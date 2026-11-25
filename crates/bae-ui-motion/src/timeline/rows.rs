@@ -106,7 +106,7 @@ impl TimelinePanel {
                 // A/V switches.
                 let av = |i: usize| {
                     Rect::from_min_size(
-                        pos2(l + cols.av + SW * i as f32, rect.top()),
+                        pos2(l + cols.x(Column::Av) + SW * i as f32, rect.top()),
                         vec2(SW, ROW_H),
                     )
                 };
@@ -116,6 +116,9 @@ impl TimelinePanel {
                     (2, "solo", Icon::Solo),
                     (3, "locked", Icon::Lock),
                 ] {
+                    if !cols.visible(Column::Av) {
+                        break;
+                    }
                     let kind = query::layer_kind(stage, layer).unwrap_or_default();
                     if attr == "audio_enabled"
                         && !matches!(kind.as_str(), "footage" | "audio" | "pre_comp")
@@ -128,25 +131,32 @@ impl TimelinePanel {
                     }
                 }
                 let p = ui.painter();
-                icons::swatch(
-                    p,
-                    pos2(l + cols.label + 7.0, cy),
-                    9.0,
-                    theme::label_color(label_of(stage, layer)),
-                );
-                let index = comp_layers
-                    .iter()
-                    .position(|x| x == layer)
-                    .map_or(0, |i| i + 1);
-                p.text(
-                    pos2(l + cols.index + 4.0, cy),
-                    Align2::LEFT_CENTER,
-                    index.to_string(),
-                    theme::small(),
-                    color::TEXT,
-                );
+                if cols.visible(Column::Label) {
+                    icons::swatch(
+                        p,
+                        pos2(l + cols.x(Column::Label) + 7.0, cy),
+                        9.0,
+                        theme::label_color(label_of(stage, layer)),
+                    );
+                }
+                if cols.visible(Column::Index) {
+                    let index = comp_layers
+                        .iter()
+                        .position(|x| x == layer)
+                        .map_or(0, |i| i + 1);
+                    p.text(
+                        pos2(l + cols.x(Column::Index) + 4.0, cy),
+                        Align2::LEFT_CENTER,
+                        index.to_string(),
+                        theme::small(),
+                        color::TEXT,
+                    );
+                }
                 // Twirl.
-                let tw = Rect::from_center_size(pos2(l + cols.twirl + 7.0, cy), vec2(12.0, 12.0));
+                let tw = Rect::from_center_size(
+                    pos2(l + cols.right(Column::Av) + 7.0, cy),
+                    vec2(12.0, 12.0),
+                );
                 let open = self.expanded.contains(layer.as_str())
                     || session.lock().reveal.contains_key(layer);
                 icons::paint(
@@ -176,17 +186,32 @@ impl TimelinePanel {
                 }
                 // Name (click selects, double-click renames, drag reorders).
                 let name_rect = Rect::from_min_max(
-                    pos2(l + cols.name + 2.0, rect.top()),
-                    pos2(l + cols.switches - 2.0, rect.bottom()),
+                    pos2(l + cols.x(Column::Name) + 2.0, rect.top()),
+                    pos2(l + cols.right(Column::Name) - 2.0, rect.bottom()),
                 );
-                let name = query::display_name_of(stage, layer);
+                let layer_name = query::display_name_of(stage, layer);
+                let source_name = if self.columns.layer_names {
+                    None
+                } else {
+                    stage
+                        .prim(layer)
+                        .and_then(|p| {
+                            p.value("source")
+                                .and_then(bae_model::Value::as_prim_ref)
+                                .cloned()
+                        })
+                        .map(|p| query::display_name_of(stage, &p))
+                };
+                let name = source_name.unwrap_or_else(|| layer_name.clone());
                 if self.rename.as_ref().is_some_and(|(p, _)| p == layer) {
                     let mut done = None;
                     if let Some((_, buf)) = &mut self.rename {
                         done = common::rename_field(ui, name_rect, buf, rid("rename"));
                     }
                     if let Some(result) = done {
-                        if let Some(new) = result.filter(|n| !n.trim().is_empty() && *n != name) {
+                        if let Some(new) =
+                            result.filter(|n| !n.trim().is_empty() && *n != layer_name)
+                        {
                             cx.invoke_with("attr.set", json!({"path": layer, "attr": "name", "value": {"type": "string", "value": new}}));
                         }
                         self.rename = None;
@@ -217,7 +242,8 @@ impl TimelinePanel {
                     }
                     let locked = query::is_locked(stage, layer);
                     if resp.double_clicked() && !locked {
-                        self.rename = Some((layer.clone(), name.clone()));
+                        self.columns.layer_names = true;
+                        self.rename = Some((layer.clone(), layer_name.clone()));
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {
@@ -238,11 +264,11 @@ impl TimelinePanel {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
                 }
-                if cols.panes.switches {
+                if cols.visible(Column::Switches) {
                     // Switches.
                     let sw = |i: usize| {
                         Rect::from_min_size(
-                            pos2(l + cols.switches + SW * i as f32, rect.top()),
+                            pos2(l + cols.x(Column::Switches) + SW * i as f32, rect.top()),
                             vec2(SW, ROW_H),
                         )
                     };
@@ -307,7 +333,7 @@ impl TimelinePanel {
                     }
                 }
                 // Modes: Mode, T, Track Matte.
-                if cols.panes.modes {
+                if cols.visible(Column::Modes) {
                     self.modes_cells(
                         ui,
                         cx,
@@ -321,11 +347,11 @@ impl TimelinePanel {
                         base,
                     );
                 }
-                if cols.panes.parent {
+                if cols.visible(Column::Parent) {
                     // Parent & Link: pick whip (left-aligned with the column title, as in
                     // AE) and dropdown.
                     let whip = Rect::from_min_size(
-                        pos2(l + cols.parent + PARENT_PAD, cy - 7.0),
+                        pos2(l + cols.x(Column::Parent) + PARENT_PAD, cy - 7.0),
                         vec2(14.0, 14.0),
                     );
                     icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
@@ -361,7 +387,7 @@ impl TimelinePanel {
                     let before = sel;
                     let drop_rect = Rect::from_min_max(
                         pos2(whip.right() + 4.0, rect.top() + 1.0),
-                        pos2(l + cols.end - 4.0, rect.bottom() - 1.0),
+                        pos2(l + cols.right(Column::Parent) - 4.0, rect.bottom() - 1.0),
                     );
                     let mut child = ui.new_child(
                         egui::UiBuilder::new()
@@ -391,6 +417,52 @@ impl TimelinePanel {
                         }
                     }
                 }
+                if cols.visible(Column::Comment) {
+                    let r = Rect::from_min_max(
+                        pos2(l + cols.x(Column::Comment) + 2.0, rect.top()),
+                        pos2(l + cols.right(Column::Comment) - 2.0, rect.bottom()),
+                    );
+                    let comment = stage
+                        .prim(layer)
+                        .and_then(|p| {
+                            p.value("comment")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_owned)
+                        })
+                        .unwrap_or_default();
+                    if let Some((path, buffer)) = &mut self.comment_edit
+                        && path == layer
+                    {
+                        if let Some(result) =
+                            common::rename_field(ui, r, buffer, rid("edit_comment"))
+                        {
+                            if let Some(text) = result
+                                && text != comment
+                            {
+                                cx.invoke_with("attr.set",json!({"path":layer,"attr":"comment","value":{"type":"string","value":text}}));
+                            }
+                            self.comment_edit = None;
+                        }
+                    } else {
+                        widgets::clipped_text(
+                            ui.painter(),
+                            r.left_center(),
+                            &comment,
+                            theme::small(),
+                            color::TEXT,
+                            r.width(),
+                        );
+                        if ui
+                            .interact(r, rid("comment"), Sense::click())
+                            .labeled_value(egui::WidgetType::Label, tr("Comment"), &comment)
+                            .double_clicked()
+                            && !query::is_locked(stage, layer)
+                        {
+                            self.comment_edit = Some((layer.clone(), comment));
+                        }
+                    }
+                }
+                cols.extra_cells(ui, stage, info, layer, rect);
                 // Duration bar.
                 if !self.graph_mode {
                     self.layer_bar(ui, cx, session, info, axis, layer, rect, layer_selected);
@@ -398,7 +470,7 @@ impl TimelinePanel {
                 }
             }
             RowKind::Group { id, label, open } => {
-                let x = l + cols.name + row.depth as f32 * 14.0;
+                let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
                 let tw = Rect::from_center_size(pos2(x + 6.0, cy), vec2(12.0, 12.0));
                 icons::paint(
                     ui.painter(),
@@ -414,7 +486,7 @@ impl TimelinePanel {
                     .interact(
                         Rect::from_min_max(
                             pos2(x, rect.top()),
-                            pos2(l + cols.switches, rect.bottom()),
+                            pos2(l + cols.x(Column::Switches), rect.bottom()),
                         ),
                         rid("group"),
                         Sense::click(),
@@ -444,7 +516,7 @@ impl TimelinePanel {
                         "Animate:"
                     };
                     let b = Rect::from_min_size(
-                        pos2(l + cols.switches + 4.0, rect.top() + 2.0),
+                        pos2(l + cols.x(Column::Switches) + 4.0, rect.top() + 2.0),
                         vec2(72.0, ROW_H - 4.0),
                     );
                     let bresp = ui.interact(b, rid("animate"), Sense::click()).labeled(
@@ -541,9 +613,16 @@ impl TimelinePanel {
         let prop_name =
             bae_ui::a11y::context(&[&self.layer_ctx(stage, &row.layer), &group, tr(label)]);
         // Keyframe navigator (A/V columns).
-        if animated {
+        if animated && (cols.visible(Column::Keys) || cols.visible(Column::Av)) {
             let nav = Rect::from_min_size(
-                pos2(l + cols.av, rect.top() + 1.0),
+                pos2(
+                    l + cols.x(if cols.visible(Column::Keys) {
+                        Column::Keys
+                    } else {
+                        Column::Av
+                    }),
+                    rect.top() + 1.0,
+                ),
                 vec2(3.0 * 13.0, ROW_H - 2.0),
             );
             let has_prev = spec.keyframes.range(..key_now).next_back().is_some();
@@ -585,7 +664,7 @@ impl TimelinePanel {
             }
         }
         // Stopwatch + name.
-        let x = l + cols.name + row.depth as f32 * 14.0;
+        let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
         let sw = Rect::from_center_size(pos2(x + 6.0, cy), vec2(16.0, 16.0));
         let mut on = animated;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(sw).id_salt(id.with("sw")));
@@ -662,7 +741,10 @@ impl TimelinePanel {
         // Cmd/Ctrl adds it.
         let name_rect = Rect::from_min_max(
             pos2(x + 16.0, rect.top()),
-            pos2((l + cols.switches - 2.0).max(x + 22.0), rect.bottom()),
+            pos2(
+                (l + cols.x(Column::Switches) - 2.0).max(x + 22.0),
+                rect.bottom(),
+            ),
         );
         let selected_prop = session.lock().selected_props.contains(&id_pair);
         let nresp = ui
@@ -705,7 +787,7 @@ impl TimelinePanel {
             .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
         if let Some(value) = value {
             let vr = Rect::from_min_max(
-                pos2(l + cols.switches, rect.top()),
+                pos2(l + cols.x(Column::Switches), rect.top()),
                 pos2(l + cols.end - 2.0, rect.bottom()),
             );
             let mut child = ui.new_child(
@@ -798,17 +880,17 @@ impl TimelinePanel {
         let id = ui.id().with(("expr", path.as_str(), attr));
         let field_id = id.with("field");
         if line == 0 {
-            let x = l + cols.name + depth as f32 * 14.0;
+            let x = l + cols.x(Column::Name) + depth as f32 * 14.0;
             widgets::clipped_text(
                 ui.painter(),
                 pos2(x + 4.0, cy),
                 &format!("{} {prop}", tr("Expression:")),
                 theme::body(),
                 color::TEXT,
-                (l + cols.switches - x - 8.0).max(0.0),
+                (l + cols.x(Column::Switches) - x - 8.0).max(0.0),
             );
             // Switches column: Enable Expression (= / ≠), pick whip.
-            let ix = l + cols.switches;
+            let ix = l + cols.x(Column::Switches);
             let eq = Rect::from_center_size(pos2(ix + SW / 2.0, cy), vec2(16.0, 16.0));
             let resp = ui
                 .interact(eq, id.with("on"), Sense::click())

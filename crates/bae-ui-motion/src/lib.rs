@@ -106,7 +106,9 @@ impl AppModule for MotionUiModule {
             ),
             (
                 "timeline",
-                PanelKind::new("Timeline", |_| Box::new(TimelinePanel::default())),
+                PanelKind::new("Timeline", |state| {
+                    Box::new(TimelinePanel::from_state(state.state))
+                }),
             ),
             (
                 "properties",

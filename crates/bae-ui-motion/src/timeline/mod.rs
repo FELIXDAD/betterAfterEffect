@@ -9,6 +9,7 @@
 //! `layer.reorder`, parenting → `layer.set_parent`. Drags preview locally and run
 //! one command when released.
 
+mod columns;
 mod dialogs;
 mod drags;
 mod header;
@@ -39,6 +40,8 @@ use crate::project::ItemDrag;
 use crate::props::{self, Node};
 use crate::session::{Session, SharedSession};
 
+pub(crate) use columns::Column;
+use columns::{Cols, Columns};
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
@@ -52,7 +55,7 @@ pub(crate) use menus::{
     catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
 };
 #[cfg(test)]
-pub(crate) use modes::{Panes, flip_matte};
+pub(crate) use modes::flip_matte;
 
 /// Row height and switch cell width: AE 26's (17 and about 15 points).
 const ROW_H: f32 = 17.0;
@@ -67,72 +70,6 @@ const MAX_EXPR_LINES: usize = 30;
 const PARENT_PAD: f32 = 6.0;
 /// Left padding of the time graph so frame 0 is not on the edge.
 const PAD: f32 = 8.0;
-
-/// Outline column x offsets (relative to the panel's left edge).
-struct Cols {
-    av: f32,
-    /// The layer's expand arrow (AE: between the A/V switches and the label).
-    twirl: f32,
-    label: f32,
-    index: f32,
-    name: f32,
-    switches: f32,
-    /// The Modes column (Mode, T, Track Matte).
-    modes: f32,
-    parent: f32,
-    end: f32,
-    /// The column groups shown (those of F4 / Shift+F4 that fit).
-    panes: modes::Panes,
-}
-
-/// Narrowest time graph: a narrower panel hides Modes (as F4 first does), then
-/// Parent & Link.
-const MIN_GRAPH: f32 = 200.0;
-
-impl Cols {
-    fn new(mut panes: modes::Panes, width: f32) -> Cols {
-        for _ in 0..2 {
-            let c = Cols::layout(panes);
-            if width - c.end >= MIN_GRAPH {
-                return c;
-            }
-            if panes.switches && panes.modes {
-                panes.modes = false;
-            } else {
-                panes.parent = false;
-            }
-        }
-        Cols::layout(panes)
-    }
-
-    fn layout(panes: modes::Panes) -> Cols {
-        // Positions measured on AE 26's Timeline (points from the panel's left).
-        let av = 5.0;
-        let twirl = av + 4.0 * SW + 4.0;
-        let label = twirl + 15.0;
-        let index = label + 18.0;
-        let name = index + 28.0;
-        let switches = name + 138.0;
-        let shown = |on: bool, w: f32| if on { w } else { 0.0 };
-        // AE's eight switches: Shy, Collapse, Quality, fx, Frame Blending, Motion
-        // Blur, Adjustment Layer, 3D Layer.
-        let modes = switches + shown(panes.switches, 8.0 * SW + 14.0);
-        let parent = modes + shown(panes.modes, modes::MODES_W);
-        let end = parent + shown(panes.parent, 120.0);
-        Cols {
-            av,
-            twirl,
-            label,
-            index,
-            name,
-            switches,
-            modes,
-            parent,
-            end,
-            panes,
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 enum RowKind {
@@ -237,6 +174,7 @@ pub struct TimelinePanel {
     scroll: Time,
     drag: Option<Drag>,
     rename: Option<(PrimPath, String)>,
+    comment_edit: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
     /// The field being edited: its text and selection (chars), for the pick whip
@@ -254,7 +192,7 @@ pub struct TimelinePanel {
     /// This frame shows the Graph Editor.
     graph_mode: bool,
     /// Switches / Modes / Parent & Link columns shown (F4, Shift+F4).
-    panes: modes::Panes,
+    columns: Columns,
     /// Where a keyframe drag puts the keyframes this frame.
     key_plan: Option<keys::KeyPlan>,
     /// Modifiers held when the primary button last went down (AE decides drag
@@ -540,9 +478,17 @@ impl TimelinePanel {
         &mut self.graph
     }
 
+    pub(crate) fn from_state(state: Option<&serde_json::Value>) -> Self {
+        let mut panel = Self::default();
+        if let Some(state) = state {
+            panel.columns = serde_json::from_value(state["columns"].clone()).unwrap_or_default();
+            panel.zoom = state["zoom"].as_f64().unwrap_or_default().clamp(0.0, 1.0) as f32;
+        }
+        panel
+    }
     #[cfg(test)]
-    pub(crate) fn panes(&self) -> Panes {
-        self.panes
+    pub(crate) fn column_visible(&self, c: Column) -> bool {
+        self.columns.visible(c)
     }
 }
 
@@ -556,9 +502,7 @@ impl Panel for TimelinePanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(
-            json!({"zoom": self.zoom, "switches": self.panes.switches, "modes": self.panes.modes, "parent": self.panes.parent}),
-        )
+        Some(json!({"zoom": self.zoom, "columns":self.columns}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -577,11 +521,11 @@ impl Panel for TimelinePanel {
                 true
             }
             "motion.timeline.toggle_switches_modes" => {
-                self.panes.toggle_switches_modes();
+                self.columns.toggle_switches_modes();
                 true
             }
             "motion.timeline.toggle_parent_column" => {
-                self.panes.parent = !self.panes.parent;
+                self.columns.toggle(Column::Parent);
                 true
             }
             _ => actions::handle(action, cx, &session),
@@ -589,6 +533,23 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let cols = self.columns.layout();
+        let needed = cols.end + 200.0;
+        if needed > ui.available_width() {
+            egui::ScrollArea::horizontal()
+                .id_salt("timeline_columns_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(needed);
+                    self.contents(ui, cx, &cols);
+                });
+        } else {
+            self.contents(ui, cx, &cols);
+        }
+    }
+}
+impl TimelinePanel {
+    fn contents(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, cols: &Cols) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
@@ -615,7 +576,6 @@ impl Panel for TimelinePanel {
         }
         let now = session.lock().time(&info.path);
         self.graph_mode = session.lock().graph_editor;
-        let cols = Cols::new(self.panes, full.width());
         let graph_left = full.left() + cols.end + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
         let axis = self.axis(&info, graph_left, graph_w);
@@ -652,7 +612,7 @@ impl Panel for TimelinePanel {
             ui.input(|i| (i.pointer.interact_pos().map(|p| p.x), i.modifiers.shift));
         self.marker_plan = self.plan_marker_drag(stage, &info, &axis, now, pointer_x, shift);
         self.bar_plan = self.plan_bar_drag(stage, &info, &axis, now, pointer_x, shift);
-        self.header(ui, cx, &session, &info, head, colrow, &cols, &axis, now);
+        self.header(ui, cx, &session, &info, head, colrow, cols, &axis, now);
 
         // Rows.
         let rows = {
@@ -724,7 +684,7 @@ impl Panel for TimelinePanel {
                         cx,
                         &session,
                         &info,
-                        &cols,
+                        cols,
                         &axis,
                         row,
                         rect,

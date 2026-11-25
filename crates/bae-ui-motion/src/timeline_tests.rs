@@ -28,6 +28,7 @@ struct H {
     layer: PrimPath,
     /// Tessellate each frame too (the perf probe measures the full CPU cost).
     tessellate: bool,
+    painted_text: Option<Vec<(String, Rect)>>,
 }
 
 impl H {
@@ -47,6 +48,7 @@ impl H {
             comp: PrimPath::new("/x").unwrap(),
             layer: PrimPath::new("/x").unwrap(),
             tessellate: false,
+            painted_text: None,
         };
         h.comp = path(
             &h.run(
@@ -124,6 +126,22 @@ impl H {
             cx.focused = true;
             tl.ui(ui, &mut cx);
         });
+        if let Some(text) = &mut self.painted_text {
+            fn collect(shape: &egui::Shape, text: &mut Vec<(String, Rect)>) {
+                match shape {
+                    egui::Shape::Text(t) => text.push((
+                        t.galley.text().to_owned(),
+                        Rect::from_min_size(t.pos, t.galley.size()),
+                    )),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| collect(s, text)),
+                    _ => {}
+                }
+            }
+            text.clear();
+            for s in &out.shapes {
+                collect(&s.shape, text);
+            }
+        }
         out.textures_delta.clear();
         if self.tessellate {
             let shapes = std::mem::take(&mut out.shapes);
@@ -2115,7 +2133,12 @@ fn modes_cell(tl: &TimelinePanel, l: &PrimPath) -> (Rect, Pos2, Pos2) {
 fn f4_alternates_switches_and_modes() {
     let mut h = H::new();
     let mut tl = h.bars();
-    let p = |tl: &TimelinePanel| (tl.panes().switches, tl.panes().modes);
+    let p = |tl: &TimelinePanel| {
+        (
+            tl.column_visible(crate::timeline::Column::Switches),
+            tl.column_visible(crate::timeline::Column::Modes),
+        )
+    };
     assert_eq!(p(&tl), (true, false), "AE starts with Switches");
     let f4 = || Invocation::new(crate::actions::ids::TOGGLE_SWITCHES_MODES);
     h.action(&mut tl, f4());
@@ -2126,7 +2149,7 @@ fn f4_alternates_switches_and_modes() {
         &mut tl,
         Invocation::new(crate::actions::ids::TOGGLE_PARENT_COLUMN),
     );
-    assert!(!tl.panes().parent);
+    assert!(!tl.column_visible(crate::timeline::Column::Parent));
     // With Modes hidden no Modes cells are drawn.
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     assert!(tl.last_modes.is_empty());
@@ -2299,4 +2322,61 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     assert!(request(&h).motion_blur.is_some());
     h.undo();
     assert!(request(&h).motion_blur.is_none());
+}
+
+#[test]
+fn column_menu_shows_the_actual_out_frame_and_header_drag_changes_layout() {
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.run(
+        "layer.trim",
+        json!({"layers":[layer],"out_point":Time::from_seconds(3.0)}),
+    );
+    let mut tl = h.bars();
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let locate = |h: &H, label: &str| {
+        h.painted_text
+            .as_ref()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(s, _)| s == label)
+            .unwrap_or_else(|| panic!("missing {label} in {:?}", h.painted_text))
+            .1
+            .center()
+    };
+    let header = locate(&h, bae_ui::tr("Source Name"));
+    let right = |down| Event::PointerButton {
+        pos: header,
+        button: PointerButton::Secondary,
+        pressed: down,
+        modifiers: Modifiers::NONE,
+    };
+    h.frame(
+        &mut tl,
+        vec![Event::PointerMoved(header), right(true)],
+        Modifiers::NONE,
+    );
+    h.frame(&mut tl, vec![right(false)], Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let menu = locate(&h, bae_ui::tr("Columns"));
+    h.frame(&mut tl, vec![Event::PointerMoved(menu)], Modifiers::NONE);
+    for _ in 0..22 {
+        h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    }
+    let out = locate(&h, bae_ui::tr("Out"));
+    h.click(&mut tl, out, Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(tl.column_visible(crate::timeline::Column::Out));
+    let cell = locate(&h, "0:00:02:29");
+    let prev = tl.last_axis.unwrap().left;
+    let divider = pos2(prev - 2.0, header.y);
+    h.drag(&mut tl, divider, divider + vec2(36.0, 0.0), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!((tl.last_axis.unwrap().left - prev - 36.0).abs() < 1.0);
+    assert!((locate(&h, "0:00:02:29").x - cell.x).abs() < 1.0);
+    let saved = tl.save_state().unwrap();
+    let restored = TimelinePanel::from_state(Some(&saved));
+    assert_eq!(restored.save_state(), Some(saved));
 }

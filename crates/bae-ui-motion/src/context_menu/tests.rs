@@ -151,7 +151,21 @@ fn menus_match_ae() {
     check("timeline.blank", TIMELINE_BLANK);
     // The Timeline's layer menu is the same table (AE 26 on the Mac).
     check("timeline.layer.camera", VIEWER_LAYER);
-    check("timeline.header", TIMELINE_HEADER);
+    let ae: Value = serde_json::from_str(AE).unwrap();
+    let ours: Vec<_> = crate::timeline::Column::ALL
+        .iter()
+        .map(|c| c.title())
+        .collect();
+    let entries = ae["menus"]["timeline.header"].as_array().unwrap();
+    let cols = entries.iter().find(|i| i["title"] == "Columns").unwrap()["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        ours,
+        cols.iter()
+            .map(|i| i["title"].as_str().unwrap())
+            .collect::<Vec<_>>()
+    );
     check("project.blank", PROJECT_BLANK);
     check("project.header", PROJECT_HEADER);
     for kind in ["comp", "footage", "folder"] {
@@ -179,12 +193,14 @@ fn every_title_has_chinese() {
     for menu in [
         VIEWER_BLANK,
         VIEWER_LAYER,
-        TIMELINE_HEADER,
         PROJECT_BLANK,
         PROJECT_ITEM,
         PROJECT_HEADER,
     ] {
         walk(&lines(menu), &mut missing);
+    }
+    for c in crate::timeline::Column::ALL {
+        walk(&[item(c.title())], &mut missing);
     }
     missing.sort();
     missing.dedup();
