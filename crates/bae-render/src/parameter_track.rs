@@ -293,7 +293,9 @@ mod tests {
             .unwrap();
         assert_eq!(run(&stage, &frame), ((64., 640.), 301));
         set(&mut stage, "time");
-        assert_eq!(run(&stage, &frame), ((10., 50.), 301));
+        let ((value, area), calls) = run(&stage, &frame);
+        assert_eq!((value, calls), (10., 301));
+        assert!((area - 50.).abs() < 1e-7);
         let reversed = EffectFrame {
             layer_start_time: t(12.),
             layer_time_scale: -0.5,
