@@ -317,6 +317,23 @@ impl Document {
         self.write(path)
     }
 
+    /// Save a Copy: write the project to `path` (a `.bae` folder, or `.baez`)
+    /// without changing its location or unsaved state. Files embedded in a
+    /// `.baez` the project came from go with a `.bae` copy.
+    pub fn save_a_copy(&self, path: &Path) -> anyhow::Result<()> {
+        let mut copy = self.detached_copy()?;
+        copy.save_as(path)
+            .with_context(|| path.display().to_string())?;
+        if path.is_dir()
+            && let Some(pkg) = self.assets.package()
+        {
+            for entry in pkg.entries() {
+                pkg.extract_entry(&entry.name, &path.join(native(&entry.name)))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Save As over another existing `.bae` project folder (issue #126): the
     /// project is written to a temporary folder next to it first, then swapped
     /// in; if anything fails, the existing project is left as it was. Files

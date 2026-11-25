@@ -187,7 +187,7 @@ const FILE: &[Node] = &[
         "Save As",
         &[
             it(21889025, "Save As...", "file.save_as", "", B, Done),
-            it(21889026, "Save a Copy...", "motion.file.save_a_copy", "", B, Todo),
+            it(21889026, "Save a Copy...", "file.save_a_copy", "", B, Done),
             it(21889027, "Save a Copy As XML...", "motion.file.save_a_copy_as_xml", "", B, Adobe),
             it(21889028, "Save a Copy As 25.x...", "motion.file.save_a_copy_as_25_x", "", B, Adobe),
             it(21889029, "Save a Copy As 24.x...", "motion.file.save_a_copy_as_24_x", "", B, Adobe),
@@ -311,16 +311,16 @@ const FILE: &[Node] = &[
     sub(
         "Replace Footage",
         &[
-            it(11141121, "File...", "motion.file.replace_footage_file", "", E, Todo),
+            it(11141121, "File...", "motion.file.replace_footage_file", "", E, Done),
             it(11141122, "With Layered Comp", "motion.file.replace_footage_with_layered_comp", "", B, Adobe),
             SEP,
             it(11141124, "Placeholder...", "motion.file.replace_footage_placeholder", "", E, Later),
             it(11141125, "Solid...", "motion.file.replace_footage_solid", "", E, Later),
         ],
     ),
-    it(131107, "Reload Footage", "motion.file.reload_footage", "", E, Todo),
+    it(131107, "Reload Footage", "motion.file.reload_footage", "", E, Done),
     it(131108, "License...", "motion.file.license", "", B, Adobe),
-    it(131109, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Todo),
+    it(131109, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
     it(131110, "Reveal in Bridge", "motion.file.reveal_in_bridge", "", B, Adobe),
     SEP,
     it(131112, "Project Settings...", "motion.file.project_settings", "", E, Todo),
@@ -541,7 +541,7 @@ const LAYER: &[Node] = &[
     SEP,
     it(393220, "Open Layer", "motion.layer.open_layer", "", E, Later),
     it(393221, "Open Layer Source", "motion.layer.open_layer_source", "", B, Todo),
-    it(393222, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Todo),
+    it(393222, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
     SEP,
     sub(
         "Mask",
@@ -799,7 +799,7 @@ const LAYER: &[Node] = &[
     sub(
         "Reveal",
         &[
-            it(23003137, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Todo),
+            it(23003137, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
             it(23003138, "Reveal Layer Source in Project", "motion.layer.reveal_layer_source_in_project", "", B, Todo),
             it(23003139, "Reveal Layer in Project Flowchart", "motion.layer.reveal_layer_in_project_flowchart", "", E, Later),
             it(23003140, "Reveal Composition in Project", "motion.layer.reveal_composition_in_project", "", B, Todo),

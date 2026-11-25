@@ -58,6 +58,12 @@ pub mod ids {
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > Replace Footage > File... (Cmd/Ctrl+H).
+    pub const REPLACE_FOOTAGE: &str = "motion.file.replace_footage_file";
+    /// File > Reload Footage (Cmd/Ctrl+Alt+L).
+    pub const RELOAD_FOOTAGE: &str = "motion.file.reload_footage";
+    /// File / Layer > Reveal in Explorer (Finder on macOS).
+    pub const REVEAL_IN_EXPLORER: &str = "motion.file.reveal_in_explorer";
     /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
     pub const IMPORT_MULTIPLE: &str = "motion.file.import_multiple_files";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
@@ -225,6 +231,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::REPLACE_FOOTAGE, "Replace Footage File"),
+    (ids::RELOAD_FOOTAGE, "Reload Footage"),
+    (ids::REVEAL_IN_EXPLORER, "Reveal in Explorer"),
     (ids::IMPORT_MULTIPLE, "Import Multiple Files"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
@@ -744,6 +753,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_FILE => {
             crate::import::import_file(cx, session);
+            return true;
+        }
+        ids::REPLACE_FOOTAGE => {
+            crate::import::replace_footage(cx, session);
+            return true;
+        }
+        ids::RELOAD_FOOTAGE => {
+            crate::import::reload_footage(cx, session);
+            return true;
+        }
+        ids::REVEAL_IN_EXPLORER => {
+            crate::import::reveal_footage(cx, session);
             return true;
         }
         ids::ADD_EXPRESSION => {

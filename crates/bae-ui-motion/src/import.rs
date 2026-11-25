@@ -287,6 +287,112 @@ pub(crate) fn import_file(cx: &mut PanelContext<'_>, session: &SharedSession) {
     import_paths(cx, &paths, folder);
 }
 
+/// The footage item File > Replace Footage acts on: the one selected in the
+/// Project panel, else the source of the selected layer.
+fn replace_target(cx: &PanelContext<'_>, session: &SharedSession) -> Option<PrimPath> {
+    let footage = |p: &PrimPath| {
+        cx.stage.prim(p).is_some_and(|v| {
+            v.is_a(&bae_model::PrimType::ASSET)
+                && !matches!(query::static_value(&v, "kind"), Some(bae_model::Value::Enum(k)) if k == "solid")
+        })
+    };
+    let s = session.lock();
+    if let Some(item) = s.selected_items.iter().find(|p| footage(p)) {
+        return Some(item.clone());
+    }
+    let layer = s.selected_layers.first()?;
+    let source = cx
+        .stage
+        .prim(layer)
+        .and_then(|v| match query::static_value(&v, "source") {
+            Some(bae_model::Value::PrimRef(p)) => Some(p),
+            _ => None,
+        })?;
+    footage(&source).then_some(source)
+}
+
+/// Where a footage item's file is on disk (its path when imported), if it
+/// is there.
+fn footage_file(stage: &bae_model::Stage, item: &PrimPath) -> Option<PathBuf> {
+    let view = stage.prim(item)?;
+    let file = bae_model::asset::AssetFile::from_prim(&view)?;
+    let path = PathBuf::from(file.original.replace('/', std::path::MAIN_SEPARATOR_STR));
+    path.exists().then_some(path)
+}
+
+/// The footage items selected in the Project panel.
+fn selected_footage(cx: &PanelContext<'_>, session: &SharedSession) -> Vec<PrimPath> {
+    session
+        .lock()
+        .selected_items
+        .iter()
+        .filter(|p| {
+            cx.stage.prim(p).is_some_and(|v| {
+                v.is_a(&bae_model::PrimType::ASSET)
+                    && !matches!(query::static_value(&v, "kind"), Some(bae_model::Value::Enum(k)) if k == "solid")
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// File > Reload Footage (Cmd/Ctrl+Alt+L): the selected items read their
+/// files again (a file changed on disk); they keep their names.
+pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
+    let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    for item in selected_footage(cx, session) {
+        let Some(path) = footage_file(cx.stage, &item) else {
+            continue;
+        };
+        if let Some(file) = probe(&[path], &defaults).files.pop() {
+            cx.invoke_with(
+                "item.replace_file",
+                json!({ "item": item, "file": file, "keep_name": true }),
+            );
+        }
+    }
+}
+
+/// File / Layer ▸ Reveal in Explorer (Finder on macOS): the file of the
+/// selected footage item, else of the selected layer's source.
+pub(crate) fn reveal_footage(cx: &PanelContext<'_>, session: &SharedSession) {
+    if let Some(path) = replace_target(cx, session).and_then(|i| footage_file(cx.stage, &i)) {
+        bae_platform::reveal(&path);
+    }
+}
+
+/// File > Replace Footage > File… (Cmd/Ctrl+H): the item takes another file.
+pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
+    let Some(item) = replace_target(cx, session) else {
+        return;
+    };
+    let request = OpenRequest {
+        title: tr("Replace Footage File").to_owned(),
+        filters: Vec::new(),
+        multiple: false,
+        folders: false,
+    };
+    let Some(path) = SharedFilePicker::open(cx.resources, &request)
+        .into_iter()
+        .next()
+    else {
+        return;
+    };
+    let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    let mut probed = probe(&[path], &defaults);
+    match probed.files.pop() {
+        Some(file) => cx.invoke_with("item.replace_file", json!({ "item": item, "file": file })),
+        None => {
+            let message =
+                tr("These files could not be imported because their format is not supported:")
+                    .to_owned()
+                    + "\n"
+                    + &probed.failed.join("\n");
+            crate::dialogs::alert(cx, tr("Replace Footage File"), message);
+        }
+    }
+}
+
 /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I): the open panel comes back
 /// after each import until it is cancelled (AE).
 pub(crate) fn import_multiple(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -313,6 +419,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("File...", "文件..."),
     ("Multiple Files...", "多个文件..."),
     ("Import", "导入"),
+    ("Replace Footage File", "替换素材文件"),
+    ("Reload Footage", "重新加载素材"),
+    ("Reveal in Explorer", "在资源管理器中显示"),
     (
         "These files could not be imported because their format is not supported:",
         "以下文件的格式不受支持，无法导入：",
