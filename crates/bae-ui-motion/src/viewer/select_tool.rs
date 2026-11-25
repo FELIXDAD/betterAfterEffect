@@ -267,8 +267,19 @@ pub(super) fn frame(
                 return Press::Handle(l.path.clone(), h);
             }
         }
-        match hit_layer(stage, comp, view, pos) {
-            Some(l) => Press::Layer(l),
+        // AE: a selected layer under the pointer is the one edited, even below
+        // others; Shift-click adds the topmost one.
+        let under: Vec<PrimPath> = layers_at(stage, comp, view, pos).collect();
+        let pick = if shift {
+            under.first()
+        } else {
+            under
+                .iter()
+                .find(|l| selected.contains(l))
+                .or(under.first())
+        };
+        match pick {
+            Some(l) => Press::Layer(l.clone()),
             None => Press::Empty,
         }
     };

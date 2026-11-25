@@ -88,6 +88,8 @@
 
 - 时间重映射 / 时间伸缩 / 冻结帧（分支 `anim/time-features`）：求值早已支持（`bae-anim` 的图层时间和时间重映射、`bae-media` 的向下取整选帧），这次补了命令和素材：`bae-motion` 新增 `layer.time_remap`（开：源开头和结尾两个线性关键帧；关：删关键帧）、`layer.time_stretch`（伸缩百分比或新持续时间，入点 / 当前帧 / 出点原位定格）、`layer.time_reverse`、`layer.freeze_frame`、`layer.freeze_on_last_frame`，关键帧布局在 AE 里读回核对过（冻结帧两侧定格；在最后一帧上冻结的末键在源时长前一个**合成帧**）。渲染器之前把图像序列当成单张图片打开，现在按素材的帧速率作为序列打开（`FootageRef::sequence`）。6 个 AE 对照用例全部 0 差。对话框和菜单由 09fe9cc0 那组接。
 
+- 帧混合（分支 `anim/frame-blending`，叠在上面那个 PR 上）：图层开关 `frame_blending`（off / frame_mix / pixel_motion，用 `layer.set_attr` 设）和合成开关 `frame_blending`（`attr.set`）都开时，`bae-anim` 给素材图层算出"一个合成帧跨过多少源时间"（时间重映射取前后半帧之差，否则按伸缩），渲染器按 AE 帧混合的权重（在 AE 里量过：帐篷核，慢放时半宽 0.74 帧，快放时 0.93×速度；帧对齐也会混 89/5.5/5.5%）把相邻源帧用 Alpha 相加叠成一张，最多 64 帧。预合成不混（和 AE 一样）。像素运动暂时按帧混合画并给警告，光流在时间效果批次里做（和像素运动模糊、时间扭曲共用）。
+
 - [x] 渲染图与纹理池
 - [ ] 混合模式、遮罩、轨道遮罩
 - [x] 3D 与运动模糊（灯光着色、景深除外）
