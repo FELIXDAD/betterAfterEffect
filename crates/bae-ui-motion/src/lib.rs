@@ -120,6 +120,8 @@ impl AppModule for MotionUiModule {
             app.insert_resource(SharedSession::default());
         }
         let session = app.resource::<SharedSession>().unwrap().clone();
+        // Space should play sound as soon as the window is up, GPU or not.
+        session.start_audio();
         let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
             "bae.media/audio-output",
             std::sync::Arc::new(session),
