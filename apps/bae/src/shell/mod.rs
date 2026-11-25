@@ -147,7 +147,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     // The UI's system fonts load while the window and GPU are being set up.
     bae_ui::theme::prefetch_system_ui_fonts();
     crate::i18n::init_from_env();
-    let dirs = app.resource::<AppDirs>().cloned();
+    let dirs: Option<AppDirs> = None;
 
     // One GUI per user, except for smoke tests (CI, or next to a running instance).
     let _instance = match (&dirs, global.smoke_test) {
@@ -166,7 +166,8 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => None,
     };
 
-    let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let event_loop = match EventLoop::<UserEvent>::with_user_event().with_any_thread(true).build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             tracing::error!("cannot create the event loop: {error}");
@@ -232,7 +233,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
                 tracing::info!("opened {}", path.display());
                 crate::view_state::restore(&mut app, &document);
             }
-            Err(error) if global.smoke_test.is_some() => {
+            Err(error) if global.smoke_test.is_some() || std::env::var_os("BAE_BENCH_PROJECT").is_some() => {
                 eprintln!(
                     "{}: {}",
                     bae_platform::BINARY_NAME,
@@ -266,7 +267,9 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         workspace.show_role_picker();
     }
 
+    eprintln!("bench: document and workspace ready");
     let mut shell = Shell {
+        native_probe: NativeProbe::default(),
         app,
         proxy,
         smoke: global.smoke_test.map(SmokeTest::new),
@@ -322,7 +325,17 @@ impl SmokeTest {
     }
 }
 
+#[derive(Default)]
+struct NativeProbe {
+    start: Option<Instant>,
+    began: Option<Instant>,
+    last: Option<(u64, bae_model::Time)>,
+    first_dropped: u64,
+    fresh: usize,
+    submitted: usize,
+}
 struct Shell {
+    native_probe: NativeProbe,
     /// Preferences and the generation last applied.
     prefs: Arc<bae_prefs::PrefsStore>,
     prefs_generation: u64,
@@ -398,7 +411,8 @@ impl Shell {
             .apply(attributes, event_loop)
             .with_visible(false);
         #[cfg(windows)]
-        let attributes = with_exe_icon(attributes);
+        let attributes = with_exe_icon(attributes)
+            .with_inner_size(winit::dpi::PhysicalSize::new(3840, 2160)).with_maximized(false);
         let window = event_loop
             .create_window(attributes)
             .context("cannot create the main window")?;
@@ -787,6 +801,19 @@ impl Shell {
             return;
         };
         let frame_start = Instant::now();
+        if self.native_probe.start.is_none() {
+            let stage = self.document.stage();
+            let path = bae_motion::query::comps(stage).remove(0);
+            let info = bae_motion::query::comp_info(stage, &path).unwrap();
+            let session = self.app.resource::<bae_ui_motion::SharedSession>().unwrap();
+            let mut s = session.lock();
+            s.open_comp(&path);
+            s.auto_resolution = false;
+            s.loop_playback = true;
+            s.play(&info);
+            eprintln!("bench: playing {} full resolution, {:?}", path, info.work_area);
+            self.native_probe.start = Some(frame_start);
+        }
         tracing::trace!(frame = view.status.frames, "redraw");
 
         egui_winit::update_viewport_info(
@@ -811,6 +838,7 @@ impl Shell {
         let output = view.egui_ctx.run_ui(input, |ui| {
             invocations = workspace.ui(ui, status, document, resources);
         });
+        if self.ui_passes < 5 || self.ui_passes % 120 == 0 { eprintln!("bench: workspace pass {}", self.ui_passes); }
         self.ui_passes += 1;
         if let Some(menu) = &mut self.menu {
             let open = workspace.open_panels();
@@ -822,6 +850,7 @@ impl Shell {
             .with_open_panels(&open);
             menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
         }
+        if self.ui_passes <= 2 { eprintln!("bench: menu synced"); }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
             event_loop,
@@ -871,6 +900,7 @@ impl Shell {
         if let Some(registry) = registry.as_deref() {
             view.renderer.sync_viewports(&view.gpu, registry);
         }
+        if self.ui_passes <= 2 { eprintln!("bench: viewport registry synced"); }
         let ui_output = UiOutput {
             shapes: output.shapes,
             textures_delta: output.textures_delta,
@@ -890,8 +920,10 @@ impl Shell {
 
         let mut presented = false;
         let mut device_lost = false;
+        if self.ui_passes <= 2 { eprintln!("bench: acquiring {}x{}",width,height); }
         match view.surface.acquire() {
             Ok(Some(frame)) => {
+                if self.ui_passes <= 2 { eprintln!("bench: frame acquired"); }
                 view.renderer.render(
                     &view.gpu,
                     &view.egui_ctx,
@@ -903,8 +935,33 @@ impl Shell {
                 view.window.pre_present_notify();
                 let suboptimal = frame.is_suboptimal();
                 frame.present();
+                if self.ui_passes <= 2 { eprintln!("bench: frame presented"); }
                 if let Some(session) = session {
-                    session.lock().frame_presented(Instant::now());
+                    let now = Instant::now();
+                    let mut s = session.lock();
+                    s.frame_presented(now);
+                    let (last, dropped) = s.diagnostic_presentation();
+                    let probe = &mut self.native_probe;
+                    if now - probe.start.unwrap() >= Duration::from_secs(4) {
+                        if let Some(began) = probe.began {
+                            probe.submitted += 1;
+                            if last.is_some() && probe.last != last { probe.fresh += 1; }
+                            if now - began >= Duration::from_secs(10) {
+                                let elapsed = (now - began).as_secs_f64();
+                                let samples = registry.as_ref().unwrap().snapshot().into_iter()
+                                    .filter_map(|e| e.texture.map(|t| t.size)).collect::<Vec<_>>();
+                                let full = samples.iter().filter(|&&xy| xy == [3840,2160]).count();
+                                println!("native window={}x{} mode={:?} samples_4k={full} submitted={} fresh={} fresh_fps={:.3} missed={} elapsed_s={elapsed:.3}",
+                                    width,height,view.surface.config().present_mode,probe.submitted,probe.fresh,probe.fresh as f64/elapsed,dropped-probe.first_dropped);
+                                if full == 0 || probe.fresh == 0 || (width,height) != (3840,2160) { self.exit_code = ExitCode::FAILURE; }
+                                event_loop.exit();
+                            }
+                        } else {
+                            probe.began = Some(now);
+                            probe.first_dropped = dropped;
+                        }
+                    }
+                    self.native_probe.last = last;
                 }
                 if suboptimal {
                     view.surface.handle_suboptimal();
@@ -912,6 +969,7 @@ impl Shell {
                 presented = true;
             }
             result => {
+                if self.ui_passes <= 2 { eprintln!("bench: no presentable frame"); }
                 match result {
                     Err(GpuError::SurfaceLost) => {
                         match view.gpu.create_surface(view.window.clone()) {
@@ -1156,6 +1214,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         if self.view.is_some() {
             return;
         }
+        eprintln!("bench: resumed");
         let window = match self.create_window(event_loop) {
             Ok(window) => window,
             Err(error) => return self.fail(event_loop, &error),
@@ -1166,7 +1225,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                 // labelled widgets through accesskit (issue #116).
                 view.egui_state
                     .init_accesskit(event_loop, &view.window, self.proxy.clone());
-                view.window.set_visible(true);
+                view.window.set_visible(false);
+                eprintln!("bench: hidden surface initialized");
                 if self.menu.is_none() {
                     let contributed = self.workspace.contributed_menus(&self.app);
                     let actions = self.workspace.handled_actions(&self.app);
@@ -1178,6 +1238,7 @@ impl ApplicationHandler<UserEvent> for Shell {
                         Err(error) => tracing::warn!("native menu unavailable: {error}"),
                     }
                 }
+                let _ = view.window.request_inner_size(winit::dpi::PhysicalSize::new(3840,2160));
                 view.window.request_redraw();
                 self.view = Some(view);
                 if let Some(message) = self.startup_error.take() {
@@ -1338,6 +1399,22 @@ impl ApplicationHandler<UserEvent> for Shell {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Windows can suppress RedrawRequested for a hidden window. Drive the
+        // exact same redraw at composition deadlines while measuring it.
+        if let Some(start) = self.native_probe.start && start.elapsed().as_secs() >= 22 {
+            eprintln!("bench: timed out, {} workspace passes, {} sampled presents", self.ui_passes,self.native_probe.submitted);
+            self.exit_code = ExitCode::FAILURE;
+            event_loop.exit();
+            return;
+        }
+        if self.view.is_some() {
+            let due = self.app.resource::<bae_ui_motion::SharedSession>()
+                .and_then(|s| s.lock().playback_deadline());
+            if due.is_none_or(|at| Instant::now() >= at) {
+                self.redraw(event_loop);
+            }
+        }
+        if self.ui_passes <= 2 { eprintln!("bench: event loop waiting after {} passes",self.ui_passes); }
         self.run_pending(event_loop);
         self.sync_prefs();
         self.run_settings_requests();
@@ -1405,7 +1482,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                 deadline = Some(deadline.map_or(at, |d| d.min(at)));
             }
         }
-        event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
+        let watchdog = Instant::now() + Duration::from_millis(5);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(deadline.unwrap_or(watchdog).min(watchdog)));
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
@@ -1507,4 +1585,12 @@ fn playback_surface_4k() {
 
     let event_loop = EventLoop::builder().with_any_thread(true).build().unwrap();
     event_loop.run_app(&mut Probe).unwrap();
+}
+
+#[test]
+#[ignore = "native window test with a 4K benchmark project"]
+fn native_playback_workspace() {
+    let path = std::env::var_os("BAE_BENCH_PROJECT").unwrap();
+    let global = GlobalOptions { open: vec![path.into()], ..Default::default() };
+    assert_eq!(run(crate::app_builder().build(), &global), ExitCode::SUCCESS);
 }

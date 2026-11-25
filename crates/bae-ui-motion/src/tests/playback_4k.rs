@@ -178,3 +178,19 @@ fn playback_4k() {
         );
     }
 }
+
+#[test]
+#[ignore = "write the three benchmark compositions for the native window"]
+fn write_native_playback_projects() {
+    let dir = std::path::PathBuf::from(std::env::var_os("BAE_BENCH_PROJECT_DIR").unwrap());
+    std::fs::create_dir_all(&dir).unwrap();
+    for (count, fx) in [(100, false), (1000, false), (100, true)] {
+        let (mut h, comp) = scene(count, fx);
+        let id = format!("{count}-{fx}");
+        let stage = crate::preview_snapshot::PreviewSnapshot::take(&h.stage).restore().unwrap();
+        bae_model::Project::from_stage(stage).save_as(dir.join(format!("{id}-long.baez"))).unwrap();
+        h.run("comp.set_work_area", json!({"comp":comp, "end":FrameRate::FPS_60.frame_to_time(6)}));
+        let mut project = bae_model::Project::from_stage(h.stage);
+        project.save_as(dir.join(format!("{id}-six.baez"))).unwrap();
+    }
+}

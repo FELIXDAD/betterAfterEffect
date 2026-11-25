@@ -420,6 +420,10 @@ impl Session {
     }
 
     /// Count only frames submitted to the native presentation surface.
+    pub fn diagnostic_presentation(&self) -> (Option<(u64, Time)>, u64) {
+        (self.playback_stats.last_present, self.playback_stats.dropped)
+    }
+
     pub fn frame_presented(&mut self, now: Instant) {
         let Some(pb) = &self.playback else { return };
         let expected = self.times.get(&pb.comp).copied();
