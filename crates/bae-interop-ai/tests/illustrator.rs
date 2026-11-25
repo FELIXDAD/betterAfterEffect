@@ -327,7 +327,7 @@ fn check_basic(dir: &Path) {
     let kinds: Vec<(&str, LayerKind)> = evaluated
         .layers
         .iter()
-        .map(|l| (l.name.as_str(), l.kind))
+        .map(|l| (&*l.name, l.kind))
         .collect();
     assert_eq!(
         kinds,
@@ -347,7 +347,7 @@ fn check_basic(dir: &Path) {
     let shape = evaluated
         .layers
         .iter()
-        .find(|l| l.name == "图层 1")
+        .find(|l| &*l.name == "图层 1")
         .unwrap();
     let mut warnings = Vec::new();
     let scene = shape_layer_scene(shape, &mut warnings);

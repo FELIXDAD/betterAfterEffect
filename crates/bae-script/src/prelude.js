@@ -83,7 +83,6 @@
     for (var i = 0; i < args.length; i++) out.push(String(args[i]));
     return out.join(" ");
   };
-  var now = function () { return H("context").time; };
 
   // ---- values ---------------------------------------------------------------
 
@@ -232,7 +231,10 @@
     workAreaStart: { get: function () { return this._i().workAreaStart; } },
     workAreaDuration: { get: function () { return this._i().workAreaDuration; } },
     displayStartTime: { get: function () { return this._i().displayStartTime; } },
-    time: { get: function () { return now(); }, set: function () {} },
+    time: {
+      get: function () { return H("compTime", { path: this._p }); },
+      set: function (v) { H("setComp", { path: this._p, field: "time", value: Number(v) }); },
+    },
     numLayers: { get: function () { return this._i().layers.length; } },
     layers: {
       get: function () {
@@ -297,13 +299,13 @@
     get name() { return this._n; },
     get matchName() { return this._m; },
     get parentProperty() { return this._parent; },
-    get propertyType() { return "PROPERTY"; },
+    get propertyType() { return g.PropertyType.PROPERTY; },
     get isModified() { return true; },
     get canVaryOverTime() { return true; },
     get canSetExpression() { return true; },
     get enabled() { return true; },
     get value() { return fromHost(H("sample", { path: this._p, attr: this._a })); },
-    valueAtTime: function (t) { return fromHost(H("sample", { path: this._p, attr: this._a, time: t })); },
+    valueAtTime: function (t, preExpression) { return fromHost(H("sample", { path: this._p, attr: this._a, time: t, preExpression: !!preExpression })); },
     setValue: function (v) { H("set", { path: this._p, attr: this._a, value: toHost(v) }); },
     setValueAtTime: function (t, v) {
       H("set", { path: this._p, attr: this._a, value: toHost(v), time: t, key: true });
@@ -382,7 +384,7 @@
     get name() { return this._n; },
     get matchName() { return this._m; },
     get parentProperty() { return this._parent; },
-    get propertyType() { return "INDEXED_GROUP"; },
+    get propertyType() { return g.PropertyType.INDEXED_GROUP; },
     get numProperties() { return this._children().length; },
     property: function (which) {
       var list = this._children();
@@ -440,7 +442,7 @@
       get enabled() { return H("effect", { path: e.path }).enabled; },
       set enabled(v) { H("setEffectEnabled", { path: e.path, value: !!v }); },
       get active() { return this.enabled; },
-      get propertyType() { return "NAMED_GROUP"; },
+      get propertyType() { return g.PropertyType.NAMED_GROUP; },
       remove: function () { H("removeEffect", { path: e.path }); },
     });
     return eg;
@@ -673,6 +675,11 @@
 
   g.app = app;
   g.TextDocument = TextDocument;
+  g.PropertyType = Object.freeze({ PROPERTY: 6212, INDEXED_GROUP: 6213, NAMED_GROUP: 6214 });
+  var modes = {};
+  for (var mode of H("blendModes")) modes[mode.toUpperCase()] = mode;
+  modes.SILHOUETE_ALPHA = modes.SILHOUETTE_ALPHA;
+  g.BlendingMode = Object.freeze(modes);
   g.KeyframeInterpolationType = KeyframeInterpolationType;
   g.Item = Item;
   g.FolderItem = FolderItem;
@@ -709,3 +716,9 @@
     },
   };
 })(globalThis);
+
+export const {
+  app, bae, Item, FolderItem, AVItem, FootageItem, CompItem, Layer, AVLayer,
+  TextLayer, ShapeLayer, CameraLayer, LightLayer, Property, PropertyGroup,
+  TextDocument, KeyframeInterpolationType, PropertyType, BlendingMode,
+} = globalThis;
