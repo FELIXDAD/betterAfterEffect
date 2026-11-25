@@ -8,6 +8,8 @@ use bae_render::effect::{LayerDependency, MaskSelect};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderEffect, RenderError};
 use std::sync::Arc;
 
+mod noise_utility;
+
 type Map = fn(Params<'_>) -> Vec<(u32, Value)>;
 
 #[derive(Debug)]
@@ -131,6 +133,7 @@ fn assign(params: &mut Vec<(u32, Value)>, id: u32, value: Value) {
 pub(super) fn register(r: &mut Registry) {
     let mut aliases = Vec::new();
     for target in &r.effects {
+        noise_utility::register(target, &mut aliases);
         color::register(target, &mut aliases);
     }
     r.effects.extend(aliases);

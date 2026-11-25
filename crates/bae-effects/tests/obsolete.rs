@@ -149,3 +149,71 @@ fn alpha_levels_converts_8bit_controls_and_brightness_selects_legacy_mode() {
         assert_close(&got, &expected, rect, 0.00001, old);
     }
 }
+
+#[test]
+fn noise_and_utility_aliases_follow_the_installed_targets() {
+    check_schemas(&["ADBE Noise"]);
+    for (old, modern) in [
+        ("ADBE Noise Alpha", "ADBE Noise Alpha2"),
+        ("ADBE Noise HLS", "ADBE Noise HLS2"),
+        ("ADBE Noise HLS Auto", "ADBE Noise HLS Auto2"),
+        ("ADBE Cineon Converter", "ADBE Cineon Converter2"),
+        ("CC Composite", "CS Composite"),
+    ] {
+        assert_eq!(get(old).is_some(), get(modern).is_some(), "{old}");
+        if get(modern).is_some() {
+            check_schemas(&[old]);
+        }
+    }
+}
+
+#[test]
+fn legacy_composite_reads_its_own_source() {
+    let Some(fx) = get("CC Composite") else {
+        return;
+    };
+    let instance = common::instance("CC Composite", vec![]);
+    let params = bae_render::EffectParams::new(&instance);
+    let dependencies = fx.effect().layer_dependencies(&params);
+    assert_eq!(dependencies.len(), 1);
+    assert_eq!(
+        dependencies[0].layer,
+        instance.path.parent().unwrap().parent().unwrap()
+    );
+    assert_eq!(
+        dependencies[0].stage,
+        bae_render::effect::LayerStage::Source
+    );
+}
+
+#[test]
+fn cineon_legacy_modes_use_the_modern_conversion_directions() {
+    let Some(old) = get("ADBE Cineon Converter") else {
+        return;
+    };
+    let modern = get("ADBE Cineon Converter2").unwrap();
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(7, 1);
+    let input = Pixels::new(rect, |x, _| [x as f32 / 7., 0.35, 0.75, 1.]);
+    for (legacy, direction) in [(1, 2), (2, 1), (3, 2), (4, 3), (5, 2), (6, 3)] {
+        let a = run(
+            &gpu,
+            F32,
+            old,
+            vec![(1, Value::Int(legacy))],
+            &input,
+            rect,
+            1.,
+        );
+        let b = run(
+            &gpu,
+            F32,
+            modern,
+            vec![(1, Value::Int(direction))],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&a, &b, rect, 0.00001, "Cineon");
+    }
+}
