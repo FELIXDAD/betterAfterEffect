@@ -71,7 +71,7 @@ macOS/Linux 的 shell 脚本需要 Bash、Python 3、Git。Windows 脚本使用�
 1. 用 EC2 Instance Connect 或 SSM 连接选定的 Linux 实例。确认 8787 可用，且独立目录和同名服务未被其他应用使用。
 2. 将 server.py、index.html 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
 3. 将 bae-progress-web.service 安装至 `/etc/systemd/system/`，运行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now bae-progress-web`。通过 `systemctl is-enabled bae-progress-web`、`systemctl is-active bae-progress-web` 和实际带认证的状态请求核验。服务无需管理员权限。
-4. 有域名时在 HTTPS 入口转发到本服务，关闭 SSE 响应缓冲，保持长连接，把后端监听地址改为 127.0.0.1。临时 IP 模式按来源 IP 限制安全组 TCP 8787 的访问。HTTP Basic 和 Bearer 在 HTTP 链路上以明文传递。
+4. 有域名时在 HTTPS 入口转发到本服务，关闭 SSE 响应缓冲，保持长连接，服务单元默认仅监听 127.0.0.1。临时 IP 模式需单独调整监听地址，并按来源 IP 限制安全组 TCP 8787 的访问。HTTP Basic 和 Bearer 在 HTTP 链路上以明文传递。
 5. 将各汇报机 env 的 BAE_BOARD_URL 改为已验证的 AWS 地址。用两个浏览器窗口验证汇报动态与实时更新。
 
 制作一致性快照（目标路径为新文件）：
@@ -80,3 +80,7 @@ macOS/Linux 的 shell 脚本需要 Bash、Python 3、Git。Windows 脚本使用�
 umask 077
 python3 -c 'import sqlite3, sys; from pathlib import Path; sqlite3.connect(Path.home()/".config/bae-board/board.sqlite3").backup(sqlite3.connect(sys.argv[1]))' /private/tmp/bae-board-deploy.sqlite3
 ```
+
+### 线上实例
+
+正式入口为 https://board.rimlight.studio/ ，运行在东京 Lightsail 实例 spectra。Nginx 使用独立虚拟主机转发到回环端口 8787；证书由 Certbot 的 webroot 流程续期，续期后平滑重载 Nginx。Mac 的 8787 是单独的本机原型，部署后所有 agent 统一向正式入口汇报。
