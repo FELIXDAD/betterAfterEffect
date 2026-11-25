@@ -168,7 +168,7 @@ impl Renderer {
 
     /// A renderer with explicit settings.
     pub fn with_config(gpu: Arc<GpuContext>, config: RendererConfig) -> Self {
-        let pipelines = Pipelines::new(gpu.device());
+        let pipelines = Pipelines::new(&gpu);
         Self {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
