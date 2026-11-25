@@ -153,23 +153,47 @@ pub(crate) struct Executed {
     pub incomplete: bool,
     /// CPU time encoding each node (by node index), when timed.
     pub node_times: Vec<std::time::Duration>,
+    /// The frame converted into a new RGBA8 texture (when asked for),
+    /// recorded in the frame's own submission.
+    pub output: Option<wgpu::Texture>,
 }
 
 struct PoolAllocator<'a> {
     pool: &'a mut TexturePool,
     device: &'a wgpu::Device,
-    format: wgpu::TextureFormat,
 }
 
 impl ImageAllocator for PoolAllocator<'_> {
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
-        self.pool
-            .acquire(self.device, self.format, rect, pixel_scale)
+    fn allocate(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
+        self.pool.acquire(self.device, format, rect, pixel_scale)
     }
 }
 
-/// Executes `graph` and submits it. Returns the output node's image (and,
-/// when `timed`, the CPU time of every node).
+/// Share whole-surface effect outputs between ROI requests in the renderer's
+/// existing byte-limited frame cache. Entries are published after submission.
+pub(crate) struct TileCache<'a> {
+    pub frames: &'a mut crate::cache::FrameCache<GpuImage>,
+    pub request: u64,
+    pub comp: &'a crate::RenderComp,
+}
+
+/// Per-node timing of a frame (the Render Time column).
+pub(crate) struct Timing<'a> {
+    /// CPU time per node.
+    pub cpu: bool,
+    /// GPU timestamps per node, when the device supports them.
+    pub gpu: Option<&'a mut crate::gpu_timer::GpuTimer>,
+}
+
+/// Executes `graph` and submits it once. Returns the output node's image,
+/// with `output` its conversion into a new RGBA8 texture recorded before the
+/// same submission (the viewer path: one submit per frame), and, when
+/// `timed`, the CPU time of every node.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(
     gpu: &Arc<GpuContext>,
@@ -179,8 +203,16 @@ pub(crate) fn execute(
     mask_buffers: &mut MaskBuffers,
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
-    timed: bool,
+    mut tiles: Option<TileCache<'_>>,
+    timing: Timing<'_>,
+    output: Option<crate::OutputAlpha>,
 ) -> Result<Executed, RenderError> {
+    let timed = timing.cpu;
+    let mut gpu_timer = timing.gpu;
+    let gpu_timed = gpu_timer
+        .as_deref_mut()
+        .is_some_and(|t| t.begin(graph.nodes.len()));
+    let mut surfaces = Vec::new();
     let device = gpu.device();
     let total_draws: usize = graph
         .nodes
@@ -257,8 +289,29 @@ pub(crate) fn execute(
     let mut node_times = Vec::with_capacity(if timed { graph.nodes.len() } else { 0 });
     for (index, node) in graph.nodes.iter().enumerate() {
         let started = timed.then(std::time::Instant::now);
-        let image = match &node.kind {
-            NodeKind::Composite(c) => {
+        if gpu_timed && let Some(t) = gpu_timer.as_deref() {
+            t.write(&mut encoder, index);
+        }
+        let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
+            NodeKind::Effect(fx) if fx.effect.full_surface() => Some(crate::cache::FrameKey {
+                comp: fx.instance.path.clone(),
+                time: fx.frame.comp_time,
+                request: cache.request,
+            }),
+            _ => None,
+        });
+        let cached = surface_key.as_ref().and_then(|key| {
+            let frames = &mut tiles.as_mut()?.frames;
+            (frames.content_hash(key) == Some(node.key))
+                .then(|| frames.get(key).cloned())
+                .flatten()
+        });
+        let image = match (&node.kind, cached) {
+            (_, Some(image)) => {
+                surface_key = None;
+                image
+            }
+            (NodeKind::Composite(c), None) => {
                 let px = node_pixels(node);
                 let target = pool.acquire(device, format, px, node.pixel_scale)?;
                 let scratch_needed = c.ops.iter().any(|op| ctx.needs_backdrop(c, op));
@@ -288,17 +341,13 @@ pub(crate) fn execute(
                 )?;
                 target
             }
-            NodeKind::Fill(fill) => {
+            (NodeKind::Fill(fill), None) => {
                 let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
                 ctx.fill(&mut encoder, node, fill.color, &fill.rect, &target)?;
                 target
             }
-            NodeKind::Source(src) => {
-                let mut alloc = PoolAllocator {
-                    pool,
-                    device,
-                    format,
-                };
+            (NodeKind::Source(src), None) => {
+                let mut alloc = PoolAllocator { pool, device };
                 let mut ectx = EncodeContext {
                     gpu,
                     encoder: &mut encoder,
@@ -319,7 +368,7 @@ pub(crate) fn execute(
                     Err(e) => return Err(e),
                 }
             }
-            NodeKind::Effect(fx) => {
+            (NodeKind::Effect(fx), None) => {
                 let input = outputs[fx.input.index()]
                     .clone()
                     .ok_or_else(|| RenderError::Other("effect input missing".into()))?;
@@ -334,16 +383,15 @@ pub(crate) fn execute(
                     .filter_map(|(m, id)| Some((m.clone(), outputs[id.index()].clone()?)))
                     .collect();
                 let mut params = fx.frame.params(&fx.instance);
+                params.scene = fx.scene.as_deref();
                 params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
                 if let Some(samples) = &fx.samples {
+                    params.parameter_samples = &samples.parameter_samples;
+                    params.tracks = &samples.tracks;
                     params.mask_paths = &samples.paths;
                     params.history = &samples.history;
                 }
-                let mut alloc = PoolAllocator {
-                    pool,
-                    device,
-                    format,
-                };
+                let mut alloc = PoolAllocator { pool, device };
                 let mut ectx = EncodeContext {
                     gpu,
                     encoder: &mut encoder,
@@ -363,7 +411,7 @@ pub(crate) fn execute(
                     Err(e) => return Err(e),
                 }
             }
-            NodeKind::Mix(mix) => {
+            (NodeKind::Mix(mix), None) => {
                 let input = |id: crate::graph::NodeId| {
                     outputs[id.index()]
                         .clone()
@@ -383,11 +431,14 @@ pub(crate) fn execute(
                 ctx.passes += 1;
                 target
             }
-            NodeKind::Mask(_) => ctx.mask_outs[index]
+            (NodeKind::Mask(_), None) => ctx.mask_outs[index]
                 .as_ref()
                 .map(|m| m.image.clone())
                 .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
+        if let Some(key) = surface_key {
+            surfaces.push((key, node.key, image.clone()));
+        }
         outputs[index] = Some(image);
         if let Some(started) = started {
             node_times.push(started.elapsed());
@@ -403,16 +454,74 @@ pub(crate) fn execute(
     }
     let draw_calls = ctx.draw_calls;
     let passes = ctx.passes;
-    gpu.queue().submit([encoder.finish()]);
+    if gpu_timed && let Some(t) = gpu_timer.as_deref_mut() {
+        t.write(&mut encoder, graph.nodes.len());
+        t.finish(&mut encoder, graph.nodes.len() + 1, &graph.owners);
+    }
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;
+    let output = output.map(|alpha| {
+        let [w, h] = image.texel_size();
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bae-render.output"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bae-render.output"),
+            size: crate::renderer::OUTPUT_PARAMS_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue()
+            .write_buffer(&uniform, 0, &crate::renderer::output_params(alpha, false));
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        record_output_pass(
+            device,
+            ctx.pipelines,
+            &mut encoder,
+            &image,
+            &view,
+            wgpu::TextureFormat::Rgba8Unorm,
+            &uniform,
+        );
+        target
+    });
+    gpu.queue().submit([encoder.finish()]);
+    ctx.pipelines.end_frame();
+    if gpu_timed && let Some(t) = gpu_timer {
+        t.submitted();
+    }
+    if !graph.incomplete
+        && !incomplete
+        && let Some(cache) = tiles
+    {
+        for (key, hash, image) in surfaces {
+            let bytes = image.byte_size();
+            cache
+                .frames
+                .insert(key, image, bytes, cache.comp.dependencies(), hash);
+        }
+    }
     Ok(Executed {
         image,
         draw_calls,
         passes,
         incomplete,
         node_times,
+        output,
     })
 }
 
@@ -1052,4 +1161,51 @@ fn plan_op(
         data.mode[1] |= flags::MASK;
     }
     Ok(Some(data))
+}
+
+/// Records the output conversion of `image` into `target` (a `format` view).
+pub(crate) fn record_output_pass(
+    device: &wgpu::Device,
+    pipelines: &mut Pipelines,
+    encoder: &mut wgpu::CommandEncoder,
+    image: &GpuImage,
+    target: &wgpu::TextureView,
+    format: wgpu::TextureFormat,
+    uniform: &wgpu::Buffer,
+) {
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bae-render.output"),
+        layout: &pipelines.output_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&image.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: uniform.as_entire_binding(),
+            },
+        ],
+    });
+    let [w, h] = image.texel_size();
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("bae-render.output"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    pass.set_pipeline(pipelines.output_for(device, format));
+    pass.set_bind_group(0, &group, &[]);
+    pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
+    pass.draw(0..3, 0..1);
 }

@@ -64,7 +64,6 @@ fn app_builder() -> AppBuilder {
         // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
         .add_module(bae_motion::MotionModule)
         // `script.run`: AE-style scripts (File > Scripts, `bae --headless`, MCP).
-        .add_module(bae_script::ScriptModule)
         // Plugin host: `bae plugin check|list`; plugin effects in the app registries.
         .add_module(bae_plugin::PluginModule)
         .add_module(shell::ShellModule)

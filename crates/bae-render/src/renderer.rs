@@ -82,6 +82,10 @@ pub struct RenderedFrame {
     /// empty otherwise and for cached frames. Drawing the layer into the comp
     /// itself is not included (it is one batched pass for all layers).
     pub layer_times: Vec<(PrimPath, Duration)>,
+    /// GPU time per top-level layer, the newest measurement read back (from
+    /// a frame or two earlier), when the device has timestamp queries inside
+    /// encoders; empty otherwise.
+    pub layer_gpu_times: Vec<(PrimPath, Duration)>,
 }
 
 /// How [`Renderer::read_rgba8`] treats alpha.
@@ -127,6 +131,10 @@ pub struct Renderer {
     effects: EffectLibrary,
     /// Measure per-layer render times ([`RenderedFrame::layer_times`]).
     layer_times: bool,
+    /// Timestamp queries for per-layer GPU times (created when needed).
+    gpu_timer: Option<crate::gpu_timer::GpuTimer>,
+    /// The newest per-layer GPU times read back.
+    gpu_times: Vec<(PrimPath, Duration)>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -186,6 +194,8 @@ impl Renderer {
             providers: SourceProviders::new(),
             effects: EffectLibrary::new(),
             layer_times: false,
+            gpu_timer: None,
+            gpu_times: Vec::new(),
             gpu,
         }
     }
@@ -195,11 +205,26 @@ impl Renderer {
     /// every graph node.
     pub fn set_layer_times(&mut self, on: bool) {
         self.layer_times = on;
+        if on && self.gpu_timer.is_none() {
+            self.gpu_timer = crate::gpu_timer::GpuTimer::new(self.gpu.device());
+        }
+        if !on {
+            self.gpu_timer = None;
+            self.gpu_times.clear();
+        }
     }
 
     /// The shared GPU context.
     pub fn gpu(&self) -> &Arc<GpuContext> {
         &self.gpu
+    }
+
+    /// Hash the pixels with camera/light dependencies from the installed effects.
+    pub fn content_hash(&self, comp: &RenderComp) -> u64 {
+        use std::hash::Hasher;
+        let mut h = rustc_hash::FxHasher::default();
+        comp.hash_content(&mut h, Some(&self.effects));
+        h.finish()
     }
 
     /// Effect implementations (register built-in and plugin effects here).
@@ -293,25 +318,57 @@ impl Renderer {
         request: &RenderRequest,
         frames: Option<&mut dyn crate::graph::CompFrames>,
     ) -> Result<RenderedFrame, RenderError> {
+        Ok(self.render(comp, request, frames, None)?.0)
+    }
+
+    /// [`Renderer::render_frame_with`] followed by [`Renderer::output_texture`]
+    /// in one GPU submission (the viewer path).
+    pub fn render_frame_output(
+        &mut self,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        frames: Option<&mut dyn crate::graph::CompFrames>,
+        alpha: OutputAlpha,
+    ) -> Result<(RenderedFrame, wgpu::Texture), RenderError> {
+        let (frame, output) = self.render(comp, request, frames, Some(alpha))?;
+        let texture = match output {
+            Some(texture) => texture,
+            // From the frame cache: only the conversion is submitted.
+            None => self.output_texture(&frame, alpha)?,
+        };
+        Ok((frame, texture))
+    }
+
+    fn render(
+        &mut self,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        frames: Option<&mut dyn crate::graph::CompFrames>,
+        output: Option<OutputAlpha>,
+    ) -> Result<(RenderedFrame, Option<wgpu::Texture>), RenderError> {
         let key = FrameKey {
             comp: comp.path.clone(),
             time: comp.time,
             request: request.fingerprint(),
         };
-        let hash = comp.content_hash();
+        let hash = self.content_hash(comp);
         if self.frames.content_hash(&key) == Some(hash)
             && let Some(image) = self.frames.get(&key)
         {
-            return Ok(RenderedFrame {
-                image: image.clone(),
-                comp: comp.path.clone(),
-                time: comp.time,
-                from_cache: true,
-                stats: FrameStats::default(),
-                warnings: Vec::new(),
-                incomplete: false,
-                layer_times: Vec::new(),
-            });
+            return Ok((
+                RenderedFrame {
+                    image: image.clone(),
+                    comp: comp.path.clone(),
+                    time: comp.time,
+                    from_cache: true,
+                    stats: FrameStats::default(),
+                    warnings: Vec::new(),
+                    incomplete: false,
+                    layer_times: Vec::new(),
+                    layer_gpu_times: Vec::new(),
+                },
+                None,
+            ));
         }
 
         let started = Instant::now();
@@ -330,6 +387,15 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
+        let tiles = request.roi.map(|_| crate::exec::TileCache {
+            frames: &mut self.frames,
+            request: RenderRequest {
+                roi: None,
+                ..*request
+            }
+            .fingerprint(),
+            comp,
+        });
         let executed = execute(
             &self.gpu,
             &mut self.pipelines,
@@ -338,11 +404,23 @@ impl Renderer {
             &mut self.mask_buffers,
             &graph,
             format,
-            self.layer_times,
+            tiles,
+            crate::exec::Timing {
+                cpu: self.layer_times,
+                gpu: self.gpu_timer.as_mut(),
+            },
+            output,
         )?;
+        if let Some(timer) = &mut self.gpu_timer {
+            let period = self.gpu.queue().get_timestamp_period();
+            if let Some(times) = timer.collect(self.gpu.device(), period) {
+                self.gpu_times = times;
+            }
+        }
         let encode = encode_start.elapsed();
         self.pool.end_frame();
 
+        let output = executed.output;
         let image = executed.image;
         let incomplete = graph.incomplete || executed.incomplete;
         if !graph.time_dependent && !incomplete {
@@ -357,23 +435,27 @@ impl Renderer {
         for w in &warnings {
             tracing::debug!(comp = %comp.path, "{w}");
         }
-        Ok(RenderedFrame {
-            image,
-            comp: comp.path.clone(),
-            time: comp.time,
-            from_cache: false,
-            stats: FrameStats {
-                nodes: graph.nodes.len(),
-                draws: graph.draw_count(),
-                draw_calls: executed.draw_calls,
-                passes: executed.passes,
-                build,
-                encode,
+        Ok((
+            RenderedFrame {
+                image,
+                comp: comp.path.clone(),
+                time: comp.time,
+                from_cache: false,
+                stats: FrameStats {
+                    nodes: graph.nodes.len(),
+                    draws: graph.draw_count(),
+                    draw_calls: executed.draw_calls,
+                    passes: executed.passes,
+                    build,
+                    encode,
+                },
+                warnings,
+                incomplete,
+                layer_times: layer_times(&graph, &executed.node_times),
+                layer_gpu_times: self.gpu_times.clone(),
             },
-            warnings,
-            incomplete,
-            layer_times: layer_times(&graph, &executed.node_times),
-        })
+            output,
+        ))
     }
 
     /// Blocks until the GPU has finished all submitted work.
@@ -453,42 +535,15 @@ impl Renderer {
         format: wgpu::TextureFormat,
         uniform: &wgpu::Buffer,
     ) {
-        let device = self.gpu.device();
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bae-render.output"),
-            layout: &self.pipelines.output_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&frame.image.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: uniform.as_entire_binding(),
-                },
-            ],
-        });
-        let [w, h] = frame.image.texel_size();
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("bae-render.output"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_pipeline(self.pipelines.output_for(device, format));
-        pass.set_bind_group(0, &group, &[]);
-        pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
-        pass.draw(0..3, 0..1);
+        crate::exec::record_output_pass(
+            self.gpu.device(),
+            &mut self.pipelines,
+            encoder,
+            &frame.image,
+            target,
+            format,
+            uniform,
+        );
     }
 
     /// Writes a frame as an 8-bit RGBA PNG (straight alpha unless `alpha` says

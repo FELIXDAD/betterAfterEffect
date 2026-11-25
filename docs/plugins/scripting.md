@@ -70,8 +70,8 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 - `FolderItem`：`items`、`numItems`、`item(i)`；`items.addComp(...)`、`items.addFolder(name)` 建在这个文件夹里。
 - `FootageItem`（素材和纯色）：`width`、`height`、`pixelAspect`、`duration`、`frameRate`、`file`（`{fsName, name}`）、`mainSource.color`（纯色的颜色）、`mainSource.isStill`。
 - `CompItem`：
-  - 可读写：`name`、`width`、`height`、`pixelAspect`、`duration`、`frameRate`、`bgColor`（写入走 `comp.set_settings`）
-  - 只读：`frameDuration`、`workAreaStart`、`workAreaDuration`、`displayStartTime`、`time`（运行时的当前时间）、`numLayers`、`selectedLayers`
+  - 可读写：`name`、`width`、`height`、`pixelAspect`、`duration`、`frameRate`、`bgColor`（写入走 `comp.set_settings`），以及合成播放头 `time`
+  - 只读：`frameDuration`、`workAreaStart`、`workAreaDuration`、`displayStartTime`、`numLayers`、`selectedLayers`
   - `layer(index 或 名称)`、`layers`（LayerCollection，`layers[1]` 是最上面的图层）
 
 ### LayerCollection（`comp.layers`）
@@ -128,7 +128,7 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 | 成员 | 说明 |
 |---|---|
 | `value` | 当前时间的值 |
-| `valueAtTime(t)` | 时间 t 的值 |
+| `valueAtTime(t, preExpression)` | 返回指定时间的值。第二个参数为 `true` 时读取表达式计算前的值 |
 | `setValue(v)` | 设静态值；属性有关键帧时和 AE 一样报错，请用 `setValueAtTime` |
 | `setValueAtTime(t, v)` | 在时间 t 设关键帧（没有关键帧时打开秒表） |
 | `setValuesAtTimes(times, values)`、`setValueAtKey(i, v)` | 批量设关键帧、改第 i 个关键帧的值 |
@@ -153,8 +153,6 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 ## 和 AE 的差别
 
 - `item.id`、`layer.id` 是工程里的路径字符串（例如 `/comps/Comp_1`），不是数字；`app.project.itemByID()` 接受它。
-- `value` / `valueAtTime()` 返回关键帧或静态值，**不计算表达式**（相当于 AE 的 `valueAtTime(t, true)`）。
-- `comp.time` 是运行时的当前时间，脚本里不能修改。
 - 没有 `File`、`Folder`、`Socket`、ScriptUI 面板，也不能读写文件系统；`app.project.save()`、`importFile()` 等暂不支持。
 - ExtendScript 的预处理行（`#target aftereffects`、`#include`、`#targetengine`）会被忽略；可以使用现代 JavaScript 语法（`let`、箭头函数、模板字符串……）。
 - 撤销：见上文，一次运行始终是一个撤销步骤。
@@ -204,6 +202,14 @@ MCP 工具名会把调用 ID 中的点换成下划线，例如 `plugin_com_examp
 每次插件调用独占一个 QuickJS 运行时，执行时限 10 秒，堆上限由 `memory_limit_mb` 决定，默认 64 MiB。一次成功调用里的所有修改可以一次撤销。导出函数抛出错误时，命令返回错误，事务回滚。界面调用可读取当前合成、选区和时间。无界面调用请显式传入需要处理的图层。
 
 脚本默认可读工程。需要修改工程的插件在 `[permissions]` 声明 `project = "write"` 并安装在用户、系统或应用插件目录。工程目录及 `BAE_PLUGIN_PATH` 按工程作用域加载，只授予读取权限。`project = "none"` 仅允许计算、日志和提示。脚本插件可调用模型和动效命令，模块导入支持内置 `"bae"`。
+
+### 播放头、表达式和权限
+
+`comp.time` 使用合成时间，单位为秒。赋值后播放头对齐到帧，各合成保留各自的时间。`Property.value` 返回该合成当前帧的表达式结果。用 `valueAtTime(t, true)` 读取表达式计算前的值，用 `valueAtTime(t, false)` 读取计算后的值。脚本可以用 `PropertyType.PROPERTY` 判断属性类型，用 `BlendingMode.MULTIPLY` 等常量读写图层混合模式。
+
+插件安装时编译 ES 模块，调用时执行入口。每次调用的日志和提示合计最多 256 条、64 KiB。脚本通过应用命令注册表执行已加载模块的命令。涉及文件路径的命令需要宿主授予文件句柄，当前脚本接口不提供此类句柄。
+
+[合成摘要](../../plugins/examples/composition-report) 演示只读自动化。打开合成后运行文件菜单里的 Composition Summary，或通过 MCP 获取名称、时长、帧率和图层数。[选中图层淡入](../../plugins/examples/fade-selected) 演示写入关键帧。选中图层后运行图层菜单里的 Fade Selected Layers，播放头处写入起始关键帧，指定帧数后恢复该帧原有的不透明度。
 
 ### 普通脚本示例
 

@@ -7,3 +7,19 @@ highlights = "高光"
 midtones = "中间调"
 shadows = "阴影"
 blend = "与原始图像混合"
+
+[effect.cc-toner]
+name = "CC Toner"
+keywords = ["色调"]
+
+[effect.cc-toner.params]
+tones = "Tones"
+highlights = "Highlights"
+brights = "Brights"
+midtones = "Midtones"
+darktones = "Darktones"
+shadows = "Shadows"
+blend_w_original = "Blend w. Original"
+
+[effect.cc-toner.choices]
+tones = ["Duotone", "Tritone", "Pentone", "(-", "Solid"]
