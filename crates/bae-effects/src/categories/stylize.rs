@@ -3,6 +3,7 @@ use crate::Registry;
 use crate::effects::spatial;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.effects.push(crate::effects::compound::texturize());
     packages(
         registry,
         &[

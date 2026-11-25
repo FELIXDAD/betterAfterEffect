@@ -231,6 +231,23 @@ pub const ZH: &[(&str, &str)] = &[
     ),
     ("Modifier key pressed", "按下辅助按键"),
     ("Default.txt", "默认值.txt"),
+    ("Untitled Custom Preset.txt", "无标题自定义预设.txt"),
+    ("Create Preset", "创建预设"),
+    ("Preset Name:", "预设名称 -"),
+    ("Save", "保存"),
+    ("Copied to clipboard", "复制到剪贴板"),
+    (
+        "The key set name you entered is not valid. Please choose another name.",
+        "您输入的键组名称无效。请选择另一个名称。",
+    ),
+    (
+        "A custom shortcut set named “{name}” already exists. Do you want to overwrite it?",
+        "已存在名为“{name}”的自定义快捷键集。是否要将其覆盖？",
+    ),
+    (
+        "Are you sure you want to delete the keyboard layout set “{name}”?",
+        "是否确定要删除键盘布局集“{name}”？",
+    ),
     ("Custom.txt", "自定义.txt"),
     // The scopes of the Commands menu and the Panels groups (AE: $$$/AE/KB/*).
     ("Character and Paragraph Panels", "字符和段落面板"),

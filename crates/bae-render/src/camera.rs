@@ -211,6 +211,16 @@ impl Camera {
         }
     }
 
+    /// Comp-space size of one comp pixel: `1 / zoom` per unit of distance
+    /// from a perspective camera, or (stored negative, a constant) `−1 / scale`
+    /// for an orthographic view.
+    pub fn world_per_pixel(&self) -> f64 {
+        match self.projection {
+            Projection::Perspective => 1.0 / self.zoom.max(1e-9),
+            Projection::Orthographic { scale } => -1.0 / scale.max(1e-9),
+        }
+    }
+
     /// Comp space → camera space.
     pub fn view(&self) -> DMat4 {
         self.world.inverse()

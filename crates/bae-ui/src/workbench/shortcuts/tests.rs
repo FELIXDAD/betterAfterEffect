@@ -507,3 +507,68 @@ impl Session {
         self.key_tooltip(chord)
     }
 }
+
+/// Presets: Save As, switching, Delete are staged; OK writes the files; the
+/// selected preset is remembered; Copy To Clipboard writes AE's text.
+#[test]
+fn presets_are_files_written_on_ok() {
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let dir = std::env::temp_dir().join(format!("bae-presets-dialog-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut wb = workbench();
+    wb.set_shortcut_presets_dir(Some(dir.clone()));
+    wb.open_shortcut_editor();
+    let s = session(&mut wb);
+    assert_eq!(s.presets.names(), [DEFAULT_PRESET]);
+    // A change makes Custom.txt; Save As copies it to "Mine.txt" and selects it.
+    s.select(row("comp.new", None));
+    s.focus = Some(PillFocus::New);
+    run(&mut wb, vec![key(Key::J, Modifiers::COMMAND)]);
+    let s = session(&mut wb);
+    assert_eq!(s.preset, CUSTOM_PRESET);
+    s.save_preset_as("Mine.txt");
+    assert_eq!(
+        s.presets.names(),
+        [DEFAULT_PRESET, CUSTOM_PRESET, "Mine.txt"]
+    );
+    // Switching to the built-in preset and back.
+    s.choose_preset(DEFAULT_PRESET);
+    assert!(s.chords_of(&row("comp.new", None)) == [chord("Cmd+N")]);
+    s.choose_preset("Mine.txt");
+    assert!(
+        s.chords_of(&row("comp.new", None))
+            .contains(&chord("Cmd+J"))
+    );
+    // Copy To Clipboard: AE's text (tabs, CR line ends, an empty last line).
+    let text = presets::clipboard_text(&s.tree, &s.chords);
+    assert!(
+        text.starts_with("Application\t\t\r\tSelection\tV\t\r"),
+        "{text:?}"
+    );
+    assert!(text.contains("\t\tNew Composition...\t"), "{text:?}");
+    assert!(text.ends_with("\t\r\r"));
+    assert!(!dir.exists(), "nothing written before OK");
+    wb.commit_shortcut_editor();
+    assert!(dir.join("Mine.txt").is_file() && dir.join("Custom.txt").is_file());
+    assert_eq!(wb.state().shortcut_presets["km"], "Mine.txt");
+
+    // Reopened: Mine.txt selected; Delete it and Cancel: still there.
+    wb.open_shortcut_editor();
+    let s = session(&mut wb);
+    assert_eq!(s.preset, "Mine.txt");
+    s.delete_preset();
+    assert_eq!(s.preset, DEFAULT_PRESET);
+    wb.cancel_shortcut_editor();
+    assert!(dir.join("Mine.txt").is_file());
+    // Delete and OK: gone, the built-in preset selected, shortcuts reset.
+    wb.open_shortcut_editor();
+    session(&mut wb).delete_preset();
+    wb.commit_shortcut_editor();
+    assert!(!dir.join("Mine.txt").exists());
+    assert!(!wb.state().shortcut_presets.contains_key("km"));
+    assert_eq!(
+        wb.keymap().lookup(&chord("Cmd+N"), None).unwrap().action,
+        "comp.new"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use bae_app::{Registry, Resources};
 use bae_effects::EffectInfo;
-use bae_model::{EffectDef, EffectParamDef, PrimPath};
+use bae_model::{EffectDef, EffectParamDef, PrimPath, PrimType, Stage};
 use bae_render::effect::registry_id;
 use bae_ui::i18n::{self, Lang};
 use bae_ui::menu::{MenuItemSpec, MenuPos};
@@ -153,6 +153,18 @@ pub(crate) fn option_labels(match_name: &str, param: &EffectParamDef) -> Vec<Str
 /// The layer an effect instance belongs to.
 pub(crate) fn layer_of(effect: &PrimPath) -> Option<PrimPath> {
     bae_motion::effect::layer_of_effect(effect)
+}
+
+/// Masks of the layer `effect` is on, Mask 1 first (AE's mask popups).
+pub(crate) fn layer_masks(stage: &Stage, effect: &PrimPath) -> Vec<PrimPath> {
+    let Some(masks) = layer_of(effect).and_then(|l| l.child("masks").ok()) else {
+        return Vec::new();
+    };
+    stage
+        .children(&masks)
+        .into_iter()
+        .filter(|m| stage.prim(m).is_some_and(|v| v.is_a(&PrimType::MASK)))
+        .collect()
 }
 
 /// A dragged effect (Effects & Presets → a layer in the timeline or viewer).

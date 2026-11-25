@@ -119,16 +119,22 @@ const FLAG_LIT: u32 = 1024u;
 @group(0) @binding(0) var<storage, read> draws: array<Draw>;
 @group(0) @binding(1) var<storage, read> samples: array<Sample>;
 // Lighting records (light.rs `Lighting::pack`): P(u) = r0 u.x + r1 u.y + r2,
-// normal + light count, eye, material (ambient, diffuse, specular, shininess),
-// (metal), then 4 vec4s per light: position + kind (0 ambient, 1 parallel,
-// 2 point, 3 spot), direction + falloff (0 none, 1 smooth, 2 inverse square),
-// colour · intensity + radius, (cos outer, cos inner, falloff distance).
+// normal + light count, eye + comp-space pixel size (> 0: per unit distance,
+// < 0: constant), material (ambient, diffuse, specular, shininess), (metal,
+// caster count, caster block offset), then 5 vec4s per light: position + kind
+// (0 ambient, 1 parallel, 2 point, 3 spot), direction + falloff (0 none,
+// 1 smooth, 2 inverse square), colour · intensity + radius, (cos outer,
+// cos inner, falloff distance), (shadow darkness, diffusion); then 8 vec4s per
+// shadow caster: plane, world -> layer px rows (2), rect, solid colour, atlas
+// uv map, atlas uv clip, (opacity, transmission, layer px per comp px, kind).
 @group(0) @binding(2) var<storage, read> lighting: array<vec4<f32>>;
 @group(1) @binding(0) var t_src: texture_2d<f32>;
 @group(1) @binding(1) var t_matte: texture_2d<f32>;
 @group(1) @binding(2) var t_dst: texture_2d<f32>;
 @group(1) @binding(3) var s_linear: sampler;
 @group(1) @binding(4) var t_mask: texture_2d<f32>;
+// Image shadow casters of the composite (exec/shadow.rs).
+@group(1) @binding(5) var t_shadow: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -281,12 +287,80 @@ fn step_smooth(e0: f32, e1: f32, x: f32) -> f32 {
     return t * t * (3.0 - 2.0 * t);
 }
 
+// AE's shadow edge without diffusion, in receiver pixels (light.rs).
+const SHADOW_SOFTNESS: f32 = 1.0;
+
+// Fraction of [c - s, c + s] inside [lo, hi].
+fn span(c: f32, s: f32, lo: f32, hi: f32) -> f32 {
+    return max(min(c + s, hi) - max(c - s, lo), 0.0) / (2.0 * s);
+}
+
+// How much of a light (l0, l1, l4 of its record) reaches p past the shadow
+// casters of record `o` (AE-CMP-437, light.rs `shadow`); `pixel` is the
+// comp-space size of a receiver pixel at p.
+fn shadow(o: u32, p: vec3<f32>, l0: vec4<f32>, l1: vec4<f32>, l4: vec4<f32>, pixel: f32) -> vec3<f32> {
+    let head = lighting[o + 6u];
+    let count = u32(head.y);
+    let block = o + u32(head.z);
+    var to = l0.xyz - p;
+    if u32(l0.w) == 1u { to = -l1.xyz * 1e6; }
+    let light_dist = max(length(l0.xyz - p), 1e-6);
+    var keep = vec3<f32>(1.0);
+    for (var i = 0u; i < count; i++) {
+        let c = block + 8u * i;
+        let plane = lighting[c];
+        let denom = dot(plane.xyz, to);
+        if abs(denom) < 1e-9 { continue; }
+        let t = -(dot(plane.xyz, p) + plane.w) / denom;
+        if t <= 1e-5 || t >= 1.0 { continue; }
+        let h = p + to * t;
+        let r0 = lighting[c + 1u];
+        let r1 = lighting[c + 2u];
+        let u = vec2<f32>(dot(r0.xyz, h) + r0.w, dot(r1.xyz, h) + r1.w);
+        let rect = lighting[c + 3u];
+        let info = lighting[c + 7u];
+        // Diffusion: a square light of that half-size seen through the caster;
+        // at least AE's shadow-map edge.
+        // (Parallel lights: an orthographic shadow map, the edge does not shrink.)
+        let frac = clamp(t * length(to) / light_dist, 0.0, 1.0);
+        let shrink = select(1.0 - frac, 1.0, u32(l0.w) == 1u);
+        let s = max(max(l4.y * frac, SHADOW_SOFTNESS * pixel * shrink) * info.z, 1e-4);
+        if u.x + s <= rect.x || u.x - s >= rect.z || u.y + s <= rect.y || u.y - s >= rect.w { continue; }
+        if info.w == 0.0 {
+            let col = lighting[c + 4u];
+            let a = span(u.x, s, rect.x, rect.z) * span(u.y, s, rect.y, rect.w) * col.a * info.x;
+            keep *= 1.0 - l4.x * a * (1.0 - info.y * col.rgb);
+        } else {
+            let map = lighting[c + 5u];
+            let clip = lighting[c + 6u];
+            let dims = vec2<f32>(textureDimensions(t_shadow));
+            let n = u32(clamp(ceil(2.0 * s * map.x * dims.x), 1.0, 6.0));
+            let sub = s / f32(n);
+            var sum = vec3<f32>(0.0);
+            for (var j = 0u; j < n; j++) {
+                for (var k = 0u; k < n; k++) {
+                    let q = u + (vec2<f32>(f32(k), f32(j)) * 2.0 + 1.0) * sub - s;
+                    let cov = span(q.x, sub, rect.x, rect.z) * span(q.y, sub, rect.y, rect.w);
+                    let uv = clamp(q * map.xy + map.zw, clip.xy, clip.zw);
+                    let texel = textureSampleLevel(t_shadow, s_linear, uv, 0.0);
+                    let col = texel.rgb / max(texel.a, 1e-6);
+                    sum += 1.0 - l4.x * cov * texel.a * info.x * (1.0 - info.y * col);
+                }
+            }
+            keep *= sum / f32(n * n);
+        }
+    }
+    return keep;
+}
+
 // AE's Classic 3D lighting (AE-CMP-436, light.rs `shade`) of straight colour
 // `c` at input texel `u`, from the lighting record at `o`.
 fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> vec3<f32> {
     let p = lighting[o].xyz * u.x + lighting[o + 1u].xyz * u.y + lighting[o + 2u].xyz;
     let header = lighting[o + 3u];
-    let v = normalize(lighting[o + 4u].xyz - p);
+    let eye = lighting[o + 4u];
+    let v = normalize(eye.xyz - p);
+    let pixel = select(-eye.w, eye.w * length(eye.xyz - p), eye.w > 0.0);
     let mat = lighting[o + 5u];
     var n = header.xyz;
     if dot(n, v) < 0.0 { n = -n; }
@@ -295,11 +369,12 @@ fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> vec3<f32> {
     var spec = vec3<f32>(0.0);
     let count = u32(header.w);
     for (var i = 0u; i < count; i++) {
-        let b = o + 7u + 4u * i;
+        let b = o + 7u + 5u * i;
         let l0 = lighting[b];
         let l1 = lighting[b + 1u];
         let l2 = lighting[b + 2u];
         let l3 = lighting[b + 3u];
+        let l4 = lighting[b + 4u];
         let kind = u32(l0.w);
         if kind == 0u {
             amb += l2.rgb;
@@ -327,7 +402,8 @@ fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> vec3<f32> {
         if kind == 3u {
             atten *= step_smooth(l3.x, l3.y, dot(l1.xyz, -to_light));
         }
-        let k = l2.rgb * atten;
+        var k = l2.rgb * atten;
+        if l4.x > 0.0 { k *= shadow(o, p, l0, l1, l4, pixel); }
         diff += k * nl;
         let nh = max(dot(n, normalize(to_light + v)), 1e-8);
         spec += k * select(pow(nh, mat.w), 1.0, mat.w <= 0.0);
