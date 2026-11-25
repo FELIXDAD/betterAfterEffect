@@ -1808,3 +1808,38 @@ fn three_d_axis_arrows_move_along_one_axis_and_rings_rotate() {
     let o = h.v3(&l, "transform:orientation");
     assert!((o[2] - 30.0).abs() < 1.0 && o[0].abs() < 1e-6, "{o:?}");
 }
+
+/// In a 3D view, a click on a camera selects it and a drag moves it in the
+/// view's plane (Top: x and z, not y).
+#[test]
+fn cameras_are_picked_and_dragged_in_3d_views() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    h.run(
+        "attr.set",
+        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [200.0, 180.0, -100.0]}}),
+    );
+    tool_action(&h, super::view3d::ids::SWITCH, json!({"view": "top"}));
+    h.session().lock().selected_layers.clear();
+    h.frame(Vec::new(), Modifiers::NONE);
+    // Where Top shows the camera.
+    let at = {
+        let v = h.viewer.last_view.unwrap();
+        let p = v
+            .project(bae_anim::glam::DVec3::new(200.0, 180.0, -100.0), true)
+            .unwrap();
+        v.to_comp(p)
+    };
+    h.click(at.x, at.y, Modifiers::NONE);
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&camera)
+    );
+    let r = h.drag((at.x, at.y), (at.x + 50.0, at.y), Modifiers::NONE);
+    h.apply(&r);
+    let p = h.v3(&camera, "transform:position");
+    assert!(
+        (p[0] - 250.0).abs() < 1.0 && (p[1] - 180.0).abs() < 1e-6,
+        "{p:?}"
+    );
+}

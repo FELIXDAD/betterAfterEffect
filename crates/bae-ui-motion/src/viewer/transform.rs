@@ -44,7 +44,8 @@ impl LayerEdit {
             parent: l
                 .parent
                 .map_or(DMat4::IDENTITY, |i| comp.layers[i].world_matrix),
-            three_d: l.switches.three_d,
+            // Cameras and lights are always 3D.
+            three_d: l.switches.three_d || matches!(l.kind, LayerKind::Camera | LayerKind::Light),
         }
     }
 
