@@ -603,3 +603,21 @@ fn expression_controls_by_name_index_and_layer_reference() {
     let ec = eval(&s, 0.0);
     assert_eq!(ec.layers[0].transform.rotation.z, 42.5);
 }
+
+#[test]
+fn property_index_and_length_read_its_value() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "A", "solid");
+        b.set(&l, "transform:position", Value::Vec3([10.0, 20.0, 0.0]));
+        // A 2D layer's Position has two components in expressions.
+        b.expr(
+            &l,
+            "transform:rotation",
+            0.0,
+            "transform.position[1] + transform.position.length + (transform.position[2] === undefined ? 100 : 0)",
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 122.0);
+}

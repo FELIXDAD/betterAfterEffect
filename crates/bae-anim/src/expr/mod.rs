@@ -10,6 +10,7 @@
 //!   Host functions called from JavaScript read it; they never hold a borrow while
 //!   calling back into JavaScript.
 
+pub(crate) mod fast;
 pub(crate) mod rewrite;
 
 use std::cell::RefCell;
@@ -34,6 +35,9 @@ struct Engine {
     ctx: Context,
     /// Source → index into the JS array `__fns`, or the compile error.
     compiled: HashMap<Arc<str>, Result<u32, String>>,
+    /// The same by the source's address (compiled comps keep their sources
+    /// across frames), holding the source so the address stays its own.
+    by_ptr: rustc_hash::FxHashMap<usize, (Arc<str>, Result<u32, String>)>,
 }
 
 thread_local! {
@@ -65,8 +69,32 @@ impl Engine {
             _rt: rt,
             ctx,
             compiled: HashMap::new(),
+            by_ptr: rustc_hash::FxHashMap::default(),
         }
     }
+}
+
+/// Engines made ahead of use by [`prewarm`] (creating one takes a few ms: the
+/// runtime, the context and the prelude).
+static PREWARMED: std::sync::Mutex<Vec<Engine>> = std::sync::Mutex::new(Vec::new());
+
+/// Make an expression engine now, on this (background) thread, for the first
+/// thread that evaluates expressions to take over instead of creating one
+/// while the user waits (the app's warm-up runs this at startup).
+pub fn prewarm() {
+    let engine = Engine::new();
+    PREWARMED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(engine);
+}
+
+fn take_or_new() -> Engine {
+    let ready = PREWARMED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .pop();
+    ready.unwrap_or_else(Engine::new)
 }
 
 /// QuickJS stack budget, see [`Engine::new`].
@@ -77,7 +105,7 @@ const JS_STACK: usize = 384 << 10;
 pub(crate) fn with_js<R>(f: impl FnOnce(&Ctx<'_>) -> R) -> R {
     let ctx = ENGINE.with(|e| {
         let mut e = e.borrow_mut();
-        e.get_or_insert_with(Engine::new).ctx.clone()
+        e.get_or_insert_with(take_or_new).ctx.clone()
     });
     ctx.with(|ctx| {
         // QuickJS measures its stack limit from the stack top recorded when the
@@ -96,14 +124,33 @@ pub(crate) fn with_js<R>(f: impl FnOnce(&Ctx<'_>) -> R) -> R {
 // Scope
 // ---------------------------------------------------------------------------
 
+/// An evaluation on the stack: comp id, layer, property, comp time.
 type Key = (usize, usize, PrimPath, Arc<str>, i64);
+
+/// Memo key: comp id, layer, the compiled property (its address: the scope's
+/// comps outlive the scope) and comp time. Integers only, so a lookup costs a
+/// few multiplies instead of hashing paths (1000-layer comps look up every
+/// property twice per frame). The stack still compares paths, so a second
+/// compiled copy of a property only costs a second memo entry.
+type MemoKey = (usize, usize, usize, i64);
+
+fn memo_key(cx: &Cx<'_, '_>, e: &ExprProp) -> MemoKey {
+    (cx.comp, cx.layer, std::ptr::from_ref(e) as usize, cx.ct.0)
+}
+
+type Memo = rustc_hash::FxHashMap<MemoKey, Value>;
+
+thread_local! {
+    /// The last scope's memo, emptied: the next frame reuses its table.
+    static MEMO_POOL: RefCell<Memo> = RefCell::new(Memo::default());
+}
 
 /// State of one top-level evaluation.
 pub(crate) struct Scope {
     comps: Vec<Arc<CompiledComp>>,
     by_path: HashMap<PrimPath, usize>,
     by_name: HashMap<String, usize>,
-    memo: HashMap<Key, Value>,
+    memo: Memo,
     stack: Vec<Key>,
     /// Errors by comp id, deduplicated by (prim, attr).
     errors: Vec<(usize, AttrError)>,
@@ -135,7 +182,7 @@ impl Scope {
             comps,
             by_path,
             by_name,
-            memo: HashMap::new(),
+            memo: MEMO_POOL.with(|p| std::mem::take(&mut *p.borrow_mut())),
             stack: Vec::new(),
             errors: Vec::new(),
             deps: BTreeSet::new(),
@@ -179,10 +226,15 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
     let result = installed
         .then(|| SCOPE.with(|s| s.borrow_mut().take()))
         .flatten()
-        .map(|s| ScopeResult {
-            errors: s.errors,
-            deps: s.deps,
-            comps: s.comps,
+        .map(|mut s| {
+            let mut memo = std::mem::take(&mut s.memo);
+            memo.clear();
+            MEMO_POOL.with(|p| *p.borrow_mut() = memo);
+            ScopeResult {
+                errors: s.errors,
+                deps: s.deps,
+                comps: s.comps,
+            }
         });
     drop(reset);
     (r, result)
@@ -205,7 +257,7 @@ fn scope_comp(c: usize) -> Option<Arc<CompiledComp>> {
 /// pre-expression value is returned, as AE does.
 pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
     let pre = e.base.sample(cx);
-    let key: Key = (cx.comp, cx.layer, e.prim.clone(), e.attr.clone(), cx.ct.0);
+    let key = memo_key(cx, e);
     let state = SCOPE.with(|s| {
         let s = s.borrow();
         let s = s.as_ref()?;
@@ -216,7 +268,7 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
         // `valueAtTime`, `velocity`) or a cycle → pre-expression value, as in AE.
         s.stack
             .iter()
-            .any(|k| k.0 == key.0 && k.1 == key.1 && k.2 == key.2 && k.3 == key.3)
+            .any(|k| k.0 == cx.comp && k.1 == cx.layer && k.2 == e.prim && *k.3 == *e.attr)
             .then_some(None)
     });
     match state {
@@ -224,6 +276,21 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
         Some(None) => return pre,
         None if SCOPE.with(|s| s.borrow().is_none()) => return pre,
         None => {}
+    }
+    // Common shapes run in Rust: they read only their own property, so they
+    // need no stack entry or dependency; anything unusual falls back to JS.
+    if let Some(f) = e.fast.as_ref().filter(|_| fast_enabled())
+        && let Some(value) = eval_fast(f, cx, e, &pre)
+    {
+        let value = clamped(e, value);
+        #[cfg(test)]
+        FAST_HITS.with(|h| h.set(h.get() + 1));
+        SCOPE.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.memo.insert(key, value.clone());
+            }
+        });
+        return value;
     }
     let too_deep = SCOPE.with(|s| {
         let mut s = s.borrow_mut();
@@ -247,7 +314,8 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
     };
     SCOPE.with(|s| {
         if let Some(s) = s.borrow_mut().as_mut() {
-            s.stack.push(key.clone());
+            s.stack
+                .push((cx.comp, cx.layer, e.prim.clone(), e.attr.clone(), cx.ct.0));
         }
     });
     let result = call(ctx, &func, cx, e);
@@ -261,11 +329,7 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
         return pre;
     }
     let value = match result.and_then(|js| to_value(js, &pre)) {
-        Ok(Value::Float(v)) if e.clamp.is_some() => {
-            let (lo, hi) = e.clamp.expect("checked");
-            Value::Float(v.clamp(lo, hi))
-        }
-        Ok(v) => v,
+        Ok(v) => clamped(e, v),
         Err(msg) => {
             record_error(cx, e, msg);
             pre
@@ -277,6 +341,127 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
         }
     });
     value
+}
+
+/// `v` clamped to the property's range (Opacity), as after interpolation.
+fn clamped(e: &ExprProp, v: Value) -> Value {
+    match (v, e.clamp) {
+        (Value::Float(v), Some((lo, hi))) => Value::Float(v.clamp(lo, hi)),
+        (v, _) => v,
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests compare the fast path with JavaScript by turning it off.
+    pub(crate) static NO_FAST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Evaluations the fast path finished.
+    pub(crate) static FAST_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn fast_enabled() -> bool {
+    #[cfg(test)]
+    return !NO_FAST.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    true
+}
+
+/// What the fast path reads: the property's own pre-expression value, keys
+/// and seed, exactly as the JS host functions give them to `value`,
+/// `valueAtTime`, `velocityAtTime` and the keyframe list.
+struct FastEnv<'a, 'b, 'js> {
+    cx: &'a Cx<'b, 'js>,
+    e: &'a ExprProp,
+    layer: &'a crate::eval::CompiledLayer,
+    /// AE's 1/1024-frame time grid.
+    tick: f64,
+    /// A 2D layer's Position, Anchor Point or Scale: two components in JS.
+    flat: bool,
+    seed: u32,
+}
+
+impl FastEnv<'_, '_, '_> {
+    fn sample(&self, ct: Time) -> Vec<f64> {
+        let cx = Cx {
+            ct,
+            lt: self.layer.timing.layer_time(ct),
+            ..*self.cx
+        };
+        let mut out = components(&self.e.base.sample(&cx));
+        if self.flat {
+            out.truncate(2);
+        }
+        out
+    }
+
+    fn grid(&self, t: f64) -> f64 {
+        (t / self.tick).round() * self.tick
+    }
+}
+
+impl fast::Env for FastEnv<'_, '_, '_> {
+    fn now(&self) -> f64 {
+        self.cx.ct.as_seconds()
+    }
+
+    fn pre(&self, t: f64) -> Vec<f64> {
+        self.sample(Time::from_seconds(self.grid(t)))
+    }
+
+    fn keys(&self) -> Vec<(f64, Vec<f64>)> {
+        self.e.base.curve().map_or_else(Vec::new, |c| {
+            c.keys()
+                .map(|(t, v)| (self.layer.timing.comp_time(t).as_seconds(), components(v)))
+                .collect()
+        })
+    }
+
+    fn pre_velocity(&self, t: f64) -> Vec<f64> {
+        let q = self.grid(t);
+        let (t0, t1) = (Time::from_seconds(q), Time::from_seconds(q + self.tick));
+        let (a, b) = (self.sample(t0), self.sample(t1));
+        let dt = (t1 - t0).as_seconds();
+        a.iter().zip(&b).map(|(a, b)| (b - a) / dt).collect()
+    }
+
+    fn seed(&self) -> u32 {
+        self.seed
+    }
+}
+
+/// `e` through the fast path, or `None` when JS has to evaluate it.
+fn eval_fast(f: &fast::Fast, cx: &Cx<'_, '_>, e: &ExprProp, pre: &Value) -> Option<Value> {
+    let comp = scope_comp(cx.comp)?;
+    let layer = comp.layers.get(cx.layer)?;
+    let env = FastEnv {
+        cx,
+        e,
+        layer,
+        tick: comp.frame_rate.frame_duration().as_seconds() / 1024.0,
+        flat: !layer.switches.three_d
+            && e.prim == layer.path
+            && matches!(&*e.attr, tr::POSITION | tr::ANCHOR_POINT | tr::SCALE),
+        seed: seed_of(e, cx.comp, cx.layer),
+    };
+    let comps = f.eval(&env)?;
+    // Errors (non-finite results) are reported by the JS path.
+    if comps.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let pick = |i: usize, fallback: f64| comps.get(i).copied().unwrap_or(fallback);
+    Some(match pre {
+        Value::Float(_) => Value::Float(pick(0, 0.0)),
+        Value::Int(_) => Value::Int(pick(0, 0.0).round() as i64),
+        Value::Bool(_) => Value::Bool(pick(0, 0.0) != 0.0),
+        Value::Time(_) => Value::Time(Time::from_seconds(pick(0, 0.0))),
+        Value::Vec2(t) => Value::Vec2([pick(0, t[0]), pick(1, t[1])]),
+        Value::Vec3(t) => Value::Vec3([pick(0, t[0]), pick(1, t[1]), pick(2, t[2])]),
+        Value::Color(t) => {
+            Value::Color([pick(0, t[0]), pick(1, t[1]), pick(2, t[2]), pick(3, t[3])])
+        }
+        Value::FloatList(_) => Value::FloatList(comps),
+        _ => return None,
+    })
 }
 
 fn is_deferred() -> bool {
@@ -329,7 +514,7 @@ fn set_deferred(v: bool) {
 
 /// Memoise `e`'s pre-expression value at `cx` (cuts a dependency cycle there).
 pub(crate) fn memoize_pre(cx: &Cx<'_, '_>, e: &ExprProp) {
-    let key: Key = (cx.comp, cx.layer, e.prim.clone(), e.attr.clone(), cx.ct.0);
+    let key = memo_key(cx, e);
     let pre = e.base.sample(cx);
     SCOPE.with(|s| {
         if let Some(s) = s.borrow_mut().as_mut() {
@@ -361,10 +546,16 @@ fn record_error(cx: &Cx<'_, '_>, e: &ExprProp, message: String) {
 
 /// Compiled wrapper function for `source` (cached per thread).
 fn compile<'js>(ctx: &Ctx<'js>, source: &Arc<str>) -> Result<Function<'js>, String> {
+    let ptr = Arc::as_ptr(source).cast::<u8>() as usize;
     let cached = ENGINE.with(|e| {
-        e.borrow()
-            .as_ref()
-            .and_then(|e| e.compiled.get(source).cloned())
+        let mut e = e.borrow_mut();
+        let e = e.as_mut()?;
+        if let Some((_, r)) = e.by_ptr.get(&ptr) {
+            return Some(r.clone());
+        }
+        let r = e.compiled.get(source).cloned()?;
+        e.by_ptr.insert(ptr, (source.clone(), r.clone()));
+        Some(r)
     });
     let fns: Array<'js> = ctx.globals().get("__fns").map_err(|e| e.to_string())?;
     let id = match cached {
@@ -459,10 +650,7 @@ const LOCALS: &[(&str, &str)] = &[
 /// The JavaScript source of the wrapper function for an expression.
 pub(crate) fn wrapper_source(source: &str) -> Result<String, String> {
     let r = rewrite::rewrite(source).map_err(|e| e.to_string())?;
-    let mut prologue = String::from(
-        "(function(__env){var thisComp=__env.thisComp,thisLayer=__env.thisLayer,\
-         thisProperty=__env.thisProperty,time=__env.time;",
-    );
+    let mut prologue = String::new();
     for (name, init) in LOCALS {
         if r.idents.contains(*name) && !r.declared.contains(*name) {
             prologue.push_str(&format!("var {name}={init};"));
@@ -480,7 +668,23 @@ pub(crate) fn wrapper_source(source: &str) -> Result<String, String> {
     for name in &r.undeclared_assignments {
         prologue.push_str(&format!("var {name};"));
     }
-    Ok(format!("{prologue}{}}})", r.body))
+    // The AE objects are made only when the expression (or an AE name above)
+    // uses them: most evaluations need one or none.
+    let dynamic = ["eval", "Function", "arguments"]
+        .iter()
+        .any(|n| r.idents.contains(*n));
+    let needs = |n: &str| dynamic || r.idents.contains(n) || prologue.contains(n);
+    let mut head = String::from("(function(__c,__l,__p,__a,time){");
+    if needs("thisComp") {
+        head.push_str("var thisComp=new Comp(__c);");
+    }
+    if needs("thisLayer") {
+        head.push_str("var thisLayer=new Layer(__c,__l);");
+    }
+    if needs("thisProperty") {
+        head.push_str("var thisProperty=__prop(__c,__l,__p,__a);");
+    }
+    Ok(format!("{head}{prologue}{}}})", r.body))
 }
 
 fn compile_new<'js>(ctx: &Ctx<'js>, source: &str) -> Result<Function<'js>, String> {
@@ -501,7 +705,7 @@ fn call<'js>(
     e: &ExprProp,
 ) -> Result<rquickjs::Value<'js>, String> {
     let call: Function<'js> = ctx.globals().get("__call").map_err(|e| e.to_string())?;
-    let seed = seed_of(cx.comp, cx.layer, e.prim.as_str(), &e.attr);
+    let seed = seed_of(e, cx.comp, cx.layer);
     call.call((
         func.clone(),
         cx.comp as i32,
@@ -646,20 +850,35 @@ fn components(v: &Value) -> Vec<f64> {
     }
 }
 
-fn seed_of(comp: usize, layer: usize, prim: &str, attr: &str) -> u32 {
-    // FNV-1a over the property's identity: stable across runs and machines.
-    let mut h: u32 = 0x811c_9dc5;
-    for b in prim
-        .bytes()
-        .chain([0])
-        .chain(attr.bytes())
-        .chain((comp as u32).to_le_bytes())
-        .chain((layer as u32).to_le_bytes())
-    {
+// The property's random seed: FNV-1a over its identity (prim, 0, attr, comp
+// id, layer index), stable across runs and machines. The prim and attr part is
+// hashed once when the comp compiles ([`seed_prefix`]).
+
+fn fnv(mut h: u32, bytes: impl IntoIterator<Item = u8>) -> u32 {
+    for b in bytes {
         h ^= u32::from(b);
         h = h.wrapping_mul(0x0100_0193);
     }
     h
+}
+
+/// The FNV-1a state after the property's prim and attr.
+pub(crate) fn seed_prefix(prim: &str, attr: &str) -> u32 {
+    fnv(0x811c_9dc5, prim.bytes().chain([0]).chain(attr.bytes()))
+}
+
+fn seed_of(e: &ExprProp, comp: usize, layer: usize) -> u32 {
+    seed_with(e.seed, comp, layer)
+}
+
+fn seed_with(prefix: u32, comp: usize, layer: usize) -> u32 {
+    fnv(
+        prefix,
+        (comp as u32)
+            .to_le_bytes()
+            .into_iter()
+            .chain((layer as u32).to_le_bytes()),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,11 +1353,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
-                Ok::<_, rquickjs::Error>(seed_of(
+                Ok::<_, rquickjs::Error>(seed_with(
+                    seed_prefix(own(&prim, &comp.layers[li]), &attr),
                     c as usize,
                     li,
-                    own(&prim, &comp.layers[li]),
-                    &attr,
                 ))
             },
         )?,
@@ -1164,6 +1382,15 @@ mod tests {
         // Undeclared assignments become locals (no leaking globals).
         let w = wrapper_source("freq = 2; freq").unwrap();
         assert!(w.contains("var freq;"), "{w}");
+        // Only the AE objects it uses.
+        let w = wrapper_source("thisComp.layer(index - 1).rotation + 1").unwrap();
+        assert!(
+            w.contains("var thisComp=") && w.contains("var thisLayer="),
+            "{w}"
+        );
+        assert!(!w.contains("var thisProperty="), "{w}");
+        let w = wrapper_source("time * 10").unwrap();
+        assert!(!w.contains("var this"), "{w}");
     }
 
     #[test]
