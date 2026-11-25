@@ -41,9 +41,11 @@ fn vignette_example() {
         ParamKind::Slider { valid_min: 0.0, valid_max: 100.0, integer: false, ref display, .. } if display == "percent"
     ));
     assert_eq!(amount.default, Some(Value::Float(50.0)));
-    // Relative point: the default depends on the layer size, so none here.
-    assert_eq!(e.def.param(2).unwrap().kind, ParamKind::Point);
-    assert_eq!(e.def.param(2).unwrap().default, None);
+    // Relative point: the default is a fraction of the layer size.
+    let center = e.def.param(2).unwrap();
+    assert_eq!(center.kind, ParamKind::Point);
+    assert!(center.flags.relative_default);
+    assert_eq!(center.default, Some(Value::Vec2([0.5, 0.5])));
     let shape = e.def.param(5).unwrap();
     assert_eq!(
         shape.kind,
@@ -144,10 +146,9 @@ fn parse_errors_have_locations() {
 #[test]
 fn validation_errors() {
     assert_error(&HEADER.replace("com.example.t", "Example"), "plugin id");
-    assert_error(
-        &HEADER.replace("\"0.1\"", "\"1.0\""),
-        "not supported by this host",
-    );
+    assert_error(&HEADER.replace("\"0.1\"", "\"1.1\""), "update BAE");
+    assert_error(&HEADER.replace("\"0.1\"", "\"0.2\""), "no longer supports");
+    assert!(PluginManifest::parse(&HEADER.replace("\"0.1\"", "\"1.0\"")).is_ok());
     assert_error(
         &effect_with("").replace("\"fx\"", "\"Fx\""),
         "must start with a lowercase",
