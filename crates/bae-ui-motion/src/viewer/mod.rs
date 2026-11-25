@@ -599,13 +599,15 @@ impl Panel for CompositionViewer {
                     s.playback_stats.dropped
                 )
             };
-            painter.text(
-                area.right_top() + vec2(-8., 8.),
-                Align2::RIGHT_TOP,
-                label,
-                theme::body(),
-                color::TEXT_STRONG,
+            let galley = painter.layout_no_wrap(label, theme::body(), color::TEXT_STRONG);
+            let pos = area.right_top() + vec2(-8. - galley.size().x, 8.);
+            let rect = Rect::from_min_size(pos, galley.size());
+            painter.rect_filled(
+                rect.expand2(vec2(4., 2.)),
+                2.,
+                Color32::from_black_alpha(180),
             );
+            painter.galley(pos, galley, color::TEXT_STRONG);
             self.banner.ui(ui, cx, &session, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
             return;

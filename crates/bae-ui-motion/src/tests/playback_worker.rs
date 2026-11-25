@@ -155,7 +155,11 @@ fn playback_worker_4k() {
                 registry.set_display_handle(e.id, Some(e.id.raw()));
             }
         }
-        measure_cadence(&h, &path, &gpu, &registry, &mut worker);
+        measure_cadence(&h, &path, &gpu, &registry, &mut worker, cached);
+        let work_area = bae_motion::query::comp_info(&h.stage, &path)
+            .unwrap()
+            .work_area;
+        measure_cadence(&h, &path, &gpu, &registry, &mut worker, work_area);
     }
 }
 
@@ -185,8 +189,12 @@ fn draw_cached(
     });
     let target = display.create_view(&Default::default());
     let mut renderer = egui_wgpu::Renderer::new(device, format, Default::default());
+    let mut display_bytes = 0u64;
+    let mut display_textures = 0u32;
     for e in registry.snapshot() {
         if let Some(texture) = e.texture {
+            display_textures += 1;
+            display_bytes += u64::from(texture.size[0]) * u64::from(texture.size[1]) * 4;
             let egui::TextureId::User(handle) =
                 renderer.register_native_texture(device, &texture.view, texture.filter)
             else {
@@ -271,7 +279,9 @@ fn draw_cached(
         red,
         "display target did not contain any of the red shape pixels"
     );
-    println!("cached 3840x2160 frames={N} gpu_pass_ms={ms:.4} completed_fps={fps:.2}");
+    println!(
+        "cached 3840x2160 frames={N} gpu_pass_ms={ms:.4} completed_fps={fps:.2} resident_rgba8_textures={display_textures} resident_rgba8_bytes={display_bytes}"
+    );
 }
 
 /// Sample the viewer at composition deadlines. A new frame counts when its
@@ -283,13 +293,14 @@ fn measure_cadence(
     gpu: &GpuContext,
     registry: &ViewportTextureRegistry,
     worker: &mut PlaybackPreview,
+    range: TimeRange,
 ) {
     use bae_gpu::wgpu;
     let seconds: u32 = std::env::var("BAE_BENCH_PLAY_SECONDS").map_or(30, |v| v.parse().unwrap());
     assert!((1..=120).contains(&seconds));
     let rate = FrameRate::FPS_60;
-    let info = bae_motion::query::comp_info(&h.stage, path).unwrap();
-    let end = rate.time_to_frame(info.work_area.end);
+    let first = rate.time_to_frame(range.start);
+    let frames = rate.time_to_frame(range.end) - first;
     let target = gpu.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("paced 4K viewer output"),
         size: wgpu::Extent3d {
@@ -317,7 +328,7 @@ fn measure_cadence(
         if index >= warm + u64::from(seconds) * 60 {
             break;
         }
-        let time = rate.frame_to_time(index as i64 % end);
+        let time = rate.frame_to_time(first + index as i64 % frames);
         let entries = registry.snapshot();
         for e in &entries {
             if e.texture.is_some() && e.display_handle.is_none() {
@@ -331,7 +342,7 @@ fn measure_cadence(
             path,
             time,
             rate,
-            info.work_area,
+            range,
             true,
             1,
             &h.ctx,
@@ -363,7 +374,7 @@ fn measure_cadence(
     samples.sort_unstable();
     let elapsed = (start.elapsed() - Duration::from_secs(3)).as_secs_f64();
     println!(
-        "paced 4K elapsed_s={elapsed:.3} samples={} fresh={fresh} fresh_fps={:.3} ui_p95_ms={:.4}",
+        "paced 4K window_frames={frames} elapsed_s={elapsed:.3} samples={} fresh={fresh} fresh_fps={:.3} ui_p95_ms={:.4}",
         samples.len(),
         f64::from(fresh) / elapsed,
         samples[samples.len() * 95 / 100].as_secs_f64() * 1000.

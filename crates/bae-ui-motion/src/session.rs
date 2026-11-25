@@ -51,7 +51,7 @@ impl Playback {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct PlaybackStats {
+pub(crate) struct PlaybackStats {
     pub fps: f64,
     pub dropped: u64,
     matched: bool,
@@ -113,7 +113,7 @@ pub struct Session {
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
-    pub playback_stats: PlaybackStats,
+    pub(crate) playback_stats: PlaybackStats,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -400,7 +400,7 @@ impl Session {
     }
 
     /// Called by the viewer for the actual texture used in this UI pass.
-    pub fn drew_preview(&mut self, actual: Time) {
+    pub(crate) fn drew_preview(&mut self, actual: Time) {
         self.playback_stats.drawn = Some(actual);
     }
 
@@ -477,6 +477,12 @@ mod tests {
         assert_eq!(s.time(&i.path), Time::ZERO);
         s.drew_preview(Time::ZERO);
         s.frame_presented(next - Duration::from_nanos(1));
+        s.drew_preview(Time::ZERO);
+        s.frame_presented(next - Duration::from_nanos(1));
+        assert_eq!(
+            s.playback_stats.frames, 1,
+            "repeated presents hold one composition frame"
+        );
         s.tick(start + Duration::from_millis(51));
         assert_eq!(s.time(&i.path), Time::ZERO);
         assert_eq!(s.playback_stats.dropped, 2);
