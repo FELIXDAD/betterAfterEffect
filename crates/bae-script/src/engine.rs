@@ -2,6 +2,7 @@
 //! object model (`prelude.js`) and the single host function `__host`.
 
 use std::cell::Cell;
+use std::fmt::Write;
 use std::time::{Duration, Instant};
 
 use rquickjs::context::EvalOptions;
@@ -138,17 +139,34 @@ fn declare_module<'js>(ctx: &Ctx<'js>, source: &str) -> rquickjs::Result<Module<
     Module::declare(ctx.clone(), SCRIPT_FILE, source)
 }
 
-/// Checks syntax and imports without executing the module's top-level code.
-pub fn check_module(source: &str, heap_bytes: usize) -> Result<(), String> {
+/// Links the manifest's named imports without running the plugin's top-level code.
+pub fn check_module<'a>(
+    source: &str,
+    heap_bytes: usize,
+    exports: impl Iterator<Item = &'a str>,
+) -> Result<(), String> {
     let rt = Runtime::new().map_err(|e| e.to_string())?;
     rt.set_memory_limit(heap_bytes);
     rt.set_max_stack_size(JS_STACK);
     let context = Context::full(&rt).map_err(|e| e.to_string())?;
     context.with(|ctx| {
-        declare_module(&ctx, source)
-            .map(drop)
-            .catch(&ctx)
-            .map_err(|e| describe(e, None))
+        // ES modules link all imports first, then evaluate dependencies in source order.
+        // The first dependency stops evaluation before the plugin can run.
+        let mut probe = String::from("import 'check-stop';\nimport {");
+        for (i, name) in exports.enumerate() {
+            write!(probe, "{} as entry{i},", Json::from(name)).unwrap();
+        }
+        write!(probe, "}} from '{SCRIPT_FILE}';").unwrap();
+        let check = || -> rquickjs::Result<()> {
+            declare_module(&ctx, source)?;
+            Module::declare(ctx.clone(), "check-stop", "throw null;")?;
+            Module::evaluate(ctx.clone(), "check-exports", probe)?.finish()
+        };
+        match check().catch(&ctx) {
+            Err(CaughtError::Value(v)) if v.is_null() => Ok(()),
+            Err(e) => Err(describe(e, None)),
+            Ok(()) => Err("module validation did not stop before evaluation".into()),
+        }
     })
 }
 

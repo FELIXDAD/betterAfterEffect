@@ -115,8 +115,12 @@ impl ScriptPackage {
             .read_text(&script.entry)
             .map_err(|e| Diagnostic::error(&script.entry, e.to_string()))?;
         let heap_bytes = (script.memory_limit_mb.unwrap_or(64) as usize) << 20;
-        bae_script::check_module(&source, heap_bytes)
-            .map_err(|e| Diagnostic::error(&script.entry, e))?;
+        bae_script::check_module(
+            &source,
+            heap_bytes,
+            entries.iter().map(|e| e.export.as_str()),
+        )
+        .map_err(|e| Diagnostic::error(&script.entry, e))?;
         Ok(Some(Self {
             source: source.into(),
             heap_bytes,

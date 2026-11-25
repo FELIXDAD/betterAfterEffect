@@ -111,6 +111,11 @@ schema = "args.json"
     builder.add_module(PluginModule);
     let app = builder.build();
     let runtime = app.resource::<PluginRuntime>().unwrap();
+    let deferred = package("{}").with_file(
+        "main.js",
+        "throw new Error('installation executed top-level code'); function work() {} export { work as run };",
+    );
+    runtime.load(&deferred, Scope::User).unwrap();
     runtime
         .load(&package(r#"{"type":"object"}"#), Scope::User)
         .unwrap();
@@ -120,6 +125,18 @@ schema = "args.json"
         .unwrap()
         .get("plugin.org.test.reader.run")
         .unwrap();
+    let replacement = package("{}").with_file(
+        "main.js",
+        "throw new Error('installation executed top-level code'); export function other() {}",
+    );
+    let error = runtime.load(&replacement, Scope::User).unwrap_err();
+    assert!(error.to_string().contains("run"), "{error}");
+    let active = app
+        .get_registry::<dyn DynCommand>()
+        .unwrap()
+        .get(&cmd.info().id)
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(&cmd, &active));
     let mut stage = Stage::new();
     let author = AuthorId::new("user:artist").unwrap();
     let err = stage
