@@ -8,6 +8,7 @@ use crate::{
 use std::sync::Arc;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.prewarm.push(spatial::optics::prewarm);
     registry.effects.extend(spatial::optics::builtins());
     registry.prewarm.push(crate::blur::prewarm);
     registry.prewarm.push(spatial::prewarm);

@@ -34,6 +34,22 @@ macro_rules! shader {
         }
     };
 }
+pub(crate) fn prewarm(
+    rt: &crate::gpu::Runtime,
+    format: bae_gpu::wgpu::TextureFormat,
+) -> Result<(), RenderError> {
+    for shader in [
+        shader!("lens"),
+        shader!("bilateral"),
+        shader!("channels"),
+        shader!("vector"),
+        shader!("cross"),
+    ] {
+        shader.kernel(rt, format)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn builtins() -> [Builtin; 8] {
     [
         (
