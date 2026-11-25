@@ -921,10 +921,47 @@ impl Workbench {
         }
     }
 
-    /// Open (or bring to front) a panel.
+    /// Open (or bring to front) a panel: back where it was, else where the
+    /// active workspace puts it, else in AE's group for its kind.
     pub fn open_panel(&mut self, id: PanelId) {
-        self.dock.open(id.clone());
+        let near = self.home_of(&id);
+        self.dock.open_near(id.clone(), &near);
         self.dock.focus_panel(&id);
+    }
+
+    /// Panels whose frame a closed panel `id` opens into (in order): the tabs
+    /// beside it in the active workspace's layout, then AE's usual group for
+    /// its kind (the Render Queue with the Timeline, viewers with the
+    /// Composition viewer, small panels in the stack at the right).
+    fn home_of(&self, id: &PanelId) -> Vec<PanelId> {
+        let mut near: Vec<PanelId> = Vec::new();
+        if let Some((_, preset)) = self.workspaces.iter().find(|(w, _)| *w == self.active) {
+            let mut frames = Vec::new();
+            preset.layout.root.collect_frames(&mut frames);
+            frames.extend(preset.layout.floating.iter().map(|f| &f.frame));
+            if let Some(f) = frames.iter().find(|f| f.tabs.contains(id)) {
+                near.extend(f.tabs.iter().filter(|t| *t != id).cloned());
+            }
+        }
+        // AE 26's Default workspace reopens these there (its frames' ReanimTabs).
+        let group: &[&str] = match id.kind() {
+            "render_queue" => &["timeline"],
+            "flowchart" | "media_browser" | "metadata" | "footage" | "layer" | "lumetri_scopes"
+            | "essential_graphics" => &["composition"],
+            "project" | "effect_controls" => &["project", "effect_controls"],
+            "composition" | "timeline" => &[],
+            _ => &[
+                "effects",
+                "properties",
+                "align",
+                "audio",
+                "info",
+                "preview",
+                "character",
+            ],
+        };
+        near.extend(group.iter().map(|k| PanelId::new(*k)));
+        near
     }
 
     /// Close a panel, letting it save its view state first.
