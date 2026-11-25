@@ -25,7 +25,7 @@ schema_version = 1
 [plugin]
 id = "com.example.vignette"         # 必需
 version = "1.2.0"                   # 必需，语义化版本 2.0
-api = "0.1"                         # 必需，需要的最低插件 API（主版本.次版本）
+api = "1.0"                         # 必需，需要的最低插件 API（主版本.次版本）
 name = "Vignette"                   # 必需，默认（英文）名称
 description = "Darkens the edges of a layer."
 authors = ["Example Studio <dev@example.com>"]
@@ -37,7 +37,7 @@ replaces = ["com.example.old-vignette"]           # 可选：取代的旧插件 
 icon = "icons/vignette.svg"         # 可选，只用自己绘制的 SVG
 ```
 
-`api`：宿主接受"主版本相同、宿主次版本 ≥ 插件次版本"的插件。现在的宿主是 API 0.1。
+`api`：宿主接受"主版本相同、宿主次版本 ≥ 插件次版本"的插件。现在的宿主是 API 1.0（M1 起稳定）；按 0.1 预发布版写的插件（`api = "0.1"`）布局相同，仍然接受。原生插件的 `abi_required` 必须等于这里的值。
 
 ## `[[effect]]`
 
@@ -102,7 +102,7 @@ grows = true                        # 结果按读取范围向外扩展（模糊
 name = "tmp"                        # 着色器里用 bae_load_tmp / bae_sample_tmp 读
 format = "working"                  # working（默认）| rgba16f | rgba32f | r32f | rg32f | rgba8unorm
 rect = "input"                      # output（默认）| input：覆盖输出范围还是（扩展后的）输入范围
-scale = 1.0                         # 保留；API 0.1 只支持 1.0
+scale = 1.0                         # 保留；API 1.0 只支持 1.0
 
 [[effect.pass]]
 entry = "blur_horizontal"           # 着色器里的 @compute 入口
@@ -136,7 +136,7 @@ writes = "output"                   # 最后一个 pass 必须写 output
 | `button` | `label` | — | — |
 | `arbitrary` | —（仅原生） | 字节 | — |
 | `path` | —（仅原生） | 遮罩引用 | — |
-| `string`、`asset` | 保留，API 0.1 还不能用 | | |
+| `string`、`asset` | 保留，API 1.0 还不能用 | | |
 
 说明：
 
@@ -176,6 +176,8 @@ memory_limit_mb = 64                # 默认 64，最大 1024
 
 有原生贡献就必须有 `[native]`，有脚本贡献就必须有 `[script]`。库文件是构建产物，检查工具在库缺失时只给警告。
 
+`isolation` 是插件作者的声明。宿主为了不让插件崩溃拖垮 BAE，只让可信插件进程内运行：随 BAE 安装的和系统级插件按声明；用户级和工程内插件即使写 `in-process` 也在进程外运行，除非用户把它设为进程内（开发时可用环境变量 `BAE_PLUGIN_IN_PROCESS`）。详见 [原生插件](native-c.md#宿主怎么运行原生插件)。
+
 ## 其他贡献
 
 ```toml
@@ -198,7 +200,7 @@ menu = "File/Scripts"
 
 命令在命令注册表里的 ID 是 `plugin.<插件 ID>.<命令 ID>`，自动化脚本是 `script.<插件 ID>.<ID>`。
 
-`[[shape_operator]]`、`[[importer]]`、`[[exporter]]`、`[[codec]]`、`[[panel]]`、`[[workspace]]`、`[[keymap]]`、`[[expression_library]]` 的格式见规格 §5.3.8；API 0.1 的宿主会解析它们，但还不加载（给出警告）。
+`[[shape_operator]]`、`[[importer]]`、`[[exporter]]`、`[[codec]]`、`[[panel]]`、`[[workspace]]`、`[[keymap]]`、`[[expression_library]]` 的格式见规格 §5.3.8；API 1.0 的宿主会解析它们，但还不加载（给出警告）。
 
 ## `[permissions]`、`[dependencies]`、`[exports]`
 
@@ -221,7 +223,7 @@ wgsl = ["shaders/noise.wgsl"]
 js = ["scripts/lib.js"]
 ```
 
-（跨插件引用 WGSL 模块 `includes = ["plugin:<id>/<路径>"]` 在 API 0.1 里还不支持。）
+（跨插件引用 WGSL 模块 `includes = ["plugin:<id>/<路径>"]` 在 API 1.0 里还不支持。）
 
 ## 本地化（`locales/<语言>.toml`）
 

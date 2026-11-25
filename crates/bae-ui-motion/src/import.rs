@@ -152,6 +152,11 @@ fn probe_file(
                 folder: folder.map(str::to_owned),
             });
         }
+        Err(bae_media::MediaError::HevcDecoderUnavailable) => out.failed.push(format!(
+            "{} — {}",
+            file_name(path),
+            tr("HEVC decoding is unsupported. Check that Windows HEVC Video Extensions are installed.")
+        )),
         Err(_) => out.failed.push(file_name(path)),
     }
 }

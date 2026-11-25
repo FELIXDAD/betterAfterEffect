@@ -4,6 +4,7 @@ pub(crate) mod colorama;
 pub(crate) mod colorama_definition;
 mod colorama_palettes;
 mod curves;
+pub(crate) mod lumetri;
 mod shadow;
 mod temporal_stats;
 
