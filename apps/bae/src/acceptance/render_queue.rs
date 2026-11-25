@@ -982,7 +982,7 @@ fn movies_from_the_render_queue_have_their_codec_frames_and_alpha() {
         (ExportFormat::ProRes4444, "mov", "ap4h", true),
     ];
     for (i, (format, ext, codec, alpha)) in cases.into_iter().enumerate() {
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         let path = dir.join(format!("影片 {codec}.{ext}"));
         configure(&h, i, format, &path, 0, 59);
         // The output module's defaults for the format (as AE's templates).
@@ -1017,7 +1017,7 @@ fn stopping_a_movie_keeps_a_playable_file_of_the_rendered_frames() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tricky_dir(tmp.path()).join("停止 影片.mp4");
     long_comp(&mut h);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(&h, 0, ExportFormat::H264, &path, 0, 1799);
     settle(&mut h);
     render(&mut h);
@@ -1067,7 +1067,7 @@ fn a_movie_into_a_read_only_folder_fails_with_a_message() {
     perms.set_readonly(true);
     fs::set_permissions(&locked, perms.clone()).unwrap();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(&h, 0, ExportFormat::ProRes, &locked.join("x.mov"), 0, 9);
     render(&mut h);
     let status = wait_item(&mut h, 0, Duration::from_secs(120));
@@ -1103,7 +1103,7 @@ fn a_movie_on_a_full_disk_fails_cleanly() {
     let volume = PathBuf::from("/Volumes/BAEFULLMOV");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         long_comp(&mut h);
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         configure(
             &h,
             0,
@@ -1134,7 +1134,7 @@ fn closing_the_project_while_rendering_stops_and_empties_the_queue() {
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("关闭 时 渲染");
     long_comp(&mut h);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     configure(&h, 0, ExportFormat::Png, &out.join("f_[####].png"), 0, 1799);
     render(&mut h);
     let started = Instant::now();
@@ -1183,7 +1183,7 @@ fn closing_the_project_while_rendering_stops_and_empties_the_queue() {
     assert!(three < 100, "{three} frames: the render did not stop");
     // The next project renders normally.
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(items(&h).len(), 1);
     configure(
         &h,
@@ -1205,7 +1205,7 @@ fn a_new_png_item_is_rgb_as_in_ae() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
     comp_with(&mut h, &["shape:rect"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(
         items(&h)[0].channels,
         bae_ui_motion::render_queue::Channels::Rgb
