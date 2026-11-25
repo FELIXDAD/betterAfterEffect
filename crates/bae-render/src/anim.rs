@@ -35,12 +35,19 @@ use crate::light::{Falloff, Light, LightKind, Material, ShadowMode};
 use crate::motion::{CompMotionBlur, LayerSample};
 use crate::request::RenderPurpose;
 
+#[cfg(feature = "media")]
+mod preview_audio;
+
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
 /// frames; forward [`StageEvent`]s to [`CompEvaluator::invalidate`]).
 #[derive(Debug)]
 pub struct AnimEvaluator {
     #[cfg(feature = "media")]
     audio_windows: bae_media::visual_audio::AudioWindows,
+    #[cfg(feature = "media")]
+    spectrum_plans: bae_media::visual_audio::SpectrumPlans,
+    #[cfg(feature = "media")]
+    preview_audio: Option<preview_audio::PreviewAudio>,
     inner: Evaluator,
     assets: AssetFiles,
     purpose: RenderPurpose,
@@ -54,6 +61,10 @@ impl AnimEvaluator {
         Self {
             #[cfg(feature = "media")]
             audio_windows: Default::default(),
+            #[cfg(feature = "media")]
+            spectrum_plans: Default::default(),
+            #[cfg(feature = "media")]
+            preview_audio: None,
             inner: Evaluator::new(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
@@ -84,6 +95,30 @@ impl AnimEvaluator {
     /// Drops compiled animation when the caller observed edits without individual stage events.
     pub fn clear_compiled(&mut self) {
         self.inner.clear();
+        #[cfg(feature = "media")]
+        if let Some(preview) = &mut self.preview_audio {
+            preview.composition = None;
+        }
+    }
+
+    /// Prepare the interactive viewer's audio decoders and FFT plans on one worker.
+    pub fn prepare_preview_audio(&mut self, _repaint: impl Fn() + Send + 'static) {
+        #[cfg(feature = "media")]
+        {
+            self.preview_audio = Some(preview_audio::PreviewAudio::new(
+                self.assets.clone(),
+                _repaint,
+            ));
+        }
+    }
+
+    /// The current frame uses a decoder which is still opening in the background.
+    pub fn audio_preparation_pending(&self) -> bool {
+        #[cfg(feature = "media")]
+        if let Some(preview) = &self.preview_audio {
+            return preview.pending;
+        }
+        false
     }
 
     fn warn(&mut self, message: String) {
@@ -119,6 +154,12 @@ impl AnimEvaluator {
         ec: &EvaluatedComp,
         depth: usize,
     ) -> Result<RenderComp, RenderError> {
+        #[cfg(feature = "media")]
+        if depth == 0
+            && let Some(preview) = &mut self.preview_audio
+        {
+            preview.begin(stage, ec);
+        }
         for e in &ec.errors {
             self.warn(format!("{}.{}: {}", e.prim, e.attr, e.message));
         }
@@ -342,36 +383,43 @@ impl AnimEvaluator {
         if asset.value("has_audio").and_then(Value::as_bool) != Some(true) {
             return;
         }
-        let file = match self.assets.file(&asset) {
-            Ok(Some(path)) => path,
-            Ok(None) => return,
-            Err(e) => {
-                self.warn(e);
-                return;
-            }
-        };
         let comp_duration = stage
             .prim(&ec.path)
             .and_then(|v| v.value("duration"))
             .and_then(Value::as_time)
             .unwrap_or(Time::MAX);
         let timing = bae_anim::layer_timing(&view, comp_duration);
-        let pcm = match self.audio_windows.read(
-            &file,
-            timing,
-            start,
-            (duration * f64::from(RATE)).round().max(1.0) as usize,
-            channel,
-        ) {
+        let count = (duration * f64::from(RATE)).round().max(1.0) as usize;
+        let samples = if let Some(preview) = &mut self.preview_audio {
+            match preview.source(&asset, &mut self.spectrum_plans) {
+                Ok(Some(source)) => {
+                    visual_audio::AudioWindows::read_source(source, timing, start, count, channel)
+                        .map_err(|e| e.to_string())
+                }
+                Ok(None) => return,
+                Err(e) => Err(e),
+            }
+        } else {
+            match self.assets.file(&asset) {
+                Ok(Some(file)) => self
+                    .audio_windows
+                    .read(&file, timing, start, count, channel)
+                    .map_err(|e| e.to_string()),
+                Ok(None) => return,
+                Err(e) => Err(e),
+            }
+        };
+        let pcm = match samples {
             Ok(pcm) => pcm,
             Err(e) => {
-                self.warn(format!("{}: {e}", file.display()));
+                self.warn(format!("{}: {e}", asset.path()));
                 return;
             }
         };
         let envelope = if spectrum {
             let average = fx.param(22).and_then(Value::as_bool).unwrap_or(false);
-            visual_audio::spectrum(&pcm, points, n(6, 20.0), n(7, 2000.0), average)
+            self.spectrum_plans
+                .spectrum(&pcm, points, n(6, 20.0), n(7, 2000.0), average)
         } else {
             visual_audio::waveform(&pcm, points)
         };
@@ -487,6 +535,9 @@ impl CompEvaluator for AnimEvaluator {
         #[cfg(feature = "media")]
         {
             self.audio_windows = Default::default();
+            if let Some(preview) = &mut self.preview_audio {
+                preview.composition = None;
+            }
         }
     }
 

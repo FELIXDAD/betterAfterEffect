@@ -71,10 +71,15 @@ pub(crate) struct GpuPreview {
 impl GpuPreview {
     /// A preview on the app's GPU context, if the app has one (the headless test
     /// harness and agents do not).
-    pub fn new(resources: &Resources) -> Option<Self> {
+    pub fn new(resources: &Resources, ui: &egui::Context) -> Option<Self> {
         let gpu = resources.get::<Arc<GpuContext>>()?.clone();
         let registry = resources.get::<Arc<ViewportTextureRegistry>>()?.clone();
-        Some(Self::with(gpu, registry))
+        let mut preview = Self::with(gpu, registry);
+        let ui = ui.clone();
+        preview
+            .anim
+            .prepare_preview_audio(move || ui.request_repaint());
+        Some(preview)
     }
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
@@ -160,6 +165,9 @@ impl GpuPreview {
                 return None;
             }
         };
+        if self.anim.audio_preparation_pending() {
+            return self.image();
+        }
         // A 3D view other than Active Camera (the output never changes).
         if let Some(camera) = camera {
             rc.camera = Some(camera);
@@ -220,6 +228,10 @@ impl GpuPreview {
             self.texture = Some(texture);
             self.sampled = None;
         }
+        self.image()
+    }
+
+    fn image(&self) -> Option<PreviewImage> {
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,

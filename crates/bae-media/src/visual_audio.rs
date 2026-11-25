@@ -5,6 +5,7 @@ use bae_anim::LayerTiming;
 use bae_model::Time;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use symphonia::core::dsp::{complex::Complex, fft::Fft};
 
 pub const RATE: u32 = 44_100;
 #[derive(Default)]
@@ -30,6 +31,17 @@ impl AudioWindows {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => e.insert(FileAudio::open(path)?),
         };
+        Self::read_source(source, timing, start, count, channel)
+    }
+
+    /// Sample an already prepared source, including its decoder's PCM read-ahead.
+    pub fn read_source(
+        source: &mut FileAudio,
+        timing: LayerTiming,
+        start: Time,
+        count: usize,
+        channel: i64,
+    ) -> Result<Vec<f32>, MediaError> {
         let sr = f64::from(source.info().sample_rate);
         let time = |i: usize| start + sample_to_time(i as i64, RATE);
         let pos = |i| timing.layer_time(time(i)).as_seconds() * sr;
@@ -91,59 +103,90 @@ pub fn waveform(pcm: &[f32], points: usize) -> Vec<f64> {
         .collect()
 }
 
-pub fn spectrum(pcm: &[f32], bands: usize, start: f64, end: f64, average: bool) -> Vec<f64> {
-    use symphonia::core::dsp::{complex::Complex, fft::Fft};
-    let mut result = vec![0.0_f64; bands];
-    if pcm.is_empty() || bands == 0 {
-        return result;
-    }
-    let fft_size = pcm
-        .len()
-        .min(8192)
-        .max(bands * 2)
-        .next_power_of_two()
-        .clamp(64, 16384);
-    let mut fft = Fft::new(fft_size);
-    let mut bins = vec![Complex::new(0.0, 0.0); fft_size];
-    let width = pcm.len().min(fft_size);
-    let weights: Vec<f32> = (0..width)
-        .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / width.max(2) as f32).cos())
-        .collect();
-    let norm = 2.0 / weights.iter().sum::<f32>().max(1.0);
-    let mut blocks = 0;
-    for offset in (0..pcm.len()).step_by((width / 2).max(1)) {
-        bins.fill(Complex::new(0.0, 0.0));
-        for ((z, &s), &w) in bins.iter_mut().zip(&pcm[offset..]).zip(&weights) {
-            z.re = s * w;
+/// FFT plans are private to the evaluator, so an export cannot hold up a preview.
+#[derive(Default)]
+pub struct SpectrumPlans(HashMap<usize, Fft>);
+
+impl SpectrumPlans {
+    /// Prepare both the permutation plans and Symphonia's lazy twiddle tables.
+    pub fn prewarm() -> Self {
+        let mut plans = Self::default();
+        for size in (6..=14).map(|power| 1 << power) {
+            let mut plan = Fft::new(size);
+            plan.fft_inplace(&mut vec![Complex::new(0.0, 0.0); size]);
+            plans.0.insert(size, plan);
         }
-        fft.fft_inplace(&mut bins);
-        for (i, output) in result.iter_mut().enumerate() {
-            let k = |f: f64| {
-                ((f / f64::from(RATE) * fft_size as f64).round() as usize).min(fft_size / 2)
-            };
-            let x = k(start + (end - start) * i as f64 / bands as f64);
-            let y = k(start + (end - start) * (i + 1) as f64 / bands as f64);
-            let peak = bins[x.min(y)..=x.max(y)]
-                .iter()
-                .map(|v| v.norm_sqr())
-                .fold(0.0_f32, f32::max)
-                .sqrt()
-                * norm;
-            if average {
-                *output += f64::from(peak)
-            } else {
-                *output = output.max(f64::from(peak))
+        plans
+    }
+
+    pub fn spectrum(
+        &mut self,
+        pcm: &[f32],
+        bands: usize,
+        start: f64,
+        end: f64,
+        average: bool,
+    ) -> Vec<f64> {
+        let mut result = vec![0.0_f64; bands];
+        if pcm.is_empty() || bands == 0 {
+            return result;
+        }
+        let fft_size = pcm
+            .len()
+            .min(8192)
+            .max(bands * 2)
+            .next_power_of_two()
+            .clamp(64, 16384);
+        let fft = self.0.entry(fft_size).or_insert_with(|| Fft::new(fft_size));
+        let mut bins = vec![Complex::new(0.0, 0.0); fft_size];
+        let width = pcm.len().min(fft_size);
+        let weights: Vec<f32> = (0..width)
+            .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / width.max(2) as f32).cos())
+            .collect();
+        let norm = 2.0 / weights.iter().sum::<f32>().max(1.0);
+        let mut blocks = 0;
+        for offset in (0..pcm.len()).step_by((width / 2).max(1)) {
+            bins.fill(Complex::new(0.0, 0.0));
+            for ((z, &s), &w) in bins.iter_mut().zip(&pcm[offset..]).zip(&weights) {
+                z.re = s * w;
+            }
+            fft.fft_inplace(&mut bins);
+            for (i, output) in result.iter_mut().enumerate() {
+                let k = |f: f64| {
+                    ((f / f64::from(RATE) * fft_size as f64).round() as usize).min(fft_size / 2)
+                };
+                let x = k(start + (end - start) * i as f64 / bands as f64);
+                let y = k(start + (end - start) * (i + 1) as f64 / bands as f64);
+                let peak = bins[x.min(y)..=x.max(y)]
+                    .iter()
+                    .map(|v| v.norm_sqr())
+                    .fold(0.0_f32, f32::max)
+                    .sqrt()
+                    * norm;
+                if average {
+                    *output += f64::from(peak)
+                } else {
+                    *output = output.max(f64::from(peak))
+                }
+            }
+            blocks += 1;
+            if offset + width >= pcm.len() {
+                break;
             }
         }
-        blocks += 1;
-        if offset + width >= pcm.len() {
-            break;
+        if average {
+            for v in &mut result {
+                *v /= f64::from(blocks);
+            }
         }
+        result
     }
-    if average {
-        for v in &mut result {
-            *v /= f64::from(blocks);
-        }
+}
+
+impl std::fmt::Debug for SpectrumPlans {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpectrumPlans")
+            .field("plans", &self.0.len())
+            .finish()
     }
-    result
 }

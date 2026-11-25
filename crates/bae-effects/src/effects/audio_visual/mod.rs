@@ -14,6 +14,33 @@ use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderErr
 use std::sync::Arc;
 
 struct Display(EffectDef);
+
+fn draw_kernel(
+    rt: &gpu::Runtime,
+    format: wgpu::TextureFormat,
+) -> Result<Arc<gpu::Kernel>, RenderError> {
+    let key = KernelKey {
+        owner: "bae.effects/audio-visual".into(),
+        entry: "draw".into(),
+        variant: gpu::format_key(format),
+    };
+    rt.kernel(&key, || {
+        Ok(KernelSource {
+            label: "bae.effects.audio_visual",
+            wgsl: include_str!("display.wgsl")
+                .replace("WORKING_FORMAT", crate::blur::format_name(format)?),
+            entry: "draw",
+            bindings: vec![
+                (0, Binding::Uniform(96)),
+                (1, Binding::Texture),
+                (2, Binding::ReadBuffer),
+                (3, Binding::Storage(format)),
+            ],
+            workgroup: [8, 8, 1],
+        })
+    })
+}
+
 impl Effect for Display {
     fn def(&self) -> &EffectDef {
         &self.0
@@ -52,26 +79,7 @@ impl TargetEffect for Display {
         let output = target.allocate(out, input.pixel_scale)?;
         let format = target.format();
         let rt = gpu::runtime(target.gpu());
-        let key = KernelKey {
-            owner: "bae.effects/audio-visual".into(),
-            entry: "draw".into(),
-            variant: gpu::format_key(format),
-        };
-        let kernel = rt.kernel(&key, || {
-            Ok(KernelSource {
-                label: "bae.effects.audio_visual",
-                wgsl: include_str!("display.wgsl")
-                    .replace("WORKING_FORMAT", crate::blur::format_name(format)?),
-                entry: "draw",
-                bindings: vec![
-                    (0, Binding::Uniform(96)),
-                    (1, Binding::Texture),
-                    (2, Binding::ReadBuffer),
-                    (3, Binding::Storage(format)),
-                ],
-                workgroup: [8, 8, 1],
-            })
-        })?;
+        let kernel = draw_kernel(&rt, format)?;
         let mut w = UniformWriter::with_size(96);
         for (i, r) in [input.rect, out].iter().enumerate() {
             w.i32s(i * 16, &[r.x0, r.y0, r.x1, r.y1]);
@@ -141,6 +149,9 @@ fn builtin(slug: &str, zh: &str, builder: DefBuilder, fixed: &[u32]) -> Builtin 
 mod spectrum;
 mod waveform;
 pub(crate) fn register(registry: &mut crate::Registry) {
+    registry
+        .prewarm
+        .push(|rt, format| draw_kernel(rt, format).map(drop));
     registry
         .effects
         .extend([waveform::effect(), spectrum::effect()]);

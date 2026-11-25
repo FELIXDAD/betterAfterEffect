@@ -164,6 +164,15 @@ fn check_audio_display(
         json!({"kind":"audio","comp":comp,"source":asset}),
     )["path"]
         .clone();
+    // The viewer prepares the file as soon as its layer is present.
+    let mut preview = AnimEvaluator::new(None);
+    let (ready, wake) = std::sync::mpsc::channel();
+    preview.prepare_preview_audio(move || {
+        let _ = ready.send(());
+    });
+    preview.evaluate(&fx.stage, &comp, Time::ZERO).unwrap();
+    wake.recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
     let effect = fx.apply(&solid, name);
     fx.param(&effect, 1, json!({"type":"prim_ref","value":layer}));
     fx.param(&effect, 2, json!({"type":"vec2","value":[4.0,16.0]}));
@@ -175,6 +184,13 @@ fn check_audio_display(
     let signal = fx.pixel_at(&comp, x, y, Time::from_seconds(0.5)).unwrap();
     assert_eq!(early[3], 0, "{early:?}");
     assert!(signal[3] > 128, "{signal:?}");
+    fx.eval = preview;
+    fx.eval.clear_compiled();
+    assert_eq!(
+        fx.pixel_at(&comp, x, y, Time::from_seconds(0.5)).unwrap(),
+        signal
+    );
+    assert!(!fx.eval.audio_preparation_pending());
 }
 
 #[test]
