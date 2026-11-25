@@ -1,0 +1,54 @@
+[effect.scatter]
+name = "散布"
+keywords = ["随机散布"]
+
+[effect.scatter.params]
+scatter_amount = "散布数量"
+grain = "颗粒"
+scatter_randomness = "散布随机性"
+
+[effect.scatter.choices]
+grain = ["两者", "水平", "垂直"]
+
+[effect.brush-strokes]
+name = "画笔描边"
+keywords = ["笔触"]
+
+[effect.brush-strokes.params]
+stroke_angle = "描边角度"
+brush_size = "画笔大小"
+stroke_length = "描边长度"
+stroke_density = "描边浓度"
+stroke_randomness = "描边随机性"
+paint_surface = "绘画表面"
+blend_with_original = "与原始图像混合"
+
+[effect.brush-strokes.choices]
+paint_surface = ["在原始图像上绘画", "在透明背景上绘画", "在白色上绘画", "在黑色上绘画"]
+
+[effect.cc-threshold]
+name = "CC Threshold"
+keywords = ["阈值"]
+
+[effect.cc-threshold.params]
+threshold = "Threshold"
+channel = "Channel"
+invert = "Invert"
+blend_w_original = "Blend w. Original"
+
+[effect.cc-threshold.choices]
+channel = ["Luminance", "RGB", "Saturation", "Alpha"]
+
+[effect.cc-threshold-rgb]
+name = "CC Threshold RGB"
+keywords = ["三通道阈值"]
+
+[effect.cc-threshold-rgb.params]
+red_threshold = "Red Threshold"
+green_threshold = "Green Threshold"
+blue_threshold = "Blue Threshold"
+invert_red_channel = "Invert Red Channel"
+invert_green_channel = "Invert Green Channel"
+invert_blue_channel = "Invert Blue Channel"
+blend_w_original = "Blend w. Original"
+
