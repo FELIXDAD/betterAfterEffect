@@ -129,6 +129,38 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "transform:skew" => "Skew",
         "transform:skew_axis" => "Skew Axis",
         "text:source" => "Source Text",
+        // Text animators (AE: Animator N > Range Selector N, properties).
+        "animator:anchor_point" => "Anchor Point",
+        "animator:position" => "Position",
+        "animator:scale" => "Scale",
+        "animator:skew" => "Skew",
+        "animator:rotation" => "Rotation",
+        "animator:opacity" => "Opacity",
+        "animator:fill_color" => "Fill Color",
+        "animator:stroke_color" => "Stroke Color",
+        "animator:stroke_width" => "Stroke Width",
+        "animator:tracking" => "Tracking Amount",
+        "animator:line_spacing" => "Line Spacing",
+        "animator:blur" => "Blur",
+        // AE's Chinese UI says 起始 here but 开始 for Trim Paths.
+        "start" if prim_type == Some(&PrimType::TEXT_SELECTOR) => {
+            return match bae_ui::i18n::lang() {
+                bae_ui::i18n::Lang::Zh => "起始".into(),
+                _ => "Start".into(),
+            };
+        }
+        "end" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "End",
+        "offset" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "Offset",
+        "units" => "Units",
+        "based_on" => "Based On",
+        "mode" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "Mode",
+        "amount" => "Amount",
+        "shape" if prim_type == Some(&PrimType::TEXT_SELECTOR) => "Shape",
+        "smoothness" => "Smoothness",
+        "ease_high" => "Ease High",
+        "ease_low" => "Ease Low",
+        "randomize_order" => "Randomize Order",
+        "random_seed" => "Random Seed",
         "size" => "Size",
         "position" => "Position",
         "roundness" => "Roundness",

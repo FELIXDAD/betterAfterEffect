@@ -143,6 +143,7 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
     let effect = fx.effect();
     let roi = effect.output_bounds(&params, image.rect);
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba16Float);
+    effect_inputs(&mut target, &*effect, &params, &image);
     // Warm up (pipelines, pool).
     for _ in 0..3 {
         let _ = fx.render(&mut target, &params, &image, roi).unwrap();
@@ -178,8 +179,10 @@ fn profile_steps(gpu: &Arc<GpuContext>, case: &Case) {
     };
     let params = EffectParams::new(&inst);
     let image = input(gpu, case.size);
-    let roi = fx.effect().output_bounds(&params, image.rect);
+    let effect = fx.effect();
+    let roi = effect.output_bounds(&params, image.rect);
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba16Float);
+    effect_inputs(&mut target, &*effect, &params, &image);
     // Warm the GPU up (clocks) without the timer, then time one frame.
     let timer = bae_effects::profile::take().unwrap();
     for _ in 0..30 {
@@ -194,4 +197,18 @@ fn profile_steps(gpu: &Arc<GpuContext>, case: &Case) {
     for sample in timer.read(gpu).unwrap() {
         println!("    {:<36} {:>8.3} ms", sample.label, sample.millis());
     }
+}
+
+fn effect_inputs(
+    target: &mut Standalone,
+    effect: &dyn bae_render::Effect,
+    params: &EffectParams<'_>,
+    image: &GpuImage,
+) {
+    let layers = effect
+        .layer_dependencies(params)
+        .into_iter()
+        .map(|dep| (dep, image.clone()))
+        .collect();
+    target.set_effect_inputs(layers, Vec::new());
 }

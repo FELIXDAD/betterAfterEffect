@@ -403,3 +403,46 @@ pub(crate) fn keys_with_labels(stage: &Stage, layers: &[PrimPath], labels: &[u8]
     }
     out
 }
+
+/// An animator's Add menu (AE): Property ▸ (the Animate Text properties; those
+/// not rendered yet are greyed), Selector ▸ Range (Wiggly and Expression greyed).
+pub(crate) fn animator_add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, animator: &PrimPath) {
+    let add = |ui: &mut Ui, cx: &mut PanelContext<'_>, title: &str, property: &str, on: bool| {
+        if ui.add_enabled(on, egui::Button::new(tr(title))).clicked() {
+            cx.invoke_with(
+                "text.animate",
+                json!({"animator": animator, "property": property}),
+            );
+            ui.close();
+        }
+    };
+    common::submenu(ui, tr("Property"), &mut |ui| {
+        for (title, property, on) in [
+            ("Anchor Point", "anchor_point", false),
+            ("Position", "position", true),
+            ("Scale", "scale", true),
+            ("Skew", "skew", false),
+            ("Rotation", "rotation", true),
+            ("Opacity", "opacity", true),
+        ] {
+            add(ui, cx, title, property, on);
+        }
+        ui.separator();
+        add(ui, cx, "Fill Color", "fill_rgb", true);
+        add(ui, cx, "Stroke Color", "stroke_rgb", false);
+        add(ui, cx, "Stroke Width", "stroke_width", false);
+        ui.separator();
+        add(ui, cx, "Tracking", "tracking", true);
+        add(ui, cx, "Line Spacing", "line_spacing", false);
+        ui.separator();
+        add(ui, cx, "Blur", "blur", false);
+    });
+    common::submenu(ui, tr("Selector"), &mut |ui| {
+        if ui.button(tr("Range")).clicked() {
+            cx.invoke_with("text.add_selector", json!({ "animator": animator }));
+            ui.close();
+        }
+        ui.add_enabled(false, egui::Button::new(tr("Wiggly")));
+        ui.add_enabled(false, egui::Button::new(tr("Expression")));
+    });
+}

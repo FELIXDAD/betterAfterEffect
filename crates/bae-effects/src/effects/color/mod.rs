@@ -5,6 +5,7 @@ pub(crate) mod colorama_definition;
 mod colorama_palettes;
 mod curves;
 mod shadow;
+mod temporal_stats;
 
 use crate::gpu::{self, Binding, KernelKey, KernelSource, Resource, UniformWriter};
 use crate::target::EffectTarget;
@@ -26,6 +27,8 @@ pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<
         "histogram",
         "percentiles",
         "shadow_highlight",
+        "scene_compare",
+        "mix_temporal_stats",
     ] {
         kernel(rt, format, entry)?;
     }
@@ -69,6 +72,7 @@ fn kernel(
             "apply_curves" => (include_str!("curves.wgsl"), curves::UNIFORM_BYTES, 1),
             "histogram" | "percentiles" => (include_str!("shadow.wgsl"), shadow::UNIFORM_BYTES, 1),
             "shadow_highlight" => (include_str!("shadow.wgsl"), shadow::UNIFORM_BYTES, 4),
+            "scene_compare" | "mix_temporal_stats" => (include_str!("temporal_stats.wgsl"), 16, 3),
             _ => unreachable!(),
         };
         let mut bindings = vec![
