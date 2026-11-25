@@ -1,6 +1,6 @@
 //! Wipes that read a second layer or a composition camera.
 mod definitions;
-use super::{image_grid, layer_input};
+use crate::effects::{image_grid, layer_input};
 use crate::{
     EffectTarget, TargetEffect,
     gpu::{self, Resource, UniformWriter},

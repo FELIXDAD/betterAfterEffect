@@ -407,7 +407,7 @@ fn timewarp() -> DefBuilder {
 }
 
 /// Other frames of the same layer up to the effect's position in the stack.
-pub(super) fn before_effect(p: &EffectParams<'_>, time: Time) -> Option<LayerDependency> {
+pub(crate) fn before_effect(p: &EffectParams<'_>, time: Time) -> Option<LayerDependency> {
     Some(LayerDependency::before_effect(
         layer_input::own_layer(p)?,
         time,

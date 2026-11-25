@@ -454,7 +454,7 @@ pub(crate) fn card_wipe() -> Builtin {
         "none",
     );
     b.push(121, "", "", ParamKind::GroupEnd, None);
-    let (def, names) = b.build();
+    let (def, names) = b.reference_points().build();
     let mut fx = rust_builtin(
         (
             Arc::new(LayerWipe {
