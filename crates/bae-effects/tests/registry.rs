@@ -36,7 +36,10 @@ fn builtins_register_through_the_plugin_registries() {
             def.match_name.starts_with("ADBE ")
                 || matches!(
                     def.match_name.as_str(),
-                    "VISINF Grain Implant" | "APC Colorama"
+                    "VISINF Grain Implant"
+                        | "VISINF Grain Removal"
+                        | "VISINF Grain Duplication"
+                        | "APC Colorama"
                 ),
             "{}",
             def.match_name
