@@ -62,7 +62,7 @@
 - [扭曲](../../crates/bae-effects/tests/ae/categories/distort.md#工作流进度)
 - [生成](../../crates/bae-effects/tests/ae/categories/generate.md#工作流进度)
 - [抠像](../../crates/bae-effects/tests/ae/categories/keying.md#工作流进度)
-  - 本轮抠像接入 Keylight、Key Cleaner、提取和 Unmult。柔和及实边遮罩共用两遍 GPU 引导滤波，支持前帧和边缘颜色净化。
+  - 本轮抠像接入 Keylight、Key Cleaner、提取和 Unmult。Keylight 在独立遮罩纹理上用最小/最大滤波和高斯模糊处理边缘与黑白噪点。Key Cleaner、柔和及实边遮罩共用可分离方框均值和 RGB 协方差引导滤波，支持前帧和边缘颜色净化。
 - [遮罩](../../crates/bae-effects/tests/ae/categories/matte.md#工作流进度)
 - [杂色和颗粒](../../crates/bae-effects/tests/ae/categories/noise-grain.md#工作流进度)
   - 杂色完成湍流杂色、匹配颗粒、移除颗粒、杂色 Alpha 和 HLS 两种模式。旧版中间值使用现有中间值内核。
