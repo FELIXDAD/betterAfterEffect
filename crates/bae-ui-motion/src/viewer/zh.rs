@@ -3,7 +3,6 @@
 
 pub(crate) const ZH: &[(&str, &str)] = &[
     // The layer menu's Select ▸ (the layers under the pointer).
-    ("Select", "选择"),
     // Viewer
     ("Magnification", "放大率"),
     ("Fit", "适合"),
