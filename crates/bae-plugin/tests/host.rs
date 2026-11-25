@@ -174,6 +174,8 @@ fn official_examples_load_through_the_host() {
         [
             "com.example.align-to-grid",
             "com.example.box-blur",
+            "com.example.composition-report",
+            "com.example.fade-selected",
             "com.example.posterize",
             "com.example.vignette"
         ]

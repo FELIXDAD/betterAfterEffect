@@ -167,11 +167,7 @@ impl Session {
 
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
-        let last = info.duration - info.frame_duration();
-        let t = info
-            .frame_rate
-            .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
-        self.times.insert(info.path.clone(), t);
+        self.times.insert(info.path.clone(), info.playhead_time(t));
     }
 
     /// Make `comp` the active comp (opening a timeline tab for it).
