@@ -1,5 +1,5 @@
 //! OCIO effect parameters select processors from the active config or BAE's built-in spaces.
-use super::lut::ocio_effect;
+use crate::effects::lut::ocio_effect;
 use crate::{Builtin, catalog::DefBuilder, params::Params, rust_builtin};
 use bae_color::{CdlOp, ColorError, ColorOp, ColorTransform, builtin, ocio::Config};
 use bae_model::{EffectDef, ParamKind};
@@ -22,7 +22,7 @@ fn config() -> Result<Option<&'static Config>, RenderError> {
         .map_err(|e| RenderError::Other(e.clone()))
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum Operation {
+pub(crate) enum Operation {
     Cdl,
     Space,
     Display,
@@ -32,14 +32,14 @@ pub(super) enum Operation {
     Profile,
 }
 impl Operation {
-    pub(super) fn data_id(self) -> u32 {
+    pub(crate) fn data_id(self) -> u32 {
         match self {
             Self::File => 5,
             Self::Cdl => 6,
             _ => 0,
         }
     }
-    pub(super) fn selection(self, def: &EffectDef, p: &EffectParams<'_>) -> [i64; 9] {
+    pub(crate) fn selection(self, def: &EffectDef, p: &EffectParams<'_>) -> [i64; 9] {
         let params = Params::new(def, p);
         std::array::from_fn(|i| {
             if self == Self::Profile && i == 8 {
@@ -54,19 +54,19 @@ impl Operation {
         })
     }
 
-    pub(super) fn transform(
+    pub(crate) fn transform(
         self,
         bytes: &[u8],
         s: [i64; 9],
     ) -> Result<ColorTransform, RenderError> {
         let grade = (|| -> Result<ColorTransform, ColorError> {
             if self == Self::Cineon {
-                return super::utility_aliases::cineon_processor(
+                return crate::categories::utility::aliases::cineon_processor(
                     s.map(|v| f64::from_bits(v as u64)),
                 );
             }
             if self == Self::Profile {
-                return super::utility_aliases::profile_processor(s);
+                return crate::categories::utility::aliases::profile_processor(s);
             }
             if self == Self::Cdl {
                 return cdl(bytes, s[1], s[2] != 0);

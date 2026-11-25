@@ -1,7 +1,8 @@
 use crate::catalog::DefBuilder;
 use crate::{
     Builtin,
-    effects::{controls::Control as BoundsAlias, lut::ocio_effect, ocio::Operation},
+    categories::{color::ocio::Operation, controls::Control as BoundsAlias},
+    effects::lut::ocio_effect,
     rust_builtin,
 };
 use std::sync::Arc;
@@ -500,7 +501,7 @@ const OUTPUT_PROFILES: &[&str] = &[
 
 // Cineon controls describe an OCIO LogAffineTransform. Code values are in
 // 10-bit film density units; the black and white points anchor the linear side.
-pub(super) fn cineon_processor(
+pub(crate) fn cineon_processor(
     s: [f64; 9],
 ) -> Result<bae_color::ColorTransform, bae_color::ColorError> {
     use bae_color::{ColorOp, ColorTransform, LogOp};
@@ -526,7 +527,7 @@ pub(super) fn cineon_processor(
         grade
     })
 }
-pub(super) fn profile_processor(
+pub(crate) fn profile_processor(
     s: [i64; 9],
 ) -> Result<bae_color::ColorTransform, bae_color::ColorError> {
     use bae_color::{ColorError, ColorSpace, builtin as b};

@@ -3,8 +3,10 @@ use crate::Registry;
 use crate::{effects, rust_builtin};
 use std::sync::Arc;
 
+pub(crate) mod ocio;
+
 pub(crate) fn register(registry: &mut Registry) {
-    registry.effects.extend(effects::ocio::entries());
+    registry.effects.extend(ocio::entries());
     registry.prewarm.push(effects::color::prewarm);
     packages(
         registry,

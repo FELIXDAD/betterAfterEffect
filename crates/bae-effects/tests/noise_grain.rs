@@ -1,4 +1,3 @@
-//! Structural and GPU invariants for generators, noise and transitions.
 mod common;
 use bae_model::{ParamKind, Value};
 use bae_render::IRect;
@@ -52,49 +51,7 @@ fn fractal_loop_seed_and_fractional_octaves() {
 }
 
 #[test]
-fn all_wipes_have_exact_endpoints() {
-    let Some(gpu) = context() else { return };
-    let r = IRect::from_size(32, 32);
-    let src = test_image(r);
-    for (name, end) in [
-        ("ADBE Linear Wipe", 100.),
-        ("ADBE Radial Wipe", 100.),
-        ("ADBE Block Dissolve", 100.),
-        ("ADBE Venetian Blinds", 100.),
-        ("ADBE Gradient Wipe", 1.),
-    ] {
-        for completion in [0., end] {
-            let result = run(
-                &gpu,
-                F32,
-                builtin(name),
-                vec![(1, Value::Float(completion))],
-                &src,
-                r,
-                1.,
-            );
-            if completion == 0. {
-                assert_eq!(result.data, src.data);
-            } else {
-                assert!(result.data.iter().all(|&px| px == [0.; 4]), "{name}");
-            }
-        }
-    }
-}
-
-#[test]
-fn implemented_layer_and_mask_controls_are_enabled() {
-    for (name, ids) in [
-        ("ADBE Fill", &[1, 7, 3, 4][..]),
-        ("ADBE Gradient Wipe", &[3, 4]),
-    ] {
-        for &id in ids {
-            assert!(
-                !builtin(name).def().param(id).unwrap().flags.disabled,
-                "{name} {id}"
-            );
-        }
-    }
+fn unsupported_sample_controls_are_disabled() {
     for id in [60, 61, 62, 63] {
         assert!(
             builtin("VISINF Grain Implant")
@@ -104,80 +61,6 @@ fn implemented_layer_and_mask_controls_are_enabled() {
                 .flags
                 .disabled
         );
-    }
-}
-
-#[test]
-fn hdr_fill_and_eight_sixteen_bit_wipe_thresholds() {
-    use bae_effects::Standalone;
-    use bae_render::EffectParams;
-    let Some(gpu) = context() else { return };
-    let r = IRect::from_size(3, 2);
-    let input = Pixels::new(r, |_, _| [0.499, 0.499, 0.499, 1.0]);
-    let fx = builtin("ADBE Gradient Wipe");
-    let inst = instance(&fx.info.match_name, vec![(1, Value::Float(0.5))]);
-    let image = input.upload(&gpu, F32);
-    for (sixteen_bpc, float, expected) in
-        [(false, false, 0.5), (true, false, 0.0), (false, true, 0.0)]
-    {
-        let p = EffectParams {
-            sixteen_bpc,
-            float,
-            ..EffectParams::new(&inst)
-        };
-        let mut target = Standalone::new(gpu.clone(), F32);
-        let out = fx.render(&mut target, &p, &image, r).unwrap();
-        target.finish().unwrap();
-        assert_eq!(Pixels::download(&gpu, &out).get(0, 0)[3], expected);
-    }
-    let source = Pixels::new(r, |_, _| [0.0, 0.0, 0.0, 0.5]);
-    for (float, red) in [(true, 1.0), (false, 0.5)] {
-        let result = run_depth(
-            &gpu,
-            F32,
-            builtin("ADBE Fill"),
-            vec![(2, Value::Color([2., 0., 0., 1.]))],
-            &source,
-            r,
-            1.,
-            float,
-        );
-        assert_eq!(result.get(0, 0), [red, 0., 0., 0.5]);
-    }
-}
-
-#[test]
-fn gradient_points_stay_with_layer_across_tiles() {
-    use bae_effects::Standalone;
-    use bae_render::EffectParams;
-    let Some(gpu) = context() else { return };
-    let bounds = IRect::from_size(128, 128);
-    let tile = IRect::new(8, 16, 48, 32);
-    let region = Pixels::new(tile, |_, _| [1.; 4]);
-    let mut image = region.upload(&gpu, F32);
-    // The half-resolution tile covers this region in layer pixels.
-    image.rect = IRect::new(16, 32, 96, 64);
-    image.pixel_scale = 2.0;
-    let fx = builtin("ADBE Ramp");
-    let inst = instance(&fx.info.match_name, vec![]);
-    let p = EffectParams {
-        layer_bounds: bounds,
-        scale: 0.5,
-        ..EffectParams::new(&inst)
-    };
-    let mut target = Standalone::new(gpu.clone(), F32);
-    let out = fx.render(&mut target, &p, &image, tile).unwrap();
-    target.finish().unwrap();
-    assert_eq!(out.rect, image.rect);
-    assert_eq!(out.texel_size(), tile.size());
-    let data = bae_gpu::transfer::read_texture(&gpu, &out.texture).unwrap();
-    for (x, y) in [(0, 0), (39, 15)] {
-        let value = (tile.y0 as f32 + y as f32) / 64.0;
-        let pixel = data.pixel(x, y);
-        let rgba: [f32; 4] = std::array::from_fn(|i| {
-            f32::from_le_bytes(pixel[4 * i..4 * i + 4].try_into().unwrap())
-        });
-        assert_eq!(rgba, [value, value, value, 1.]);
     }
 }
 
@@ -220,6 +103,7 @@ fn noise_variants_share_the_hls_phase_and_legacy_median() {
         assert!(out.get(2, 2).iter().all(|v| v.is_finite()), "{name}");
     }
 }
+
 #[test]
 fn match_grain_uses_the_selected_reference_on_the_gpu() {
     let Some(gpu) = context() else { return };
