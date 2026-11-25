@@ -258,8 +258,19 @@ pub(super) fn frame(
                 return Press::Handle(l.path.clone(), h);
             }
         }
-        match hit_layer(stage, comp, view, pos) {
-            Some(l) => Press::Layer(l),
+        // AE: a selected layer under the pointer is the one edited, even below
+        // others; Shift-click adds the topmost one.
+        let under: Vec<PrimPath> = layers_at(stage, comp, view, pos).collect();
+        let pick = if shift {
+            under.first()
+        } else {
+            under
+                .iter()
+                .find(|l| selected.contains(l))
+                .or(under.first())
+        };
+        match pick {
+            Some(l) => Press::Layer(l.clone()),
             None => Press::Empty,
         }
     };
@@ -416,6 +427,14 @@ pub(super) fn frame(
         && let Some(pos) = pointer
     {
         d.update(view.to_comp(pos), shift, snap);
+        // AE's Info panel: the moved layer's position and how far it moved.
+        if matches!(d.kind, Kind::Move { .. })
+            && let Some(e) = d.edits.first()
+        {
+            let (p, p0) = (e.now.position, e.start.position);
+            session.lock().info.moved =
+                Some((e.path.clone(), [p.x, p.y], [p.x - p0.x, p.y - p0.y]));
+        }
     }
     if let Some(d) = state.path_drag.as_mut()
         && let Some(pos) = pointer

@@ -50,6 +50,11 @@
 //! | `effect.set_enabled` | an effect's fx switch |
 //! | `effect.reset` | Reset in Effect Controls |
 //! | `effect.duplicate` | Edit > Duplicate with effects selected |
+//! | `layer.time_remap` | Layer > Time > Enable Time Remapping (Cmd/Ctrl+Alt+T) |
+//! | `layer.time_stretch` | Layer > Time > Time Stretch (stretch or new duration, hold in point / current frame / out point) |
+//! | `layer.time_reverse` | Layer > Time > Time-Reverse Layer (Cmd/Ctrl+Alt+R) |
+//! | `layer.freeze_frame` | Layer > Time > Freeze Frame |
+//! | `layer.freeze_on_last_frame` | Layer > Time > Freeze On Last Frame |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -69,7 +74,9 @@ pub mod import;
 pub mod keys;
 pub mod layer;
 pub mod markers;
+pub mod matte;
 pub mod names;
+pub mod paint;
 pub mod path;
 pub mod precompose;
 pub mod query;
@@ -77,6 +84,8 @@ pub mod shape;
 pub mod solid;
 pub mod text;
 pub mod text_animators;
+pub mod text_path;
+pub mod time;
 mod util;
 
 use std::sync::Arc;
@@ -90,7 +99,7 @@ pub use comp::{
     TrimCompToWorkArea,
 };
 pub use dimensions::SeparateDimensions;
-pub use expressions::{ExpressionEdit, SetExpressions};
+pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
@@ -103,17 +112,23 @@ pub use layer::{
     ShiftLayers, SlipLayers, SplitLayers, TrimLayers, copy_layers,
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
+pub use matte::SetTrackMatte;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
+pub use text_path::SetTextPath;
+pub use time::{
+    FreezeFrame, FreezeOnLastFrame, SetTimeRemap, StretchHold, TimeReverse, TimeStretch,
+};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(paint::AddStroke),
         r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
@@ -131,6 +146,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimLayers),
         r.register(ShiftLayers),
         r.register(SlipLayers),
+        r.register(SetTrackMatte),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),
@@ -158,9 +174,16 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateText),
         r.register(SetText),
         r.register(SetExpressions),
+        r.register(BakeExpression),
         r.register(AnimateText),
         r.register(AddTextSelector),
         r.register(RemoveTextAnimators),
+        r.register(SetTextPath),
+        r.register(SetTimeRemap),
+        r.register(TimeStretch),
+        r.register(TimeReverse),
+        r.register(FreezeFrame),
+        r.register(FreezeOnLastFrame),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

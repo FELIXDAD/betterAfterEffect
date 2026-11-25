@@ -70,6 +70,15 @@ pub mod ids {
     /// Animation > Add Expression (AE Alt+Shift+=): toggles the selected
     /// properties' expressions.
     pub const ADD_EXPRESSION: &str = "motion.anim.add_expression";
+    /// Layer > Switches > Enable / Disable Expressions: every expression of the
+    /// selected layers.
+    pub const ENABLE_EXPRESSIONS: &str = "motion.layer.enable_expressions";
+    pub const DISABLE_EXPRESSIONS: &str = "motion.layer.disable_expressions";
+    /// Layer > Reveal > Reveal Expression Errors: the properties whose expressions
+    /// fail, revealed in the Timeline.
+    pub const REVEAL_EXPRESSION_ERRORS: &str = "motion.layer.reveal_expression_errors";
+    /// Animation > Keyframe Assistant > Convert Expression to Keyframes.
+    pub const CONVERT_EXPRESSION: &str = "motion.anim.convert_expression_to_keyframes";
     /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
     pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
     /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
@@ -99,11 +108,18 @@ pub mod ids {
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
+    /// Edit > Paste Reversed Keyframes (AE Cmd/Ctrl+Shift+V).
+    pub const PASTE_REVERSED: &str = "motion.edit.paste_reversed_keyframes";
     /// Edit > Cut: Copy, then Clear.
     pub const CUT: &str = "edit.cut";
     /// Layer ▸ Switches ▸ Shy, Lock … and Layer ▸ 3D Layer: params `{"switch":
     /// "<attr>"}` (see [`super::SWITCHES`]); toggles the selected layers.
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
+    /// Layer ▸ Track Matte ▸ … (params `{"matte": "alpha", "source": "above"}`).
+    pub const TRACK_MATTE: &str = "motion.layer.track_matte";
+    /// F4 / Shift+F4 (the Timeline handles them).
+    pub const TOGGLE_SWITCHES_MODES: &str = "motion.timeline.toggle_switches_modes";
+    pub const TOGGLE_PARENT_COLUMN: &str = "motion.timeline.toggle_parent_column";
     /// Layer ▸ Blending Mode ▸ … (params `{"mode": "multiply"}`).
     pub const BLENDING_MODE: &str = "motion.layer.blending_mode";
     /// Layer ▸ Next / Previous Blending Mode (AE Shift+= / Shift+-; `{"step": ±1}`).
@@ -116,6 +132,17 @@ pub mod ids {
     /// Edit ▸ Label ▸ colour: params `{"label": 0..=16}`.
     pub const LABEL: &str = "motion.edit.label";
     pub const SELECT_LABEL_GROUP: &str = "motion.edit.select_label_group";
+    /// Layer ▸ Transform ▸ Flip Horizontal / Flip Vertical (Scale X / Y negated).
+    pub const FLIP_HORIZONTAL: &str = "motion.layer.flip_horizontal";
+    pub const FLIP_VERTICAL: &str = "motion.layer.flip_vertical";
+    /// Layer ▸ Transform ▸ Center In View (AE Ctrl+Home): the anchor point to the
+    /// middle of the comp.
+    pub const CENTER_IN_VIEW: &str = "motion.layer.center_in_view";
+    /// Layer ▸ Transform ▸ Fit to Comp (Ctrl+Alt+F), Fit to Comp Width
+    /// (Ctrl+Alt+Shift+H), Fit to Comp Height (Ctrl+Alt+Shift+G).
+    pub const FIT_TO_COMP: &str = "motion.layer.fit_to_comp";
+    pub const FIT_TO_COMP_WIDTH: &str = "motion.layer.fit_to_comp_width";
+    pub const FIT_TO_COMP_HEIGHT: &str = "motion.layer.fit_to_comp_height";
 }
 
 /// The layer switches the Layer menu toggles (`layer.set_attr` attributes) with
@@ -131,6 +158,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("motion_blur", "Motion Blur"),
     ("adjustment_layer", "Adjustment Layer"),
     ("three_d", "3D Layer"),
+    ("preserve_transparency", "Preserve Transparency"),
 ];
 
 /// Whether a switch is on for a layer.
@@ -163,6 +191,10 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ADD_EXPRESSION, "Add Expression"),
+    (ids::ENABLE_EXPRESSIONS, "Enable Expressions"),
+    (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
+    (ids::REVEAL_EXPRESSION_ERRORS, "Reveal Expression Errors"),
+    (ids::CONVERT_EXPRESSION, "Convert Expression to Keyframes"),
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
@@ -201,7 +233,14 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::COPY, "Copy"),
     (ids::CUT, "Cut"),
     (ids::PASTE, "Paste"),
+    (ids::PASTE_REVERSED, "Paste Reversed Keyframes"),
     (ids::LAYER_SWITCH, "Layer Switch"),
+    (ids::TRACK_MATTE, "Track Matte"),
+    (
+        ids::TOGGLE_SWITCHES_MODES,
+        "Toggle Switches / Modes Columns",
+    ),
+    (ids::TOGGLE_PARENT_COLUMN, "Show / Hide Parent Column"),
     (ids::BLENDING_MODE, "Blending Mode"),
     (ids::BLENDING_MODE_STEP, "Next Blending Mode"),
     (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
@@ -209,6 +248,12 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::HIDE_OTHER_VIDEO, "Hide Other Video"),
     (ids::QUALITY, "Quality"),
     (ids::LABEL, "Label"),
+    (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
+    (ids::FLIP_VERTICAL, "Flip Vertical"),
+    (ids::CENTER_IN_VIEW, "Center In View"),
+    (ids::FIT_TO_COMP, "Fit to Comp"),
+    (ids::FIT_TO_COMP_WIDTH, "Fit to Comp Width"),
+    (ids::FIT_TO_COMP_HEIGHT, "Fit to Comp Height"),
     (ids::SELECT_LABEL_GROUP, "Select Label Group"),
     (ids::GRAPH_EDITOR, "Graph Editor"),
     (ids::KEY_INTERPOLATION, "Keyframe Interpolation"),
@@ -553,6 +598,90 @@ fn jump_to_key(
     if let Some(t) = pick {
         s.set_time(info, t);
     }
+}
+
+/// Layer ▸ Transform commands on `layers` at comp time `now`, as `attr.set_many`
+/// edits (a keyframe where the property is animated, like AE).
+fn transform_edits(
+    stage: &bae_model::Stage,
+    info: &CompInfo,
+    now: Time,
+    layers: &[PrimPath],
+    id: &str,
+) -> Vec<serde_json::Value> {
+    use bae_anim::Transform;
+    use bae_anim::glam::{DMat4, DVec3};
+    use bae_model::Value;
+    let Ok(comp) = bae_anim::Evaluator::new().evaluate_comp(stage, &info.path, now) else {
+        return Vec::new();
+    };
+    let center = DVec3::new(f64::from(info.width), f64::from(info.height), 0.0) / 2.0;
+    // Move Position so that `local` (layer space) lands on the comp's center.
+    let land = |t: &mut Transform, parent: DMat4, local: DVec3, three_d: bool| {
+        let d = center - (parent * t.matrix(three_d)).transform_point3(local);
+        t.position += parent
+            .inverse()
+            .transform_vector3(DVec3::new(d.x, d.y, 0.0));
+    };
+    let mut out = Vec::new();
+    for l in comp.layers.iter().filter(|l| layers.contains(&l.path)) {
+        let parent = l
+            .parent
+            .map_or(DMat4::IDENTITY, |i| comp.layers[i].world_matrix);
+        let three_d = l.switches.three_d;
+        let mut t = l.transform;
+        match id {
+            ids::FLIP_HORIZONTAL => t.scale.x = -t.scale.x,
+            ids::FLIP_VERTICAL => t.scale.y = -t.scale.y,
+            ids::CENTER_IN_VIEW => {
+                let anchor = t.anchor_point;
+                land(&mut t, parent, anchor, three_d);
+            }
+            _ => {
+                let Some((a, b)) = crate::render::layer_bounds(l) else {
+                    continue;
+                };
+                let size = b - a;
+                if size.x <= 0.0 || size.y <= 0.0 {
+                    continue;
+                }
+                let w = f64::from(info.width) / size.x * 100.0;
+                let h = f64::from(info.height) / size.y * 100.0;
+                let (sx, sy) = match id {
+                    ids::FIT_TO_COMP => (w, h),
+                    ids::FIT_TO_COMP_WIDTH => (w, w),
+                    _ => (h, h),
+                };
+                t.scale.x = sx.copysign(t.scale.x);
+                t.scale.y = sy.copysign(t.scale.y);
+                let c = (a + b) / 2.0;
+                land(&mut t, parent, DVec3::new(c.x, c.y, 0.0), three_d);
+            }
+        }
+        let time = query::to_key_time(stage, &l.path, now);
+        let mut push = |attr: &str, v: Value| {
+            out.push(json!({"path": l.path, "attr": attr, "time": time, "value": v}));
+        };
+        if t.scale != l.transform.scale {
+            let v = t.scale;
+            push("transform:scale", Value::Vec3([v.x, v.y, v.z]));
+        }
+        if t.position != l.transform.position {
+            let p = t.position;
+            let separate = stage
+                .prim(&l.path)
+                .and_then(|v| query::static_value(&v, "transform:separate_dimensions"))
+                .and_then(|v| v.as_bool())
+                == Some(true);
+            if separate {
+                push("transform:position_x", Value::Float(p.x));
+                push("transform:position_y", Value::Float(p.y));
+            } else {
+                push("transform:position", Value::Vec3([p.x, p.y, p.z]));
+            }
+        }
+    }
+    out
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
@@ -1085,6 +1214,29 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
+        ids::TRACK_MATTE if !layers.is_empty() => {
+            // "source": "above" / "below" picks the adjacent layer of each layer.
+            let matte = inv
+                .params
+                .get("matte")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none");
+            let all = query::comp_layers(stage, &info.path);
+            let side = inv.params.get("source").and_then(|v| v.as_str());
+            for l in &layers {
+                let mut p = json!({"layers": [l], "matte": matte});
+                let i = all.iter().position(|x| x == l).unwrap_or(0);
+                let src = match side {
+                    Some("above") => i.checked_sub(1).and_then(|j| all.get(j)),
+                    Some("below") => all.get(i + 1),
+                    _ => None,
+                };
+                if let Some(s) = src {
+                    p["source"] = json!(s);
+                }
+                cx.invoke_with("layer.set_track_matte", p);
+            }
+        }
         ids::LAYER_SWITCH => {
             let Some(attr) = inv.params.get("switch").and_then(|v| v.as_str()) else {
                 return true;
@@ -1138,6 +1290,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     "layer.set_attr",
                     json!({"layers": targets, "attr": attr, "value": {"type": "bool", "value": on}}),
                 );
+            }
+        }
+        ids::FLIP_HORIZONTAL
+        | ids::FLIP_VERTICAL
+        | ids::CENTER_IN_VIEW
+        | ids::FIT_TO_COMP
+        | ids::FIT_TO_COMP_WIDTH
+        | ids::FIT_TO_COMP_HEIGHT => {
+            let edits = transform_edits(stage, &info, now, &layers, id);
+            if !edits.is_empty() {
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
             }
         }
         ids::QUALITY => {
@@ -1218,6 +1381,74 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 keys: copied,
             });
         }
+        ids::ENABLE_EXPRESSIONS | ids::DISABLE_EXPRESSIONS => {
+            let enabled = id == ids::ENABLE_EXPRESSIONS;
+            let mut items = Vec::new();
+            for l in layers.iter().filter(|l| !query::is_locked(stage, l)) {
+                for n in crate::props::revealed(stage, l, &Reveal::Animated) {
+                    if let crate::props::Node::Prop { path, attr, .. } = n
+                        && let Some(e) =
+                            query::attr_spec(stage, &path, &attr).and_then(|s| s.expression.clone())
+                        && e.enabled != enabled
+                    {
+                        items.push(json!({"path": path, "attr": attr, "source": e.source, "enabled": enabled}));
+                    }
+                }
+            }
+            if !items.is_empty() {
+                cx.invoke_with("attr.set_expressions", json!({"items": items}));
+            }
+        }
+        ids::REVEAL_EXPRESSION_ERRORS => {
+            let mut by_layer: Vec<(PrimPath, Vec<(PrimPath, String)>)> = Vec::new();
+            for e in s.expr_errors.clone() {
+                let Some(l) = query::owning_layer(stage, &e.prim) else {
+                    continue;
+                };
+                let prop = (e.prim, e.attr);
+                match by_layer.iter_mut().find(|(x, _)| *x == l) {
+                    Some((_, props)) => props.push(prop),
+                    None => by_layer.push((l, vec![prop])),
+                }
+            }
+            for (l, props) in by_layer {
+                s.reveal.insert(l, Reveal::Props(props));
+            }
+        }
+        ids::CONVERT_EXPRESSION => {
+            // Every frame of the layer's span in the comp becomes a keyframe.
+            let props: Vec<(PrimPath, String)> = s
+                .selected_props
+                .iter()
+                .filter(|(p, a)| {
+                    query::locked_layer_of(stage, p).is_none()
+                        && query::attr_spec(stage, p, a)
+                            .and_then(|s| s.expression.as_ref())
+                            .is_some_and(|e| e.enabled)
+                })
+                .cloned()
+                .collect();
+            let mut eval = bae_anim::Evaluator::new();
+            for (path, attr) in props {
+                let Some(layer) = query::owning_layer(stage, &path) else {
+                    continue;
+                };
+                let timing = query::layer_timing(stage, &layer);
+                let end = timing.out_point.max(timing.in_point).min(info.duration);
+                let mut t = timing.in_point.min(timing.out_point).max(Time::ZERO);
+                let mut keys = Vec::new();
+                while t < end {
+                    if let Some(v) = common::current_value(&mut eval, stage, &path, &attr, t) {
+                        keys.push(json!({"time": query::to_key_time(stage, &path, t), "value": v}));
+                    }
+                    t += frame;
+                }
+                cx.invoke_with(
+                    "attr.bake_expression",
+                    json!({"path": path, "attr": attr, "keys": keys}),
+                );
+            }
+        }
         ids::PASTE if !s.layer_clipboard.is_empty() => {
             // Above the topmost selected layer, else on top; named like
             // Duplicate; the pasted layers end up selected.
@@ -1235,15 +1466,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 before,
             });
         }
-        ids::PASTE => {
+        ids::PASTE | ids::PASTE_REVERSED => {
             let Some(clip) = s.clipboard.clone() else {
-                return false;
+                return id == ids::PASTE_REVERSED;
             };
+            let reversed = id == ids::PASTE_REVERSED;
             for l in &layers {
                 let kt = query::to_key_time(stage, l, now);
                 cx.invoke_with(
                     "key.paste",
-                    json!({"path": l, "attr": clip.attr, "time": kt, "keys": clip.keys}),
+                    json!({"path": l, "attr": clip.attr, "time": kt, "keys": clip.keys, "reversed": reversed}),
                 );
             }
         }
@@ -1252,6 +1484,91 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         id => return ACTIONS.iter().any(|(a, _)| *a == id),
     }
     true
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Variants of motion actions and commands (`actions::variants`, #140): the
+    // Keyboard Shortcuts window, Edit > Undo and History name each one.
+    ("Back 10 Frames", "后退 10 帧"),
+    ("Forward 10 Frames", "前进 10 帧"),
+    ("New Solid", "新建纯色"),
+    ("New Adjustment Layer", "新建调整图层"),
+    ("New Null Object", "新建空对象"),
+    ("New Text Layer", "新建文本图层"),
+    ("New Camera", "新建摄像机"),
+    ("New Light", "新建灯光"),
+    ("New Shape Layer", "新建形状图层"),
+    ("New Rectangle", "新建矩形"),
+    ("New Ellipse", "新建椭圆"),
+    // Layer menu actions and their variants (Keyboard Shortcuts, Undo).
+    ("Layer Switch", "图层开关"),
+    ("Unlock All Layers", "解锁所有图层"),
+    ("Show All Video", "显示所有视频"),
+    ("Hide Other Video", "隐藏其他视频"),
+    ("Quality", "品质"),
+    ("Best Quality", "最佳品质"),
+    ("Draft Quality", "草图品质"),
+    ("Wireframe Quality", "线框品质"),
+    ("Show Position", "显示位置"),
+    ("Add Position to Shown Properties", "将位置添加到显示的属性"),
+    ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),
+    ("Show Scale", "显示缩放"),
+    ("Add Scale to Shown Properties", "将缩放添加到显示的属性"),
+    ("Scale: Add or Remove Keyframe", "缩放：添加或移除关键帧"),
+    ("Show Rotation", "显示旋转"),
+    ("Add Rotation to Shown Properties", "将旋转添加到显示的属性"),
+    ("Rotation: Add or Remove Keyframe", "旋转：添加或移除关键帧"),
+    ("Show Opacity", "显示不透明度"),
+    (
+        "Add Opacity to Shown Properties",
+        "将不透明度添加到显示的属性",
+    ),
+    (
+        "Opacity: Add or Remove Keyframe",
+        "不透明度：添加或移除关键帧",
+    ),
+    ("Show Anchor Point", "显示锚点"),
+    (
+        "Add Anchor Point to Shown Properties",
+        "将锚点添加到显示的属性",
+    ),
+    (
+        "Anchor Point: Add or Remove Keyframe",
+        "锚点：添加或移除关键帧",
+    ),
+    // Edit / layer commands
+    ("Duplicate", "重复"),
+    ("Split Layer", "拆分图层"),
+    ("Select All", "全选"),
+    ("Deselect All", "全部取消选择"),
+    ("Copy", "复制"),
+    ("Paste", "粘贴"),
+    // Layer > Arrange: AE 26 and the usual Chinese UI wording (docs/glossary.md).
+    ("Bring Layer Forward", "前移一层"),
+    ("Send Layer Backward", "后移一层"),
+    ("Bring Layer to Front", "置于顶层"),
+    ("Send Layer to Back", "置于底层"),
+    ("Trim Layer In Point", "将入点修剪到当前时间"),
+    ("Trim Layer Out Point", "将出点修剪到当前时间"),
+    ("Move In Point to Current Time", "将入点移到当前时间"),
+    ("Move Out Point to Current Time", "将出点移到当前时间"),
+    ("Set Work Area Start", "将工作区域开头设置为当前时间"),
+    ("Set Work Area End", "将工作区域结尾设置为当前时间"),
+    ("Trim Comp to Work Area", "将合成修剪至工作区域"),
+    // Layer > Transform (AE 26's Chinese menu).
+    ("Flip Horizontal", "水平翻转"),
+    ("Flip Vertical", "垂直翻转"),
+    ("Center In View", "视点居中"),
+    ("Fit to Comp", "适合复合"),
+    ("Fit to Comp Width", "适合复合宽度"),
+    ("Fit to Comp Height", "适合复合高度"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
 }
 
 #[cfg(test)]

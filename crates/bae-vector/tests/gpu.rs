@@ -258,6 +258,9 @@ fn linear_gradient_in_group_space() {
 fn shared_renderer_is_reused() {
     let Some(gpu) = gpu() else { return };
     let a = VelloRenderer::shared(&gpu).unwrap();
+    let kept = Arc::downgrade(&a);
+    drop(a);
+    // Kept for the context's lifetime, not just while someone holds it.
     let b = VelloRenderer::shared(&gpu).unwrap();
-    assert!(Arc::ptr_eq(&a, &b));
+    assert!(std::ptr::eq(kept.as_ptr(), Arc::as_ptr(&b)));
 }

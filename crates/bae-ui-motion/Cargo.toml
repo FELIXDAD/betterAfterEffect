@@ -33,6 +33,10 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 
+[build-dependencies]
+# build.rs deflates the catalog tables into $OUT_DIR/catalog.bin.
+flate2.workspace = true
+
 [dev-dependencies]
 bae-vector = { workspace = true, features = ["render"] }
 # Render queue tests write TIFF too (bae-media encoders).

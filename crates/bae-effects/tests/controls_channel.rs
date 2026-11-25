@@ -202,6 +202,20 @@ fn choker_spreads_fractional_pixels_and_has_an_opaque_matte_view() {
 
 #[test]
 fn set_matte_checks_out_the_source_of_a_hidden_layer_in_layer_space() {
+    let inst = instance("ADBE Set Matte3", vec![]);
+    let params = bae_render::EffectParams {
+        layer_bounds: IRect::from_size(4096, 2160),
+        ..bae_render::EffectParams::new(&inst)
+    };
+    let tile = IRect::new(64, 32, 96, 48);
+    assert_eq!(
+        get("ADBE Set Matte3")
+            .unwrap()
+            .effect()
+            .input_roi(&params, tile),
+        tile
+    );
+
     let Some(gpu) = context() else { return };
     let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 24, 16);
     let solid = |name: &str, width, height, color| {

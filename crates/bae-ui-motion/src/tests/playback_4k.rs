@@ -131,7 +131,7 @@ fn playback_4k() {
             });
             let encode = Instant::now();
             preview
-                .frame(&h.resources, &h.stage, &comp, 1)
+                .frame(&h.resources, &h.stage, &comp, 1, None)
                 .expect("published preview");
             if let Some(scope) = scope {
                 cpu_ms += (evaluation + encode.elapsed()).as_secs_f64() * 1000.0;
