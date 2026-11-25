@@ -765,8 +765,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTwirlAnchorPointAddState` | `motion.reveal` | `{"what":"transform:anchor_point","add":true}` | Shift+A | Shift+A |  | B | ✅ |
 | `CompTwirlAnchorPointAddStateNewKF` | `motion.toggle_key` | `{"attr":"transform:anchor_point"}` | Alt+Shift+A | Opt+Shift+A |  | B | ✅ |
 | `CompTwirlAnchorPointNewKF` | `motion.toggle_key` | `{"attr":"transform:anchor_point","only":true}` |  | Opt+A |  | B | ☐ |
-| `CompTwirlAudio` | `motion.reveal` | `{"what":"audio:levels","add":false}` | L | L |  | B | ☐ |
-| `CompTwirlAudioAddState` | `motion.reveal` | `{"what":"audio:levels","add":true}` | Shift+L | Shift+L |  | B | ☐ |
+| `CompTwirlAudio` | `motion.reveal` | `{"what":"audio:levels","add":false}` | L | L |  | B | ✅ |
+| `CompTwirlAudioAddState` | `motion.reveal` | `{"what":"audio:levels","add":true}` | Shift+L | Shift+L |  | B | ✅ |
 | `CompTwirlAudioAddStateNewKF` | `motion.toggle_key` | `{"attr":"audio:levels"}` | Alt+Shift+L | Opt+Shift+L |  | B | ☐ |
 | `CompTwirlAudioNewKF` | `motion.toggle_key` | `{"attr":"audio:levels","only":true}` |  | Opt+L |  | B | ☐ |
 | `CompTwirlOpacity` | `motion.reveal` | `{"what":"transform:opacity","add":false}` | T | T |  | B | ✅ |
@@ -937,7 +937,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `OpenMRUContext` | `motion.panel.activate_most_recent_viewer` |  | Shift+Esc | Shift+Esc |  | B | ⏸ |
 | `PreviewAudio` | `motion.comp.preview_audio` | `{"work_area":false}` | PadDecimal / PadComma / PadDelete | PadDecimal / PadComma / PadDelete / Control+. |  | B | ⏸ |
 | `PreviewAudioWorkArea` | `motion.comp.preview_audio` | `{"work_area":true}` | Alt+PadDecimal / Alt+PadComma / Alt+PadDelete | Opt+PadDecimal / Opt+PadComma / Opt+PadDelete / Control+Opt+. |  | B | ⏸ |
-| `PreviewNumpad0` | `motion.play` | `{"preview":"numpad0"}` | Pad0 / PadInsert | Pad0 / PadInsert / Control+0 |  | B | ☐ |
+| `PreviewNumpad0` | `motion.play` | `{"preview":"numpad0"}` | Pad0 / PadInsert | Pad0 / PadInsert / Control+0 |  | B | ✅ |
 | `PreviewNumpad0NFrames` | `motion.play` | `{"preview":"numpad0_n_frames"}` | Alt+Pad0 / Alt+PadInsert | Opt+Pad0 / Opt+PadInsert / Control+Opt+0 |  | B | ⏸ |
 | `PreviewShiftNumpad0` | `motion.play` | `{"preview":"shift_numpad0"}` | Shift+Pad0 / Shift+PadInsert | Shift+Pad0 / Shift+PadInsert / Control+Shift+0 |  | B | ☐ |
 | `ShowConsole` | `motion.window.console` |  | Ctrl+F12 | Cmd+F12 |  | B | ⏸ |
