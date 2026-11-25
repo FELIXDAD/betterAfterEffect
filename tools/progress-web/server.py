@@ -13,6 +13,9 @@ import secrets
 import sqlite3
 import subprocess
 import threading
+import time
+import urllib.request
+import sys
 
 HERE = Path(__file__).resolve().parent
 CONF = Path(os.getenv("BAE_BOARD_CONFIG", Path.home() / ".config/bae-board"))
@@ -97,6 +100,77 @@ def initialize():
         if not db.execute("select 1 from items limit 1").fetchone():
             seed_board(db)
         register_legacy_effects(db)
+        db.execute("""create table if not exists parity_issues(
+            number integer primary key, title text not null, state text not null, updated text not null)""")
+        if not db.execute("select 1 from parity_issues where number=400").fetchone():
+            save_issue(db, 400, "P0 易用性交互", "open", "")
+
+
+# The first four checks come from issue 400, the last three from its owner comment.
+INTERACTIONS = (
+    ("图层内容可选中及复制", "点名称选中行，小箭头展开。形状、效果、蒙版、文字动画器支持复制、粘贴和同层级副本。"),
+    ("查看器优先操作已选图层", "拖动、手柄、键盘微移作用于已选图层；取消选择后再按点击位置拾取最上层。"),
+    ("数值框全选、Tab 与方向键", "单击和 Tab / Shift+Tab 全选；上下键 ±1，Cmd/Ctrl ±0.1，Shift ±10；Enter 确认，Esc 取消。"),
+    ("多选同时修改", "对应属性值及 3D、运动模糊、隐藏、锁定等开关同步修改，一步撤销。"),
+    ("取消选择图层", "时间轴或查看器空白处、F2、Cmd+Shift+A 清空选择；随后形状工具可新建形状图层。"),
+    ("双击编辑形状", "选取工具双击查看器形状，进入路径编辑或自由变换。"),
+    ("系统核对交互细节", "按 AE 核查选择模型、工具与修饰键、新建规则、数值编辑和键盘操作；列出差异，逐批修复并提交 PR。"),
+)
+
+
+def parity_tasks(number, title):
+    checks = INTERACTIONS if number == 400 else [(title, "")]
+    for index, (name, detail) in enumerate(checks, 1):
+        prefix = f"ae-{number}-{index}" if number == 400 else f"ae-{number}"
+        yield dict(name=name, detail=detail, fix=prefix + "-fix", verify=prefix + "-verify")
+
+
+def save_issue(db, number, title, state, updated):
+    db.execute("""insert into parity_issues values(?,?,?,?)
+        on conflict(number) do update set title=excluded.title,state=excluded.state,
+        updated=excluded.updated where parity_issues.title!=excluded.title
+        or parity_issues.state!=excluded.state or parity_issues.updated!=excluded.updated""",
+               (number, title, state, updated))
+    for task in parity_tasks(number, title):
+        for role, kind, module in (("fix", "milestone" if number == 400 else "repair", "交互对齐"),
+                                   ("verify", "acceptance", "交互验收")):
+            db.execute("""insert into items(id,kind,module,name,status,tag,prs,updated)
+                values(?,?,?,?,'todo','','[]',?) on conflict(id) do nothing""",
+                       (task[role], kind, module, task["name"], now()))
+
+
+def sync_parity():
+    issues = []
+    for page in range(1, 10001):
+        url = ("https://api.github.com/repos/FELIXDAD/betterAfterEffects/issues"
+               f"?state=all&labels=ae-parity&sort=created&direction=asc&per_page=100&page={page}")
+        with urllib.request.urlopen(url, timeout=15) as response:
+            batch = json.load(response)
+        issues.extend(row for row in batch if "pull_request" not in row)
+        if len(batch) < 100:
+            break
+    with closing(connect()) as db, db:
+        for issue in issues:
+            save_issue(db, issue["number"], issue["title"], issue["state"], issue["updated_at"])
+        changed = db.total_changes
+    if changed:
+        notify_clients()
+
+
+def parity_loop():
+    while True:
+        try:
+            sync_parity()
+        except (OSError, ValueError, KeyError, sqlite3.Error) as error:
+            print(f"GitHub issue sync failed: {error}", file=sys.stderr, flush=True)
+        time.sleep(300)
+
+
+def notify_clients():
+    global VERSION
+    with CHANGE:
+        VERSION += 1
+        CHANGE.notify_all()
 
 
 def register_legacy_effects(db):
@@ -155,7 +229,10 @@ def snapshot():
             select seq,item,agent,status,note,updated,null as pr from activity
             union all select 0,'','GitHub',state,title,updated,number from pulls where item is null
             order by updated desc, seq desc""")]
-        return dict(items=items, agents=agents, activity=feed)
+        issues = [dict(row) for row in db.execute("select * from parity_issues order by number")]
+        for issue in issues:
+            issue["tasks"] = list(parity_tasks(issue["number"], issue["title"]))
+        return dict(items=items, agents=agents, activity=feed, parity=issues)
 
 
 def field(data, key, limit, required=False):
@@ -254,7 +331,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        global VERSION
         if not self.authorized(BEARER):
             return
         if self.path != "/api/report":
@@ -269,9 +345,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply({"error": str(error)}, 400)
             return
         if changed:
-            with CHANGE:
-                VERSION += 1
-                CHANGE.notify_all()
+            notify_clients()
         self.reply({"changed": changed})
 
 
@@ -287,5 +361,6 @@ if __name__ == "__main__":
     initialize()
     if args.github:
         import_github()
+    threading.Thread(target=parity_loop, daemon=True).start()
     print(f"http://{args.host}:{PORT}", flush=True)
     ThreadingHTTPServer((args.host, PORT), Handler).serve_forever()

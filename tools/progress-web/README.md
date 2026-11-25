@@ -84,3 +84,9 @@ python3 -c 'import sqlite3, sys; from pathlib import Path; sqlite3.connect(Path.
 ### 线上实例
 
 正式入口为 https://board.rimlight.studio/ ，运行在东京 Lightsail 实例 spectra。Nginx 使用独立虚拟主机转发到回环端口 8787；证书由 Certbot 的 webroot 流程续期，续期后平滑重载 Nginx。Mac 的 8787 是单独的本机原型，部署后所有 agent 统一向正式入口汇报。
+
+### AE 交互对齐
+
+“AE 交互对齐”列出 issue、修复和验收三种独立状态。#400 共七项，编号顺序与正文和补充评论一致。第 N 项的修复 ID 是 `ae-400-N-fix`，验收 ID 是 `ae-400-N-verify`。七项修复计入里程碑，验收单独计数。
+
+看板服务启动时及此后每五分钟，通过公开 GitHub API 分页读取仓库中所有带 `ae-parity` 标签的开放和关闭 issue。以 issue 编号去重，#400 复用上述七项。新 issue 的修复和验收初始均为待办，例如第 401 号对应 `ae-401-fix`、`ae-401-verify`。开发者汇报修复，tester 独立汇报验收。issue 改名或关闭只更新其来源信息；不会自动完成修复或验收。同步失败保留上次结果，下一轮重试。
