@@ -297,7 +297,7 @@ fn param_row(
         .as_ref()
         .filter(|s| s.path == *effect && s.attr == attr)
         .map(|s| s.value.clone())
-        .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
+        .or_else(|| common::current_value(eval.get(cx.stage), stage, effect, &attr, now))
         .or_else(|| {
             let layer = super::layer_of(effect)?;
             bae_motion::effect::instance_default(stage, &layer, param)
@@ -373,7 +373,7 @@ fn param_row(
     });
     // An expression pick whip dragged from the Timeline.
     if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
-        crate::expr::link(cx, eval.get(cx.resources), &whip, effect, Some(&attr), now);
+        crate::expr::link(cx, eval.get(cx.stage), &whip, effect, Some(&attr), now);
     }
     if twirl && state.open_params.contains(&key) {
         ui.horizontal(|ui| {

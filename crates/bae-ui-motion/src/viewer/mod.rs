@@ -498,7 +498,7 @@ impl Panel for CompositionViewer {
         }
 
         // Evaluate.
-        let eval = self.eval.get(cx.resources);
+        let eval = self.eval.get(cx.stage);
         let mut comp = match eval.evaluate_comp(cx.stage, &info.path, time) {
             Ok(c) => c,
             Err(e) => {

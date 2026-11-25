@@ -194,6 +194,31 @@ fn pointer(events: &mut Vec<Event>, pos: Pos2, pressed: Option<bool>) {
 }
 
 #[test]
+fn preview_observes_edits_without_a_shell_history_log() {
+    let mut h = Harness::new();
+    let mut changes = crate::common::StageChanges::default();
+    assert!(changes.sync(&h.stage, |_| panic!("new evaluator already has no plans")));
+    assert!(!changes.sync(&h.stage, |_| panic!("steady frame invalidated")));
+    h.run("comp.create", json!({"name": "Main"}));
+    let mut edits = Vec::new();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    h.stage.undo(&h.author).unwrap();
+    h.stage.redo(&h.author).unwrap();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    assert_eq!(
+        edits,
+        [
+            bae_model::EventOrigin::Local,
+            bae_model::EventOrigin::Undo,
+            bae_model::EventOrigin::Redo
+        ]
+    );
+    let mut reset = false;
+    changes.sync(&Stage::new(), |event| reset = event.is_none());
+    assert!(reset);
+}
+
+#[test]
 fn module_registers_panels_shortcuts_and_commands() {
     let mut b = AppBuilder::new();
     b.add_module(bae_ui::UiModule)

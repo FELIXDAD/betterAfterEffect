@@ -149,8 +149,10 @@ impl GpuPreview {
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
-        if self.changes.changed(resources) {
-            self.anim.clear_compiled();
+        if self.changes.sync(stage, |event| match event {
+            Some(event) => bae_render::CompEvaluator::invalidate(&mut self.anim, event),
+            None => self.anim.clear_compiled(),
+        }) {
             self.last = None;
         }
         let mut rc = match self.anim.convert(stage, comp, 0) {
