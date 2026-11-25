@@ -6,6 +6,7 @@
 pub(crate) const ZH: &[(&str, &str)] = &[
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
     // (#136). The command crate stays UI-free; its titles are translated here.
+    ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
