@@ -7,7 +7,6 @@ DynamicUser=yes
 StateDirectory=bae-progress-web
 StateDirectoryMode=0700
 Environment=BAE_BOARD_CONFIG=/var/lib/bae-progress-web
-EnvironmentFile=-/etc/bae-progress-web/github.env
 WorkingDirectory=/opt/bae-progress-web
 ExecStart=/usr/bin/python3 /opt/bae-progress-web/server.py --host 127.0.0.1 --port 8787
 Restart=on-failure
