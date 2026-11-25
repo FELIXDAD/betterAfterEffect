@@ -7,6 +7,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // (#136). The command crate stays UI-free; its titles are translated here.
     ("Waveform Audio (WAV)", "波形音频（WAV）"),
     ("Stereo, 48 kHz, 24-bit PCM", "立体声，48 kHz，24 位 PCM"),
+    ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
