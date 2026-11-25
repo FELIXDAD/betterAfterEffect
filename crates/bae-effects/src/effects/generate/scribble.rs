@@ -145,7 +145,7 @@ pub(crate) fn scribble() -> Builtin {
         1,
         [1, 1000],
     );
-    Generator::Scribble.builtin(style(b, 26, "Composite", "合成", 2), "scribble", "涂抹")
+    Generator::Scribble.builtin(style(b, 26, "Composite", "合成", 2), "scribble", "涂写")
 }
 
 pub(super) fn options_zh(id: u32) -> Option<&'static [&'static str]> {

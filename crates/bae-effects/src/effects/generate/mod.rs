@@ -56,7 +56,7 @@ impl Generator {
             &[id, zh],
         );
         if matches!(self, Self::Scribble) {
-            effect.info.keywords.push("涂写".into());
+            effect.info.keywords.push("涂抹".into());
         }
         effect
     }
