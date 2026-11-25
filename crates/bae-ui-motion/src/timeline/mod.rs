@@ -242,7 +242,7 @@ struct TimelineLayers {
 #[derive(Default)]
 pub struct TimelinePanel {
     eval: EvalCache,
-    expanded: HashSet<String>,
+    pub(crate) expanded: HashSet<String>,
     /// 0 = whole comp, 1 = a few frames.
     zoom: f32,
     /// Start of the visible range when zoomed (comp time).
@@ -299,6 +299,9 @@ pub struct TimelinePanel {
     /// Where the last frame drew the layer bars, for tests.
     #[cfg(test)]
     pub(crate) last_bars: Vec<(PrimPath, Rect)>,
+    /// Group rows: id, twirl arrow, name.
+    #[cfg(test)]
+    pub(crate) last_groups: Vec<(String, Pos2, Pos2)>,
 }
 
 /// Comp time ↔ x in the graph.
@@ -669,6 +672,7 @@ impl Panel for TimelinePanel {
             self.last_expr.clear();
             self.last_lang.clear();
             self.last_bars.clear();
+            self.last_groups.clear();
         }
 
         let head = Rect::from_min_max(
@@ -732,6 +736,7 @@ impl Panel for TimelinePanel {
                 s.selected_keys.clear();
                 s.selected_layers.clear();
                 s.selected_props.clear();
+                s.selected_groups.clear();
             }
             // Right-click on empty space: AE 26's comp menu (New ▸, Composition
             // Settings, Preview ▸ …).
@@ -895,6 +900,7 @@ fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: 
         s.selected_layers = vec![layer.clone()];
         s.selected_keys.clear();
         s.selected_props.clear();
+        s.selected_groups.clear();
     }
 }
 
