@@ -160,7 +160,7 @@ fn particle(id: u32, t: f32, s: State, lifespan: f32) -> Sprite {
                 if s.birth >= frame.maps[i].x { texture_index = 2. + f32(i); }
             }
         } else if f(47) == 3. {
-            texture_index += round(age * 3.);
+            texture_index += round(clamp((t-s.birth) / max(.001,frame.maps[3].x), 0., 1.) * 3.);
         }
         result.brush = vec4f(crop, crop, style, texture_index);
     }

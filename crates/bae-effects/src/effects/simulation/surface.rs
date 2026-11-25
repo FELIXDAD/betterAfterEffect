@@ -34,8 +34,12 @@ pub(super) fn frame(
             input.rect.height() as f32,
         ],
     );
-    let times = if kind == Kind::World && scene.p.popup(47) == 1 {
-        super::texture_times(scene.p.p.time.as_seconds(), scene.p.f(5), true)
+    let times = if kind == Kind::World && scene.p.popup(47) != 2 {
+        super::texture_times(
+            scene.p.p.time.as_seconds(),
+            super::max_lifetime(scene.p, 5),
+            scene.p.popup(47) == 1,
+        )
     } else {
         [0.; 4]
     };
