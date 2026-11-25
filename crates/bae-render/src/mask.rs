@@ -75,10 +75,19 @@ pub const FEATHER_STEPS: usize = 16;
 /// Samples per path segment for the feather contours.
 const FEATHER_SAMPLES: usize = 24;
 
+/// A feather point as (path parameter, signed radius: outward positive).
+fn signed(f: &bae_model::FeatherPoint) -> (f64, f64) {
+    let r = f.radius.abs();
+    (
+        f64::from(f.segment) + f.t,
+        if f.inner || f.radius < 0.0 { -r } else { r },
+    )
+}
+
 /// Widest outward and inward variable-width feather radii (pixels).
 fn feather_reach(m: &RenderMask) -> (f64, f64) {
-    m.feather_points.iter().fold((0.0, 0.0), |(o, i), p| {
-        let r = f64::from(p[1]);
+    m.shape.feather.iter().fold((0.0, 0.0), |(o, i), f| {
+        let r = signed(f).1;
         (o.max(r), i.max(-r))
     })
 }
@@ -172,21 +181,19 @@ pub fn path_frame(path: &BezierPath, u: f64) -> Option<([f64; 2], [f64; 2])> {
 }
 
 /// Offsets of a closed path between its inner (`f` = 0) and outer (`f` = 1)
-/// variable-width feather boundaries, one polyline per fraction, layer pixels.
-pub fn feather_offsets(
-    path: &BezierPath,
-    points: &[[f32; 2]],
-    fractions: &[f64],
-) -> Vec<Vec<Point>> {
+/// variable-width feather boundaries (its `feather` points), one polyline per
+/// fraction, layer pixels.
+pub fn feather_offsets(path: &BezierPath, fractions: &[f64]) -> Vec<Vec<Point>> {
     let samples = path_samples(path);
-    if samples.is_empty() || points.is_empty() {
+    if samples.is_empty() || path.feather.is_empty() {
         return Vec::new();
     }
     let n = path.vertices.len() as f64;
     let mut outer: Vec<(f64, f64)> = Vec::new();
     let mut inner: Vec<(f64, f64)> = Vec::new();
-    for p in points {
-        let (u, r) = (f64::from(p[0]).rem_euclid(n), f64::from(p[1]));
+    for f in &path.feather {
+        let (u, r) = signed(f);
+        let u = u.rem_euclid(n);
         if r > 0.0 {
             outer.push((u, r));
         } else if r < 0.0 {
@@ -215,7 +222,7 @@ pub fn feather_contours(m: &RenderMask) -> Vec<Vec<Point>> {
     let fractions: Vec<f64> = (1..=FEATHER_STEPS)
         .map(|k| (k as f64 - 0.5) / FEATHER_STEPS as f64)
         .collect();
-    feather_offsets(&m.shape, &m.feather_points, &fractions)
+    feather_offsets(&m.shape, &fractions)
 }
 
 /// How a mask's expansion outline modifies its coverage.
@@ -730,14 +737,18 @@ mod tests {
             opacity: 1.0,
             feather: [0.0, 0.0],
             expansion: 0.0,
-            feather_points: Vec::new(),
         }
     }
 
     #[test]
     fn feather_points_make_nested_contours_out_to_their_radius() {
         let mut m = mask(MaskMode::Add, rect_path(0.0, 0.0, 100.0, 100.0));
-        m.feather_points = vec![[0.5, 20.0]];
+        m.shape.feather = vec![bae_model::FeatherPoint {
+            segment: 0,
+            t: 0.5,
+            radius: 20.0,
+            ..Default::default()
+        }];
         let contours = feather_contours(&m);
         assert_eq!(contours.len(), FEATHER_STEPS);
         // One outward point: a constant radius; the outermost contour sits just

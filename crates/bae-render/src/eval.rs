@@ -410,11 +410,6 @@ impl<'a> MockPass<'a> {
                     opacity: (float(&m, "opacity", local).unwrap_or(100.0) / 100.0) as f32,
                     feather: [feather.x as f32, feather.y as f32],
                     expansion: float(&m, "expansion", local).unwrap_or(0.0) as f32,
-                    feather_points: crate::input::feather_points(sample(
-                        &m,
-                        "feather_points",
-                        local,
-                    )),
                     path,
                 })
             })

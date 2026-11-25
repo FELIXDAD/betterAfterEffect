@@ -740,6 +740,7 @@ impl Panel for CompositionViewer {
             &resp,
             cx,
             &session,
+            &info,
             &comp,
             &view,
             effective,

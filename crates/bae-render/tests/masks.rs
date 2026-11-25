@@ -45,7 +45,6 @@ fn mask(mode: MaskMode, shape: BezierPath) -> RenderMask {
         opacity: 1.0,
         feather: [0.0, 0.0],
         expansion: 0.0,
-        feather_points: Vec::new(),
     }
 }
 

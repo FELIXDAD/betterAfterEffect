@@ -66,7 +66,6 @@ fn layer(i: usize, f: usize, seed: &[f64; 6]) -> RenderLayer {
             [feather, feather]
         },
         expansion: if i.is_multiple_of(3) { 8.0 } else { 0.0 },
-        feather_points: Vec::new(),
     };
     if m.inverted {
         m.opacity = 0.5;
@@ -81,7 +80,6 @@ fn layer(i: usize, f: usize, seed: &[f64; 6]) -> RenderLayer {
             opacity: 1.0,
             feather: [10.0, 10.0],
             expansion: 0.0,
-            feather_points: Vec::new(),
         });
     }
     l

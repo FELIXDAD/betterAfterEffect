@@ -279,7 +279,6 @@ fn rectangle_mask(layer: &PrimPath, name: &str, rect: [f64; 4]) -> RenderMask {
         opacity: 1.,
         feather: [0.; 2],
         expansion: 0.,
-        feather_points: Vec::new(),
     }
 }
 

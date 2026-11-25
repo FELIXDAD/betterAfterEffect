@@ -502,9 +502,6 @@ pub struct RenderMask {
     pub feather: [f32; 2],
     /// Expansion in pixels (negative contracts).
     pub expansion: f32,
-    /// Variable-width feather points (AE-CMP-043): path parameter (segment index
-    /// + t) and radius in pixels, outward positive.
-    pub feather_points: Vec<[f32; 2]>,
 }
 
 impl RenderMask {
@@ -516,22 +513,6 @@ impl RenderMask {
         self.opacity.to_bits().hash(h);
         self.feather.map(f32::to_bits).hash(h);
         self.expansion.to_bits().hash(h);
-        for p in &self.feather_points {
-            p.map(f32::to_bits).hash(h);
-        }
-    }
-}
-
-/// `feather_points` of a mask prim (flat pairs) as render feather points.
-pub fn feather_points(value: Option<bae_model::Value>) -> Vec<[f32; 2]> {
-    match value {
-        Some(bae_model::Value::FloatList(v)) => v
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| [c[0] as f32, c[1] as f32])
-            .collect(),
-        _ => Vec::new(),
     }
 }
 
