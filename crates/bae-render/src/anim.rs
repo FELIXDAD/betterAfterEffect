@@ -269,15 +269,23 @@ impl AnimEvaluator {
                 .effects
                 .iter()
                 .filter(|_| l.switches.effects)
-                .map(|e| RenderEffect {
-                    path: e.path.clone(),
-                    effect: e.match_name.clone(),
-                    enabled: e.enabled,
-                    params: e
+                .map(|e| {
+                    let mut params: Vec<(u32, bae_model::Value)> = e
                         .params
                         .iter()
                         .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
-                        .collect(),
+                        .collect();
+                    // The Paint effect's strokes visible at this frame.
+                    if e.match_name == crate::paint::PAINT_EFFECT {
+                        let strokes = crate::paint::strokes(&e.children, l.layer_time);
+                        params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
+                    }
+                    RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: e.enabled,
+                        params,
+                    }
                 })
                 .collect();
         }

@@ -53,6 +53,7 @@ pub mod light;
 pub mod mask;
 mod module;
 pub mod motion;
+pub mod paint;
 pub mod png_out;
 pub mod pool;
 mod renderer;
