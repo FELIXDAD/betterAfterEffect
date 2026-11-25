@@ -20,6 +20,59 @@ const COLOR: &[&str] = &[
 fn color_aliases_match_the_legacy_reference() {
     check_schemas(COLOR);
 }
+#[test]
+fn spatial_aliases_match_the_legacy_reference() {
+    check_schemas(&[
+        "ADBE Fast Blur",
+        "ADBE Geometry",
+        "ADBE Unsharp Mask",
+        "ADBE Set Matte2",
+        "ADBE PSL Solid Fill",
+        "ADBE Spill Suppressor",
+    ]);
+}
+
+#[test]
+fn fast_blur_maps_direction_and_edges_to_box_blur() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(8, 6);
+    let input = Pixels::new(rect, |x, y| {
+        [u8::from(x == 3) as f32, 0., u8::from(y == 3) as f32, 1.]
+    });
+    for repeat in [false, true] {
+        let legacy = vec![
+            (1, Value::Float(2.)),
+            (2, Value::Int(2)),
+            (3, Value::Bool(repeat)),
+        ];
+        let modern = vec![
+            (1, Value::Float(2.)),
+            (2, Value::Int(3)),
+            (3, Value::Int(2)),
+            (4, Value::Bool(repeat)),
+        ];
+        let a = run(
+            &gpu,
+            F32,
+            get("ADBE Fast Blur").unwrap(),
+            legacy,
+            &input,
+            rect,
+            1.,
+        );
+        let b = run(
+            &gpu,
+            F32,
+            get("ADBE Box Blur2").unwrap(),
+            modern,
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&a, &b, rect, 0.00001, "Fast Blur");
+    }
+}
+
 fn check_schemas(names: &[&str]) {
     let hidden: Json = serde_json::from_str(include_str!(
         "../../../docs/reference/ae/effects/obsolete-hidden.json"
