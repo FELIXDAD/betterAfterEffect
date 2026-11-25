@@ -32,6 +32,7 @@ pub(super) mod matte;
 pub(super) mod noise_grain;
 pub(super) mod perspective;
 pub(super) mod stylize;
+pub(super) mod text;
 pub(super) mod time;
 pub(super) mod transition;
 pub(super) mod utility;
@@ -62,6 +63,7 @@ impl Embedded {
             out.push(Builtin {
                 info,
                 implementation: Implementation::Declarative(fx),
+                alias: None,
             });
         }
         Ok(())
