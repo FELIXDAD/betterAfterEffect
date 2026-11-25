@@ -629,6 +629,12 @@ pub(crate) fn queue_control<'a>(
 
 /// Where the text `text` was painted in the last frame (first match, inside its
 /// clip rect). Finds rows the panels paint themselves (timeline layer names).
+/// The Timeline's name column header: "Source Name" (AE's default) or
+/// "Layer Name" (after clicking it).
+pub(crate) fn timeline_header(h: &Ui) -> Option<Rect> {
+    find_text(h, "Source Name").or_else(|| find_text(h, "Layer Name"))
+}
+
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }

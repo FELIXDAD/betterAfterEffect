@@ -51,7 +51,8 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
-        comp_layers: &[PrimPath],
+        layers: &super::TimelineLayers,
+        parent_items: &[&str],
         key_rects: &mut Vec<(Rect, KeyRef)>,
     ) {
         let stage = cx.stage;
@@ -141,7 +142,7 @@ impl TimelinePanel {
                     );
                 }
                 if cols.visible(Column::Index) {
-                    let index = self.layer_numbers[layer];
+                    let index = layers.numbers[layer];
                     p.text(
                         pos2(l + cols.x(Column::Index) + 4.0, cy),
                         Align2::LEFT_CENTER,
@@ -333,7 +334,7 @@ impl TimelinePanel {
                         cols,
                         rect,
                         layer,
-                        comp_layers,
+                        &layers.paths,
                         layer_selected,
                         &layer_ctx,
                         base,
@@ -365,17 +366,10 @@ impl TimelinePanel {
                     let parent = stage
                         .prim(layer)
                         .and_then(|v| v.value("parent").and_then(|v| v.as_prim_ref()).cloned());
-                    let mut names: Vec<String> = vec![tr("None").to_owned()];
-                    names.extend(
-                        comp_layers.iter().enumerate().map(|(i, p)| {
-                            format!("{}. {}", i + 1, query::display_name_of(stage, p))
-                        }),
-                    );
-                    let items: Vec<&str> = names.iter().map(String::as_str).collect();
                     let mut sel = parent
                         .as_ref()
-                        .and_then(|p| comp_layers.iter().position(|x| x == p))
-                        .map_or(0, |i| i + 1);
+                        .and_then(|p| layers.numbers.get(p).copied())
+                        .unwrap_or(0);
                     let before = sel;
                     let drop_rect = Rect::from_min_max(
                         pos2(whip.right() + 4.0, rect.top() + 1.0),
@@ -386,21 +380,21 @@ impl TimelinePanel {
                             .max_rect(drop_rect)
                             .id_salt(rid("parent")),
                     );
-                    let current = items.get(sel).map(|s| s.to_string()).unwrap_or_default();
+                    let current = parent_items[sel];
                     widgets::dropdown(
                         &mut child,
                         rid("parent_dd"),
                         &mut sel,
-                        &items,
+                        parent_items,
                         drop_rect.width(),
                     )
                     .labeled_value(
                         egui::WidgetType::ComboBox,
                         &bae_ui::a11y::context(&[&layer_ctx, tr("Parent & Link")]),
-                        &current,
+                        current,
                     );
                     if sel != before {
-                        let parent = (sel > 0).then(|| comp_layers[sel - 1].clone());
+                        let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
                         if parent.as_ref() != Some(layer) {
                             cx.invoke_with(
                                 "layer.set_parent",

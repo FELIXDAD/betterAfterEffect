@@ -18,6 +18,7 @@ ae_match_names = ["VISINF Grain Implant"]
 keywords = ["film", "grain", "stock"]
 flags = ["non-param-vary"]
 shader = "shaders/add_grain.wgsl"
+includes = ["shaders/field.wgsl"]
 
 [effect.roi]
 read = "params.blur_matte + 1"
