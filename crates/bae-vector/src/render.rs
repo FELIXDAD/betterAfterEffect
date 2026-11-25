@@ -396,6 +396,9 @@ impl VelloRenderer {
             (_, None) => {}
         }
         BUILT.notify_all();
+        drop(shared);
+        // Frames drawn while it was building are incomplete: draw them again.
+        bae_gpu::warm_up::request_redraw();
         built
     }
 

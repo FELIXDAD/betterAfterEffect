@@ -453,13 +453,17 @@ impl Shell {
                 .get_registry::<dyn bae_gpu::WarmUp>()
                 .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
                 .unwrap_or_default();
-            let proxy = self.proxy.clone();
-            bae_gpu::warm_up::spawn(gpu.clone(), tasks, move || {
-                // Frames skipped while warming up are drawn now.
-                let _ = proxy.send_event(UserEvent::Repaint {
-                    delay: Duration::ZERO,
-                });
+            // Frames drawn without something still warming up are incomplete
+            // (not remembered by the viewers): repaint when work finishes.
+            let proxy = std::sync::Mutex::new(self.proxy.clone());
+            bae_gpu::warm_up::set_redraw(move || {
+                if let Ok(proxy) = proxy.lock() {
+                    let _ = proxy.send_event(UserEvent::Repaint {
+                        delay: Duration::ZERO,
+                    });
+                }
             });
+            bae_gpu::warm_up::spawn(gpu.clone(), tasks);
         }
 
         let egui_ctx = egui::Context::default();

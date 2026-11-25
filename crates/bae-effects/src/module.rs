@@ -27,8 +27,10 @@ use crate::catalog::EffectInfo;
 #[derive(Debug, Default)]
 pub struct EffectsModule;
 
-/// Compiles the built-in effects' pipelines for the default working format
-/// during the app's warm-up, before the first effect is applied.
+/// Compiles the built-in effects' pipelines during the app's warm-up, before
+/// the first effect is applied: RGBA16F (the default working format), then
+/// RGBA32F where the GPU supports 32 bpc. Anything the UI needs earlier is
+/// compiled on demand in the background (`gpu::Runtime::kernel`).
 struct WarmUp;
 
 impl bae_gpu::WarmUp for WarmUp {
@@ -41,8 +43,17 @@ impl bae_gpu::WarmUp for WarmUp {
     }
 
     fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
-        crate::prewarm(gpu, bae_render::WorkFormat::default().texture_format())
-            .map_err(|e| e.to_string())
+        crate::prewarm(gpu, bae_render::WorkFormat::Rgba16Float.texture_format())
+            .map_err(|e| e.to_string())?;
+        // 32 bpc projects work in RGBA32F when the GPU can filter and blend
+        // it (`Renderer::work_format` falls back to RGBA16F otherwise).
+        let float32 = bae_gpu::wgpu::Features::FLOAT32_FILTERABLE
+            | bae_gpu::wgpu::Features::FLOAT32_BLENDABLE;
+        if gpu.device().features().contains(float32) {
+            crate::prewarm(gpu, bae_render::WorkFormat::Rgba32Float.texture_format())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 }
 

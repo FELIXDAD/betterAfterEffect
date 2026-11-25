@@ -208,7 +208,9 @@ impl GpuPreview {
                 tracing_warn(&format!("preview: {e}"));
                 return None;
             }
-            self.last = Some(key);
+            // A frame missing something that is still warming up is shown but
+            // not remembered: it is rendered again on the next repaint.
+            self.last = (!frame.incomplete).then_some(key);
             self.rect = Some(frame.image.rect);
             self.texture = Some(texture);
             self.sampled = None;

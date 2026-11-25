@@ -101,6 +101,8 @@ pub struct RenderGraph {
     /// An effect reads another time of the comp: the frame depends on more than
     /// its own evaluated comp (not frame-cached).
     pub time_dependent: bool,
+    /// A layer source was still warming up and is missing (not frame-cached).
+    pub incomplete: bool,
 }
 
 impl RenderGraph {
@@ -498,6 +500,7 @@ pub fn build_with(
         frames,
         resolving: Vec::new(),
         time_dependent: false,
+        incomplete: false,
     };
     let output = builder.composite(comp, rect, scale, 0, false)?;
     Ok(RenderGraph {
@@ -506,6 +509,7 @@ pub fn build_with(
         output,
         warnings: builder.warnings,
         time_dependent: builder.time_dependent,
+        incomplete: builder.incomplete,
     })
 }
 
@@ -537,6 +541,7 @@ struct Builder<'a, 'f> {
     /// Layers whose effects are being planned (cycle detection of layer inputs).
     resolving: Vec<PrimPath>,
     time_dependent: bool,
+    incomplete: bool,
 }
 
 /// The content of a layer, planned: its bounds (in layer texel units) and how
@@ -1713,6 +1718,11 @@ impl Builder<'_, '_> {
             }
             LayerContent::Custom(custom) => match self.sources.custom(custom) {
                 Ok(source) => Some(Content::Source(source, time)),
+                // Drawn again when it is ready (the frame is not kept).
+                Err(error) if error.is_warming_up() => {
+                    self.incomplete = true;
+                    None
+                }
                 Err(error) => {
                     self.warn(format!("{}: {error}", layer.path));
                     None
