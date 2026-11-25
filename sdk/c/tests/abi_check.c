@@ -54,16 +54,16 @@
 /* BAE_ABI_VERSION_MAJOR/MINOR are plain literals, so plugins can gate code on
    them with #if. (BAE_ABI_VERSION / BAE_MAKE_VERSION contain casts and are
    not usable in #if.) */
-#if BAE_ABI_VERSION_MAJOR != 0u || BAE_ABI_VERSION_MINOR < 1u
-#error "abi_check.c was written for ABI 0.1"
+#if BAE_ABI_VERSION_MAJOR != 1u
+#error "abi_check.c was written for ABI 1.x"
 #endif
 
 IS_TYPE(BAE_ABI_VERSION, uint32_t);
 IS_TYPE(BAE_MAKE_VERSION(1, 2), uint32_t);
 IS_TYPE(BAE_VERSION_MAJOR(0u), uint32_t);
 IS_TYPE(BAE_VERSION_MINOR(0u), uint32_t);
-EQ(BAE_ABI_VERSION, 0x00000001u);
-EQ(BAE_MAKE_VERSION(0, 1), BAE_ABI_VERSION);
+EQ(BAE_ABI_VERSION, 0x00010000u);
+EQ(BAE_MAKE_VERSION(1, 0), BAE_ABI_VERSION);
 EQ(BAE_MAKE_VERSION(1, 0), 0x00010000u);
 EQ(BAE_MAKE_VERSION(1, 2), 0x00010002u);
 EQ(BAE_MAKE_VERSION(0xFFFF, 0xFFFF), 0xFFFFFFFFu);

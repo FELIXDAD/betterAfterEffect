@@ -75,3 +75,8 @@ relate_crates = false
 
 [board]
 title = "BAE 进度看板"
+
+[notify]
+# false: no message to the leader for each successful merge (the board lists them). CI
+# failures, conflicts and a red dev are still reported.
+merged = false

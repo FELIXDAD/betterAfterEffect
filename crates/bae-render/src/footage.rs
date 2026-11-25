@@ -28,7 +28,11 @@ mod imp {
             Self
         }
 
-        pub fn get(&self, path: &Path) -> Result<Arc<dyn LayerSource>, String> {
+        pub fn get(
+            &self,
+            path: &Path,
+            _sequence: Option<bae_model::FrameRate>,
+        ) -> Result<Arc<dyn LayerSource>, String> {
             Err(format!(
                 "footage {}: bae-render was built without the `media` feature",
                 path.display()
@@ -47,8 +51,9 @@ mod imp {
     use bae_gpu::GpuContext;
     use bae_media::{
         AlphaMode, FrameCache, FrameRequest, MediaFormats, MediaGpu, MediaLibrary, OpenOptions,
+        SequenceMode,
     };
-    use bae_model::Time;
+    use bae_model::{FrameRate, Time};
     use rustc_hash::FxHashMap;
 
     use crate::error::RenderError;
@@ -66,6 +71,7 @@ mod imp {
         open: OpenOptions,
         request: FrameRequest,
         size: [u32; 2],
+        rate: Option<FrameRate>,
     }
 
     impl std::fmt::Debug for FootageSource {
@@ -78,13 +84,21 @@ mod imp {
     }
 
     impl FootageSource {
-        /// Opens `path` through `library`.
+        /// Opens `path` through `library`: alone, or (`sequence`) as the image
+        /// sequence it starts at that frame rate.
         pub fn open(
             library: Arc<MediaLibrary>,
             gpu: Arc<MediaGpu>,
             path: &Path,
+            sequence: Option<FrameRate>,
         ) -> Result<Self, RenderError> {
-            let open = OpenOptions::default();
+            let open = match sequence {
+                Some(rate) => OpenOptions {
+                    sequence: SequenceMode::Sequence,
+                    sequence_frame_rate: rate,
+                },
+                None => OpenOptions::default(),
+            };
             let info = library
                 .info(path, &open)
                 .map_err(|e| RenderError::Footage {
@@ -97,6 +111,9 @@ mod imp {
             })?;
             Ok(Self {
                 size: [video.width, video.height],
+                rate: video
+                    .frame_rate
+                    .filter(|_| info.kind != bae_media::MediaKind::Still),
                 library,
                 gpu,
                 path: path.to_path_buf(),
@@ -115,6 +132,10 @@ mod imp {
             self.library
                 .content_hash(&self.path, &self.open, &self.request, time)
                 .unwrap_or(0)
+        }
+
+        fn frame_rate(&self) -> Option<FrameRate> {
+            self.rate
         }
 
         fn render(
@@ -148,7 +169,7 @@ mod imp {
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
-        sources: FxHashMap<PathBuf, Result<Arc<FootageSource>, String>>,
+        sources: FxHashMap<(PathBuf, Option<FrameRate>), Result<Arc<FootageSource>, String>>,
     }
 
     impl FootageCache {
@@ -172,20 +193,25 @@ mod imp {
 
         /// The source for `path` (opened once; failures are remembered and
         /// reported as warnings by the caller).
-        pub fn get(&mut self, path: &Path) -> Result<Arc<dyn LayerSource>, String> {
-            if let Some(entry) = self.sources.get(path) {
+        pub fn get(
+            &mut self,
+            path: &Path,
+            sequence: Option<FrameRate>,
+        ) -> Result<Arc<dyn LayerSource>, String> {
+            let key = (path.to_path_buf(), sequence);
+            if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
             }
-            let entry = FootageSource::open(self.library.clone(), self.gpu.clone(), path)
+            let entry = FootageSource::open(self.library.clone(), self.gpu.clone(), path, sequence)
                 .map(Arc::new)
                 .map_err(|e| e.to_string());
-            self.sources.insert(path.to_path_buf(), entry.clone());
+            self.sources.insert(key, entry.clone());
             entry.map(|s| s as Arc<dyn LayerSource>)
         }
 
         /// Forgets open files (they changed on disk or were relinked).
         pub fn clear(&mut self) {
-            for path in self.sources.keys() {
+            for (path, _) in self.sources.keys() {
                 self.library.invalidate(path);
             }
             self.sources.clear();
