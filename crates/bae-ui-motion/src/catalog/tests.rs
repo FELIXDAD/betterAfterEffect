@@ -1070,7 +1070,8 @@ fn menu_items_use_ae_chinese_labels() {
     for top in json["menus"].as_array().unwrap() {
         collect(top, &mut labels);
     }
-    let zh: BTreeMap<&str, &str> = crate::i18n::ZH
+    let all = crate::i18n::all();
+    let zh: BTreeMap<&str, &str> = all
         .iter()
         .chain(crate::tools::ZH)
         .chain(MENU_ZH)
