@@ -78,7 +78,7 @@ pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{
     CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
-    RenderMask, TrackMatte,
+    RenderMask, TrackMatte, feather_points,
 };
 pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;

@@ -252,6 +252,11 @@ impl AnimEvaluator {
                     opacity: m.opacity.clamp(0.0, 1.0) as f32,
                     feather: m.feather.map(|v| v as f32),
                     expansion: m.expansion as f32,
+                    feather_points: crate::input::feather_points(
+                        stage
+                            .prim(&m.path)
+                            .and_then(|v| v.attr("feather_points").and_then(|s| s.value.clone())),
+                    ),
                 })
                 .collect();
             // The fx switch turns the whole effect stack off.

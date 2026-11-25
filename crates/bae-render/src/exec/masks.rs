@@ -181,6 +181,8 @@ pub(super) fn encode(
             xmax: r.xmax + ox,
             chan: u32::from(e.stroke),
             size,
+            weight: e.weight,
+            _pad: 0.0,
         }));
         if !r.edges.is_empty() {
             edge_draws[place.page].push(Draw {

@@ -604,6 +604,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             ),
             boolean("inverted", false),
             vec2("feather", [0.0, 0.0]),
+            AttrDef::new("feather_points", ValueType::FloatList, DefaultValue::None, false)
+                .doc("Variable-width feather points (Mask Feather tool), flat pairs: path parameter (segment index + t), radius in pixels (outward positive, inward negative)."),
             float("opacity", 100.0),
             float("expansion", 0.0),
             color("color", [1.0, 1.0, 0.0, 1.0]).fixed(),

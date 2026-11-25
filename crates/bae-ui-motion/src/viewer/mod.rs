@@ -24,6 +24,7 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 pub(crate) mod errors;
+mod feather_tool;
 mod free_transform;
 mod menu;
 mod motion_path;
@@ -74,6 +75,7 @@ pub struct CompositionViewer {
     shape: Option<shape_tool::ShapeDrag>,
     /// Pen tools: the open path being drawn, a Convert Vertex drag.
     pen: pen_tool::PenState,
+    feather: feather_tool::FeatherState,
     /// Selection, Rotation and Pan Behind tools: transform drags, marquee,
     /// selected mask vertices.
     select: select_tool::SelectState,
@@ -727,6 +729,17 @@ impl Panel for CompositionViewer {
             cx,
             &session,
             &info,
+            &comp,
+            &view,
+            effective,
+            &painter,
+        );
+        feather_tool::frame(
+            &mut self.feather,
+            ui,
+            &resp,
+            cx,
+            &session,
             &comp,
             &view,
             effective,

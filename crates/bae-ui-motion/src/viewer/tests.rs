@@ -1696,3 +1696,39 @@ fn resolution_recurse_sets_nested_comps_and_ae_shortcuts_are_bound() {
         .expect("Half bound");
     assert_eq!(half.chord.to_string(), "Cmd+Shift+J");
 }
+
+#[test]
+fn mask_feather_tool_adds_drags_and_deletes_feather_points() {
+    let mut h = H::new();
+    let solid = h.layer("solid");
+    h.run(
+        "mask.create",
+        json!({"layer": solid, "kind": "rect", "position": [200.0, 150.0], "size": [200.0, 100.0]}),
+    );
+    let mask = h.children(&solid.child("masks").unwrap())[0].clone();
+    h.select(&[&solid]);
+    h.tools().lock().set(Tool::MaskFeather);
+    let points = |h: &H| match h.value(&mask, "feather_points") {
+        Some(Value::FloatList(v)) => v,
+        _ => Vec::new(),
+    };
+    // Press on the top edge (segment 3 → 0) and drag 20 px out.
+    let r = h.click_drag((200.0, 100.0), (0.0, -20.0), Modifiers::NONE);
+    h.apply(&r);
+    let p = points(&h);
+    assert_eq!(p.len(), 2, "{p:?}");
+    assert!(
+        (p[0] - 3.5).abs() < 0.05 && (p[1] - 20.0).abs() < 1.0,
+        "{p:?}"
+    );
+    // Drag the point 10 px further.
+    let r = h.click_drag((200.0, 80.0), (0.0, -10.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!((points(&h)[1] - 30.0).abs() < 1.0, "{:?}", points(&h));
+    // Alt+click deletes it; undo brings it back.
+    let r = h.click(200.0, 70.0, Modifiers::ALT);
+    h.apply(&r);
+    assert!(points(&h).is_empty());
+    h.stage.undo(&h.author).unwrap();
+    assert_eq!(points(&h).len(), 2);
+}
