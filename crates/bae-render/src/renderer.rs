@@ -108,11 +108,16 @@ pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARA
 /// Exact-sized display output. Keep the view with the texture so repeated
 /// presentations never sample the padding of a working texture.
 pub struct OutputTarget {
-    pub texture: wgpu::Texture,
-    pub view: wgpu::TextureView,
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
 }
 
 impl OutputTarget {
+    /// The persistent sampled view used by the viewer registration.
+    pub fn view(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+
     pub fn size(&self) -> [u32; 2] {
         [self.texture.width(), self.texture.height()]
     }

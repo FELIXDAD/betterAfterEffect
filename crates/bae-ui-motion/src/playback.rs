@@ -281,7 +281,15 @@ impl PlaybackPreview {
                 repaint: repaint.clone(),
             });
         }
-        let d = state.demand.as_mut().unwrap();
+        let Mailbox {
+            demand,
+            queued,
+            ready,
+            failed,
+            epoch,
+            ..
+        } = &mut *state;
+        let d = demand.as_mut().unwrap();
         let discontinuity = d.times.first().is_some_and(|old| time < *old)
             || d.range != range
             || d.looping != looping
@@ -307,16 +315,16 @@ impl PlaybackPreview {
                 d.times.push(t);
                 frame += 1;
             }
-            let times = d.times.clone();
+            let times = &d.times;
             if discontinuity {
                 // Jobs already encoded can finish, but cannot publish into the
                 // new epoch. Completed frames inside the new horizon are reusable.
-                state.epoch += 1;
-                state.queued.clear();
-                state.ready.retain(|slot| times.contains(&slot.time));
+                *epoch += 1;
+                queued.clear();
+                ready.retain(|slot| times.contains(&slot.time));
                 self.shown = None;
             }
-            state.failed.retain(|t| times.contains(t));
+            failed.retain(|t| times.contains(t));
             self.shared.changed.notify_one();
         }
         if let Some(slot) = state
@@ -367,6 +375,12 @@ fn time_arithmetic(source: &str) -> bool {
     })
 }
 
+struct CompletedFrame {
+    slot: Arc<Slot>,
+    deps: Option<Vec<Dependency>>,
+    dynamic: bool,
+}
+
 struct Producer {
     available: FreeTargets,
     stage: Stage,
@@ -409,7 +423,7 @@ impl Producer {
         time: Time,
         registry: &Arc<ViewportTextureRegistry>,
         budget: u64,
-    ) -> Result<(Arc<Slot>, Option<Vec<Dependency>>, bool), String> {
+    ) -> Result<CompletedFrame, String> {
         let comp = self
             .eval
             .evaluate_comp(&self.stage, &self.scene.key.path, time)
@@ -425,7 +439,7 @@ impl Producer {
             .render(&self.stage, &rc, self.scene.key.resolution, available)
             .map_err(|e| e.to_string())?;
         let size = target.size();
-        let view = target.view.clone();
+        let view = target.view().clone();
         let slot = Arc::new(Slot {
             available: self.available.clone(),
             target: Some(target),
@@ -446,17 +460,17 @@ impl Producer {
             )
             .map_err(|e| e.to_string())?;
         let deps = (slot.bytes <= budget).then(|| rc.dependencies());
-        Ok((
+        Ok(CompletedFrame {
             slot,
             deps,
-            self.dynamic
+            dynamic: self.dynamic
                 || temporal
                 || rc.motion_blur.is_some()
                 || rc
                     .layers
                     .iter()
                     .any(|l| matches!(l.content, bae_render::LayerContent::Comp(_))),
-        ))
+        })
     }
 }
 
@@ -503,7 +517,11 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
             producer.as_mut().unwrap().render(time, &registry, budget)
         })();
         match result {
-            Ok((slot, deps, dynamic)) => {
+            Ok(CompletedFrame {
+                slot,
+                deps,
+                dynamic,
+            }) => {
                 let shared = shared.clone();
                 gpu.queue().on_submitted_work_done(move || {
                     let mut state = shared.state.lock().unwrap();

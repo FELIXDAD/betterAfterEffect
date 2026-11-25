@@ -215,7 +215,7 @@ impl GpuPreview {
                 self.registry
                     .publish_view(
                         self.id,
-                        target.view.clone(),
+                        target.view().clone(),
                         target.size(),
                         wgpu::TextureFormat::Rgba8Unorm,
                         wgpu::FilterMode::Linear,
