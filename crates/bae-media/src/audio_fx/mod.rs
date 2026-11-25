@@ -12,7 +12,13 @@ struct Definition {
     reverse: bool,
     create: fn() -> Box<dyn Processor>,
 }
-const DEFINITIONS: &[Definition] = &[];
+mod reverse;
+const DEFINITIONS: &[Definition] = &[Definition {
+    name: "ADBE Aud Reverse",
+    defaults: &[0.0],
+    reverse: true,
+    create: || Box::new(reverse::Main),
+}];
 
 fn number(value: &Value) -> Option<f64> {
     value
