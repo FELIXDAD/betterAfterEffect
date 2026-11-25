@@ -113,7 +113,7 @@ impl TargetEffect for MatteChoker {
     ) -> Result<GpuImage, RenderError> {
         let (stages, iterations) = self.stages(p);
         let read = self.input_roi(p, roi).intersect(&input.rect);
-        if read.is_empty() || stages.iter().all(|s| s[0] == 0. && s[2] == 1.) {
+        if read.is_empty() || stages == [[0., 0., 1.]; 2] {
             return Ok(input.clone());
         }
         let input = common::premultiplied(target, input)?;
@@ -124,7 +124,7 @@ impl TargetEffect for MatteChoker {
         let mut current = &input;
         for _ in 0..iterations {
             for [radius, choke, softness] in stages {
-                if radius == 0. && softness == 1. {
+                if [radius, choke, softness] == [0., 0., 1.] {
                     continue;
                 }
                 dispatch_to(

@@ -1136,6 +1136,8 @@ def head_conflict(head_files, files):
     shared = sorted(f for f in head_files & files if keep(f))
     if shared:
         return ", ".join(shared[:5])
+    if not CFG["merge"].get("relate_crates", True):
+        return ""
     rel = crate_relation(head_files, files)
     return ("crate " + rel) if rel else ""
 

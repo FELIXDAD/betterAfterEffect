@@ -50,13 +50,10 @@ fn layer(p: Params<'_>, input: IRect) -> (DVec2, DVec2) {
 }
 
 fn point(p: Params<'_>, id: u32, origin: DVec2, size: DVec2) -> DVec2 {
-    if let Some(Value::Vec2(v)) = p.p.value(id) {
-        return DVec2::from_array(*v) * p.p.scale;
-    }
-    let Some(Value::Vec2(v)) = p.value(id) else {
-        return origin;
-    };
-    origin + size * DVec2::from_array(*v) / DVec2::new(640., 360.)
+    p.def
+        .param(id)
+        .and_then(|param| p.render_point(param, origin.to_array(), size.to_array()))
+        .map_or(origin, DVec2::from_array)
 }
 
 fn square_to_quad([a, b, c, d]: [DVec2; 4]) -> DMat3 {
