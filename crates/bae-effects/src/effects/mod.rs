@@ -15,6 +15,7 @@ pub use blur::{BoxBlur, GaussianBlur};
 pub(crate) mod color;
 pub(crate) mod compound;
 pub mod distort;
+pub mod liquify;
 pub mod spatial;
 pub(crate) mod temporal;
 
