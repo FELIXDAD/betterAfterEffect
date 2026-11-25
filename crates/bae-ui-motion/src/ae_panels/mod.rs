@@ -10,6 +10,13 @@ pub mod paragraph;
 use bae_ui::PanelKind;
 
 /// The panels, by id, replacing the shell's placeholders.
+/// Registers the panels (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    for (id, kind) in panels() {
+        crate::register_panel(app, id, kind);
+    }
+}
+
 pub(crate) fn panels() -> Vec<(&'static str, PanelKind)> {
     vec![
         (
