@@ -1276,7 +1276,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             && let Some(pad) = numpad::key(code, &key.logical_key)
         {
             // egui-winit sends no event for numpad `*`: the modifiers held now.
-            let modifiers = view.egui_ctx.input(|i| i.modifiers);
+            let modifiers = numpad::current_modifiers(
+                &view.egui_state.egui_input().events,
+                view.egui_ctx.input(|i| i.modifiers),
+            );
             numpad::rewrite(
                 &mut view.egui_state.egui_input_mut().events,
                 before,
