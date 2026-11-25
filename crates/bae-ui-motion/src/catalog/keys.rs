@@ -553,7 +553,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "SwitchToLast3DView", "Esc", "motion.view.switch_to_last_3d_view", "", A, Later, 0),
     k("CSwitchboard", "SwitchToWorkspaceA", "Shift+F10", "workspace.switch", r#"{"id":"motion"}"#, B, Done, 0),
     k("CSwitchboard", "SwitchToWorkspaceB", "Shift+F11", "workspace.switch", r#"{"id":"review"}"#, B, Done, 0),
-    k("CSwitchboard", "SwitchToWorkspaceC", "Shift+F12", "workspace.switch", r#"{"id":"ae_learn"}"#, B, Todo, 0),
+    k("CSwitchboard", "SwitchToWorkspaceC", "Shift+F12", "workspace.switch", r#"{"id":"ae_learn"}"#, B, Done, 0),
     k("CSwitchboard", "ToggleCastsShadows", "Alt+Shift+C", "motion.layer.casts_shadows", "", B, Later, 0),
     k("CSwitchboard", "ToggleEffectControls", "F3|Ctrl+Shift+T", "window.panel", r#"{"id":"effect_controls","toggle":true}"#, B, Done, 0),
     k("CSwitchboard", "ToggleExpression", "Alt+Shift+=", "motion.anim.add_expression", "", C, Todo, 0),
