@@ -146,10 +146,9 @@ fn parse_errors_have_locations() {
 #[test]
 fn validation_errors() {
     assert_error(&HEADER.replace("com.example.t", "Example"), "plugin id");
-    assert_error(
-        &HEADER.replace("\"0.1\"", "\"1.0\""),
-        "not supported by this host",
-    );
+    assert_error(&HEADER.replace("\"0.1\"", "\"1.1\""), "update BAE");
+    assert_error(&HEADER.replace("\"0.1\"", "\"0.2\""), "no longer supports");
+    assert!(PluginManifest::parse(&HEADER.replace("\"0.1\"", "\"1.0\"")).is_ok());
     assert_error(
         &effect_with("").replace("\"fx\"", "\"Fx\""),
         "must start with a lowercase",
@@ -227,6 +226,20 @@ fn validation_errors() {
         &format!("{HEADER}[[automation]]\nid = \"a\"\nname = \"A\"\nentry = \"run\"\n"),
         "[script] table",
     );
+}
+
+#[test]
+fn wgsl_arbitrary_parameters_must_be_ui_only() {
+    let histogram = r#"
+[[effect.param]]
+id = 2
+key = "histogram"
+type = "arbitrary"
+name = "Histogram"
+"#;
+    assert_error(&effect_with(histogram), "only available to native effects");
+    let declared = effect_with(&format!("{histogram}flags = [\"ui-only\"]"));
+    assert!(errors(&declared).is_empty());
 }
 
 #[test]
