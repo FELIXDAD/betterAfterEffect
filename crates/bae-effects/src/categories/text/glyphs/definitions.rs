@@ -72,6 +72,7 @@ pub(crate) fn timecode() -> Builtin {
             "percent",
         )
         .checkbox(15, "Composite On Original", "在原始图像上合成", true)
+        .reference_points()
         .build();
     let mut fx = rust_builtin(
         (
@@ -202,6 +203,7 @@ pub(crate) fn numbers() -> Builtin {
         )
         .checkbox(13, "Proportional Spacing", "比例间距", false)
         .checkbox(14, "Composite On Original", "在原始图像上合成", true)
+        .reference_points()
         .build();
     let mut fx = rust_builtin(
         (
