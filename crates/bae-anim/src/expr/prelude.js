@@ -24,7 +24,10 @@ var __now = 0;
 // Property objects stand for their value in arithmetic and library calls (AE).
 function __val(a) {
   if (a === undefined) throw new Error("Undefined value used in expression (could be an out of range array subscript?)");
-  return a instanceof Property ? a.value : a;
+  if (a instanceof Property) return a.value;
+  // `text.sourceText` (a String carrying the property's methods) is its text.
+  if (a instanceof String) return a.valueOf();
+  return a;
 }
 function __isArr(a) { return Array.isArray(a); }
 function __isNum(a) { return typeof a === "number" || typeof a === "boolean"; }
@@ -328,7 +331,10 @@ function __call(fn, c, l, prim, attr, t, seed) {
   __env_c = c;
   __resetRandom(seed);
   try {
-    return __val(fn(c, l, prim, attr, t));
+    var r = fn(c, l, prim, attr, t);
+    // A Source Text expression may end with a text style (AE 17.0+).
+    if (r instanceof TextStyle) return { __style: true, changes: r.__c };
+    return __val(r);
   } finally {
     __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __timeless = saveTl;
   }
@@ -340,7 +346,7 @@ function __prop(c, l, p, a) { return new Property(c, l, p, a); }
 // Time grid of AE's valueAtTime: 1/1024 of a frame (measured in AE 26 at 30 fps).
 function __tick() { return __h.compInfo(__env_c).frameDuration / 1024; }
 function __q(t) { var k = __tick(); return Math.round(t / k) * k; }
-function __unwrap(r) { return r.length === 1 ? r[0] : r; }
+function __unwrap(r) { return typeof r === "string" || r.length !== 1 ? r : r[0]; }
 Property.prototype = {
   get value() { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, __now, false)); },
   valueAtTime: function (t) { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, t, false)); },
@@ -464,15 +470,195 @@ Property.prototype = {
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
   get propertyIndex() { return 1; },
 };
+// ---- property names and groups (AE: thisProperty.name, propertyGroup(n)) ----
+Property.prototype.__chain = function () {
+  if (!this.__ch) this.__ch = __h.propertyChain(this.__c, this.__l, this.__p, this.__a);
+  return this.__ch;
+};
+Object.defineProperty(Property.prototype, "name", { get: function () { return this.__chain().name; } });
+Object.defineProperty(Property.prototype, "active", { get: function () { return true; } });
+Object.defineProperty(Property.prototype, "enabled", { get: function () { return true; } });
+Property.prototype.propertyGroup = function (countUp) {
+  var n = countUp === undefined ? 1 : countUp;
+  var g = this.__chain().groups[n - 1];
+  if (!g) throw new Error("Property group " + n + " is out of range");
+  var c = this.__c, l = this.__l, layer = new Layer(c, l);
+  switch (g.kind) {
+    case "layer": return layer;
+    case "transform": var t = layer.transform; t.name = g.name; return t;
+    case "mask": var m = layer.mask(g.name); m.name = g.name; return m;
+    case "effect": var e = layer.effect(g.name); if (!e.name) e.name = g.name; return e;
+    case "cameraOption": return layer.cameraOption;
+    case "lightOption": return layer.lightOption;
+    case "materialOption": return layer.materialOption;
+    case "shape":
+      if (typeof __ShapeItem === "function") {
+        return new __ShapeItem(c, l, { path: g.path, type: g.type, op: g.op, name: g.name });
+      }
+      return { name: g.name };
+    default: return { name: g.name };
+  }
+};
+
+// ---- shape layer contents (AE: content("Shape 1").content("Path 1").path) ----
+function __content(c, l, parent, which) {
+  var info = __h.content(c, l, parent, which);
+  if (info === null || info === undefined) {
+    throw new Error("Property " + JSON.stringify(which) + " is missing or does not exist");
+  }
+  return new __ShapeItem(c, l, info);
+}
+function __ShapeItem(c, l, info) {
+  this.__c = c; this.__l = l; this.__p = info.path; this.__t = info.type; this.__o = info.op;
+  this.name = info.name;
+}
+__ShapeItem.prototype = {
+  content: function (which) { return __content(this.__c, this.__l, this.__p, which); },
+  get transform() {
+    if (this.__t !== "ShapeGroup") return undefined;
+    var c = this.__c, l = this.__l, p = this.__p;
+    var t = {};
+    [["anchorPoint", "anchor_point"], ["position", "position"], ["scale", "scale"], ["skew", "skew"],
+     ["skewAxis", "skew_axis"], ["rotation", "rotation"], ["opacity", "opacity"]].forEach(function (n) {
+      Object.defineProperty(t, n[0], { get: function () { return __prop(c, l, p, "transform:" + n[1]); } });
+    });
+    return t;
+  },
+};
+// AE's property names by item type (and by operator).
+var __SHAPE_PROPS = {
+  Rect: { size: "size", position: "position", roundness: "roundness" },
+  Ellipse: { size: "size", position: "position" },
+  Star: { points: "points", position: "position", rotation: "rotation", innerRadius: "inner_radius",
+          outerRadius: "outer_radius", innerRoundness: "inner_roundness", outerRoundness: "outer_roundness" },
+  Path: { path: "path" },
+  Fill: { color: "color", opacity: "opacity" },
+  Stroke: { color: "color", opacity: "opacity", strokeWidth: "width", miterLimit: "miter_limit" },
+  GradientFill: { startPoint: "start_point", endPoint: "end_point", highlightLength: "highlight_length",
+                  highlightAngle: "highlight_angle", opacity: "opacity" },
+  GradientStroke: { startPoint: "start_point", endPoint: "end_point", highlightLength: "highlight_length",
+                    highlightAngle: "highlight_angle", opacity: "opacity", strokeWidth: "width",
+                    miterLimit: "miter_limit" },
+};
+var __OPERATOR_PROPS = {
+  trim: { start: "trim:start", end: "trim:end", offset: "trim:offset" },
+  repeater: { copies: "repeater:copies", offset: "repeater:offset" },
+};
+(function () {
+  var names = {};
+  [__SHAPE_PROPS, __OPERATOR_PROPS].forEach(function (group) {
+    for (var t in group) for (var n in group[t]) names[n] = true;
+  });
+  Object.keys(names).forEach(function (n) {
+    Object.defineProperty(__ShapeItem.prototype, n, {
+      get: function () {
+        var map = this.__t === "ShapeOperator" ? __OPERATOR_PROPS[this.__o] : __SHAPE_PROPS[this.__t];
+        var attr = map && map[n];
+        return attr ? __prop(this.__c, this.__l, this.__p, attr) : undefined;
+      },
+    });
+  });
+})();
+
+// ---- paths (AE: mask paths, shape paths) ----
+Property.prototype.__path = function (t) {
+  var p = __h.prop(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t, false);
+  if (!p || !p.__path) throw new Error("Property is not a path");
+  return p;
+};
+Property.prototype.points = function (t) { return this.__path(t).points; };
+Property.prototype.inTangents = function (t) { return this.__path(t).inTangents; };
+Property.prototype.outTangents = function (t) { return this.__path(t).outTangents; };
+Property.prototype.isClosed = function () { return this.__path(__now).closed; };
+[["pointOnPath", 0], ["tangentOnPath", 1], ["normalOnPath", 2]].forEach(function (m) {
+  Property.prototype[m[0]] = function (percentage, t) {
+    return __h.pathAt(this.__c, this.__l, this.__p, this.__a,
+      [percentage === undefined ? 0.5 : percentage, t === undefined ? __now : t, m[1]]);
+  };
+});
+// createPath(points = [[0,0], [100,0], [100,100], [0,100]], inTangents = [],
+// outTangents = [], is_closed = true): a path a path expression can return.
+Property.prototype.createPath = function (points, inTangents, outTangents, isClosed) {
+  if (points === undefined) points = [[0, 0], [100, 0], [100, 100], [0, 100]];
+  points = __val(points);
+  if (!__isArr(points) || points.length < 1) throw new Error("createPath needs at least one point");
+  function tangents(v) {
+    v = v === undefined ? [] : __val(v);
+    if (v.length !== 0 && v.length !== points.length) {
+      throw new Error("Tangent array length must equal the number of points");
+    }
+    return v.length ? v : points.map(function () { return [0, 0]; });
+  }
+  return { __path: true, points: points, inTangents: tangents(inTangents),
+           outTangents: tangents(outTangents), closed: isClosed === undefined ? true : !!isClosed };
+};
+
+// ---- text (AE: thisLayer.text.sourceText and the 17.0+ style API) ----
+Property.prototype.getStyleAt = function (charIndex, t) {
+  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t), {});
+};
+Property.prototype.createStyle = function () { return this.getStyleAt(0, __now); };
+Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, __now); } });
+
+function __TextGroup(c, l) { this.__c = c; this.__l = l; }
+__TextGroup.prototype = {
+  // The text as a string (string methods, concatenation, length) that also has
+  // the property's methods, as AE's sourceText behaves.
+  get sourceText() {
+    var p = __prop(this.__c, this.__l, "", "text:source");
+    var s = new String(p.value);
+    ["valueAtTime", "velocityAtTime", "key", "nearestKey", "getStyleAt", "createStyle"].forEach(function (k) {
+      s[k] = function () { return p[k].apply(p, arguments); };
+    });
+    ["value", "style", "numKeys"].forEach(function (k) {
+      Object.defineProperty(s, k, { get: function () { return p[k]; } });
+    });
+    return s;
+  },
+};
+
+// A text style: what the text uses (`__f`, from the host) plus the `set…`
+// calls made on it (`__c`), each returning a new style.
+function TextStyle(fields, changes) { this.__f = fields; this.__c = changes; }
+TextStyle.prototype = {
+  get horizontalScale() { return "horizontalScale" in this.__c ? this.__c.horizontalScale : 100; },
+  get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
+};
+[
+  ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
+  ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
+  ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
+  ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
+].forEach(function (p) {
+  Object.defineProperty(TextStyle.prototype, p[0], {
+    get: function () { return p[1] in this.__c ? this.__c[p[1]] : this.__f[p[1]]; },
+  });
+});
+[
+  ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
+  ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
+  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineShift", "baselineShift"],
+  ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
+  ["setSmallCaps", "smallCaps"], ["setApplyFill", "applyFill"], ["setApplyStroke", "applyStroke"],
+  ["setHorizontalScale", "horizontalScale"], ["setVerticalScale", "verticalScale"],
+].forEach(function (p) {
+  TextStyle.prototype[p[0]] = function (v) {
+    var c = {};
+    for (var k in this.__c) c[k] = this.__c[k];
+    c[p[1]] = __val(v);
+    return new TextStyle(this.__f, c);
+  };
+});
+
 // `transform.position[0]` and `.length` read the value, as in AE: getters on
 // the prototype (a Proxy would trap every method and field access).
 (function () {
   function index(i) {
-    return function () { var v = this.value; return __isArr(v) ? v[i] : undefined; };
+    return function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v[i] : undefined; };
   }
   for (var i = 0; i < 16; i++) Object.defineProperty(Property.prototype, String(i), { get: index(i) });
   Object.defineProperty(Property.prototype, "length", {
-    get: function () { var v = this.value; return __isArr(v) ? v.length : 1; },
+    get: function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v.length : 1; },
   });
 })();
 
@@ -538,6 +724,23 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
   get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
+  get marker() { return new MarkerProperty(this.__c, this.__l); },
+  get text() { return new __TextGroup(this.__c, this.__l); },
+  sourceRectAtTime: function (t, includeExtents) {
+    var r = __h.sourceRect(this.__c, this.__l, t === undefined ? __now : t, !!includeExtents);
+    return { top: r[1], left: r[0], width: r[2], height: r[3] };
+  },
+  content: function (which) { return __content(this.__c, this.__l, "", which); },
+  get rotationX() { return this.transform.xRotation; },
+  get rotationY() { return this.transform.yRotation; },
+  get rotationZ() { return this.transform.rotation; },
+  get cameraOption() {
+    var g = __optionGroup(this, "Camera Options", __CAMERA_OPTIONS);
+    for (var k in __CAMERA_DEFAULTS) g[k] = __CAMERA_DEFAULTS[k];
+    return g;
+  },
+  get lightOption() { return __optionGroup(this, "Light Options", __LIGHT_OPTIONS); },
+  get materialOption() { return __optionGroup(this, "Material Options", __MATERIAL_OPTIONS); },
   get audioLevels() {
     if (!this.hasAudio) {
       throw new Error("property or method named 'audioLevels' in Class 'Layer' is missing or does not exist. " +
@@ -600,8 +803,104 @@ Layer.prototype = {
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
+// ---- camera, light and material options (AE: layer.zoom, cameraOption.zoom …) ----
+var __CAMERA_OPTIONS = {
+  zoom: "camera:zoom", depthOfField: "camera:depth_of_field", focusDistance: "camera:focus_distance",
+  aperture: "camera:aperture", blurLevel: "camera:blur_level",
+};
+// Iris and highlight options are not modelled yet: AE's defaults.
+var __CAMERA_DEFAULTS = {
+  irisShape: 1, irisRotation: 0, irisRoundness: 0, irisAspectRatio: 1, irisDiffractionFringe: 0,
+  highlightGain: 0, highlightThreshold: 255, highlightSaturation: 0,
+};
+var __LIGHT_OPTIONS = {
+  intensity: "light:intensity", color: "light:color", coneAngle: "light:cone_angle",
+  coneFeather: "light:cone_feather", radius: "light:radius", falloffDistance: "light:falloff_distance",
+  shadowDarkness: "light:shadow_darkness", shadowDiffusion: "light:shadow_diffusion",
+  castsShadows: "light:casts_shadows",
+};
+var __MATERIAL_OPTIONS = {
+  castsShadows: "material:casts_shadows", lightTransmission: "material:light_transmission",
+  acceptsShadows: "material:accepts_shadows", acceptsLights: "material:accepts_lights",
+  ambient: "material:ambient", diffuse: "material:diffuse", specular: "material:specular_intensity",
+  specularIntensity: "material:specular_intensity", shininess: "material:specular_shininess",
+  specularShininess: "material:specular_shininess", metal: "material:metal",
+};
+function __optionGroup(layer, name, options) {
+  var g = { name: name };
+  for (var k in options) {
+    (function (attr) {
+      Object.defineProperty(g, k, { get: function () { return __prop(layer.__c, layer.__l, "", attr); } });
+    })(options[k]);
+  }
+  return g;
+}
+// The same on the layer itself (AE: thisComp.layer("Camera 1").zoom).
+(function () {
+  function define(name, get) {
+    if (!(name in Layer.prototype)) Object.defineProperty(Layer.prototype, name, { get: get });
+  }
+  function attrGetter(attr) { return function () { return __prop(this.__c, this.__l, "", attr); }; }
+  [__CAMERA_OPTIONS, __LIGHT_OPTIONS, __MATERIAL_OPTIONS].forEach(function (options) {
+    for (var k in options) if (k !== "castsShadows") define(k, attrGetter(options[k]));
+  });
+  Object.keys(__CAMERA_DEFAULTS).forEach(function (k) {
+    define(k, function () { return __CAMERA_DEFAULTS[k]; });
+  });
+  // A light's own Casts Shadows; any other layer's Material Option.
+  define("castsShadows", function () {
+    return __prop(this.__c, this.__l, "", this.__info.kind === "light" ? "light:casts_shadows" : "material:casts_shadows");
+  });
+})();
+
+// ---- markers (AE: thisLayer.marker, thisComp.marker, MarkerKey) ----
+function MarkerProperty(c, l) { this.__c = c; this.__l = l; this.__m = null; }
+MarkerProperty.prototype = {
+  get __keys() {
+    if (this.__m === null) {
+      this.__m = __h.markers(this.__c, this.__l).map(function (m, i) { return new MarkerKey(m, i + 1); });
+    }
+    return this.__m;
+  },
+  get numKeys() { return this.__keys.length; },
+  // key(index) or key(comment), as AE.
+  key: function (k) {
+    var ks = this.__keys;
+    if (typeof k === "string") {
+      for (var i = 0; i < ks.length; i++) if (ks[i].comment === k) return ks[i];
+      throw new Error("Marker key " + JSON.stringify(k) + " does not exist");
+    }
+    if (k < 1 || k > ks.length) throw new Error("Key index " + k + " out of range");
+    return ks[k - 1];
+  },
+  nearestKey: function (t) {
+    var ks = this.__keys, best = -1, bd = Infinity;
+    for (var i = 0; i < ks.length; i++) {
+      var d = Math.abs(ks[i].time - t);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) throw new Error("property has no keyframes");
+    return ks[best];
+  },
+};
+function MarkerKey(m, index) {
+  this.time = m.time;
+  this.index = index;
+  this.duration = m.duration;
+  this.comment = m.comment;
+  this.value = m.comment;
+  this.chapter = m.chapter;
+  this.url = m.url;
+  this.frameTarget = m.frameTarget;
+  this.eventCuePoint = false;
+  this.cuePointName = m.cuePointName;
+  this.parameters = {};
+  this.protectedRegion = m.protectedRegion;
+}
+
 function Comp(c) { this.__c = c; this.__i = null; }
 Comp.prototype = {
+  get marker() { return new MarkerProperty(this.__c, -1); },
   get __info() { return this.__i || (this.__i = __h.compInfo(this.__c)); },
   get name() { return this.__info.name; },
   get width() { return this.__info.width; },

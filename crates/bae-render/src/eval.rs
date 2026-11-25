@@ -49,6 +49,80 @@ pub struct EvaluatorFrames<'a> {
 }
 
 impl crate::graph::CompFrames for EvaluatorFrames<'_> {
+    fn animated_controls(&self, effect: &PrimPath, ids: &[u32]) -> bool {
+        ids.is_empty()
+            || self.stage.prim(effect).is_some_and(|fx| {
+                ids.iter().any(|id| {
+                    fx.attr(&bae_model::effect::param_attr(*id))
+                        .is_some_and(|a| a.is_animated() || a.expression.is_some())
+                })
+            })
+    }
+
+    fn parameters_at(
+        &mut self,
+        instance: &RenderEffect,
+        ids: &[u32],
+        frame: &crate::graph::EffectFrame,
+        times: &[Time],
+    ) -> Vec<crate::effect::ParameterSample> {
+        if times.is_empty() {
+            return Vec::new();
+        }
+        let Some(view) = self.stage.prim(&instance.path) else {
+            return Vec::new();
+        };
+        let mut samples: Vec<_> = times
+            .iter()
+            .map(|&time| crate::effect::ParameterSample {
+                time,
+                values: Vec::new(),
+            })
+            .collect();
+        for (id, current) in &instance.params {
+            if !ids.is_empty() && !ids.contains(id) {
+                continue;
+            }
+            let name = bae_model::effect::param_attr(*id);
+            let Some(attr) = view.attr(&name) else {
+                continue;
+            };
+            let curve =
+                bae_anim::Curve::new(&attr.keyframes, bae_anim::schema::curve_kind(&name, attr));
+            for sample in &mut samples {
+                let value = if attr.expression.is_some() {
+                    self.evaluator.attribute(
+                        self.stage,
+                        &instance.path,
+                        &name,
+                        frame.comp_at(sample.time),
+                    )
+                } else {
+                    curve.as_ref().map(|curve| curve.sample(sample.time))
+                };
+                sample
+                    .values
+                    .push((*id, value.unwrap_or_else(|| current.clone())));
+            }
+        }
+        samples
+    }
+
+    fn scalar_track(
+        &mut self,
+        effect: &PrimPath,
+        id: u32,
+        frame: &crate::graph::EffectFrame,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let name = bae_model::effect::param_attr(id);
+        let attr = self.stage.prim(effect)?.attr(&name)?;
+        if !attr.is_animated() && attr.expression.is_none() {
+            return None;
+        }
+        self.evaluator
+            .integral(self.stage, effect, &name, frame, attr)
+    }
+
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
         self.evaluator.evaluate(self.stage, comp, time).map(Some)
     }
@@ -67,6 +141,33 @@ pub trait CompEvaluator {
         comp: &PrimPath,
         time: Time,
     ) -> Result<RenderComp, RenderError>;
+
+    /// Evaluate a single effect attribute at composition time.
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<Value> {
+        bae_anim::Evaluator::new()
+            .evaluate_attribute(stage, path, name, time)
+            .ok()
+    }
+
+    /// Cumulative scalar samples for effects that integrate a parameter over time.
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        crate::parameter_track::prepare(&mut Arc::default(), attr, frame, |t| {
+            self.attribute(stage, path, name, t)?.as_f64()
+        })
+    }
 
     /// Drops whatever `event` makes stale. Default: nothing is cached.
     fn invalidate(&mut self, _event: &StageEvent) {}
@@ -211,6 +312,7 @@ impl<'a> MockPass<'a> {
             let mut out = RenderLayer::new(layer.path().clone(), LayerContent::None);
             out.time = local;
             out.time_scale = if stretch == 0.0 { 1.0 } else { stretch / 100.0 };
+            out.in_point = in_point;
             out.active = in_point <= time && time < out_point && solo_ok && guide_ok;
             out.visible = boolean(layer, "enabled", local).unwrap_or(true);
             out.adjustment =
