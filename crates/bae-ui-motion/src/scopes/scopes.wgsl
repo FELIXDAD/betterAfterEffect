@@ -42,11 +42,15 @@ fn accumulate(@builtin(global_invocation_id) id: vec3u) {
     let col = pos.x * 256u / p.size.x;
     let y = luma(c);
     atomicAdd(&bins[WAVE + (255u - level(y)) * 256u + col], 1u);
-    let rgb = vec3u(level(c.r), level(c.g), level(c.b));
-    for (var ch = 0u; ch < 3u; ch++) {
-        atomicAdd(&bins[PARADE + ch * 65536u + (255u - rgb[ch]) * 256u + col], 1u);
-        atomicAdd(&bins[HIST + ch * 256u + rgb[ch]], 1u);
-    }
+    let r = level(c.r);
+    let g = level(c.g);
+    let b = level(c.b);
+    atomicAdd(&bins[PARADE + (255u - r) * 256u + col], 1u);
+    atomicAdd(&bins[PARADE + 65536u + (255u - g) * 256u + col], 1u);
+    atomicAdd(&bins[PARADE + 131072u + (255u - b) * 256u + col], 1u);
+    atomicAdd(&bins[HIST + r], 1u);
+    atomicAdd(&bins[HIST + 256u + g], 1u);
+    atomicAdd(&bins[HIST + 512u + b], 1u);
     atomicAdd(&bins[HIST + 768u + level(y)], 1u);
     // Rec. 709 Cb / Cr in -0.5 … 0.5: blue to the right, red up.
     let cb = (c.b - y) / 1.8556;
@@ -64,13 +68,21 @@ fn peak(@builtin(local_invocation_index) lane: u32) {
         atomicStore(&tallest, 1u);
     }
     workgroupBarrier();
-    for (var ch = 0u; ch < 3u; ch++) {
-        atomicMax(&tallest, atomicLoad(&bins[HIST + ch * 256u + lane]));
-    }
+    atomicMax(&tallest, atomicLoad(&bins[HIST + lane]));
+    atomicMax(&tallest, atomicLoad(&bins[HIST + 256u + lane]));
+    atomicMax(&tallest, atomicLoad(&bins[HIST + 512u + lane]));
     workgroupBarrier();
     if lane == 0u {
         atomicStore(&bins[PEAK], atomicLoad(&tallest));
     }
+}
+
+// Histogram bar of channel `ch` at level `lv`: lit left of its length.
+// (No writes through a runtime vector index: D3D's FXC rejects them.)
+fn bar(ch: u32, lv: u32, x: u32) -> f32 {
+    let peak = f32(atomicLoad(&bins[PEAK]));
+    let len = f32(atomicLoad(&bins[HIST + ch * 256u + lv])) / peak * 255.0;
+    return select(0.0, 0.8, f32(x) < len);
 }
 
 fn glow(v: u32) -> f32 {
@@ -92,22 +104,19 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     } else if tile == 1u {
         // Levels bottom (0) to top (255), counts to the right.
         let lv = 255u - y;
-        let peak = f32(atomicLoad(&bins[PEAK]));
-        for (var ch = 0u; ch < 3u; ch++) {
-            let len = f32(atomicLoad(&bins[HIST + ch * 256u + lv])) / peak * 255.0;
-            if f32(x) < len {
-                rgb[ch] = 0.8;
-            }
-        }
+        rgb = vec3f(bar(0u, lv, x), bar(1u, lv, x), bar(2u, lv, x));
     } else if tile == 2u {
         let ch = min(x / 86u, 2u);
-        let col = (x - ch * 86u) * 256u / 86u;
-        let g = glow(atomicLoad(&bins[PARADE + ch * 65536u + y * 256u + min(col, 255u)]));
-        rgb[ch] = g;
+        let col = min((x - ch * 86u) * 256u / 86u, 255u);
+        let g = glow(atomicLoad(&bins[PARADE + ch * 65536u + y * 256u + col]));
+        rgb = vec3f(select(0.0, g, ch == 0u), select(0.0, g, ch == 1u), select(0.0, g, ch == 2u));
     } else if p.wave_rgb == 1u {
-        for (var ch = 0u; ch < 3u; ch++) {
-            rgb[ch] = glow(atomicLoad(&bins[PARADE + ch * 65536u + y * 256u + x]));
-        }
+        let at = y * 256u + x;
+        rgb = vec3f(
+            glow(atomicLoad(&bins[PARADE + at])),
+            glow(atomicLoad(&bins[PARADE + 65536u + at])),
+            glow(atomicLoad(&bins[PARADE + 131072u + at])),
+        );
     } else {
         let g = glow(atomicLoad(&bins[WAVE + y * 256u + x]));
         rgb = vec3f(g * 0.85, g, g * 0.85);
