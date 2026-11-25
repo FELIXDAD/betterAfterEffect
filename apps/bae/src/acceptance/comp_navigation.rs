@@ -90,6 +90,81 @@ fn project_drop_inserts_one_undoable_precomp_and_blocks_cycles() {
 }
 
 #[test]
+fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
+    use bae_model::Time;
+
+    let mut h = fixture();
+    let ruler = h.get_by_label("Time Ruler").rect();
+    let ruler_at = |fraction| {
+        egui::pos2(
+            ruler.left() + ruler.width() * fraction,
+            ruler.bottom() - 2.0,
+        )
+    };
+    click_at(&mut h, ruler_at(0.3));
+    let start = h.state().now();
+    assert!(start > Time::ZERO);
+    click_at(&mut h, ruler_at(0.7));
+    let parent_time = h.state().now();
+    assert!(parent_time > start);
+
+    let blank_y = find_text(&h, "Layer Name").unwrap().bottom() + 65.0;
+    drop_item(&mut h, "Child", egui::pos2(ruler_at(0.3).x, blank_y));
+    let layer = h.state().layers()[0].clone();
+    let timing = query::layer_timing(h.state().stage(), &layer);
+    assert_eq!((timing.start_time, timing.in_point), (start, start));
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        serde_json::json!({"path": layer, "attr": "stretch", "value": {"type": "float", "value": 200.0}}),
+    ));
+    settle(&mut h);
+    let child = query::precomp_source(h.state().stage(), &layer).unwrap();
+    let child_info = query::comp_info(h.state().stage(), &child).unwrap();
+    let expected = child_info
+        .frame_rate
+        .snap(Time((parent_time - start).0 / 2));
+    let name = row(&h, "Child").center();
+    double_click_at(&mut h, name);
+    assert_eq!(h.state().active_comp().as_ref(), Some(&child));
+    assert_eq!(h.state().now(), expected);
+
+    let parent = project_row(&h, "Parent");
+    double_click_at(&mut h, parent);
+    assert_eq!(h.state().now(), parent_time);
+    for (attr, value) in [
+        (
+            "time_remap",
+            serde_json::json!({"type": "time", "value": Time::from_seconds(1.0)}),
+        ),
+        (
+            "time_remap_enabled",
+            serde_json::json!({"type": "bool", "value": true}),
+        ),
+    ] {
+        h.state_mut().invoke(Invocation::with_params(
+            "attr.set",
+            serde_json::json!({"path": layer, "attr": attr, "value": value}),
+        ));
+    }
+    settle(&mut h);
+    let bar = egui::pos2(ruler_at(0.5).x, row(&h, "Child").center().y);
+    double_click_at(&mut h, bar);
+    assert_eq!(h.state().active_comp().as_ref(), Some(&child));
+    assert_eq!(h.state().now(), Time::from_seconds(1.0));
+
+    let mut prefs = (*h.state().prefs.current()).clone();
+    prefs.set("composition.synchronize_time_all_related_items", false);
+    h.state().prefs.set(prefs).unwrap();
+    click_at(&mut h, ruler_at(0.2));
+    let saved_child_time = h.state().now();
+    assert_ne!(saved_child_time, Time::from_seconds(1.0));
+    double_click_at(&mut h, parent);
+    double_click_at(&mut h, name);
+    assert_eq!(h.state().active_comp(), Some(child));
+    assert_eq!(h.state().now(), saved_child_time);
+}
+
+#[test]
 fn tab_menu_and_toolbar_navigate_direct_parents_and_children() {
     let mut h = fixture();
     let header = find_text(&h, "Layer Name").unwrap();

@@ -216,12 +216,8 @@ impl TimelinePanel {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
                     let locked = query::is_locked(stage, layer);
-                    if resp.double_clicked() {
-                        if let Some(source) = query::precomp_source(stage, layer) {
-                            session.lock().open_comp(&source);
-                        } else if !locked {
-                            self.rename = Some((layer.clone(), name.clone()));
-                        }
+                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) && !locked {
+                        self.rename = Some((layer.clone(), name.clone()));
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {

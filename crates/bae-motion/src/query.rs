@@ -45,6 +45,12 @@ impl CompInfo {
         self.frame_rate.time_to_frame(self.duration).max(1)
     }
 
+    /// Snap a playhead or insertion point to a visible frame in this composition.
+    pub fn snap_visible_time(&self, time: Time) -> Time {
+        let last = (self.duration - self.frame_duration()).max(Time::ZERO);
+        self.frame_rate.snap(time.clamp(Time::ZERO, last))
+    }
+
     /// Duration of one frame.
     pub fn frame_duration(&self) -> Time {
         self.frame_rate.frame_duration()

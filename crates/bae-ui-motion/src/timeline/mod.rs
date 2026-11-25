@@ -36,7 +36,7 @@ use serde_json::json;
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::graph::GraphEditor;
-use crate::project::ItemDrag;
+use crate::project::{DropPlacement, ItemDrag};
 use crate::props::{self, Node};
 use crate::session::{Session, SharedSession};
 
@@ -709,7 +709,7 @@ impl Panel for TimelinePanel {
             .pointer_interact_pos()
             .filter(|_| ui.rect_contains_pointer(body))
             .and_then(|pos| {
-                egui::DragAndDrop::payload::<ItemDrag>(ui.ctx()).map(|item| (item, pos.y))
+                egui::DragAndDrop::payload::<ItemDrag>(ui.ctx()).map(|item| (item, pos))
             });
         let mut drop_slot = None;
         let mut last_row_bottom = body.top();
@@ -727,12 +727,12 @@ impl Panel for TimelinePanel {
                     let row = &rows[i];
                     let (rect, _) =
                         ui.allocate_exact_size(vec2(full.width(), ROW_H), Sense::hover());
-                    if let Some((_, pointer_y)) = &project_drop {
+                    if let Some((_, pointer)) = &project_drop {
                         last_row_bottom = rect.bottom();
-                        if drop_slot.is_none() && *pointer_y <= rect.bottom() {
+                        if drop_slot.is_none() && pointer.y <= rect.bottom() {
                             let number = self.layer_numbers[&row.layer];
                             let before =
-                                matches!(row.kind, RowKind::Layer) && *pointer_y < rect.center().y;
+                                matches!(row.kind, RowKind::Layer) && pointer.y < rect.center().y;
                             drop_slot = Some(if before {
                                 (number - 1, rect.top())
                             } else {
@@ -762,7 +762,7 @@ impl Panel for TimelinePanel {
                 }
             });
 
-        if let Some((item, _)) = project_drop {
+        if let Some((item, pointer)) = project_drop {
             let (index, y) = drop_slot.unwrap_or((comp_layers.len(), last_row_bottom));
             ui.painter().with_clip_rect(body).hline(
                 body.x_range(),
@@ -770,7 +770,10 @@ impl Panel for TimelinePanel {
                 Stroke::new(2.0, color::ACCENT),
             );
             if ui.input(|i| i.pointer.primary_released()) {
-                crate::viewer::add_item_as_layer(cx, &session, &item.0, None, Some(index));
+                let start = graph_body
+                    .contains(pointer)
+                    .then(|| info.snap_visible_time(axis.t(pointer.x)));
+                item.add_as_layer(cx, &session, DropPlacement::Timeline { index, start });
             }
         }
 

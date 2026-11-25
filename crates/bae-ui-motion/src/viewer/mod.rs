@@ -16,7 +16,7 @@ use serde_json::json;
 
 use crate::common::{self, EvalCache};
 use crate::gpu_preview::GpuPreview;
-use crate::project::ItemDrag;
+use crate::project::{DropPlacement, ItemDrag};
 use crate::render::{self, Affine, View};
 use crate::session::{Scrub, SharedSession};
 use crate::tools::cursor::{self, Hover};
@@ -868,12 +868,10 @@ impl Panel for CompositionViewer {
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
-            add_item_as_layer(
+            item.add_as_layer(
                 cx,
                 &session,
-                &item.0,
-                pointer.map(|p| view.to_comp(p)),
-                None,
+                DropPlacement::Viewer(pointer.map(|p| view.to_comp(p))),
             );
         }
         // An effect dropped on a layer (Effects & Presets) is applied to it.
@@ -954,42 +952,6 @@ pub(crate) fn set_resolution(
             );
         }
     }
-}
-
-/// Add a project item to the active comp (drag and drop).
-pub(crate) fn add_item_as_layer(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    item: &PrimPath,
-    at: Option<DVec2>,
-    index: Option<usize>,
-) {
-    let stage = cx.stage;
-    let Some(active) = session.lock().active_comp.clone() else {
-        return;
-    };
-    let kind = if query::comp_info(stage, item).is_some() {
-        if query::would_nest_recursively(stage, &active, item) {
-            return;
-        }
-        LayerKind::PreComp
-    } else {
-        match stage
-            .prim(item)
-            .and_then(|v| query::static_value(&v, "kind"))
-        {
-            Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
-            _ => LayerKind::Footage,
-        }
-    };
-    let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
-    if let Some(p) = at {
-        extra["position"] = json!([p.x, p.y]);
-    }
-    if let Some(index) = index {
-        extra["index"] = json!(index);
-    }
-    common::new_layer(cx, session, kind, extra);
 }
 
 fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {

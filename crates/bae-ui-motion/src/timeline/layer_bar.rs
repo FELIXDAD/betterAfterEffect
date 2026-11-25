@@ -294,10 +294,8 @@ impl TimelinePanel {
         if resp.clicked() {
             select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
-        if resp.double_clicked()
-            && let Some(source) = query::precomp_source(stage, layer)
-        {
-            session.lock().open_comp(&source);
+        if resp.double_clicked() {
+            self.open_precomp(cx, session, layer);
         }
         // Right-click: the layer context menu (as on the layer name).
         let mut menu_out = None;
