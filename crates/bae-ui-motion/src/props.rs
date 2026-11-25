@@ -408,6 +408,7 @@ pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<
             match reveal {
                 Reveal::Animated => spec.is_some_and(|s| s.is_animated() || s.expression.is_some()),
                 Reveal::Modified => spec.is_some_and(|s| !s.is_empty()),
+                Reveal::Props(list) => list.iter().any(|(p, a)| p == path && a == attr),
                 Reveal::Attrs(list) => {
                     path == layer
                         && list.iter().any(|a| {

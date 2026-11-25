@@ -27,6 +27,12 @@ pub fn run(mut app: App) -> ExitCode {
             };
         }
     };
+    if let Invocation::Subcommand { name, matches, .. } = &invocation
+        && name == "plugin"
+        && matches.subcommand_name() == Some("runner")
+    {
+        return bae_plugin::native::runner_main();
+    }
     let global = invocation.global().clone();
     let is_subcommand = matches!(invocation, Invocation::Subcommand { .. });
 

@@ -158,6 +158,7 @@ pub fn param_def(p: &ParamDecl) -> Option<EffectParamDef> {
             collapsed: p.has_flag(ParamFlag::StartCollapsed) || p.collapsed == Some(true),
             custom_ui: false,
             relative_default: p.is_relative_point(),
+            reference_point_default: false,
         },
     })
 }
