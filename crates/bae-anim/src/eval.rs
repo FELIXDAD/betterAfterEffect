@@ -848,10 +848,10 @@ impl CompiledComp {
         js: Option<&Ctx<'_>>,
     ) -> EvaluatedComp {
         let n = self.layers.len();
-        let has_solo = self
+        let video_solo = self
             .layers
             .iter()
-            .any(|l| l.switches.solo && l.switches.enabled);
+            .any(|l| l.switches.solo && l.switches.enabled && l.kind != LayerKind::Audio);
 
         // Expressions: memoise them first so long chains stay shallow (see warm_up).
         if js.is_some() && self.has_expressions {
@@ -897,7 +897,7 @@ impl CompiledComp {
                 };
                 let active = layer.timing.is_active(time);
                 let visible =
-                    layer.switches.enabled && active && (!has_solo || layer.switches.solo);
+                    layer.switches.enabled && active && (!video_solo || layer.switches.solo);
                 let tf = sample_transform(layer, &cx);
                 EvaluatedLayer {
                     path: layer.path.clone(),

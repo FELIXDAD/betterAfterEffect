@@ -57,7 +57,7 @@ impl TimelinePanel {
         locked: bool,
     ) {
         let resp = ui.interact(rect, id, Sense::click_and_drag());
-        if !locked || attr == "locked" {
+        if !locked || bae_model::editable_on_locked_layer(attr) {
             if input.press
                 && resp.is_pointer_button_down_on()
                 && let Some(pos) = input.pos
