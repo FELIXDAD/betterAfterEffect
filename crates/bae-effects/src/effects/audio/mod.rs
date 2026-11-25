@@ -14,4 +14,7 @@ fn audio_control(slug: &str, zh: &str, builder: DefBuilder, static_params: &[u32
     rust_builtin((Arc::new(Control(def)), names), slug, zh, &["audio", zh])
 }
 
-pub(crate) fn register(registry: &mut crate::Registry) {}
+mod reverb;
+pub(crate) fn register(registry: &mut crate::Registry) {
+    registry.effects.extend([reverb::effect()]);
+}

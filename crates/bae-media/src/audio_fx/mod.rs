@@ -12,7 +12,13 @@ struct Definition {
     reverse: bool,
     create: fn() -> Box<dyn Processor>,
 }
-const DEFINITIONS: &[Definition] = &[];
+mod reverb;
+const DEFINITIONS: &[Definition] = &[Definition {
+    name: "ADBE Aud Reverb",
+    defaults: &[100.0, 75.0, 25.0, 10.0, 90.0, 10.0],
+    reverse: false,
+    create: || Box::new(reverb::Main::default()),
+}];
 
 fn number(value: &Value) -> Option<f64> {
     value
