@@ -219,6 +219,13 @@ impl GpuPreview {
         })
     }
 
+    /// The published frame and a key that changes with it (Lumetri Scopes).
+    pub fn output(&self) -> Option<(wgpu::Texture, u64)> {
+        let (hash, time, resolution) = self.last?;
+        let key = hash ^ (time.flicks() as u64).rotate_left(17) ^ u64::from(resolution);
+        Some((self.texture.clone()?, key))
+    }
+
     /// Straight (unpremultiplied) 8-bit RGBA of the published frame at comp
     /// point `p`, as shown (display-encoded); `None` outside the frame. Reads
     /// one texel back from the GPU (blocking, only when the pointer moved to

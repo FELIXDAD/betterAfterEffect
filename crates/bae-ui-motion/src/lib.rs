@@ -42,6 +42,7 @@ mod project;
 mod props;
 mod render;
 pub mod render_queue;
+pub mod scopes;
 pub mod session;
 mod timeline;
 pub mod tools;
@@ -76,6 +77,7 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(tools::ZH);
         bae_ui::i18n::register(catalog::menu_zh());
         bae_ui::i18n::register(ae_panels::ZH);
+        bae_ui::i18n::register(scopes::ZH);
         effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
@@ -93,7 +95,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 8] = [
+        let panels: [(&str, PanelKind); 9] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -131,6 +133,12 @@ impl AppModule for MotionUiModule {
             (
                 "render_queue",
                 PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
+            ),
+            (
+                "lumetri_scopes",
+                PanelKind::new("Lumetri Scopes", |spawn| {
+                    Box::new(scopes::ScopesPanel::from_state(spawn.state))
+                }),
             ),
         ];
         kinds.batch(|tx| {

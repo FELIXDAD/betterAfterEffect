@@ -110,6 +110,8 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The frame the Composition viewer shows and its key (Lumetri Scopes).
+    pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
