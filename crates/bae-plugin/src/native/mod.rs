@@ -22,6 +22,7 @@
 pub mod library;
 pub mod pixels;
 pub mod runner;
+mod shm;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -52,6 +53,7 @@ pub use runner::{RunnerClient, RunnerCommand, runner_main};
 pub const IN_PROCESS_ENV: &str = "BAE_PLUGIN_IN_PROCESS";
 /// A dedicated runner executable (no arguments) instead of `bae plugin runner`.
 pub const RUNNER_ENV: &str = "BAE_PLUGIN_RUNNER";
+const RUNNER_CHILD_ENV: &str = "BAE_PLUGIN_RUNNER_CHILD";
 
 /// How the host runs native plugins.
 #[derive(Clone, Debug, Default)]
@@ -499,6 +501,11 @@ pub fn load_plugin(
     notices: &Notices,
 ) -> Result<Arc<NativePlugin>, Vec<Diagnostic>> {
     let err = |m: String| vec![Diagnostic::error(MANIFEST_FILE, m)];
+    if std::env::var_os(RUNNER_CHILD_ENV).is_some() {
+        return Err(err(
+            "a plugin runner cannot load nested native plugins".into()
+        ));
+    }
     let id = manifest.plugin.id.as_str();
     let native = manifest
         .native
