@@ -2,6 +2,25 @@
 use super::*;
 use std::collections::BTreeSet;
 
+#[derive(Clone, Copy)]
+pub(super) struct SwitchInput {
+    press: bool,
+    release: bool,
+    pos: Option<Pos2>,
+    cancel: bool,
+}
+
+impl SwitchInput {
+    pub(super) fn read(i: &egui::InputState) -> Self {
+        Self {
+            press: i.pointer.primary_pressed(),
+            release: i.pointer.primary_released(),
+            pos: i.pointer.interact_pos(),
+            cancel: i.key_pressed(egui::Key::Escape) || !i.focused,
+        }
+    }
+}
+
 pub(super) struct SwitchDrag {
     attr: &'static str,
     value: bool,
@@ -27,6 +46,7 @@ impl TimelinePanel {
     pub(super) fn switch_cell(
         &mut self,
         ui: &Ui,
+        input: SwitchInput,
         cx: &mut PanelContext<'_>,
         rect: Rect,
         id: Id,
@@ -38,17 +58,10 @@ impl TimelinePanel {
         locked: bool,
     ) -> egui::Response {
         let resp = ui.interact(rect, id, Sense::click_and_drag());
-        let (press, release, pos) = ui.input(|i| {
-            (
-                i.pointer.primary_pressed(),
-                i.pointer.primary_released(),
-                i.pointer.interact_pos(),
-            )
-        });
-        if !locked || attr == "locked" {
-            if press
+        if !locked || bae_model::editable_on_locked_layer(attr) {
+            if input.press
                 && resp.is_pointer_button_down_on()
-                && let Some(pos) = pos
+                && let Some(pos) = input.pos
             {
                 self.switch_drag = Some(SwitchDrag {
                     attr,
@@ -60,7 +73,7 @@ impl TimelinePanel {
             if let Some(drag) = &mut self.switch_drag
                 && drag.attr == attr
             {
-                if let Some(pos) = pos {
+                if let Some(pos) = input.pos {
                     let cell = rect.intersect(ui.clip_rect());
                     // Cover intermediate rows even if two pointer samples are several rows apart.
                     let traversed = cell.contains(pos)
@@ -75,7 +88,7 @@ impl TimelinePanel {
                 if drag.changed.contains(layer) {
                     on = drag.value;
                 }
-            } else if resp.clicked() && !release {
+            } else if resp.clicked() && !input.release {
                 // Activation through the keyboard or accessibility tree has no pointer stroke.
                 set_switch(cx, [layer], attr, !on);
             }
@@ -108,18 +121,18 @@ impl TimelinePanel {
         resp
     }
 
-    pub(super) fn finish_switch_drag(&mut self, ui: &Ui, cx: &mut PanelContext<'_>) {
+    pub(super) fn finish_switch_drag(&mut self, input: SwitchInput, cx: &mut PanelContext<'_>) {
         let Some(drag) = &mut self.switch_drag else {
             return;
         };
-        if ui.input(|i| i.key_pressed(egui::Key::Escape) || !i.focused) {
+        if input.cancel {
             self.switch_drag = None;
-        } else if ui.input(|i| i.pointer.primary_released()) {
+        } else if input.release {
             if !drag.changed.is_empty() {
                 set_switch(cx, &drag.changed, drag.attr, drag.value);
             }
             self.switch_drag = None;
-        } else if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+        } else if let Some(pos) = input.pos {
             drag.previous = pos;
         }
     }

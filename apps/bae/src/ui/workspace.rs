@@ -83,6 +83,26 @@ pub fn failure_notice(error: &bae_model::CommandError) -> String {
     }
 }
 
+/// The status bar template of a plugin notice (`{plugin}`, `{detail}`).
+pub fn plugin_notice_template(kind: bae_plugin::NoticeKind) -> &'static str {
+    use bae_plugin::NoticeKind as K;
+    match kind {
+        K::LoadFailed => "Plugin {plugin} could not be loaded and is disabled: {detail}",
+        K::RenderFailed => "Plugin {plugin} failed to render a frame: {detail}",
+        K::Crashed => "Plugin {plugin} crashed and will be restarted: {detail}",
+        K::Disabled => {
+            "Plugin {plugin} stopped working and was disabled for this session: {detail}"
+        }
+    }
+}
+
+/// The status bar text for a plugin notice (load failure, crash, disabled).
+pub fn plugin_notice(notice: &bae_plugin::Notice) -> String {
+    tr(plugin_notice_template(notice.kind))
+        .replace("{plugin}", &notice.plugin)
+        .replace("{detail}", &notice.detail)
+}
+
 /// The viewport texture the composition placeholder shows (an app resource).
 #[derive(Debug, Clone, Copy)]
 pub struct PlaceholderViewer(pub ViewportTextureId);
@@ -345,6 +365,15 @@ impl Workspace {
     /// Id of the active workspace.
     pub fn active_workspace(&self) -> &str {
         self.workbench.active_workspace()
+    }
+
+    /// English title of the active workspace.
+    pub fn active_workspace_title(&self) -> &str {
+        let active = self.workbench.active_workspace();
+        self.workbench
+            .workspaces()
+            .find(|(id, _)| *id == active)
+            .map_or("", |(_, p)| p.title.as_str())
     }
 
     /// Workspace ids and English titles in bar order (Window menu).
