@@ -131,14 +131,14 @@ fn cc_sphere() -> Builtin {
     b = b.checkbox(23, "Internal Shadows", "Internal Shadows", false);
     b = b.checkbox(24, "Transparency Falloff", "Transparency Falloff", false);
     b.push(25, "", "", ParamKind::GroupEnd, None);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
                 mode: 0,
                 def,
-                label: "bae.effects/cc_sphere",
-                shader: CC_SPHERE,
+                shader: &CC_SPHERE,
+                read: source_bounds,
                 inputs: &[(22, true)],
                 bounds: unchanged,
             }),
@@ -306,8 +306,8 @@ fn cc_cylinder() -> Builtin {
             Arc::new(Sampled {
                 mode: 0,
                 def,
-                label: "bae.effects/cc_cylinder",
-                shader: CC_CYLINDER,
+                shader: &CC_CYLINDER,
+                read: source_bounds,
                 inputs: &[],
                 bounds: unchanged,
             }),
@@ -411,14 +411,14 @@ fn cc_spotlight() -> Builtin {
         ],
     );
     b = b.layer(9, "Gel Layer", "Gel Layer").layer_stage(9);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
                 mode: 0,
                 def,
-                label: "bae.effects/cc_spotlight",
-                shader: CC_SPOTLIGHT,
+                shader: &CC_SPOTLIGHT,
+                read: unchanged,
                 inputs: &[(9, true)],
                 bounds: unchanged,
             }),

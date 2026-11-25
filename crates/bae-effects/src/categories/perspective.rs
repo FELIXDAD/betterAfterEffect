@@ -1,14 +1,11 @@
+mod filters;
 use super::packages;
 use crate::Registry;
 use crate::effects::spatial;
 
 pub(crate) fn register(registry: &mut Registry) {
-    registry
-        .effects
-        .extend(crate::effects::perspective_filters::entries());
-    registry
-        .prewarm
-        .push(crate::effects::perspective_filters::prewarm);
+    registry.effects.extend(filters::entries());
+    registry.prewarm.push(filters::prewarm);
     packages(
         registry,
         &[

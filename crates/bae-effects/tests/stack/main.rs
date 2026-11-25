@@ -143,23 +143,26 @@ fn levels_then_exposure(fx: &mut Fx, layer: &PrimPath) -> (PrimPath, PrimPath) {
     (levels, exposure)
 }
 
-#[test]
-fn distort_point_defaults_use_the_source_on_apply_and_reset() {
+mod blur_sharpen;
+mod distort;
+mod noise_grain;
+mod perspective;
+mod relative_points;
+mod stylize;
+
+fn assert_reference_points(rows: &[(&str, u32, [f64; 2])]) {
     let mut fx = Fx::new();
     let comp = fx.comp();
     let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
-    for (effect_name, id, expected) in [
-        ("ADBE Mirror", 1, [31., 6.5]),
-        ("ADBE Corner Pin", 4, [31., 13.]),
-        ("ADBE Geometry2", 2, [15.5, 6.5]),
-    ] {
-        let effect = fx.apply(&layer, effect_name);
-        let prop = format!("param:{id:04}");
-        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&prop).cloned();
-        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
-        fx.param(&effect, id, json!({"type": "vec2", "value": [4., 5.]}));
-        fx.run("effect.reset", json!({"effects": [effect]}));
-        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
+    for &(name, id, expected) in rows {
+        let effect = fx.apply(&layer, name);
+        let attr = format!("param:{id:04}");
+        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&attr).cloned();
+        let expected = Some(bae_model::Value::Vec2(expected));
+        assert_eq!(point(&fx), expected);
+        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
+        fx.run("effect.reset", json!({"effects":[effect]}));
+        assert_eq!(point(&fx), expected);
     }
 }
 
@@ -196,6 +199,7 @@ fn effects_render_top_to_bottom() {
 }
 
 /// Effect parameters animate through bae-anim: keyframes and expressions.
+
 #[test]
 fn parameters_follow_keyframes_and_expressions() {
     let mut fx = Fx::new();
@@ -383,6 +387,7 @@ fn adjustment_layer_coverage_and_opacity() {
 /// A blur on an adjustment layer over one untransformed layer equals the same
 /// blur on the layer itself: the adjusted result replaces what is below (no
 /// sharp copy shows through where the blur made pixels transparent).
+
 #[test]
 fn adjustment_blur_matches_layer_blur() {
     let blur = |on_adjustment: bool| -> Option<Vec<[u8; 4]>> {
@@ -462,6 +467,7 @@ fn effects_and_fx_switch_survive_save_and_reopen() {
 
 /// Every built-in effect: apply it, change a parameter, keyframe it, render,
 /// and undo back to no effects (one undo step per command).
+
 #[test]
 fn every_builtin_applies_animates_renders_and_undoes() {
     let mut fx = Fx::new();
@@ -507,74 +513,4 @@ fn every_builtin_applies_animates_renders_and_undoes() {
             def.match_name
         );
     }
-}
-
-#[test]
-fn spatial_point_defaults_follow_source_dimensions_on_apply_and_reset() {
-    let mut fx = Fx::new();
-    let comp = fx.comp();
-    let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
-    for (name, id, expected) in [
-        ("ADBE Radial Blur", 2, [15.5, 6.5]),
-        ("ADBE Tile", 1, [15.5, 6.5]),
-        ("ADBE Radial Shadow", 3, [7.75, 3.25]),
-        ("CC Sphere", 7, [15.5, 6.5]),
-        ("CC Spotlight", 1, [27.9, 1.3]),
-        ("CC Spotlight", 2, [15.5, 6.5]),
-    ] {
-        let effect = fx.apply(&layer, name);
-        let attr = format!("param:{id:04}");
-        let check_point = |fx: &Fx| {
-            let Some(bae_model::Value::Vec2(actual)) = fx.stage.prim(&effect).unwrap().value(&attr)
-            else {
-                panic!("missing point {name}-{id}");
-            };
-            assert!(
-                actual
-                    .iter()
-                    .zip(expected)
-                    .all(|(got, want)| (got - want).abs() < 1e-12),
-                "{name}-{id}: expected {expected:?}, got {actual:?}"
-            );
-        };
-        check_point(&fx);
-        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
-        fx.run("effect.reset", json!({"effects":[effect]}));
-        check_point(&fx);
-    }
-}
-
-#[test]
-fn relative_point_defaults_follow_the_layer_on_apply_and_reset() {
-    let mut fx = Fx::new();
-    let comp = fx.comp();
-    let layer = fx.solid(&comp, [1.0, 0.0, 0.0], [31, 13]);
-    let before = fx.pixel(&comp, 32, 12);
-    // Declarative packages give point defaults as fractions of the layer.
-    for (name, id, expected) in [
-        ("ADBE Ramp", 1, [15.5, 0.0]),
-        ("ADBE Ramp", 3, [15.5, 13.0]),
-        ("ADBE Radial Wipe", 3, [15.5, 6.5]),
-    ] {
-        let effect = fx.apply(&layer, name);
-        let attr = format!("param:{id:04}");
-        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&attr).cloned();
-        let expected = Some(bae_model::Value::Vec2(expected));
-        assert_eq!(point(&fx), expected, "{name} {id}");
-        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
-        fx.run("effect.reset", json!({"effects":[effect]}));
-        assert_eq!(point(&fx), expected, "{name} {id}");
-        fx.run("effect.remove", json!({"effects":[effect]}));
-    }
-    // The written values render as the implicit defaults did.
-    let ramp = fx.apply(&layer, "ADBE Ramp");
-    let written = fx.pixel(&comp, 32, 12);
-    for id in [1, 3] {
-        fx.run(
-            "attr.clear",
-            json!({"path": ramp, "attr": format!("param:{id:04}")}),
-        );
-    }
-    assert_eq!(fx.pixel(&comp, 32, 12), written);
-    assert!(before.is_none() || written != before);
 }

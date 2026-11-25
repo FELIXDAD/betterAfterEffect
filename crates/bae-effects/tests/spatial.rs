@@ -452,28 +452,3 @@ fn radial_shadow_resize_preserves_projection_outside_the_layer() {
     let shadow = Pixels::new(ray, |_, _| [0., 0., 0., 127. / 255.]);
     assert_close(&got, &shadow, ray, 0.001, "projected outside source bounds");
 }
-
-#[test]
-fn projection_silhouettes_and_spotlight() {
-    let Some(gpu) = context() else { return };
-    let rect = IRect::from_size(64, 48);
-    let input = Pixels::new(rect, |_, _| [0.8, 0.4, 0.2, 1.]);
-    for (name, params) in [
-        ("CC Sphere", vec![(6, Value::Float(12.))]),
-        ("CC Cylinder", vec![]),
-    ] {
-        let out = run(&gpu, F32, builtin(name), params, &input, rect, 1.);
-        assert!(out.get(32, 24)[3] > 0.99, "{name}");
-        assert_eq!(out.get(0, 0)[3], 0.);
-    }
-    let light = run(
-        &gpu,
-        F32,
-        builtin("CC Spotlight"),
-        vec![(8, Value::Int(1))],
-        &input,
-        rect,
-        1.,
-    );
-    assert!(light.get(32, 24)[3] > light.get(0, 47)[3]);
-}

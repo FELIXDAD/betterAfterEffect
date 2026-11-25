@@ -152,20 +152,11 @@ impl bae_model::Command for ApplyEffect {
 pub fn instance_default(
     stage: &Stage,
     layer: &PrimPath,
-    def: &EffectDef,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    let measured = matches!(
-        param.match_name.as_deref(),
-        Some("ADBE Radial Blur-0002" | "ADBE Tile-0001" | "ADBE Radial Shadow-0003")
-    ) || (def.plugin.is_none() && def.category == "Distort")
-        || matches!(
-            param.match_name.as_deref(),
-            Some("CC Sphere-0007" | "CC Spotlight-0001" | "CC Spotlight-0002")
-        );
     let unit = if param.flags.relative_default {
         [1.0, 1.0]
-    } else if measured {
+    } else if param.flags.reference_point_default {
         [1.0 / 640.0, 1.0 / 360.0]
     } else {
         return param.default.clone();
@@ -229,7 +220,7 @@ fn add_instance(
         if param.kind.value_type().is_none() {
             continue;
         }
-        if let Some(value) = instance_default(tx.stage(), layer, def, param) {
+        if let Some(value) = instance_default(tx.stage(), layer, param) {
             set(tx, &path, &param_attr(param.id), value)?;
         }
     }
@@ -422,7 +413,7 @@ impl bae_model::Command for ResetEffects {
             let def = find_def(&self.defs, &match_name)
                 .ok_or_else(|| fail(format!("unknown effect `{match_name}`")))?;
             for param in &def.params {
-                let Some(default) = instance_default(tx.stage(), &layer, &def, param) else {
+                let Some(default) = instance_default(tx.stage(), &layer, param) else {
                     continue;
                 };
                 let attr = param_attr(param.id);
