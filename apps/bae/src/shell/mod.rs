@@ -23,6 +23,7 @@ mod numpad;
 mod open_documents;
 #[cfg(any(windows, test))]
 mod save_guard;
+mod script_bindings;
 #[cfg(windows)]
 mod win_save;
 mod window_state;
@@ -69,6 +70,7 @@ impl AppModule for ShellModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_gpu::GpuModule);
         app.add_module(bae_ui::UiModule);
+        script_bindings::install(app);
         // Agent panels: tool-call log and proposals (bae-agent, workstream 17).
         let audit = Arc::new(bae_agent::AuditLog::new());
         let feed: Arc<dyn bae_ui::agent::AgentFeed> =
