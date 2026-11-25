@@ -76,6 +76,7 @@ pub mod layer;
 pub mod markers;
 pub mod matte;
 pub mod names;
+pub mod paint;
 pub mod path;
 pub mod precompose;
 pub mod query;
@@ -127,6 +128,7 @@ pub use time::{
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(paint::AddStroke),
         r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
