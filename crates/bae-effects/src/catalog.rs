@@ -335,9 +335,12 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "关闭",
         ],
         _ => {
-            return crate::categories::noise_grain::grain::definitions::options(
-                match_name, param_id,
-            );
+            return crate::categories::keying::keyer::definitions::options(match_name, param_id)
+                .or_else(|| {
+                    crate::categories::noise_grain::grain::definitions::options(
+                        match_name, param_id,
+                    )
+                });
         }
     })
 }

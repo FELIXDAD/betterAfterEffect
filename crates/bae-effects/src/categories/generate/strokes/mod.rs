@@ -1,4 +1,5 @@
 //! Path and time based generators. Geometry is in layer pixels.
+mod contour;
 mod paint;
 mod paint_strokes;
 mod scribble;
@@ -147,7 +148,10 @@ impl TargetEffect for PaintEffect {
             Generator::Stroke => stroke::paint(v),
             Generator::WriteOn => write_on::paint(v, input),
             Generator::Scribble => scribble::paint(v, input),
-            Generator::Vegas => vegas::paint(ctx, v, input)?,
+            Generator::Vegas if v.popup(52) == 1 => {
+                return vegas::render_contours(ctx, v, input, roi);
+            }
+            Generator::Vegas => vegas::paint(v),
         };
         paint.render(ctx, p, input, roi)
     }
@@ -296,5 +300,6 @@ pub(crate) fn prewarm(
 ) -> Result<(), RenderError> {
     paint::kernel(rt, format)?;
     vegas::contour_kernel(rt)?;
+    contour::prewarm(rt, format)?;
     Ok(())
 }
