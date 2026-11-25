@@ -13,86 +13,13 @@ pub(super) fn switch_name(icon: Icon) -> &'static str {
         Icon::Shy => "Shy",
         Icon::Collapse => "Collapse Transformations",
         Icon::Quality => "Quality and Sampling",
+        Icon::Fx => "Effects",
         Icon::FrameBlend => "Frame Blending",
         Icon::MotionBlur => "Motion Blur",
         Icon::Adjustment => "Adjustment Layer",
         Icon::Cube => "3D Layer",
         _ => "Switch",
     }
-}
-
-/// A layer switch; `layer` is the accessibility context ("Layer “Solid 1”").
-pub(super) fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id, layer: &str) -> bool {
-    let resp = ui.interact(rect, id, Sense::click()).labeled_toggle(
-        egui::WidgetType::Checkbox,
-        &bae_ui::a11y::context(&[layer, tr(switch_name(icon))]),
-        on,
-    );
-    widgets::paint_switch(
-        ui.painter(),
-        rect.shrink2(vec2(1.0, 2.0)),
-        on,
-        icon,
-        resp.hovered(),
-    );
-    resp.clicked()
-}
-
-fn frame_mix_cell(
-    ui: &mut Ui,
-    cx: &mut PanelContext<'_>,
-    layer: &PrimPath,
-    label: &str,
-    rect: Rect,
-    id: Id,
-) {
-    let Some(view) = cx.stage.prim(layer) else {
-        return;
-    };
-    if view.value("kind").and_then(|v| v.as_str()) != Some("footage") {
-        return;
-    }
-    let asset = view
-        .value("source")
-        .and_then(|s| s.as_prim_ref())
-        .and_then(|p| cx.stage.prim(p));
-    let Some(asset) = asset else { return };
-    let kind = asset.value("kind").and_then(|v| v.as_str());
-    if !(kind == Some("sequence")
-        || (kind == Some("footage") && asset.value("frame_rate").is_some()))
-    {
-        return;
-    }
-    let mode = view
-        .value("frame_blending")
-        .and_then(|v| v.as_str())
-        .unwrap_or("off");
-    let on = mode != "off";
-    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(id));
-    if query::is_locked(cx.stage, layer) {
-        cell.disable();
-    }
-    let name = tr(match mode {
-        "pixel_motion" => "Pixel Motion",
-        "frame_mix" => "Frame Mix",
-        _ => "Off",
-    });
-    let resp = cell.interact(rect, id, Sense::click()).labeled_value(
-        egui::WidgetType::Button,
-        &bae_ui::a11y::context(&[label, tr("Frame Blending")]),
-        name,
-    );
-    widgets::paint_switch(
-        ui.painter(),
-        rect.shrink2(vec2(1.0, 2.0)),
-        on,
-        Icon::FrameBlend,
-        resp.hovered(),
-    );
-    if resp.clicked() {
-        cx.invoke_with("layer.set_attr", json!({"layers":[layer],"attr":"frame_blending","value":{"type":"enum","value":if on {"off"} else {"frame_mix"}}}));
-    }
-    resp.on_hover_text(name);
 }
 
 impl TimelinePanel {
@@ -167,6 +94,7 @@ impl TimelinePanel {
                         vec2(SW, ROW_H),
                     )
                 };
+                let locked = query::is_locked(stage, layer);
                 for (i, attr, icon) in [
                     (0, "enabled", Icon::Eye),
                     (1, "audio_enabled", Icon::Speaker),
@@ -180,9 +108,18 @@ impl TimelinePanel {
                         continue;
                     }
                     let on = bool_attr(stage, layer, attr);
-                    if switch(ui, av(i), on, icon, rid(attr), &layer_ctx) {
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
-                    }
+                    self.switch_cell(
+                        ui,
+                        cx,
+                        av(i),
+                        rid(attr),
+                        layer,
+                        &layer_ctx,
+                        attr,
+                        icon,
+                        on,
+                        locked,
+                    );
                 }
                 let p = ui.painter();
                 icons::swatch(
@@ -272,7 +209,6 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    let locked = query::is_locked(stage, layer);
                     if resp.double_clicked() && !locked {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
@@ -303,41 +239,39 @@ impl TimelinePanel {
                             vec2(SW, ROW_H),
                         )
                     };
-                    if frame_mix_available() {
-                        frame_mix_cell(ui, cx, layer, &layer_ctx, sw(4), rid("frame_blending"));
-                    }
-                    // Shy: no box, AE's figure peeking over the bar, or ducked behind it
-                    // when the layer is shy.
-                    let shy = bool_attr(stage, layer, "shy");
-                    let resp = ui
-                        .interact(sw(0), rid("shy"), Sense::click())
-                        .labeled_toggle(
-                            egui::WidgetType::Checkbox,
-                            &bae_ui::a11y::context(&[&layer_ctx, tr("Shy")]),
-                            shy,
-                        );
-                    icons::paint(
-                        ui.painter(),
-                        Rect::from_center_size(sw(0).center(), vec2(13.0, 13.0)),
-                        if shy { Icon::ShyOn } else { Icon::Shy },
-                        if resp.hovered() {
-                            color::TEXT_STRONG
-                        } else {
-                            color::ICON
-                        },
-                    );
-                    if resp.clicked() {
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "shy", "value": {"type": "bool", "value": !shy}}));
-                    }
+                    let mut cell = |rect: Rect, attr, icon, on| {
+                        self.switch_cell(
+                            ui,
+                            cx,
+                            rect,
+                            rid(attr),
+                            layer,
+                            &layer_ctx,
+                            attr,
+                            icon,
+                            on,
+                            locked,
+                        )
+                    };
                     for (i, attr, icon) in [
+                        (0, "shy", Icon::Shy),
                         (1, "collapse_transformation", Icon::Collapse),
                         (5, "motion_blur", Icon::MotionBlur),
                         (6, "adjustment_layer", Icon::Adjustment),
+                        (7, "three_d", Icon::Cube),
                     ] {
-                        let on = bool_attr(stage, layer, attr);
-                        if switch(ui, sw(i), on, icon, rid(attr), &layer_ctx) {
-                            cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
-                        }
+                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr));
+                    }
+                    if frame_mix_available()
+                        && let Some(mode) = footage_frame_blending(stage, layer)
+                    {
+                        let tip = match mode {
+                            "pixel_motion" => "Pixel Motion",
+                            "frame_mix" => "Frame Mix",
+                            _ => "Off",
+                        };
+                        cell(sw(4), "frame_blending", Icon::FrameBlend, mode != "off")
+                            .on_hover_text(tr(tip));
                     }
                     // Effect switch (fx): only on layers with effects, like AE.
                     if !bae_motion::effect::effects_of(stage, layer).is_empty() {
@@ -346,25 +280,13 @@ impl TimelinePanel {
                             .and_then(|v| query::static_value(&v, "effects_enabled"))
                             .and_then(|v| v.as_bool())
                             .unwrap_or(true);
-                        if switch(ui, sw(3), on, Icon::Fx, rid("effects_enabled"), &layer_ctx) {
-                            cx.invoke_with(
-                                "layer.set_attr",
-                                json!({"layers": [layer], "attr": "effects_enabled", "value": {"type": "bool", "value": !on}}),
-                            );
-                        }
+                        cell(sw(3), "effects_enabled", Icon::Fx, on);
                     }
                     let draft = stage
                         .prim(layer)
                         .and_then(|v| query::static_value(&v, "quality"))
                         .is_some_and(|v| v.as_str() == Some("draft"));
-                    if switch(ui, sw(2), !draft, Icon::Quality, rid("quality"), &layer_ctx) {
-                        let to = if draft { "best" } else { "draft" };
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "quality", "value": {"type": "enum", "value": to}}));
-                    }
-                    let three_d = bool_attr(stage, layer, "three_d");
-                    if switch(ui, sw(7), three_d, Icon::Cube, rid("three_d"), &layer_ctx) {
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "three_d", "value": {"type": "bool", "value": !three_d}}));
-                    }
+                    cell(sw(2), "quality", Icon::Quality, !draft);
                 }
                 // Modes: Mode, T, Track Matte.
                 if cols.panes.modes {
@@ -1117,4 +1039,24 @@ fn option_label(token: &str) -> &'static str {
         .iter()
         .find(|(t, _, _)| *t == token)
         .map_or("", |(_, en, z)| if zh { z } else { en })
+}
+
+/// The media importer writes a frame rate only for moving footage. Still and audio layers
+/// have no temporal video samples to mix.
+fn footage_frame_blending<'a>(stage: &'a Stage, layer: &PrimPath) -> Option<&'a str> {
+    let view = stage.prim(layer)?;
+    if view.value("kind")?.as_str()? != "footage" {
+        return None;
+    }
+    let asset = stage.prim(view.value("source")?.as_prim_ref()?)?;
+    let kind = asset.value("kind")?.as_str()?;
+    if kind == "sequence" || (kind == "footage" && asset.value("frame_rate").is_some()) {
+        Some(
+            view.value("frame_blending")
+                .and_then(|v| v.as_str())
+                .unwrap_or("off"),
+        )
+    } else {
+        None
+    }
 }

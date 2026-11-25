@@ -2132,6 +2132,64 @@ fn f4_alternates_switches_and_modes() {
 }
 
 #[test]
+fn sweeping_a_switch_crosses_skipped_rows_and_backtracks_in_one_undo() {
+    let mut h = H::new();
+    for _ in 0..3 {
+        h.run("layer.create", json!({"comp": h.comp, "kind": "solid"}));
+    }
+    let mut tl = h.bars();
+    let mut rows = tl.last_bars.clone();
+    rows.sort_by(|a, b| a.1.center().y.total_cmp(&b.1.center().y));
+    assert_eq!(rows.len(), 4);
+    let point = |i: usize| pos2(12.0, rows[i].1.center().y);
+    let read = |h: &H| {
+        rows.iter()
+            .map(|(p, _)| {
+                query::static_value(&h.stage.prim(p).unwrap(), "enabled") == Some(Value::Bool(true))
+            })
+            .collect::<Vec<_>>()
+    };
+    h.run(
+        "layer.set_attr",
+        json!({"layers":[rows[1].0],"attr":"locked","value":{"type":"bool","value":true}}),
+    );
+    for (initial, expected) in [
+        (true, vec![false, true, false, false]),
+        (false, vec![true; 4]),
+    ] {
+        for events in [
+            vec![Event::PointerMoved(point(0))],
+            vec![button(point(0), true, Modifiers::NONE)],
+            vec![Event::PointerMoved(point(3))],
+            vec![Event::PointerMoved(point(0))],
+            vec![Event::PointerMoved(point(0) + vec2(30.0, 0.0))],
+        ] {
+            assert!(
+                h.frame(&mut tl, events, Modifiers::NONE)
+                    .invocations
+                    .is_empty()
+            );
+        }
+        let r = h.frame(
+            &mut tl,
+            vec![button(point(0) + vec2(30.0, 0.0), false, Modifiers::NONE)],
+            Modifiers::NONE,
+        );
+        assert_eq!(r.invocations.len(), 1);
+        assert_eq!(
+            r.invocations[0].params["layers"].as_array().unwrap().len(),
+            3
+        );
+        h.apply(&r);
+        assert_eq!(read(&h), expected);
+        h.undo();
+        assert_eq!(read(&h)[0], initial);
+        h.apply(&r);
+        h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    }
+}
+
+#[test]
 fn hide_shy_layers_switch_hides_shy_layers_from_the_timeline() {
     let mut h = H::new();
     let comp = h.comp.clone();

@@ -167,14 +167,11 @@ impl TimelinePanel {
             vec2(20.0, 20.0),
         );
         let gresp = ui.interact(ge, ui.id().with("graph_editor_switch"), Sense::click());
-        let on = {
-            let mut s = session.lock();
-            if gresp.clicked() {
-                s.graph_editor = !s.graph_editor;
-            }
-            s.graph_editor
-        };
-        self.graph_mode = on;
+        if gresp.clicked() {
+            self.graph_mode = !self.graph_mode;
+            session.lock().graph_editor = self.graph_mode;
+        }
+        let on = self.graph_mode;
         let gresp = gresp.labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
         if on {
             ui.painter().rect_filled(ge, 2.0, color::BUTTON_ON);
