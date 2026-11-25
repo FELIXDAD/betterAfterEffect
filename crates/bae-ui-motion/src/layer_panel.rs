@@ -338,3 +338,12 @@ fn time_ruler(
         s.set_time(info, Time::from_seconds(f * total));
     }
 }
+
+/// Registers this module's panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    crate::register_panel(
+        app,
+        "layer",
+        bae_ui::PanelKind::new("Layer", |spawn| Box::new(LayerPanel::new(spawn.state))),
+    );
+}

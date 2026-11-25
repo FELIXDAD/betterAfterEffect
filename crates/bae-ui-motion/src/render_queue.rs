@@ -817,24 +817,24 @@ impl RenderQueuePanel {
         let mut remove = None;
         let mut cancel = None;
         let mut requeue = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (i, item) in q.items.iter_mut().enumerate() {
-                let last =
-                    bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
-                ui.push_id(item.id, |ui| {
-                    item_ui(
-                        ui,
-                        i + 1,
-                        item,
-                        last,
-                        &mut remove,
-                        &mut cancel,
-                        &mut requeue,
-                    );
-                });
-                ui.separator();
-            }
-        });
+        // No scroll area of its own: the dock scrolls a panel that does not fit
+        // (AE opens the Render Queue in the short Timeline frame).
+        for (i, item) in q.items.iter_mut().enumerate() {
+            let last =
+                bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
+            ui.push_id(item.id, |ui| {
+                item_ui(
+                    ui,
+                    i + 1,
+                    item,
+                    last,
+                    &mut remove,
+                    &mut cancel,
+                    &mut requeue,
+                );
+            });
+            ui.separator();
+        }
         if let Some(id) = remove {
             q.remove(id);
         }
@@ -1122,6 +1122,83 @@ fn channels_label(channels: Channels) -> &'static str {
         Channels::Rgb => "RGB",
         Channels::RgbAlpha => "RGB + Alpha",
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Render Queue (AE 简体中文界面用词)
+    ("Window", "窗口"),
+    ("Render Queue", "渲染队列"),
+    ("Add to Render Queue", "添加到渲染队列"),
+    ("Render", "渲染"),
+    ("Rendering", "正在渲染"),
+    ("Queued", "已加入队列"),
+    ("Done", "完成"),
+    ("Failed", "失败"),
+    (
+        "Stopped ({done}/{total} frames)",
+        "已停止（{done}/{total} 帧）",
+    ),
+    ("Stop", "停止"),
+    ("Render Again", "重新渲染"),
+    ("Format", "格式"),
+    ("Output To", "输出到"),
+    // Output module (AE 26 输出模块设置)
+    ("PNG Sequence", "PNG 序列"),
+    ("TIFF Sequence", "TIFF 序列"),
+    ("OpenEXR Sequence", "OpenEXR 序列"),
+    ("Channels", "通道"),
+    ("Target Bitrate", "目标比特率"),
+    (
+        "This format has no alpha channel.",
+        "此格式没有 Alpha 通道。",
+    ),
+    ("ProRes export requires macOS.", "ProRes 导出需要 macOS。"),
+    (
+        "HEVC decoding is unsupported. Check that Windows HEVC Video Extensions are installed.",
+        "系统不支持此 HEVC 视频。请检查是否已安装 Windows「HEVC 视频扩展」。",
+    ),
+    (
+        "A hardware HEVC encoder is required.",
+        "导出 HEVC 需要硬件编码器。",
+    ),
+    (
+        "The system H.264 encoder is unavailable.",
+        "系统 H.264 编码器不可用。",
+    ),
+    ("Frames", "帧"),
+    ("Show in Finder", "在访达中显示"),
+    ("Show in Explorer", "在资源管理器中显示"),
+    ("Show in Folder", "在文件夹中显示"),
+    ("Rendering needs a GPU.", "渲染需要 GPU。"),
+    (
+        "Choose where to render: Output To is empty.",
+        "请选择渲染输出位置：“输出到”为空。",
+    ),
+    (
+        "The frames are outside the composition (0–{last}).",
+        "帧范围超出了合成（0–{last}）。",
+    ),
+    ("The composition no longer exists.", "合成已不存在。"),
+    (
+        "The file will be saved as .{ext} to match the format.",
+        "文件会按格式保存为 .{ext}。",
+    ),
+    (
+        "Add a composition with Composition > Add to Render Queue.",
+        "用“合成 > 添加到渲染队列”添加合成。",
+    ),
+];
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "render_queue",
+        bae_ui::PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
+    );
 }
 
 #[cfg(test)]

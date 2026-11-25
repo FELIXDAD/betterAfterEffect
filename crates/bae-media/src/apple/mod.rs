@@ -21,6 +21,7 @@
 //! instead of building a new one (scrubbing). A request shortly after the
 //! current frame switches to an open-ended range and reads forward (playback).
 
+mod audio_input;
 mod encode;
 mod trim;
 

@@ -403,7 +403,7 @@ impl Panel for CompositionViewer {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().tick(&info) {
+        if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
         let time = session.lock().time(&info.path);
@@ -992,6 +992,13 @@ pub(crate) fn add_item_as_layer(
             .and_then(|v| query::static_value(&v, "kind"))
         {
             Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+            _ if stage.prim(item).is_some_and(|v| {
+                v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                    && v.value("has_video").and_then(Value::as_bool) == Some(false)
+            }) =>
+            {
+                LayerKind::Audio
+            }
             _ => LayerKind::Footage,
         }
     };
@@ -1019,4 +1026,19 @@ fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {
             .font(theme::small()),
         );
     });
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "composition",
+        bae_ui::PanelKind::new("Composition", |spawn| {
+            Box::new(CompositionViewer::new(spawn.state))
+        }),
+    );
 }
