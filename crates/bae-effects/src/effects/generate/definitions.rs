@@ -634,3 +634,58 @@ pub(crate) fn cc_light_burst_2_5() -> Builtin {
         .extend([(4, vec!["Straight".into(), "Fade".into(), "Center".into()])]);
     fx
 }
+
+pub(crate) fn eyedropper_fill() -> Builtin {
+    let mut b = DefBuilder::new("ADBE Eyedropper Fill", "Eyedropper Fill", "Generate");
+    b.push(
+        1,
+        "Sample Point",
+        "采样点",
+        ParamKind::Point,
+        Some(Value::Vec2([0.5, 0.5])),
+    );
+    let (mut def, names) = b
+        .slider(
+            2,
+            "Sample Radius",
+            "采样半径",
+            10.,
+            [0.5, 200.],
+            [0.5, 200.],
+            2,
+            "pixels",
+        )
+        .popup(
+            3,
+            "Average Pixel Color",
+            "平均像素颜色",
+            1,
+            &["Skip Empty", "All", "All Premultiplied", "Including Alpha"],
+        )
+        .checkbox(4, "Maintain Original Alpha", "保持原始 Alpha", false)
+        .slider(
+            5,
+            "Blend With Original",
+            "与原始图像混合",
+            0.,
+            [0., 1.],
+            [0., 1.],
+            2,
+            "none",
+        )
+        .build();
+    def.params[0].flags.relative_default = true;
+    let mut fx = rust_builtin(
+        (Arc::new(eyedropper::EyedropperFill { def }), names),
+        "eyedropper-fill",
+        "吸管填充",
+        &["Eyedropper Fill", "取色"],
+    );
+    fx.info.param_options_zh.push((
+        3,
+        ["跳过空白", "全部", "全部预乘", "包括 Alpha"]
+            .map(str::to_owned)
+            .into(),
+    ));
+    fx
+}

@@ -367,60 +367,6 @@ default = 20
 range = [0, 100]
 
 [[effect]]
-id = "eyedropper-fill"
-name = "Eyedropper Fill"
-category = "Generate"
-implementation = "wgsl"
-ae_match_names = ["ADBE Eyedropper Fill"]
-shader = "shaders/eyedropper_fill.wgsl"
-
-[effect.roi]
-read = "32768"
-
-[[effect.pass]]
-entry = "eyedropper_fill"
-reads = ["input"]
-writes = "output"
-
-[[effect.param]]
-id = 1
-key = "sample_point"
-type = "point"
-name = "Sample Point"
-default = [0.5, 0.5]
-
-[[effect.param]]
-id = 2
-key = "sample_radius"
-type = "float"
-name = "Sample Radius"
-default = 10
-range = [0.5, 200]
-
-[[effect.param]]
-id = 3
-key = "average_pixel_color"
-type = "popup"
-name = "Average Pixel Color"
-default = 1
-choices = ["Skip Empty", "All", "All Premultiplied", "Including Alpha"]
-
-[[effect.param]]
-id = 4
-key = "maintain_original_alpha"
-type = "checkbox"
-name = "Maintain Original Alpha"
-default = false
-
-[[effect.param]]
-id = 5
-key = "blend_with_original"
-type = "float"
-name = "Blend With Original"
-default = 0
-range = [0, 1]
-
-[[effect]]
 id = "cc-light-sweep"
 name = "CC Light Sweep"
 category = "Generate"

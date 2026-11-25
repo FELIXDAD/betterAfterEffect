@@ -1,6 +1,7 @@
 //! Generators with image dependencies, temporal parameters or multiple GPU passes.
 mod bucket;
 mod definitions;
+mod eyedropper;
 mod rays;
 mod waves;
 
@@ -14,7 +15,9 @@ use bae_gpu::wgpu;
 use bae_model::{EffectDef, Value};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
 use bucket::PaintBucket;
-pub(crate) use definitions::{cc_light_burst_2_5, cc_light_rays, paint_bucket, radio_waves};
+pub(crate) use definitions::{
+    cc_light_burst_2_5, cc_light_rays, eyedropper_fill, paint_bucket, radio_waves,
+};
 use rays::LightRays;
 use waves::RadioWaves;
 
@@ -88,5 +91,7 @@ impl Pass {
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     rays::PASS.kernel(rt, format)?;
     waves::PASS.kernel(rt, format)?;
+    eyedropper::SAMPLE.kernel(rt, format)?;
+    eyedropper::FILL.kernel(rt, format)?;
     bucket::prewarm(rt, format)
 }

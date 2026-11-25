@@ -352,7 +352,7 @@ pub struct EffectNode {
     /// Evaluated parameters.
     pub instance: RenderEffect,
     /// Evaluated parameter samples in layer time.
-    pub history: Vec<(Time, RenderEffect)>,
+    pub history: Vec<crate::effect::ParameterSample>,
     /// Frame context for [`EffectParams`] (time, scale, bounds, rate, shutter …).
     pub frame: EffectFrame,
     /// Input node.
@@ -392,6 +392,12 @@ pub struct EffectFrame {
 }
 
 impl EffectFrame {
+    /// Map a layer sample time to the corresponding composition time.
+    pub fn comp_at(&self, local: Time) -> Time {
+        self.comp_time
+            + Time::from_seconds((local - self.time).as_seconds() * self.layer_time_scale)
+    }
+
     /// The parameters of `instance` in this frame.
     pub fn params<'a>(&self, instance: &'a RenderEffect) -> EffectParams<'a> {
         EffectParams {
@@ -451,6 +457,22 @@ impl SourceResolver for NoSources {
 /// The comp evaluated at other times, for effects that read other frames
 /// ([`LayerDependency::time`]); `crate::eval::EvaluatorFrames` evaluates the stage.
 pub trait CompFrames {
+    /// Whether a sampled control may vary with time.
+    fn animated_controls(&self, _effect: &PrimPath, _ids: &[u32]) -> bool {
+        true
+    }
+
+    /// Sample only the selected controls at the requested layer times.
+    fn parameters_at(
+        &mut self,
+        _effect: &RenderEffect,
+        _ids: &[u32],
+        _frame: &EffectFrame,
+        _times: &[Time],
+    ) -> Vec<crate::effect::ParameterSample> {
+        Vec::new()
+    }
+
     /// `comp` evaluated at comp time `time` (`None`: not available).
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError>;
 }
@@ -1432,23 +1454,20 @@ impl Builder<'_, '_> {
         rect.hash(&mut h);
         let params = frame.params(&instance);
         let mut history = Vec::new();
-        if let Some(frames) = self.frames.as_mut() {
-            for time in effect.parameter_times(&params) {
-                let delta = (time - frame.time).as_seconds() * frame.layer_time_scale;
-                let at = frame.comp_time + Time::from_seconds(delta);
-                if let Some(sample) = frames.comp_at(&comp.path, at)?
-                    && let Some(source) = sample.layers.iter().find(|l| l.path == layer.path)
-                    && let Some(fx) = source.effects.iter().find(|fx| fx.path == instance.path)
-                {
-                    self.time_dependent = true;
-                    time.hash(&mut h);
-                    for (id, value) in &fx.params {
-                        id.hash(&mut h);
-                        crate::input::hash_value(value, &mut h);
-                    }
-                    history.push((time, fx.clone()));
+        if let Some(frames) = self.frames.as_mut()
+            && frames.animated_controls(&instance.path, effect.parameter_ids())
+            && let times = effect.parameter_times(&params)
+            && !times.is_empty()
+        {
+            history = frames.parameters_at(&instance, effect.parameter_ids(), &frame, &times);
+            for sample in &history {
+                sample.time.hash(&mut h);
+                for (id, value) in &sample.values {
+                    id.hash(&mut h);
+                    crate::input::hash_value(value, &mut h);
                 }
             }
+            self.time_dependent |= !history.is_empty();
         }
         let mut layers = Vec::new();
         for dep in effect.layer_dependencies(&params) {

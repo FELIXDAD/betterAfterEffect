@@ -79,23 +79,6 @@ fork_variation = "分叉变化"
 2 = "半线性"
 3 = "样条"
 
-[effect.eyedropper-fill]
-name = "吸管填充"
-keywords = ["取色"]
-
-[effect.eyedropper-fill.params]
-sample_point = "采样点"
-sample_radius = "采样半径"
-average_pixel_color = "平均像素颜色"
-maintain_original_alpha = "保持原始 Alpha"
-blend_with_original = "与原始图像混合"
-
-[effect.eyedropper-fill.choices.average_pixel_color]
-1 = "跳过空白"
-2 = "全部"
-3 = "全部预乘"
-4 = "包括 Alpha"
-
 [effect.cc-light-sweep]
 name = "CC Light Sweep"
 keywords = ["扫光"]

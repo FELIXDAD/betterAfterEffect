@@ -93,21 +93,11 @@ impl TargetEffect for PaintBucket {
             ));
         }
         let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
-        let buffer = |size| {
-            rt.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(LABEL),
-                size,
-                usage: wgpu::BufferUsages::STORAGE,
-                mapped_at_creation: false,
-            })
-        };
-        let parents = buffer(bytes);
         let stroke = v.popup(8);
         let radius = (v.f(5) * p.scale) as f32;
         let distance = stroke > 1 && radius > 0.0 && !v.b(7);
         let scratch_size = if distance { bytes } else { 4 };
-        let mut from = buffer(scratch_size);
-        let mut to = buffer(scratch_size);
+        let [parents, mut from, mut to] = rt.bucket_buffers([bytes, scratch_size, scratch_size]);
         let mut u = UniformWriter::with_size(BYTES as usize);
         image_grid::image_coords(&mut u, 0, input, grid);
         u.i32s(32, &image_grid::rect4(rect))

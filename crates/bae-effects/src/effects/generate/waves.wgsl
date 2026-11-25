@@ -19,19 +19,32 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
     let p=u.roi.xy+vec2i(id.xy);
     if any(p>=u.roi.zw){return;}
     let pos=vec2f(p)+0.5;
+    let filter_radius = max(1.0, u.threshold.x);
+    let map_end = u.map.origin + vec2f(u.map.size) / u.map.scale;
+    let far_corner = max(abs(u.map.origin - u.contour.xy), abs(map_end - u.contour.xy));
+    let map_extent = length(far_corner + vec2f(filter_radius + 1.0 / u.map.scale));
+    let half_layer = max(min(u.layer.x, u.layer.y) * 0.5, 1.0);
+    let aa = inverseSqrt(max(1.0, u.polygon.w));
     var result=vec4f(0);
     for(var i=0u;i<u32(u.shape.x);i++){
-        let w=u.waves[i]; let rel=pos-w.geom.xy;
-        let theta=atan2(rel.y,rel.x)-w.geom.w;
-        let sector=6.2831853/u.shape.z;
-        let side=cos((fract(theta/sector+0.5)-0.5)*sector)/cos(sector*0.5);
-        let radius=w.geom.z*(1.0+u.polygon.z*(0.5+0.5*cos(theta*u.shape.z)));
-        var d=length(rel)*mix(side,1.0,saturate(u.polygon.x*(0.5+u.polygon.y*0.5)))-radius;
-        if u.shape.y!=1.0 {
-            if u.shape.y==3.0 && u.layer.z==0.0 {continue;}
-            let scale=max(0.01,w.geom.z/max(min(u.layer.x,u.layer.y)*0.5,1.0));
+        let w = u.waves[i];
+        let rel = pos - w.geom.xy;
+        let width = w.stroke.y * 0.5;
+        let scale = max(0.01, w.geom.z / half_layer);
+        let extent = select(map_extent * scale, abs(w.geom.z) * (1.0 + max(u.polygon.z, 0.0)),
+                            u.shape.y == 1.0);
+        if any(abs(rel) > vec2f(extent + width + aa)) { continue; }
+        let theta = atan2(rel.y, rel.x) - w.geom.w;
+        var d: f32;
+        if u.shape.y == 1.0 {
+            let sector = 6.2831853 / u.shape.z;
+            let side = cos((fract(theta / sector + 0.5) - 0.5) * sector) / cos(sector * 0.5);
+            let radius = w.geom.z * (1.0 + u.polygon.z * (0.5 + 0.5 * cos(theta * u.shape.z)));
+            d = length(rel) * mix(side, 1.0, saturate(u.polygon.x * (0.5 + u.polygon.y * 0.5))) - radius;
+        } else {
+            if u.shape.y == 3.0 && u.layer.z == 0.0 { continue; }
             let q=u.contour.xy+vec2f(cos(theta),sin(theta))*length(rel)/scale;
-            let r=max(1.0,u.threshold.x);
+            let r = filter_radius;
             let dxy=vec2f(r,0);
             let samples=vec4f(contour_value(q+dxy),contour_value(q-dxy),contour_value(q+dxy.yx),contour_value(q-dxy.yx));
             var value=mix(contour_value(q),dot(samples,vec4f(0.25)),saturate(u.threshold.x));
@@ -41,8 +54,6 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
             let diff=(fract((value-threshold)*levels+0.5)-0.5)/levels;
             d=diff*2.0*r*scale/max(length(samples.xz-samples.yw),0.0001);
         }
-        let width=w.stroke.y*0.5;
-        let aa=1.0/sqrt(max(1.0,u.polygon.w));
         let k=clamp(d/max(width,0.001),-1.0,1.0);
         var profile=1.0;
         switch u32(u.shape.w) { case 2u:{profile=1.0-abs(k);} case 3u:{profile=0.5+0.5*k;}

@@ -230,3 +230,70 @@ fn wide_time_averages_frames_and_time_difference_compares_them() {
         &difference[..4]
     );
 }
+
+#[test]
+fn radio_waves_batches_birth_controls_without_evaluating_other_frames() {
+    use bae_render::{effect::ParameterSample, graph::EffectFrame};
+
+    #[derive(Default)]
+    struct BirthControls {
+        animated: bool,
+        requests: Vec<Vec<Time>>,
+    }
+
+    impl CompFrames for BirthControls {
+        fn animated_controls(&self, _: &PrimPath, _: &[u32]) -> bool {
+            self.animated
+        }
+
+        fn parameters_at(
+            &mut self,
+            effect: &RenderEffect,
+            ids: &[u32],
+            _: &EffectFrame,
+            times: &[Time],
+        ) -> Vec<ParameterSample> {
+            assert_eq!(effect.effect, "APC Radio Waves");
+            assert!(ids.contains(&4) && !ids.contains(&34));
+            self.requests.push(times.to_vec());
+            times
+                .iter()
+                .map(|&time| ParameterSample {
+                    time,
+                    values: vec![(4, Value::Vec2([time.as_seconds(), 3.]))],
+                })
+                .collect()
+        }
+
+        fn comp_at(&mut self, _: &PrimPath, _: Time) -> Result<Option<RenderComp>, RenderError> {
+            panic!("a wave birth requested a whole composition")
+        }
+    }
+
+    let Some(mut r) = renderer() else { return };
+    let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+    comp.time = Time::from_seconds(2.);
+    let mut layer = solid(CLIP, 16, [0.; 4]);
+    layer.time = comp.time;
+    layer.effects.push(effect(
+        "waves",
+        "APC Radio Waves",
+        vec![(34, Value::Float(2.))],
+    ));
+    comp.layers.push(layer);
+    let mut controls = BirthControls {
+        animated: true,
+        requests: Vec::new(),
+    };
+    r.render_frame_with(&comp, &RenderRequest::default(), Some(&mut controls))
+        .unwrap();
+    assert_eq!(
+        controls.requests,
+        [[0., 0.5, 1., 1.5].map(Time::from_seconds)]
+    );
+    controls.animated = false;
+    controls.requests.clear();
+    r.render_frame_with(&comp, &RenderRequest::default(), Some(&mut controls))
+        .unwrap();
+    assert!(controls.requests.is_empty());
+}

@@ -117,6 +117,7 @@ pub(crate) struct Runtime {
     ring: UniformRing,
     placeholder: wgpu::TextureView,
     kernels: Mutex<FxHashMap<KernelKey, Arc<Kernel>>>,
+    bucket_buffers: Mutex<[Option<wgpu::Buffer>; 3]>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -148,6 +149,26 @@ pub(crate) fn runtime(gpu: &Arc<GpuContext>) -> Arc<Runtime> {
 }
 
 impl Runtime {
+    /// Every bucket invocation initializes its scratch in the same command buffer that consumes it.
+    pub(crate) fn bucket_buffers(&self, sizes: [u64; 3]) -> [wgpu::Buffer; 3] {
+        let mut buffers = self.bucket_buffers.lock();
+        std::array::from_fn(|i| {
+            let slot = &mut buffers[i];
+            if let Some(buffer) = slot
+                && buffer.size() >= sizes[i]
+            {
+                return buffer.clone();
+            }
+            slot.insert(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("bae.effects.bucket.scratch"),
+                size: sizes[i],
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            }))
+            .clone()
+        })
+    }
+
     fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bae.effects.uniform_ring"),
@@ -186,6 +207,7 @@ impl Runtime {
             },
             placeholder,
             kernels: Mutex::new(FxHashMap::default()),
+            bucket_buffers: Mutex::default(),
         }
     }
 
@@ -389,4 +411,22 @@ pub(crate) fn dispatch(
     pass.set_pipeline(&kernel.pipeline);
     pass.set_bind_group(0, group, offsets);
     pass.dispatch_workgroups(x, y, z);
+}
+
+#[cfg(test)]
+mod bucket_tests {
+    #[test]
+    fn scratch_buffers_grow_individually_and_are_reused() {
+        let Some(gpu) = bae_gpu::testing::shared_context() else {
+            return;
+        };
+        let rt = super::runtime(&gpu);
+        let small = rt.bucket_buffers([1024, 4, 4]);
+        assert_eq!(rt.bucket_buffers([512, 4, 4]), small);
+        let with_stroke = rt.bucket_buffers([1024; 3]);
+        assert_eq!(with_stroke[0], small[0]);
+        assert_ne!(with_stroke[1], small[1]);
+        assert_ne!(with_stroke[2], small[2]);
+        assert_eq!(rt.bucket_buffers([1024; 3]), with_stroke);
+    }
 }

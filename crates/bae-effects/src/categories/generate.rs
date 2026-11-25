@@ -7,6 +7,7 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.effects.extend([
         radio_waves(),
         paint_bucket(),
+        eyedropper_fill(),
         cc_light_rays(),
         cc_light_burst_2_5(),
     ]);
@@ -21,7 +22,6 @@ pub(crate) fn register(registry: &mut Registry) {
                     "shaders/lens_flare.wgsl",
                     "shaders/beam.wgsl",
                     "shaders/advanced_lightning.wgsl",
-                    "shaders/eyedropper_fill.wgsl",
                     "shaders/cc_light_sweep.wgsl"
                 ]
             ),

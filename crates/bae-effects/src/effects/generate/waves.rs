@@ -31,6 +31,9 @@ impl Effect for RadioWaves {
     fn def(&self) -> &EffectDef {
         &self.def
     }
+    fn parameter_ids(&self) -> &'static [u32] {
+        &[4, 36, 38, 40, 42, 44, 46, 50, 52, 54, 56, 58, 60, 62]
+    }
     fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<Time> {
         if Params::new(&self.def, p).popup(6) == 1 {
             self.births(p)
@@ -130,15 +133,7 @@ impl TargetEffect for RadioWaves {
             ],
         );
         for (index, birth) in births.into_iter().enumerate() {
-            let sampled = EffectParams {
-                effect: p
-                    .history
-                    .iter()
-                    .find(|(t, _)| *t == birth)
-                    .map_or(p.effect, |(_, e)| e),
-                ..*p
-            };
-            let at = Params::new(&self.def, &sampled);
+            let at = v.at_time(birth);
             let age = (p.time - birth).as_seconds().max(0.);
             let life = at.f(56).max(0.00001);
             let fade = (age / at.f(58).max(0.00001)).min(1.)

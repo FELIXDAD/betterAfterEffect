@@ -182,6 +182,39 @@ fn gradient_points_stay_with_layer_across_tiles() {
 }
 
 #[test]
+fn eyedropper_fills_a_distant_tile_with_the_sample_disk_mean() {
+    let Some(gpu) = context() else { return };
+    let input = Pixels::new(IRect::from_size(32, 16), |x, y| {
+        if (x, y) == (8, 6) {
+            [0.5, 0., 0., 0.5]
+        } else {
+            [0., 0., 0.5, 0.5]
+        }
+    });
+    let tile = IRect::new(21, 4, 29, 12);
+    for format in [F16, F32] {
+        let out = run(
+            &gpu,
+            format,
+            builtin("ADBE Eyedropper Fill"),
+            vec![
+                (1, Value::Vec2([8., 6.])),
+                (2, Value::Float(1.)),
+                (3, Value::Int(4)),
+            ],
+            &input,
+            tile,
+            1.,
+        );
+        for px in &out.data {
+            for (got, want) in px.iter().zip([0.1, 0., 0.4, 0.5]) {
+                assert!((got - want).abs() < 0.001, "{px:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn paint_bucket_connectivity_and_jump_flood_stroke() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(17, 13);

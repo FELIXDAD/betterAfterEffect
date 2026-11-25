@@ -19,6 +19,15 @@ use crate::input::RenderEffect;
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Values of selected effect controls at one layer time.
+#[derive(Clone, Debug)]
+pub struct ParameterSample {
+    /// Layer time of the sample.
+    pub time: Time,
+    /// Requested controls authored on the instance.
+    pub values: Vec<(u32, Value)>,
+}
+
 /// Evaluated parameters of one effect instance plus the frame context an
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
@@ -26,7 +35,7 @@ pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
     /// Prior samples of this instance requested by the effect, in layer time.
-    pub history: &'a [(Time, RenderEffect)],
+    pub history: &'a [ParameterSample],
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
@@ -227,6 +236,11 @@ pub trait Effect: Send + Sync {
     /// Layer times at which the effect needs earlier parameter values.
     fn parameter_times(&self, _params: &EffectParams<'_>) -> Vec<Time> {
         Vec::new()
+    }
+
+    /// Controls to sample at parameter_times. Empty selects all authored controls.
+    fn parameter_ids(&self) -> &'static [u32] {
+        &[]
     }
 
     /// Other layers this instance reads (scheduled before it). Default: none.

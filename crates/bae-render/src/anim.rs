@@ -364,6 +364,16 @@ impl CompEvaluator for AnimEvaluator {
         self.eval(stage, comp, time, 0)
     }
 
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<bae_model::Value> {
+        self.inner.evaluate_attribute(stage, path, name, time).ok()
+    }
+
     fn invalidate(&mut self, event: &StageEvent) {
         self.inner.invalidate(event);
     }
