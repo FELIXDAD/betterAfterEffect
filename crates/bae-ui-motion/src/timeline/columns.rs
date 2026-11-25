@@ -74,7 +74,17 @@ impl Default for Columns {
     fn default() -> Self {
         Self {
             layer_names: false,
-            shown: Column::ALL.map(|c| matches!(c, Column::Av | Column::Label | Column::Index | Column::Name | Column::Switches | Column::Parent)),
+            shown: Column::ALL.map(|c| {
+                matches!(
+                    c,
+                    Column::Av
+                        | Column::Label
+                        | Column::Index
+                        | Column::Name
+                        | Column::Switches
+                        | Column::Parent
+                )
+            }),
             widths: Column::ALL.map(|c| c.spec().1),
             split: None,
             offset: 0.0,
@@ -132,8 +142,13 @@ impl Columns {
         let bounds = (full.width() - 200.0).max(full.width() * 0.4);
         let min = 120.0_f32.min(bounds);
         let mut width = self.split.unwrap_or(x).clamp(min, bounds);
-        let divider = Rect::from_min_max(pos2(full.left() + width, full.top() + TABS_H), pos2(full.left() + width + 4.0, full.bottom()));
-        let handle = ui.interact(divider, ui.id().with("outline_split"), Sense::drag()).on_hover_cursor(CursorIcon::ResizeHorizontal);
+        let divider = Rect::from_min_max(
+            pos2(full.left() + width, full.top() + TABS_H),
+            pos2(full.left() + width + 4.0, full.bottom()),
+        );
+        let handle = ui
+            .interact(divider, ui.id().with("outline_split"), Sense::drag())
+            .on_hover_cursor(CursorIcon::ResizeHorizontal);
         if handle.dragged() {
             width = (width + handle.drag_delta().x).clamp(min, bounds);
             self.split = Some(width);
@@ -143,26 +158,43 @@ impl Columns {
             self.offset -= ui.input(|i| i.smooth_scroll_delta.x);
         }
         self.offset = self.offset.clamp(0.0, (x - width).max(0.0));
-        for edge in &mut edges { edge.0 -= self.offset; }
-        Cols { edges, end: x - self.offset, viewport: width, content: x }
-
+        for edge in &mut edges {
+            edge.0 -= self.offset;
+        }
+        Cols {
+            edges,
+            end: x - self.offset,
+            viewport: width,
+            content: x,
+        }
     }
 
     pub(super) fn scrollbar(&mut self, ui: &Ui, foot: Rect, cols: &Cols) {
-        if cols.content <= cols.viewport { return; }
+        if cols.content <= cols.viewport {
+            return;
+        }
         let track = Rect::from_min_max(
             pos2(foot.left() + 4.0, foot.bottom() - 7.0),
             pos2(foot.left() + cols.viewport - 4.0, foot.bottom() - 1.0),
         );
-        let thumb_width = (track.width() * cols.viewport / cols.content).max(16.0).min(track.width());
+        let thumb_width = (track.width() * cols.viewport / cols.content)
+            .max(16.0)
+            .min(track.width());
         let travel = track.width() - thumb_width;
-        if travel <= 0.0 { return; }
+        if travel <= 0.0 {
+            return;
+        }
         let max_offset = cols.content - cols.viewport;
         let x = track.left() + travel * self.offset / max_offset;
         let thumb = Rect::from_min_size(pos2(x, track.top()), vec2(thumb_width, track.height()));
-        let drag = ui.interact(thumb.expand2(vec2(0.0, 1.0)), ui.id().with("outline_scrollbar"), Sense::drag());
+        let drag = ui.interact(
+            thumb.expand2(vec2(0.0, 1.0)),
+            ui.id().with("outline_scrollbar"),
+            Sense::drag(),
+        );
         if drag.dragged() {
-            self.offset = (self.offset + drag.drag_delta().x * max_offset / travel).clamp(0.0, max_offset);
+            self.offset =
+                (self.offset + drag.drag_delta().x * max_offset / travel).clamp(0.0, max_offset);
         }
         ui.painter().rect_filled(track, 2.0, color::SEPARATOR);
         ui.painter().rect_filled(thumb, 2.0, color::ICON_DIM);
@@ -263,6 +295,9 @@ impl Cols {
     }
     pub(super) fn visible(&self, c: Column) -> bool {
         self.width(c) > 0.0
+    }
+    pub(super) fn on_screen(&self, c: Column) -> bool {
+        self.visible(c) && self.x(c) < self.viewport && self.right(c) > 0.0
     }
     pub(super) fn extra_cells(
         &self,

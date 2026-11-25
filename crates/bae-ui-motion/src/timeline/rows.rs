@@ -188,7 +188,8 @@ impl TimelinePanel {
                     pos2(l + cols.right(Column::Name) - 2.0, rect.bottom()),
                 );
                 let name = query::display_name_of(stage, layer);
-                let source_name = stage.prim(layer)
+                let source_name = stage
+                    .prim(layer)
                     .and_then(|p| p.value("source").and_then(bae_model::Value::as_prim_ref))
                     .map(|p| query::display_name_of(stage, p));
                 let display_name = match source_name {
@@ -453,10 +454,34 @@ impl TimelinePanel {
                         }
                     }
                 }
+                if cols.on_screen(Column::RenderTime) {
+                    let elapsed = session.lock().layer_times.get(layer).copied();
+                    let text = elapsed.map_or_else(
+                        || "—".into(),
+                        |d| format!("{:.2} {}", d.as_secs_f64() * 1000.0, tr("ms")),
+                    );
+                    widgets::clipped_text(
+                        ui.painter(),
+                        pos2(l + cols.x(Column::RenderTime) + 3.0, cy),
+                        &text,
+                        theme::small(),
+                        color::TEXT,
+                        cols.width(Column::RenderTime) - 6.0,
+                    );
+                }
                 cols.extra_cells(ui, stage, info, layer, rect);
                 // Duration bar.
                 if !self.graph_mode {
-                    self.layer_bar(graph_ui, cx, session, info, axis, layer, rect, layer_selected);
+                    self.layer_bar(
+                        graph_ui,
+                        cx,
+                        session,
+                        info,
+                        axis,
+                        layer,
+                        rect,
+                        layer_selected,
+                    );
                     self.layer_markers_ui(graph_ui, cx, session, info, axis, layer, rect);
                 }
             }
@@ -543,7 +568,8 @@ impl TimelinePanel {
             }
             RowKind::Prop { path, attr, label } => {
                 self.prop_row(
-                    ui, graph_ui, cx, session, info, cols, axis, row, rect, path, attr, label, now, key_rects,
+                    ui, graph_ui, cx, session, info, cols, axis, row, rect, path, attr, label, now,
+                    key_rects,
                 );
             }
             RowKind::Expression {
@@ -573,7 +599,7 @@ impl TimelinePanel {
     pub(super) fn prop_row(
         &mut self,
         ui: &mut Ui,
-        graph_ui: &mut Ui,
+        graph_ui: &Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
@@ -866,7 +892,7 @@ impl TimelinePanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn expression_row(
         &mut self,
-        ui: &mut Ui,
+        ui: &Ui,
         graph_ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,

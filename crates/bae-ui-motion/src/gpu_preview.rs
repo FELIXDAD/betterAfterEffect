@@ -143,6 +143,7 @@ impl GpuPreview {
         comp: &EvaluatedComp,
         resolution: u32,
         camera: Option<bae_render::Camera>,
+        measure_layer_times: bool,
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
@@ -179,6 +180,7 @@ impl GpuPreview {
                 stage,
                 evaluator: &mut self.anim,
             };
+            self.renderer.set_layer_times(measure_layer_times);
             let frame = match self
                 .renderer
                 .render_frame_with(&rc, &request, Some(&mut frames))
@@ -189,6 +191,15 @@ impl GpuPreview {
                     return None;
                 }
             };
+            if measure_layer_times
+                && !frame.from_cache
+                && let Some(session) = resources.get::<crate::session::SharedSession>()
+            {
+                let mut s = session.lock();
+                s.layer_times
+                    .retain(|layer, _| !frame.comp.is_prefix_of(layer));
+                s.layer_times.extend(frame.layer_times.iter().cloned());
+            }
             let texture = match self
                 .renderer
                 .output_texture(&frame, OutputAlpha::Premultiplied)

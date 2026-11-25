@@ -589,10 +589,21 @@ impl Panel for CompositionViewer {
         }
         let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
         self.render_factor = resolution;
-        let image = self
-            .gpu
-            .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
+        let frame_nr = ui.ctx().cumulative_frame_nr();
+        let measure = session
+            .lock()
+            .timing_column_frame
+            .is_some_and(|shown| frame_nr.saturating_sub(shown) <= 1);
+        let image = self.gpu.as_mut().and_then(|g| {
+            g.frame(
+                cx.resources,
+                cx.stage,
+                &comp,
+                resolution,
+                view_camera,
+                measure,
+            )
+        });
         self.on_gpu = image.is_some();
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).

@@ -295,6 +295,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Out", "出"),
     ("Out Point", "出点"),
     ("Render Time", "渲染时间"),
+    ("ms", "毫秒"),
     ("Stretch", "伸缩"),
     ("Tape Name", "磁带名称"),
     ("Video Info", "视频信息"),

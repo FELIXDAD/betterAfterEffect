@@ -606,7 +606,13 @@ impl TimelinePanel {
 
         // Rows.
         let rows = {
-            let s = session.lock();
+            let frame = ui.ctx().cumulative_frame_nr();
+            let mut s = session.lock();
+            if self.columns.visible(Column::RenderTime) && cols.on_screen(Column::RenderTime) {
+                s.timing_column_frame = Some(frame);
+            } else if s.timing_column_frame != Some(frame) {
+                s.timing_column_frame = None;
+            }
             self.rows(stage, &info.path, &s)
         };
         if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
