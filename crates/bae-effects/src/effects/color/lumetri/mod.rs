@@ -582,7 +582,7 @@ pub(crate) fn cc_vignette() -> Builtin {
         2,
         "none",
     );
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     rust_builtin(
         (
             Arc::new(Lumetri {

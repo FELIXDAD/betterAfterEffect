@@ -1,30 +1,35 @@
-struct FxSettings {
-    images:array<FxImage,5>, rect:vec4i, layer:vec4f,
-    scale:f32, hdr:u32, time:f32, mode:u32, values:array<vec4f,33>,
+struct Sampled {
+    images: array<FxImage,5>,
+    roi: vec4i,
+    layer: vec4i,
+    presence: u32,
+    stage: u32,
+    index: u32,
+    float_depth: u32,
+    scale: f32,
+    time: f32,
+    fps: f32,
+    pad: f32,
+    values: array<vec4f,233>,
 }
-@group(0) @binding(0) var<uniform> u:FxSettings;
-@group(0) @binding(1) var src:texture_2d<f32>;
-@group(0) @binding(2) var map1:texture_2d<f32>;
-@group(0) @binding(3) var map2:texture_2d<f32>;
-@group(0) @binding(4) var map3:texture_2d<f32>;
-@group(0) @binding(5) var map4:texture_2d<f32>;
-@group(0) @binding(6) var dst:texture_storage_2d<WORKING_FORMAT,write>;
-fn v(i:u32)->f32{return u.values[i].x;}
-fn pt(i:u32)->vec2f{return u.values[i].xy;}
-fn uv(p:vec2f)->vec2f{return (p-u.layer.xy)/u.layer.zw;}
-fn pos(q:vec2f)->vec2f{return u.layer.xy+q*u.layer.zw;}
-fn source(p:vec2f)->vec4f{return fx_bilinear(src,u.images[0],p,false);}
-fn angle2(p:vec2f,a:f32)->vec2f{return vec2f(cos(a)*p.x-sin(a)*p.y,sin(a)*p.x+cos(a)*p.y);}
-fn layer_sample(tex:texture_2d<f32>,img:FxImage,p:vec2f,stretch:bool)->vec4f{
-    if img.size.x==0u{return vec4f(0);}
-    var q=p-pos(vec2f(0.5))+img.origin+0.5*vec2f(img.size)/img.scale;
-    if stretch{q=img.origin+uv(p)*vec2f(img.size)/img.scale;}
-    return fx_bilinear(tex,img,q,false);
-}
+@group(0) @binding(0) var<uniform> u: Sampled;
+@group(0) @binding(1) var input_tex: texture_2d<f32>;
+@group(0) @binding(2) var map_a: texture_2d<f32>;
+@group(0) @binding(3) var map_b: texture_2d<f32>;
+@group(0) @binding(4) var map_c: texture_2d<f32>;
+@group(0) @binding(5) var map_d: texture_2d<f32>;
+@group(0) @binding(6) var out_tex: texture_storage_2d<WORKING_FORMAT, write>;
+fn value(id: u32) -> f32 { return u.values[id].x; }
+fn enabled(id: u32) -> bool { return value(id) != 0.0; }
+fn has(i:u32) -> bool { return (u.presence & (1u << i)) != 0u; }
+fn src(p:vec2f) -> vec4f { return fx_bilinear(input_tex,u.images[0],p,true); }
+fn aux_a(p:vec2f) -> vec4f { return fx_bilinear(map_a,u.images[1],p,true); }
+fn aux_b(p:vec2f) -> vec4f { return fx_bilinear(map_b,u.images[2],p,true); }
+fn aux_c(p:vec2f) -> vec4f { return fx_bilinear(map_c,u.images[3],p,true); }
+fn gray(x:f32) -> vec4f { return vec4f(vec3f(x),1.0); }
+fn output(rgb:vec3f, alpha:f32) -> vec4f { return fx_output(rgb,alpha,u.float_depth!=0u); }
 @compute @workgroup_size(8,8)
-fn main(@builtin(global_invocation_id) gid:vec3u){
-    let p=vec2i(gid.xy);if any(p>=u.rect.zw-u.rect.xy){return;}
-    var c=effect(vec2f(p+u.rect.xy)+0.5);
-    if u.hdr==0u{let a=clamp(c.a,0.,1.);c=vec4f(clamp(c.rgb,vec3f(0),vec3f(a)),a);}
-    textureStore(dst,p,c);
+fn main(@builtin(global_invocation_id) id:vec3u) {
+    let xy = u.roi.xy + vec2i(id.xy);
+    if all(xy < u.roi.zw) { textureStore(out_tex, vec2i(id.xy), evaluate(vec2f(xy)+0.5)); }
 }

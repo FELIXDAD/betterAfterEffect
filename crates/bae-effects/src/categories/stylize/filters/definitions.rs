@@ -40,14 +40,14 @@ fn cc_kaleida() -> Builtin {
     );
     b = b.angle(4, "Rotation", "Rotation", 0.0);
     b = b.checkbox(5, "Floating Center", "Floating Center", false);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
                 mode: 0,
                 def,
-                label: "bae.effects/cc_kaleida",
-                shader: CC_KALEIDA,
+                shader: &CC_KALEIDA,
+                read: source_bounds,
                 inputs: &[],
                 bounds: unchanged,
             }),
@@ -159,8 +159,8 @@ fn cc_repetile() -> Builtin {
             Arc::new(Sampled {
                 mode: 0,
                 def,
-                label: "bae.effects/cc_repetile",
-                shader: CC_REPETILE,
+                shader: &CC_REPETILE,
+                read: repeat_input,
                 inputs: &[],
                 bounds: repeat_bounds,
             }),
@@ -336,14 +336,14 @@ fn cc_glass() -> Builtin {
         "none",
     );
     b.push(22, "", "", ParamKind::GroupEnd, None);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
                 mode: 0,
                 def,
-                label: "bae.effects/cc_glass",
-                shader: CC_GLASS,
+                shader: &CC_GLASS,
+                read: glass_input,
                 inputs: &[(2, true)],
                 bounds: unchanged,
             }),
