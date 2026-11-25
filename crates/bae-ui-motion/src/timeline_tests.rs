@@ -2094,6 +2094,32 @@ fn outline_follows_ae_metrics() {
     assert_eq!(tl.last_bars.len(), rows);
 }
 
+#[test]
+fn double_clicking_a_layer_bar_opens_it_in_the_layer_panel() {
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    let mut tl = h.bars();
+    let at = bar_rect(&tl, &layer).center();
+    h.click(&mut tl, at, Modifiers::NONE);
+    let r = h.click(&mut tl, at, Modifiers::NONE);
+    assert!(r.open.iter().any(|p| p.kind() == "layer"), "{:?}", r.open);
+    assert_eq!(h.session().lock().layer_panel.as_ref(), Some(&layer));
+    // The panel shows the layer alone, at its own size, from the origin.
+    let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, Time::ZERO).unwrap();
+    let (one, min) = crate::layer_panel::alone(&comp, &layer, 0).unwrap();
+    let l = &one.layers[0];
+    assert_eq!(one.layers.len(), 1);
+    let (a, b) = crate::render::layer_bounds(l).unwrap();
+    assert_eq!(
+        l.world_matrix.transform_point3(a.extend(0.0)).truncate(),
+        a - min
+    );
+    assert_eq!(
+        (f64::from(one.width), f64::from(one.height)),
+        ((b - a).x.ceil(), (b - a).y.ceil())
+    );
+}
+
 /// F4: the Modes column instead of Switches (AE starts with Switches).
 fn show_modes(h: &mut H, tl: &mut TimelinePanel) {
     h.action(
@@ -2299,4 +2325,47 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     assert!(request(&h).motion_blur.is_some());
     h.undo();
     assert!(request(&h).motion_blur.is_none());
+}
+
+#[test]
+fn layer_expression_commands_disable_convert_and_reveal_errors() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.run(
+        "attr.set_expression",
+        json!({"path": layer, "attr": ROT, "source": "time * 30"}),
+    );
+    let mut tl = h.bars();
+    let spec = |h: &H| query::attr_spec(&h.stage, &layer, ROT).cloned().unwrap();
+    // Layer > Switches > Disable / Enable Expressions.
+    h.session().lock().selected_layers = vec![layer.clone()];
+    let r = h.action(&mut tl, Invocation::new(ids::DISABLE_EXPRESSIONS));
+    h.apply(&r);
+    assert!(!spec(&h).expression.unwrap().enabled);
+    let r = h.action(&mut tl, Invocation::new(ids::ENABLE_EXPRESSIONS));
+    h.apply(&r);
+    assert!(spec(&h).expression.unwrap().enabled);
+    // Convert Expression to Keyframes: a key per frame, the expression off.
+    h.session().lock().selected_props = vec![(layer.clone(), ROT.to_owned())];
+    let r = h.action(&mut tl, Invocation::new(ids::CONVERT_EXPRESSION));
+    h.apply(&r);
+    let s = spec(&h);
+    assert!(!s.expression.as_ref().unwrap().enabled);
+    let k = s.keyframes.get(&Time::from_seconds(1.0)).unwrap();
+    assert_eq!(k.value, Value::Float(30.0));
+    assert!(s.keyframes.len() > 30, "{}", s.keyframes.len());
+    h.undo();
+    assert!(spec(&h).keyframes.is_empty());
+    // Reveal Expression Errors: exactly the failing properties.
+    h.session().lock().expr_errors = vec![bae_anim::AttrError {
+        prim: layer.clone(),
+        attr: "transform:opacity".into(),
+        message: "ReferenceError".into(),
+    }];
+    h.action(&mut tl, Invocation::new(ids::REVEAL_EXPRESSION_ERRORS));
+    assert!(matches!(
+        h.session().lock().reveal.get(&layer),
+        Some(crate::session::Reveal::Props(p)) if p == &[(layer.clone(), "transform:opacity".to_owned())]
+    ));
 }
