@@ -26,6 +26,7 @@ mod error;
 mod eval;
 mod evaluated;
 mod expr;
+mod samples;
 pub mod schema;
 pub mod time;
 mod transform;
@@ -40,6 +41,7 @@ pub use evaluated::{
     LightState, LightType, TextPathOptions, TrackMatte,
 };
 pub use expr::prewarm as prewarm_expressions;
+pub use samples::{ImageSamples, SampleKey, SampleRequests};
 pub use time::{LayerTiming, MotionBlur};
 pub use transform::{AutoOrientRotation, Transform};
 

@@ -489,31 +489,29 @@ pub fn build_with(
         Some(roi) => units(&roi.to_rect(), scale).intersect(&domain),
         None => domain,
     };
-    let mut builder = Builder {
-        sources,
-        effects,
-        linear: request.color.blend == crate::request::BlendSpace::Linear,
-        purpose: request.purpose,
-        clamp: request.depth.clamps(),
-        nodes: Vec::new(),
-        dedup: FxHashMap::default(),
-        warnings: Vec::new(),
-        skip_effects_of: None,
-        frames,
-        resolving: Vec::new(),
-        time_dependent: false,
-        owner: None,
-        owners: Vec::new(),
-    };
+    let mut builder = Builder::new(request, sources, effects, frames);
     let output = builder.composite(comp, rect, scale, 0, false)?;
-    Ok(RenderGraph {
-        depth: request.depth,
-        nodes: builder.nodes,
-        output,
-        warnings: builder.warnings,
-        time_dependent: builder.time_dependent,
-        owners: builder.owners,
-    })
+    Ok(builder.finish(request, output))
+}
+
+/// A graph whose output is one layer of `comp` in its layer space, as an effect
+/// layer input reads it (`dep`: which layer, at which comp time, how far through
+/// masks and effects), at `request`'s resolution. `None` when the layer has no
+/// pixels. `sampleImage` expressions read layers through this.
+pub fn build_layer_image(
+    comp: &RenderComp,
+    request: &RenderRequest,
+    sources: &mut dyn SourceResolver,
+    effects: &EffectLibrary,
+    frames: Option<&mut dyn CompFrames>,
+    dep: &LayerDependency,
+) -> Result<Option<RenderGraph>, RenderError> {
+    let scale = f64::from(request.resolution.factor());
+    let mut builder = Builder::new(request, sources, effects, frames);
+    let Some(output) = builder.layer_input(comp, dep, scale, 0)? else {
+        return Ok(None);
+    };
+    Ok(Some(builder.finish(request, output)))
 }
 
 /// Converts a rectangle in space pixels to texel units at `pixel_scale`.
@@ -564,6 +562,43 @@ enum Content {
     /// Frame blending: source frames (start times) and their weights.
     Mix(Arc<dyn LayerSource>, Vec<(Time, f32)>),
     Comp(Arc<RenderComp>),
+}
+
+impl<'a, 'f> Builder<'a, 'f> {
+    fn new(
+        request: &RenderRequest,
+        sources: &'a mut dyn SourceResolver,
+        effects: &'a EffectLibrary,
+        frames: Option<&'f mut dyn CompFrames>,
+    ) -> Self {
+        Self {
+            sources,
+            effects,
+            linear: request.color.blend == crate::request::BlendSpace::Linear,
+            purpose: request.purpose,
+            clamp: request.depth.clamps(),
+            nodes: Vec::new(),
+            dedup: FxHashMap::default(),
+            warnings: Vec::new(),
+            skip_effects_of: None,
+            frames,
+            resolving: Vec::new(),
+            time_dependent: false,
+            owner: None,
+            owners: Vec::new(),
+        }
+    }
+
+    fn finish(self, request: &RenderRequest, output: NodeId) -> RenderGraph {
+        RenderGraph {
+            depth: request.depth,
+            nodes: self.nodes,
+            output,
+            warnings: self.warnings,
+            time_dependent: self.time_dependent,
+            owners: self.owners,
+        }
+    }
 }
 
 impl Builder<'_, '_> {
