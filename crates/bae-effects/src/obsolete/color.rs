@@ -1,7 +1,6 @@
 //! Color aliases keep the old AE controls and translate only the changed parameters.
 use super::*;
 use crate::catalog::DefBuilder;
-use bae_model::ParamFlags;
 
 pub(super) fn register(target: &Builtin, out: &mut Vec<Builtin>) {
     let alias = match target.info.match_name.as_str() {
@@ -158,19 +157,6 @@ fn levels(target: &Builtin, individual: bool) -> Builtin {
     };
     let mut a = Definition::inherit(target, old, id, &target.info.name, &target.info.name_zh);
     legacy_channel(&mut a);
-    // The histogram is a UI-only arbitrary parameter. Keep its original disk slot.
-    a.def.params.insert(
-        1,
-        EffectParamDef {
-            id: 2,
-            name: "Histogram".into(),
-            match_name: Some(format!("{old}-0002")),
-            kind: ParamKind::ArbitraryData,
-            default: None,
-            flags: ParamFlags::default(),
-        },
-    );
-    a.info.param_names_zh.push((2, "直方图".into()));
     for id in [black, black + 1] {
         let param = a.param(id);
         param.kind = ParamKind::Checkbox;

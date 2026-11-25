@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 
 use bae_anim::{
-    CameraState, EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, LayerSource, LightState,
+    CameraState, EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, FrameBlending,
+    LayerSource, LightState,
 };
 use bae_model::{LayerKind, PrimPath, Stage, StageEvent, Time};
 use glam::{DAffine2, DMat4, DVec2};
@@ -27,8 +28,8 @@ use crate::error::RenderError;
 use crate::eval::CompEvaluator;
 use crate::graph::MAX_DEPTH;
 use crate::input::{
-    CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
-    TrackMatte, hash_value,
+    CustomContent, FootageRef, FrameBlend, LayerContent, RenderComp, RenderEffect, RenderLayer,
+    RenderMask, TrackMatte, hash_value,
 };
 use crate::light::{Falloff, Light, LightKind, Material, ShadowMode};
 use crate::motion::{CompMotionBlur, LayerSample};
@@ -74,6 +75,11 @@ impl AnimEvaluator {
     pub fn with_purpose(mut self, purpose: RenderPurpose) -> Self {
         self.purpose = purpose;
         self
+    }
+
+    /// Drops compiled animation when the caller observed edits without individual stage events.
+    pub fn clear_compiled(&mut self) {
+        self.inner.clear();
     }
 
     fn warn(&mut self, message: String) {
@@ -348,6 +354,10 @@ impl AnimEvaluator {
                     source_time: *time,
                     sequence: (info.kind == "sequence")
                         .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
+                    blend: l.frame_blend_span.map(|span| FrameBlend {
+                        span,
+                        pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
+                    }),
                 }),
                 _ => LayerContent::None,
             }),
