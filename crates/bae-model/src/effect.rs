@@ -116,6 +116,14 @@ pub struct ParamFlags {
     /// Parameter has a custom-drawn UI (control panel or comp viewer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub custom_ui: bool,
+    /// The default (a point) is a fraction of the layer size, as AE's
+    /// `PF_ADD_POINT` percentages: an instance starts at `default × layer
+    /// size`. A 3D point's z stays absolute.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relative_default: bool,
+    /// The default is in AE reference-layer pixels (640 × 360), rather than layer pixels.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference_point_default: bool,
 }
 
 /// One parameter of an effect definition.

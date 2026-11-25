@@ -25,6 +25,7 @@
 pub mod animator;
 pub mod fonts;
 pub mod layout;
+pub mod path;
 #[cfg(feature = "render")]
 pub mod render;
 
