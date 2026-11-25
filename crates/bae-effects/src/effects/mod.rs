@@ -5,10 +5,12 @@
 pub mod blur;
 pub(crate) mod controls;
 pub(crate) mod generate;
+pub(crate) mod grain;
 mod image_grid;
 mod layer_input;
 pub(crate) mod lut;
 pub(crate) mod morphology;
+mod sampled;
 pub(crate) mod set_matte;
 
 pub use blur::{BoxBlur, GaussianBlur};
@@ -18,6 +20,7 @@ pub(crate) mod compound;
 pub mod distort;
 pub mod spatial;
 pub(crate) mod temporal;
+pub(crate) mod text;
 
 pub(crate) fn prewarm(
     rt: &crate::gpu::Runtime,

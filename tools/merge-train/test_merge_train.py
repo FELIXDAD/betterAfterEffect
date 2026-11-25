@@ -235,6 +235,10 @@ class ProcessTest(Base):
         self.assertTrue(mt.squash_wanted(pr(labels=["reference-data"])))
 
     def test_ci_failure_drops_label_and_notifies(self):
+        # The repo sends bounces only to the owner when one is found; this test covers both.
+        patcher = mock.patch.dict(mt.CFG, {"notify": {"bounce_leader": True}})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         wt = [{"host": "local", "name": "bae-03", "branch": "core/x", "comment": "", "status": "",
                "last_activity": 0, "agents": [{"orcaSessionId": "aaaa", "address": "orca_session_id:aaaa",
                                                "updatedAt": 1}]}]
