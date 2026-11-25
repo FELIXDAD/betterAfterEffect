@@ -148,6 +148,9 @@ pub struct Workbench {
     tool: usize,
     /// Modifiers held at the end of the last frame (Copy / Cut / Paste chords).
     held: egui::Modifiers,
+    /// Keyboard focus at the end of the last frame. egui drops the focus as a
+    /// frame with Esc begins, so a focused field's Esc is judged by this.
+    focus_before: KeyFocus,
     /// Toolbars by keymap id (`Registry<dyn Toolbar>`).
     toolbars: Arc<Registry<dyn Toolbar>>,
     /// Keymaps whose toolbar got its saved state back.
@@ -332,6 +335,7 @@ impl Workbench {
             requests: PanelRequests::default(),
             tool: 1,
             held: egui::Modifiers::NONE,
+            focus_before: KeyFocus::None,
             toolbars: Arc::new(Registry::new()),
             toolbars_loaded: Vec::new(),
             external_modal: false,
@@ -725,6 +729,7 @@ impl Workbench {
         self.workspace_dialogs(ui.ctx());
         ime_follows_caret(ui.ctx());
         ime_undo_after(ui.ctx());
+        self.focus_before = KeyFocus::of(ui.ctx());
         std::mem::take(&mut self.requests.invocations)
     }
 
@@ -825,8 +830,11 @@ impl Workbench {
     fn collect_shortcuts(&mut self, ctx: &Context) {
         let focus = KeyFocus::of(ctx);
         let typing = focus == KeyFocus::Text;
-        // An open menu or popup closes on Esc before Esc is a shortcut.
+        // An open menu or popup closes on Esc before Esc is a shortcut; so
+        // does a field or widget that had the focus (egui let go of it as this
+        // frame began).
         let popup = egui::Popup::is_any_open(ctx);
+        let esc_focus = self.focus_before;
         let focused = self.dock.focused_panel().map(|p| p.kind().to_owned());
         let keymap = &self.keymap;
         let mut hits = Vec::new();
@@ -871,8 +879,9 @@ impl Workbench {
                     else {
                         return true;
                     };
+                    let esc = *key == Key::Escape && modifiers.is_none();
                     if focus.reserves(&binding.chord)
-                        || (popup && *key == Key::Escape && modifiers.is_none())
+                        || (esc && (popup || esc_focus.reserves(&binding.chord)))
                     {
                         return true;
                     }
@@ -1204,6 +1213,7 @@ fn reserved_while_typing(chord: &Chord) -> bool {
             | Delete
             | Enter
             | Tab
+            | Escape
     );
     let text_command = chord.command && !chord.alt && matches!(chord.key, Z | Y | A | C | V | X);
     editing || text_command
