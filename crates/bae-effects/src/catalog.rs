@@ -164,6 +164,16 @@ impl DefBuilder {
         self
     }
 
+    /// Marks captured point defaults measured on AE's 640 × 360 reference layer.
+    pub(crate) fn reference_points(mut self) -> Self {
+        for p in &mut self.def.params {
+            if matches!(p.kind, ParamKind::Point) {
+                p.flags.reference_point_default = true;
+            }
+        }
+        self
+    }
+
     /// Integer slider.
     pub fn int(mut self, id: u32, name: &str, zh: &str, default: i64, valid: [i64; 2]) -> Self {
         self.push(
@@ -209,6 +219,14 @@ impl DefBuilder {
         self
     }
 
+    /// Marks the last parameter as static, as for AE path selectors.
+    pub(crate) fn static_param(mut self) -> Self {
+        let flags = &mut self.def.params.last_mut().unwrap().flags;
+        flags.cannot_animate = true;
+        flags.cannot_time_vary = true;
+        self
+    }
+
     /// A same-comp layer reference. An unwritten default resolves to self.
     pub fn layer(mut self, id: u32, name: &str, zh: &str) -> Self {
         self.push(id, name, zh, ParamKind::Layer, None);
@@ -247,7 +265,7 @@ pub(crate) const fn layer_stage_id(layer_id: u32) -> u32 {
 /// in the same one-based order as the corresponding parameter definition.
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     Some(match (match_name, param_id) {
-        (_, 0x10001 | 0x10003) => &["源", "蒙版", "效果和蒙版"],
+        (_, 0x10001..=0x1ffff) => &["源", "蒙版", "效果和蒙版"],
         ("ADBE Echo", 5) => &[
             "相加",
             "最大值",
@@ -309,6 +327,13 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "完全",
             "关闭",
         ],
-        _ => return None,
+        _ => {
+            return crate::categories::keying::keyer::definitions::options(match_name, param_id)
+                .or_else(|| {
+                    crate::categories::noise_grain::grain::definitions::options(
+                        match_name, param_id,
+                    )
+                });
+        }
     })
 }

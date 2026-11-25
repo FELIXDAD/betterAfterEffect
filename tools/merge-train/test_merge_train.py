@@ -235,6 +235,10 @@ class ProcessTest(Base):
         self.assertTrue(mt.squash_wanted(pr(labels=["reference-data"])))
 
     def test_ci_failure_drops_label_and_notifies(self):
+        # The repo sends bounces only to the owner when one is found; this test covers both.
+        patcher = mock.patch.dict(mt.CFG, {"notify": {"bounce_leader": True}})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         wt = [{"host": "local", "name": "bae-03", "branch": "core/x", "comment": "", "status": "",
                "last_activity": 0, "agents": [{"orcaSessionId": "aaaa", "address": "orca_session_id:aaaa",
                                                "updatedAt": 1}]}]
@@ -358,10 +362,30 @@ class UnstickTest(Base):
     def test_missing_checks_nudge_once_after_delay(self):
         st = {}
         self.wait(pr(), st, self.MISSING, 3).assert_not_called()      # too early
-        self.wait(pr(), st, self.MISSING, 11).assert_called_once()     # nudge
+        with mock.patch.object(mt, "gh_json", return_value=[{"workflow_runs": []}]):
+            self.wait(pr(), st, self.MISSING, 11).assert_called_once()  # no fast run
         st["prs"]["7"]["nudged_head"] = "h1"
         self.wait(pr(), st, self.MISSING, 30).assert_not_called()     # once per head
         self.wait(pr(), {}, self.RUNNING, 60).assert_not_called()     # CI is running: wait
+
+    def test_274_fast_workflow_precedes_required_windows_job(self):
+        head = "67ca78203d05a0c638284313635554da28ba3cab"
+        p = pr(number=274, headRefOid=head, headRefName="media/windows-mf")
+        missing = ("pending", [("fast / Windows x64", "missing", "")])
+        endpoint = "repos/%s/actions/workflows/ci-fast.yml/runs?head_sha=%s&per_page=100" % (
+            mt.CFG["repo"], head)
+        for status in ("queued", "in_progress", "waiting", "pending", "requested", "completed"):
+            with self.subTest(status=status):
+                st = {}
+                pages = [{"workflow_runs": [{"status": status}]}]
+                with mock.patch.object(mt, "gh_json", return_value=pages) as api:
+                    nudge = self.wait(p, st, missing, 12)
+                if status == "completed":
+                    nudge.assert_called_once()
+                else:
+                    nudge.assert_not_called()
+                    self.assertNotIn("stuck_since", mt.pr_state(st, 274))
+                api.assert_called_once_with(["api", "--paginate", "--slurp", endpoint])
 
     def test_nudge_behind_runs_update_branch(self):
         repo = self.make_repo()
@@ -643,10 +667,23 @@ class CrateRelationTest(Base):
         with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
                 mock.patch.object(mt, "fetch_pr_head"), \
                 mock.patch.object(mt, "changed_files", side_effect=lambda sha: files[sha]), \
-                mock.patch.object(mt, "do_merge", return_value=True) as merge:
+                mock.patch.object(mt, "do_merge", return_value=True) as merge, \
+                mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
             self.assertTrue(mt.skip_ahead(q, st))
         self.assertEqual(merge.call_args[0][0]["number"], 3)
         self.assertIn("fx 依赖 render", st["prs"]["2"]["detail"])
+
+    def test_without_relate_crates_only_files_block_skip_ahead(self):
+        q = [pr(number=1, headRefOid="h1"), pr(number=2, headRefOid="h2")]
+        files = {"h1": {"crates/render/src/layer.rs"}, "h2": {"crates/render/src/other.rs"}}
+        st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=40)).isoformat()}
+        with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "changed_files", side_effect=lambda sha: files[sha]), \
+                mock.patch.object(mt, "do_merge", return_value=True) as merge, \
+                mock.patch.dict(mt.CFG["merge"], {"relate_crates": False}):
+            self.assertTrue(mt.skip_ahead(q, st))
+        self.assertEqual(merge.call_args[0][0]["number"], 2)
 
 
 class DevCancelledTest(Base):

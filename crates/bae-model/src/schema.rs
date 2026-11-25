@@ -281,6 +281,8 @@ const LAYER: &[AttrDef] = &[
         .doc("AE 'Preserve Underlying Transparency' (T switch): draw only where layers below are opaque."),
     boolean("collapse_transformation", false).doc("Continuous rasterization for vectors."),
     boolean("motion_blur", false),
+    choice("frame_blending", "off", &["off", "frame_mix", "pixel_motion"])
+        .doc("AE Frame Blending switch; renders only when the comp switch is on too."),
     choice("quality", "best", &["best", "draft", "wireframe"]),
     choice("sampling", "bilinear", &["bilinear", "bicubic"]),
     boolean("guide", false),
@@ -408,7 +410,10 @@ pub static SCHEMAS: &[PrimSchema] = &[
             time("work_area_start", 0),
             time_none("work_area_duration").doc("None = to the end."),
             time("display_start_time", 0),
+            AttrDef::new("guides", ValueType::FloatList, DefaultValue::None, false)
+                .doc("Viewer guides: pairs of (0 horizontal / 1 vertical, comp pixels)."),
             boolean("motion_blur", false),
+            boolean("frame_blending", false).doc("AE Enable Frame Blending (comp switch)."),
             AttrDef::new(
                 "shutter_angle",
                 ValueType::Float,
@@ -651,6 +656,45 @@ pub static SCHEMAS: &[PrimSchema] = &[
             string("plugin:version"),
             AttrDef::new("state", ValueType::Bytes, DefaultValue::None, false)
                 .doc("Opaque per-instance plugin state (AE sequence data)."),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::PAINT_STROKE,
+        doc: "A paint stroke under a Paint effect (AE's Brush / Clone / Eraser strokes), \
+              in layer space; shown from `in_point` to `out_point` (layer time).",
+        attrs: &[
+            string("name"),
+            choice("tool", "brush", &["brush", "clone", "eraser"]).fixed(),
+            bezier("path").doc("The stroke's path (layer pixels)."),
+            float("start", 0.0).doc("Percent of the path drawn from."),
+            float("end", 100.0).doc("Percent of the path drawn to (Write On animates it)."),
+            color("color", [1.0, 1.0, 1.0, 1.0]),
+            float("diameter", 10.0),
+            float("angle", 0.0),
+            float("hardness", 100.0),
+            float("roundness", 100.0),
+            float("spacing", 25.0),
+            choice("channels", "rgba", &["rgba", "rgb", "alpha"]),
+            float("opacity", 100.0),
+            float("flow", 100.0),
+            choice("mode", "normal", BLEND_MODES),
+            choice(
+                "erase",
+                "layer_and_paint",
+                &["layer_and_paint", "paint", "last_stroke"],
+            )
+            .fixed(),
+            prim_ref("clone:source").doc("Clone Stamp: the source layer (none = this layer)."),
+            vec2("clone:position", [0.0, 0.0]).doc("Clone Stamp: where the source is sampled."),
+            time("clone:time", 0).doc("Clone Stamp: the source time (Lock Source Time)."),
+            time("clone:time_shift", 0).doc("Clone Stamp: source time offset."),
+            boolean("clone:lock_time", false).fixed(),
+            vec2("transform:anchor_point", [0.0, 0.0]),
+            vec2("transform:position", [0.0, 0.0]),
+            vec2("transform:scale", [100.0, 100.0]),
+            float("transform:rotation", 0.0),
+            time("in_point", 0).fixed(),
+            time("out_point", 0).fixed(),
         ],
     },
     PrimSchema {

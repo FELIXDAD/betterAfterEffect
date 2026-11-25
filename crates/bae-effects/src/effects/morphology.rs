@@ -93,7 +93,7 @@ pub(crate) fn simple_choker() -> Builtin {
     )
 }
 
-pub(super) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     image_grid::kernel(rt, format, LABEL, SOURCE, UNIFORM_SIZE)?;
     Ok(())
 }
@@ -283,7 +283,58 @@ impl TargetEffect for Morphology {
         input: &GpuImage,
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        let Setup {
+        self.setup(params)
+            .encode(target, params, input, roi, self.choker)
+    }
+}
+
+pub(crate) enum Extremum {
+    Min(i32),
+    Max(i32),
+}
+impl Extremum {
+    pub(crate) fn radius(&self) -> i32 {
+        match *self {
+            Self::Min(r) | Self::Max(r) => r,
+        }
+    }
+}
+
+/// Apply separable extrema to the alpha channel on the render grid.
+pub(crate) fn filter_alpha(
+    target: &mut dyn EffectTarget,
+    params: &EffectParams<'_>,
+    input: &GpuImage,
+    roi: IRect,
+    operations: &[Extremum],
+) -> Result<GpuImage, RenderError> {
+    let mut steps = Vec::new();
+    for op in operations {
+        let minimum = matches!(op, Extremum::Min(_));
+        axis(&mut steps, op.radius(), true, minimum);
+        axis(&mut steps, op.radius(), false, minimum);
+    }
+    Setup {
+        steps,
+        mask: 8,
+        repeat: true,
+        view_matte: false,
+        sigma: 0.,
+        gain: 1.,
+        bias: 0.,
+    }
+    .encode(target, params, input, roi, false)
+}
+impl Setup {
+    fn encode(
+        self,
+        target: &mut dyn EffectTarget,
+        params: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+        choker: bool,
+    ) -> Result<GpuImage, RenderError> {
+        let Self {
             mut steps,
             mask,
             repeat,
@@ -291,7 +342,7 @@ impl TargetEffect for Morphology {
             sigma,
             gain,
             bias,
-        } = self.setup(params);
+        } = self;
         if roi.is_empty() || (steps.is_empty() && !view_matte) {
             return Ok(input.clone());
         }
@@ -344,7 +395,7 @@ impl TargetEffect for Morphology {
                         | (u32::from(first) << 1)
                         | (u32::from(last) << 2)
                         | (u32::from(repeat) << 3)
-                        | (u32::from(self.choker) << 4)
+                        | (u32::from(choker) << 4)
                         | (u32::from(view_matte) << 5)
                         | (u32::from(params.float) << 6),
                 )

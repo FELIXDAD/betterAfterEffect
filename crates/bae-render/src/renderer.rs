@@ -73,6 +73,10 @@ pub struct RenderedFrame {
     pub stats: FrameStats,
     /// Things that were not rendered faithfully.
     pub warnings: Vec<String>,
+    /// Something was still warming up and is missing (a vector or text layer,
+    /// an effect): the frame is not cached and should be drawn again when the
+    /// warm-up reports progress (`bae_gpu::warm_up::request_redraw`).
+    pub incomplete: bool,
     /// CPU time spent on each top-level layer of the comp, in drawing order,
     /// when [`Renderer::set_layer_times`] is on (AE's Render Time column);
     /// empty otherwise and for cached frames. Drawing the layer into the comp
@@ -322,6 +326,7 @@ impl Renderer {
                 from_cache: true,
                 stats: FrameStats::default(),
                 warnings: Vec::new(),
+                incomplete: false,
                 layer_times: Vec::new(),
                 layer_gpu_times: Vec::new(),
             });
@@ -366,7 +371,8 @@ impl Renderer {
         self.pool.end_frame();
 
         let image = executed.image;
-        if !graph.time_dependent {
+        let incomplete = graph.incomplete || executed.incomplete;
+        if !graph.time_dependent && !incomplete {
             self.frames.insert(
                 key,
                 image.clone(),
@@ -392,6 +398,7 @@ impl Renderer {
                 encode,
             },
             warnings,
+            incomplete,
             layer_times: layer_times(&graph, &executed.node_times),
             layer_gpu_times: self.gpu_times.clone(),
         })

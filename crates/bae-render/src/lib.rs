@@ -44,6 +44,7 @@ mod exec;
 pub mod export;
 pub mod fixture;
 pub mod footage;
+mod frame_blend;
 pub mod geom;
 mod gpu;
 mod gpu_timer;
@@ -78,8 +79,8 @@ pub use geom::{IRect, Rect};
 pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{
-    CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
-    RenderMask, TrackMatte,
+    CustomContent, Dependency, FootageRef, FrameBlend, LayerContent, RenderComp, RenderEffect,
+    RenderLayer, RenderMask, TrackMatte,
 };
 pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;
@@ -93,3 +94,26 @@ pub use source::{
     EncodeContext, GpuImage, ImageAlpha, LayerSource, SourceProvider, SourceProviders,
     SourceRequest,
 };
+
+thread_local! {
+    static INTERACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks the calling thread as interactive (the UI thread) or not. On an
+/// interactive thread, first-use work that is not ready yet (the warm-up,
+/// `bae_gpu::warm_up`, is still preparing it) is not waited for: the frame is
+/// drawn without it and marked incomplete ([`RenderedFrame::incomplete`]),
+/// and the app redraws when it is ready.
+pub fn set_interactive_thread(on: bool) {
+    INTERACTIVE.with(|c| c.set(on));
+}
+
+/// Whether the calling thread is interactive ([`set_interactive_thread`]).
+pub fn is_interactive_thread() -> bool {
+    INTERACTIVE.with(|c| c.get())
+}
+
+/// The error for `what` still being prepared by the warm-up.
+pub fn warming_up(what: &str) -> RenderError {
+    RenderError::WarmingUp(what.to_owned())
+}

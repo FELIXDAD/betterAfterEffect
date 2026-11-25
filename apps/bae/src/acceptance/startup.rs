@@ -197,6 +197,15 @@ fn busy_window() -> Ui {
     h
 }
 
+/// Labels with the Render Queue in front of the Timeline (where AE opens it),
+/// then with the Timeline in front again.
+fn busy_labels(h: &mut Ui) -> Vec<String> {
+    let mut all = labels(h);
+    to_front(h, "timeline");
+    all.extend(labels(h));
+    all
+}
+
 /// English labels that must be in the tree (with at least this many nodes).
 const MAIN_CONTROLS: &[(&str, usize)] = &[
     ("Selection Tool", 1),
@@ -214,7 +223,7 @@ const MAIN_CONTROLS: &[(&str, usize)] = &[
 #[test]
 fn main_controls_are_found_by_accessible_name() {
     let mut h = busy_window();
-    let all = labels(&h);
+    let all = busy_labels(&mut h);
     let mut missing = Vec::new();
     for (label, min) in MAIN_CONTROLS {
         let n = all.iter().filter(|l| names(l, label)).count();
@@ -224,7 +233,7 @@ fn main_controls_are_found_by_accessible_name() {
     }
     // Names shown in the UI: layers (timeline rows carry the layer number,
     // "Layer 1 “Text”", #128), comp tab, workspaces.
-    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Motion", "Review"] {
+    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Default", "Review"] {
         let quoted = format!("“{label}”");
         if !all.iter().any(|l| l == label || l.ends_with(&quoted)) {
             missing.push(label.to_owned());
@@ -308,8 +317,8 @@ fn accessible_names_are_chinese_in_the_chinese_ui() {
         return;
     }
     crate::i18n::init_from_env();
-    let h = busy_window();
-    let all = labels(&h);
+    let mut h = busy_window();
+    let all = busy_labels(&mut h);
     let mut wrong = Vec::new();
     if !labels(&gui()).iter().any(|l| l == "搜索") {
         wrong.push("Search → 搜索 not in the tree".to_owned());
@@ -774,7 +783,9 @@ fn numbered_names_in_chinese() {
     }
     key(&mut h, Modifiers::COMMAND, Key::M);
     key(&mut h, Modifiers::COMMAND, Key::M);
-    let all = labels(&h);
+    let mut all = labels(&h);
+    to_front(&mut h, "timeline");
+    all.extend(labels(&h));
     let english: Vec<&String> = all
         .iter()
         .filter(|l| l.starts_with("Layer ") || l.starts_with("Render Item"))

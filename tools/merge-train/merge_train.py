@@ -605,7 +605,8 @@ def fail_pr(pr, reason, details=(), worktrees=None):
     addr, on = owner_address(agent, wt)
     if addr:
         send(addr, subject, msg, priority="high", on=on)
-    if leader:
+    # With an owner found, the owner fixes it; the leader hears only about orphaned PRs.
+    if leader and (not addr or CFG.get("notify", {}).get("bounce_leader", True)):
         send(leader, subject, msg + ("\n负责 agent：%s" % (addr or "（Orca 里没找到这个分支）")))
 
 
@@ -684,6 +685,14 @@ def scratch_at(commit):
     w("clean", "-qfd")
     w("checkout", "-q", "--detach", commit)
     return w
+
+
+def fast_ci_active(head):
+    """The fast workflow can be waiting for a runner before its required job exists."""
+    endpoint = "repos/%s/actions/workflows/ci-fast.yml/runs?head_sha=%s&per_page=100" % (
+        CFG["repo"], head)
+    pages = gh_json(["api", "--paginate", "--slurp", endpoint])
+    return any(run["status"] != "completed" for page in pages for run in page["workflow_runs"])
 
 
 def nudge_ci(pr, ps):
@@ -829,13 +838,16 @@ def process_head(pr, st):
             if why:
                 fail_pr(pr, why, data.get("checks", ()))
                 return True
-        # Nothing queued or running, only missing/skipped: CI will never come by itself.
+        # The required fast job appears only after its prerequisite, changes, finishes.
         states = [st_ for _, st_, _ in data.get("checks", ()) if st_ != "success"]
         if states and all(x in ("missing", "skipped") for x in states):
             ps.setdefault("stuck_since", now_utc().isoformat())
             stuck = (now_utc() - dt.datetime.fromisoformat(ps["stuck_since"])).total_seconds() / 60
             if stuck >= CFG.get("missing_nudge_minutes", 10) and ps.get("nudged_head") != pr["headRefOid"]:
-                nudge_ci(pr, ps)
+                if fast_ci_active(pr["headRefOid"]):
+                    ps.pop("stuck_since")
+                else:
+                    nudge_ci(pr, ps)
         else:
             ps.pop("stuck_since", None)
         return False
@@ -1124,6 +1136,8 @@ def head_conflict(head_files, files):
     shared = sorted(f for f in head_files & files if keep(f))
     if shared:
         return ", ".join(shared[:5])
+    if not CFG["merge"].get("relate_crates", True):
+        return ""
     rel = crate_relation(head_files, files)
     return ("crate " + rel) if rel else ""
 
