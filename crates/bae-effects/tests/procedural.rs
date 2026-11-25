@@ -62,6 +62,10 @@ fn all_wipes_have_exact_endpoints() {
         ("ADBE Block Dissolve", 100.),
         ("ADBE Venetian Blinds", 100.),
         ("ADBE Gradient Wipe", 1.),
+        ("CC Grid Wipe", 1.),
+        ("CC Light Wipe", 100.),
+        ("CC Radial ScaleWipe", 1.),
+        ("CC Image Wipe", 1.),
     ] {
         for completion in [0., end] {
             let result = run(
@@ -178,5 +182,51 @@ fn gradient_points_stay_with_layer_across_tiles() {
             f32::from_le_bytes(pixel[4 * i..4 * i + 4].try_into().unwrap())
         });
         assert_eq!(rgba, [value, value, value, 1.]);
+    }
+}
+
+#[test]
+fn card_camera_projects_the_grid_and_flips_to_the_back_layer() {
+    use bae_effects::Standalone;
+    use bae_model::PrimPath;
+    use bae_render::{EffectParams, RenderEffect, effect::LayerDependency};
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(40, 24);
+    let mut a = test_image(rect);
+    a.data.fill([1., 0., 0., 1.]);
+    let mut b = test_image(rect);
+    b.data.fill([0., 0., 1., 1.]);
+    let raw = a.upload(&gpu, F32);
+    let layer = PrimPath::new("/comp/back").unwrap();
+    for (progress, expected) in [(0., [1., 0., 0., 1.]), (100., [0., 0., 1., 1.])] {
+        let instance = RenderEffect {
+            path: PrimPath::new("/comp/front/effects/wipe").unwrap(),
+            effect: "APC CardWipeCam".into(),
+            enabled: true,
+            params: vec![
+                (2, Value::Float(progress)),
+                (6, Value::PrimRef(layer.clone())),
+                (8, Value::Int(1)),
+                (10, Value::Float(3.)),
+                (12, Value::Float(5.)),
+                (56, Value::Float(0.)),
+                (66, Value::Float(1.)),
+            ],
+        };
+        let params = EffectParams::new(&instance);
+        let mut target = Standalone::new(gpu.clone(), F32);
+        target.set_effect_inputs(
+            vec![(
+                LayerDependency::source(layer.clone(), params.comp_time),
+                b.upload(&gpu, F32),
+            )],
+            vec![],
+        );
+        let output = builtin("APC CardWipeCam")
+            .render(&mut target, &params, &raw, rect)
+            .unwrap();
+        target.submit();
+        let got = Pixels::download(&gpu, &output);
+        assert_eq!(got.get(14, 11), expected);
     }
 }

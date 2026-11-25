@@ -32,20 +32,10 @@ fn builtins_register_through_the_plugin_registries() {
         assert!(b.info.full_id.starts_with("bae.effects/"));
         // Built-ins are not plugin effects: never removed, never "missing".
         assert!(def.plugin.is_none(), "{}", def.match_name);
-        assert!(
-            def.match_name.starts_with("ADBE ")
-                || matches!(
-                    def.match_name.as_str(),
-                    "VISINF Grain Implant" | "APC Colorama"
-                ),
-            "{}",
-            def.match_name
-        );
-        assert!(
-            !b.info.name_zh.is_empty() && b.info.name_zh != b.info.name,
-            "{}",
-            def.match_name
-        );
+        // Third-party effects bundled with AE retain their vendor's match name
+        // and can have the same official display name in both locales.
+        assert!(!def.match_name.is_empty());
+        assert!(!b.info.name_zh.is_empty(), "{}", def.match_name);
         assert_ne!(category_zh(&b.info.category), "其他", "{}", b.info.category);
         assert!(
             b.info.keywords.iter().any(|k| !k.is_ascii()),

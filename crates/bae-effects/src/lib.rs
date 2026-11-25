@@ -142,6 +142,10 @@ impl Effect for Forward {
         self.0.input_roi(params, output_roi)
     }
 
+    fn uses_scene(&self, params: &EffectParams<'_>) -> bool {
+        self.0.uses_scene(params)
+    }
+
     fn layer_dependencies(
         &self,
         params: &EffectParams<'_>,
