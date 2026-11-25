@@ -398,6 +398,22 @@ fn rust_example_renders_out_of_process() {
     }
     let pid = runner.pid().expect("runner running");
     assert_ne!(pid, std::process::id());
+    // Grow on the next frame, then reuse the same segment for a smaller one.
+    for rect in [[0, 0, 64, 12], [0, 0, 4, 2]] {
+        let input = image(rect, source);
+        let mut output = vec![0; input.len()];
+        let params = vec![
+            ParamWire::Color(dark),
+            ParamWire::Color(light),
+            ParamWire::Float(0.0),
+        ];
+        let out = runner
+            .render(&frame(0, params, rect), &input, &mut output)
+            .unwrap();
+        assert_eq!(out, RenderOut::Rendered(rect));
+        assert!(close(pixel(&output, rect, 2, 1), source(2, 1), 1e-5));
+        assert_eq!(runner.pid(), Some(pid));
+    }
     host.unload("com.example.duotone-rs", &mut reg).unwrap();
     drop(native);
 }
@@ -660,4 +676,79 @@ fn the_rust_sdk_turns_panics_into_errors() {
         )
         .expect("the plugin itself survives");
     assert!(close(pixel(&output, rect, 1, 1), source(1, 1), 0.0));
+}
+
+#[test]
+fn native_and_script_entries_share_the_running_app_and_replace_together() {
+    use bae_app::AppBuilder;
+    use bae_model::{AuthorId, DynCommand, EffectDef, Stage};
+    use bae_plugin::{PluginModule, PluginRuntime};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    let dir = scratch("mixed-native-script");
+    let manifest = r#"
+[script]
+entry = "main.js"
+[[command]]
+id = "probe"
+name = "Probe"
+implementation = "script"
+entry = "run"
+schema = "args.json"
+[[automation]]
+id = "report"
+name = "Report"
+entry = "report"
+"#;
+    invert_package(&dir, &[], |m| m + manifest).expect("C compiler for mixed package");
+    std::fs::write(dir.join("args.json"), "{}").unwrap();
+    let js =
+        "export function run(args) { return args.value; } export function report() { return 2; }";
+    std::fs::write(dir.join("main.js"), js).unwrap();
+    let mut app = AppBuilder::new();
+    app.add_module(PluginModule);
+    let app = app.build();
+    let runtime = app.resource::<PluginRuntime>().unwrap();
+    let source = DirSource::new(&dir);
+    let id = runtime.load(&source, Scope::Bundled).unwrap();
+    let defs = app.get_registry::<EffectDef>().unwrap();
+    let effects = app.get_registry::<dyn Effect>().unwrap();
+    let commands = app.get_registry::<dyn DynCommand>().unwrap();
+    let effect = "com.example.invert-c/invert";
+    let command = "plugin.com.example.invert-c.probe";
+    let automation = "script.com.example.invert-c.report";
+    let author = AuthorId::new("user:artist").unwrap();
+    let mut stage = Stage::new();
+    let mut invoke = |id: &str| {
+        stage
+            .transact(&author, id, |tx| {
+                commands.get(id).unwrap().run_json(tx, json!({"value": 17}))
+            })
+            .unwrap()
+            .0
+    };
+    assert!(defs.get(effect).is_some());
+    let native = effects.get(effect).unwrap();
+    assert_eq!(invoke(command), json!(17));
+    assert_eq!(invoke(automation), json!(2));
+    std::fs::write(dir.join("main.js"), "export function run() {}").unwrap();
+    assert!(
+        runtime
+            .load(&source, Scope::Bundled)
+            .unwrap_err()
+            .to_string()
+            .contains("report")
+    );
+    assert!(Arc::ptr_eq(&native, &effects.get(effect).unwrap()));
+    assert_eq!(invoke(command), json!(17));
+    assert_eq!(invoke(automation), json!(2));
+    std::fs::write(dir.join("main.js"), js.replace("return 2", "return 3")).unwrap();
+    runtime.load(&source, Scope::Bundled).unwrap();
+    assert!(effects.get(effect).is_some());
+    assert_eq!(invoke(command), json!(17));
+    assert_eq!(invoke(automation), json!(3));
+    runtime.unload(&id).unwrap();
+    assert!(effects.get(effect).is_none() && defs.get(effect).is_none());
+    assert!(commands.get(command).is_none() && commands.get(automation).is_none());
 }

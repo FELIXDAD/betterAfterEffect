@@ -23,7 +23,7 @@ pub(super) const HANDLE_PICK: f32 = 5.0;
 pub(super) const ANCHOR_PICK: f32 = 8.0;
 
 /// One layer a drag changes.
-pub(super) struct LayerEdit {
+pub(crate) struct LayerEdit {
     pub path: PrimPath,
     pub start: Transform,
     pub now: Transform,
@@ -96,7 +96,7 @@ pub(super) fn anchor_screen(l: &EvaluatedLayer, view: &View) -> Pos2 {
 }
 
 /// What a drag does.
-pub(super) enum Kind {
+pub(crate) enum Kind {
     Move {
         start: DVec2,
     },
@@ -149,12 +149,16 @@ fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
 }
 
 /// A drag of the selected layers.
-pub(super) struct TransformDrag {
+pub(crate) struct TransformDrag {
     pub edits: Vec<LayerEdit>,
     pub kind: Kind,
     snapping: Option<Snapping>,
     /// The point snapped to in the last frame (comp space).
     guide: Option<DVec2>,
+    /// Guides and grid lines the snapping point snaps to (View ▸ Snap to
+    /// Guides / Grid): `(vertical, at)` comp pixels, within `line_snap`.
+    lines: Vec<(bool, f64)>,
+    line_snap: f64,
 }
 
 impl TransformDrag {
@@ -171,7 +175,16 @@ impl TransformDrag {
             kind,
             snapping: None,
             guide: None,
+            lines: Vec::new(),
+            line_snap: 0.0,
         }
+    }
+
+    /// Guide and grid lines to snap to, within `distance` comp pixels.
+    pub fn with_lines(mut self, lines: Vec<(bool, f64)>, distance: f64) -> Self {
+        self.lines = lines;
+        self.line_snap = distance;
+        self
     }
 
     /// Snapping as AE 26 does it (R1, transform-tools.md §4): only one point
@@ -229,7 +242,8 @@ impl TransformDrag {
                 let lock = shift && matches!(self.kind, Kind::Move { .. });
                 let axis = |mut d: DVec2| {
                     if lock {
-                        if (p - start).x.abs() > (p - start).y.abs() {
+                        // AE 26: |dx| ≥ |dy| locks horizontally (R1).
+                        if (p - start).x.abs() >= (p - start).y.abs() {
                             d.y = 0.0;
                         } else {
                             d.x = 0.0;
@@ -241,6 +255,22 @@ impl TransformDrag {
                 if let Some(t) = self.snap_target(d, snap) {
                     d = axis(t - self.snapping.as_ref().expect("snapping").feature);
                     self.guide = Some(t);
+                } else if let Some(s) = &self.snapping {
+                    // Guides and grid lines: each axis on its own.
+                    let f = s.feature + d;
+                    let near = |vertical: bool, v: f64| {
+                        self.lines
+                            .iter()
+                            .filter(|(vv, at)| *vv == vertical && (v - at).abs() <= self.line_snap)
+                            .min_by(|a, b| (v - a.1).abs().total_cmp(&(v - b.1).abs()))
+                            .map(|(_, at)| *at)
+                    };
+                    if let Some(x) = near(true, f.x) {
+                        d.x += x - f.x;
+                    }
+                    if let Some(y) = near(false, f.y) {
+                        d.y += y - f.y;
+                    }
                 }
                 d
             }
@@ -268,7 +298,20 @@ impl TransformDrag {
                 let d = DVec2::new(hp.x - a.x, hp.y - a.y);
                 let s0 = e0.start.scale;
                 let (mut rx, mut ry) = (1.0, 1.0);
-                if shift {
+                if shift && ax && ay {
+                    // A corner keeps the proportions with the larger of the two
+                    // ratios (AE 26: max(|sx|, |sy|), R1 transform-tools.md §1).
+                    let ratio = |q: f64, d: f64, s: f64| {
+                        if d.abs() > 1e-9 && s.abs() > 1e-9 {
+                            100.0 * q / d / s
+                        } else {
+                            1.0
+                        }
+                    };
+                    let (sx, sy) = (ratio(q.x, d.x, s0.x), ratio(q.y, d.y, s0.y));
+                    let m = if sx.abs() >= sy.abs() { sx } else { sy };
+                    (rx, ry) = (m, m);
+                } else if shift {
                     // Keep the proportions: the handle moves along its line
                     // through the anchor.
                     let dd = DVec2::new(

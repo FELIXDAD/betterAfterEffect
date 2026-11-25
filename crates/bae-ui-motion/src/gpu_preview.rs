@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::common::StageChanges;
 use bae_anim::EvaluatedComp;
 use bae_app::{Registry, Resources};
 use bae_gpu::GpuContext;
@@ -54,6 +55,7 @@ pub(crate) struct GpuPreview {
     id: ViewportTextureId,
     renderer: Renderer,
     anim: AnimEvaluator,
+    changes: StageChanges,
     sources_gen: Option<u64>,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
@@ -64,6 +66,10 @@ pub(crate) struct GpuPreview {
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// The newest frame was incomplete (something still warming up): the
+    /// viewer keeps showing the last complete frame with a "Preparing…" hint
+    /// until it is redrawn complete.
+    pub preparing: bool,
 }
 
 impl GpuPreview {
@@ -90,12 +96,14 @@ impl GpuPreview {
             id,
             renderer,
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            changes: StageChanges::default(),
             sources_gen: None,
             last: None,
             rect: None,
             texture: None,
             sampled: None,
             has_text: false,
+            preparing: false,
         }
     }
 
@@ -146,6 +154,10 @@ impl GpuPreview {
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
+        if self.changes.changed(resources) {
+            self.anim.clear_compiled();
+            self.last = None;
+        }
         let mut rc = match self.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
@@ -189,6 +201,17 @@ impl GpuPreview {
                     return None;
                 }
             };
+            // Like AE, an incomplete frame (an effect pipeline or the text
+            // renderer still warming up) is never shown: the last complete
+            // frame stays, and the frame is rendered again on the redraw the
+            // warm-up requests when it is ready.
+            self.preparing = frame.incomplete;
+            if frame.incomplete {
+                return Some(PreviewImage {
+                    handle: self.registry.display_handle(self.id)?,
+                    rect: self.rect?,
+                });
+            }
             let texture = match self
                 .renderer
                 .output_texture(&frame, OutputAlpha::Premultiplied)

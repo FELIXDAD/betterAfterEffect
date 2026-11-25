@@ -38,6 +38,12 @@ use std::process::ExitCode;
 use bae_app::AppBuilder;
 
 fn main() -> ExitCode {
+    if std::env::args_os()
+        .skip(1)
+        .eq(["plugin", "runner"].map(std::ffi::OsString::from))
+    {
+        return bae_plugin::native::runner_main();
+    }
     startup::run(app_builder().build())
 }
 
@@ -57,6 +63,8 @@ fn app_builder() -> AppBuilder {
         .add_module(bae_effects::EffectsModule)
         // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
         .add_module(bae_motion::MotionModule)
+        // `script.run`: AE-style scripts (File > Scripts, `bae --headless`, MCP).
+        .add_module(bae_script::ScriptModule)
         // Plugin host: `bae plugin check|list`; plugin effects in the app registries.
         .add_module(bae_plugin::PluginModule)
         .add_module(shell::ShellModule)
@@ -70,11 +78,24 @@ fn app_builder() -> AppBuilder {
     ) {
         tracing::warn!("shape layer source not registered: {error}");
     }
-    if let Err(error) = builder.register_arc::<dyn bae_render::SourceProvider>(
-        bae_text::TEXT_PROVIDER,
-        std::sync::Arc::new(bae_text::render::TextProvider::new()),
-    ) {
+    let text = std::sync::Arc::new(bae_text::render::TextProvider::new());
+    if let Err(error) = builder
+        .register_arc::<dyn bae_render::SourceProvider>(bae_text::TEXT_PROVIDER, text.clone())
+    {
         tracing::warn!("text layer source not registered: {error}");
+    }
+    // First-use work done in the background at startup (shell `warm_up`).
+    for (id, task) in [
+        (
+            "bae.vector.renderer",
+            std::sync::Arc::new(bae_vector::render::VectorWarmUp)
+                as std::sync::Arc<dyn bae_gpu::WarmUp>,
+        ),
+        ("bae.text.fonts", text),
+    ] {
+        if let Err(error) = builder.register_arc::<dyn bae_gpu::WarmUp>(id, task) {
+            tracing::warn!("warm-up task {id} not registered: {error}");
+        }
     }
     // Feature modules from other workstreams are added here.
     builder
