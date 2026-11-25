@@ -1773,3 +1773,37 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     tool_action(&h, ids::SHORTCUT, json!({"slot": "a"}));
     assert_eq!(view(&h), View3d::Custom(2));
 }
+
+/// #400: with a layer selected, the viewer edits it even where layers above it
+/// cover it; a click on empty space deselects, and then a click picks the
+/// topmost layer.
+#[test]
+fn the_viewer_edits_the_selected_layer_under_others() {
+    let mut h = H::new();
+    let bottom = h.solid([200.0, 200.0], [320.0, 180.0]);
+    let top = h.solid([100.0, 100.0], [320.0, 180.0]);
+    h.select(&[&bottom]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.drag((320.0, 180.0), (340.0, 180.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(
+        h.v3(&bottom, "transform:position"),
+        [340.0, 180.0, 0.0]
+    ));
+    assert!(close3(
+        h.v3(&top, "transform:position"),
+        [320.0, 180.0, 0.0]
+    ));
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&bottom)
+    );
+    // Outside every layer: nothing selected; then the topmost layer.
+    h.click(10.0, 10.0, Modifiers::NONE);
+    assert!(h.session().lock().selected_layers.is_empty());
+    h.click(320.0, 180.0, Modifiers::NONE);
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&top)
+    );
+}
