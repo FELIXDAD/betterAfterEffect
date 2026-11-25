@@ -110,6 +110,7 @@ impl Command for SetAssetFiles {
     type Params = SetAssetFilesParams;
     type Output = ();
     const ID: &'static str = "asset.set_files";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Relink Assets";
     const DESCRIPTION: &'static str = "Set the file references (relative path, original path, fingerprint) of several Asset prims as one undo step. Each value is written in the sublayer whose opinion currently wins.";
 
@@ -151,6 +152,7 @@ impl Command for RelinkAsset {
     type Params = RelinkAssetParams;
     type Output = RelinkPlan;
     const ID: &'static str = "asset.relink";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Relink Asset";
     const DESCRIPTION: &'static str = "Relink an asset to a file on disk; with find_others, also relink the other missing assets found through the same directory change or in the same folder. Returns what was relinked, the implied path mapping and what is still missing.";
 
@@ -183,6 +185,7 @@ impl Command for Scan {
     type Params = PackParams;
     type Output = PackageReport;
     const ID: &'static str = "package.scan";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Check Project Assets";
     const DESCRIPTION: &'static str = "Report what packing would do without writing anything: every asset (used or unused, found or missing, where it was found, size), fonts used, referenced projects and totals.";
 
@@ -214,6 +217,7 @@ impl Command for Pack {
     type Params = PackOutputParams;
     type Output = PackageReport;
     const ID: &'static str = "package.pack";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Package Project";
     const DESCRIPTION: &'static str = "Write the project and every asset file it uses into one self-contained .baez file (media stored uncompressed, project data compressed). The open project and the original files are not changed. Returns a report with missing assets and sizes.";
 
@@ -253,6 +257,7 @@ impl Command for Collect {
     type Params = CollectParams;
     type Output = PackageReport;
     const ID: &'static str = "package.collect";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Collect Files";
     const DESCRIPTION: &'static str = "Copy the project and every asset file it uses into a new .bae folder (assets under assets/), like AE's Collect Files. The open project and the original files are not changed.";
 
@@ -285,6 +290,7 @@ impl Command for Unpack {
     type Params = UnpackParams;
     type Output = UnpackReport;
     const ID: &'static str = "package.unpack";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Unpack Project";
     const DESCRIPTION: &'static str = "Unpack a .baez into a normal .bae project folder and check that every asset resolves. Does not change the open project.";
 

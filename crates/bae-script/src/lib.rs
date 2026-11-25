@@ -27,7 +27,7 @@ mod convert;
 mod engine;
 mod host;
 
-pub use engine::check_module;
+pub use engine::{CompiledModule, prepare_module, prewarm};
 
 use std::sync::{Arc, Mutex};
 
@@ -85,6 +85,8 @@ pub struct ScriptEnv<'a> {
     pub time: Time,
     /// How long the run may take (default [`TIME_LIMIT`]).
     pub time_limit: Option<std::time::Duration>,
+    /// Timeline view for reading and moving composition playheads.
+    pub view: Option<&'a dyn ScriptView>,
 }
 
 /// Default time limit of a run.
@@ -127,11 +129,13 @@ pub struct ScriptSelection {
 /// Supplies view state without coupling the plugin host to a workspace.
 pub trait ScriptView: std::fmt::Debug + Send + Sync {
     fn selection(&self) -> ScriptSelection;
+    fn time(&self, comp: &PrimPath) -> Time;
+    fn set_time(&self, comp: &bae_motion::query::CompInfo, time: Time);
 }
 
 /// An exported function of an installed ES module.
 pub struct ModuleEntry<'a> {
-    pub source: &'a str,
+    pub module: &'a CompiledModule,
     pub export: &'a str,
     pub args: &'a serde_json::Value,
     pub heap_bytes: usize,
@@ -161,6 +165,9 @@ fn run_program(
         access,
         selected: env.selected_layers.clone(),
         generation: 0,
+        playheads: Default::default(),
+        evaluator: bae_anim::Evaluator::new(),
+        output_bytes: 0,
         report: ScriptReport {
             name: name.to_owned(),
             ..ScriptReport::default()
@@ -251,10 +258,10 @@ pub struct RunScriptParams {
     /// The comp `app.project.activeItem` returns.
     #[serde(default)]
     pub active_comp: Option<PrimPath>,
-    /// The layers `comp.selectedLayers` returns.
+    /// Selected layers. When omitted, uses the current view selection.
     #[serde(default)]
-    pub selected_layers: Vec<PrimPath>,
-    /// Current time in seconds of comp time (`comp.time`, `Property.value`); default 0.
+    pub selected_layers: Option<Vec<PrimPath>>,
+    /// Composition time in seconds. Defaults to its playhead, or zero without a view.
     #[serde(default)]
     pub time: Option<f64>,
 }
@@ -263,37 +270,25 @@ pub struct RunScriptParams {
 /// error and its line, the completion value) is the command's output; a script
 /// error does not fail the command, so changes made before it are kept.
 pub struct RunScript {
-    /// Module commands (`bae-motion` …) published in the app.
-    app: std::sync::Weak<Registry<dyn DynCommand>>,
-    /// Model commands and, without an app registry, the motion commands.
-    builtins: CommandRegistry,
+    commands: ScriptRegistry,
     defs: Arc<Registry<EffectDef>>,
     console: ScriptConsole,
+    view: Option<Arc<dyn ScriptView>>,
+}
+
+enum ScriptRegistry {
+    Application(std::sync::Weak<Registry<dyn DynCommand>>),
+    Standalone(CommandRegistry),
 }
 
 impl RunScript {
-    /// `script.run` over the app's command registry (module commands) plus the
-    /// model commands.
-    pub fn new(
-        app: Arc<Registry<dyn DynCommand>>,
-        defs: Arc<Registry<EffectDef>>,
-        console: ScriptConsole,
-    ) -> Self {
-        RunScript {
-            app: Arc::downgrade(&app),
-            builtins: CommandRegistry::with_builtins(),
-            defs,
-            console,
-        }
-    }
-
     /// `script.run` with the standard commands only ([`standard_commands`]).
     pub fn standalone(defs: Arc<Registry<EffectDef>>) -> Self {
         RunScript {
-            app: std::sync::Weak::new(),
-            builtins: standard_commands(defs.clone()),
+            commands: ScriptRegistry::Standalone(standard_commands(defs.clone())),
             defs,
             console: ScriptConsole::default(),
+            view: None,
         }
     }
 
@@ -304,10 +299,10 @@ impl RunScript {
     }
 
     fn command(&self, id: &str) -> Option<Arc<dyn DynCommand>> {
-        self.app
-            .upgrade()
-            .and_then(|r| r.get(id))
-            .or_else(|| self.builtins.get(id).cloned())
+        match &self.commands {
+            ScriptRegistry::Application(app) => app.upgrade()?.get(id),
+            ScriptRegistry::Standalone(registry) => registry.get(id).cloned(),
+        }
     }
 }
 
@@ -325,12 +320,34 @@ impl bae_model::Command for RunScript {
     ) -> Result<ScriptReport, CommandError> {
         let commands = |id: &str| self.command(id);
         let effects = |name: &str| find_effect(&self.defs, name);
+        let selection = self
+            .view
+            .as_ref()
+            .map(|v| v.selection())
+            .unwrap_or_default();
+        let comp = p.active_comp.or(selection.comp.clone());
+        let time = if let Some(t) = p.time {
+            Time::from_seconds(t)
+        } else if comp == selection.comp {
+            selection.time
+        } else {
+            comp.as_ref()
+                .zip(self.view.as_ref())
+                .map_or(Time::ZERO, |(comp, view)| view.time(comp))
+        };
         let env = ScriptEnv {
             commands: &commands,
             effects: &effects,
-            active_comp: p.active_comp,
-            selected_layers: p.selected_layers,
-            time: Time::from_seconds(p.time.unwrap_or(0.0)),
+            selected_layers: p.selected_layers.unwrap_or_else(|| {
+                if comp == selection.comp {
+                    selection.layers
+                } else {
+                    Vec::new()
+                }
+            }),
+            active_comp: comp,
+            time,
+            view: self.view.as_deref(),
             time_limit: None,
         };
         let name = p.name.unwrap_or_else(|| "script".to_owned());
@@ -352,28 +369,38 @@ impl AppModule for ScriptModule {
     }
 
     fn build(&self, app: &mut AppBuilder) {
-        let console = match app.resource::<ScriptConsole>() {
-            Some(c) => c.clone(),
-            None => {
-                let c = ScriptConsole::default();
-                app.insert_resource(c.clone());
-                c
-            }
-        };
+        if app.resource::<ScriptConsole>().is_none() {
+            app.insert_resource(ScriptConsole::default());
+        }
+    }
+
+    fn finish(&self, app: &mut AppBuilder) {
+        let console = app
+            .resource::<ScriptConsole>()
+            .expect("script console")
+            .clone();
         let owner = app.current_owner();
         let defs = app.registry::<EffectDef>();
         let commands = app.registry::<dyn DynCommand>();
         // Through a command registry: it builds the type-erased command and
         // its parameter schema (the MCP tool definition).
-        let mut r = CommandRegistry::new();
-        let _ = r.register(RunScript::new(commands.clone(), defs, console));
-        if let Some(cmd) = r.get(RUN_SCRIPT).cloned() {
-            commands.batch(|tx| {
-                if !tx.contains(RUN_SCRIPT) {
-                    let _ = tx.register_arc(owner.clone(), RUN_SCRIPT, cmd);
+        let mut r = CommandRegistry::with_builtins();
+        let run = RunScript {
+            commands: ScriptRegistry::Application(Arc::downgrade(&commands)),
+            defs,
+            console,
+            view: app.resource::<Arc<dyn ScriptView>>().cloned(),
+        };
+        r.register(run).expect("unique script.run");
+        commands.batch(|tx| {
+            for info in r.infos() {
+                if !tx.contains(&info.id) {
+                    let cmd = r.get(&info.id).expect("registered command").clone();
+                    tx.register_arc(owner.clone(), info.id.as_str(), cmd)
+                        .expect("unique model command");
                 }
-            });
-        }
+            }
+        });
     }
 }
 
