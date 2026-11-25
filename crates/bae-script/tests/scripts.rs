@@ -317,6 +317,42 @@ fn effects_text_and_expressions() {
 }
 
 #[test]
+fn playheads_sample_expressions_and_expose_property_and_blend_enums() {
+    let mut fx = Fx::new();
+    let out = fx.ok(r#"
+        var a = app.project.items.addComp("A", 20, 20, 1, 4, 24);
+        var b = app.project.items.addComp("B", 20, 20, 1, 4, 24);
+        var layer = a.layers.addNull(), p = layer.rotation;
+        p.setValue(5);
+        p.expression = "value + time * 10";
+        a.time = 1.01;
+        b.time = 2;
+        layer.blendingMode = BlendingMode.MULTIPLY;
+        [a.time, b.time, p.value, p.valueAtTime(2, false), p.valueAtTime(2, true),
+         p.propertyType === PropertyType.PROPERTY, layer.blendingMode === BlendingMode.MULTIPLY]
+    "#);
+    assert_eq!(out, norm(json!([1, 2, 15, 25, 5, true, true])));
+}
+
+#[test]
+fn logs_and_alerts_share_entry_and_utf8_byte_limits() {
+    let mut fx = Fx::new();
+    let r = fx.script(
+        "for (let i=0;i<200;i++){alert('x');console.log('y')}",
+        json!({}),
+    );
+    assert_eq!(r.error, None);
+    assert_eq!((r.alerts.len(), r.log.len()), (128, 128));
+    let r = fx.script(
+        "console.log('x'); alert('é'.repeat(40000)); console.log('z')",
+        json!({}),
+    );
+    assert_eq!(r.error, None);
+    assert_eq!(r.alerts[0].len(), 65534);
+    assert_eq!(r.log, ["x", "z"]);
+}
+
+#[test]
 fn run_api_labels_the_step_with_the_undo_group() {
     let mut fx = Fx::new();
     let reg = bae_script::standard_commands(fx.defs.clone());
@@ -328,6 +364,7 @@ fn run_api_labels_the_step_with_the_undo_group() {
         active_comp: None,
         selected_layers: Vec::new(),
         time: Time::ZERO,
+        view: None,
         time_limit: None,
     };
     let (report, _) = bae_script::run(
@@ -355,6 +392,7 @@ fn runaway_scripts_stop_at_the_time_limit() {
         active_comp: None,
         selected_layers: Vec::new(),
         time: Time::ZERO,
+        view: None,
         time_limit: Some(std::time::Duration::from_millis(200)),
     };
     let (report, _) = bae_script::run(

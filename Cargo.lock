@@ -833,6 +833,7 @@ dependencies = [
  "bae-app",
  "bae-gpu",
  "bae-model",
+ "bae-motion",
  "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
@@ -904,6 +905,7 @@ dependencies = [
 name = "bae-script"
 version = "0.0.2"
 dependencies = [
+ "bae-anim",
  "bae-app",
  "bae-model",
  "bae-motion",
