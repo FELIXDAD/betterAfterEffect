@@ -38,6 +38,7 @@ mod i18n;
 pub mod import;
 mod layer_panel;
 pub mod menus;
+mod paint_panels;
 mod panels;
 mod prefs;
 mod project;
@@ -80,6 +81,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     layer_panel::register,
     ae_panels::register,
     scopes::register,
+    paint_panels::register,
     // Chinese strings only.
     actions::register,
     context_menu::register,
