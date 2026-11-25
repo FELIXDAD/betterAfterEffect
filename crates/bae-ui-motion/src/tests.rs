@@ -1857,11 +1857,17 @@ fn audio_assistant_creates_three_frame_sampled_sliders_in_one_undo() {
     h.session().lock().open_comp(&comp);
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("amplitude.wav");
+    // Match the analysis rate so that even the first frame has an exact RMS.
+    let rate = 48_000_u32;
+    let byte_rate = 4 * rate;
     let mut bytes = Vec::from(*b"RIFF");
-    bytes.extend((36 + 32000u32).to_le_bytes());
-    bytes.extend(b"WAVEfmt \x10\0\0\0\x01\0\x02\0\x40\x1f\0\0\x00\x7d\0\0\x04\0\x10\0data");
-    bytes.extend(32000u32.to_le_bytes());
-    for _ in 0..8000 {
+    bytes.extend((36 + byte_rate).to_le_bytes());
+    bytes.extend(b"WAVEfmt \x10\0\0\0\x01\0\x02\0");
+    bytes.extend(rate.to_le_bytes());
+    bytes.extend(byte_rate.to_le_bytes());
+    bytes.extend(b"\x04\0\x10\0data");
+    bytes.extend(byte_rate.to_le_bytes());
+    for _ in 0..rate {
         bytes.extend(8192i16.to_le_bytes());
         bytes.extend((-16384i16).to_le_bytes());
     }
