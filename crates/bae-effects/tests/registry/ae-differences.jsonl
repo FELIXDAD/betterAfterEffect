@@ -134,6 +134,7 @@
 ["ADBE Lumetri/order[7]","ADBE Lumetri-0012","ADBE Lumetri-0011"]
 ["ADBE Lumetri/order[8]","ADBE Lumetri-0013","ADBE Lumetri-0012"]
 ["ADBE Lumetri/order[9]","ADBE Lumetri-0014","ADBE Lumetri-0013"]
+["ADBE Paint Group/present",true,false]
 ["ADBE Radial Blur-0005/type","NO_VALUE","CUSTOM_VALUE"]
 ["ADBE Ramp-0008/name_zh","","交换颜色"]
 ["ADBE Spill2/name_zh","Advanced Spill Suppressor","高级溢出抑制器"]

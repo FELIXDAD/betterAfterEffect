@@ -20,12 +20,12 @@ const ERASE: u32 = 5;
 const MAX: u32 = 1;
 
 pub(crate) fn paint_effect() -> Builtin {
-    let def = DefBuilder::new(paint::PAINT_EFFECT, "Paint", "Generate").checkbox(
-        1,
-        "Paint on Transparent",
-        "在透明背景上绘画",
-        false,
-    );
+    // AE: Paint on Transparent, then the Strokes group (ADBE Paint Group),
+    // which holds the strokes; here they are `PaintStroke` prims, not a
+    // parameter group (an accepted AE difference).
+    let def = DefBuilder::new(paint::PAINT_EFFECT, "Paint", "Generate")
+        .checkbox(1, "Paint on Transparent", "在透明背景上绘画", false)
+        .ae_match_name("ADBE Paint On Transparent");
     Generator::Paint.builtin(def, "paint", "绘画")
 }
 
