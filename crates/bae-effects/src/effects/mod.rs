@@ -19,6 +19,7 @@ pub(crate) mod compound;
 pub mod distort;
 pub mod spatial;
 pub(crate) mod temporal;
+pub(crate) mod text;
 
 pub(crate) fn prewarm(
     rt: &crate::gpu::Runtime,
