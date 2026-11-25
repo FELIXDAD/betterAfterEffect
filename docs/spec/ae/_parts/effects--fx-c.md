@@ -322,12 +322,12 @@ Conventions for this part (apply to every item below unless the item says otherw
   | 2 | All Masks (所有蒙版) | `-0010` (obs.) | Checkbox | Off | — | — | Strokes every mask. |
   | 3 | Stroke Sequentially (顺序描边) | `-0011` (obs.) | Checkbox | On | — | — | With All Masks: Start/End run across masks one after another (in mask order) instead of on each mask simultaneously. |
   | 4 | Color (颜色) | `-0002` (obs.) | Color | white | any | RGB | |
-  | 5 | Brush Size (画笔大小) | `-0003` (obs.) | Float slider | 2.0 | slider 0-50, valid 0-1000 (UNVERIFIED) | px | Diameter. |
-  | 6 | Brush Hardness (画笔硬度) | `-0004` (obs.) | Float slider | 75% | 0-100% | Percent (0-1) | Lottie `k: 0.75`. |
+  | 5 | Brush Size (画笔大小) | `-0003` (obs.) | Float slider | 2.0 | 0–200 | px | Radius, measured in AE 26.2.1. |
+  | 6 | Brush Hardness (画笔硬度) | `-0004` (obs.) | Float slider | 75% | 0–94.9997% | Percent (0-1) | Lottie `k: 0.75`. |
   | 7 | Opacity (不透明度) | `-0005` (obs.) | Float slider | 100% | 0-100% | Percent (0-1) | |
   | 8 | Start (起始) | `-0008` (obs.) | Float slider | 0% | 0-100% | Percent (0-100) | |
   | 9 | End (结束) | `-0009` (obs.) | Float slider | 100% | 0-100% | Percent (0-100) | |
-  | 10 | Spacing (间距) | `-0006` (obs.) | Float slider | 15% | 0-100% (UNVERIFIED) | Percent (0-100) | Distance between brush dabs as % of Brush Size. |
+  | 10 | Spacing (间距) | `-0006` (obs.) | Float slider | 15% | 0–100% | Percent (0-100) | Distance between brush dabs as % of brush diameter. |
   | 11 | Paint Style (绘画样式) | `-0007` (obs.) | Popup | On Original Image | 1 On Original Image (在原始图像上), 2 On Transparent (在透明背景上), 3 Reveal Original Image (显示原始图像) | — | |
 
   ```
@@ -335,14 +335,18 @@ Conventions for this part (apply to every item below unless the item says otherw
   L_total = sum(arc_length(path_i))
   // Start/End are fractions of each path (or of L_total when Sequentially)
   for each path segment [s0, s1] covered by [min(Start,End), max(Start,End)]:
-     place round dabs every max(1, Spacing/100 * BrushSize) px along arc length
-     dab profile: radius = BrushSize/2, hard core radius = Hardness * radius, linear/gaussian falloff to edge (UNVERIFIED profile)
-  S = coverage (dabs combined with max, not additive — UNVERIFIED)
+     step = max(1, Spacing) / 100 * 2 * BrushSize
+     stamp indices from floor(s0/step) up to, excluding, floor(s1/step)
+     radius = BrushSize
+     inner = max(radius - 1, 0) * Hardness
+     dab profile inside radius: exp(-6.25 * (max(distance - inner, 0) / (radius - inner))^2)
+     evaluate the stamp on a half-pixel-centered grid, translate with bilinear filtering
+  S = 1 - product(1 - dabCoverage)
   On Original Image:     out = vec4(Color*S*Opacity, S*Opacity) over src
   On Transparent:        out = vec4(Color*S*Opacity, S*Opacity)
   Reveal Original Image: out = src * (S*Opacity)        // stroke acts as matte for the layer
   ```
-  - Start > End is allowed (reverses the visible range). Mask modes are irrelevant to the stroke; masks with mode other than None still cut the layer.
+  - The straight-mask brush profile, spacing and trim grid were measured in AE 26.2.1 by varying size, hardness, spacing and opacity. Start > End produces the same interval as swapping Start and End. Mask modes are irrelevant to the stroke; masks with mode other than None still cut the layer.
 - **Priority:** P1 (classic write-on trick; Lottie-exportable).
 - **Owner:** bae-effects (+ bae-vector)
 - **Notes:** lottie-web `SVGStrokeEffect` implements this (uses dasharray for Start/End, `Paint Style` 3 = reveal via mask). Open masks are stroked, closed masks include the closing segment. Output is clipped to the layer bounds (no bounds growth). Implementation hint: reuse the bae-vector path flattener and a dab-accumulation compute pass, or approximate with a Vello stroke when Spacing ≤ 25% and hardness = 100%.
@@ -355,24 +359,27 @@ Conventions for this part (apply to every item below unless the item says otherw
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Brush Position (画笔位置) | `ADBE Write-on-0001` | Point | (UNVERIFIED) | any | px | Animate (or link by expression to a Motion Sketch layer). |
-  | 2 | Color (颜色) | `-0002` | Color | (UNVERIFIED) | any | RGB | |
-  | 3 | Brush Size (画笔大小) | `-0003` | Float slider | (UNVERIFIED) | (UNVERIFIED) | px | |
-  | 4 | Brush Hardness (画笔硬度) | `-0004` | Float slider | (UNVERIFIED) | 0-100% | Percent | |
-  | 5 | Brush Opacity (画笔不透明度) | `-0005` | Float slider | 100% | 0-100% | Percent | |
-  | 6 | Stroke Length (secs) (描边长度(秒)) | `-0006` | Float slider | 0 = permanent (UNVERIFIED) | ≥ 0 | s | Each dab stays visible this long; 0 = forever. |
-  | 7 | Brush Spacing (secs) (画笔间距(秒)) | `-0007` | Float slider | (UNVERIFIED) | > 0 | s | Time interval between dabs. |
-  | 8 | Paint Time Properties (绘画时间属性) | `-0008` | Popup | None | 1 None, 2 Opacity, 3 Color (AE 26 popup table) | — | Whether paint props are sampled per dab over time. |
+  | 1 | Brush Position (画笔位置) | `ADBE Write-on-0001` | Point | Layer center | any | px | Animate (or link by expression to a Motion Sketch layer). |
+  | 2 | Color (颜色) | `-0002` | Color | white | any | RGB | |
+  | 3 | Brush Size (画笔大小) | `-0003` | Float slider | 2 | 0–200 | px | Radius. |
+  | 4 | Brush Hardness (画笔硬度) | `-0004` | Float slider | 75% | 0–94.9997% | Percent | |
+  | 5 | Brush Opacity (画笔不透明度) | `-0005` | Float slider | 100% | 0–100% | Percent | |
+  | 6 | Stroke Length (secs) (描边长度(秒)) | `-0006` | Float slider | 0 = permanent | 0–3000 | s | Width of the sampled time window. |
+  | 7 | Brush Spacing (secs) (画笔间距(秒)) | `-0007` | Float slider | 0.009995 | 0.001007–3000 | s | Time interval between dabs. |
+  | 8 | Paint Time Properties (绘画时间属性) | `-0008` | Popup | Color | 1 None, 2 Opacity, 3 Color (AE 26 popup table) | — | Whether paint props are sampled per dab over time. |
   | 9 | Brush Time Properties (画笔时间属性) | `-0009` | Popup | None | 1 None, 2 Size, 3 Hardness, 4 Size & Hardness (AE 26 popup table) | — | |
   | 10 | Paint Style (绘画样式) | `-0010` | Popup | On Original Image | 1 On Original Image (在原始图像上), 2 On Transparent (在透明背景上), 3 Reveal Original Image (显示原始图像) | — | |
 
   ```
-  // History-dependent: render(t) = union of dabs at times tk = layerIn + k*Spacing, tk <= t
-  for each tk: pos = BrushPosition(tk); if StrokeLength==0 or t - tk <= StrokeLength: draw dab(pos, size, hardness, colour)
+  first = StrokeLength == 0 ? layerIn : max(layerIn, t - StrokeLength)
+  // StrokeLength and Spacing use 16.16 fixed-point seconds.
+  paint at first, then first + k*Spacing while sample time < t
+  always sample Brush Position at each mark
+  evaluate opted-in paint and brush properties at that mark, other properties at t
   ```
 - **Priority:** P2
 - **Owner:** bae-effects (+ bae-anim)
-- **Notes:** Output at time t depends on parameter values at all earlier dab times (a "time-sampling" effect); BAE must evaluate the Brush Position property at many times per frame (cache the sampled path). Shape layers with Trim Paths are the modern replacement (shapes.md, Trim Paths).
+- **Notes:** The sampling window and exclusive upper bound were measured on AE 26.2.1 using a linear position track with 0.05/0.1 second spacing. Output at time t depends on parameter values at all earlier dab times (a "time-sampling" effect); BAE must evaluate the Brush Position property at many times per frame (cache the sampled path). Shape layers with Trim Paths are the modern replacement (shapes.md, Trim Paths).
 
 ### AE-FX-611 · Scribble (涂抹)
 
