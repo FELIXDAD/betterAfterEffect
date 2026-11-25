@@ -228,14 +228,14 @@ impl SharedSession {
     pub(crate) fn retry_audio(&self) {
         let needed = {
             let s = self.lock();
-            s.retry_audio_after.map_or_else(
-                || {
-                    s.output
-                        .as_ref()
-                        .is_some_and(bae_media::playback::AudioOutput::device_lost)
-                },
-                |at| Instant::now() >= at,
-            )
+            match s.retry_audio_after {
+                Some(at) => Instant::now() >= at,
+                // Never opened or lost: open it now rather than wait for a failure.
+                None => s
+                    .output
+                    .as_ref()
+                    .is_none_or(bae_media::playback::AudioOutput::device_lost),
+            }
         };
         if needed {
             self.start_audio();
