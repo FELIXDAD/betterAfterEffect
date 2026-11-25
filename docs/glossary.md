@@ -85,8 +85,8 @@
 | Untitled Project | 未命名项目 |
 | Agent Activity（BAE） | Agent 活动 |
 | Proposals（BAE） | 提案 |
-| Work Area | 工作区域（AE 26 的“将合成裁剪到工作区”这一项缩写成“工作区”；BAE 统一用“工作区域”，不和 Workspace“工作区”混用） |
-| Trim | 修剪（如“将入点修剪到当前时间”“将合成修剪至工作区域”；“裁剪”是 Crop） |
+| Work Area | 工作区域。以 AE 各处原文为准：合成菜单里是“将合成裁剪到工作区”（`MenuID/0005`），时间轴工作区域右键菜单里是“将合成修剪至工作区域”“提升工作区域”“提取工作区域”（`MenuID/0171`）；Workspace 是“工作区” |
+| Trim | 以 AE 各处原文为准：多数是“修剪”（“将入点修剪到当前时间”、工作区域右键菜单的“将合成修剪至工作区域”），合成菜单那一项是“将合成裁剪到工作区”；Crop 是“裁剪” / “裁切”（同样照 AE 原文） |
 | Bring Layer to Front / Bring Layer Forward | 置于顶层 / 前移一层（AE 26 图层 ▸ 排列，也是通用叫法） |
 | Send Layer Backward / Send Layer to Back | 后移一层 / 置于底层 |
 | Add to Render Queue | 添加到渲染队列 |
@@ -143,7 +143,7 @@
 | Source Name | 源名称 |
 | Parent & Link | 父级和链接 |
 | Mode | 模式 |
-| Track Matte | 轨道遮罩（时间轴列名和"没有轨道遮罩"；AE 26 的 图层 菜单子菜单标题写作"跟踪遮罩"，BAE 统一用"轨道遮罩"） |
+| Track Matte | 以 AE 各处原文为准：图层菜单的子菜单标题是“跟踪遮罩”（`MenuID/0006`），时间轴的列名和“没有轨道遮罩”是“轨道遮罩”（`EGG/LStr/0329`、`0812`） |
 | Solo | 单独（AE 26 的开关名和 图层 ▸ 开关 ▸ 单独，R1 实测；不是"独奏"） |
 | Toggle Switches / Modes | 切换开关/模式 |
 | Frame Render Time | 帧渲染时间 |

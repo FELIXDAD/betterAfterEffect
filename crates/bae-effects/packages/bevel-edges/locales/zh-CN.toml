@@ -1,0 +1,10 @@
+[effect.bevel-edges]
+name = "边缘斜面"
+keywords = ["斜面","倒角"]
+
+[effect.bevel-edges.params]
+edge_thickness = "边缘厚度"
+light_angle = "灯光角度"
+light_color = "灯光颜色"
+light_intensity = "灯光强度"
+

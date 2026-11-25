@@ -384,3 +384,111 @@ name = "Luma Correction"
 group = "ultra_settings"
 default = 0
 range = [0, 100]
+
+[[effect]]
+id = "extract"
+name = "Extract"
+category = "Keying"
+implementation = "wgsl"
+ae_match_names = ["ADBE Extract"]
+shader = "shaders/extract.wgsl"
+
+[[effect.param]]
+id = 1
+key = "histogram"
+type = "button"
+name = "Histogram"
+flags = ["disabled"]
+
+[[effect.param]]
+id = 2
+key = "channel"
+type = "popup"
+name = "Channel"
+default = 1
+choices = ["Luminance", "Red", "Green", "Blue", "Alpha"]
+
+[[effect.param]]
+id = 3
+key = "black_point"
+type = "float"
+name = "Black Point"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 4
+key = "white_point"
+type = "float"
+name = "White Point"
+default = 255
+range = [0, 255]
+
+[[effect.param]]
+id = 5
+key = "black_softness"
+type = "float"
+name = "Black Softness"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 6
+key = "white_softness"
+type = "float"
+name = "White Softness"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 7
+key = "invert"
+type = "checkbox"
+name = "Invert"
+default = false
+
+[[effect]]
+id = "unmult"
+name = "Unmult"
+category = "Keying"
+implementation = "wgsl"
+ae_match_names = ["ADBE Unmult"]
+shader = "shaders/unmult.wgsl"
+
+[[effect.param]]
+id = 30
+key = "background_color"
+type = "popup"
+name = "Background Color"
+default = 1
+choices = ["Black", "White"]
+
+[[effect.param]]
+id = 31
+key = "black_level"
+type = "float"
+name = "Black Level"
+default = 0
+range = [-10000, 10000]
+
+[[effect.param]]
+id = 32
+key = "softness"
+type = "float"
+name = "Softness"
+default = 1
+range = [0, 10000]
+
+[[effect.param]]
+id = 33
+key = "remove_color_matting"
+type = "checkbox"
+name = "Remove Color Matting"
+default = true
+
+[[effect.param]]
+id = 34
+key = "clip_hdr_result"
+type = "checkbox"
+name = "Clip HDR Result"
+default = true
