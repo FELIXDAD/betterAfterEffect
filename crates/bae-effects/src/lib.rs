@@ -221,6 +221,7 @@ pub fn register(defs: &mut EffectRegistry, library: &mut EffectLibrary) -> usize
         defs.register(b.def().clone());
         library.register(b.effect());
     }
+    library.set_frame_interpolator(effects::temporal::interpolator());
     builtins().len()
 }
 

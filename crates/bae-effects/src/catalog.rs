@@ -270,6 +270,7 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "Alpha 差值",
             "仅 Alpha 差值",
         ],
+        ("ADBE OFMotionBlur", 1) => &["手动", "自动"],
         ("ADBE Timewarp", 1) => &["全帧", "帧混合", "像素运动"],
         ("ADBE Timewarp", 2) => &["速度", "源帧"],
         ("ADBE Timewarp", 14) => &["正常", "极端"],

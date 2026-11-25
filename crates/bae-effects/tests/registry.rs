@@ -153,6 +153,7 @@ fn builtin_defs_follow_the_ae_26_reference() {
         "CC Wide Time",
         "CC Force Motion Blur",
         "ADBE Timewarp",
+        "ADBE OFMotionBlur",
         "ADBE AutoLevels",
         "ADBE AutoContrast",
         "ADBE AutoColor",
@@ -236,5 +237,5 @@ fn builtin_defs_follow_the_ae_26_reference() {
             count += 1;
         }
     }
-    assert_eq!(count, 33);
+    assert_eq!(count, 34);
 }
