@@ -108,13 +108,13 @@ fn gpu_finds_translated_feature_in_all_channels() {
         return;
     };
     let matcher = Matcher::new(gpu.device());
-    let texture = |dx: i32, dy: i32| {
+    let texture = |dx: f32, dy: f32| {
         let mut pixels = Vec::new();
         for y in 0..40 {
             for x in 0..48 {
-                let (x, y) = (x - dx, y - dy);
-                let v = (x * x + 13 * y * y + 11 * x * y).rem_euclid(251) as u8;
-                pixels.extend_from_slice(&[v, v.wrapping_mul(3), 170, 255]);
+                let (x, y) = (x as f32 - 20.0 - dx, y as f32 - 18.0 - dy);
+                let green = (30.0 + 160.0 * (-(x * x + y * y) / 9.0).exp()).round() as u8;
+                pixels.extend_from_slice(&[240, green, 220, 255]);
             }
         }
         create_texture_with_data(
@@ -137,34 +137,36 @@ fn gpu_finds_translated_feature_in_all_channels() {
         )
         .unwrap()
     };
-    let reference = texture(0, 0);
-    let current = texture(3, -2);
-    for channel in 0..3 {
-        let region = Region {
-            reference: &reference,
-            field: 0,
-            center: [20, 18],
-            search_center: [20, 18],
-            feature: [12, 12],
-            search: [26, 26],
-        };
-        let m = matcher
-            .analyze(
-                &gpu,
-                &current,
-                &[region],
-                Options {
-                    channel,
-                    subpixel: true,
-                    enhance: 0,
-                    radius: 2,
-                    field: 0,
-                },
-            )
-            .unwrap()[0];
-        assert!(
-            (m[0] - 23.).abs() < 0.25 && (m[1] - 16.).abs() < 0.25 && m[2] > 0.99,
-            "channel {channel}: {m:?}"
-        );
+    let reference = texture(0., 0.);
+    for (dx, dy) in [(3.0, -2.0), (3.35, -2.4)] {
+        let current = texture(dx, dy);
+        for channel in 0..3 {
+            let region = Region {
+                reference: &reference,
+                field: 0,
+                center: [20, 18],
+                search_center: [20, 18],
+                feature: [12, 12],
+                search: [26, 26],
+            };
+            let m = matcher
+                .analyze(
+                    &gpu,
+                    &current,
+                    &[region],
+                    Options {
+                        channel,
+                        subpixel: true,
+                        enhance: 0,
+                        radius: 2,
+                        field: 0,
+                    },
+                )
+                .unwrap()[0];
+            assert!(
+                (m[0] - 20. - dx).hypot(m[1] - 18. - dy) < 0.1 && m[2] > 0.96,
+                "channel {channel}, shift ({dx}, {dy}): {m:?}"
+            );
+        }
     }
 }

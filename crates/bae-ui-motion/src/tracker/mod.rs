@@ -3,6 +3,7 @@ mod dialogs;
 mod gpu;
 pub(crate) mod overlay;
 #[cfg(test)]
+#[path = "tests/analysis.rs"]
 mod tests;
 mod worker;
 

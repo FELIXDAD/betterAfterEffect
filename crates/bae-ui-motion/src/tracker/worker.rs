@@ -94,16 +94,21 @@ pub(super) fn start(
                     let (one, min) = crate::layer_panel::alone(&comp, &source, 0)
                         .ok_or("Missing motion source")?;
                     let rc = anim.convert(&stage, &one, 0).map_err(|e| e.to_string())?;
-                    let frame = renderer
-                        .render_frame(&rc, &RenderRequest::full())
-                        .map_err(|e| e.to_string())?;
-                    if frame.incomplete || !frame.warnings.is_empty() {
-                        return Err(frame
-                            .warnings
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(|| "Tracker is warming up".into()));
-                    }
+                    let frame = loop {
+                        if stop.load(Ordering::Relaxed) {
+                            return Err("Tracking stopped".into());
+                        }
+                        let frame = renderer
+                            .render_frame(&rc, &RenderRequest::full())
+                            .map_err(|e| e.to_string())?;
+                        if let Some(warning) = frame.warnings.first() {
+                            return Err(warning.clone());
+                        }
+                        if !frame.incomplete {
+                            break frame;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(16));
+                    };
                     let origin = min
                         + DVec2::new(
                             f64::from(frame.image.rect.x0),
@@ -306,7 +311,9 @@ impl Analysis<'_> {
                 } else if hit[2] < -1. {
                     p.center
                 } else {
-                    image.origin + DVec2::new(f64::from(hit[0]), f64::from(hit[1]))
+                    let reference = p.ref_center - p.reference.origin;
+                    let fraction = reference - reference.round();
+                    image.origin + DVec2::new(f64::from(hit[0]), f64::from(hit[1])) + fraction
                 };
                 let attach = if predicted {
                     None
