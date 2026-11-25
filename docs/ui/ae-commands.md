@@ -34,11 +34,7 @@
 
 快捷键列：Windows 是 AE 26.0 的默认值（`docs/reference/ae/shortcuts.json`）；macOS 是 AE 26.2.1 的默认值（`docs/reference/ae/mac/shortcuts.json`）：一般是 Ctrl→Cmd、Alt→Opt，例外按 Mac 文件（`catalog::MAC_KEYS`）。`Control` 是 macOS 的 Control 键（AE 文件里的 `macControl`）。`PadX` 是小键盘键。
 
-## 统计
-
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 155，◐ 8，☐ 169，⏸ 208，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 158 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 149 条，macOS 149 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+各状态的数量（菜单项、快捷键）不写在这里，免得每个 PR 都改这一段：见 CI 每次运行上传的 `shortcut-sweep.md`（完整 CI 的运行页面 → Artifacts → `bae-<平台>`）。本地生成：`BAE_SHORTCUT_REPORT=shortcut-sweep.md cargo test -p bae --bin bae shortcut_sweep`。
 
 ## 主菜单
 
