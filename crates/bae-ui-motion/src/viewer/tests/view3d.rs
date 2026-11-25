@@ -155,3 +155,31 @@ fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
         [320.0, 180.0, -zoom]
     ));
 }
+
+#[test]
+fn three_d_scale_gizmo_scales_along_one_axis() {
+    let mut h = H::new();
+    let l = h.solid([100.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "attr.set",
+        json!({"path": l, "attr": "three_d", "value": {"type": "bool", "value": true}}),
+    );
+    h.select(&[&l]);
+    // 5: the 3D Gizmo's Scale mode.
+    tool_action(&h, "motion.tool.gizmo_scale", json!({}));
+    assert_eq!(
+        h.tools().lock().options.gizmo,
+        crate::tools::GizmoMode::Scale
+    );
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = 70.0 / f64::from(h.viewer.last_view.unwrap().scale);
+    // From the X square to twice as far from the anchor: Scale X doubles.
+    let done = h.drag(
+        (320.0 + r, 180.0),
+        (320.0 + 2.0 * r, 200.0),
+        Modifiers::NONE,
+    );
+    h.apply(&done);
+    let s = h.v3(&l, "transform:scale");
+    assert!((s[0] - 200.0).abs() < 1.0 && s[1] == 100.0, "{s:?}");
+}

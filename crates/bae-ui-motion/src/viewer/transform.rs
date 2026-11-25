@@ -131,6 +131,16 @@ pub(crate) enum Kind {
         /// Where along the axis the drag started.
         start: f64,
     },
+    /// A 3D layer's scale arrow: Scale `axis` by how far along `dir` the
+    /// pointer is from `origin`, relative to where it started.
+    AxisScale {
+        axis: usize,
+        origin: DVec3,
+        dir: DVec3,
+        camera: Box<Camera>,
+        size: DVec2,
+        start: f64,
+    },
     /// A 3D layer's rotation ring: X / Y / Z Rotation (or Orientation) `axis`.
     Spin {
         axis: usize,
@@ -349,6 +359,25 @@ impl TransformDrag {
                     e.now.position = e.start.position + e.parent.inverse().transform_vector3(w);
                 }
             }
+            Kind::AxisScale {
+                axis,
+                origin,
+                dir,
+                camera,
+                size,
+                start,
+            } => {
+                let Some(t) = super::gizmo3d::along(camera, *size, p, *origin, *dir) else {
+                    return;
+                };
+                if start.abs() < 1e-6 {
+                    return;
+                }
+                let ratio = t / *start;
+                for e in &mut self.edits {
+                    e.now.scale[*axis] = e.start.scale[*axis] * ratio;
+                }
+            }
             Kind::Spin {
                 axis,
                 center,
@@ -511,7 +540,9 @@ impl TransformDrag {
     /// The gizmo axis an axis or ring drag uses.
     pub fn axis(&self) -> Option<usize> {
         match self.kind {
-            Kind::Axis { axis, .. } | Kind::Spin { axis, .. } => Some(axis),
+            Kind::Axis { axis, .. } | Kind::AxisScale { axis, .. } | Kind::Spin { axis, .. } => {
+                Some(axis)
+            }
             _ => None,
         }
     }
