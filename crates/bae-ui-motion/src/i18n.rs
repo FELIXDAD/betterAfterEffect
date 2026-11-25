@@ -650,6 +650,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Dialogs (`dialogs`): Composition Settings. Terms follow the AE 26 Simplified
     // Chinese UI (docs/glossary.md §十).
     ("Composition Settings", "合成设置"),
+    ("Composition Mini-Flowchart", "合成微型流程图"),
     ("Composition Settings...", "合成设置..."),
     ("Composition Name:", "合成名称:"),
     ("Composition Name", "合成名称"),

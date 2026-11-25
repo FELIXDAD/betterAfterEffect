@@ -190,6 +190,16 @@ impl TimelinePanel {
         }
         gresp.on_hover_text(tr("Graph Editor"));
 
+        let flow = ge.translate(vec2(-5.0 * 26.0, 0.0));
+        let title = tr("Composition Mini-Flowchart");
+        let button = ui
+            .interact(flow, ui.id().with("mini_flow"), Sense::click())
+            .labeled(egui::WidgetType::Button, title);
+        icons::paint(p, flow.shrink(3.0), Icon::MiniFlowchart, color::ICON);
+        if button.on_hover_text(title).clicked() {
+            cx.invoke(ids::MINI_FLOW);
+        }
+
         // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
         // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
         // comp, as AE does.

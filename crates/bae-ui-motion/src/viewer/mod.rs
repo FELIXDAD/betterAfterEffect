@@ -868,7 +868,13 @@ impl Panel for CompositionViewer {
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
-            add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
+            add_item_as_layer(
+                cx,
+                &session,
+                &item.0,
+                pointer.map(|p| view.to_comp(p)),
+                None,
+            );
         }
         // An effect dropped on a layer (Effects & Presets) is applied to it.
         if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
@@ -956,13 +962,14 @@ pub(crate) fn add_item_as_layer(
     session: &SharedSession,
     item: &PrimPath,
     at: Option<DVec2>,
+    index: Option<usize>,
 ) {
     let stage = cx.stage;
     let Some(active) = session.lock().active_comp.clone() else {
         return;
     };
     let kind = if query::comp_info(stage, item).is_some() {
-        if item == &active {
+        if query::would_nest_recursively(stage, &active, item) {
             return;
         }
         LayerKind::PreComp
@@ -978,6 +985,9 @@ pub(crate) fn add_item_as_layer(
     let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
     if let Some(p) = at {
         extra["position"] = json!([p.x, p.y]);
+    }
+    if let Some(index) = index {
+        extra["index"] = json!(index);
     }
     common::new_layer(cx, session, kind, extra);
 }

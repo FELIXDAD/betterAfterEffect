@@ -157,6 +157,41 @@ pub fn comp_layers(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
         .collect()
 }
 
+/// The composition opened by double-clicking this pre-comp layer.
+pub fn precomp_source(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let view = stage.prim(layer)?;
+    if view.value("kind")?.as_str()? != "pre_comp" {
+        return None;
+    }
+    let source = view.value("source")?.as_prim_ref()?;
+    stage
+        .prim(source)?
+        .is_a(&PrimType::COMP)
+        .then(|| source.clone())
+}
+
+/// The composition source of each pre-comp layer, in layer order.
+pub fn child_comps<'a>(stage: &'a Stage, comp: &PrimPath) -> impl Iterator<Item = PrimPath> + 'a {
+    comp_layers(stage, comp)
+        .into_iter()
+        .filter_map(|layer| precomp_source(stage, &layer))
+}
+
+/// Whether using `source` inside `parent` would close a composition cycle.
+pub fn would_nest_recursively(stage: &Stage, parent: &PrimPath, source: &PrimPath) -> bool {
+    let mut stack = vec![source.clone()];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(comp) = stack.pop() {
+        if &comp == parent {
+            return true;
+        }
+        if visited.insert(comp.clone()) {
+            stack.extend(child_comps(stage, &comp));
+        }
+    }
+    false
+}
+
 /// Whether `path` is a `Layer` prim.
 pub fn is_layer(stage: &Stage, path: &PrimPath) -> bool {
     stage.prim(path).is_some_and(|v| v.is_a(&PrimType::LAYER))
