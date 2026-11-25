@@ -435,6 +435,11 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
         }
+        id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
+            && id != "motion.view.clear_guides" =>
+        {
+            spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
+        }
         crate::viewer::view3d::ids::SWITCH => {
             let view = spec_param(item.params, "view").unwrap_or_default();
             spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)

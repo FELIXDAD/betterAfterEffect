@@ -95,6 +95,7 @@ pub(crate) fn format_name(format: wgpu::TextureFormat) -> Result<&'static str, R
     match format {
         wgpu::TextureFormat::Rgba16Float => Ok("rgba16float"),
         wgpu::TextureFormat::Rgba32Float => Ok("rgba32float"),
+        wgpu::TextureFormat::R32Float => Ok("r32float"),
         other => Err(RenderError::Other(format!(
             "bae-effects: unsupported working format {other:?}"
         ))),
