@@ -62,6 +62,7 @@
 - [扭曲](../../crates/bae-effects/tests/ae/categories/distort.md#工作流进度)
 - [生成](../../crates/bae-effects/tests/ae/categories/generate.md#工作流进度)
 - [抠像](../../crates/bae-effects/tests/ae/categories/keying.md#工作流进度)
+  - 本轮抠像接入 Keylight、Key Cleaner、提取和 Unmult。柔和及实边遮罩共用两遍 GPU 引导滤波，支持前帧和边缘颜色净化。
 - [遮罩](../../crates/bae-effects/tests/ae/categories/matte.md#工作流进度)
 - [杂色和颗粒](../../crates/bae-effects/tests/ae/categories/noise-grain.md#工作流进度)
 - [透视](../../crates/bae-effects/tests/ae/categories/perspective.md#工作流进度)
@@ -74,4 +75,6 @@
 
 LUT 字节和文件名随项目保存。效果面板的文件选择按钮交由 G 接入。三个自动校正效果的瞬时平滑和场景检测等待 #286 提供跨帧输入。
 
-本轮抠像接入 Keylight、Key Cleaner、提取和 Unmult。柔和及实边遮罩共用两遍 GPU 引导滤波，支持前帧和边缘颜色净化。
+### Lumetri 颜色（2026-11-24）
+
+完成六个 GPU 分组、输入和创意 LUT 接口、主曲线与色相对饱和度曲线、三路色轮、HSL 辅助和晕影。AE 26.2.1 的逐组及串联对照见[颜色校正记录](../../crates/bae-effects/tests/ae/categories/color.md#lumetri-颜色)。输入 LUT 的文件选择器可复用效果面板工作流的 LUT 接口。
