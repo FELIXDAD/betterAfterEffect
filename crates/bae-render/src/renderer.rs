@@ -219,6 +219,14 @@ impl Renderer {
         &self.gpu
     }
 
+    /// Hash the pixels with camera/light dependencies from the installed effects.
+    pub fn content_hash(&self, comp: &RenderComp) -> u64 {
+        use std::hash::Hasher;
+        let mut h = rustc_hash::FxHasher::default();
+        comp.hash_content(&mut h, Some(&self.effects));
+        h.finish()
+    }
+
     /// Effect implementations (register built-in and plugin effects here).
     pub fn effects_mut(&mut self) -> &mut EffectLibrary {
         &mut self.effects
@@ -315,7 +323,7 @@ impl Renderer {
             time: comp.time,
             request: request.fingerprint(),
         };
-        let hash = comp.content_hash();
+        let hash = self.content_hash(comp);
         if self.frames.content_hash(&key) == Some(hash)
             && let Some(image) = self.frames.get(&key)
         {
@@ -348,6 +356,15 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
+        let tiles = request.roi.map(|_| crate::exec::TileCache {
+            frames: &mut self.frames,
+            request: RenderRequest {
+                roi: None,
+                ..*request
+            }
+            .fingerprint(),
+            comp,
+        });
         let executed = execute(
             &self.gpu,
             &mut self.pipelines,
@@ -356,6 +373,7 @@ impl Renderer {
             &mut self.mask_buffers,
             &graph,
             format,
+            tiles,
             crate::exec::Timing {
                 cpu: self.layer_times,
                 gpu: self.gpu_timer.as_mut(),

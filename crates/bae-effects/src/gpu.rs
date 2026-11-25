@@ -9,7 +9,7 @@
 
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use bae_gpu::{GpuContext, wgpu};
 use bae_render::RenderError;
@@ -115,6 +115,7 @@ impl UniformRing {
 pub(crate) struct Runtime {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    pub particles: OnceLock<Result<crate::categories::simulation::Engine, String>>,
     ring: UniformRing,
     placeholder: wgpu::TextureView,
     kernels: Mutex<FxHashMap<KernelKey, Arc<Kernel>>>,
@@ -187,6 +188,7 @@ impl Runtime {
         Self {
             device,
             queue,
+            particles: OnceLock::new(),
             ring: UniformRing {
                 buffer,
                 align,
@@ -224,6 +226,15 @@ impl Runtime {
     /// Writes `bytes` into a ring slot; returns its dynamic offset.
     pub fn uniform(&self, bytes: &[u8]) -> u32 {
         self.ring.push(&self.queue, bytes)
+    }
+
+    /// Uniform ring binding for a pipeline with a dynamic viewport offset.
+    pub fn uniform_binding(&self, size: u64) -> wgpu::BindingResource<'_> {
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &self.ring.buffer,
+            offset: 0,
+            size: NonZeroU64::new(size),
+        })
     }
 
     /// The kernel for `key`, built from `source` on first use.
@@ -374,13 +385,7 @@ impl Runtime {
             .map(|(&(binding, kind), res)| wgpu::BindGroupEntry {
                 binding,
                 resource: match (kind, res) {
-                    (Binding::Uniform(size), _) => {
-                        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &self.ring.buffer,
-                            offset: 0,
-                            size: NonZeroU64::new(u64::from(size)),
-                        })
-                    }
+                    (Binding::Uniform(size), _) => self.uniform_binding(u64::from(size)),
                     (_, Resource::Buffer(b)) => b.as_entire_binding(),
                     (_, Resource::View(v)) => wgpu::BindingResource::TextureView(v),
                     (_, Resource::Uniform) => wgpu::BindingResource::TextureView(&self.placeholder),

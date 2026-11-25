@@ -156,8 +156,21 @@ impl Effect for Forward {
         self.0.input_roi(params, output_roi)
     }
 
-    fn uses_scene(&self, params: &EffectParams<'_>) -> bool {
-        self.0.uses_scene(params)
+    fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        self.0.uses_scene(p)
+    }
+
+    fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_times(p)
+    }
+    fn parameter_ids(&self) -> &'static [u32] {
+        self.0.parameter_ids()
+    }
+    fn integrated_parameters(&self) -> &'static [u32] {
+        self.0.integrated_parameters()
+    }
+    fn full_surface(&self) -> bool {
+        self.0.full_surface()
     }
 
     fn layer_dependencies(
@@ -215,6 +228,7 @@ fn registry() -> &'static Registry {
         categories::matte::register(&mut r);
         categories::noise_grain::register(&mut r);
         categories::perspective::register(&mut r);
+        categories::simulation::register(&mut r);
         categories::stylize::register(&mut r);
         categories::text::register(&mut r);
         categories::time::register(&mut r);

@@ -173,7 +173,7 @@ impl GpuPreview {
                 blur.cameras.fill(Some(camera));
             }
         }
-        let key = (rc.content_hash(), rc.time, resolution);
+        let key = (self.renderer.content_hash(&rc), rc.time, resolution);
         if self.last != Some(key) {
             let request = RenderRequest {
                 resolution: match resolution {
