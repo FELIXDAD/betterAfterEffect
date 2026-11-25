@@ -320,7 +320,7 @@ fn matte_choke(@builtin(global_invocation_id) id:vec3<u32>) {
     let b=sum/norm;
     if !vertical {store(p,b); return;}
     let width=clamp(2.0*floor(255.0*args.z),1.0,255.0);
-    let alpha=saturate((b.a*255.0-127.0-255.0*args.y)/width+0.5);
+    let alpha=saturate((b.a-args.y-0.5)*(255.0/width)+0.5);
     let original=load(aux,f.aux,p);
     store(p,vec4<f32>(select(straight(b),straight(original),original.a>0.0)*alpha,alpha));
 }
