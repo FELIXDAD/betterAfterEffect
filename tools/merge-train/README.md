@@ -136,7 +136,7 @@ dev CI 变红时，脚本会自己暂停：写暂停文件，给看板 issue 打
 
 必需检查写在 `config.toml` 的 `[checks]`，以 `.github/workflows/ci.yml` 为准，和 CI 分档（分支 `build/ci-tiers`）约定一致：
 
-- `fast = ["fast / macOS arm64", "fast / Windows x64"]`：每次推送 PR 都跑。
+- `fast = ["fast / Windows x64"]`：每次推送 PR 都跑（macOS 只在 full 里跑，2026-11-24 起）。
 - `full = ["full / macOS arm64", "full / Windows x64"]`：PR 带 `merge-ready` 时在 labeled / synchronize 事件上跑，所以 update-branch 之后会自动重跑；dev / main 推送时也跑。
 
 CI 改了 job 名字时，只需要改 `config.toml`。

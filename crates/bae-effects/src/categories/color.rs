@@ -42,6 +42,7 @@ pub(crate) fn register(registry: &mut Registry) {
     );
     registry.effects.extend(effects::color::auto::builtins());
     registry.effects.push(effects::color::colorama::builtin());
+    registry.effects.push(effects::color::lumetri::builtin());
     let (curves, zh) = effects::color::Curves::new();
     registry.effects.push(rust_builtin(
         (Arc::new(curves), zh),
