@@ -8,6 +8,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Master Volume", "主音量"),
     ("Left Channel", "左声道"),
     ("Right Channel", "右声道"),
+    ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
