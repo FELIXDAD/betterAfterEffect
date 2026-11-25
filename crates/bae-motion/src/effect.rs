@@ -145,6 +145,81 @@ impl bae_model::Command for ApplyEffect {
     }
 }
 
+/// One effect of an animation preset: its matchName, name and the values of
+/// the parameters it stores (`param:<id>` attributes).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PresetEffect {
+    pub match_name: String,
+    /// `param:<id>` → value.
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, Value>,
+}
+
+/// Animation ▸ Apply Animation Preset (and double-click in Effects & Presets):
+/// the preset's effects with their values, added to each layer.
+pub struct ApplyPreset {
+    defs: Arc<Registry<EffectDef>>,
+}
+
+impl ApplyPreset {
+    pub fn new(defs: Arc<Registry<EffectDef>>) -> Self {
+        Self { defs }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ApplyPresetParams {
+    pub layers: Vec<PrimPath>,
+    pub effects: Vec<PresetEffect>,
+}
+
+impl bae_model::Command for ApplyPreset {
+    type Params = ApplyPresetParams;
+    type Output = EffectsOutput;
+    const ID: &'static str = "effect.apply_preset";
+    const TITLE: &'static str = "Apply Animation Preset";
+    const DESCRIPTION: &'static str = "Apply an animation preset (AE: Animation > Apply Animation Preset, Effects & Presets): add its effects with their stored parameter values to each layer, at the bottom of the stack. One undo step.";
+
+    fn run(
+        &self,
+        tx: &mut Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<EffectsOutput, CommandError> {
+        if p.layers.is_empty() {
+            return Err(fail("no layers given"));
+        }
+        if p.effects.is_empty() {
+            return Err(fail("the preset has no effects"));
+        }
+        let defs: Vec<_> = p
+            .effects
+            .iter()
+            .map(|e| {
+                find_def(&self.defs, &e.match_name)
+                    .ok_or_else(|| fail(format!("unknown effect `{}`", e.match_name)))
+            })
+            .collect::<Result<_, _>>()?;
+        ensure_unlocked(tx.stage(), &p.layers)?;
+        let mut out = Vec::new();
+        for layer in &p.layers {
+            if !query::is_layer(tx.stage(), layer) {
+                return Err(fail(format!("{layer} is not a layer")));
+            }
+            for (e, def) in p.effects.iter().zip(&defs) {
+                // Named like any new instance (AE numbers repeats).
+                let effect = add_instance(tx, layer, def, None)?;
+                for (attr, value) in &e.values {
+                    if attr.starts_with("param:") {
+                        set(tx, &effect, attr, value.clone())?;
+                    }
+                }
+                out.push(effect);
+            }
+        }
+        Ok(EffectsOutput { effects: out })
+    }
+}
+
 /// The value a new (or reset) instance of `param` starts with on `layer`.
 /// Relative point defaults ([`bae_model::ParamFlags::relative_default`]) are
 /// scaled by the layer's source size (else the comp size); built-in AE point
@@ -512,6 +587,7 @@ pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand
 pub fn register_effect_commands(r: &mut CommandRegistry, defs: Arc<Registry<EffectDef>>) {
     let results = [
         r.register(ApplyEffect::new(defs.clone())),
+        r.register(ApplyPreset::new(defs.clone())),
         r.register(RemoveEffects),
         r.register(RemoveAllEffects),
         r.register(ReorderEffects),

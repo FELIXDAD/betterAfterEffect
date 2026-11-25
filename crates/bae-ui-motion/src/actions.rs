@@ -56,6 +56,8 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
+    pub const APPLY_PRESET: &str = "motion.anim.apply_animation_preset";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
     /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
@@ -190,6 +192,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::SAVE_PRESET, "Save Animation Preset..."),
+    (ids::APPLY_PRESET, "Apply Animation Preset..."),
     (ids::ADD_EXPRESSION, "Add Expression"),
     (ids::ENABLE_EXPRESSIONS, "Enable Expressions"),
     (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
@@ -775,6 +779,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::SAVE_PRESET => {
+            crate::presets::save(cx, session);
+            return true;
+        }
+        ids::APPLY_PRESET => {
+            crate::presets::apply(cx, session);
             return true;
         }
         ids::PRE_COMPOSE => {
@@ -1489,6 +1501,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Save Animation Preset...", "保存动画预设..."),
+    ("Apply Animation Preset...", "应用动画预设..."),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),

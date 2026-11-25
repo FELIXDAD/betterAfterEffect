@@ -40,6 +40,7 @@ mod layer_panel;
 pub mod menus;
 mod panels;
 mod prefs;
+mod presets;
 mod project;
 mod props;
 mod render;
@@ -77,6 +78,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     render_queue::register,
     layer_panel::register,
     ae_panels::register,
+    presets::register,
     // Chinese strings only.
     actions::register,
     context_menu::register,

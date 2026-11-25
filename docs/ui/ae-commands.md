@@ -436,8 +436,8 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | Track in Boris FX Mocha | 851969 | `motion.anim.track_in_boris_fx_mocha` |  |  |  | B | Ⓐ |
-| Save Animation Preset... | 851970 | `motion.anim.save_animation_preset` |  |  |  | E | ⏸ |
-| Apply Animation Preset... | 851971 | `motion.anim.apply_animation_preset` |  |  |  | E | ⏸ |
+| Save Animation Preset... | 851970 | `motion.anim.save_animation_preset` |  |  |  | E | ✅ |
+| Apply Animation Preset... | 851971 | `motion.anim.apply_animation_preset` |  |  |  | E | ✅ |
 | Recent Animation Presets ▸ (recent presets) | 11599873 | `motion.anim.recent_animation_preset` |  | Ctrl+Alt+Shift+F | Cmd+Opt+Shift+F | E | ⋯ |
 | Browse Presets... | 851973 | `motion.anim.browse_presets` |  |  |  | E | ⏸ |
 | Set Keyframe | 851975 | `motion.anim.set_keyframe` |  |  |  | B | ☐ |
