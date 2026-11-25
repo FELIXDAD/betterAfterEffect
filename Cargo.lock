@@ -747,6 +747,7 @@ dependencies = [
  "objc2-video-toolbox",
  "parking_lot",
  "png",
+ "rtrb",
  "serde",
  "serde_json",
  "symphonia",
@@ -4694,6 +4695,12 @@ checksum = "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
 dependencies = [
  "cc",
 ]
+
+[[package]]
+name = "rtrb"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5974e397833d890f2f74963408e0d4a6cd8eda2f6a445ae06750291b5d7a997e"
 
 [[package]]
 name = "rustc-hash"

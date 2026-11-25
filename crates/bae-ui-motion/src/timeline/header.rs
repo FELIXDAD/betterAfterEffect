@@ -398,13 +398,11 @@ impl TimelinePanel {
         if (ruler_resp.clicked() || ruler_resp.dragged())
             && let Some(pos) = ruler_resp.interact_pointer_pos()
         {
-            let mut s = session.lock();
-            s.scrub_to(
-                cx.stage,
-                info,
-                axis.t(pos.x),
-                ui.input(|i| i.modifiers.command),
-            );
+            let sound = ui.input(|i| i.modifiers.command);
+            if sound {
+                session.retry_audio();
+            }
+            session.lock().scrub_to(cx, info, axis.t(pos.x), sound);
             self.drag = Some(Drag::Cti);
         }
         if ruler_resp.drag_stopped() {
