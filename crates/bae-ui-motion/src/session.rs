@@ -316,7 +316,23 @@ impl Session {
 
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
-        self.times.insert(info.path.clone(), info.playhead_time(t));
+        let at = self.update_time(info, t);
+        if let Some(pb) = &mut self.playback
+            && pb.comp == info.path
+        {
+            if pb.range.contains(at) {
+                pb.from = at;
+                pb.started = Instant::now();
+            } else {
+                self.stop();
+            }
+        }
+    }
+
+    fn update_time(&mut self, info: &CompInfo, t: Time) -> Time {
+        let at = info.playhead_time(t);
+        self.times.insert(info.path.clone(), at);
+        at
     }
 
     /// Make `comp` the active comp (opening a timeline tab for it).
@@ -609,6 +625,13 @@ impl Session {
     /// Advance playback to the wall-clock time. Returns whether it is still playing
     /// (the caller then requests a repaint).
     pub fn tick(&mut self, info: &CompInfo) -> bool {
+        if self
+            .playback
+            .as_ref()
+            .is_some_and(|p| p.comp == info.path && p.range != info.work_area)
+        {
+            self.play(info);
+        }
         let Some(pb) = self.playback.clone() else {
             return false;
         };
@@ -650,7 +673,7 @@ impl Session {
                 return false;
             }
         }
-        self.set_time(info, t);
+        self.update_time(info, t);
         true
     }
 }
@@ -727,7 +750,11 @@ mod tests {
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
         assert!(s.tick(&i));
-        s.stop();
+        let seek = i.frame_rate.frame_to_time(42);
+        s.set_time(&i, seek);
+        assert_eq!(s.playback.as_ref().unwrap().from, seek);
+        s.set_time(&i, Time::ZERO);
+        assert!(!s.is_playing());
         assert!(!s.tick(&i));
     }
 }

@@ -29,7 +29,7 @@ fn export_alpha(gpu: &Arc<GpuContext>, stage: &Stage, comp: &PrimPath, frame: i6
     }
     run_worker(
         &queue,
-        &StageSnapshot::take(stage).unwrap(),
+        &crate::preview_snapshot::PreviewSnapshot::take(stage),
         gpu.clone(),
         &[],
         None,

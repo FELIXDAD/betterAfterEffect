@@ -264,7 +264,14 @@ impl Scene<'_> {
             }
         }
         for (index, sample) in samples.iter().take(64).enumerate() {
-            let value = |id| sample.values.iter().find(|(k, _)| *k == id).map(|(_, v)| v);
+            let value = |id| {
+                sample
+                    .values
+                    .iter()
+                    .find(|(k, _)| *k == id)
+                    .map(|(_, v)| v)
+                    .or_else(|| self.p.p.value(id))
+            };
             let position = if kind == Kind::World {
                 let component =
                     |id| value(id).and_then(Value::as_f64).unwrap_or(0.) as f32 * self.size[0];
