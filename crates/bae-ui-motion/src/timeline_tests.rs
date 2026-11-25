@@ -2326,3 +2326,46 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     h.undo();
     assert!(request(&h).motion_blur.is_none());
 }
+
+#[test]
+fn layer_expression_commands_disable_convert_and_reveal_errors() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.run(
+        "attr.set_expression",
+        json!({"path": layer, "attr": ROT, "source": "time * 30"}),
+    );
+    let mut tl = h.bars();
+    let spec = |h: &H| query::attr_spec(&h.stage, &layer, ROT).cloned().unwrap();
+    // Layer > Switches > Disable / Enable Expressions.
+    h.session().lock().selected_layers = vec![layer.clone()];
+    let r = h.action(&mut tl, Invocation::new(ids::DISABLE_EXPRESSIONS));
+    h.apply(&r);
+    assert!(!spec(&h).expression.unwrap().enabled);
+    let r = h.action(&mut tl, Invocation::new(ids::ENABLE_EXPRESSIONS));
+    h.apply(&r);
+    assert!(spec(&h).expression.unwrap().enabled);
+    // Convert Expression to Keyframes: a key per frame, the expression off.
+    h.session().lock().selected_props = vec![(layer.clone(), ROT.to_owned())];
+    let r = h.action(&mut tl, Invocation::new(ids::CONVERT_EXPRESSION));
+    h.apply(&r);
+    let s = spec(&h);
+    assert!(!s.expression.as_ref().unwrap().enabled);
+    let k = s.keyframes.get(&Time::from_seconds(1.0)).unwrap();
+    assert_eq!(k.value, Value::Float(30.0));
+    assert!(s.keyframes.len() > 30, "{}", s.keyframes.len());
+    h.undo();
+    assert!(spec(&h).keyframes.is_empty());
+    // Reveal Expression Errors: exactly the failing properties.
+    h.session().lock().expr_errors = vec![bae_anim::AttrError {
+        prim: layer.clone(),
+        attr: "transform:opacity".into(),
+        message: "ReferenceError".into(),
+    }];
+    h.action(&mut tl, Invocation::new(ids::REVEAL_EXPRESSION_ERRORS));
+    assert!(matches!(
+        h.session().lock().reveal.get(&layer),
+        Some(crate::session::Reveal::Props(p)) if p == &[(layer.clone(), "transform:opacity".to_owned())]
+    ));
+}

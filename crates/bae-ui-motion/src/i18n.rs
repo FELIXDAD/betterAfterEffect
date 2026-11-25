@@ -99,6 +99,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Enable Expression", "启用表达式"),
     ("Paste Reversed Keyframes", "粘贴反向关键帧"),
     ("Add Expression", "添加表达式"),
+    ("Enable Expressions", "启用表达式"),
+    ("Disable Expressions", "禁用表达式"),
+    ("Reveal Expression Errors", "显示表达式错误"),
+    ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Set Expressions", "设置多个表达式"),
     (
         "Error in property '{prop}' of layer {index} ('{layer}') in comp '{comp}'.",

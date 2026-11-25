@@ -22,6 +22,8 @@ pub enum Reveal {
     Modified,
     /// P, S, R, T, A (Shift adds): exactly these layer attributes.
     Attrs(Vec<String>),
+    /// Exactly these properties (Reveal Expression Errors).
+    Props(Vec<(PrimPath, String)>),
 }
 
 /// Real-time playback of one comp.
