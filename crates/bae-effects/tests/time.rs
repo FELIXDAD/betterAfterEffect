@@ -1,15 +1,14 @@
 use bae_model::{Time, Value};
 use bae_render::{LayerContent, RenderComp, RenderLayer};
 use std::sync::Arc;
-
 #[path = "ae/categories/mod.rs"]
 mod categories;
 #[path = "ae/harness.rs"]
 mod harness;
 
-#[path = "common/temporal.rs"]
-mod temporal;
-use temporal::{CLIP, effect, path, pixels, renderer, solid};
+#[path = "common/time_scene.rs"]
+mod time_scene;
+use time_scene::*;
 
 #[test]
 fn posterize_freezes_earlier_effects_in_layer_time() {

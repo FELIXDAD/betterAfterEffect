@@ -95,7 +95,11 @@ fn particle_world_guides_follow_the_selected_layer_and_guide_controls() {
     let center = h.screen(320., 340.);
     let diagonal = vec2(4., 4.);
     assert!(lines(&mut h).contains(&[center - diagonal, center + diagonal]));
-    tool_action(&h, crate::viewer::view3d::ids::SWITCH, json!({"view": "front"}));
+    tool_action(
+        &h,
+        crate::viewer::view3d::ids::SWITCH,
+        json!({"view": "front"}),
+    );
     let front = h.screen(480., 180.);
     assert!(lines(&mut h).contains(&[front - diagonal, front + diagonal]));
     tool_action(

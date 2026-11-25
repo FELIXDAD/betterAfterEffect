@@ -76,9 +76,9 @@ fn simulation_presets_render_finite_pixels_in_both_working_formats() {
     }
 }
 
-#[path = "common/temporal.rs"]
-mod temporal;
-use temporal::{CLIP, effect, path, pixels, renderer, solid};
+#[path = "common/time_scene.rs"]
+mod time_scene;
+use time_scene::{CLIP, effect, path, pixels, renderer, solid};
 
 #[test]
 fn particle_texture_clocks_match_in_playback_and_after_a_seek() {

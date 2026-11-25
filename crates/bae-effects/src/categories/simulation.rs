@@ -23,4 +23,4 @@ pub(crate) fn register(registry: &mut Registry) {
     );
 }
 
-pub use particles::projection::particle_world_projection;
+pub use particles::projection::{particle_scene_projection, particle_world_projection};

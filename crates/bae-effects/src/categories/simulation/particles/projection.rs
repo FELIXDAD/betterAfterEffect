@@ -1,18 +1,10 @@
-use bae_render::{camera::Projection, effect::EffectScene};
-use glam::{DMat4, DVec2, DVec3, DVec4};
+use bae_render::camera::{Camera, Projection};
+use glam::{DAffine2, DMat4, DVec2, DVec3, DVec4};
 
 /// Projects full-resolution particle positions to homogeneous layer pixels for
 /// both the GPU sprites and the composition viewer. Positions start at the
 /// layer's top-left content bound. Divide x and y by w after near-plane clipping.
-pub fn particle_world_projection(
-    size: DVec2,
-    origin: DVec2,
-    scene: Option<&EffectScene>,
-    param: impl Fn(u32) -> f64,
-) -> DMat4 {
-    if let Some(projection) = scene.and_then(|s| scene_projection(s, origin)) {
-        return projection;
-    }
+pub fn particle_world_projection(size: DVec2, param: impl Fn(u32) -> f64) -> DMat4 {
     let center = size * 0.5;
     let focal = center.x / (param(37).to_radians() * 0.5).tan().max(0.01);
     let camera = DMat4::from_rotation_z(param(36).to_radians())
@@ -30,13 +22,18 @@ pub fn particle_world_projection(
     ) * camera
 }
 
-pub(super) fn scene_projection(scene: &EffectScene, origin: DVec2) -> Option<DMat4> {
-    let camera = scene.camera?;
+/// Projects particles through the active composition camera into layer pixels.
+pub fn particle_scene_projection(
+    camera: Camera,
+    comp_size: DVec2,
+    placement: DAffine2,
+    origin: DVec2,
+) -> DMat4 {
     let view = camera.view();
-    let inverse = scene.placement.inverse();
-    let center = DVec2::from_array(scene.size.map(f64::from)) * 0.5;
+    let inverse = placement.inverse();
+    let center = comp_size * 0.5;
     let project = |v: DVec3| {
-        let xy = scene.placement.transform_point2(v.truncate() + origin);
+        let xy = placement.transform_point2(v.truncate() + origin);
         let p = view.transform_point3(xy.extend(v.z));
         let (w, zoom) = match camera.projection {
             Projection::Perspective => (p.z, camera.zoom),
@@ -47,10 +44,10 @@ pub(super) fn scene_projection(scene: &EffectScene, origin: DVec2) -> Option<DMa
         DVec4::new(xy.x, xy.y, 0., w)
     };
     let base = project(DVec3::ZERO);
-    Some(DMat4::from_cols(
+    DMat4::from_cols(
         project(DVec3::X) - base,
         project(DVec3::Y) - base,
         project(DVec3::Z) - base,
         base,
-    ))
+    )
 }

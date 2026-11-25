@@ -54,23 +54,31 @@ pub(super) fn frame(
     u.f32s(208, &[side.width() as f32, side.height() as f32]);
     let origin = glam::DVec2::from_array(scene.origin.map(f64::from));
     let view = scene.p.p.scene;
-    let projection = if kind == Kind::World {
-        let size = glam::DVec2::from_array(scene.size.map(f64::from));
-        Some(super::projection::particle_world_projection(
-            size,
-            origin,
-            view,
-            |id| scene.p.f(id),
-        ))
-    } else {
-        view.and_then(|v| super::projection::scene_projection(v, origin))
-    };
+    let projection = view
+        .and_then(|s| {
+            s.camera.map(|camera| {
+                super::projection::particle_scene_projection(
+                    camera,
+                    glam::DVec2::from_array(s.size.map(f64::from)),
+                    s.placement,
+                    origin,
+                )
+            })
+        })
+        .or_else(|| {
+            (kind == Kind::World).then(|| {
+                super::projection::particle_world_projection(
+                    glam::DVec2::from_array(scene.size.map(f64::from)),
+                    |id| scene.p.f(id),
+                )
+            })
+        });
     if let Some(projection) = projection {
         u.f32s(112, &projection.as_mat4().to_cols_array());
         u.f32(8, 1.);
     }
     if let Some(view) = view
-        && let Some(light) = view.light
+        && let Some(light) = view.layer_light
     {
         let xy = view
             .placement
@@ -208,7 +216,7 @@ pub(super) fn composite(
     if kind == Kind::Drizzle
         && p.popup(22) == 2
         && let Some(view) = p.p.scene
-        && let Some(light) = view.light
+        && let Some(light) = view.layer_light
     {
         let xy = view
             .placement

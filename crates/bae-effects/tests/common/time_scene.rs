@@ -4,13 +4,13 @@ use bae_render::{
     Renderer, graph::CompFrames,
 };
 
-pub(super) const CLIP: &str = "/comps/main/layers/clip";
+pub const CLIP: &str = "/comps/main/layers/clip";
 
-pub(super) fn path(s: &str) -> PrimPath {
+pub fn path(s: &str) -> PrimPath {
     PrimPath::new(s).unwrap()
 }
 
-pub(super) fn effect(name: &str, match_name: &str, params: Vec<(u32, Value)>) -> RenderEffect {
+pub fn effect(name: &str, match_name: &str, params: Vec<(u32, Value)>) -> RenderEffect {
     RenderEffect {
         path: path(&format!("{CLIP}/effects/{name}")),
         enabled: true,
@@ -19,7 +19,7 @@ pub(super) fn effect(name: &str, match_name: &str, params: Vec<(u32, Value)>) ->
     }
 }
 
-pub(super) fn solid(prim: &str, width: u32, color: [f32; 4]) -> RenderLayer {
+pub fn solid(prim: &str, width: u32, color: [f32; 4]) -> RenderLayer {
     RenderLayer::new(
         path(prim),
         LayerContent::Solid {
@@ -37,7 +37,7 @@ impl<F: Fn(Time) -> RenderComp> CompFrames for Frames<F> {
     }
 }
 
-pub(super) fn renderer() -> Option<Renderer> {
+pub fn renderer() -> Option<Renderer> {
     let mut renderer = Renderer::new(bae_gpu::testing::shared_context()?);
     bae_effects::register(
         &mut bae_model::EffectRegistry::new(),
@@ -46,11 +46,7 @@ pub(super) fn renderer() -> Option<Renderer> {
     Some(renderer)
 }
 
-pub(super) fn pixels(
-    renderer: &mut Renderer,
-    scene: impl Fn(Time) -> RenderComp,
-    t: f64,
-) -> Vec<u8> {
+pub fn pixels(renderer: &mut Renderer, scene: impl Fn(Time) -> RenderComp, t: f64) -> Vec<u8> {
     let t = Time::from_seconds(t);
     let comp = scene(t);
     let frame = renderer

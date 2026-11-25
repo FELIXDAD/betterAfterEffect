@@ -2,7 +2,7 @@
 use bae_anim::glam::{DMat3, DMat4, DVec2, DVec3, DVec4};
 use bae_anim::{Curve, CurveKind, EvaluatedComp, EvaluatedEffect, EvaluatedLayer, Evaluator};
 use bae_model::{PrimPath, Stage, Value};
-use bae_render::{anim::affine_2d, camera::Camera, effect::EffectScene};
+use bae_render::{anim::affine_2d, camera::Camera};
 use egui::{Color32, Painter, Pos2, Stroke, vec2};
 
 use crate::render::{self, View};
@@ -169,14 +169,12 @@ fn paint_effect(
     if placement.matrix2.determinant() == 0. {
         return;
     }
-    let scene = EffectScene {
-        camera,
-        light: None,
-        size: [comp.width, comp.height],
-        placement,
-    };
-    let projection = bae_effects::particle_world_projection(size, origin, Some(&scene), param)
-        * DMat4::from_translation((size * 0.5).extend(0.))
+    let projection = match camera {
+        Some(camera) => {
+            bae_effects::particle_scene_projection(camera, comp_size, placement, origin)
+        }
+        None => bae_effects::particle_world_projection(size, param),
+    } * DMat4::from_translation((size * 0.5).extend(0.))
         * DMat4::from_scale(DVec3::splat(size.x));
     let layer_to_comp = match view.camera {
         Some((camera, viewport)) if layer.switches.three_d => {
