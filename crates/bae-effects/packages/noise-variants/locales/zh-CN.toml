@@ -1,0 +1,50 @@
+
+
+[effect.noise-alpha]
+name = "杂色 Alpha"
+keywords = ["杂色和颗粒"]
+
+[effect.noise-alpha.params]
+noise = "杂色"
+amount = "数量"
+original_alpha = "原始 Alpha"
+overflow = "溢出"
+phase = "上下文控制"
+noise_options_animation = "杂色选项（动画）"
+cycle = "循环杂色"
+turns = "循环（旋转次数）"
+
+[effect.noise-alpha.choices]
+noise = ["统一随机", "方形随机", "(-", "统一动画", "方形动画"]
+original_alpha = ["相加", "固定", "缩放", "边缘"]
+overflow = ["剪切", "反绕", "回绕"]
+
+[effect.noise-hls]
+name = "杂色 HLS"
+keywords = ["杂色和颗粒"]
+
+[effect.noise-hls.params]
+noise = "杂色"
+hue = "色相"
+lightness = "亮度"
+saturation = "饱和度"
+grain_size = "颗粒大小"
+phase = "杂色相位"
+
+[effect.noise-hls.choices]
+noise = ["统一", "方形", "颗粒"]
+
+[effect.noise-hls-auto]
+name = "杂色 HLS 自动"
+keywords = ["杂色和颗粒"]
+
+[effect.noise-hls-auto.params]
+noise = "杂色"
+hue = "色相"
+lightness = "亮度"
+saturation = "饱和度"
+grain_size = "颗粒大小"
+speed = "杂色动画速度"
+
+[effect.noise-hls-auto.choices]
+noise = ["统一", "方形", "颗粒"]

@@ -1,7 +1,9 @@
 //! Pointer shapes of the tools over the Composition viewer. egui's system cursors
 //! cover the selection arrow, hand, zoom, crosshair and I-beam; the pen, rotation,
 //! anchor and camera tools draw their own glyph (the system pointer hidden), with
-//! the hot spot where AE puts it (the pen nib's tip, the glyph's center).
+//! the hot spot where AE puts it: the pen nib's tip (where a click lands), the
+//! glyph's center for the others. Hot spots are in points inside the 16-point
+//! glyph box, so they hold at every display scale.
 
 use bae_ui::icons::{self, Icon};
 use egui::{Color32, CursorIcon, Painter, Pos2, Rect, Ui, Vec2, vec2};
@@ -47,8 +49,12 @@ pub(crate) fn for_tool(tool: Tool, hover: Hover) -> Cursor {
         Rectangle | RoundedRectangle | Ellipse | Polygon | Star => {
             Cursor::System(CursorIcon::Crosshair)
         }
-        Pen => glyph(Icon::Pen, (8.0, 1.5)),
-        AddVertex | DeleteVertex | ConvertVertex | MaskFeather => glyph(tool.icon(), (5.5, 2.0)),
+        // The nib points to the lower left (Spectrum VectorDraw; measured on its
+        // outline). The vertex tools' pen is smaller, its tip higher.
+        Pen => glyph(Icon::Pen, (2.0, 14.8)),
+        AddVertex | DeleteVertex | ConvertVertex | MaskFeather => glyph(tool.icon(), (2.0, 11.6)),
+        OrbitCursor | OrbitScene | OrbitPoi | PanCursor | PanPoi | DollyCursor | DollyTo
+        | DollyPoi => glyph(tool.icon(), (8.0, 8.0)),
         TypeHorizontal => Cursor::System(CursorIcon::Text),
         // Not available in the Composition viewer in this version.
         _ => Cursor::System(CursorIcon::NotAllowed),
@@ -99,4 +105,29 @@ pub(crate) fn close_mark(painter: &Painter, pos: Pos2) {
     let c = pos + vec2(9.0, 12.0);
     painter.circle_stroke(c, 3.0, egui::Stroke::new(2.5, Color32::BLACK));
     painter.circle_stroke(c, 3.0, egui::Stroke::new(1.0, Color32::WHITE));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A click lands on the pen nib's tip, at the glyph's lower left.
+    #[test]
+    fn pen_hot_spots_are_the_nib_tips() {
+        for tool in [
+            Tool::Pen,
+            Tool::AddVertex,
+            Tool::DeleteVertex,
+            Tool::ConvertVertex,
+        ] {
+            let Cursor::Glyph { hot, .. } = for_tool(tool, Hover::default()) else {
+                panic!("{tool:?} draws a glyph");
+            };
+            assert!(hot.x < 4.0 && hot.y > 10.0, "{tool:?}: {hot:?}");
+        }
+        let Cursor::Glyph { hot, .. } = for_tool(Tool::OrbitScene, Hover::default()) else {
+            panic!("camera tools draw a glyph");
+        };
+        assert_eq!(hot, vec2(8.0, 8.0));
+    }
 }

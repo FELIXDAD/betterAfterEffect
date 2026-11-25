@@ -180,3 +180,69 @@ fn gradient_points_stay_with_layer_across_tiles() {
         assert_eq!(rgba, [value, value, value, 1.]);
     }
 }
+
+#[test]
+fn noise_variants_share_the_hls_phase_and_legacy_median() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(0, 0, 12, 12);
+    let input = Pixels::new(rect, |x, y| {
+        let z = if (x + y) % 2 == 0 { 0.25 } else { 0.75 };
+        [z, z, z, 1.]
+    });
+    let values = vec![(3, Value::Float(35.))];
+    let fixed = run(
+        &gpu,
+        F16,
+        builtin("ADBE Noise HLS2"),
+        values.clone(),
+        &input,
+        rect,
+        1.,
+    );
+    let automatic = run(
+        &gpu,
+        F16,
+        builtin("ADBE Noise HLS Auto2"),
+        values,
+        &input,
+        rect,
+        1.,
+    );
+    assert_close(&fixed, &automatic, rect, 0.001, "shared HLS phase");
+    assert_ne!(fixed.get(2, 2), input.get(2, 2));
+    for name in [
+        "ADBE AIF Perlin Noise 3D",
+        "ADBE Median",
+        "ADBE Noise Alpha2",
+        "VISINF Grain Removal",
+    ] {
+        let out = run(&gpu, F16, builtin(name), vec![], &input, rect, 1.);
+        assert!(out.get(2, 2).iter().all(|v| v.is_finite()), "{name}");
+    }
+}
+#[test]
+fn match_grain_uses_the_selected_reference_on_the_gpu() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(20, 20);
+    let flat = Pixels::new(rect, |_, _| [0.5, 0.5, 0.5, 1.]);
+    let noise = Pixels::new(rect, |x, y| {
+        let n = if (x + y) % 2 == 0 { 0.6 } else { 0.4 };
+        [n, n, n, 1.]
+    });
+    let fx = builtin("VISINF Grain Duplication");
+    let layer = bae_model::PrimPath::new("/Comp/Reference").unwrap();
+    let inst = instance(
+        &fx.info.match_name,
+        vec![(13, Value::PrimRef(layer)), (2, Value::Int(5))],
+    );
+    let p = bae_render::EffectParams::new(&inst);
+    let dep = fx.effect().layer_dependencies(&p).remove(0);
+    let mut target = bae_effects::Standalone::new(gpu.clone(), F16);
+    target.set_effect_inputs(vec![(dep, noise.upload(&gpu, F16))], vec![]);
+    let result = fx
+        .render(&mut target, &p, &flat.upload(&gpu, F16), rect)
+        .unwrap();
+    target.finish().unwrap();
+    let out = Pixels::download(&gpu, &result);
+    assert!(max_diff(&out, &flat, rect).0 > 0.02);
+}
