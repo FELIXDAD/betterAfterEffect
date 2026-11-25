@@ -18,21 +18,22 @@ function snap(v, size) {
   return Math.round(v / size) * size;
 }
 
-/** Command `plugin.com.example.align-to-grid.align-to-grid`. Args validated by the schema. */
+/** Command `plugin.com.example.align-to-grid.align-to-grid`. */
 export function alignToGrid(args) {
   const size = args.size ?? 10;
+  if (!Number.isFinite(size) || size <= 0) throw new Error("Grid size must be positive.");
   const comp = app.project.activeItem;
-  if (!(comp instanceof CompItem)) {
+  if (!args.layers?.length && !(comp instanceof CompItem)) {
     throw new Error("Open a composition first.");
   }
   let moved = 0;
   for (const layer of targetLayers(comp, args.layers)) {
     const position = layer.transform.position;
-    const [x, y, z] = position.value;
-    const snapped = [snap(x, size), snap(y, size), z];
+    const [x, y, ...rest] = position.value;
+    const snapped = [snap(x, size), snap(y, size), ...rest];
     if (snapped[0] !== x || snapped[1] !== y) {
-      // At the current time: sets a keyframe if the property is animated (AE behaviour).
-      position.setValue(snapped);
+      if (position.numKeys) position.setValueAtTime(layer.containingComp.time, snapped);
+      else position.setValue(snapped);
       moved += 1;
     }
   }
@@ -42,10 +43,13 @@ export function alignToGrid(args) {
 /** Script `script.com.example.align-to-grid.report-off-grid`: read-only. */
 export function reportOffGrid() {
   const comp = app.project.activeItem;
-  const off = comp.layers.filter((layer) => {
+  if (!(comp instanceof CompItem)) throw new Error("Open a composition first.");
+  const off = [];
+  for (let i = 1; i <= comp.numLayers; i++) {
+    const layer = comp.layer(i);
     const [x, y] = layer.transform.position.value;
-    return x % 10 !== 0 || y % 10 !== 0;
-  });
+    if (x % 10 !== 0 || y % 10 !== 0) off.push(layer);
+  }
   console.log(`${off.length} layer(s) are off the 10 px grid`);
   return { layers: off.map((l) => l.name) };
 }
