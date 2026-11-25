@@ -315,6 +315,11 @@ fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
                 .or_else(|| effects::spatial::options_zh(m, p.id))
                 .or_else(|| effects::distort::options_zh(m, p.id))
                 .or_else(|| categories::generate::strokes::options_zh(m, p.id))
+                .or_else(|| {
+                    (m == effects::liquify::MATCH_NAME)
+                        .then(|| effects::liquify::options_zh(p.id))
+                        .flatten()
+                })
                 .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
             Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
         })

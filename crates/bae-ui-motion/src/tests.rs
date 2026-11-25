@@ -2458,3 +2458,36 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     h.frame("composition", &mut viewer, Vec::new());
     assert!(h.session().lock().expr_errors.is_empty());
 }
+
+/// The Paint and Brushes panels edit the next stroke's settings; Clone Options
+/// show with the Clone Stamp, Erase with the Eraser.
+#[test]
+fn paint_and_brushes_panels_show_for_each_paint_tool() {
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    h.session().lock().open_comp(&comp);
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    for tool in [
+        crate::tools::Tool::Brush,
+        crate::tools::Tool::CloneStamp,
+        crate::tools::Tool::Eraser,
+    ] {
+        tools.lock().set(tool);
+        h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
+        h.frame(
+            "brushes",
+            &mut crate::paint_panels::BrushesPanel,
+            Vec::new(),
+        );
+    }
+    let p = tools.lock().options.paint.clone();
+    assert_eq!(
+        (p.opacity, p.diameter, p.duration.as_str()),
+        (100.0, 21.0, "constant")
+    );
+}

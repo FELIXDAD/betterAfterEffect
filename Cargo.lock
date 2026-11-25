@@ -547,6 +547,7 @@ dependencies = [
  "bae-plugin",
  "bae-prefs",
  "bae-render",
+ "bae-script",
  "bae-text",
  "bae-ui",
  "bae-ui-motion",
@@ -741,6 +742,8 @@ dependencies = [
  "image",
  "objc2 0.6.5",
  "objc2-av-foundation",
+ "objc2-avf-audio",
+ "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-core-media",
  "objc2-core-video",
@@ -831,6 +834,7 @@ dependencies = [
  "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
+ "bae-script",
  "cc",
  "clap",
  "half",
@@ -890,6 +894,20 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "bae-script"
+version = "0.0.2"
+dependencies = [
+ "bae-app",
+ "bae-model",
+ "bae-motion",
+ "rquickjs",
+ "schemars",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -965,6 +983,7 @@ dependencies = [
  "bae-platform",
  "bae-prefs",
  "bae-render",
+ "bae-script",
  "bae-ui",
  "bae-vector",
  "egui",
