@@ -13,10 +13,10 @@ use bae_app::{Registry, Resources};
 use bae_gpu::GpuContext;
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
 use bae_gpu::wgpu;
-use bae_model::{Stage, Time};
+use bae_model::{PrimPath, Stage, Time};
 use bae_render::{
-    AnimEvaluator, IRect, OutputAlpha, RenderPurpose, RenderRequest, Renderer, RendererConfig,
-    Resolution, SourceProvider,
+    AnimEvaluator, IRect, OutputAlpha, OutputTarget, RenderPurpose, RenderRequest, Renderer,
+    RendererConfig, Resolution, SourceProvider,
 };
 
 /// Layer source providers registered by other modules (05's shape layers, plugin
@@ -51,20 +51,42 @@ pub(crate) struct PreviewImage {
 pub(super) struct RenderEngine {
     pub(super) renderer: Renderer,
     pub(super) anim: AnimEvaluator,
+    sources_gen: Option<u64>,
 }
 
 impl RenderEngine {
-    pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
+    pub(super) fn new(gpu: Arc<GpuContext>) -> Self {
         Self {
             renderer: Renderer::with_config(
                 gpu,
                 RendererConfig {
-                    frame_cache_bytes: cache,
+                    frame_cache_bytes: 0,
                     pool_idle_bytes: 128 << 20,
                 },
             ),
+            sources_gen: None,
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
         }
+    }
+
+    pub(super) fn sync(
+        &mut self,
+        sources: Option<&PreviewSources>,
+        effects: Option<&PreviewEffects>,
+    ) -> bool {
+        let mut changed = false;
+        if let Some(PreviewSources(registry)) = sources {
+            let generation = registry.generation();
+            if self.sources_gen != Some(generation) {
+                for entry in registry.snapshot().iter() {
+                    self.renderer.providers_mut().register(entry.item().clone());
+                }
+                self.sources_gen = Some(generation);
+                changed = true;
+            }
+        }
+        let effects_changed = effects.is_some_and(|e| self.renderer.sync_effects(&e.0));
+        changed || effects_changed
     }
 
     pub(super) fn render(
@@ -72,7 +94,8 @@ impl RenderEngine {
         stage: &Stage,
         rc: &bae_render::RenderComp,
         resolution: u32,
-    ) -> Result<(wgpu::Texture, IRect, bool), bae_render::RenderError> {
+        available: Option<OutputTarget>,
+    ) -> Result<(OutputTarget, IRect, bool), bae_render::RenderError> {
         let request = RenderRequest {
             resolution: Resolution::Custom(resolution),
             purpose: RenderPurpose::Preview,
@@ -90,7 +113,7 @@ impl RenderEngine {
             .render_frame_with(rc, &request, Some(&mut frames))?;
         let texture = self
             .renderer
-            .output_texture(&frame, OutputAlpha::Premultiplied)?;
+            .output_to(&frame, OutputAlpha::Premultiplied, available)?;
         Ok((texture, frame.image.rect, frames.sampled))
     }
 }
@@ -115,11 +138,10 @@ pub(crate) struct GpuPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
-    engine: RenderEngine,
+    engine: Option<RenderEngine>,
     pub(super) playback: super::playback::PlaybackPreview,
-    sources_gen: Option<u64>,
-    /// `(content hash, time, resolution)` of the published frame.
-    last: Option<(u64, Time, u32)>,
+    target: Option<OutputTarget>,
+    last: Option<(u64, PrimPath, Time, u32)>,
     rect: Option<IRect>,
 }
 
@@ -134,15 +156,14 @@ impl GpuPreview {
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
         let id = registry.create("motion composition viewer");
-        let engine = RenderEngine::new(gpu.clone(), 512 << 20);
         let playback = super::playback::PlaybackPreview::new(gpu.clone(), registry.clone());
         GpuPreview {
             gpu,
             registry,
             id,
-            engine,
+            engine: None,
             playback,
-            sources_gen: None,
+            target: None,
             last: None,
             rect: None,
         }
@@ -157,30 +178,6 @@ impl GpuPreview {
             && !self.gpu.is_lost()
     }
 
-    fn sync_sources(&mut self, resources: &Resources) {
-        let Some(PreviewSources(registry)) = resources.get::<PreviewSources>() else {
-            return;
-        };
-        let generation = registry.generation();
-        if self.sources_gen == Some(generation) {
-            return;
-        }
-        self.sources_gen = Some(generation);
-        let providers = self.engine.renderer.providers_mut();
-        for entry in registry.snapshot().iter() {
-            providers.register(entry.item().clone());
-        }
-        self.last = None;
-    }
-
-    fn sync_effects(&mut self, resources: &Resources) {
-        if let Some(PreviewEffects(registry)) = resources.get::<PreviewEffects>()
-            && self.engine.renderer.sync_effects(registry)
-        {
-            self.last = None;
-        }
-    }
-
     /// Render `comp` (if it changed) and return the texture to draw. `None` until
     /// the shell has registered the texture with egui (the frame after the first
     /// publish) or when rendering failed.
@@ -190,35 +187,44 @@ impl GpuPreview {
         stage: &Stage,
         comp: &EvaluatedComp,
         resolution: u32,
+        live_edit: bool,
     ) -> Option<PreviewImage> {
-        self.sync_sources(resources);
-        self.sync_effects(resources);
-        let rc = match self.engine.anim.convert(stage, comp, 0) {
-            Ok(rc) => rc,
-            Err(e) => {
-                tracing_warn(&format!("preview: {e}"));
-                return None;
+        let engine = self
+            .engine
+            .get_or_insert_with(|| RenderEngine::new(self.gpu.clone()));
+        if engine.sync(
+            resources.get::<PreviewSources>(),
+            resources.get::<PreviewEffects>(),
+        ) {
+            self.last = None;
+        }
+        let key = (stage.revision(), comp.path.clone(), comp.time, resolution);
+        if live_edit || self.last.as_ref() != Some(&key) {
+            self.last = None;
+            let rc = engine
+                .anim
+                .convert(stage, comp, 0)
+                .map_err(|e| tracing_warn(&format!("preview: {e}")))
+                .ok()?;
+            let previous_size = self.target.as_ref().map(OutputTarget::size);
+            let (target, rect, _) = engine
+                .render(stage, &rc, resolution, self.target.take())
+                .map_err(|e| tracing_warn(&format!("preview: {e}")))
+                .ok()?;
+            if previous_size != Some(target.size()) {
+                self.registry
+                    .publish_view(
+                        self.id,
+                        target.view.clone(),
+                        target.size(),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        wgpu::FilterMode::Linear,
+                    )
+                    .map_err(|e| tracing_warn(&format!("preview: {e}")))
+                    .ok()?;
             }
-        };
-        let key = (rc.content_hash(), rc.time, resolution);
-        if self.last != Some(key) {
-            let (texture, rect, _) = match self.engine.render(stage, &rc, resolution) {
-                Ok(frame) => frame,
-                Err(e) => {
-                    tracing_warn(&format!("preview: {e}"));
-                    return None;
-                }
-            };
-            // Display-encoded 8-bit values, sampled as they are (egui blends in
-            // gamma space, see docs/spec/app-shell.md §5).
-            if let Err(e) = self
-                .registry
-                .publish(self.id, &texture, wgpu::FilterMode::Linear)
-            {
-                tracing_warn(&format!("preview: {e}"));
-                return None;
-            }
-            self.last = Some(key);
+            self.target = Some(target);
+            self.last = (!live_edit).then_some(key);
             self.rect = Some(rect);
         }
         Some(PreviewImage {
@@ -229,7 +235,10 @@ impl GpuPreview {
 
     #[cfg(test)]
     pub fn renderer(&mut self) -> &mut Renderer {
-        &mut self.engine.renderer
+        &mut self
+            .engine
+            .get_or_insert_with(|| RenderEngine::new(self.gpu.clone()))
+            .renderer
     }
 
     #[cfg(test)]

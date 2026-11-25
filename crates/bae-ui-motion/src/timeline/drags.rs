@@ -120,7 +120,7 @@ impl TimelinePanel {
                 if released {
                     self.drag = None;
                     let now = session.lock().time(&info.path);
-                    let eval = self.eval.get(cx.resources);
+                    let eval = self.eval.get(cx.stage);
                     if let Some(p) = pointer {
                         if let Some((_, path, attr)) =
                             prop_rows.iter().find(|(r, ..)| r.contains(p))

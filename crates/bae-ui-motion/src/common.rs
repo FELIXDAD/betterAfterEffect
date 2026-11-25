@@ -8,7 +8,6 @@ use bae_app::Resources;
 use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
-use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
@@ -75,20 +74,18 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
         })
 }
 
-/// An [`Evaluator`] whose compiled comps are dropped whenever the stage changed
-/// (detected through the shell's history log; without one, every frame).
+/// Compilations belong to one published stage revision.
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
-    seq: Option<u64>,
+    revision: Option<u64>,
 }
 
 impl EvalCache {
-    pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        if seq.is_none() || seq != self.seq {
+    pub(crate) fn get(&mut self, stage: &Stage) -> &mut Evaluator {
+        if self.revision != Some(stage.revision()) {
             self.eval.clear();
-            self.seq = seq;
+            self.revision = Some(stage.revision());
         }
         &mut self.eval
     }

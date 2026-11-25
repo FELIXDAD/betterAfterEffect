@@ -105,12 +105,26 @@ pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARA
     params
 }
 
+/// Exact-sized display output. Keep the view with the texture so repeated
+/// presentations never sample the padding of a working texture.
+pub struct OutputTarget {
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+}
+
+impl OutputTarget {
+    pub fn size(&self) -> [u32; 2] {
+        [self.texture.width(), self.texture.height()]
+    }
+}
+
 /// The GPU compositor.
 pub struct Renderer {
     gpu: Arc<GpuContext>,
     pipelines: Pipelines,
     pool: TexturePool,
     draws: DrawBuffer,
+    output_uniform: Option<(OutputAlpha, wgpu::Buffer)>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
     footage: FootageCache,
@@ -169,6 +183,7 @@ impl Renderer {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
+            output_uniform: None,
             mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
             footage: FootageCache::new(gpu.clone()),
@@ -274,14 +289,19 @@ impl Renderer {
         request: &RenderRequest,
         frames: Option<&mut dyn crate::graph::CompFrames>,
     ) -> Result<RenderedFrame, RenderError> {
-        let key = FrameKey {
-            comp: comp.path.clone(),
-            time: comp.time,
-            request: request.fingerprint(),
-        };
-        let hash = comp.content_hash();
-        if self.frames.content_hash(&key) == Some(hash)
-            && let Some(image) = self.frames.get(&key)
+        let lookup = (self.frames.stats().budget > 0).then(|| {
+            (
+                FrameKey {
+                    comp: comp.path.clone(),
+                    time: comp.time,
+                    request: request.fingerprint(),
+                },
+                comp.content_hash(),
+            )
+        });
+        if let Some((key, hash)) = &lookup
+            && self.frames.content_hash(key) == Some(*hash)
+            && let Some(image) = self.frames.get(key)
         {
             return Ok(RenderedFrame {
                 image: image.clone(),
@@ -322,7 +342,10 @@ impl Renderer {
         self.pool.end_frame();
 
         let image = executed.image;
-        if !graph.time_dependent {
+        if !graph.time_dependent
+            && image.byte_size() <= self.frames.stats().budget
+            && let Some((key, hash)) = lookup
+        {
             self.frames.insert(
                 key,
                 image.clone(),
@@ -375,41 +398,66 @@ impl Renderer {
         frame: &RenderedFrame,
         alpha: OutputAlpha,
     ) -> Result<wgpu::Texture, RenderError> {
+        Ok(self.output_to(frame, alpha, None)?.texture)
+    }
+
+    /// Encode into an available exact-sized target. The caller owns it until all
+    /// consumers have released the frame. Queue order protects consecutive uses.
+    pub fn output_to(
+        &mut self,
+        frame: &RenderedFrame,
+        alpha: OutputAlpha,
+        available: Option<OutputTarget>,
+    ) -> Result<OutputTarget, RenderError> {
         let device = self.gpu.device();
         let [w, h] = frame.image.texel_size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bae-render.output"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+        let target = available
+            .filter(|t| t.size() == [w.max(1), h.max(1)])
+            .unwrap_or_else(|| {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("bae-render.output"),
+                    size: wgpu::Extent3d {
+                        width: w.max(1),
+                        height: h.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                OutputTarget { texture, view }
+            });
+        let (previous, uniform) = self.output_uniform.get_or_insert_with(|| {
+            use wgpu::util::DeviceExt;
+            (
+                alpha,
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bae-render.output"),
+                    contents: &output_params(alpha, false),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                }),
+            )
         });
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.output"),
-            size: OUTPUT_PARAMS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.gpu
-            .queue()
-            .write_buffer(&uniform, 0, &output_params(alpha, false));
+        if *previous != alpha {
+            self.gpu
+                .queue()
+                .write_buffer(uniform, 0, &output_params(alpha, false));
+            *previous = alpha;
+        }
+        let uniform = uniform.clone();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("bae-render.output"),
         });
         self.record_output(
             &mut encoder,
             frame,
-            &view,
+            &target.view,
             wgpu::TextureFormat::Rgba8Unorm,
             &uniform,
         );
