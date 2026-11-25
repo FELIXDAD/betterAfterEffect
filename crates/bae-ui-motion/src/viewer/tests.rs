@@ -976,12 +976,13 @@ fn bounding_box_handles_scale_around_the_anchor() {
         "not moved"
     );
     h.stage.undo(&h.author).unwrap();
-    // Shift keeps the proportions.
+    // Shift keeps the proportions with the larger ratio (AE 26: 200 % × 120 %
+    // becomes 200 % × 200 %).
     let r = h.drag((420.0, 230.0), (520.0, 240.0), Modifiers::SHIFT);
     h.apply(&r);
     let s = h.v3(&a, "transform:scale");
     assert!(
-        (s[0] - 184.0).abs() < 0.01 && (s[0] - s[1]).abs() < 1e-9,
+        (s[0] - 200.0).abs() < 0.01 && (s[0] - s[1]).abs() < 1e-9,
         "{s:?}"
     );
     h.stage.undo(&h.author).unwrap();
