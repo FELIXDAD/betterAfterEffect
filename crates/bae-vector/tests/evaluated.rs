@@ -168,3 +168,30 @@ fn evaluated_shape_layer_renders_on_the_gpu() {
     );
     assert_eq!(at(-15, 0)[3], 0, "nothing on the left");
 }
+
+#[test]
+fn ae_match_names_drive_animated_shape_operators_through_commands() {
+    let (mut p, comp, layer) = project();
+    let path = format!("{}/contents/ellipse_group/offset", layer.as_str());
+    let operator = p.create(&path, "ShapeOperator");
+    p.set(
+        &operator,
+        "match_name",
+        Value::String("ADBE Vector Filter - Offset".into()),
+    );
+    let attr = bae_vector::operators::parameter_attr("ADBE Vector Offset Amount");
+    p.key(&operator, &attr, Time::ZERO, Value::Float(0.0));
+    p.key(
+        &operator,
+        &attr,
+        Time::from_seconds(1.0),
+        Value::Float(20.0),
+    );
+    // Use the untrimmed frame, with both paints above the newly created operator.
+    let comp = evaluate_comp(&p.stage, &comp, Time::from_seconds(1.0)).unwrap();
+    let mut warnings = vec![];
+    let scene = shape_layer_scene(comp.layer(&layer).unwrap(), &mut warnings);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let bounds = scene.bounds(false).unwrap();
+    assert!((bounds.width() - 160.0).abs() < 0.1, "{bounds:?}");
+}
