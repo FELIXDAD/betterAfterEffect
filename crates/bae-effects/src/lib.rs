@@ -199,6 +199,7 @@ fn registry() -> &'static Registry {
         categories::perspective::register(&mut r);
         categories::simulation::register(&mut r);
         categories::stylize::register(&mut r);
+        categories::text::register(&mut r);
         categories::time::register(&mut r);
         categories::transition::register(&mut r);
         categories::utility::register(&mut r);

@@ -18,6 +18,7 @@ pub mod distort;
 pub(crate) mod simulation;
 pub mod spatial;
 pub(crate) mod temporal;
+pub(crate) mod text;
 
 pub(crate) fn prewarm(
     rt: &crate::gpu::Runtime,
