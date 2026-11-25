@@ -1961,3 +1961,62 @@ fn text_animators_animate_add_selector_and_remove() {
         .is_err()
     );
 }
+
+#[test]
+fn set_track_matte_sets_type_source_and_hides_the_matte() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "solid", json!({}));
+    fx.run(
+        "layer.set_track_matte",
+        json!({"layers": [a], "matte": "luma_inverted", "source": b}),
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte_layer"),
+        Some(Value::PrimRef(b.clone()))
+    );
+    assert_eq!(fx.value(&b, "enabled"), Some(Value::Bool(false)));
+    // Type only: the source stays.
+    fx.run(
+        "layer.set_track_matte",
+        json!({"layers": [a], "matte": "alpha"}),
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte_layer"),
+        Some(Value::PrimRef(b.clone()))
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        fx.value(&a, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
+    );
+    // Not itself, not another comp, not an unknown type.
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "alpha", "source": a})
+        )
+        .is_err()
+    );
+    let other = fx.comp();
+    let c = fx.layer(&other, "solid", json!({}));
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "alpha", "source": c})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "bogus"})
+        )
+        .is_err()
+    );
+}

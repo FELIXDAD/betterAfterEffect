@@ -99,6 +99,8 @@ pub struct EvaluatedLayer {
     pub text: Option<Box<TextDocument>>,
     /// Text layers: animators with their selectors (`animators` folder), evaluated.
     pub text_animators: Vec<EvaluatedPrim>,
+    /// Text layers on a path (AE: Text > Path Options with a mask chosen).
+    pub text_path: Option<TextPathOptions>,
     pub camera: Option<CameraState>,
     pub light: Option<LightState>,
     /// Other layers this layer's expressions read at this time (`thisComp.layer(…)`,
@@ -205,6 +207,21 @@ pub struct EvaluatedMask {
     pub expansion: f64,
 }
 
+/// AE's Path Options of a text layer at one time: the mask the text runs along
+/// (one of [`EvaluatedLayer::masks`]) and how.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TextPathOptions {
+    pub mask: PrimPath,
+    pub reverse: bool,
+    /// Characters turn with the path (AE default on).
+    pub perpendicular: bool,
+    /// The characters spread between the margins.
+    pub force_alignment: bool,
+    /// Pixels along the path.
+    pub first_margin: f64,
+    pub last_margin: f64,
+}
+
 /// An effect instance at one time.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct EvaluatedEffect {
@@ -213,6 +230,8 @@ pub struct EvaluatedEffect {
     pub enabled: bool,
     /// Every `param:NNNN` attribute, evaluated, keyed by its numeric ID (`"0001"`).
     pub params: BTreeMap<String, Value>,
+    /// Child prims, generically evaluated (the Paint effect's strokes).
+    pub children: Vec<EvaluatedPrim>,
 }
 
 impl EvaluatedEffect {
