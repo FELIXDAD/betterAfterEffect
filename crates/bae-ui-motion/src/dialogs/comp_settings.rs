@@ -131,7 +131,7 @@ impl Default for Values {
             duration: Time::from_seconds(10.0),
             bg: [0.0, 0.0, 0.0, 1.0],
             shutter_angle: 180.0,
-            shutter_phase: -90.0,
+            shutter_phase: 0.0,
             samples: 16,
             adaptive_limit: 128,
             preserve_frame_rate: false,
