@@ -31,7 +31,7 @@ fn project_row(h: &Ui, name: &str) -> Pos2 {
 }
 
 fn row(h: &Ui, name: &str) -> Rect {
-    let header = find_text(h, "Layer Name").unwrap();
+    let header = timeline_header(h).unwrap();
     find_texts(h, |t| t == name)
         .into_iter()
         .find(|r| r.top() > header.bottom() && r.left() < header.left() + 350.0)
@@ -66,7 +66,7 @@ fn button(h: &Ui, name: &str) -> Rect {
 #[test]
 fn project_drop_inserts_one_undoable_precomp_and_blocks_cycles() {
     let mut h = fixture();
-    let header = find_text(&h, "Layer Name").unwrap();
+    let header = timeline_header(&h).unwrap();
     let blank = header.center() + vec2(0.0, 100.0);
     drop_item(&mut h, "Child", blank);
     assert_eq!(h.state().layer_names(), ["Child"]);
@@ -108,7 +108,7 @@ fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
     let parent_time = h.state().now();
     assert!(parent_time > start);
 
-    let blank_y = find_text(&h, "Layer Name").unwrap().bottom() + 65.0;
+    let blank_y = timeline_header(&h).unwrap().bottom() + 65.0;
     drop_item(&mut h, "Child", egui::pos2(ruler_at(0.3).x, blank_y));
     let layer = h.state().layers()[0].clone();
     let timing = query::layer_timing(h.state().stage(), &layer);
@@ -167,7 +167,7 @@ fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
 #[test]
 fn tab_menu_and_toolbar_navigate_direct_parents_and_children() {
     let mut h = fixture();
-    let header = find_text(&h, "Layer Name").unwrap();
+    let header = timeline_header(&h).unwrap();
     let pointer = header.center() + vec2(30.0, 85.0);
     drop_item(&mut h, "Child", pointer);
     let layer = row(&h, "Child").center();

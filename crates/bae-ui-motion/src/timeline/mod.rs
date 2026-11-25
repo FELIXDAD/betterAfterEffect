@@ -3,12 +3,13 @@
 //! navigators, values and expressions, and the time graph (comp tabs, current time,
 //! ruler, work area, CTI, layer duration bars, keyframes).
 //!
-//! Every edit is a command: switches → `attr.set`, values → `attr.set_at`, stopwatch
+//! Every edit is a command: switches → `layer.set_attr`, values → `attr.set_at`, stopwatch
 //! → `attr.set_animated`, dragging bars → `layer.shift_time` / `layer.trim`, dragging
 //! keyframes → `key.move`, work area → `comp.set_work_area`, reordering →
 //! `layer.reorder`, parenting → `layer.set_parent`. Drags preview locally and run
 //! one command when released.
 
+mod columns;
 mod dialogs;
 mod drags;
 mod header;
@@ -19,8 +20,12 @@ mod menus;
 mod modes;
 pub(crate) mod navigation;
 mod rows;
+mod switches;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use bae_model::{Interpolation, Keyframe, PrimPath, Stage, Time};
 use bae_motion::KeyRef;
@@ -40,6 +45,8 @@ use crate::project::{DropPlacement, ItemDrag};
 use crate::props::{self, Node};
 use crate::session::{Session, SharedSession};
 
+pub(crate) use columns::Column;
+use columns::{Cols, Columns};
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
@@ -53,7 +60,7 @@ pub(crate) use menus::{
     catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
 };
 #[cfg(test)]
-pub(crate) use modes::{Panes, flip_matte};
+pub(crate) use modes::flip_matte;
 
 /// Row height and switch cell width: AE 26's (17 and about 15 points).
 const ROW_H: f32 = 17.0;
@@ -68,72 +75,6 @@ const MAX_EXPR_LINES: usize = 30;
 const PARENT_PAD: f32 = 6.0;
 /// Left padding of the time graph so frame 0 is not on the edge.
 const PAD: f32 = 8.0;
-
-/// Outline column x offsets (relative to the panel's left edge).
-struct Cols {
-    av: f32,
-    /// The layer's expand arrow (AE: between the A/V switches and the label).
-    twirl: f32,
-    label: f32,
-    index: f32,
-    name: f32,
-    switches: f32,
-    /// The Modes column (Mode, T, Track Matte).
-    modes: f32,
-    parent: f32,
-    end: f32,
-    /// The column groups shown (those of F4 / Shift+F4 that fit).
-    panes: modes::Panes,
-}
-
-/// Narrowest time graph: a narrower panel hides Modes (as F4 first does), then
-/// Parent & Link.
-const MIN_GRAPH: f32 = 200.0;
-
-impl Cols {
-    fn new(mut panes: modes::Panes, width: f32) -> Cols {
-        for _ in 0..2 {
-            let c = Cols::layout(panes);
-            if width - c.end >= MIN_GRAPH {
-                return c;
-            }
-            if panes.switches && panes.modes {
-                panes.modes = false;
-            } else {
-                panes.parent = false;
-            }
-        }
-        Cols::layout(panes)
-    }
-
-    fn layout(panes: modes::Panes) -> Cols {
-        // Positions measured on AE 26's Timeline (points from the panel's left).
-        let av = 5.0;
-        let twirl = av + 4.0 * SW + 4.0;
-        let label = twirl + 15.0;
-        let index = label + 18.0;
-        let name = index + 28.0;
-        let switches = name + 138.0;
-        let shown = |on: bool, w: f32| if on { w } else { 0.0 };
-        // AE's eight switches: Shy, Collapse, Quality, fx, Frame Blending, Motion
-        // Blur, Adjustment Layer, 3D Layer.
-        let modes = switches + shown(panes.switches, 8.0 * SW + 14.0);
-        let parent = modes + shown(panes.modes, modes::MODES_W);
-        let end = parent + shown(panes.parent, 120.0);
-        Cols {
-            av,
-            twirl,
-            label,
-            index,
-            name,
-            switches,
-            modes,
-            parent,
-            end,
-            panes,
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 enum RowKind {
@@ -228,6 +169,15 @@ enum Drag {
     },
 }
 
+/// The layer order and parent-menu labels only change when the project changes.
+struct TimelineLayers {
+    revision: u64,
+    comp: PrimPath,
+    paths: Vec<PrimPath>,
+    numbers: HashMap<PrimPath, usize>,
+    parent_labels: Vec<String>,
+}
+
 #[derive(Default)]
 pub struct TimelinePanel {
     eval: EvalCache,
@@ -237,7 +187,9 @@ pub struct TimelinePanel {
     /// Start of the visible range when zoomed (comp time).
     scroll: Time,
     drag: Option<Drag>,
+    switch_drag: Option<switches::SwitchDrag>,
     rename: Option<(PrimPath, String)>,
+    comment_edit: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
     /// The field being edited: its text and selection (chars), for the pick whip
@@ -247,15 +199,13 @@ pub struct TimelinePanel {
     expr_press: Option<crate::expr::Selection>,
     /// The property whose language menu is open and its field's selection then.
     lang_press: Option<(PrimPath, String, Option<crate::expr::Selection>)>,
-    /// AE layer numbers (# column) of the shown comp, for accessibility names:
-    /// two layers may share a name (issue #128).
-    layer_numbers: HashMap<PrimPath, usize>,
+    layers: Option<Arc<TimelineLayers>>,
     /// Graph Editor mode state (shown when the session's `graph_editor` is on).
     graph: GraphEditor,
     /// This frame shows the Graph Editor.
     graph_mode: bool,
     /// Switches / Modes / Parent & Link columns shown (F4, Shift+F4).
-    panes: modes::Panes,
+    columns: Columns,
     /// Where a keyframe drag puts the keyframes this frame.
     key_plan: Option<keys::KeyPlan>,
     /// Modifiers held when the primary button last went down (AE decides drag
@@ -424,11 +374,40 @@ impl TimelinePanel {
         }
     }
 
-    fn rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<Row> {
+    fn layer_list(&mut self, stage: &Stage, comp: &PrimPath) -> Arc<TimelineLayers> {
+        if let Some(layers) = &self.layers
+            && layers.revision == stage.revision()
+            && &layers.comp == comp
+        {
+            return layers.clone();
+        }
+        let paths = query::comp_layers(stage, comp);
+        let numbers = paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.clone(), i + 1))
+            .collect();
+        let parent_labels = paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("{}. {}", i + 1, query::display_name_of(stage, p)))
+            .collect();
+        let layers = Arc::new(TimelineLayers {
+            revision: stage.revision(),
+            comp: comp.clone(),
+            paths,
+            numbers,
+            parent_labels,
+        });
+        self.layers = Some(layers.clone());
+        layers
+    }
+
+    fn rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
-        let hide_shy = bool_attr(stage, comp, "hide_shy_layers");
-        for layer in query::comp_layers(stage, comp) {
-            if hide_shy && bool_attr(stage, &layer, "shy") {
+        let hide_shy = bool_attr(stage, &layers.comp, "hide_shy_layers");
+        for layer in &layers.paths {
+            if hide_shy && bool_attr(stage, layer, "shy") {
                 continue;
             }
             out.push(Row {
@@ -436,16 +415,16 @@ impl TimelinePanel {
                 layer: layer.clone(),
                 depth: 0,
             });
-            if let Some(r) = s.reveal.get(&layer) {
-                for n in props::revealed(stage, &layer, r) {
+            if let Some(r) = s.reveal.get(layer) {
+                for n in props::revealed(stage, layer, r) {
                     if let Node::Prop { path, attr, label } = n {
-                        push_prop(&path, &attr, &label, &layer, 1, stage, &mut out);
+                        push_prop(&path, &attr, &label, layer, 1, stage, &mut out);
                     }
                 }
             } else if self.expanded.contains(layer.as_str()) {
                 flatten_tree(
-                    &props::layer_tree(stage, &layer),
-                    &layer,
+                    &props::layer_tree(stage, layer),
+                    layer,
                     1,
                     &self.expanded,
                     stage,
@@ -521,7 +500,9 @@ impl TimelinePanel {
     /// "Layer 2 “Solid”": the accessibility context of a layer's controls.
     fn layer_ctx(&self, stage: &bae_model::Stage, layer: &PrimPath) -> String {
         bae_ui::a11y::layer(
-            self.layer_numbers.get(layer).copied(),
+            self.layers
+                .as_ref()
+                .and_then(|list| list.numbers.get(layer).copied()),
             &query::display_name_of(stage, layer),
         )
     }
@@ -541,9 +522,17 @@ impl TimelinePanel {
         &mut self.graph
     }
 
+    pub(crate) fn from_state(state: Option<&serde_json::Value>) -> Self {
+        let mut panel = Self::default();
+        if let Some(state) = state {
+            panel.columns = Columns::load(state);
+            panel.zoom = state["zoom"].as_f64().unwrap_or_default().clamp(0.0, 1.0) as f32;
+        }
+        panel
+    }
     #[cfg(test)]
-    pub(crate) fn panes(&self) -> Panes {
-        self.panes
+    pub(crate) fn column_visible(&self, c: Column) -> bool {
+        self.columns.visible(c)
     }
 }
 
@@ -557,9 +546,7 @@ impl Panel for TimelinePanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(
-            json!({"zoom": self.zoom, "switches": self.panes.switches, "modes": self.panes.modes, "parent": self.panes.parent}),
-        )
+        Some(json!({"zoom": self.zoom, "columns":self.columns}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -578,11 +565,11 @@ impl Panel for TimelinePanel {
                 true
             }
             "motion.timeline.toggle_switches_modes" => {
-                self.panes.toggle_switches_modes();
+                self.columns.toggle_switches_modes();
                 true
             }
             "motion.timeline.toggle_parent_column" => {
-                self.panes.parent = !self.panes.parent;
+                self.columns.toggle(Column::Parent);
                 true
             }
             _ => actions::handle(action, cx, &session),
@@ -590,6 +577,13 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let full = ui.available_rect_before_wrap();
+        let cols = self.columns.layout(ui, full);
+        self.contents(ui, cx, &cols);
+    }
+}
+impl TimelinePanel {
+    fn contents(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, cols: &Cols) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
@@ -616,8 +610,7 @@ impl Panel for TimelinePanel {
         }
         let now = session.lock().time(&info.path);
         self.graph_mode = session.lock().graph_editor;
-        let cols = Cols::new(self.panes, full.width());
-        let graph_left = full.left() + cols.end + 2.0;
+        let graph_left = full.left() + cols.viewport + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
         let axis = self.axis(&info, graph_left, graph_w);
         #[cfg(test)]
@@ -653,24 +646,28 @@ impl Panel for TimelinePanel {
             ui.input(|i| (i.pointer.interact_pos().map(|p| p.x), i.modifiers.shift));
         self.marker_plan = self.plan_marker_drag(stage, &info, &axis, now, pointer_x, shift);
         self.bar_plan = self.plan_bar_drag(stage, &info, &axis, now, pointer_x, shift);
-        self.header(ui, cx, &session, &info, head, colrow, &cols, &axis, now);
+        self.header(ui, cx, &session, &info, head, colrow, cols, &axis, now);
 
-        // Rows.
+        // Share one parent menu across the visible rows.
+        let layers = self.layer_list(stage, &info.path);
+        let comp_layers = &layers.paths;
+        let parent_items: Vec<_> = std::iter::once(tr("None"))
+            .chain(layers.parent_labels.iter().map(String::as_str))
+            .collect();
         let rows = {
-            let s = session.lock();
-            self.rows(stage, &info.path, &s)
+            let frame = ui.ctx().cumulative_frame_nr();
+            let mut s = session.lock();
+            if self.columns.visible(Column::RenderTime) && cols.on_screen(Column::RenderTime) {
+                s.timing_column_frame = Some(frame);
+            } else if s.timing_column_frame != Some(frame) {
+                s.timing_column_frame = None;
+            }
+            self.rows(stage, &layers, &s)
         };
         if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
             self.press_mods = m;
         }
         self.key_plan = self.plan_key_drag(stage, &info, &axis, &rows, now, pointer_x, shift);
-        let comp_layers = query::comp_layers(stage, &info.path);
-        self.layer_numbers = comp_layers
-            .iter()
-            .enumerate()
-            .map(|(i, l)| (l.clone(), i + 1))
-            .collect();
-
         // Background of the graph body: marquee selection and deselect (the Graph
         // Editor has its own).
         if !self.graph_mode {
@@ -717,12 +714,17 @@ impl Panel for TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
+        let switch_input = ui.input(switches::SwitchInput::read);
         egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
                 // Rows touch, as in AE (a 1-point line between them).
                 ui.spacing_mut().item_spacing.y = 0.0;
+                let mut outline = ui.new_child(egui::UiBuilder::new().id_salt("outline_rows"));
+                let mut clip = ui.clip_rect();
+                clip.max.x = clip.max.x.min(graph_left - 2.0);
+                outline.set_clip_rect(clip);
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =
@@ -730,7 +732,7 @@ impl Panel for TimelinePanel {
                     if let Some((_, pointer)) = &project_drop {
                         last_row_bottom = rect.bottom();
                         if drop_slot.is_none() && pointer.y <= rect.bottom() {
-                            let number = self.layer_numbers[&row.layer];
+                            let number = layers.numbers[&row.layer];
                             let before =
                                 matches!(row.kind, RowKind::Layer) && pointer.y < rect.center().y;
                             drop_slot = Some(if before {
@@ -741,15 +743,18 @@ impl Panel for TimelinePanel {
                         }
                     }
                     self.row_ui(
+                        &mut outline,
                         ui,
                         cx,
                         &session,
                         &info,
-                        &cols,
+                        cols,
                         &axis,
                         row,
                         rect,
-                        &comp_layers,
+                        switch_input,
+                        &layers,
+                        &parent_items,
                         &mut key_rects,
                     );
                     match &row.kind {
@@ -777,6 +782,8 @@ impl Panel for TimelinePanel {
             }
         }
 
+        self.finish_switch_drag(switch_input, cx);
+
         // Drags that span rows.
         self.finish_drags(
             ui,
@@ -787,7 +794,7 @@ impl Panel for TimelinePanel {
             &key_rects,
             &layer_rows,
             &prop_rows,
-            &comp_layers,
+            comp_layers,
         );
 
         let mut cti_body = graph_body;
@@ -811,6 +818,7 @@ impl Panel for TimelinePanel {
 
         self.footer(ui, foot, &info, &axis, now, graph_left);
         navigation::show(ui, stage, &session);
+        self.columns.scrollbar(ui, foot, cols);
 
         // Keyframe dialogs (modal; Enter and Esc are theirs).
         let dialog_open = session.lock().key_dialog.is_some();
@@ -893,4 +901,85 @@ fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: 
         s.selected_keys.clear();
         s.selected_props.clear();
     }
+}
+
+#[cfg(test)]
+mod layer_list_tests {
+    use super::*;
+    use bae_model::{AuthorId, CommandRegistry, Value};
+    use serde_json::json;
+
+    #[test]
+    fn parent_choices_follow_edits_and_project_replacement() {
+        let mut registry = CommandRegistry::with_builtins();
+        bae_motion::register_commands(&mut registry);
+        let author = AuthorId::new("user:test").unwrap();
+        let run = |stage: &mut Stage, id, params| {
+            registry.execute(stage, &author, id, params).unwrap().output
+        };
+        let create_comp = |stage: &mut Stage| {
+            let result = run(stage, "comp.create", json!({"name":"Playback"}));
+            PrimPath::new(result["path"].as_str().unwrap()).unwrap()
+        };
+        let mut stage = Stage::new();
+        let comp = create_comp(&mut stage);
+        let mut panel = TimelinePanel::default();
+        for name in ["A", "B"] {
+            run(
+                &mut stage,
+                "layer.create",
+                json!({"comp":comp, "kind":"solid", "name":name}),
+            );
+        }
+        let initial = panel.layer_list(&stage, &comp);
+        assert_eq!(initial.parent_labels, ["1. B", "2. A"]);
+        let mut session = Session::default();
+        let info = query::comp_info(&stage, &comp).unwrap();
+        session.play(&info);
+        session.set_time(&info, info.frame_rate.frame_to_time(3));
+        assert!(Arc::ptr_eq(&initial, &panel.layer_list(&stage, &comp)));
+
+        let a = &initial.paths[1];
+        run(
+            &mut stage,
+            "attr.set",
+            json!({"path":a, "attr":"name", "value":Value::String("Renamed".into())}),
+        );
+        assert_eq!(
+            panel.layer_list(&stage, &comp).parent_labels,
+            ["1. B", "2. Renamed"]
+        );
+        run(
+            &mut stage,
+            "layer.reorder",
+            json!({"layers":[a], "index":0}),
+        );
+        let reordered = panel.layer_list(&stage, &comp);
+        assert_eq!(reordered.numbers[a], 1);
+        assert_eq!(reordered.parent_labels, ["1. Renamed", "2. B"]);
+        stage.undo(&author).unwrap();
+        assert_eq!(
+            panel.layer_list(&stage, &comp).parent_labels,
+            ["1. B", "2. Renamed"]
+        );
+
+        let mut other = Stage::new();
+        assert_eq!(create_comp(&mut other), comp);
+        assert!(panel.layer_list(&other, &comp).paths.is_empty());
+    }
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "timeline",
+        bae_ui::PanelKind::new("Timeline", |spawn| {
+            Box::new(TimelinePanel::from_state(spawn.state))
+        }),
+    );
 }

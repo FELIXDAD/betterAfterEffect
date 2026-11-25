@@ -170,7 +170,7 @@ jobs:
             throw "Expected BAE file and product versions $expected"
           }
 
-      - name: macOS bundle signature
+      - name: macOS bundle version and signature
         # Checks the zip as a user gets it: unpacked like Archive Utility does, with the
         # quarantine flag a browser download sets. A broken signature makes Gatekeeper call
         # the app "damaged" with no way to open it (#105). BAE.app is ad-hoc signed and not
@@ -180,9 +180,12 @@ jobs:
         run: |
           check="$RUNNER_TEMP/bundle-check"
           rm -rf "$check" && mkdir -p "$check"
-          zips=(target/dist/BAE-*-macos.zip)
-          ditto -x -k "${zips[0]}" "$check"
+          version="$(jq -er .version size-report.json)"
+          ditto -x -k "target/dist/BAE-$version-aarch64-macos.zip" "$check"
           app="$check/BAE.app"
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            test "$(plutil -extract "$key" raw "$app/Contents/Info.plist")" = "${version%%[-+]*}"
+          done
           xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");CI;" "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign --display --verbose=2 "$app"

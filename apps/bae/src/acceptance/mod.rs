@@ -238,6 +238,7 @@ impl Gui {
         let prefs = self.prefs.clone();
         if prefs.generation() != self.prefs_generation {
             self.prefs_generation = prefs.generation();
+            crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
             bae_ui::settings::apply(&prefs.current());
             self.doc.set_undo_limit(prefs.current().levels_of_undo());
         }
@@ -659,6 +660,12 @@ pub(crate) fn queue_control<'a>(
 
 /// Where the text `text` was painted in the last frame (first match, inside its
 /// clip rect). Finds rows the panels paint themselves (timeline layer names).
+/// The Timeline's name column header: "Source Name" (AE's default) or
+/// "Layer Name" (after clicking it).
+pub(crate) fn timeline_header(h: &Ui) -> Option<Rect> {
+    find_text(h, "Source Name").or_else(|| find_text(h, "Layer Name"))
+}
+
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }

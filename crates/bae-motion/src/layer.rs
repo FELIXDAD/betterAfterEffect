@@ -1218,6 +1218,7 @@ pub const LAYER_SWITCH_ATTRS: &[&str] = &[
     "solo",
     "collapse_transformation",
     "motion_blur",
+    "frame_blending",
     "adjustment_layer",
     "three_d",
     "quality",
@@ -1234,7 +1235,8 @@ pub struct SetLayerAttrParams {
     pub layers: Vec<PrimPath>,
     /// One of the layer switches (`shy`, `locked`, `enabled` = Video,
     /// `effects_enabled` = Effect (fx), `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
-    /// `adjustment_layer`, `three_d`), `quality` (`best` / `draft` /
+    /// `adjustment_layer`, `three_d`), `frame_blending` (`off` / `frame_mix` /
+    /// `pixel_motion`; the comp's `frame_blending` switch is set with `attr.set`), `quality` (`best` / `draft` /
     /// `wireframe`), `label` (0 = none, 1–16 = AE's label colours) or `blend_mode`
     /// (AE's 38 modes, `multiply` …).
     pub attr: String,

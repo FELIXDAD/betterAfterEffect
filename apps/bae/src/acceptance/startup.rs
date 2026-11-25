@@ -224,7 +224,7 @@ fn main_controls_are_found_by_accessible_name() {
     }
     // Names shown in the UI: layers (timeline rows carry the layer number,
     // "Layer 1 “Text”", #128), comp tab, workspaces.
-    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Motion", "Review"] {
+    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Default", "Review"] {
         let quoted = format!("“{label}”");
         if !all.iter().any(|l| l == label || l.ends_with(&quoted)) {
             missing.push(label.to_owned());
@@ -260,7 +260,7 @@ fn main_controls_are_found_by_accessible_name() {
         .query_all_by_label("Layer 1 “Text”")
         .map(|n| n.rect())
         .collect();
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     let row = rows
         .into_iter()
         .find(|r| r.top() > head.bottom())
@@ -740,7 +740,7 @@ fn layer_numbers_in_names_follow_reorder_and_delete() {
     );
     // Delete the middle one: 1, 2, still unique.
     let middle = h.state().layers()[1].clone();
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(
         &mut h,
         egui::pos2(head.left() + 800.0, head.bottom() + 150.0),

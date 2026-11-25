@@ -183,6 +183,8 @@ pub struct AppMenu {
     /// Registry ids of the Edit menu's Undo and Redo items.
     undo: Option<String>,
     redo: Option<String>,
+    /// Window ▸ Workspace ▸ Reset "<workspace>" to Saved Layout: id and text.
+    reset: Option<(String, String)>,
     /// Action ids modules handle (`bae_ui::menu::handled_actions`).
     actions: HashSet<String>,
     /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
@@ -217,12 +219,14 @@ impl AppMenu {
         };
         let undo = find(ids::UNDO);
         let redo = find(ids::REDO);
+        let reset = find(ids::RESET_WORKSPACE).map(|id| (id, String::new()));
         let mut menu = Self {
             menu,
             undo_state: (Some(String::new()), None),
             contributed: items,
             undo,
             redo,
+            reset,
             actions,
             generation: 0,
         };
@@ -285,6 +289,21 @@ impl AppMenu {
         }
     }
 
+    /// Names the active workspace in Window ▸ Workspace ▸ Reset “<name>” to Saved
+    /// Layout, as AE does (`title`: its English title).
+    pub fn set_workspace_title(&mut self, title: &str) {
+        let Some((id, shown)) = &mut self.reset else {
+            return;
+        };
+        let text = tr("Reset “{name}” to Saved Layout").replace("{name}", tr(title));
+        if text != *shown {
+            if let Some(c) = self.contributed.get(id.as_str()) {
+                c.item.set_text(&native_text(&text));
+            }
+            *shown = text;
+        }
+    }
+
     /// Updates the Undo / Redo items (`Some(label)` = enabled, AE: "Undo <step>",
     /// "Can’t Undo" when there is nothing to undo).
     pub fn set_undo_state(&mut self, state: (Option<String>, Option<String>)) {
@@ -300,6 +319,32 @@ impl AppMenu {
             }
         }
         self.undo_state = state;
+    }
+
+    /// Takes the menu bar off before another one replaces it (a language change).
+    pub fn detach(&self, window: &winit::window::Window) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = window;
+            self.menu.remove_for_nsapp();
+        }
+        #[cfg(windows)]
+        {
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = window.window_handle()
+                && let RawWindowHandle::Win32(win32) = handle.as_raw()
+            {
+                // SAFETY: `hwnd` is the live window this menu was attached to, on
+                // the thread that owns it.
+                if let Err(error) = unsafe { self.menu.remove_for_hwnd(win32.hwnd.get()) } {
+                    tracing::warn!("cannot remove the native menu: {error}");
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = window;
+        }
     }
 
     /// Attaches the menu bar: the global NSApp menu on macOS, the window's menu

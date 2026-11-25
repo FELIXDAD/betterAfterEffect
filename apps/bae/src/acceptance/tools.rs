@@ -6,7 +6,7 @@
 use bae_model::{PrimPath, Value};
 use bae_motion::query;
 use bae_ui_motion::{SharedTools, Tool};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Rect, vec2};
 use egui_kittest::kittest::Queryable as _;
 
 use super::*;

@@ -295,31 +295,20 @@ pub(crate) const PROJECT_HEADER: &[Entry] = &[
     ),
 ];
 
-/// Timeline, right-click on the column headers.
-pub(crate) const TIMELINE_HEADER: &[Entry] = &[
-    Off("Hide This"),
-    Off("Rename This..."),
-    Sep,
-    Sub(
-        "Columns",
-        &[
-            Off("A/V Features"),
-            Off("Label"),
-            Off("#"),
-            Off("Source Name"),
-            Off("Comment"),
-            Off("Switches"),
-            Off("Modes"),
-            Off("Parent & Link"),
-            Off("Keys"),
-            Off("Render Time"),
-            Off("In"),
-            Off("Out"),
-            Off("Duration"),
-            Off("Stretch"),
-        ],
-    ),
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Context menus (AE 26).
+    ("Layer Styles", "图层样式"),
+    ("Open Effect Controls", "打开效果控件"),
+    // Layer context menu items that are not in the menu bar.
+    ("Invert Selection", "反向选择"),
 ];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+}
 
 #[cfg(test)]
 mod tests;
