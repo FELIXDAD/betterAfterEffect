@@ -415,3 +415,97 @@ impl Panel for PreviewPanel {
         let _ = Rect::NOTHING;
     }
 }
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Properties
+    ("Transform", "变换"),
+    ("Layer Transform", "图层变换"),
+    ("Layer Contents", "图层内容"),
+    ("Contents", "内容"),
+    ("Masks", "蒙版"),
+    ("Effects", "效果"),
+    ("Anchor Point", "锚点"),
+    ("Position", "位置"),
+    ("Scale", "缩放"),
+    ("Rotation", "旋转"),
+    ("X Rotation", "X 轴旋转"),
+    ("Y Rotation", "Y 轴旋转"),
+    ("Z Rotation", "Z 轴旋转"),
+    ("Orientation", "方向"),
+    ("Opacity", "不透明度"),
+    ("Point of Interest", "目标点"),
+    ("Source Text", "源文本"),
+    ("Path Options", "路径选项"),
+    ("Reverse Path", "反转路径"),
+    ("Perpendicular To Path", "垂直于路径"),
+    ("Force Alignment", "强制对齐"),
+    ("First Margin", "首字边距"),
+    ("Last Margin", "末字边距"),
+    ("Roundness", "圆度"),
+    ("Points", "点"),
+    ("Inner Radius", "内径"),
+    ("Outer Radius", "外径"),
+    ("Inner Roundness", "内圆度"),
+    ("Outer Roundness", "外圆度"),
+    ("Fill", "填充"),
+    ("Stroke", "描边"),
+    ("Color", "颜色"),
+    ("Stroke Width", "描边宽度"),
+    ("Skew", "倾斜"),
+    ("Skew Axis", "倾斜轴"),
+    ("Path", "路径"),
+    ("Mask Path", "蒙版路径"),
+    ("Mask Feather", "蒙版羽化"),
+    ("Mask Opacity", "蒙版不透明度"),
+    ("Mask Expansion", "蒙版扩展"),
+    ("Reset", "重置"),
+    ("Param", "参数"),
+    ("Expression", "表达式"),
+    ("Font Size", "字体大小"),
+    ("Fill Color", "填充颜色"),
+    ("Zoom", "缩放"),
+    ("Intensity", "强度"),
+    ("No layer selected", "未选择图层"),
+    ("No effects applied", "未应用效果"),
+    (
+        "Select a layer to see its properties.",
+        "选择一个图层以查看其属性。",
+    ),
+    // Preview panel
+    ("First Frame", "第一帧"),
+    ("Previous Frame", "上一帧"),
+    ("Play/Stop", "播放/停止"),
+    ("Next Frame", "下一帧"),
+    ("Last Frame", "最后一帧"),
+    ("Loop", "循环"),
+    ("Frame Rate (Auto)", "帧速率（自动）"),
+    ("Playing", "正在播放"),
+    ("Go to Start", "转到开头"),
+    ("Go to End", "转到结尾"),
+    ("Go to Layer In Point", "转到图层入点"),
+    ("Go to Layer Out Point", "转到图层出点"),
+];
+
+/// Registers this module's Chinese strings and panels (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "properties",
+        bae_ui::PanelKind::new("Properties", |_| Box::new(PropertiesPanel::default())),
+    );
+    crate::register_panel(
+        app,
+        "effect_controls",
+        bae_ui::PanelKind::new("Effect Controls", |_| {
+            Box::new(EffectControlsPanel::default())
+        }),
+    );
+    crate::register_panel(
+        app,
+        "preview",
+        bae_ui::PanelKind::new("Preview", |_| Box::new(PreviewPanel)),
+    );
+}
