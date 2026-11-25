@@ -1,7 +1,7 @@
-fn effect(p:vec2f)->vec4f{
-    let base=fx_unpremult(source(p));var c=base;
-    if v(2)!=0. && u.images[1].size.x!=0u{c=fx_unpremult(layer_sample(map1,u.images[1],p,false));}
-    let input_mode=i32(v(5));let output_mode=i32(v(6));let hsl=fx_hsl(c.rgb);
+fn shade(p:vec2f)->vec4f{
+    let base=fx_unpremult(fx_sample(input_tex, u.images[0], p, false));var c=base;
+    if value(2)!=0. && u.images[1].size.x!=0u{c=fx_unpremult(sample_layer(map_a,u.images[1],p,false));}
+    let input_mode=i32(value(5));let output_mode=i32(value(6));let hsl=fx_hsl(c.rgb);
     let y=fx_luma(c.rgb);var rgb=base.rgb;var a=base.a;
     if input_mode<=5 {
         switch input_mode {
@@ -11,7 +11,7 @@ fn effect(p:vec2f)->vec4f{
             case 4:{let cb=c.g-.5;let cr=c.b-.5;rgb=vec3f(c.r+1.402*cr,c.r-.344136*cb-.714136*cr,c.r+1.772*cb);}
             default:{rgb=c.rgb*c.a;}
         }
-        if v(7)!=0.{rgb=1.-rgb;}
+        if value(7)!=0.{rgb=1.-rgb;}
     }else{
         var val=0.;
         switch input_mode{
@@ -20,7 +20,7 @@ fn effect(p:vec2f)->vec4f{
             case 16:{val=fx_channel(c,8u);}case 18:{val=min(c.r,min(c.g,c.b));}case 19:{val=max(c.r,max(c.g,c.b));}
             default:{}
         }
-        if v(7)!=0.{val=1.-val;}
+        if value(7)!=0.{val=1.-val;}
         let dest=select(output_mode,output_mode-9,output_mode>=10);
         if output_mode>=10 {rgb=vec3f(0);a=1.;}
         switch dest{
@@ -34,6 +34,6 @@ fn effect(p:vec2f)->vec4f{
             default:{}
         }
     }
-    if v(8)!=0.{a=1.;}
+    if value(8)!=0.{a=1.;}
     return vec4f(rgb*a,a);
 }

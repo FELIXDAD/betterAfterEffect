@@ -3,13 +3,11 @@
 //! iterations) or that need resources declarative effects cannot declare.
 
 pub mod blur;
-pub(crate) mod controls;
-mod image_grid;
-mod layer_input;
+pub(crate) mod image_grid;
+pub(crate) mod layer_input;
 pub(crate) mod lut;
 pub(crate) mod morphology;
-mod sampled;
-pub(crate) mod set_matte;
+pub(crate) mod sampled;
 
 pub use blur::{BoxBlur, GaussianBlur};
 
@@ -18,14 +16,6 @@ pub(crate) mod compound;
 pub mod distort;
 pub mod spatial;
 pub(crate) mod temporal;
-
-pub(crate) fn prewarm(
-    rt: &crate::gpu::Runtime,
-    format: bae_gpu::wgpu::TextureFormat,
-) -> Result<(), bae_render::RenderError> {
-    set_matte::prewarm(rt, format)?;
-    morphology::prewarm(rt, format)
-}
 
 /// Localized dropdown options for the Color Correction Rust effects.
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
@@ -37,5 +27,3 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
         _ => None,
     }
 }
-
-pub(crate) mod channel_filters;

@@ -1,6 +1,6 @@
 // Match-name adapters use the same pipeline and the same overlap functions as generated colors.
 fn bae_unpremultiply(c:vec4f)->vec4f{return fx_unpremult(c);}
-fn from_layer(p:vec2f,stretch:bool)->vec4f{return layer_sample(map1,u.images[1],p,stretch);}
+fn from_layer(p:vec2f,stretch:bool)->vec4f{return sample_layer(map_a,u.images[1],p,stretch);}
 fn overlap(base:vec3f,color:vec3f,mode:u32)->vec3f {
     return generated_blend(vec4f(base,1.),color,1.,mode).rgb;
 }
@@ -49,40 +49,40 @@ fn compound_value(b:vec3f,s:vec3f,op:u32,overflow:u32)->vec3f{
     }
     return r;
 }
-fn effect(p:vec2f)->vec4f {
-    let b=source(p);let bs=fx_unpremult(b);
-    switch u.mode{
+fn shade(p:vec2f)->vec4f {
+    let b=fx_sample(input_tex, u.images[0], p, false);let bs=fx_unpremult(b);
+    switch u.stage{
         case 1u:{ // Arithmetic
-            var rgb=arithmetic(bs.rgb,vec3f(v(2),v(3),v(4))/255.,u32(v(1)));
-            if v(5)!=0.{rgb=saturate(rgb);}return vec4f(rgb*b.a,b.a);
+            var rgb=arithmetic(bs.rgb,vec3f(value(2),value(3),value(4))/255.,u32(value(1)));
+            if value(5)!=0.{rgb=saturate(rgb);}return vec4f(rgb*b.a,b.a);
         }
         case 2u:{ // Blend
             if u.images[1].size.x==0u{return b;}
-            let top=from_layer(p,v(4)==2.);let modes=array<u32,5>(2,21,19,14,15);
-            let mode=u32(v(2));var result=top;
+            let top=from_layer(p,value(4)==2.);let modes=array<u32,5>(2,21,19,14,15);
+            let mode=u32(value(2));var result=top;
             if mode!=1u {result=composite(b,top,1.,modes[clamp(mode,1u,5u)-1u]);}
-            return mix(result,b,v(3));
+            return mix(result,b,value(3));
         }
         case 3u:{ // Calculations
-            let src=selection(b,u32(v(2)),v(3)!=0.);
-            let top=selection(from_layer(p,v(10)!=0.),u32(v(7)),v(9)!=0.);
+            let selected_source=selection(b,u32(value(2)),value(3)!=0.);
+            let top=selection(from_layer(p,value(10)!=0.),u32(value(7)),value(9)!=0.);
             let modes=array<u32,37>(2,1,2,14,5,12,12,2,4,15,6,11,11,2,7,8,9,25,26,27,2,16,16,17,2,19,20,21,22,2,33,34,35,36,2,37,38);
-            let out=composite(src,top,v(8),modes[clamp(u32(v(12)),1u,37u)-1u]);
-            if v(13)!=0.{return vec4f(fx_unpremult(out).rgb*b.a,b.a);}return out;
+            let out=composite(selected_source,top,value(8),modes[clamp(u32(value(12)),1u,37u)-1u]);
+            if value(13)!=0.{return vec4f(fx_unpremult(out).rgb*b.a,b.a);}return out;
         }
         case 4u:{ // Compound Arithmetic
-            let t=fx_unpremult(from_layer(p,v(5)!=0.));let op=u32(v(2));let overflow=u32(v(4));let ch=u32(v(3));
+            let t=fx_unpremult(from_layer(p,value(5)!=0.));let op=u32(value(2));let overflow=u32(value(4));let ch=u32(value(3));
             var rgb=bs.rgb;var a=bs.a;
             if ch!=3u{rgb=compound_value(bs.rgb,t.rgb,op,overflow);}
             if ch!=1u{a=compound_value(vec3f(bs.a),vec3f(t.a),op,overflow).r;}
-            return mix(vec4f(rgb*a,a),b,v(6)*.01);
+            return mix(vec4f(rgb*a,a),b,value(6)*.01);
         }
         default:{ // CC Composite
-            let t=from_layer(p,false);let opacity=v(1)*.01;let choice=u32(v(2));
+            let t=from_layer(p,false);let opacity=value(1)*.01;let choice=u32(value(2));
             let modes=array<u32,41>(1,2,2,2,14,5,23,12,12,2,4,15,6,24,11,11,2,7,8,9,25,26,27,28,2,16,16,17,2,19,20,21,22,2,33,34,35,36,2,37,38);
             var out=composite(b,t,opacity,modes[clamp(choice,1u,41u)-1u]);
             if choice==2u{out=b+(1.-b.a)*t*opacity;}
-            if v(3)!=0.{return vec4f(fx_unpremult(out).rgb*b.a,b.a);}return out;
+            if value(3)!=0.{return vec4f(fx_unpremult(out).rgb*b.a,b.a);}return out;
         }
     }
 }

@@ -6,7 +6,7 @@
 //!   (one request in flight; responses carry the plugin's log lines). The
 //!   runner moves its stdout away first, so `printf` in a plugin goes to
 //!   stderr instead of corrupting the channel.
-//! * Frames: input and output pixels live in a shared memory file mapped by
+//! * Frames: input and output pixels live in shared memory mapped by
 //!   both processes (grown on demand, reused across frames).
 //! * Crashes and hangs: EOF on the channel, or no reply within the watchdog
 //!   time (render 10 s, load 30 s), fails the call; the runner is killed and
@@ -14,20 +14,23 @@
 //!   plugin for the session ([`CallError::Crashed`] with `disabled`).
 
 use std::ffi::OsString;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::net::UnixStream as RunnerInput;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, ExitCode, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(windows)]
+use std::process::ChildStdin as RunnerInput;
+use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
-use memmap2::MmapMut;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::library::Library;
 use super::pixels;
+use super::shm::{Mapping, Shm, ShmSpec};
 use super::{CallError, FrameRequest, LibraryInfo, PreRenderOut, RenderOut, rect};
 
 /// Largest control message accepted (pixels never go through the channel).
@@ -78,18 +81,12 @@ enum Request {
     PreRender(FrameRequest),
     Render {
         frame: FrameRequest,
-        /// A new shared memory file to map (first frame, or after growing).
+        /// A new shared memory segment to map (first frame, or after growing).
         shm: Option<ShmSpec>,
         /// Where the output image starts in the shared memory.
         output_offset: usize,
     },
     Shutdown,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ShmSpec {
-    path: PathBuf,
-    len: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -176,9 +173,20 @@ pub fn runner_main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // Unix also carries mapping descriptors on stdin. Read exactly the control
+    // message so a buffered read cannot consume the following descriptor byte.
+    #[cfg(unix)]
+    let mut input = {
+        use std::os::fd::AsFd;
+        match io::stdin().as_fd().try_clone_to_owned() {
+            Ok(fd) => File::from(fd),
+            Err(_) => return ExitCode::FAILURE,
+        }
+    };
+    #[cfg(windows)]
     let mut input = io::stdin().lock();
     let mut library: Option<Library> = None;
-    let mut shm: Option<MmapMut> = None;
+    let mut shm: Option<Mapping> = None;
     loop {
         let Ok(bytes) = read_message(&mut input) else {
             return ExitCode::SUCCESS;
@@ -210,7 +218,7 @@ fn failed(e: CallError) -> Reply {
     }
 }
 
-fn serve(request: Request, library: &mut Option<Library>, shm: &mut Option<MmapMut>) -> Reply {
+fn serve(request: Request, library: &mut Option<Library>, shm: &mut Option<Mapping>) -> Reply {
     let internal = |m: String| Reply::Failed {
         status: bae_plugin_sdk::abi::BAE_ERR_INTERNAL,
         message: m,
@@ -244,7 +252,7 @@ fn serve(request: Request, library: &mut Option<Library>, shm: &mut Option<MmapM
             output_offset,
         } => {
             if let Some(spec) = spec {
-                match map_file(&spec.path, spec.len) {
+                match spec.open() {
                     Ok(m) => *shm = Some(m),
                     Err(e) => return internal(format!("cannot map shared memory: {e}")),
                 }
@@ -254,7 +262,10 @@ fn serve(request: Request, library: &mut Option<Library>, shm: &mut Option<MmapM
             };
             let input_len = pixels::image_len(frame.format, rect(frame.input));
             let output_len = pixels::image_len(frame.format, rect(frame.request));
-            if output_offset < input_len || output_offset + output_len > mem.len() {
+            if output_offset < input_len
+                || output_offset > mem.len()
+                || output_len > mem.len() - output_offset
+            {
                 return internal("frame does not fit the shared memory".into());
             }
             let (input, rest) = mem.split_at_mut(output_offset);
@@ -268,59 +279,9 @@ fn serve(request: Request, library: &mut Option<Library>, shm: &mut Option<MmapM
     }
 }
 
-fn map_file(path: &Path, len: usize) -> io::Result<MmapMut> {
-    let file = OpenOptions::new().read(true).write(true).open(path)?;
-    if (file.metadata()?.len() as usize) < len {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "shared memory file too small",
-        ));
-    }
-    // SAFETY: the file is private to this host/runner pair; both sides only
-    // touch disjoint ranges while a request is in flight.
-    unsafe { MmapMut::map_mut(&file) }
-}
-
-// ---------------------------------------------------------------------------
-// Host side
-// ---------------------------------------------------------------------------
-
-/// Shared memory owned by the host: a temporary file mapped read/write.
-struct Shm {
-    path: PathBuf,
-    map: MmapMut,
-}
-
-impl Shm {
-    fn create(len: usize) -> io::Result<Shm> {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "bae-plugin-{}-{}.shm",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
-        file.set_len(len as u64)?;
-        // SAFETY: a fresh private file; see `map_file`.
-        let map = unsafe { MmapMut::map_mut(&file) }?;
-        Ok(Shm { path, map })
-    }
-}
-
-impl Drop for Shm {
-    fn drop(&mut self) {
-        // Best effort: on Windows the runner may still map it until it exits.
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
 struct Runner {
     child: Child,
-    stdin: ChildStdin,
+    stdin: RunnerInput,
     replies: Receiver<io::Result<Vec<u8>>>,
     /// Whether the runner mapped the current `ClientState::shm`.
     shm_mapped: bool,
@@ -387,12 +348,21 @@ impl RunnerClient {
     fn spawn(&self, state: &mut ClientState) -> Result<LibraryInfo, CallError> {
         let mut cmd = Command::new(&self.command.program);
         cmd.args(&self.command.args)
-            .stdin(Stdio::piped())
+            .env(super::RUNNER_CHILD_ENV, "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        #[cfg(unix)]
+        let stdin = {
+            use std::os::fd::OwnedFd;
+            let (host, child) =
+                RunnerInput::pair().map_err(|e| CallError::Failed(e.to_string()))?;
+            cmd.stdin(Stdio::from(OwnedFd::from(child)));
+            host
+        };
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
+            cmd.stdin(Stdio::piped());
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
@@ -402,10 +372,9 @@ impl RunnerClient {
                 self.command.program.display()
             ))
         })?;
-        let (Some(stdin), Some(mut stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            let _ = child.kill();
-            return Err(CallError::Failed("plugin runner without pipes".into()));
-        };
+        #[cfg(windows)]
+        let stdin = child.stdin.take().expect("configured with piped stdin");
+        let mut stdout = child.stdout.take().expect("configured with piped stdout");
         let (tx, replies) = channel();
         let spawned = std::thread::Builder::new()
             .name(format!("bae-plugin-runner:{}", self.plugin_id))
@@ -461,7 +430,17 @@ impl RunnerClient {
             .runner
             .as_mut()
             .ok_or_else(|| CallError::Failed("runner not started".into()))?;
-        let outcome = match write_message(&mut runner.stdin, request) {
+        let sent = write_message(&mut runner.stdin, request);
+        #[cfg(unix)]
+        let sent = sent.and_then(|()| match request {
+            Request::Render { shm: Some(_), .. } => state
+                .shm
+                .as_ref()
+                .expect("sending new mapping")
+                .send_fd(&runner.stdin),
+            _ => Ok(()),
+        });
+        let outcome = match sent {
             Err(e) => Err(format!("the plugin process stopped ({e})")),
             Ok(()) => match runner.replies.recv_timeout(timeout) {
                 Ok(Ok(bytes)) => serde_json::from_slice::<Response>(&bytes)
@@ -571,21 +550,16 @@ impl RunnerClient {
         let mapped = state.runner.as_ref().is_some_and(|r| r.shm_mapped);
         let shm = state.shm.as_mut().expect("created above");
         shm.map[..input.len()].copy_from_slice(input);
-        let spec = (!mapped).then(|| ShmSpec {
-            path: shm.path.clone(),
-            len: shm.map.len(),
-        });
+        let spec = (!mapped).then(|| shm.spec());
         let request = Request::Render {
             frame: frame.clone(),
             shm: spec,
             output_offset,
         };
         let reply = self.exchange(&mut state, &request, RENDER_TIMEOUT)?;
-        if let Some(r) = state.runner.as_mut() {
-            r.shm_mapped = true;
-        }
         match reply {
             Reply::Rendered(out) => {
+                state.runner.as_mut().expect("runner replied").shm_mapped = true;
                 let shm = state.shm.as_ref().expect("created above");
                 output.copy_from_slice(&shm.map[output_offset..output_offset + output.len()]);
                 Ok(out)
