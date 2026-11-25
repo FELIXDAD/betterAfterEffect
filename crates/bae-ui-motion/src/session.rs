@@ -96,6 +96,8 @@ pub struct Session {
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
+    /// The layer the Layer panel shows (opened from the Timeline).
+    pub(crate) layer_panel: Option<PrimPath>,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
