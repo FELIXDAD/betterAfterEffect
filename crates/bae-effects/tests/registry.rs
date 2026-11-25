@@ -19,10 +19,6 @@ fn builtins_register_through_the_plugin_registries() {
     assert_eq!(library.len(), n);
     assert_eq!(defs.iter().count(), n);
     let mut ids = HashSet::new();
-    let simulation: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../docs/reference/ae/effects/simulation.json"
-    ))
-    .unwrap();
     for b in all {
         let def = b.def();
         assert_eq!(def.match_name, b.info.match_name);
@@ -36,34 +32,12 @@ fn builtins_register_through_the_plugin_registries() {
         assert!(b.info.full_id.starts_with("bae.effects/"));
         // Built-ins are not plugin effects: never removed, never "missing".
         assert!(def.plugin.is_none(), "{}", def.match_name);
-        if b.info.category == "Simulation" {
-            // Bundled CC effects keep their product names in the zh-CN host.
-            let entry = simulation["effects"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|entry| entry["matchName"] == def.match_name)
-                .unwrap();
-            assert_eq!(entry["displayName"], b.info.name_zh);
-        } else {
-            // CC effects keep their English names in AE's Chinese UI.
-            let cc = def.match_name.starts_with("CC ");
-            assert!(
-                def.match_name.starts_with("ADBE ")
-                    || cc
-                    || matches!(
-                        def.match_name.as_str(),
-                        "VISINF Grain Implant" | "APC Colorama"
-                    ),
-                "{}",
-                def.match_name
-            );
-            assert!(
-                !b.info.name_zh.is_empty() && (cc || b.info.name_zh != b.info.name),
-                "{}",
-                def.match_name
-            );
-        }
+        assert!(!def.match_name.is_empty());
+        assert!(
+            !b.info.name.is_empty() && !b.info.name_zh.is_empty(),
+            "{}",
+            def.match_name
+        );
         assert_ne!(category_zh(&b.info.category), "其他", "{}", b.info.category);
         assert!(
             b.info.keywords.iter().any(|k| !k.is_ascii()),
@@ -144,112 +118,10 @@ fn prewarm_compiles_every_pipeline() {
     }
 }
 
+#[path = "registry/ae_reference.rs"]
+mod ae_reference;
+
 #[test]
 fn builtin_defs_follow_the_ae_26_reference() {
-    let names = [
-        "ADBE Invert",
-        "ADBE Shift Channels",
-        "ADBE Set Matte3",
-        "ADBE Minimax",
-        "ADBE Simple Choker",
-        "ADBE Black&White",
-        "ADBE Vibrance",
-        "ADBE PhotoFilterPS",
-        "ADBE Color Balance 2",
-        "ADBE Gradient Wipe",
-        "ADBE Displacement Map",
-        "ADBE Compound Blur",
-        "ADBE Texturize",
-        "ADBE Fill",
-        "ADBE Echo",
-        "ADBE Posterize Time",
-        "ADBE Time Displacement",
-        "ADBE Difference",
-        "CC Wide Time",
-        "CC Force Motion Blur",
-        "ADBE Timewarp",
-        "ADBE AutoLevels",
-        "ADBE AutoContrast",
-        "ADBE AutoColor",
-        "ADBE ShadowHighlight",
-    ];
-    let refs = [
-        include_str!("../../../docs/reference/ae/effects/expression-controls.json"),
-        include_str!("../../../docs/reference/ae/effects/channel.json"),
-        include_str!("../../../docs/reference/ae/effects/matte.json"),
-        include_str!("../../../docs/reference/ae/effects/color-correction.json"),
-        include_str!("../../../docs/reference/ae/effects/transition.json"),
-        include_str!("../../../docs/reference/ae/effects/distort.json"),
-        include_str!("../../../docs/reference/ae/effects/blur-and-sharpen.json"),
-        include_str!("../../../docs/reference/ae/effects/stylize.json"),
-        include_str!("../../../docs/reference/ae/effects/generate.json"),
-        include_str!("../../../docs/reference/ae/effects/time.json"),
-    ];
-    let mut count = 0;
-    for text in refs {
-        let data: serde_json::Value = serde_json::from_str(text).unwrap();
-        for reference in data["effects"].as_array().unwrap() {
-            let name = reference["matchName"].as_str().unwrap();
-            let control = data["categorySlug"] == "expression-controls";
-            if !control && !names.contains(&name) {
-                continue;
-            }
-            let fx = bae_effects::get(name).unwrap();
-            assert_eq!(fx.effect().renders_pixels(), !control);
-            assert_eq!(fx.info.name_zh, reference["displayName"].as_str().unwrap());
-            let properties = reference["properties"].as_array().unwrap();
-            let params = fx.def().params.iter().filter(|p| p.match_name.is_some());
-            assert_eq!(params.clone().count(), properties.len() - 1, "{name}");
-            for (p, ae) in params.zip(properties) {
-                assert_eq!(p.match_name.as_deref(), ae["matchName"].as_str(), "{name}");
-                assert_eq!(fx.info.param_name_zh(p.id), ae["name"].as_str(), "{name}");
-                let value = &ae["defaultValue"];
-                let check_vector = |v: &[f64]| {
-                    let reference = value.as_array().unwrap();
-                    assert!(
-                        v.iter()
-                            .copied()
-                            .eq(reference.iter().map(|v| v.as_f64().unwrap()))
-                    );
-                };
-                match &p.default {
-                    Some(bae_model::Value::Bool(v)) => assert_eq!(*v, value.as_i64() == Some(1)),
-                    Some(bae_model::Value::Int(v)) => assert_eq!(Some(*v), value.as_i64()),
-                    Some(bae_model::Value::Float(v)) => assert_eq!(Some(*v), value.as_f64()),
-                    Some(bae_model::Value::Color(v)) => check_vector(v),
-                    Some(bae_model::Value::Vec2(v)) => check_vector(v),
-                    Some(bae_model::Value::Vec3(v)) => check_vector(v),
-                    None if matches!(p.kind, ParamKind::GroupStart | ParamKind::GroupEnd) => {
-                        assert!(value.is_null());
-                    }
-                    None => {
-                        assert!(matches!(p.kind, ParamKind::Layer | ParamKind::Path));
-                        assert!(matches!(value.as_i64(), Some(0 | 1)));
-                    }
-                    other => panic!("{name}: unexpected default {other:?}"),
-                }
-                if let ParamKind::Slider {
-                    valid_min,
-                    valid_max,
-                    ..
-                } = p.kind
-                {
-                    assert_eq!(
-                        (Some(valid_min), Some(valid_max)),
-                        (ae["minValue"].as_f64(), ae["maxValue"].as_f64()),
-                        "{name}"
-                    );
-                }
-                if let ParamKind::Popup { options } = &p.kind {
-                    let ae = ae["dropdownOptions"].as_array().unwrap();
-                    assert_eq!(options.len(), ae.len(), "{name}");
-                    if let Some(zh) = bae_effects::catalog::options_zh(name, p.id) {
-                        assert!(zh.iter().zip(ae).all(|(a, b)| Some(*a) == b.as_str()));
-                    }
-                }
-            }
-            count += 1;
-        }
-    }
-    assert_eq!(count, 33);
+    ae_reference::check();
 }

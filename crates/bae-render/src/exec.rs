@@ -154,13 +154,16 @@ pub(crate) struct Executed {
 struct PoolAllocator<'a> {
     pool: &'a mut TexturePool,
     device: &'a wgpu::Device,
-    format: wgpu::TextureFormat,
 }
 
 impl ImageAllocator for PoolAllocator<'_> {
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
-        self.pool
-            .acquire(self.device, self.format, rect, pixel_scale)
+    fn allocate(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
+        self.pool.acquire(self.device, format, rect, pixel_scale)
     }
 }
 
@@ -284,11 +287,7 @@ pub(crate) fn execute(
                 target
             }
             NodeKind::Source(src) => {
-                let mut alloc = PoolAllocator {
-                    pool,
-                    device,
-                    format,
-                };
+                let mut alloc = PoolAllocator { pool, device };
                 let mut ectx = EncodeContext {
                     gpu,
                     encoder: &mut encoder,
@@ -317,11 +316,7 @@ pub(crate) fn execute(
                 params.history = &fx.history;
                 params.scene = fx.scene.as_deref();
                 params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
-                let mut alloc = PoolAllocator {
-                    pool,
-                    device,
-                    format,
-                };
+                let mut alloc = PoolAllocator { pool, device };
                 let mut ectx = EncodeContext {
                     gpu,
                     encoder: &mut encoder,

@@ -1,29 +1,29 @@
 @compute @workgroup_size(128)
 fn advance_emitter(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= cfg.count {
+    if tid.x >= frame.batch.y {
         return;
     }
-    let id = cfg.first + tid.x;
-    sprites[tid.x] = particle(id, frame.timing.x, current(id, frame.timing.x));
+    let id = frame.batch.x + tid.x;
+    sprites[tid.x] = particle(id, frame.timing.x, at_time(id, frame.timing.x));
 }
 
 @compute @workgroup_size(128)
 fn advance_weather(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= cfg.count {
+    if tid.x >= frame.batch.y {
         return;
     }
-    let id = cfg.first + tid.x;
-    sprites[tid.x] = weather(id, frame.timing.x, current(id, frame.timing.x));
+    let id = frame.batch.x + tid.x;
+    sprites[tid.x] = weather(id, frame.timing.x, at_time(id, frame.timing.x));
 }
 
 @compute @workgroup_size(128)
 fn advance_drizzle(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= cfg.count {
+    if tid.x >= frame.batch.y {
         return;
     }
-    let id = cfg.first + tid.x;
+    let id = frame.batch.x + tid.x;
     let t = frame.timing.x;
-    let s = current(id, t);
+    let s = at_time(id, t);
     let age = clamp((t-s.birth) / life(), 0., 1.);
     let r = max(1., age * f(6) * cfg.size.x * .001);
     sprites[tid.x] = sprite(s.pos.xy, vec2f(r), 0., 11., vec4f(age, f(3) / 360., 0., select(0., 1.-age, s.birth >= 0.)));
@@ -31,10 +31,10 @@ fn advance_drizzle(@builtin(global_invocation_id) tid: vec3u) {
 
 @compute @workgroup_size(128)
 fn advance_tiles(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= cfg.count {
+    if tid.x >= frame.batch.y {
         return;
     }
-    sprites[tid.x] = tiles(cfg.first + tid.x, frame.timing.x);
+    sprites[tid.x] = tiles(frame.batch.x + tid.x, frame.timing.x);
 }
 
 struct Vary {

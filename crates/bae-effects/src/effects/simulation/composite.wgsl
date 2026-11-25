@@ -40,11 +40,7 @@ fn composite(@builtin(global_invocation_id) tid: vec3u) {
                 result = vec4f(fg.rgb + back.rgb, result.a);
             }
             case 4u: {
-                if u.kind == 7u {
-                    result.a = min(1., fg.a + back.a);
-                } else {
-                    result.a = 1.;
-                }
+                result.a = 1.;
             }
             case 5u: {
                 result = vec4f(max(fg.rgb, back.rgb), result.a);

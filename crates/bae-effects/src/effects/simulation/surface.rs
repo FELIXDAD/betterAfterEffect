@@ -14,7 +14,7 @@ pub(super) fn frame(
     maps: &[Option<GpuImage>],
 ) -> UniformWriter {
     let scale = scene.p.p.scale as f32;
-    let mut u = UniformWriter::with_size(224);
+    let mut u = UniformWriter::with_size(240);
     u.f32s(0, &[scene.p.p.time.as_seconds().max(0.) as f32, scale]);
     u.f32s(
         16,
@@ -129,7 +129,6 @@ pub(super) fn composite(
         Kind::Snow => (p.f(26) as f32, if p.popup(25) == 2 { 5 } else { 1 }),
         Kind::Rain => (p.f(16) as f32, if p.popup(15) == 2 { 5 } else { 1 }),
         Kind::Stars => (p.f(6) as f32, 1),
-        Kind::Scatter => (0., p.popup(4)),
         Kind::Bubbles | Kind::Drizzle => (1., 1),
         _ => (0., 1),
     };
