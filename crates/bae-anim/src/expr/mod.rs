@@ -595,6 +595,7 @@ const LOCALS: &[(&str, &str)] = &[
     ("height", "thisLayer.height"),
     ("source", "thisLayer.source"),
     ("transform", "thisLayer.transform"),
+    ("marker", "thisLayer.marker"),
     ("anchorPoint", "thisLayer.anchorPoint"),
     ("position", "thisLayer.position"),
     ("scale", "thisLayer.scale"),
@@ -981,6 +982,35 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 Ok::<_, rquickjs::Error>(out)
             },
         )?,
+    )?;
+
+    h.set(
+        "markers",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32, l: i32| {
+            let comp = comp_or_throw(&ctx, c)?;
+            // `l < 0`: the comp's markers; a layer's are in its time base.
+            let (marks, layer) = if l < 0 {
+                (&comp.markers, None)
+            } else {
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                (&comp.layers[li].markers, Some(&comp.layers[li]))
+            };
+            let out = Array::new(ctx.clone())?;
+            for (i, m) in marks.iter().enumerate() {
+                let comp_time = |t: Time| layer.map_or(t, |l| l.timing.comp_time(t));
+                let o = Object::new(ctx.clone())?;
+                o.set("time", comp_time(m.time).as_seconds())?;
+                o.set("duration", m.duration.as_seconds())?;
+                o.set("comment", m.comment.as_str())?;
+                o.set("chapter", m.chapter.as_str())?;
+                o.set("url", m.url.as_str())?;
+                o.set("frameTarget", m.frame_target.as_str())?;
+                o.set("cuePointName", m.cue_point_name.as_str())?;
+                o.set("protectedRegion", m.protected_region)?;
+                out.set(i, o)?;
+            }
+            Ok::<_, rquickjs::Error>(out)
+        })?,
     )?;
 
     h.set(
