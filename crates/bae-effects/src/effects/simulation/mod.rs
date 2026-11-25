@@ -2,7 +2,7 @@
 mod catalog;
 mod engine;
 pub(crate) mod projection;
-pub(crate) use engine::Engine;
+pub(crate) use engine::{Engine, prewarm};
 mod surface;
 
 use crate::{Builtin, EffectTarget, TargetEffect, common, gpu::UniformWriter, params::Params};
