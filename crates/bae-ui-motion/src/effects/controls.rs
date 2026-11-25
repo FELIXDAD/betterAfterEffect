@@ -327,6 +327,12 @@ fn param_row(
             ui.colored_label(color::TEXT_DISABLED, tr("Not available in BAE yet"));
         } else {
             ui.add_enabled_ui(!disabled, |ui| {
+                if def.match_name=="ADBE MESH WARP" && param.id==4 {
+                    let mut number=|id:u32|common::current_value(eval.get(cx.resources),stage,effect,&param_attr(id),now)
+                        .or_else(||def.param(id).and_then(|p|p.default.clone())).and_then(|v|v.as_f64()).unwrap_or(0.);
+                    edit=super::warp_grid::edit(ui,value.as_ref(),[number(2) as usize,number(1) as usize]);
+                    return;
+                }
                 edit = value_control(
                     ui,
                     cx,
