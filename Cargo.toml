@@ -256,6 +256,9 @@ opt-level = "s"
 opt-level = "s"
 [profile.release.package.bae-motion]
 opt-level = "s"
+# Scripts: one run per user action, never in the frame path.
+[profile.release.package.bae-script]
+opt-level = "s"
 # Effects: the CPU side only plans passes and writes uniforms (the GPU runs them).
 [profile.release.package.bae-effects]
 opt-level = "s"
