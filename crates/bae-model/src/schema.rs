@@ -306,6 +306,16 @@ const LAYER: &[AttrDef] = &[
     prim_ref("text:path")
         .kinds(&["text"])
         .doc("Mask used as the text path."),
+    // AE's Path Options (Text > Path Options) of text on a path.
+    boolean("text:reverse_path", false).kinds(&["text"]),
+    boolean("text:perpendicular_to_path", true).kinds(&["text"]),
+    boolean("text:force_alignment", false).kinds(&["text"]),
+    float("text:first_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path before the text."),
+    float("text:last_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path after the text."),
     choice("camera:type", "two_node", &["one_node", "two_node"]).kinds(&["camera"]),
     float("camera:zoom", 1777.8)
         .kinds(&["camera"])

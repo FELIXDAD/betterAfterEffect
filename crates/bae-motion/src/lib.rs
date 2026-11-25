@@ -78,6 +78,7 @@ pub mod shape;
 pub mod solid;
 pub mod text;
 pub mod text_animators;
+pub mod text_path;
 mod util;
 
 use std::sync::Arc;
@@ -111,6 +112,7 @@ pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
+pub use text_path::SetTextPath;
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -164,6 +166,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(AnimateText),
         r.register(AddTextSelector),
         r.register(RemoveTextAnimators),
+        r.register(SetTextPath),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

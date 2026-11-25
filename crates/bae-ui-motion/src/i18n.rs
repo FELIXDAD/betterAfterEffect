@@ -38,6 +38,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Delete Vertex", "删除顶点"),
     ("New Text", "新建文本"),
     ("Edit Text", "编辑文本"),
+    ("Change Path", "更改路径"),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
@@ -529,6 +530,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Opacity", "不透明度"),
     ("Point of Interest", "目标点"),
     ("Source Text", "源文本"),
+    ("Path Options", "路径选项"),
+    ("Reverse Path", "反转路径"),
+    ("Perpendicular To Path", "垂直于路径"),
+    ("Force Alignment", "强制对齐"),
+    ("First Margin", "首字边距"),
+    ("Last Margin", "末字边距"),
     ("Roundness", "圆度"),
     ("Points", "点"),
     ("Inner Radius", "内径"),
