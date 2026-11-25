@@ -12,13 +12,59 @@ struct Definition {
     reverse: bool,
     create: fn() -> Box<dyn Processor>,
 }
+mod delay;
+mod eq;
+mod filter;
+mod reverb;
+mod reverse;
 mod stereo;
-const DEFINITIONS: &[Definition] = &[Definition {
-    name: "ADBE Aud Stereo Mixer",
-    defaults: &[100.0, 100.0, -100.0, 100.0, 0.0],
-    reverse: false,
-    create: || Box::new(stereo::Main),
-}];
+mod svf;
+const DEFINITIONS: &[Definition] = &[
+    Definition {
+        name: "ADBE Aud Stereo Mixer",
+        defaults: &[100.0, 100.0, -100.0, 100.0, 0.0],
+        reverse: false,
+        create: || Box::new(stereo::Main),
+    },
+    Definition {
+        name: "ADBE Aud Reverse",
+        defaults: &[0.0],
+        reverse: true,
+        create: || Box::new(reverse::Main),
+    },
+    Definition {
+        name: "ADBE Aud HiLo",
+        defaults: &[1.0, 2000.0, 0.0, 100.0],
+        reverse: false,
+        create: || Box::new(filter::Main::default()),
+    },
+    Definition {
+        name: "ADBE Param EQ",
+        defaults: &[
+            0.0, 1.0, 1000.0, 20.0, 50.0, 0.0, 5000.0, 20.0, 50.0, 0.0, 10000.0, 20.0, 50.0,
+        ],
+        reverse: false,
+        create: || Box::new(eq::Main::default()),
+    },
+    Definition {
+        name: "ADBE Aud BT",
+        defaults: &[0.0, 0.0],
+        reverse: false,
+        create: || Box::new(eq::Shelves::default()),
+    },
+    Definition {
+        name: "ADBE Aud Delay",
+        defaults: &[500.0, 50.0, 50.0, 75.0, 75.0],
+        reverse: false,
+        create: || Box::new(delay::Main::default()),
+    },
+    Definition {
+        name: "ADBE Aud Reverb",
+        defaults: &[100.0, 75.0, 25.0, 10.0, 90.0, 10.0],
+        reverse: false,
+        create: || Box::new(reverb::Main::default()),
+    },
+];
 
 fn number(value: &Value) -> Option<f64> {
     value

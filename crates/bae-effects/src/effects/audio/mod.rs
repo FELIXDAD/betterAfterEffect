@@ -14,7 +14,20 @@ fn audio_control(slug: &str, zh: &str, builder: DefBuilder, static_params: &[u32
     rust_builtin((Arc::new(Control(def)), names), slug, zh, &["audio", zh])
 }
 
+mod delay;
+mod eq;
+mod filter;
+mod reverb;
+mod reverse;
 mod stereo;
 pub(crate) fn register(registry: &mut crate::Registry) {
-    registry.effects.extend([stereo::effect()]);
+    registry.effects.extend([
+        stereo::effect(),
+        reverse::effect(),
+        filter::effect(),
+        eq::effect(),
+        delay::effect(),
+        reverb::effect(),
+        eq::alias(),
+    ]);
 }
