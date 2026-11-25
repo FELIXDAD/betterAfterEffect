@@ -677,6 +677,9 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let Some(info) = common::active_comp(stage, session) else {
         return true;
     };
+    if id == ids::PLAY {
+        session.retry_audio();
+    }
     let mut s = session.lock();
     let now = s.time(&info.path);
     let frame = info.frame_duration();
@@ -687,7 +690,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if s.is_playing() {
                 s.stop();
             } else {
-                s.preview(stage, &info);
+                s.preview(cx, &info);
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,

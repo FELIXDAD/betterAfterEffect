@@ -1,4 +1,7 @@
 //! Stereo composition mix, shared by the preview device and file encoders.
+mod sinc;
+use sinc::Sinc;
+
 use bae_anim::{Curve, CurveKind, LayerTiming};
 use bae_model::{PrimPath, Stage, Time, Value};
 use std::path::PathBuf;
@@ -21,6 +24,7 @@ pub fn layer_file(stage: &Stage, layer: &PrimPath) -> Option<PathBuf> {
 struct Track {
     file: PathBuf,
     source: Option<FileAudio>,
+    kernel: Option<Sinc>,
     timing: LayerTiming,
     levels: [f64; 2],
     automation: Option<Curve>,
@@ -69,6 +73,7 @@ impl AudioMix {
                 Some(Track {
                     file,
                     source: None,
+                    kernel: None,
                     timing: bae_anim::layer_timing(&view, duration),
                     levels,
                     automation,
@@ -77,6 +82,25 @@ impl AudioMix {
             })
             .collect();
         Self { tracks }
+    }
+
+    /// Probe enabled sources on the preview producer, before the first seek.
+    pub(crate) fn prepare_sources(&mut self, rate: u32) {
+        for track in &mut self.tracks {
+            if let Ok(mut decoder) = FileAudio::open(&track.file) {
+                let source_rate = f64::from(decoder.info().sample_rate);
+                let step = source_step(track.timing, source_rate, rate);
+                if (step.abs() - 1.0).abs() > 1e-9 {
+                    track.kernel = Some(Sinc::new((1.0 / step.abs()).min(1.0)));
+                }
+                let at = track
+                    .timing
+                    .layer_time(track.timing.in_point.min(track.timing.out_point));
+                let first = (at.as_seconds() * source_rate).max(0.0) as u64;
+                let _ = decoder.read_window(first, 1);
+                track.source = Some(decoder);
+            }
+        }
     }
 
     /// Whether the composition contains at least one enabled audio source.
@@ -122,58 +146,77 @@ impl Track {
                 .layer_time(sample_to_time(start + i as i64, rate))
         };
         self.effects.begin(start + a as i64, start + b as i64, rate);
-        let reversed = self.effects.reverse;
-        let mirror = first_at(self.timing.in_point) + first_at(self.timing.out_point) - 1;
-        let pos = |i| {
-            if reversed {
-                self.timing
-                    .layer_time(sample_to_time(mirror - start - i as i64, rate))
-                    .as_seconds()
-                    * src_rate
-            } else {
-                layer_time(i).as_seconds() * src_rate
-            }
-        };
-        let head = pos(a);
-        let tail = pos(b - 1);
-        let base = head.min(tail).max(0.0).floor() as u64;
-        let last = head.max(tail).max(0.0).floor() as u64 + 2;
-        let data = if head.max(tail) < 0.0 || source.info().frame_count.is_some_and(|n| base >= n) {
-            crate::AudioBuffer::default()
+        let step = source_step(self.timing, src_rate, rate);
+        let (head, step) = if self.effects.reverse {
+            let mirror = first_at(self.timing.in_point) + first_at(self.timing.out_point) - 1;
+            let time = sample_to_time(mirror - start - a as i64, rate);
+            (self.timing.layer_time(time).as_seconds() * src_rate, -step)
         } else {
-            source.read(base, last - base)?
+            (layer_time(a).as_seconds() * src_rate, step)
         };
-        let channels = usize::from(data.channels);
-        let frames = data.frames();
+        let tail = head + (b - a - 1) as f64 * step;
+        let aligned = (step.abs() - 1.0).abs() < 1e-9 && (head - head.round()).abs() < 1e-5;
+        let kernel = if aligned {
+            None
+        } else {
+            let cutoff = (1.0 / step.abs()).min(1.0);
+            if self.kernel.as_ref().is_none_or(|k| k.cutoff != cutoff) {
+                self.kernel = Some(Sinc::new(cutoff));
+            }
+            self.kernel.as_ref()
+        };
+        let radius = kernel.map_or(0, |k| k.radius as u64);
+        let base = (head.min(tail).max(0.0).floor() as u64).saturating_sub(radius);
+        let last = head.max(tail).ceil() as u64 + radius + 1;
+        let channels = usize::from(source.info().channels);
+        let data = if head.max(tail) < 0.0 || source.info().frame_count.is_some_and(|n| base >= n) {
+            &[][..]
+        } else {
+            source.read_window(base, last - base)?
+        };
+        let frames = data.len() / channels;
         let static_gain = self.levels.map(db_gain);
-        for (i, dst) in (a..b).zip(&mut out[a..b]) {
-            let p = pos(i) - base as f64;
-            let sample = if (0.0..frames as f64).contains(&p) {
-                let j = p.floor() as usize;
-                std::array::from_fn(|c: usize| {
-                    let ch = c.min(channels - 1);
-                    let left = data.samples[j * channels + ch];
-                    let right = data.samples[(j + 1).min(frames - 1) * channels + ch];
-                    left + (right - left) * p.fract() as f32
-                })
+        let gain_at = |i| match self
+            .automation
+            .as_ref()
+            .map(|curve| curve.sample(layer_time(i)))
+        {
+            Some(Value::Vec2(db)) => db.map(db_gain),
+            _ => static_gain,
+        };
+        // Evaluate keyframes at short block boundaries, then ramp in linear gain.
+        for offset in (a..b).step_by(32) {
+            let end = (offset + 32).min(b);
+            let from = gain_at(offset);
+            let to = if self.automation.is_some() {
+                gain_at(end)
             } else {
-                [0.0; 2]
+                from
             };
-            let sample = self.effects.process(sample, layer_time(i), rate);
-            let gain = match self
-                .automation
-                .as_ref()
-                .map(|curve| curve.sample(layer_time(i)))
-            {
-                Some(Value::Vec2(db)) => db.map(db_gain),
-                _ => static_gain,
-            };
-            for c in 0..2 {
-                dst[c] += sample[c] * gain[c];
+            for (i, dst) in out[offset..end].iter_mut().enumerate() {
+                let pos = head + (offset + i - a) as f64 * step - base as f64;
+                let sample = if frames == 0 || pos < -1e-5 || pos >= frames as f64 {
+                    [0.0; 2]
+                } else if let Some(k) = kernel {
+                    k.sample(data, channels, pos.max(0.0))
+                } else {
+                    let frame = (pos.round() as usize).min(frames - 1) * channels;
+                    [data[frame], data[frame + 1.min(channels - 1)]]
+                };
+                let sample = self.effects.process(sample, layer_time(offset + i), rate);
+                let t = i as f32 / (end - offset) as f32;
+                for c in 0..2 {
+                    dst[c] += sample[c] * (from[c] + (to[c] - from[c]) * t);
+                }
             }
         }
         Ok(())
     }
+}
+
+fn source_step(timing: LayerTiming, source_rate: f64, output_rate: u32) -> f64 {
+    let second = timing.start_time + Time::from_seconds(1.0);
+    timing.layer_time(second).as_seconds() * source_rate / f64::from(output_rate)
 }
 
 fn db_gain(db: f64) -> f32 {
