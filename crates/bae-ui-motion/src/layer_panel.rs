@@ -83,7 +83,7 @@ pub(crate) fn alone(
     l.opacity = 1.0;
     l.visible = true;
     l.active = true;
-    l.blend_mode = "normal".to_owned();
+    l.blend_mode = "normal".into();
     l.track_matte = Default::default();
     l.track_matte_layer = None;
     l.switches.three_d = false;

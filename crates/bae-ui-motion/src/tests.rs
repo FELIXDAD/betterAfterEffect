@@ -1891,6 +1891,55 @@ impl bae_ui::files::FilePicker for Picker {
 }
 
 #[test]
+fn double_l_reveals_the_imported_audio_layer_waveform() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tone.wav");
+    // One mono 16-bit PCM sample at 8 kHz.
+    std::fs::write(&file,b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\xff\x3f").unwrap();
+    let probed = crate::import::probe(std::slice::from_ref(&file), &Default::default());
+    h.run("item.import", json!({"files":probed.files}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "tone.wav")
+        .unwrap();
+    let layer = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp":comp,"kind":"footage","source":asset}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        bae_media::audio::layer_file(&h.stage, &layer)
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        file.canonicalize().unwrap()
+    );
+    h.session().lock().selected_layers = vec![layer.clone()];
+    let mut panel = TimelinePanel::default();
+    for expected in ["audio:levels", "audio:waveform"] {
+        h.action(
+            &mut panel,
+            Invocation::with_params(
+                crate::actions::ids::REVEAL,
+                json!({"what":"audio:levels","add":false}),
+            ),
+        );
+        assert_eq!(
+            h.session().lock().reveal.get(&layer),
+            Some(&crate::session::Reveal::Attrs(vec![expected.into()]))
+        );
+    }
+}
+
+#[test]
 fn import_file_and_files_dropped_on_the_project_panel() {
     let dir = import_fixture("ui");
     let mut h = Harness::new();
@@ -2457,4 +2506,37 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     );
     h.frame("composition", &mut viewer, Vec::new());
     assert!(h.session().lock().expr_errors.is_empty());
+}
+
+/// The Paint and Brushes panels edit the next stroke's settings; Clone Options
+/// show with the Clone Stamp, Erase with the Eraser.
+#[test]
+fn paint_and_brushes_panels_show_for_each_paint_tool() {
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    h.session().lock().open_comp(&comp);
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    for tool in [
+        crate::tools::Tool::Brush,
+        crate::tools::Tool::CloneStamp,
+        crate::tools::Tool::Eraser,
+    ] {
+        tools.lock().set(tool);
+        h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
+        h.frame(
+            "brushes",
+            &mut crate::paint_panels::BrushesPanel,
+            Vec::new(),
+        );
+    }
+    let p = tools.lock().options.paint.clone();
+    assert_eq!(
+        (p.opacity, p.diameter, p.duration.as_str()),
+        (100.0, 21.0, "constant")
+    );
 }
