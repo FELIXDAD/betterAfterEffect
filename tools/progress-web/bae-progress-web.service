@@ -1,0 +1,21 @@
+[Unit]
+Description=betterAfterEffects progress board
+After=network.target
+
+[Service]
+DynamicUser=yes
+StateDirectory=bae-progress-web
+StateDirectoryMode=0700
+Environment=BAE_BOARD_CONFIG=/var/lib/bae-progress-web
+WorkingDirectory=/opt/bae-progress-web
+ExecStart=/usr/bin/python3 /opt/bae-progress-web/server.py --host 0.0.0.0 --port 8787
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
