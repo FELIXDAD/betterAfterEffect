@@ -42,7 +42,7 @@ fn set_switch(cx: &mut PanelContext<'_>, paths: impl serde::Serialize, attr: &st
 
 /// Whether `layer` has the `attr` switch and can change it.
 fn switch_applies(stage: &Stage, layer: &PrimPath, attr: &str) -> bool {
-    if attr != "locked" && query::is_locked(stage, layer) {
+    if !bae_model::editable_on_locked_layer(attr) && query::is_locked(stage, layer) {
         return false;
     }
     match attr {
@@ -72,7 +72,7 @@ impl TimelinePanel {
         locked: bool,
     ) {
         let resp = ui.interact(rect, id, Sense::click_and_drag());
-        if !locked || attr == "locked" {
+        if !locked || bae_model::editable_on_locked_layer(attr) {
             if input.press
                 && resp.is_pointer_button_down_on()
                 && let Some(pos) = input.pos

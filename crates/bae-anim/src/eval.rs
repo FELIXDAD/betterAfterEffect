@@ -16,7 +16,8 @@ use crate::curve::Curve;
 use crate::error::EvalError;
 use crate::evaluated::{
     AssetInfo, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer, EvaluatedMask,
-    EvaluatedPrim, LayerSource, LayerSwitches, LightFalloff, LightState, LightType, TrackMatte,
+    EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff, LightState, LightType,
+    TrackMatte,
 };
 use crate::expr;
 use crate::schema::{
@@ -246,6 +247,7 @@ pub(crate) struct CompiledComp {
     pub(crate) duration: Time,
     pub(crate) bg_color: [f64; 4],
     pub(crate) motion_blur: MotionBlur,
+    pub(crate) frame_blending: bool,
     pub(crate) layers: Vec<CompiledLayer>,
     /// Prims whose changes invalidate this compiled comp (the comp and its sources).
     pub(crate) deps: Vec<PrimPath>,
@@ -489,6 +491,7 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         duration,
         bg_color,
         motion_blur,
+        frame_blending: setting_bool(&view, ct, c::FRAME_BLENDING),
         layers,
         deps,
     })
@@ -518,6 +521,11 @@ fn compile_layer(
         motion_blur: setting_bool(v, lt, l::MOTION_BLUR),
         collapse_transformation: setting_bool(v, lt, l::COLLAPSE_TRANSFORMATION),
         preserve_transparency: setting_bool(v, lt, l::PRESERVE_TRANSPARENCY),
+        frame_blending: match setting_str(v, lt, l::FRAME_BLENDING).as_deref() {
+            Some("frame_mix") => FrameBlending::FrameMix,
+            Some("pixel_motion") => FrameBlending::PixelMotion,
+            _ => FrameBlending::Off,
+        },
     };
 
     let source = match setting_ref(v, l::SOURCE) {
@@ -840,10 +848,10 @@ impl CompiledComp {
         js: Option<&Ctx<'_>>,
     ) -> EvaluatedComp {
         let n = self.layers.len();
-        let has_solo = self
+        let video_solo = self
             .layers
             .iter()
-            .any(|l| l.switches.solo && l.switches.enabled);
+            .any(|l| l.switches.solo && l.switches.enabled && l.kind != LayerKind::Audio);
 
         // Expressions: memoise them first so long chains stay shallow (see warm_up).
         if js.is_some() && self.has_expressions {
@@ -889,7 +897,7 @@ impl CompiledComp {
                 };
                 let active = layer.timing.is_active(time);
                 let visible =
-                    layer.switches.enabled && active && (!has_solo || layer.switches.solo);
+                    layer.switches.enabled && active && (!video_solo || layer.switches.solo);
                 let tf = sample_transform(layer, &cx);
                 EvaluatedLayer {
                     path: layer.path.clone(),
@@ -910,6 +918,10 @@ impl CompiledComp {
                     } else {
                         Vec::new()
                     },
+                    frame_blend_span: (self.frame_blending
+                        && layer.switches.frame_blending != FrameBlending::Off
+                        && matches!(layer.source, CompiledSource::Asset(..)))
+                    .then(|| source_span(layer, &cx, self.frame_rate.frame_duration())),
                     parent: layer.parent,
                     opacity: (tf.opacity / 100.0).clamp(0.0, 1.0),
                     local_matrix: DMat4::IDENTITY,
@@ -1024,6 +1036,7 @@ impl CompiledComp {
             duration: self.duration,
             bg_color: self.bg_color,
             motion_blur: self.motion_blur,
+            frame_blending: self.frame_blending,
             layers: out,
             camera,
             errors: Vec::new(),
@@ -1229,6 +1242,22 @@ fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>, tick: Time) -> Opt
     };
     let d = pos(b) - pos(a);
     (d.length_squared() > 0.0).then_some(d)
+}
+
+/// The source time one comp frame `frame` spans around now: the time remap's
+/// change over the frame centred here, or the frame scaled by the stretch.
+fn source_span(layer: &CompiledLayer, cx: &Cx<'_, '_>, frame: Time) -> Time {
+    let Some(p) = &layer.time_remap else {
+        let stretch = layer.timing.stretch.abs().max(1.0);
+        return Time((frame.0 as f64 * 100.0 / stretch).round() as i64);
+    };
+    let at =
+        |ct: Time| match p.sample(&cx.at_layer_time(layer.timing.layer_time(ct), &layer.timing)) {
+            Value::Time(t) => t,
+            other => Time::from_seconds(num(&other)),
+        };
+    let half = Time(frame.0 / 2);
+    Time((at(cx.ct + half) - at(cx.ct - half)).0.abs())
 }
 
 fn sample_source(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> LayerSource {
