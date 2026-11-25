@@ -423,10 +423,12 @@ impl TimelinePanel {
             && path == &info.path
             && *revision == cx.stage.revision()
         {
+            // AE: green segments directly under the work area bar, above the
+            // ruler ticks, one per cached run of frames (AE-UI-064).
             for span in spans {
                 p.hline(
                     axis.x(span.start)..=axis.x(span.end),
-                    ruler.bottom() - 1.5,
+                    wa_top + 8.0 + 2.0,
                     Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
                 );
             }
