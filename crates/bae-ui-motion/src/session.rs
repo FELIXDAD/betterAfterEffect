@@ -92,6 +92,10 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// Each comp's 3D views (View ▸ Switch 3D View).
+    pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
+    /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
+    pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
