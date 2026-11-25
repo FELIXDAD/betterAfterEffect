@@ -218,7 +218,9 @@ pub fn unpack(value: &Value) -> Vec<Stroke> {
                 _ => Erase::LayerAndPaint,
             },
             points: v[i + HEADER..end]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| DVec2::new(c[0], c[1]))
                 .collect(),
             color: [h[3], h[4], h[5], h[6]].map(|c| c as f32),
