@@ -231,6 +231,7 @@ impl AnimEvaluator {
         out.time = l.layer_time;
         out.start_time = l.timing.start_time;
         out.time_scale = l.timing.stretch_percent() / 100.;
+        out.in_point = l.timing.in_point.min(l.timing.out_point);
         out.active = l.active && guide_ok;
         out.visible = l.visible;
         out.adjustment = l.switches.adjustment || l.kind == LayerKind::Adjustment;

@@ -204,6 +204,7 @@ mod tests {
             time: t(10.),
             comp_time: t(10.),
             layer_start_time: Time::ZERO,
+            layer_in: Time::ZERO,
             layer_time_scale: 1.,
             scale: 1.,
             layer_bounds: crate::IRect::from_size(64, 64),

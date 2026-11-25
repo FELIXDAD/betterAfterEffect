@@ -196,7 +196,7 @@ impl Scene<'_> {
                 }
             }
         }
-        let samples = self.p.p.history;
+        let samples = self.p.p.parameter_samples;
         u.u32(history_offset, samples.len().min(64) as u32);
         for (index, sample) in samples.iter().take(64).enumerate() {
             let value = |id| sample.values.iter().find(|(k, _)| *k == id).map(|(_, v)| v);

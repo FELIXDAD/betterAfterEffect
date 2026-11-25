@@ -54,7 +54,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use bae_model::{PrimPath, Time};
-use glam::{DAffine2, DVec2};
+use glam::{DAffine2, DMat4, DVec2};
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::blend::{BlendMode, TrackMatteMode};
@@ -102,6 +102,8 @@ pub struct RenderGraph {
     /// An effect reads another time of the comp: the frame depends on more than
     /// its own evaluated comp (not frame-cached).
     pub time_dependent: bool,
+    /// A layer source was still warming up and is missing (not frame-cached).
+    pub incomplete: bool,
     /// The top-level layer each node was planned for, by node index (`None`:
     /// the comp itself). Per-layer render times add up their nodes.
     pub owners: Vec<Option<PrimPath>>,
@@ -355,20 +357,25 @@ pub struct EffectNode {
     pub effect: Arc<dyn Effect>,
     /// Evaluated parameters.
     pub instance: RenderEffect,
+    /// Composition scene when requested.
+    pub scene: Option<Box<crate::effect::EffectScene>>,
     /// Frame context for [`EffectParams`] (time, scale, bounds, rate, shutter …).
     pub frame: EffectFrame,
-    /// Samples of animated parameters used by the simulation.
-    pub history: Box<[crate::effect::ParameterSample]>,
-    /// Integrated scalar curves shared with the animation evaluator.
-    pub tracks: Vec<(u32, Arc<crate::effect::ScalarTrack>)>,
-    /// Scene inputs used by camera-aware effects.
-    pub scene: Option<Box<crate::effect::EffectScene>>,
     /// Input node.
     pub input: NodeId,
     /// Layer images the effect reads ([`Effect::layer_dependencies`]).
     pub layers: Vec<(LayerDependency, NodeId)>,
     /// Mask coverage images it reads ([`Effect::mask_dependencies`]).
     pub masks: Vec<(MaskSelect, NodeId)>,
+    /// Raw mask paths and historical parameters, for effects that read them.
+    pub(crate) samples: Option<Box<EffectSamples>>,
+}
+
+pub(crate) struct EffectSamples {
+    pub parameter_samples: Vec<crate::effect::ParameterSample>,
+    pub tracks: Vec<(u32, Arc<crate::effect::ScalarTrack>)>,
+    pub paths: Vec<RenderMask>,
+    pub history: Vec<(Time, RenderEffect)>,
 }
 
 /// The frame context of an effect call, stored per effect node (everything in
@@ -381,6 +388,8 @@ pub struct EffectFrame {
     pub comp_time: Time,
     /// Composition time corresponding to zero on the layer clock.
     pub layer_start_time: Time,
+    /// Comp time when the layer first becomes active.
+    pub layer_in: Time,
     /// Comp-time seconds per layer-time second.
     pub layer_time_scale: f64,
     /// Resolution scale.
@@ -413,6 +422,7 @@ impl EffectFrame {
         EffectParams {
             time: self.time,
             comp_time: self.comp_time,
+            layer_in: self.layer_in,
             layer_time_scale: self.layer_time_scale,
             scale: self.scale,
             layer_bounds: self.layer_bounds,
@@ -495,6 +505,24 @@ pub trait CompFrames {
 
     /// `comp` evaluated at comp time `time` (`None`: not available).
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError>;
+
+    /// Evaluated parameters of one effect at a comp time.
+    fn effect_at(
+        &mut self,
+        comp: &PrimPath,
+        layer: &PrimPath,
+        effect: &PrimPath,
+        time: Time,
+    ) -> Result<Option<RenderEffect>, RenderError> {
+        Ok(self.comp_at(comp, time)?.and_then(|comp| {
+            comp.layers
+                .into_iter()
+                .find(|l| l.path == *layer)?
+                .effects
+                .into_iter()
+                .find(|fx| fx.path == *effect)
+        }))
+    }
 }
 
 /// Builds the graph for `comp` under `request`.
@@ -542,6 +570,7 @@ pub fn build_with(
         frames,
         resolving: Vec::new(),
         time_dependent: false,
+        incomplete: false,
         owner: None,
         owners: Vec::new(),
     };
@@ -552,6 +581,7 @@ pub fn build_with(
         output,
         warnings: builder.warnings,
         time_dependent: builder.time_dependent,
+        incomplete: builder.incomplete,
         owners: builder.owners,
     })
 }
@@ -584,6 +614,7 @@ struct Builder<'a, 'f> {
     /// Layers whose effects are being planned (cycle detection of layer inputs).
     resolving: Vec<PrimPath>,
     time_dependent: bool,
+    incomplete: bool,
     /// The top-level layer being planned (owner of the nodes pushed now).
     owner: Option<PrimPath>,
     owners: Vec<Option<PrimPath>>,
@@ -848,6 +879,7 @@ impl Builder<'_, '_> {
             comp_time: comp.time,
             layer_start_time: layer.start_time,
             layer_time_scale: layer.time_scale,
+            layer_in: layer.in_point,
             scale: 1.0 / scale,
             layer_bounds: content_rect.round_out(),
             frame_rate: comp.frame_rate,
@@ -973,7 +1005,7 @@ impl Builder<'_, '_> {
                 roi = bounds_chain[i + 1];
                 rois[i + 1] = roi;
             }
-            roi = effect.input_roi(&params, roi).intersect(&bounds_chain[i]);
+            roi = effect.required_input(&params, roi, bounds_chain[i]);
             rois[i] = roi;
         }
 
@@ -1503,6 +1535,7 @@ impl Builder<'_, '_> {
             comp_time: comp.time,
             layer_start_time: layer.start_time,
             layer_time_scale: layer.time_scale,
+            layer_in: layer.in_point,
             scale: 1.0 / scale,
             layer_bounds: comp_px.round_out(),
             frame_rate: comp.frame_rate,
@@ -1519,10 +1552,7 @@ impl Builder<'_, '_> {
             if effects[i].0.full_surface() {
                 rois[i + 1] = domain;
             }
-            rois[i] = effects[i]
-                .0
-                .input_roi(&params, rois[i + 1])
-                .intersect(&domain);
+            rois[i] = effects[i].0.required_input(&params, rois[i + 1], domain);
         }
         let base_rect = rois[0].union(&canvas).intersect(&domain);
 
@@ -1654,10 +1684,33 @@ impl Builder<'_, '_> {
         }
         rect.hash(&mut h);
         let params = frame.params(&instance);
-        let scene = (effect.uses_scene(&params)
-            && (comp.camera.is_some() || !comp.lights.is_empty()))
-        .then(|| {
-            let light = comp
+        let scene = effect.uses_scene(&params).then(|| {
+            let world = layer.matrix_3d.unwrap_or_else(|| {
+                let m = layer.transform;
+                DMat4::from_cols(
+                    m.matrix2.x_axis.extend(0.).extend(0.),
+                    m.matrix2.y_axis.extend(0.).extend(0.),
+                    glam::DVec4::Z,
+                    m.translation.extend(0.).extend(1.),
+                )
+            });
+            let projection = comp
+                .view_camera()
+                .plane_homography(&world, DVec2::new(comp.width.into(), comp.height.into()));
+            let light = comp.lights.first().map(|light| {
+                let local = world
+                    .inverse()
+                    .transform_point3(light.position())
+                    .to_array();
+                let color = light.color.map(|v| v * light.intensity * 0.01);
+                (local, color)
+            });
+            projection.to_cols_array().map(f64::to_bits).hash(&mut h);
+            if let Some((position, color)) = light {
+                position.map(f64::to_bits).hash(&mut h);
+                color.map(f32::to_bits).hash(&mut h);
+            }
+            let layer_light = comp
                 .lights
                 .iter()
                 .find(|light| {
@@ -1674,18 +1727,20 @@ impl Builder<'_, '_> {
                 v.to_bits().hash(&mut h);
             }
             crate::input::hash_camera(&comp.camera, &mut h);
-            if let Some(light) = &light {
+            if let Some(light) = &layer_light {
                 crate::input::hash_light(light, &mut h);
             }
             Box::new(crate::effect::EffectScene {
-                camera: comp.camera,
+                projection,
                 light,
+                camera: comp.camera,
                 size: [comp.width, comp.height],
                 placement: layer.transform,
+                layer_light,
             })
         });
         let mut tracks = Vec::new();
-        let mut history = Vec::new();
+        let mut parameter_samples = Vec::new();
         if let Some(frames) = self.frames.as_mut() {
             for &id in effect.integrated_parameters() {
                 if let Some(track) = frames.scalar_track(&instance.path, id, &frame) {
@@ -1699,8 +1754,9 @@ impl Builder<'_, '_> {
             };
             if frames.animated_controls(&instance.path, effect.parameter_ids()) {
                 let times = effect.parameter_times(&params);
-                history = frames.parameters_at(&instance, effect.parameter_ids(), &frame, &times);
-                for sample in &history {
+                parameter_samples =
+                    frames.parameters_at(&instance, effect.parameter_ids(), &frame, &times);
+                for sample in &parameter_samples {
                     sample.time.hash(&mut h);
                     for (id, value) in &sample.values {
                         id.hash(&mut h);
@@ -1708,10 +1764,10 @@ impl Builder<'_, '_> {
                     }
                 }
             }
-            self.time_dependent |= !history.is_empty() || !tracks.is_empty();
+            self.time_dependent |= !parameter_samples.is_empty() || !tracks.is_empty();
         }
         let params = EffectParams {
-            history: &history,
+            parameter_samples: &parameter_samples,
             tracks: &tracks,
             ..params
         };
@@ -1731,18 +1787,61 @@ impl Builder<'_, '_> {
                 masks.push((select, node));
             }
         }
+        let paths: Vec<_> = match effect.path_dependencies(&params) {
+            Some(MaskSelect::All) => layer.masks.clone(),
+            Some(MaskSelect::One(path)) => layer
+                .masks
+                .iter()
+                .filter(|mask| mask.path == path)
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        for mask in &paths {
+            mask.hash_into(&mut h);
+        }
+        let mut history = Vec::new();
+        for time in effect.parameter_sample_times(&params) {
+            let sample = if time == comp.time {
+                Some(instance.clone())
+            } else {
+                self.time_dependent = true;
+                match self.frames.as_mut() {
+                    Some(frames) => {
+                        frames.effect_at(&comp.path, &layer.path, &instance.path, time)?
+                    }
+                    None => None,
+                }
+            };
+            if let Some(sample) = sample {
+                time.hash(&mut h);
+                sample.hash_into(&mut h);
+                history.push((time, sample));
+            }
+        }
+        let samples = (!paths.is_empty()
+            || !history.is_empty()
+            || !parameter_samples.is_empty()
+            || !tracks.is_empty())
+        .then(|| {
+            Box::new(EffectSamples {
+                paths,
+                history,
+                parameter_samples,
+                tracks,
+            })
+        });
         Ok(self.push(Node {
             kind: NodeKind::Effect(Box::new(EffectNode {
+                scene,
                 layer: layer.path.clone(),
                 effect,
                 instance,
                 frame,
-                history: history.into_boxed_slice(),
-                tracks,
-                scene,
                 input,
                 layers,
                 masks,
+                samples,
             })),
             rect,
             pixel_scale: scale,
@@ -1863,6 +1962,7 @@ impl Builder<'_, '_> {
                 comp_time: comp.time,
                 layer_start_time: layer.start_time,
                 layer_time_scale: layer.time_scale,
+                layer_in: layer.in_point,
                 scale: 1.0 / scale,
                 layer_bounds: content_rect.round_out(),
                 frame_rate: comp.frame_rate,
@@ -2000,6 +2100,11 @@ impl Builder<'_, '_> {
             }
             LayerContent::Custom(custom) => match self.sources.custom(custom) {
                 Ok(source) => Some(Content::Source(source, time)),
+                // Drawn again when it is ready (the frame is not kept).
+                Err(error) if error.is_warming_up() => {
+                    self.incomplete = true;
+                    None
+                }
                 Err(error) => {
                     self.warn(format!("{}: {error}", layer.path));
                     None

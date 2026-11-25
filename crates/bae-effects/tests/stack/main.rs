@@ -145,6 +145,7 @@ fn levels_then_exposure(fx: &mut Fx, layer: &PrimPath) -> (PrimPath, PrimPath) {
 
 mod blur_sharpen;
 mod distort;
+mod generate;
 mod noise_grain;
 mod perspective;
 mod relative_points;

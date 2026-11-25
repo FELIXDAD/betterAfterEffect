@@ -217,6 +217,8 @@ pub struct RenderLayer {
     pub time: Time,
     /// Composition time corresponding to zero on the layer clock.
     pub start_time: Time,
+    /// Earliest comp time at which this layer is active.
+    pub in_point: Time,
     /// Comp-time seconds per layer-time second (AE time stretch).
     pub time_scale: f64,
     /// What the layer draws.
@@ -266,6 +268,7 @@ impl RenderLayer {
             time: Time::ZERO,
             start_time: Time::ZERO,
             time_scale: 1.0,
+            in_point: Time::ZERO,
             content,
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
@@ -292,6 +295,7 @@ impl RenderLayer {
     }
 
     fn hash_content(&self, h: &mut impl Hasher, effects: Option<&crate::EffectLibrary>) {
+        self.in_point.hash(h);
         self.content.hash_into(h, effects);
         self.masks.len().hash(h);
         for m in &self.masks {
@@ -565,7 +569,7 @@ impl RenderEffect {
         self.params.iter().find(|(n, _)| *n == id).map(|(_, v)| v)
     }
 
-    fn hash_into(&self, h: &mut impl Hasher) {
+    pub(crate) fn hash_into(&self, h: &mut impl Hasher) {
         self.path.hash(h);
         self.effect.hash(h);
         self.enabled.hash(h);
