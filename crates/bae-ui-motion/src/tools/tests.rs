@@ -208,7 +208,8 @@ fn every_tool_is_in_one_group_and_named_in_chinese() {
 #[test]
 fn shortcuts_parse_and_do_not_clash() {
     let b = bindings();
-    assert_eq!(b.len(), SHORTCUTS.len() + NUDGES.len());
+    // + Esc (Switch to Last 3D View).
+    assert_eq!(b.len(), SHORTCUTS.len() + NUDGES.len() + 1);
     let mut chords: Vec<String> = b.iter().map(|b| b.chord.to_string()).collect();
     chords.sort();
     chords.dedup();

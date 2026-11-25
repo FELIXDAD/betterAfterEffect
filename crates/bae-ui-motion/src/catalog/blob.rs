@@ -1,10 +1,9 @@
 //! The catalog's tables in the executable: `catalog.bin` is the menus, the macOS
-//! application menu, the effect categories, the Chinese menu titles and AE's
-//! default shortcuts as deflate-compressed text, decompressed once on first use.
-//! The tables in `menu.rs`, `zh.rs` and `keys.rs` are the source (compiled into
-//! tests only);
-//! `BAE_UPDATE_DOCS=1 cargo test -p bae-ui-motion catalog` rewrites the file and
-//! a test fails while it is stale.
+//! application menu, the effect categories, the Chinese menu titles, AE's
+//! default shortcuts and AE's effects as deflate-compressed text, decompressed
+//! once on first use. `build.rs` writes it into `$OUT_DIR` from the source
+//! tables (`menu.rs`, `zh.rs`, `keys.rs`, `effects.tsv`; compiled into tests
+//! only) with `encode.rs`; it is not in the repository.
 //!
 //! Text format, one entry per line, fields separated by tabs:
 //! `@menu <title>` / `@app` / `@categories` / `@zh` / `@keys` / `@mackeys` /
@@ -20,7 +19,7 @@ use std::sync::OnceLock;
 
 use super::{AeEffect, Item, Key, Node, Owner, Platform, Status, Submenu};
 
-const BLOB: &[u8] = include_bytes!("catalog.bin");
+const BLOB: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/catalog.bin"));
 
 /// The decoded tables.
 pub(super) struct Tables {
@@ -227,115 +226,10 @@ fn decode(text: &'static str) -> Tables {
     }
 }
 
-/// The text of the tables (what `catalog.bin` holds, uncompressed).
-#[cfg(test)]
-pub(super) fn encode(
-    menus: &[(&str, &[Node])],
-    mac_app_menu: &[Node],
-    categories: &[&str],
-    zh: &[(&str, &str)],
-    keys: &[Key],
-    mac_keys: &[(&str, &str, &str)],
-    effects: &[AeEffect],
-) -> String {
-    use std::fmt::Write as _;
-    fn field(s: &str) -> &str {
-        assert!(!s.contains(['\t', '\n']), "{s:?}");
-        s
-    }
-    fn write_nodes(out: &mut String, depth: usize, nodes: &[Node]) {
-        for n in nodes {
-            match n {
-                Node::Item(it) => {
-                    let _ = writeln!(
-                        out,
-                        "I\t{depth}\t{}\t{}\t{}\t{}\t{:?}\t{:?}\t{}\t{}",
-                        it.ae,
-                        field(it.title),
-                        field(it.action),
-                        field(it.params),
-                        it.owner,
-                        it.status,
-                        if it.platform == Platform::Windows {
-                            "W"
-                        } else {
-                            "A"
-                        },
-                        u8::from(it.sorted)
-                    );
-                }
-                Node::Submenu(s) => {
-                    let p = if s.platform == Platform::Windows {
-                        "W"
-                    } else {
-                        "A"
-                    };
-                    let _ = writeln!(out, "S\t{depth}\t{}\t{p}", field(s.title));
-                    write_nodes(out, depth + 1, s.children);
-                }
-                Node::Separator => {
-                    let _ = writeln!(out, "-\t{depth}");
-                }
-                Node::Effects => {
-                    let _ = writeln!(out, "X\t{depth}");
-                }
-            }
-        }
-    }
-    let mut out = String::new();
-    for (title, entries) in menus {
-        let _ = writeln!(out, "@menu\t{}", field(title));
-        write_nodes(&mut out, 0, entries);
-    }
-    out.push_str("@app\n");
-    write_nodes(&mut out, 0, mac_app_menu);
-    out.push_str("@categories\n");
-    for c in categories {
-        let _ = writeln!(out, "{}", field(c));
-    }
-    out.push_str("@zh\n");
-    for (en, zh) in zh {
-        let _ = writeln!(out, "{}\t{}", field(en), field(zh));
-    }
-    out.push_str("@keys\n");
-    for k in keys {
-        let _ = writeln!(
-            out,
-            "{}\t{}\t{}\t{}\t{}\t{:?}\t{:?}\t{}",
-            field(k.context),
-            field(k.command),
-            field(k.keys),
-            field(k.action),
-            field(k.params),
-            k.owner,
-            k.status,
-            k.flags
-        );
-    }
-    out.push_str("@mackeys\n");
-    for (ctx, cmd, keys) in mac_keys {
-        let _ = writeln!(out, "{}\t{}\t{}", field(ctx), field(cmd), field(keys));
-    }
-    out.push_str("@effects\n");
-    for e in effects {
-        let category = categories
-            .iter()
-            .position(|c| *c == e.category)
-            .expect("effect category is listed");
-        let _ = writeln!(
-            out,
-            "{category}\t{}\t{}\t{}",
-            field(e.match_name),
-            field(e.name),
-            field(e.name_zh)
-        );
-    }
-    out
-}
-
-/// `catalog.bin` holds the source tables: `BAE_UPDATE_DOCS=1` rewrites it.
+/// The generated `catalog.bin` decodes to the source tables.
 #[test]
-fn catalog_bin_is_up_to_date() {
+fn catalog_bin_holds_the_source_tables() {
+    use super::encode::{encode, source_effects};
     use super::{EFFECT_CATEGORIES, KEYS, MAC_APP_MENU, MAC_KEYS, MENU_ZH, MENUS};
     let want = encode(
         MENUS,
@@ -344,36 +238,20 @@ fn catalog_bin_is_up_to_date() {
         MENU_ZH,
         KEYS,
         MAC_KEYS,
-        &super::source_effects(),
+        &source_effects(),
     );
-    if std::env::var_os("BAE_UPDATE_DOCS").is_some() {
-        use std::io::Write as _;
-        let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
-        enc.write_all(want.as_bytes()).unwrap();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/catalog/catalog.bin");
-        std::fs::write(path, enc.finish().unwrap()).unwrap();
-        return;
-    }
-    let mut text = String::new();
-    flate2::read::DeflateDecoder::new(BLOB)
-        .read_to_string(&mut text)
-        .unwrap();
-    assert!(
-        text == want,
-        "src/catalog/catalog.bin is stale: run BAE_UPDATE_DOCS=1 cargo test -p bae-ui-motion catalog"
-    );
-    // Decoding gives back the same tables.
     let t = tables();
-    assert_eq!(
-        encode(
-            t.menus,
-            t.mac_app_menu,
-            t.effect_categories,
-            t.zh,
-            t.keys,
-            t.mac_keys,
-            t.effects
-        ),
-        want
+    let got = encode(
+        t.menus,
+        t.mac_app_menu,
+        t.effect_categories,
+        t.zh,
+        t.keys,
+        t.mac_keys,
+        t.effects,
+    );
+    assert!(
+        got == want,
+        "catalog.bin does not decode to the source tables"
     );
 }
