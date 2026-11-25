@@ -11,6 +11,141 @@ use bae_plugin::host::{LoadError, Scope};
 use bae_plugin::{DirSource, PluginModule, PluginRuntime, load_installed};
 use bae_render::Effect;
 
+#[test]
+fn grid_plugin_runs_both_exports_in_the_callers_transaction() {
+    use bae_model::{AuthorId, CommandRegistry, DynCommand, PrimPath, Stage, Time};
+    use bae_script::{RunScript, ScriptSelection, ScriptView};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct View(PrimPath, PrimPath);
+    impl ScriptView for View {
+        fn selection(&self) -> ScriptSelection {
+            ScriptSelection {
+                comp: Some(self.0.clone()),
+                layers: vec![self.1.clone()],
+                time: Time::ZERO,
+            }
+        }
+    }
+
+    let mut stage = Stage::new();
+    let author = AuthorId::new("user:artist").unwrap();
+    let mut setup = CommandRegistry::new();
+    setup
+        .register(RunScript::standalone(Arc::default()))
+        .unwrap();
+    let report = setup.execute(&mut stage, &author, "script.run", json!({"source":
+        "var c=app.project.items.addComp('Test',100,100,1,2,25); var l=c.layers.addNull(); l.name='Guide'; l.position.setValue([13,23]); [c,l];"
+    })).unwrap().output;
+    assert!(report["error"].is_null(), "{report}");
+    let paths = &report["result"];
+    let comp = PrimPath::new(paths[0]["item"].as_str().unwrap()).unwrap();
+    let layer = PrimPath::new(paths[1]["layer"].as_str().unwrap()).unwrap();
+    let mut builder = AppBuilder::new();
+    builder.insert_resource::<Arc<dyn ScriptView>>(Arc::new(View(comp, layer)));
+    builder.add_module(PluginModule);
+    let app = builder.build();
+    let runtime = app.resource::<PluginRuntime>().unwrap();
+    let package = DirSource::new(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/examples/align-to-grid"),
+    );
+    let id = runtime.load(&package, Scope::User).unwrap();
+    let commands = app.get_registry::<dyn DynCommand>().unwrap();
+    let command = "plugin.com.example.align-to-grid.align-to-grid";
+    let automation = "script.com.example.align-to-grid.report-off-grid";
+    let snapshot = commands.snapshot();
+    assert_eq!(
+        snapshot.entry(command).unwrap().owner(),
+        &Owner::plugin(id.as_str())
+    );
+    assert_eq!(
+        commands.get(command).unwrap().info().params_schema["properties"]["size"]["exclusiveMinimum"],
+        0
+    );
+    let invoke = |stage: &mut Stage, id: &str| {
+        stage
+            .transact(&author, id, |tx| {
+                commands.get(id).unwrap().run_json(tx, json!({}))
+            })
+            .unwrap()
+            .0
+    };
+    assert_eq!(invoke(&mut stage, automation), json!({"layers":["Guide"]}));
+    assert_eq!(invoke(&mut stage, command), json!({"moved":1}));
+    assert_eq!(invoke(&mut stage, automation), json!({"layers":[]}));
+    stage.undo(&author).unwrap();
+    assert_eq!(invoke(&mut stage, automation), json!({"layers":["Guide"]}));
+    runtime.unload(&id).unwrap();
+    assert!(commands.get(command).is_none() && commands.get(automation).is_none());
+}
+
+#[test]
+fn read_only_script_and_invalid_replacement_preserve_the_project_and_active_command() {
+    use bae_model::{AuthorId, DynCommand, Stage};
+    use bae_plugin::MemorySource;
+    use serde_json::json;
+    let package = |schema: &str| {
+        MemorySource::new("test")
+        .with_file("bae-plugin.toml", r#"
+schema_version = 1
+[plugin]
+id = "org.test.reader"
+version = "1.0.0"
+api = "0.1"
+name = "Reader"
+[script]
+entry = "main.js"
+[[command]]
+id = "run"
+name = "Run"
+implementation = "script"
+entry = "run"
+schema = "args.json"
+"#)
+        .with_file("args.json", schema)
+        .with_file("main.js", "import { app } from 'bae'; export function run() { app.project.items.addFolder('X'); }")
+    };
+    let mut builder = AppBuilder::new();
+    builder.add_module(PluginModule);
+    let app = builder.build();
+    let runtime = app.resource::<PluginRuntime>().unwrap();
+    let deferred = package("{}").with_file(
+        "main.js",
+        "throw new Error('installation executed top-level code'); function work() {} export { work as run };",
+    );
+    runtime.load(&deferred, Scope::User).unwrap();
+    runtime
+        .load(&package(r#"{"type":"object"}"#), Scope::User)
+        .unwrap();
+    assert!(runtime.load(&package("{"), Scope::User).is_err());
+    let cmd = app
+        .get_registry::<dyn DynCommand>()
+        .unwrap()
+        .get("plugin.org.test.reader.run")
+        .unwrap();
+    let replacement = package("{}").with_file(
+        "main.js",
+        "throw new Error('installation executed top-level code'); export function other() {}",
+    );
+    let error = runtime.load(&replacement, Scope::User).unwrap_err();
+    assert!(error.to_string().contains("run"), "{error}");
+    let active = app
+        .get_registry::<dyn DynCommand>()
+        .unwrap()
+        .get(&cmd.info().id)
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(&cmd, &active));
+    let mut stage = Stage::new();
+    let author = AuthorId::new("user:artist").unwrap();
+    let err = stage
+        .transact(&author, "Run", |tx| cmd.run_json(tx, json!({})))
+        .unwrap_err();
+    assert!(err.to_string().contains("write permission"), "{err}");
+    assert!(!stage.can_undo(&author));
+}
+
 fn write_package(root: &Path, id: &str, version: &str) -> PathBuf {
     std::fs::create_dir_all(root).unwrap();
     std::fs::write(

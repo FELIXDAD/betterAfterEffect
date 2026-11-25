@@ -156,6 +156,8 @@ pub struct MenuItemSpec {
     pub path: Vec<String>,
     /// English title of the item.
     pub title: String,
+    /// Optional package-supplied Simplified Chinese title.
+    pub title_zh: Option<String>,
     /// Command id run when the item is chosen.
     pub action: String,
     /// Parameters of the command (`Null` = none).
@@ -196,11 +198,22 @@ impl std::fmt::Debug for MenuItemSpec {
 }
 
 impl MenuItemSpec {
+    /// Menu label in the active language.
+    pub fn display_title(&self) -> &str {
+        if crate::i18n::lang() == crate::i18n::Lang::Zh
+            && let Some(title) = &self.title_zh
+        {
+            return title;
+        }
+        crate::i18n::tr(&self.title)
+    }
+
     /// An item in `path` (English menu titles) running `action`.
     pub fn new(path: &[&str], title: impl Into<String>, action: impl Into<String>) -> Self {
         MenuItemSpec {
             path: path.iter().map(|s| (*s).to_owned()).collect(),
             title: title.into(),
+            title_zh: None,
             action: action.into(),
             params: serde_json::Value::Null,
             group: 0,
