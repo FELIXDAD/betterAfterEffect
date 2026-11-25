@@ -245,6 +245,7 @@ pub fn param_def(p: &ParamDescriptor) -> ModelParam {
     let ui = &p.ui;
     let custom_ui = ui.topic || ui.control || matches!(p.kind, ParamKind::NoData);
     let flags = ModelFlags {
+        reference_point_default: false,
         hidden: ui.invisible,
         disabled: ui.disabled,
         supervise: f.supervise || matches!(p.kind, ParamKind::Button { .. }),
@@ -252,6 +253,7 @@ pub fn param_def(p: &ParamDescriptor) -> ModelParam {
         cannot_time_vary: f.cannot_time_vary,
         collapsed: f.start_collapsed,
         custom_ui,
+        relative_default: false,
     };
     // Checkboxes, popups and references hold in BAE anyway; only numeric
     // params lose the hold-only behaviour.

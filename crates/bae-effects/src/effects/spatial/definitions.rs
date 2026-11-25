@@ -289,7 +289,12 @@ pub(crate) fn blur_sharpen() -> [Builtin; 3] {
             "directional-blur",
             "定向模糊",
         ),
-        (Kind::Radial, radial(), "radial-blur", "径向模糊"),
+        (
+            Kind::Radial,
+            radial().reference_points(),
+            "radial-blur",
+            "径向模糊",
+        ),
         (Kind::Unsharp, unsharp(), "unsharp-mask", "钝化蒙版"),
     ]
     .map(make)

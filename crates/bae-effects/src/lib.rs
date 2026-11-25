@@ -38,6 +38,7 @@ mod common;
 pub mod effects;
 mod gpu;
 mod module;
+mod obsolete;
 mod params;
 pub mod profile;
 mod target;
@@ -83,11 +84,15 @@ pub struct Builtin {
     pub info: EffectInfo,
     /// Implementation.
     pub implementation: Implementation,
+    alias: Option<Arc<obsolete::Alias>>,
 }
 
 impl Builtin {
     /// The effect as the render graph sees it.
     pub fn effect(&self) -> Arc<dyn Effect> {
+        if let Some(alias) = &self.alias {
+            return alias.clone();
+        }
         match &self.implementation {
             Implementation::Declarative(fx) => fx.clone(),
             Implementation::Rust(fx) => {
@@ -99,6 +104,9 @@ impl Builtin {
 
     /// The parameter definition.
     pub fn def(&self) -> &EffectDef {
+        if let Some(alias) = &self.alias {
+            return &alias.def;
+        }
         match &self.implementation {
             Implementation::Declarative(fx) => fx.def(),
             Implementation::Rust(fx) => fx.def(),
@@ -113,11 +121,16 @@ impl Builtin {
         input: &GpuImage,
         output_roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        match &self.implementation {
+        let mut render = |params: &EffectParams<'_>| match &self.implementation {
             Implementation::Declarative(fx) => {
                 target.render_declarative(fx, params, input, output_roi)
             }
             Implementation::Rust(fx) => fx.encode(target, params, input, output_roi),
+        };
+        if let Some(alias) = &self.alias {
+            alias.with_params(params, render)
+        } else {
+            render(params)
         }
     }
 }
@@ -188,9 +201,11 @@ fn registry() -> &'static Registry {
         categories::noise_grain::register(&mut r);
         categories::perspective::register(&mut r);
         categories::stylize::register(&mut r);
+        categories::text::register(&mut r);
         categories::time::register(&mut r);
         categories::transition::register(&mut r);
         categories::utility::register(&mut r);
+        obsolete::register(&mut r);
         r.effects.sort_by(|a, b| {
             (a.info.category.as_str(), a.info.name.as_str())
                 .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
@@ -233,7 +248,9 @@ pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(),
         warm(&rt, format)?;
     }
     for b in builtins() {
-        if let Implementation::Declarative(fx) = &b.implementation {
+        if b.alias.is_none()
+            && let Implementation::Declarative(fx) = &b.implementation
+        {
             fx.prewarm(gpu, format)?;
         }
     }
@@ -262,6 +279,7 @@ fn rust_builtin(
             param_options_zh: rust_options_zh(def),
         },
         implementation: Implementation::Rust(fx),
+        alias: None,
     }
 }
 

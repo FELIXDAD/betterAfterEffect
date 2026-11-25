@@ -413,7 +413,12 @@ pub(crate) fn stylize_builtins() -> [Builtin; 5] {
         ),
         (Kind::Cartoon, cartoon(), "cartoon", "卡通"),
         (Kind::Roughen, roughen(), "roughen-edges", "毛边"),
-        (Kind::Tile, tile(), "motion-tile", "动态拼贴"),
+        (
+            Kind::Tile,
+            tile().reference_points(),
+            "motion-tile",
+            "动态拼贴",
+        ),
     ]
     .map(|(kind, def, id, zh)| builtin(kind, def, id, zh))
 }
@@ -421,7 +426,7 @@ pub(crate) fn stylize_builtins() -> [Builtin; 5] {
 pub(crate) fn radial_shadow_builtin() -> Builtin {
     builtin(
         Kind::RadialShadow,
-        radial_shadow(),
+        radial_shadow().reference_points(),
         "radial-shadow",
         "径向阴影",
     )

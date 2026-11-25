@@ -308,13 +308,13 @@
 | Transform ▸ Orientation... | 8912902 | `motion.layer.transform_dialog` | `{"attr":"orientation"}` | Ctrl+Alt+Shift+R | Cmd+Opt+Shift+R | E | ☐ |
 | Transform ▸ Rotation... | 8912903 | `motion.layer.transform_dialog` | `{"attr":"rotation"}` | Ctrl+Shift+R | Cmd+Shift+R | E | ☐ |
 | Transform ▸ Opacity... | 8912904 | `motion.layer.transform_dialog` | `{"attr":"opacity"}` | Ctrl+Shift+O | Cmd+Shift+O | E | ☐ |
-| Transform ▸ Flip Horizontal | 8912906 | `motion.layer.flip_horizontal` |  |  |  | B | ☐ |
-| Transform ▸ Flip Vertical | 8912907 | `motion.layer.flip_vertical` |  |  |  | B | ☐ |
-| Transform ▸ Center In View | 8912908 | `motion.layer.center_in_view` |  | Ctrl+Home | Cmd+Home | B | ☐ |
+| Transform ▸ Flip Horizontal | 8912906 | `motion.layer.flip_horizontal` |  |  |  | B | ✅ |
+| Transform ▸ Flip Vertical | 8912907 | `motion.layer.flip_vertical` |  |  |  | B | ✅ |
+| Transform ▸ Center In View | 8912908 | `motion.layer.center_in_view` |  | Ctrl+Home | Cmd+Home | B | ✅ |
 | Transform ▸ Center Anchor Point in Layer Content | 8912909 | `motion.layer.center_anchor_point_in_layer_content` |  | Ctrl+Alt+Home | Cmd+Opt+Home | B | ☐ |
-| Transform ▸ Fit to Comp | 8912911 | `motion.layer.fit_to_comp` |  | Ctrl+Alt+F | Cmd+Opt+F | B | ☐ |
-| Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ☐ |
-| Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ☐ |
+| Transform ▸ Fit to Comp | 8912911 | `motion.layer.fit_to_comp` |  | Ctrl+Alt+F | Cmd+Opt+F | B | ✅ |
+| Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ✅ |
+| Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ✅ |
 | Transform ▸ Auto-Orient... | 8912915 | `motion.layer.auto_orient` |  | Ctrl+Alt+O | Cmd+Opt+O | E | ☐ |
 | Time ▸ Enable Time Remapping | 1966081 | `motion.layer.enable_time_remapping` |  | Ctrl+Alt+T | Cmd+Opt+T | B | ☐ |
 | Time ▸ Time-Reverse Layer | 1966082 | `motion.layer.time_reverse_layer` |  | Ctrl+Alt+R | Cmd+Opt+R | B | ☐ |
@@ -571,21 +571,21 @@
 
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| Workspace ▸ Animation | 9961473 | `workspace.switch` | `{"id":"ae_animation"}` |  |  | B | ☐ |
-| Workspace ▸ Essential Graphics | 9961474 | `workspace.switch` | `{"id":"ae_essential_graphics"}` |  |  | B | ☐ |
-| Workspace ▸ Learn | 9961475 | `workspace.switch` | `{"id":"ae_learn"}` | Shift+F12 | Shift+F12 | B | ☐ |
+| Workspace ▸ Animation | 9961473 | `workspace.switch` | `{"id":"ae_animation"}` |  |  | B | ✅ |
+| Workspace ▸ Essential Graphics | 9961474 | `workspace.switch` | `{"id":"ae_essential_graphics"}` |  |  | B | ✅ |
+| Workspace ▸ Learn | 9961475 | `workspace.switch` | `{"id":"ae_learn"}` | Shift+F12 | Shift+F12 | B | ✅ |
 | Workspace ▸ Review | 9961476 | `workspace.switch` | `{"id":"review"}` | Shift+F11 | Shift+F11 | B | ✅ |
-| Workspace ▸ Small Screen | 9961477 | `workspace.switch` | `{"id":"ae_small_screen"}` |  |  | B | ☐ |
-| Workspace ▸ Libraries | 9961478 | `workspace.switch` | `{"id":"ae_libraries"}` |  |  | B | ☐ |
-| Workspace ▸ All Panels | 9961479 | `workspace.switch` | `{"id":"ae_all_panels"}` |  |  | B | ☐ |
-| Workspace ▸ Effects | 9961480 | `workspace.switch` | `{"id":"ae_effects"}` |  |  | B | ☐ |
-| Workspace ▸ Text | 9961481 | `workspace.switch` | `{"id":"ae_text"}` |  |  | B | ☐ |
-| Workspace ▸ Standard | 9961482 | `workspace.switch` | `{"id":"ae_standard"}` |  |  | B | ☐ |
-| Workspace ▸ Undocked Panels | 9961483 | `workspace.switch` | `{"id":"ae_undocked_panels"}` |  |  | B | ☐ |
-| Workspace ▸ Minimal | 9961484 | `workspace.switch` | `{"id":"ae_minimal"}` |  |  | B | ☐ |
-| Workspace ▸ Paint | 9961485 | `workspace.switch` | `{"id":"ae_paint"}` |  |  | B | ☐ |
-| Workspace ▸ Motion Tracking | 9961486 | `workspace.switch` | `{"id":"ae_motion_tracking"}` |  |  | B | ☐ |
-| Workspace ▸ Color | 9961487 | `workspace.switch` | `{"id":"ae_color"}` |  |  | B | ☐ |
+| Workspace ▸ Small Screen | 9961477 | `workspace.switch` | `{"id":"ae_small_screen"}` |  |  | B | ✅ |
+| Workspace ▸ Libraries | 9961478 | `workspace.switch` | `{"id":"ae_libraries"}` |  |  | B | ✅ |
+| Workspace ▸ All Panels | 9961479 | `workspace.switch` | `{"id":"ae_all_panels"}` |  |  | B | ✅ |
+| Workspace ▸ Effects | 9961480 | `workspace.switch` | `{"id":"ae_effects"}` |  |  | B | ✅ |
+| Workspace ▸ Text | 9961481 | `workspace.switch` | `{"id":"ae_text"}` |  |  | B | ✅ |
+| Workspace ▸ Standard | 9961482 | `workspace.switch` | `{"id":"ae_standard"}` |  |  | B | ✅ |
+| Workspace ▸ Undocked Panels | 9961483 | `workspace.switch` | `{"id":"ae_undocked_panels"}` |  |  | B | ✅ |
+| Workspace ▸ Minimal | 9961484 | `workspace.switch` | `{"id":"ae_minimal"}` |  |  | B | ✅ |
+| Workspace ▸ Paint | 9961485 | `workspace.switch` | `{"id":"ae_paint"}` |  |  | B | ✅ |
+| Workspace ▸ Motion Tracking | 9961486 | `workspace.switch` | `{"id":"ae_motion_tracking"}` |  |  | B | ✅ |
+| Workspace ▸ Color | 9961487 | `workspace.switch` | `{"id":"ae_color"}` |  |  | B | ✅ |
 | Workspace ▸ Default | 9961488 | `workspace.switch` | `{"id":"motion"}` | Shift+F10 | Shift+F10 | B | ✅ |
 | Workspace ▸ Reset to Saved Layout | 9961490 | `workspace.reset` |  |  |  | B | ✅ |
 | Workspace ▸ Save Changes to this Workspace | 9961491 | `workspace.save` |  |  |  | B | ✅ |
