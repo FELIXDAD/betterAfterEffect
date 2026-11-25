@@ -177,3 +177,38 @@ fn expressions_per_frame() {
         t.elapsed() / frames as u32
     );
 }
+
+/// The 4K shapes benchmark's evaluation (#386): 1000 layers, each spinning with
+/// the expression `time*1000` on Rotation. Target: ≤ 3 ms per frame on a 5090
+/// host. `cargo test --release -p bae-anim --test perf thousand_expression -- --nocapture`.
+#[test]
+fn thousand_expression_layers_per_frame() {
+    let mut stage = build(1000);
+    stage
+        .transact(&AuthorId::new("user:test").unwrap(), "exprs", |tx| {
+            for i in 0..1000 {
+                tx.apply(Op::SetExpression {
+                    path: p(&format!("/comps/main/layers/l{i}")),
+                    attr: "transform:rotation".into(),
+                    expression: Some(bae_model::Expression::new("time*1000")),
+                })?;
+            }
+            Ok::<_, bae_model::ModelError>(())
+        })
+        .unwrap();
+    let comp = p("/comps/main");
+    let mut ev = Evaluator::new();
+    ev.evaluate_comp(&stage, &comp, Time::ZERO).unwrap();
+    let frames = 60;
+    let t = Instant::now();
+    for f in 0..frames {
+        let ec = ev
+            .evaluate_comp(&stage, &comp, bae_model::FrameRate::FPS_30.frame_to_time(f))
+            .unwrap();
+        assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    }
+    println!(
+        "1000 layers × time*1000: {:?} per frame",
+        t.elapsed() / frames as u32
+    );
+}

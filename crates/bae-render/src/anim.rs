@@ -40,6 +40,7 @@ use crate::request::RenderPurpose;
 #[derive(Debug)]
 pub struct AnimEvaluator {
     inner: Evaluator,
+    scalar_tracks: rustc_hash::FxHashMap<(PrimPath, String), Arc<crate::effect::ScalarTrack>>,
     assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
@@ -56,6 +57,7 @@ impl AnimEvaluator {
     pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
             inner: Evaluator::new(),
+            scalar_tracks: Default::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
@@ -236,6 +238,7 @@ impl AnimEvaluator {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         out.time = l.layer_time;
+        out.in_point = l.timing.in_point.min(l.timing.out_point);
         out.active = l.active && guide_ok;
         out.visible = l.visible;
         out.adjustment = l.switches.adjustment || l.kind == LayerKind::Adjustment;
@@ -408,7 +411,38 @@ impl CompEvaluator for AnimEvaluator {
         self.eval(stage, comp, time, 0)
     }
 
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<bae_model::Value> {
+        self.inner.evaluate_attribute(stage, path, name, time).ok()
+    }
+
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &bae_model::AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let slot = self
+            .scalar_tracks
+            .entry((path.clone(), name.to_owned()))
+            .or_default();
+        crate::parameter_track::prepare(slot, attr, frame, |t| {
+            self.inner
+                .evaluate_attribute(stage, path, name, t)
+                .ok()?
+                .as_f64()
+        })
+    }
+
     fn invalidate(&mut self, event: &StageEvent) {
+        self.scalar_tracks.clear();
         self.inner.invalidate(event);
     }
 
