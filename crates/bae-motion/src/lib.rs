@@ -67,6 +67,7 @@
 
 pub mod camera;
 pub mod comp;
+pub mod comp_from_items;
 pub mod dimensions;
 pub mod effect;
 pub mod expressions;
@@ -128,6 +129,7 @@ pub use time::{
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
         r.register(SetCompSettings),
         r.register(SetWorkArea),

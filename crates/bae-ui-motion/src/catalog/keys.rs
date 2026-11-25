@@ -401,7 +401,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "AddCompToRenderQueue", "Ctrl+M|Ctrl+Shift+/", "motion.add_to_render_queue", "", B, Done, 0),
     k("CSwitchboard", "AddItemToComp", "Ctrl+/", "motion.file.add_footage_to_comp", "", E, Todo, 0),
     k("CSwitchboard", "AddItemToCompReplaceLayer", "Ctrl+Alt+/", "motion.file.replace_layer_with_footage", "", E, Todo, 0),
-    k("CSwitchboard", "AddItemsToNewComp", "Alt+Backslash", "motion.file.new_comp_from_selection", "", E, Todo, 0),
+    k("CSwitchboard", "AddItemsToNewComp", "Alt+Backslash", "motion.file.new_comp_from_selection", "", E, Done, 0),
     k("CSwitchboard", "AddToAdobeMediaEncoderRenderQueue", "Ctrl+Alt+M", "motion.comp.add_to_adobe_media_encoder_queue", "", B, Adobe, 0),
     k("CSwitchboard", "AutoOrient", "Ctrl+Alt+O", "motion.layer.auto_orient", "", E, Todo, 0),
     k("CSwitchboard", "BestQuality", "Ctrl+U", "motion.layer.quality", r#"{"quality":"best"}"#, B, Done, 0),

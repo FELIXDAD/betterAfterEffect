@@ -76,7 +76,7 @@
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
 | Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ☐ |
 | Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ☐ |
-| New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ☐ |
+| New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ✅ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ⏸ |
 | Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ⏸ |

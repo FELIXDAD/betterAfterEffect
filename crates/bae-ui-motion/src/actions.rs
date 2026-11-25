@@ -58,6 +58,8 @@ pub mod ids {
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > New Comp from Selection... (Alt+\).
+    pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
     pub const IMPORT_MULTIPLE: &str = "motion.file.import_multiple_files";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
@@ -225,6 +227,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::IMPORT_MULTIPLE, "Import Multiple Files"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
@@ -739,6 +742,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_FILE => {
             crate::import::import_file(cx, session);
+            return true;
+        }
+        ids::NEW_COMP_FROM_SELECTION => {
+            // Comps, footage and solids selected in the Project panel.
+            let items: Vec<PrimPath> = session
+                .lock()
+                .selected_items
+                .iter()
+                .filter(|i| {
+                    query::comp_info(stage, i).is_some()
+                        || stage
+                            .prim(i)
+                            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+                })
+                .cloned()
+                .collect();
+            let prefs = crate::prefs::current(cx.resources);
+            let still = crate::import::ImportDefaults::of(&prefs).still_duration;
+            crate::dialogs::comp_from_selection(cx, items, still);
             return true;
         }
         ids::ADD_EXPRESSION => {

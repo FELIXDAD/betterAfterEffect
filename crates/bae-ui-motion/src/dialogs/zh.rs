@@ -252,4 +252,23 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Cineon Full", "Cineon 完整"),
     ("Film (2K)", "胶片 (2K)"),
     ("Film (4K)", "胶片 (4K)"),
+    // File ▸ New Comp from Selection… (AE 26's Chinese).
+    ("New Composition from Selection", "基于所选项新建合成"),
+    ("New Comp from Selection...", "基于所选项新建合成..."),
+    ("Create", "创建"),
+    ("Single Composition", "单个合成"),
+    ("Multiple Compositions", "多个合成"),
+    ("Use Dimensions From:", "使用尺寸来自 -"),
+    ("Use Dimensions From", "使用尺寸来自"),
+    ("Still Duration:", "静止持续时间 -"),
+    ("Still Duration", "静止持续时间"),
+    ("Sequence Layers", "序列图层"),
+    ("Overlap", "重叠"),
+    ("Transition:", "过渡 -"),
+    ("Transition", "过渡"),
+    ("Dissolve Front Layer", "溶解前景图层"),
+    (
+        "Cross Dissolve Front and Back Layers",
+        "交叉溶解前景与背景图层",
+    ),
 ];

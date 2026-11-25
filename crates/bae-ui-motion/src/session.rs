@@ -74,6 +74,9 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Open the comps a command creates (those not in `before`; New Comp
+    /// from Selection) and, with `queue`, add them to the Render Queue.
+    NewComps { before: Vec<PrimPath>, queue: bool },
 }
 
 #[derive(Debug, Default)]
@@ -118,6 +121,8 @@ pub struct Session {
     /// copy wins over [`Session::clipboard`].
     pub layer_clipboard: Vec<bae_motion::CopiedLayer>,
     pending: Vec<(Pending, u32)>,
+    /// New comps to add to the Render Queue (the dialogs host takes them).
+    pub(crate) queue_comps: Vec<PrimPath>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
     reserved: Vec<(PrimPath, String)>,
@@ -223,6 +228,21 @@ impl Session {
     pub fn sync(&mut self, stage: &Stage) {
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewComps { before, queue } = &what {
+                let added: Vec<PrimPath> = query::comps(stage)
+                    .into_iter()
+                    .filter(|c| !before.contains(c))
+                    .collect();
+                if let Some(first) = added.first() {
+                    self.open_comp(first);
+                    if *queue {
+                        self.queue_comps.extend(added);
+                    }
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewEffects { layers, before } = &what {
                 let added: Vec<PrimPath> = layers
                     .iter()
@@ -251,7 +271,9 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                Pending::NewLayers { .. }
+                | Pending::NewEffects { .. }
+                | Pending::NewComps { .. } => {
                     unreachable!("handled above")
                 }
             };
@@ -265,7 +287,9 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
+                    Pending::NewLayers { .. }
+                    | Pending::NewEffects { .. }
+                    | Pending::NewComps { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -277,7 +301,9 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
+                Pending::NewLayers { .. }
+                | Pending::NewEffects { .. }
+                | Pending::NewComps { .. } => None,
             })
             .collect();
         self.reserved
