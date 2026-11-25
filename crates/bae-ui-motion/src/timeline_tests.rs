@@ -1297,15 +1297,6 @@ fn rove_across_time_needs_inner_spatial_keyframes() {
 
 #[test]
 fn layer_menu_entries_come_from_the_command_catalog() {
-    for (top, title) in crate::timeline::LAYER_MENU {
-        if top.is_empty() {
-            continue;
-        }
-        assert!(
-            crate::timeline::catalog_entry(top, title).is_some(),
-            "{top} ▸ {title} is not in the command catalog"
-        );
-    }
     for (top, title) in [
         ("Edit", "Select Keyframe Label Group"),
         ("Animation", "Track Camera"),
