@@ -1,22 +1,28 @@
 use super::{Kind, Simulation};
 use crate::{Builtin, catalog::DefBuilder, rust_builtin};
 use bae_model::{ParamKind, Value};
-use serde_json::Value as Json;
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
+use std::sync::Arc;
 
-static ENGLISH: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
-    include_str!("names.tsv")
-        .lines()
-        .chain(include_str!("options.tsv").lines())
-        .filter_map(|s| s.split_once('\t'))
-        .collect()
-});
+struct Control {
+    id: u32,
+    en: &'static str,
+    zh: &'static str,
+    kind: ControlKind,
+    varies: bool,
+}
 
-fn english(label: &str) -> &str {
-    ENGLISH.get(label).copied().unwrap_or(label)
+#[derive(Clone, Copy)]
+enum ControlKind {
+    GroupStart,
+    GroupEnd,
+    Layer,
+    Mask,
+    Color([f64; 4]),
+    Point([f64; 2]),
+    Popup(i64, &'static [(&'static str, &'static str)]),
+    Checkbox(bool),
+    Angle(f64),
+    Slider(f64, f64, f64, &'static str),
 }
 
 macro_rules! reference {
@@ -25,13 +31,13 @@ macro_rules! reference {
             $id,
             $en,
             $zh,
-            include_str!(concat!(env!("OUT_DIR"), "/", $id, ".json")),
+            include!(concat!(env!("OUT_DIR"), "/", $id, ".rs")),
         )
     };
 }
 
 pub(super) fn builtin(kind: Kind) -> Builtin {
-    let (id, name, zh, reference) = match kind {
+    let (id, name, zh, controls): (_, _, _, &[Control]) = match kind {
         Kind::World => reference!(
             "CC Particle World",
             "CC Particle World",
@@ -55,91 +61,41 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
     };
     let mut builder = DefBuilder::new(id, name, "Simulation");
     let mut localized = Vec::new();
-    let mut fixed = Vec::new();
-    for (id, label, ty, default, min, max, choices, unit, varies) in
-        serde_json::from_str::<Vec<Control>>(reference).expect("checked-in simulation reference")
-    {
-        let en = english(&label);
-        let value = default.as_f64().unwrap_or_default();
-        let (kind, value) = match ty.as_str() {
-            "NO_VALUE" if label.is_empty() => (ParamKind::GroupEnd, None),
-            "NO_VALUE" => (ParamKind::GroupStart, None),
-            "LAYER_INDEX" => (ParamKind::Layer, None),
-            "MASK_INDEX" => (ParamKind::Path, None),
-            "COLOR" => (
-                ParamKind::Color,
-                Some(Value::Color(serde_json::from_value(default).unwrap())),
+    for c in controls {
+        use ControlKind::*;
+        let (kind, value) = match c.kind {
+            GroupStart => (ParamKind::GroupStart, None),
+            GroupEnd => (ParamKind::GroupEnd, None),
+            Layer => (ParamKind::Layer, None),
+            Mask => (ParamKind::Path, None),
+            Color(v) => (ParamKind::Color, Some(Value::Color(v))),
+            Point(v) => (ParamKind::Point, Some(Value::Vec2(v))),
+            Popup(v, labels) => {
+                localized.push((c.id, labels.iter().map(|&(_, zh)| zh.to_owned()).collect()));
+                let options = labels.iter().map(|&(en, _)| en.to_owned()).collect();
+                (ParamKind::Popup { options }, Some(Value::Int(v)))
+            }
+            Checkbox(v) => (ParamKind::Checkbox, Some(Value::Bool(v))),
+            Angle(v) => (ParamKind::Angle, Some(Value::Float(v))),
+            Slider(v, min, max, unit) => (
+                ParamKind::Slider {
+                    valid_min: min,
+                    valid_max: max,
+                    slider_min: min,
+                    slider_max: max,
+                    precision: 3,
+                    integer: false,
+                    display: unit.into(),
+                },
+                Some(Value::Float(v)),
             ),
-            "TwoD_SPATIAL" => (
-                ParamKind::Point,
-                Some(Value::Vec2(serde_json::from_value(default).unwrap())),
-            ),
-            _ if choices.is_some() => {
-                let options = choices.unwrap();
-                let translated = options.iter().map(|s| english(s).to_owned()).collect();
-                localized.push((id, options));
-                (
-                    ParamKind::Popup {
-                        options: translated,
-                    },
-                    Some(Value::Int(value as i64)),
-                )
-            }
-            _ if min == Some(0.)
-                && max == Some(1.)
-                && matches!(
-                    en,
-                    "Auto Focal Length"
-                        | "White Tiles Fixed"
-                        | "Invert Gradient"
-                        | "Source Alpha Inheritance"
-                        | "Position"
-                        | "Radius"
-                        | "Motion Path"
-                        | "Grid"
-                        | "Horizon"
-                        | "Axis Box"
-                        | "Align To Direction"
-                        | "Composite With Original"
-                        | "Stochastic Wiggle"
-                ) =>
-            {
-                (ParamKind::Checkbox, Some(Value::Bool(value != 0.)))
-            }
-            _ if unit.as_deref() == Some("度") && min.is_none() => {
-                (ParamKind::Angle, Some(Value::Float(value)))
-            }
-            _ => {
-                let lo = min.unwrap_or(-1_000_000.);
-                let hi = max.unwrap_or(1_000_000.);
-                let display = match unit.as_deref() {
-                    Some("像素") => "pixels",
-                    Some("度") => "degrees",
-                    _ => "none",
-                };
-                (
-                    ParamKind::Slider {
-                        valid_min: lo,
-                        valid_max: hi,
-                        slider_min: lo,
-                        slider_max: hi,
-                        precision: 3,
-                        integer: false,
-                        display: display.into(),
-                    },
-                    Some(Value::Float(value)),
-                )
-            }
         };
-        if !varies {
-            fixed.push(id);
-        }
-        builder.push(id, en, &label, kind, value);
+        builder.push(c.id, c.en, c.zh, kind, value);
     }
     let (mut def, names) = builder.build();
-    for param in &mut def.params {
-        param.flags.cannot_animate = fixed.contains(&param.id);
-        param.flags.cannot_time_vary = param.flags.cannot_animate;
+    for (param, control) in def.params.iter_mut().zip(controls) {
+        param.flags.cannot_animate = !control.varies;
+        param.flags.cannot_time_vary = !control.varies;
     }
     let slug = name.to_ascii_lowercase().replace('.', "").replace(' ', "-");
     let mut result = rust_builtin(
@@ -151,15 +107,3 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
     result.info.param_options_zh = localized;
     result
 }
-
-type Control = (
-    u32,
-    String,
-    String,
-    Json,
-    Option<f64>,
-    Option<f64>,
-    Option<Vec<String>>,
-    Option<String>,
-    bool,
-);
