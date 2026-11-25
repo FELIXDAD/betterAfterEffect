@@ -336,6 +336,10 @@ pub(crate) fn execute(
                     .collect();
                 let mut params = fx.frame.params(&fx.instance);
                 params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
+                if let Some(samples) = &fx.samples {
+                    params.mask_paths = &samples.paths;
+                    params.history = &samples.history;
+                }
                 let mut alloc = PoolAllocator {
                     pool,
                     device,
