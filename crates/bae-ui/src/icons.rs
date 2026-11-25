@@ -40,6 +40,8 @@ pub enum Icon {
     Solo,
     Tag,
     Shy,
+    /// The Shy switch of a shy layer (the figure ducked behind the bar).
+    ShyOn,
     Collapse,
     Quality,
     Fx,
@@ -127,6 +129,8 @@ pub enum Icon {
     PaneModes,
     PaneInOut,
     PaneRenderTime,
+    /// Warning (an expression error).
+    Alert,
     // Transport
     FirstFrame,
     PrevFrame,
@@ -160,6 +164,7 @@ impl Icon {
         Icon::Solo,
         Icon::Tag,
         Icon::Shy,
+        Icon::ShyOn,
         Icon::Collapse,
         Icon::Quality,
         Icon::Fx,
@@ -241,6 +246,7 @@ impl Icon {
         Icon::PaneModes,
         Icon::PaneInOut,
         Icon::PaneRenderTime,
+        Icon::Alert,
         Icon::FirstFrame,
         Icon::PrevFrame,
         Icon::Play,

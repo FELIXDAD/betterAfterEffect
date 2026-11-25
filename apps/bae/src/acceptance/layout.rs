@@ -224,8 +224,10 @@ fn default_workspace_fits_common_screens_in_chinese() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// The Keyboard Shortcuts window: command names on one line, the column as
-/// wide as they need, the window resizable and closed by Escape (#134).
+/// The Keyboard Shortcuts window as AE's (docs/reference/ae/mac/ui/keyboard-shortcuts.json):
+/// AE's size within the screen; the Preset and Commands menus, the preset
+/// buttons, search, the command tree left of the Key table, Undo / Clear,
+/// Cancel / OK; command names on one line (#134); resizable; Escape closes it.
 #[test]
 fn keyboard_shortcuts_window_columns() {
     let mut h = gui_sized(Gui::new(), vec2(1440.0, 880.0));
@@ -238,33 +240,46 @@ fn keyboard_shortcuts_window_columns() {
             .map(|n| n.rect())
     };
     let before = window(&h).expect("Keyboard Shortcuts window");
-    let line = |h: &Ui, text: &str| {
-        h.query_all_by_label(text)
-            .map(|n| n.rect())
-            .min_by(|a, b| a.top().total_cmp(&b.top()))
-            .unwrap_or_else(|| panic!("no row {text}"))
-    };
-    // Long names, from the #134 screenshots (since #140 the keyframe toggle is
-    // listed per property: Alt+Shift+A is the longest).
-    let names = ["Anchor Point: Add or Remove Keyframe", "Accept Proposal"];
-    for name in names {
-        let r = line(&h, name);
-        assert!(r.height() < 20.0, "{name} wraps: {r:?}");
-    }
-    // The shortcut column starts right of the longest name and uses the rest.
-    let plus: Vec<Rect> = h
-        .query_all_by_label("+")
-        .map(|n| n.rect())
-        .filter(|r| before.contains_rect(*r))
-        .collect();
-    assert!(!plus.is_empty(), "no + buttons");
-    let name_right = line(&h, names[0]).right();
-    let first_plus = plus.iter().map(|r| r.left()).fold(f32::MAX, f32::min);
     assert!(
-        first_plus > name_right && first_plus < before.center().x + before.width() * 0.25,
-        "shortcut column at {first_plus}, names end at {name_right}, window {before:?}"
+        before.width() > 1350.0 && before.height() > 800.0,
+        "not AE's size (1520×887) within the screen: {before:?}"
     );
-    // Resizable: drag the bottom-right corner.
+    for label in [
+        "Preset:",
+        "Commands:",
+        "Save As...",
+        "Delete",
+        "Copy To Clipboard",
+        "Search",
+        "Undo",
+        "Clear",
+        "Cancel",
+        "OK",
+        "Application",
+    ] {
+        assert!(
+            h.query_all_by_label(label)
+                .any(|n| before.contains_rect(n.rect())),
+            "no {label} in the window"
+        );
+    }
+    // The search field has the focus: a long name, found, on one row of the
+    // tree, left of the Key table.
+    type_text(&mut h, "anchor point: add");
+    settle(&mut h);
+    let name = "Anchor Point: Add or Remove Keyframe";
+    let row = h
+        .query_all_by_label(name)
+        .map(|n| n.rect())
+        .find(|r| before.contains_rect(*r))
+        .unwrap_or_else(|| panic!("no row {name}"));
+    assert!(row.height() < 24.0, "{name} is not one row: {row:?}");
+    let modifiers = find_text(&h, "Modifiers").expect("the Key table");
+    assert!(
+        row.right() < modifiers.left() && row.width() > before.width() * 0.4,
+        "tree {row:?}, Key table at {modifiers:?}"
+    );
+    // Resizable: drag the bottom-right corner in.
     let corner = before.right_bottom() - vec2(3.0, 3.0);
     h.input_mut().events.extend([
         Event::PointerMoved(corner),
@@ -277,13 +292,13 @@ fn keyboard_shortcuts_window_columns() {
     ]);
     frame(&mut h);
     for i in 1..=10 {
-        let p = corner + vec2(20.0 * i as f32, 10.0 * i as f32);
+        let p = corner - vec2(20.0 * i as f32, 10.0 * i as f32);
         send(&mut h, Event::PointerMoved(p));
     }
     send(
         &mut h,
         Event::PointerButton {
-            pos: corner + vec2(200.0, 100.0),
+            pos: corner - vec2(200.0, 100.0),
             button: PointerButton::Primary,
             pressed: false,
             modifiers: Modifiers::NONE,
@@ -292,7 +307,7 @@ fn keyboard_shortcuts_window_columns() {
     settle(&mut h);
     let after = window(&h).expect("window after resize");
     assert!(
-        after.width() > before.width() + 150.0 && after.height() > before.height() + 50.0,
+        after.width() < before.width() - 150.0 && after.height() < before.height() - 50.0,
         "not resizable: {before:?} → {after:?}"
     );
     // Escape closes it.
@@ -458,23 +473,27 @@ fn keyboard_shortcuts_window_in_chinese_in_a_small_retina_window() {
         screen.expand(1.0).contains_rect(w),
         "window {w:?} outside the screen {screen:?}"
     );
-    // Long Chinese command names stay on one line.
+    // Long Chinese command names stay on one row (found with the search field,
+    // which has the focus).
     let mut checked = 0;
-    // (Since #140 the keyframe toggle is listed per property; Opacity's row sorts
-    // near the top in Chinese.)
     for en in [
         "Opacity: Add or Remove Keyframe",
         "Accept Proposal",
         "Go to Previous Keyframe",
     ] {
         let zh = bae_ui::tr(en);
+        type_text(&mut h, zh);
+        settle(&mut h);
         if let Some(r) = h
             .query_all_by_label(zh)
             .map(|n| n.rect())
             .find(|r| w.contains_rect(*r))
         {
-            assert!(r.height() < 20.0, "{zh} wraps: {r:?}");
+            assert!(r.height() < 24.0, "{zh} is not one row: {r:?}");
             checked += 1;
+        }
+        for _ in zh.chars() {
+            key(&mut h, Modifiers::NONE, Key::Backspace);
         }
     }
     assert!(checked >= 1, "no command rows found in the window");

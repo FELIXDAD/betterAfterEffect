@@ -637,8 +637,16 @@ fn catalog_lines() -> Vec<String> {
                     level.extend(inner);
                 }
                 Node::Effects => {
+                    // Each category lists AE's effects by name (crate::effects).
                     for c in EFFECT_CATEGORIES {
                         level.push(format!("{prefix} > {c} ▸"));
+                        let mut names: Vec<&str> = crate::effects::directory()
+                            .iter()
+                            .filter(|e| e.category == *c)
+                            .map(|e| e.name)
+                            .collect();
+                        names.sort_unstable();
+                        level.extend(names.iter().map(|n| format!("{prefix} > {c} > {n}")));
                     }
                 }
                 _ => {}
@@ -2273,4 +2281,52 @@ fn layer_copy_cut_and_paste() {
         query::layer_kind(&h.stage, &in_other[0]).as_deref(),
         Some("solid")
     );
+}
+
+#[test]
+fn expression_errors_reach_the_session_banner_and_timeline() {
+    let mut h = Harness::new();
+    let (comp, _solid, shape) = h.comp_with_layers();
+    h.run(
+        "attr.set_expression",
+        json!({"path": shape, "attr": "transform:rotation", "source": "nope * 2"}),
+    );
+    let mut viewer = CompositionViewer::new(None);
+    let mut tl = TimelinePanel::default();
+    h.frame("composition", &mut viewer, Vec::new());
+    let errors = h.session().lock().expr_errors.clone();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(errors[0].attr, "transform:rotation");
+    let index = query::comp_layers(&h.stage, &comp)
+        .iter()
+        .position(|l| *l == shape)
+        .unwrap()
+        + 1;
+    let text = crate::viewer::errors::describe(&h.stage, &errors[0]);
+    let layer = query::display_name_of(&h.stage, &shape);
+    let comp_name = query::display_name_of(&h.stage, &comp);
+    assert!(
+        text.starts_with(&format!(
+            "Error in property 'Rotation' of layer {index} ('{layer}') in comp '{comp_name}'.\n"
+        )),
+        "{text}"
+    );
+    assert!(text.contains("nope"), "{text}");
+    // The timeline draws the row with its warning (no invocations).
+    h.session()
+        .lock()
+        .reveal
+        .insert(shape.clone(), crate::session::Reveal::Animated);
+    assert!(
+        h.frame("timeline", &mut tl, Vec::new())
+            .invocations
+            .is_empty()
+    );
+    // Fixed: the errors go away.
+    h.run(
+        "attr.set_expression",
+        json!({"path": shape, "attr": "transform:rotation", "source": "time * 2"}),
+    );
+    h.frame("composition", &mut viewer, Vec::new());
+    assert!(h.session().lock().expr_errors.is_empty());
 }

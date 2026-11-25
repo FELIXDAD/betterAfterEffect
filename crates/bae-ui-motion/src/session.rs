@@ -88,8 +88,10 @@ pub struct Session {
     pub playback: Option<Playback>,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
-    /// Viewer resolution divisor: 1 Full, 2 Half, 3 Third, 4 Quarter.
-    pub resolution: u32,
+    /// The viewer's resolution is on Auto: it follows the magnification. The
+    /// chosen resolution itself is the comp's (`resolution`, as in Composition
+    /// Settings).
+    pub auto_resolution: bool,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
@@ -102,6 +104,9 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// Expression errors of the active comp at the current time (the viewer's
+    /// evaluation): the error banner and the timeline's warning icons.
+    pub expr_errors: Vec<bae_anim::AttrError>,
 }
 
 /// The session as an app resource (`Resources::get::<SharedSession>()`).
@@ -112,7 +117,6 @@ impl Default for SharedSession {
     fn default() -> Self {
         SharedSession(Arc::new(Mutex::new(Session {
             loop_playback: true,
-            resolution: 1,
             ..Session::default()
         })))
     }

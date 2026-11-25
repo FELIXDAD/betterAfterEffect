@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use bae_gpu::{GpuContext, wgpu};
-use bae_model::{PrimPath, Time};
+use bae_model::PrimPath;
 use bae_render::png_out::read_rgba8;
 use bae_render::{AnimEvaluator, CompEvaluator, OutputAlpha, RenderRequest, Renderer};
 
@@ -53,7 +53,9 @@ fn matches_after_effects() {
     for (name, case_tolerance) in &names {
         let tolerance = case_tolerance.saturating_add(slack);
         let comp = PrimPath::new(&format!("/comps/{name}")).unwrap();
-        let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
+        let rc = eval
+            .evaluate(&stage, &comp, cases::render_time(name))
+            .unwrap();
         let frame = renderer.render_frame(&rc, &RenderRequest::full()).unwrap();
         let img = renderer
             .read_rgba8(&frame, OutputAlpha::Premultiplied)

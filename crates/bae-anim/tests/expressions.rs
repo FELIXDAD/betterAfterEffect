@@ -520,3 +520,86 @@ fn to_comp_projects_3d_layers_through_the_default_camera() {
     assert!((ec.layers[0].transform.rotation.z - want).abs() < 1e-9);
     assert_eq!(ec.layers[0].transform.opacity, 30.0);
 }
+
+#[test]
+fn expression_controls_by_name_index_and_layer_reference() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "controls", "null");
+        let target = b.layer(MAIN, "target", "null");
+        b.set(&target, "transform:rotation", 10.0);
+        b.prim(&format!("{l}/effects"), PrimType::FOLDER);
+        for (slug, name, mn, value) in [
+            (
+                "slider",
+                "Slider Control",
+                "ADBE Slider Control",
+                Some(Value::Float(4.0)),
+            ),
+            (
+                "point",
+                "Point Control",
+                "ADBE Point Control",
+                Some(Value::Vec2([5.0, 6.0])),
+            ),
+            (
+                "point_3d",
+                "3D Point Control",
+                "ADBE Point3D Control",
+                Some(Value::Vec3([1.0, 2.0, 7.0])),
+            ),
+            (
+                "angle",
+                "Angle Control",
+                "ADBE Angle Control",
+                Some(Value::Float(8.0)),
+            ),
+            (
+                "check",
+                "Checkbox Control",
+                "ADBE Checkbox Control",
+                Some(Value::Bool(true)),
+            ),
+            (
+                "color",
+                "Color Control",
+                "ADBE Color Control",
+                Some(Value::Color([0.1, 0.2, 0.5, 1.0])),
+            ),
+            (
+                "layer",
+                "Layer Control",
+                "ADBE Layer Control",
+                Some(Value::PrimRef(p(&target))),
+            ),
+            ("self_layer", "Self", "ADBE Layer Control", None),
+            (
+                "menu",
+                "Dropdown Menu Control",
+                "ADBE Dropdown Control",
+                Some(Value::Int(3)),
+            ),
+        ] {
+            let fx = format!("{l}/effects/{slug}");
+            b.prim(&fx, PrimType::EFFECT)
+                .set(&fx, "match_name", mn)
+                .set(&fx, "name", name);
+            if let Some(value) = value {
+                b.set(&fx, "param:0001", value);
+            }
+        }
+        b.set(&format!("{l}/effects/check"), "enabled", false);
+        b.expr(&l, "transform:rotation", 0.0, r#"
+            if (effect("Checkbox Control").active || !effect("Checkbox Control")("Checkbox").value) {
+                throw Error("wrong checkbox state");
+            }
+            if (effect("Self")("Layer").index !== thisLayer.index) throw Error("wrong default layer");
+            effect("Slider Control")("Slider") + effect(1)(1)
+              + effect("Point Control")("点")[1] + effect("3D Point Control")("3D Point")[2]
+              + effect("Angle Control").param("Angle") + effect("Color Control")("Color")[2]
+              + effect("Dropdown Menu Control")("Pseudo/@@wtM8H841Sg2uh023dgZBCw-0001")
+              + effect("Layer Control")(1).rotation
+        "#);
+    });
+    let ec = eval(&s, 0.0);
+    assert_eq!(ec.layers[0].transform.rotation.z, 42.5);
+}

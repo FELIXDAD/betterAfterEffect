@@ -64,6 +64,7 @@ pub mod camera;
 pub mod comp;
 pub mod dimensions;
 pub mod effect;
+pub mod expressions;
 pub mod import;
 pub mod keys;
 pub mod layer;
@@ -75,6 +76,7 @@ pub mod query;
 pub mod shape;
 pub mod solid;
 pub mod text;
+pub mod text_animators;
 mod util;
 
 use std::sync::Arc;
@@ -88,6 +90,7 @@ pub use comp::{
     TrimCompToWorkArea,
 };
 pub use dimensions::SeparateDimensions;
+pub use expressions::{ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
@@ -105,6 +108,7 @@ pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
+pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -153,6 +157,10 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(DeleteVertex),
         r.register(CreateText),
         r.register(SetText),
+        r.register(SetExpressions),
+        r.register(AnimateText),
+        r.register(AddTextSelector),
+        r.register(RemoveTextAnimators),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

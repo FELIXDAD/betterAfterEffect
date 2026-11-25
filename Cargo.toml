@@ -1,4 +1,4 @@
-# BAE (betterAfterEffect) Cargo workspace.
+# BAE (betterAfterEffects) Cargo workspace.
 #
 # This is a *virtual* workspace: there is no root package. Every crate lives in
 # `apps/*`, `crates/*`, `services/*`, `xtask` or `tools/*`, and new crates under
@@ -28,7 +28,7 @@ version = "0.0.1"
 edition = "2024"
 rust-version = "1.100"
 license = "Apache-2.0"
-repository = "https://github.com/FELIXDAD/betterAfterEffect"
+repository = "https://github.com/FELIXDAD/betterAfterEffects"
 publish = false
 
 [workspace.lints.cargo]
@@ -254,6 +254,9 @@ opt-level = "s"
 [profile.release.package.bae-ui-motion]
 opt-level = "s"
 [profile.release.package.bae-motion]
+opt-level = "s"
+# Effects: the CPU side only plans passes and writes uniforms (the GPU runs them).
+[profile.release.package.bae-effects]
 opt-level = "s"
 [profile.release.package.bae-platform]
 opt-level = "s"
