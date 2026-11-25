@@ -56,6 +56,24 @@ pub struct Scrub {
     pub path: PrimPath,
     pub attr: String,
     pub value: Value,
+    /// The same property on the other selected layers (or selected across
+    /// layers), changing with it: path and its value.
+    pub peers: Vec<(PrimPath, Value)>,
+}
+
+impl Scrub {
+    /// Every prim the drag changes, with its value.
+    pub fn targets(&self) -> impl Iterator<Item = (&PrimPath, &Value)> {
+        std::iter::once((&self.path, &self.value)).chain(self.peers.iter().map(|(p, v)| (p, v)))
+    }
+
+    /// The previewed value of `attr` of `path`, if the drag changes it.
+    pub fn value_for(&self, path: &PrimPath, attr: &str) -> Option<&Value> {
+        if self.attr != attr {
+            return None;
+        }
+        self.targets().find(|(p, _)| *p == path).map(|(_, v)| v)
+    }
 }
 
 /// Copied keyframes (one attribute at a time, like AE's paste target).
@@ -129,6 +147,8 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// View ▸ rulers, guides, grid and safe areas (the viewer's options).
+    pub(crate) view_options: crate::viewer::guides::ViewOptions,
     /// Each comp's 3D views (View ▸ Switch 3D View).
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).

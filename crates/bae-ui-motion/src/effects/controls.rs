@@ -295,8 +295,8 @@ fn param_row(
         .lock()
         .scrub
         .as_ref()
-        .filter(|s| s.path == *effect && s.attr == attr)
-        .map(|s| s.value.clone())
+        .and_then(|s| s.value_for(effect, &attr))
+        .cloned()
         .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
         .or_else(|| {
             let layer = super::layer_of(effect)?;
