@@ -447,6 +447,7 @@ impl Shell {
             })
         };
         self.app.insert_resource(gpu.clone());
+        warm_up(gpu.clone());
 
         let egui_ctx = egui::Context::default();
         bae_ui::theme::apply(&egui_ctx);
@@ -1452,5 +1453,33 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.save_window_state();
         // Drop GPU objects while the window still exists.
         self.view = None;
+    }
+}
+
+/// Compiles the vector renderer's and the built-in effects' GPU pipelines on a
+/// background thread as soon as the GPU context exists, so the first shape,
+/// text layer or effect does not stall the UI for seconds compiling shaders
+/// (a first text layer took 2.2 s on an RTX 5090). A draw that needs the
+/// vector renderer meanwhile waits for it instead of compiling it again.
+fn warm_up(gpu: Arc<GpuContext>) {
+    let spawned = std::thread::Builder::new()
+        .name("bae-gpu-warm-up".into())
+        .spawn(move || {
+            let start = Instant::now();
+            if let Err(e) = bae_vector::render::VelloRenderer::shared(&gpu) {
+                tracing::warn!("vector renderer warm-up: {e}");
+            }
+            let vector = start.elapsed();
+            let format = bae_render::WorkFormat::default().texture_format();
+            if let Err(e) = bae_effects::prewarm(&gpu, format) {
+                tracing::warn!("effects warm-up: {e}");
+            }
+            tracing::info!(
+                "GPU warm-up: vector renderer {vector:?}, effects {:?}",
+                start.elapsed() - vector
+            );
+        });
+    if let Err(e) = spawned {
+        tracing::warn!("GPU warm-up thread: {e}");
     }
 }
