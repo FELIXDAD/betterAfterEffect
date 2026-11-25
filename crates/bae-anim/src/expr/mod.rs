@@ -660,6 +660,7 @@ const LOCALS: &[(&str, &str)] = &[
     ("opacity", "thisLayer.opacity"),
     ("pointOfInterest", "thisLayer.pointOfInterest"),
     ("timeRemap", "thisLayer.timeRemap"),
+    ("audioLevels", "thisLayer.audioLevels"),
     ("effect", "thisLayer.effect.bind(thisLayer)"),
     ("mask", "thisLayer.mask.bind(thisLayer)"),
     ("toComp", "thisLayer.toComp.bind(thisLayer)"),
@@ -1184,6 +1185,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 .and_then(scope_comp_id)
                 .map_or(-1, |i| i as i32);
             o.set("sourceComp", source)?;
+            let comp_of = |p: &PrimPath| scope_comp_id(p).and_then(scope_comp);
+            let (video, audio) = layer.has_video_audio(&comp_of, 0);
+            o.set("hasVideo", video)?;
+            o.set("hasAudio", audio)?;
             Ok::<_, rquickjs::Error>(o)
         })?,
     )?;

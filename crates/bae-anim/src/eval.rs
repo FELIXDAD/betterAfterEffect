@@ -379,6 +379,8 @@ pub(crate) struct CompiledLayer {
     pub(crate) switches: LayerSwitches,
     pub(crate) source: CompiledSource,
     pub(crate) time_remap: Option<Prop>,
+    /// Audio Levels (dB, left/right) of layers that can carry audio.
+    pub(crate) audio_levels: Option<Prop>,
     pub(crate) parent: Option<usize>,
     pub(crate) blend_mode: Arc<str>,
     pub(crate) track_matte: TrackMatte,
@@ -576,6 +578,8 @@ fn compile_layer(
                     frame_rate: None,
                     duration: None,
                     solid_color: None,
+                    has_video: true,
+                    has_audio: false,
                 },
             ),
         },
@@ -587,6 +591,11 @@ fn compile_layer(
                 .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TIME_REMAP))
         })
         .flatten();
+    let audio_levels = matches!(
+        kind,
+        LayerKind::Audio | LayerKind::Footage | LayerKind::PreComp
+    )
+    .then(|| Prop::read(v, ty, l::AUDIO_LEVELS, Value::Vec2([0.0; 2])));
 
     // Only an authored opinion counts here: without one, AE's per-kind default applies.
     let auto_orient = match v.value(l::AUTO_ORIENT).and_then(Value::as_str) {
@@ -771,6 +780,7 @@ fn compile_layer(
         switches,
         source,
         time_remap,
+        audio_levels,
         parent: None,
         blend_mode: setting_str(v, lt, l::BLEND_MODE)
             .unwrap_or_else(|| "normal".into())
@@ -840,6 +850,8 @@ fn asset_info(av: &PrimView<'_>) -> AssetInfo {
             Some(Value::Color(c)) => c,
             _ => [0.5, 0.5, 0.5, 1.0],
         }),
+        has_video: kind == "solid" || setting_bool(av, at, asset::HAS_VIDEO),
+        has_audio: kind != "solid" && setting_bool(av, at, asset::HAS_AUDIO),
         kind,
     }
 }
@@ -1754,6 +1766,7 @@ impl CompiledLayer {
                 tr::OPACITY => Some(&t.opacity),
                 tr::POINT_OF_INTEREST => Some(&t.point_of_interest),
                 l::TIME_REMAP => self.time_remap.as_ref(),
+                l::AUDIO_LEVELS => self.audio_levels.as_ref(),
                 l::TEXT_SOURCE => self.text.as_ref(),
                 l::TEXT_FIRST_MARGIN => self.text_path.as_ref().map(|t| &t.first_margin),
                 l::TEXT_LAST_MARGIN => self.text_path.as_ref().map(|t| &t.last_margin),
@@ -1899,6 +1912,30 @@ impl CompiledLayer {
         match &self.source {
             CompiledSource::Asset(_, info) => (info.width, info.height),
             CompiledSource::Comp { .. } | CompiledSource::None => (comp.width, comp.height),
+        }
+    }
+
+    /// AE's `hasVideo` / `hasAudio`: what the layer's source carries (a pre-comp
+    /// has audio when a layer inside it does). `comp_of` finds nested comps.
+    pub(crate) fn has_video_audio(
+        &self,
+        comp_of: &dyn Fn(&PrimPath) -> Option<Arc<CompiledComp>>,
+        depth: usize,
+    ) -> (bool, bool) {
+        match (&self.source, self.kind) {
+            (_, LayerKind::Camera | LayerKind::Light) => (false, false),
+            (_, LayerKind::Audio) => (false, true),
+            (CompiledSource::Asset(_, info), _) => (info.has_video, info.has_audio),
+            (CompiledSource::Comp { path, .. }, _) => {
+                let audio = depth < 64
+                    && comp_of(path).is_some_and(|c| {
+                        c.layers
+                            .iter()
+                            .any(|l| l.has_video_audio(comp_of, depth + 1).1)
+                    });
+                (true, audio)
+            }
+            (CompiledSource::None, _) => (true, false),
         }
     }
 

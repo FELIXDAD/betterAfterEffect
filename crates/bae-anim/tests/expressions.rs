@@ -657,3 +657,46 @@ fn footage_project_and_timecodes() {
         "640|4|Clip|32|32|00;01;01;00|00:00:00:29|0001+14|false|true"
     );
 }
+
+/// hasVideo / hasAudio follow the layer's source (a pre-comp has audio when a
+/// layer inside it does), and audioLevels exists only on layers with audio.
+#[test]
+fn audio_levels_and_has_audio() {
+    let s = stage(|b| {
+        b.prim("/assets", PrimType::FOLDER)
+            .prim("/assets/song", PrimType::ASSET)
+            .set("/assets/song", "name", "Song")
+            .set("/assets/song", "has_video", false)
+            .set("/assets/song", "has_audio", true)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .comp("/comps/other", "Other");
+        let a = b.layer("/comps/other", "Music", "audio");
+        b.set(&a, "source", Value::AssetRef(p("/assets/song")));
+        let music = b.layer(MAIN, "Music", "audio");
+        b.set(&music, "source", Value::AssetRef(p("/assets/song")))
+            .set(&music, "audio:levels", Value::Vec2([-6.0, -3.0]));
+        let clip = b.layer(MAIN, "Clip", "footage");
+        b.set(&clip, "source", Value::AssetRef(p("/assets/clip")));
+        let pre = b.layer(MAIN, "Pre", "pre_comp");
+        b.set(&pre, "source", Value::PrimRef(p("/comps/other")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var m = thisComp.layer("Music"), c = thisComp.layer("Clip"), p = thisComp.layer("Pre");
+               var e = "";
+               try { c.audioLevels; } catch (err) { e = err.message.split(".")[0]; }
+               [m.audioLevels.value.join(","), m.hasAudio, m.hasVideo, m.audioActive, c.hasAudio,
+                c.hasVideo, p.hasAudio, p.audioLevels.value.join(","), e].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "-6,-3|true|false|true|false|true|true|0,0|\
+         property or method named 'audioLevels' in Class 'Layer' is missing or does not exist"
+    );
+}

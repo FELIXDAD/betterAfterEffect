@@ -514,8 +514,8 @@ Layer.prototype = {
   },
   get enabled() { return this.__info.enabled; },
   get active() { return this.__info.enabled && __now >= Math.min(this.inPoint, this.outPoint) && __now < Math.max(this.inPoint, this.outPoint); },
-  get hasVideo() { return true; },
-  get hasAudio() { return false; },
+  get hasVideo() { return this.__info.hasVideo; },
+  get hasAudio() { return this.__info.hasAudio; },
   get audioActive() { return this.hasAudio && this.active; },
   get width() { return this.__info.width; },
   get height() { return this.__info.height; },
@@ -538,6 +538,13 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
   get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
+  get audioLevels() {
+    if (!this.hasAudio) {
+      throw new Error("property or method named 'audioLevels' in Class 'Layer' is missing or does not exist. " +
+        "It may have been renamed, moved, deleted, or the name may have been mistyped.");
+    }
+    return __prop(this.__c, this.__l, "", "audio:levels");
+  },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
