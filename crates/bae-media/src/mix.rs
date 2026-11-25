@@ -24,6 +24,7 @@ struct Track {
     timing: LayerTiming,
     levels: [f64; 2],
     automation: Option<Curve>,
+    effects: crate::audio_fx::Rack,
 }
 
 /// A snapshot of layer switches, trims, stretch and stereo dB automation.
@@ -71,6 +72,7 @@ impl AudioMix {
                     timing: bae_anim::layer_timing(&view, duration),
                     levels,
                     automation,
+                    effects: crate::audio_fx::Rack::read(stage, l),
                 })
             })
             .collect();
@@ -119,28 +121,45 @@ impl Track {
             self.timing
                 .layer_time(sample_to_time(start + i as i64, rate))
         };
-        let pos = |i| layer_time(i).as_seconds() * src_rate;
+        self.effects.begin(start + a as i64, start + b as i64, rate);
+        let reversed = self.effects.reverse;
+        let mirror = first_at(self.timing.in_point) + first_at(self.timing.out_point) - 1;
+        let pos = |i| {
+            if reversed {
+                self.timing
+                    .layer_time(sample_to_time(mirror - start - i as i64, rate))
+                    .as_seconds()
+                    * src_rate
+            } else {
+                layer_time(i).as_seconds() * src_rate
+            }
+        };
         let head = pos(a);
         let tail = pos(b - 1);
-        if head.max(tail) < 0.0 {
-            return Ok(());
-        }
         let base = head.min(tail).max(0.0).floor() as u64;
-        if source.info().frame_count.is_some_and(|n| base >= n) {
-            return Ok(());
-        }
-        let last = head.max(tail).floor() as u64 + 2;
-        let data = source.read(base, last - base)?;
+        let last = head.max(tail).max(0.0).floor() as u64 + 2;
+        let data = if head.max(tail) < 0.0 || source.info().frame_count.is_some_and(|n| base >= n) {
+            crate::AudioBuffer::default()
+        } else {
+            source.read(base, last - base)?
+        };
         let channels = usize::from(data.channels);
         let frames = data.frames();
         let static_gain = self.levels.map(db_gain);
         for (i, dst) in (a..b).zip(&mut out[a..b]) {
             let p = pos(i) - base as f64;
-            if p < 0.0 || p >= frames as f64 {
-                continue;
-            }
-            let j = p.floor() as usize;
-            let frac = p.fract() as f32;
+            let sample = if (0.0..frames as f64).contains(&p) {
+                let j = p.floor() as usize;
+                std::array::from_fn(|c: usize| {
+                    let ch = c.min(channels - 1);
+                    let left = data.samples[j * channels + ch];
+                    let right = data.samples[(j + 1).min(frames - 1) * channels + ch];
+                    left + (right - left) * p.fract() as f32
+                })
+            } else {
+                [0.0; 2]
+            };
+            let sample = self.effects.process(sample, layer_time(i), rate);
             let gain = match self
                 .automation
                 .as_ref()
@@ -150,10 +169,7 @@ impl Track {
                 _ => static_gain,
             };
             for c in 0..2 {
-                let ch = c.min(channels - 1);
-                let left = data.samples[j * channels + ch];
-                let right = data.samples[(j + 1).min(frames - 1) * channels + ch];
-                dst[c] += (left + (right - left) * frac) * gain[c];
+                dst[c] += sample[c] * gain[c];
             }
         }
         Ok(())
