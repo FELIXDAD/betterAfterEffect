@@ -25,6 +25,7 @@ struct H {
     time: f64,
     /// Modifiers egui last heard of.
     mods: Modifiers,
+    shapes: Vec<egui::epaint::ClippedShape>,
     /// The accessibility tree of the last frame (menus are found by label).
     access: Option<egui::accesskit::TreeUpdate>,
 }
@@ -52,6 +53,7 @@ impl H {
             time: 0.0,
             mods: Modifiers::NONE,
             access: None,
+            shapes: Vec::new(),
         };
         h.ctx.enable_accesskit();
         h.comp = path(&h.run("comp.create", json!({"width": 640, "height": 360}))["path"]);
@@ -109,6 +111,7 @@ impl H {
         });
         out.textures_delta.clear();
         self.access = out.platform_output.accesskit_update.take();
+        self.shapes = out.shapes;
         requests
     }
 
@@ -1695,4 +1698,87 @@ fn resolution_recurse_sets_nested_comps_and_ae_shortcuts_are_bound() {
         .find(|b| b.action == crate::tools::ids::RESOLUTION && b.params == json!({"factor": 2}))
         .expect("Half bound");
     assert_eq!(half.chord.to_string(), "Cmd+Shift+J");
+}
+
+#[test]
+fn particle_world_guides_follow_the_selected_layer_and_guide_controls() {
+    let mut h = H::new();
+    let mut app = bae_app::AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    bae_motion::effect::register_effect_commands(
+        &mut h.reg,
+        app.build().registry::<bae_model::EffectDef>(),
+    );
+    let layer = h.solid([640., 360.], [320., 180.]);
+    let fx = path(
+        &h.run(
+            "effect.apply",
+            json!({"layers": [layer], "match_name": "CC Particle World"}),
+        )["effects"][0],
+    );
+    h.select(&[&layer]);
+    let set = |h: &mut H, id: u32, value: Value| {
+        h.run(
+            "attr.set_at",
+            json!({"path": fx, "attr": format!("param:{id:04}"), "time": 0, "value": value}),
+        );
+    };
+    let lines = |h: &mut H| {
+        h.frame(vec![], Modifiers::NONE);
+        h.shapes
+            .iter()
+            .filter_map(|s| match s.shape {
+                egui::Shape::LineSegment { points, .. } => Some(points),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    for id in [51, 52, 53, 55, 60, 61] {
+        set(&mut h, id, Value::Bool(false));
+    }
+    let plain = lines(&mut h);
+    for id in [51, 52, 55, 60, 61] {
+        set(&mut h, id, Value::Bool(true));
+        let shown = lines(&mut h);
+        assert!(shown.len() > plain.len(), "guide {id}");
+        set(&mut h, id, Value::Bool(false));
+    }
+    // A quarter layer-width on X becomes a quarter-width on Y after a 90° roll.
+    set(&mut h, 51, Value::Bool(true));
+    set(&mut h, 7, Value::Float(0.25));
+    set(&mut h, 36, Value::Float(90.));
+    let center = h.screen(320., 340.);
+    let diagonal = vec2(4., 4.);
+    assert!(lines(&mut h).contains(&[center - diagonal, center + diagonal]));
+    set(&mut h, 51, Value::Bool(false));
+    set(&mut h, 7, Value::Float(0.));
+    set(&mut h, 36, Value::Float(0.));
+    set(&mut h, 55, Value::Bool(true));
+    set(&mut h, 58, Value::Float(3.));
+    let floor = lines(&mut h);
+    assert_eq!(floor.len(), plain.len() + 8);
+    set(&mut h, 57, Value::Int(3));
+    assert_eq!(lines(&mut h), floor);
+    set(&mut h, 56, Value::Int(2));
+    assert_ne!(lines(&mut h), floor);
+    h.select(&[]);
+    let deselected = lines(&mut h);
+    set(&mut h, 55, Value::Bool(false));
+    assert_eq!(lines(&mut h), deselected);
+
+    h.select(&[&layer]);
+    set(&mut h, 53, Value::Bool(true));
+    assert_eq!(lines(&mut h), plain);
+    h.run(
+        "attr.set_animated",
+        json!({"path":fx,"attr":"param:0007","time":0,"animated":true}),
+    );
+    h.run("attr.set_at", json!({"path":fx,"attr":"param:0007","time":bae_model::Time::from_seconds(1.).0,"value":Value::Float(0.3)}));
+    set(&mut h, 54, Value::Float(3.));
+    assert_eq!(lines(&mut h).len(), plain.len() + 3);
+    let info = query::comp_info(&h.stage, &h.comp).unwrap();
+    h.session()
+        .lock()
+        .set_time(&info, bae_model::Time::from_seconds(0.5));
+    assert_eq!(lines(&mut h).len(), plain.len() + 6);
 }

@@ -71,23 +71,13 @@ fn particle(id: u32, t: f32, s: State) -> Sprite {
     var projected = pos.xy;
     var perspective = 1.;
     if world {
-        var camera = pos-vec3f(cfg.size * .5, 0.);
-        camera = vec3f(camera.x, rot(camera.yz, radians(f(34))));
-        let xz = rot(camera.xz, radians(f(35)));
-        camera = vec3f(xz.x, camera.y, xz.y);
-        camera = vec3f(rot(camera.xy, radians(f(36))), camera.z);
-        let focal = .5 * w / max(.01, tan(radians(f(37)) * .5));
-        let z = focal * max(.01, f(33)) + camera.z;
-        visible = visible && z>1.;
-        perspective = clamp(focal / max(1., z), .01, 12.);
-        projected = cfg.size * .5 + camera.xy * perspective;
-    }
-    if world && frame.timing.z > 0. {
-        let projected_center = frame.projection * vec4f(pos, 1.);
-        let offset = projected_center + frame.projection[0];
-        visible = visible && projected_center.w > .001;
-        projected = projected_center.xy / max(.001, projected_center.w);
-        perspective = clamp(distance(projected, offset.xy / max(.001, offset.w)), .01, 12.);
+        let point = frame.projection * vec4f(pos, 1.);
+        let w = max(.001, point.w);
+        projected = point.xy / w;
+        visible = visible && point.w > select(.001, 1., point.z > 0.);
+        let offset = point + frame.projection[0];
+        let scale = select(distance(projected, offset.xy / max(.001, offset.w)), point.z / w, point.z > 0.);
+        perspective = clamp(scale, .01, 12.);
     }
     let variation = select(f(21), f(26) * .01, world);
     let size = mix(select(f(19), f(24), world), select(f(20), f(25), world), age) *w * .018 * perspective * max(0., 1.+(rv * 2.-1.) * variation);
@@ -181,9 +171,12 @@ fn particle(id: u32, t: f32, s: State) -> Sprite {
         result.y = vec4f(result.y.xy, vec2f(.5) + (q.xy-.5) * f(46) * .01);
         let crop = .5 * (1. - clamp(f(46) * .01, 0., .999));
         var texture_index = 2.;
-        if f(47) != 2. {
-            let clock = select(1. - age, age, f(47) == 3.);
-            texture_index += round(clock * 3.);
+        if f(47) == 1. {
+            for (var i = 1u; i < 4u; i++) {
+                if s.birth >= frame.maps[i].x { texture_index = 2. + f32(i); }
+            }
+        } else if f(47) == 3. {
+            texture_index += round(age * 3.);
         }
         result.brush = vec4f(crop, crop, style, texture_index);
     }

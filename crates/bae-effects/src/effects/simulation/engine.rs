@@ -378,7 +378,7 @@ pub(super) fn render(
             )
         })
         .clone();
-    let frame = surface::frame(scene, input, roi, maps);
+    let frame = surface::frame(kind, scene, input, roi, maps);
     let viewport_offset = rt.uniform(&frame.bytes);
     let viewport = wgpu::BindGroupEntry {
         binding: 4,

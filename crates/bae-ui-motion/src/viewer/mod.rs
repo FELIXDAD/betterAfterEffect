@@ -28,6 +28,7 @@ mod free_transform;
 mod menu;
 mod motion_path;
 mod overlay;
+mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
@@ -653,6 +654,7 @@ impl Panel for CompositionViewer {
         }
 
         overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected);
 
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
