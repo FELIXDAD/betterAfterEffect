@@ -31,12 +31,12 @@ fn pipeline(
         let mut bindings = vec![(0, Binding::Uniform(BYTES))];
         let inputs = match entry {
             "horizontal" => 4,
-            "vertical" => 2,
+            "vertical" | "vertical_native" => 2,
             _ => 3,
         };
         bindings.extend((1..=inputs).map(|i| (i, Binding::Texture)));
         bindings.push((5, Binding::Storage(format)));
-        if entry != "resolve" {
+        if matches!(entry, "horizontal" | "vertical") {
             bindings.push((6, Binding::Storage(format)));
         }
         Ok(KernelSource {
@@ -50,7 +50,7 @@ fn pipeline(
 }
 
 pub(super) fn prewarm(rt: &Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
-    for entry in ["horizontal", "vertical", "resolve"] {
+    for entry in ["horizontal", "vertical", "vertical_native", "resolve"] {
         pipeline(rt, format, entry)?;
     }
     Ok(())
@@ -121,7 +121,7 @@ pub(super) fn render(
     let textures = factors.map(|f| &levels[f.ilog2() as usize]);
     let mut uniforms = UniformWriter::with_size(BYTES as usize);
     let mut weights = [[0.; 4]; WEIGHTS];
-    let mut hsize = [1; 2];
+    let mut largest_radius = 0;
     let mut vsize = [1; 2];
     for (c, &factor) in factors.iter().enumerate() {
         let xy = axes.map(|axis| if axis { factor } else { 1 });
@@ -147,18 +147,18 @@ pub(super) fn render(
             .i32s(at + 16, &image_grid::rect4(rect))
             .i32s(at + 32, &[xy[0], xy[1], r, 0]);
         if r == 0 {
+            weights[0][c] = 1.;
             continue;
         }
+        largest_radius = largest_radius.max(r);
         let [w, h] = rect.size();
-        hsize = [
-            hsize[0].max(w),
-            hsize[1].max(h + if axes[1] { 2 * r as u32 } else { 0 }),
-        ];
         vsize = [vsize[0].max(w), vsize[1].max(h)];
         for (row, w) in weights.iter_mut().zip(blur::gaussian_weights(s, r)) {
             row[c] = w;
         }
     }
+    let halo = if axes[1] { largest_radius } else { 0 };
+    let same_level = factors.iter().all(|f| *f == factors[0]);
     uniforms
         .i32s(192, &image_grid::rect4(roi))
         .i32s(208, &image_grid::rect4(levels[0].rect))
@@ -166,20 +166,28 @@ pub(super) fn render(
         .u32(228, u32::from(axes[1]))
         .u32(232, u32::from(repeat))
         .u32(236, u32::from(v.p.float))
-        .f32(240, native as f32);
+        .f32(240, native as f32)
+        .u32(244, u32::from(same_level))
+        .i32(248, halo)
+        .i32(252, if axes[0] { largest_radius } else { 0 });
     for (i, w) in weights.iter().enumerate() {
         uniforms.f32s(256 + i * 16, w);
     }
     let offset = gpu::push_uniform(&gpu::runtime(target.gpu()), &uniforms);
-    let mut pair = |[w, h]: [u32; 2]| -> Result<[GpuImage; 2], RenderError> {
-        let r = IRect::from_size(w, h);
-        Ok([target.allocate(r, 1.)?, target.allocate(r, 1.)?])
-    };
-    let [hc, ha] = pair(hsize)?;
-    let [vc, va] = pair(vsize)?;
+    let pair =
+        |target: &mut dyn EffectTarget, [w, h]: [u32; 2]| -> Result<[GpuImage; 2], RenderError> {
+            let rect = IRect::from_size(w, h);
+            Ok([target.allocate(rect, 1.)?, target.allocate(rect, 1.)?])
+        };
+    let [hc, ha] = pair(target, [vsize[0], vsize[1] + 2 * halo as u32])?;
     dispatch(target, "horizontal", offset, &textures, &[&hc, &ha])?;
-    dispatch(target, "vertical", offset, &[&hc, &ha], &[&vc, &va])?;
     let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
+    if same_level && factors[0] == 1 && native == 1. {
+        dispatch(target, "vertical_native", offset, &[&hc, &ha], &[&out])?;
+        return Ok(out);
+    }
+    let [vc, va] = pair(target, vsize)?;
+    dispatch(target, "vertical", offset, &[&hc, &ha], &[&vc, &va])?;
     dispatch(target, "resolve", offset, &[&vc, &va, &levels[0]], &[&out])?;
     Ok(out)
 }

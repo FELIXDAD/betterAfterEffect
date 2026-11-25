@@ -13,7 +13,10 @@ struct Params {
     vertical: u32,
     repeat_edge: u32,
     floating: u32,
-    native_scale: vec4f,
+    native_scale: f32,
+    same_level: u32,
+    halo: i32,
+    horizontal_radius: i32,
     weights: array<vec4f,19>,
 }
 @group(0) @binding(0) var<uniform> u: Params;
@@ -31,7 +34,7 @@ fn load_edge(tex: texture_2d<f32>, q: vec2i, rect: vec4i) -> vec4f {
 }
 fn hor(tex: texture_2d<f32>, id: vec2i, ch: u32) -> vec2f {
     let l = u.lane[ch];
-    let halo = select(0,l.radius,u.vertical!=0u);
+    let halo = u.halo;
     if l.radius == 0 || any(id >= l.out.zw-l.out.xy+vec2i(0,2*halo)) { return vec2f(0.); }
     let p = id+l.out.xy-vec2i(0,halo);
     let r = select(0,l.radius,u.horizontal!=0u);
@@ -49,28 +52,65 @@ fn hor(tex: texture_2d<f32>, id: vec2i, ch: u32) -> vec2f {
 fn horizontal(@builtin(global_invocation_id) invocation: vec3u) {
     let p=vec2i(invocation.xy);
     if any(invocation.xy>=textureDimensions(color_out)){return;}
-    let r=hor(a,p,0u); let g=hor(b,p,1u); let blue=hor(c,p,2u); let alpha=hor(d,p,3u);
-    textureStore(color_out,p,vec4f(r.x,g.x,blue.x,alpha.x));
-    textureStore(alpha_out,p,vec4f(r.y,g.y,blue.y,alpha.y));
+    if u.same_level != 0u {
+        // All four convolutions use the same source texel at each offset.
+        let center_xy = p + u.lane[0].out.xy - vec2i(0, u.halo);
+        let rect = u.lane[0].source;
+        let center = load_edge(a, center_xy, rect);
+        let center_weight = select(vec4f(1.), u.weights[0], u.horizontal_radius != 0);
+        var color = center * center_weight;
+        var coverage = center.aaaa * center_weight;
+        for (var i = 1; i <= u.horizontal_radius; i++) {
+            let dx = vec2i(i, 0);
+            let pair = load_edge(a, center_xy-dx, rect) + load_edge(a, center_xy+dx, rect);
+            color += u.weights[i] * pair;
+            coverage += u.weights[i] * pair.aaaa;
+        }
+        textureStore(color_out, p, color);
+        textureStore(alpha_out, p, coverage);
+        return;
+    }
+    let r = hor(a, p, 0u); let g = hor(b, p, 1u);
+    let blue = hor(c, p, 2u); let alpha = hor(d, p, 3u);
+    textureStore(color_out, p, vec4f(r.x, g.x, blue.x, alpha.x));
+    textureStore(alpha_out, p, vec4f(r.y, g.y, blue.y, alpha.y));
 }
+
+struct Filtered { color: vec4f, coverage: vec4f }
+fn vertical_sum(p: vec2i) -> Filtered {
+    let center = p + vec2i(0, u.halo);
+    let w = select(vec4f(1.), u.weights[0], u.vertical != 0u);
+    var color = textureLoad(a, center, 0) * w;
+    var coverage = textureLoad(b, center, 0) * w;
+    for (var i = 1; i <= u.halo; i++) {
+        let dy = vec2i(0, i);
+        color += u.weights[i] * (textureLoad(a, center-dy, 0) + textureLoad(a, center+dy, 0));
+        coverage += u.weights[i] * (textureLoad(b, center-dy, 0) + textureLoad(b, center+dy, 0));
+    }
+    return Filtered(color, coverage);
+}
+
+fn compose(color: vec4f, coverage: vec3f) -> vec4f {
+    let valid = coverage != vec3f(0.);
+    var rgb = select(vec3f(0.), color.rgb / select(vec3f(1.), coverage, valid), valid);
+    var alpha = color.a;
+    if u.floating == 0u { rgb = saturate(rgb); alpha = saturate(alpha); }
+    return vec4f(rgb * alpha, alpha);
+}
+
 @compute @workgroup_size(8,8)
 fn vertical(@builtin(global_invocation_id) invocation: vec3u) {
-    if any(invocation.xy>=textureDimensions(color_out)){return;}
-    let p=vec2i(invocation.xy);
-    var col=vec4f(0.); var cov=vec4f(0.);
-    for(var ch=0u;ch<4u;ch++) {
-        let l=u.lane[ch];
-        if l.radius==0 || any(p>=l.out.zw-l.out.xy){continue;}
-        let r=select(0,l.radius,u.vertical!=0u);
-        for(var i=-r;i<=r;i++) {
-            let q=p+vec2i(0,i+r);
-            let w=select(1.,u.weights[abs(i)][ch],r!=0);
-            col[ch] += w*textureLoad(a,q,0)[ch];
-            cov[ch] += w*textureLoad(b,q,0)[ch];
-        }
-    }
-    textureStore(color_out,p,col);
-    textureStore(alpha_out,p,cov);
+    if any(invocation.xy >= textureDimensions(color_out)) { return; }
+    let filtered = vertical_sum(vec2i(invocation.xy));
+    textureStore(color_out, invocation.xy, filtered.color);
+    textureStore(alpha_out, invocation.xy, filtered.coverage);
+}
+
+@compute @workgroup_size(8,8)
+fn vertical_native(@builtin(global_invocation_id) invocation: vec3u) {
+    if any(vec2i(invocation.xy) >= u.roi.zw-u.roi.xy) { return; }
+    let filtered = vertical_sum(vec2i(invocation.xy));
+    textureStore(color_out, invocation.xy, compose(filtered.color, filtered.coverage.rgb));
 }
 fn level_pair(q:vec2i,ch:u32)->vec2f {return vec2f(textureLoad(a,q,0)[ch],textureLoad(b,q,0)[ch]);}
 
@@ -95,13 +135,11 @@ fn result(p:vec2f,ch:u32)->vec2f {
 @compute @workgroup_size(8,8)
 fn resolve(@builtin(global_invocation_id) invocation:vec3u) {
     if any(invocation.xy>=textureDimensions(color_out)){return;}
-    let p=(vec2f(u.roi.xy)+vec2f(invocation.xy)+0.5)*u.native_scale.x;
-    var rgb=vec3f(0.);
-    for(var i=0u;i<3u;i++){
-        let pair=result(p,i);
-        if pair.y!=0. {rgb[i]=pair.x/pair.y;}
-    }
-    var alpha=result(p,3u).x;
-    if u.floating==0u {rgb=saturate(rgb);alpha=saturate(alpha);}
-    textureStore(color_out,invocation.xy,vec4f(rgb*alpha,alpha));
+    let p=(vec2f(u.roi.xy)+vec2f(invocation.xy)+0.5)*u.native_scale;
+    let red = result(p, 0u);
+    let green = result(p, 1u);
+    let blue = result(p, 2u);
+    let alpha = result(p, 3u).x;
+    let color = vec4f(red.x, green.x, blue.x, alpha);
+    textureStore(color_out, invocation.xy, compose(color, vec3f(red.y, green.y, blue.y)));
 }

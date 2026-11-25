@@ -61,7 +61,7 @@ fn gather(p: vec2f, mapped: bool) -> vec4f {
     return finish(sum/norm);
 }
 fn axis(id: u32) -> vec2f {
-    let angle = f32(id) * 2.0943951;
+    let angle = 0.5235988 + f32(id) * 2.0943951;
     return aperture_offset(vec2f(cos(angle), sin(angle)));
 }
 fn rhombi(p: vec2f, first: bool) -> vec4f {

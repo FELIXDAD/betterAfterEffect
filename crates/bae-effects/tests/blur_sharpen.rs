@@ -166,8 +166,12 @@ fn channel_blur_matches_independent_gaussians_with_partial_coverage() {
     let Some(gpu) = context() else { return };
     let rect = IRect::new(-5, 7, 49, 44);
     let input = test_image(rect);
-    let radii = [0., 8., 32., 80.];
-    for (dimensions, repeat) in [(1, false), (2, true), (3, true)] {
+    for (dimensions, repeat, radii) in [
+        (1, true, [2., 0., 7., 12.]),
+        (1, false, [0., 8., 32., 80.]),
+        (2, true, [0., 8., 32., 80.]),
+        (3, true, [0., 8., 32., 80.]),
+    ] {
         let roi = if repeat { rect } else { rect.inflate(3) };
         let gaussians = radii.map(|r| {
             if r == 0. {
