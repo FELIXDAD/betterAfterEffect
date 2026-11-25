@@ -340,6 +340,18 @@ impl Drop for Gpu {
     }
 }
 
+/// Registers the panel and its Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "lumetri_scopes",
+        bae_ui::PanelKind::new("Lumetri Scopes", |spawn| {
+            Box::new(ScopesPanel::from_state(spawn.state))
+        }),
+    );
+}
+
 /// The Lumetri Scopes panel.
 #[derive(Default)]
 pub struct ScopesPanel {
