@@ -250,6 +250,8 @@ pub struct EvaluatedEffect {
     pub enabled: bool,
     /// Every `param:NNNN` attribute, evaluated, keyed by its numeric ID (`"0001"`).
     pub params: BTreeMap<String, Value>,
+    /// Child prims, generically evaluated (the Paint effect's strokes).
+    pub children: Vec<EvaluatedPrim>,
 }
 
 impl EvaluatedEffect {
