@@ -301,7 +301,7 @@ const FILE: &[Node] = &[
     sub(
         "Interpret Footage",
         &[
-            it(10420225, "Main...", "motion.file.interpret_footage_main", "", E, Todo),
+            it(10420225, "Main...", "motion.file.interpret_footage_main", "", E, Done),
             it(10420226, "Proxy...", "motion.file.interpret_footage_proxy", "", E, Later),
             SEP,
             it(10420228, "Remember Interpretation", "motion.file.remember_interpretation", "", E, Todo),

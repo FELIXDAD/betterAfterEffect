@@ -172,6 +172,19 @@ fn columns(width: f32) -> [f32; 5] {
     ]
 }
 
+/// The project's color depth in bits per channel (Project Settings).
+fn project_depth(stage: &bae_model::Stage) -> String {
+    PrimPath::new("/project")
+        .ok()
+        .and_then(|p| stage.prim(&p))
+        .and_then(|v| query::static_value(&v, "bit_depth"))
+        .and_then(|v| match v {
+            bae_model::Value::Enum(s) | bae_model::Value::String(s) => Some(s),
+            _ => None,
+        })
+        .unwrap_or_else(|| "8".into())
+}
+
 #[cfg(test)]
 impl ProjectPanel {
     /// An item is being renamed.
@@ -404,22 +417,41 @@ impl Panel for ProjectPanel {
             color::TEXT_DIM,
         );
         let mut x = foot.right() - 6.0;
-        let mut button = |ui: &mut Ui, icon: Icon, tip: &str| {
-            x -= 24.0;
-            let r = Rect::from_min_size(pos2(x, foot.top() + 3.0), vec2(22.0, 22.0));
+        let button = |ui: &mut Ui, x: &mut f32, icon: Icon, tip: &str| {
+            *x -= 24.0;
+            let r = Rect::from_min_size(pos2(*x, foot.top() + 3.0), vec2(22.0, 22.0));
             let resp = ui
                 .put(r, |ui: &mut Ui| icons::button(ui, icon, 22.0, false))
                 .labeled(egui::WidgetType::Button, tr(tip));
             resp.on_hover_text(tr(tip)).clicked()
         };
-        if button(ui, Icon::Trash, "Delete") {
+        if button(ui, &mut x, Icon::Trash, "Delete") {
             delete = session.lock().selected_items.clone();
         }
-        if button(ui, Icon::Composition, "New Composition") {
+        // AE: the project's color depth; a click opens Project Settings.
+        let depth = project_depth(stage);
+        let label = format!("{depth} bpc");
+        let w = 46.0;
+        x -= w + 2.0;
+        let r = Rect::from_min_size(pos2(x, foot.top() + 4.0), vec2(w, 20.0));
+        let bpc = ui
+            .put(
+                r,
+                egui::Button::new(egui::RichText::new(&label).small()).frame(false),
+            )
+            .labeled_value(egui::WidgetType::Button, tr("Project Settings"), &label)
+            .on_hover_text(tr("Project Settings"));
+        if bpc.clicked() {
+            cx.invoke("motion.file.project_settings");
+        }
+        if button(ui, &mut x, Icon::Composition, "New Composition") {
             menu_new_comp = true;
         }
-        if button(ui, Icon::Folder, "New Folder") {
+        if button(ui, &mut x, Icon::Folder, "New Folder") {
             menu_new_folder = true;
+        }
+        if button(ui, &mut x, Icon::InterpretFootage, "Interpret Footage") {
+            cx.invoke(crate::actions::ids::INTERPRET_FOOTAGE);
         }
 
         // Apply.
@@ -540,6 +572,8 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Footer: the project color depth button opens Project Settings.
+    ("Project Settings", "项目设置"),
     // Project panel
     ("Name", "名称"),
     ("Type", "类型"),

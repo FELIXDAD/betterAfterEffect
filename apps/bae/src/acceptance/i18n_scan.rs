@@ -11,6 +11,8 @@ use super::*;
 
 /// Proper nouns and key legends that stay in Latin letters in a Chinese UI.
 pub(super) const ALLOWED: &[&str] = &[
+    // The Project panel's color depth button ("8 bpc", as in AE's Chinese UI).
+    "bpc",
     // Product, formats, color models, codecs.
     "BAE",
     "PNG",

@@ -8,6 +8,7 @@
 mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
+mod interpret_footage;
 mod light_settings;
 pub mod memory;
 mod precompose;
@@ -42,6 +43,8 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// File > Interpret Footage > Main (Cmd/Ctrl+Alt+G).
+    InterpretFootage(Box<interpret_footage::InterpretFootage>),
     /// An alert: a message and OK (import errors …).
     Alert { title: String, message: String },
 }
@@ -233,6 +236,18 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Interpret Footage for the footage selected in the Project panel.
+pub(crate) fn interpret_footage(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    let selected = session.lock().selected_items.clone();
+    if d.open.is_none()
+        && let Some(f) = interpret_footage::InterpretFootage::new(cx.stage, &selected)
+    {
+        d.open = Some(Dialog::InterpretFootage(Box::new(f)));
+    }
+}
+
 /// Open Camera Settings for a new camera in the active comp.
 pub(crate) fn new_camera(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -272,6 +287,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        interpret_footage::STRINGS,
     ]
     .concat()
 }
@@ -298,6 +314,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::InterpretFootage(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
         };
         let mut lock = dialogs.lock();

@@ -71,6 +71,7 @@ pub mod dimensions;
 pub mod effect;
 pub mod expressions;
 pub mod import;
+pub mod interpret;
 pub mod keys;
 pub mod layer;
 pub mod markers;
@@ -101,6 +102,7 @@ pub use comp::{
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput};
+pub use interpret::InterpretFootage;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
     PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
@@ -172,6 +174,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(InterpretFootage),
         r.register(SetText),
         r.register(SetExpressions),
         r.register(BakeExpression),

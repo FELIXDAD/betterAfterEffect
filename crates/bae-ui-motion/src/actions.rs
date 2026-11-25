@@ -56,6 +56,7 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const INTERPRET_FOOTAGE: &str = "motion.file.interpret_footage_main";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
     /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
@@ -190,6 +191,7 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::INTERPRET_FOOTAGE, "Interpret Footage: Main..."),
     (ids::ADD_EXPRESSION, "Add Expression"),
     (ids::ENABLE_EXPRESSIONS, "Enable Expressions"),
     (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
@@ -775,6 +777,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::INTERPRET_FOOTAGE => {
+            crate::dialogs::interpret_footage(cx, session);
             return true;
         }
         ids::PRE_COMPOSE => {
@@ -1489,6 +1495,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Interpret Footage: Main...", "解释素材：主要..."),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
