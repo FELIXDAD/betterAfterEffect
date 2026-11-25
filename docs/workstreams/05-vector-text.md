@@ -58,4 +58,6 @@
 
 **2026-11-24**：`text/animators` 接通模型命令、关键帧和表达式求值、Vello 与 CPU 渲染。AE 26.2.1 的位置和不透明度参考帧在 `crates/bae-text/tests/ae/golden/`。界面工作流可调用 `text.create_animator` 创建组，再使用通用属性命令。
 
+**2026-11-24 · `vector/shape-operators`**：形状树已接入合并路径五种模式、位移路径、收缩和膨胀、中继器、圆角、扭转、摆动路径和锯齿。AE 26.2.1 的参数探针、21 张参考帧和角度/密度网格脚本在 `crates/bae-vector/tests/ae/`，逐像素误差见 crate README。摆动噪声和扭转曲线拟合仍有可测差异。09fe9cc0 可用 `prim.create` 创建指定位置的 `ShapeOperator`，通过 `attr.set` 写入 `match_name` 和参数，通过 `key.set` 添加关键帧。
+
 ## 请求（其他工作流在这里留言）

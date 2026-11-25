@@ -219,9 +219,18 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "This format has no alpha channel.",
         "此格式没有 Alpha 通道。",
     ),
+    ("ProRes export requires macOS.", "ProRes 导出需要 macOS。"),
     (
-        "Movies are not available on Windows yet; they come with Media Foundation in a later version.",
-        "Windows 版暂不能输出影片，后续版本通过 Media Foundation 提供。",
+        "HEVC decoding is unsupported. Check that Windows HEVC Video Extensions are installed.",
+        "系统不支持此 HEVC 视频。请检查是否已安装 Windows「HEVC 视频扩展」。",
+    ),
+    (
+        "A hardware HEVC encoder is required.",
+        "导出 HEVC 需要硬件编码器。",
+    ),
+    (
+        "The system H.264 encoder is unavailable.",
+        "系统 H.264 编码器不可用。",
     ),
     ("Frames", "帧"),
     ("Show in Finder", "在访达中显示"),
@@ -619,6 +628,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Custom", "自定义"),
     // The viewer's resolution menu.
     ("Auto", "自动"),
+    ("Active Camera", "活动摄像机"),
+    ("3D View Popup", "3D 视图弹出式菜单"),
+    ("Switch to 3D View", "切换到三维视图"),
+    ("Switch to 3D View A", "切换到三维视图 A"),
+    ("Switch to 3D View B", "切换到三维视图 B"),
+    ("Switch to 3D View C", "切换到三维视图 C"),
     ("Save Preset", "保存预设"),
     ("Delete Preset", "删除预设"),
     ("Width:", "宽度:"),
