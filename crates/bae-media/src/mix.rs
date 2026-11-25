@@ -6,20 +6,8 @@ use bae_anim::{Curve, CurveKind, LayerTiming};
 use bae_model::{PrimPath, Stage, Time, Value};
 use std::path::PathBuf;
 
-use crate::audio::sample_to_time;
+use crate::audio::{layer_file, sample_to_time};
 use crate::{AudioSource, FileAudio, MediaError};
-
-/// The file referenced by an audio-bearing footage layer.
-pub fn layer_file(stage: &Stage, layer: &PrimPath) -> Option<PathBuf> {
-    let Value::PrimRef(asset) = stage.prim(layer)?.value("source")? else {
-        return None;
-    };
-    let asset = stage.prim(asset)?;
-    if asset.value("has_audio")?.as_bool() != Some(true) {
-        return None;
-    }
-    Some(PathBuf::from(asset.value("file:original")?.as_str()?))
-}
 
 struct Track {
     file: PathBuf,
@@ -75,7 +63,7 @@ impl AudioMix {
                     .attr("audio:levels")
                     .and_then(|s| Curve::new(&s.keyframes, CurveKind::PerDimension));
                 Some(Track {
-                    file,
+                    file: file.to_owned(),
                     source: None,
                     kernel: None,
                     timing: bae_anim::layer_timing(&view, duration),
