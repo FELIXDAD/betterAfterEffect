@@ -123,6 +123,8 @@ pub type MenuEnabled = dyn Fn(&MenuContext<'_>) -> bool + Send + Sync;
 
 /// Decides whether a checkable item shows a check mark.
 pub type MenuChecked = dyn Fn(&MenuContext<'_>) -> bool + Send + Sync;
+/// A title that follows the state (shown as given, already translated).
+pub type MenuLabel = dyn Fn(&MenuContext<'_>) -> Option<String> + Send + Sync;
 
 /// Where an entry sits in one level of the menu: entries sort by `(group,
 /// order)`; a separator goes between groups. `sorted`: the entry is placed by its
@@ -174,6 +176,7 @@ pub struct MenuItemSpec {
     pub handler_needed: bool,
     enabled: Option<Arc<MenuEnabled>>,
     checked: Option<Arc<MenuChecked>>,
+    label: Option<Arc<MenuLabel>>,
 }
 
 impl std::fmt::Debug for MenuItemSpec {
@@ -209,6 +212,7 @@ impl MenuItemSpec {
             handler_needed: false,
             enabled: None,
             checked: None,
+            label: None,
         }
     }
 
@@ -259,6 +263,21 @@ impl MenuItemSpec {
     ) -> Self {
         self.checked = Some(Arc::new(f));
         self
+    }
+
+    /// A title that follows the state (AE's Window ▸ "Composition: Comp 1"):
+    /// `f` gives the shown text, already translated; `None` keeps the title.
+    pub fn label_when(
+        mut self,
+        f: impl Fn(&MenuContext<'_>) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.label = Some(Arc::new(f));
+        self
+    }
+
+    /// The text shown now, when it follows the state ([`MenuItemSpec::label_when`]).
+    pub fn label(&self, cx: &MenuContext<'_>) -> Option<String> {
+        self.label.as_ref().and_then(|f| f(cx))
     }
 
     /// Holds a place without being shown: the submenu of its path exists even
