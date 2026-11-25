@@ -67,7 +67,10 @@ pub enum Channels {
 pub fn supports_alpha(format: ExportFormat) -> bool {
     match format {
         ExportFormat::Hevc => bae_media::VideoCodec::Hevc.supports_alpha(),
-        _ => !matches!(format, ExportFormat::Wav | ExportFormat::H264 | ExportFormat::ProRes),
+        _ => !matches!(
+            format,
+            ExportFormat::Wav | ExportFormat::H264 | ExportFormat::ProRes
+        ),
     }
 }
 
@@ -1007,41 +1010,41 @@ fn item_ui(
                 ui.label(tr("Stereo, 48 kHz, 24-bit PCM"));
                 ui.end_row();
             } else {
-            ui.label(tr("Channels"));
-            let mut channels = item.channels;
-            egui::ComboBox::from_id_salt("channels")
-                .width(combo_w)
-                .truncate()
-                .selected_text(channels_label(channels))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut channels,
-                        Channels::Rgb,
-                        channels_label(Channels::Rgb),
+                ui.label(tr("Channels"));
+                let mut channels = item.channels;
+                egui::ComboBox::from_id_salt("channels")
+                    .width(combo_w)
+                    .truncate()
+                    .selected_text(channels_label(channels))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut channels,
+                            Channels::Rgb,
+                            channels_label(Channels::Rgb),
+                        );
+                        let alpha = supports_alpha(item.format);
+                        let r = ui.add_enabled(
+                            alpha,
+                            egui::Button::selectable(
+                                channels == Channels::RgbAlpha,
+                                channels_label(Channels::RgbAlpha),
+                            ),
+                        );
+                        if r.clicked() {
+                            channels = Channels::RgbAlpha;
+                        }
+                        if !alpha {
+                            r.on_disabled_hover_text(tr("This format has no alpha channel."));
+                        }
+                    })
+                    .response
+                    .labeled_value(
+                        egui::WidgetType::ComboBox,
+                        &name("Channels"),
+                        channels_label(item.channels),
                     );
-                    let alpha = supports_alpha(item.format);
-                    let r = ui.add_enabled(
-                        alpha,
-                        egui::Button::selectable(
-                            channels == Channels::RgbAlpha,
-                            channels_label(Channels::RgbAlpha),
-                        ),
-                    );
-                    if r.clicked() {
-                        channels = Channels::RgbAlpha;
-                    }
-                    if !alpha {
-                        r.on_disabled_hover_text(tr("This format has no alpha channel."));
-                    }
-                })
-                .response
-                .labeled_value(
-                    egui::WidgetType::ComboBox,
-                    &name("Channels"),
-                    channels_label(item.channels),
-                );
-            item.channels = channels;
-            ui.end_row();
+                item.channels = channels;
+                ui.end_row();
             }
             if has_bit_rate(item.format) {
                 // AE's H.264 format options: VBR, target bitrate.
