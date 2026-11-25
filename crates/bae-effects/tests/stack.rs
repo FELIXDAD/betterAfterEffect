@@ -129,6 +129,56 @@ fn close(got: [u8; 4], want: [f64; 4], tol: u8, what: &str) {
     assert!(ok, "{what}: got {got:?}, want {want:?}");
 }
 
+#[test]
+fn audio_spectrum_reads_the_selected_layer_and_changes_pixels() {
+    let mut fx = Fx::new();
+    if fx.renderer.is_none() {
+        return;
+    }
+    let comp = fx.comp();
+    let solid = fx.solid(&comp, [0.1; 3], [64, 32]);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("signal.wav");
+    let mut bytes = Vec::from(*b"RIFF");
+    bytes.extend(16036u32.to_le_bytes());
+    bytes.extend(b"WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data");
+    bytes.extend(16000u32.to_le_bytes());
+    for i in 0..8000 {
+        let sample: i16 = if i < 2000 {
+            0
+        } else {
+            (26000.0 * (std::f32::consts::TAU * 440.0 * i as f32 / 8000.0).sin()) as i16
+        };
+        bytes.extend(sample.to_le_bytes());
+    }
+    std::fs::write(&file, bytes).unwrap();
+    fx.run("item.import",json!({"files":[{"path":file,"name":"signal.wav","attrs":{"has_audio":{"type":"bool","value":true}}}]}));
+    let asset = fx
+        .stage
+        .children(&p("/assets"))
+        .into_iter()
+        .find(|p| bae_motion::query::display_name_of(&fx.stage, p) == "signal.wav")
+        .unwrap();
+    let layer = fx.run(
+        "layer.create",
+        json!({"kind":"audio","comp":comp,"source":asset}),
+    )["path"]
+        .clone();
+    let effect = fx.apply(&solid, "ADBE AudSpect");
+    fx.param(&effect, 1, json!({"type":"prim_ref","value":layer}));
+    fx.param(&effect, 2, json!({"type":"vec2","value":[4.0,16.0]}));
+    fx.param(&effect, 3, json!({"type":"vec2","value":[60.0,16.0]}));
+    fx.param(&effect, 9, json!({"type":"float","value":16.0}));
+    fx.param(&effect, 6, json!({"type":"float","value":100.0}));
+    fx.param(&effect, 7, json!({"type":"float","value":900.0}));
+    fx.param(&effect, 8, json!({"type":"int","value":8}));
+    let (x, y) = (28, 8);
+    let early = fx.pixel_at(&comp, x, y, Time::from_seconds(0.1)).unwrap();
+    let signal = fx.pixel_at(&comp, x, y, Time::from_seconds(0.5)).unwrap();
+    assert_eq!(early[3], 0, "{early:?}");
+    assert!(signal[3] > 128, "{signal:?}");
+}
+
 const LEVELS: &str = "ADBE Easy Levels2";
 const EXPOSURE: &str = "ADBE Exposure2";
 
