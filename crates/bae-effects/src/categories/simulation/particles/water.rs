@@ -79,7 +79,7 @@ pub(super) fn render(
     let scene_params;
     let params = if v.popup(38) == 3
         && let Some(scene) = v.p.scene
-        && let Some(light) = scene.light
+        && let Some(light) = scene.layer_light
     {
         lighting = v.p.effect.clone();
         lighting

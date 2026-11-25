@@ -79,14 +79,17 @@ fn layout(
 }
 
 impl Engine {
-    fn get<'a>(
-        slot: &'a mut Option<Self>,
-        device: &wgpu::Device,
-    ) -> Result<&'a mut Self, RenderError> {
-        match slot {
-            Some(engine) => Ok(engine),
-            None => Ok(slot.insert(Self::new(device)?)),
-        }
+    fn get(rt: &gpu::Runtime) -> Result<&Self, RenderError> {
+        // Interactive frames may arrive before the registered warm-up has run.
+        let result = if bae_render::is_interactive_thread() {
+            rt.particles
+                .get()
+                .ok_or_else(|| bae_render::warming_up("the particle pipelines"))?
+        } else {
+            rt.particles
+                .get_or_init(|| Self::new(&rt.device).map_err(|e| e.to_string()))
+        };
+        result.as_ref().map_err(|e| RenderError::Other(e.clone()))
     }
 
     fn new(device: &wgpu::Device) -> Result<Self, RenderError> {
@@ -270,7 +273,7 @@ fn dispatch(
 }
 
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
-    Engine::get(&mut rt.particles.lock(), &rt.device)?;
+    Engine::get(rt)?;
     surface::composite_kernel(rt, format)?;
     super::scatter::prewarm(rt, format)?;
     super::water::prewarm(rt, format)?;
@@ -327,8 +330,7 @@ pub(super) fn render(
     }
     .clamp(1, 5) as usize
         - 1;
-    let mut slot = rt.particles.lock();
-    let engine = Engine::get(&mut slot, &rt.device)?;
+    let engine = Engine::get(&rt)?;
     let advance = engine.advance[advance].clone();
     let mut frame = surface::frame(scene, input, roi, maps);
     let controls = scene.controls(kind, seed);
@@ -428,7 +430,6 @@ pub(super) fn render(
         pass.set_viewport(0., 0., roi.width() as f32, roi.height() as f32, 0., 1.);
         pass.draw(0..4, 0..count);
     }
-    drop(slot);
     if kind == Kind::Foam
         && p.popup(2) == 2
         && let Some(map) = maps.get(2).and_then(Option::as_ref)
@@ -458,8 +459,12 @@ mod tests {
         };
         let rt = gpu::runtime(&gpu);
         crate::prewarm(&gpu, wgpu::TextureFormat::Rgba16Float).unwrap();
-        let particles = rt.particles.lock();
-        let engine = particles.as_ref().expect("registered particle warm-up");
+        let engine = rt
+            .particles
+            .get()
+            .expect("registered particle warm-up")
+            .as_ref()
+            .unwrap();
         assert!(engine.scratch.size() >= 50_000 * SPRITE_BYTES);
     }
 }

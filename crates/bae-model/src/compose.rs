@@ -11,7 +11,7 @@
 //! attached with [`Stage::attach_project`]. When a prim carries reference opinions in
 //! several sublayers, the strongest non-empty list applies (no list merging yet).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::attr::AttrSpec;
 use crate::error::{ModelError, Result};
@@ -212,23 +212,24 @@ impl Stage {
     /// sources after them.
     pub fn children(&self, path: &PrimPath) -> Vec<PrimPath> {
         let mut out: Vec<PrimPath> = Vec::new();
-        for o in self.opinions(path).iter().rev() {
+        let opinions = self.opinions(path);
+        let mut sources = opinions.len();
+        for o in opinions.iter().rev() {
             for c in o.layer.children(&o.path) {
                 let composed = path.child_unchecked(c.name());
-                if !out.contains(&composed) {
-                    out.push(composed);
-                }
+                out.push(composed);
             }
         }
         // Root-level children have no opinions to walk; take them from the stack.
         if path.is_root() {
+            sources += self.stack.len();
             for id in self.stack.iter().rev() {
-                for c in self.sublayers[id].children(path) {
-                    if !out.contains(&c) {
-                        out.push(c);
-                    }
-                }
+                out.extend(self.sublayers[id].children(path));
             }
+        }
+        if sources > 1 {
+            let mut seen = BTreeSet::new();
+            out.retain(|c| seen.insert(c.clone()));
         }
         out.retain(|c| self.is_defined_here(c));
         out
