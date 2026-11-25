@@ -1,3 +1,4 @@
+pub(crate) mod optics;
 use super::packages;
 use crate::Registry;
 use crate::{
@@ -8,8 +9,8 @@ use crate::{
 use std::sync::Arc;
 
 pub(crate) fn register(registry: &mut Registry) {
-    registry.prewarm.push(spatial::optics::prewarm);
-    registry.effects.extend(spatial::optics::builtins());
+    registry.prewarm.push(optics::prewarm);
+    registry.effects.extend(optics::builtins());
     registry.prewarm.push(crate::blur::prewarm);
     registry.prewarm.push(spatial::prewarm);
     registry.prewarm.push(crate::effects::compound::prewarm);

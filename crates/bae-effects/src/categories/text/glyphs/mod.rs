@@ -1,7 +1,7 @@
 //! Numeric displays. The host formats each string once and the GPU draws its strokes.
 mod definitions;
 mod format;
-use super::image_grid;
+use crate::effects::image_grid;
 use crate::{
     Builtin, EffectTarget, TargetEffect,
     gpu::{self, Resource, UniformWriter},

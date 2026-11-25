@@ -1,5 +1,5 @@
 pub(crate) mod definitions;
-use super::{image_grid, layer_input, sampled::Shader, temporal};
+use crate::effects::{image_grid, layer_input, sampled::Shader, temporal};
 use crate::{Builtin, EffectTarget, TargetEffect, params::Params, rust_builtin};
 use bae_model::{EffectDef, Time};
 use bae_render::{
@@ -10,9 +10,9 @@ use std::sync::Arc;
 const MATCH: Shader = Shader {
     label: "bae.effects.match-grain",
     source: concat!(
-        include_str!("../sampled.wgsl"),
+        include_str!("../../../effects/sampled.wgsl"),
         include_str!("hash.wgsl"),
-        include_str!("../../../packages/add-grain/shaders/field.wgsl"),
+        include_str!("../../../../packages/add-grain/shaders/field.wgsl"),
         include_str!("grain.wgsl"),
         include_str!("match.wgsl")
     ),
@@ -20,7 +20,7 @@ const MATCH: Shader = Shader {
 const REMOVE: Shader = Shader {
     label: "bae.effects.remove-grain",
     source: concat!(
-        include_str!("../sampled.wgsl"),
+        include_str!("../../../effects/sampled.wgsl"),
         include_str!("grain.wgsl"),
         include_str!("remove.wgsl")
     ),
@@ -28,13 +28,16 @@ const REMOVE: Shader = Shader {
 const PROFILE: Shader = Shader {
     label: "bae.effects.grain-patches",
     source: concat!(
-        include_str!("../sampled.wgsl"),
+        include_str!("../../../effects/sampled.wgsl"),
         include_str!("profile.wgsl")
     ),
 };
 const REDUCE: Shader = Shader {
     label: "bae.effects.grain-profile",
-    source: concat!(include_str!("../sampled.wgsl"), include_str!("reduce.wgsl")),
+    source: concat!(
+        include_str!("../../../effects/sampled.wgsl"),
+        include_str!("reduce.wgsl")
+    ),
 };
 pub(crate) fn prewarm(
     rt: &crate::gpu::Runtime,
@@ -61,7 +64,7 @@ pub(crate) fn builtins() -> [Builtin; 2] {
         ),
     ]
     .map(|(matching, b, id, zh)| {
-        let (def, names) = b.build();
+        let (def, names) = b.reference_points().build();
         rust_builtin(
             (Arc::new(Grain { def, matching }), names),
             id,

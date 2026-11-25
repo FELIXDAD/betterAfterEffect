@@ -1,7 +1,12 @@
 pub(crate) mod definitions;
-use super::super::{blur::BLURRINESS_TO_SIGMA, image_grid, layer_input, sampled::Shader};
-use super::{blur, common, dispatch};
+use crate::effects::{
+    blur::{BLURRINESS_TO_SIGMA, dimensions},
+    image_grid, layer_input,
+    sampled::Shader,
+    spatial::dispatch,
+};
 use crate::{Builtin, EffectTarget, TargetEffect, params::Params, rust_builtin};
+use crate::{blur, common};
 use bae_model::EffectDef;
 use bae_render::{
     Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError, effect::LayerDependency,
@@ -28,7 +33,7 @@ macro_rules! shader {
         Shader {
             label: concat!("bae.effects.optics.", $name),
             source: concat!(
-                include_str!("../../sampled.wgsl"),
+                include_str!("../../../effects/sampled.wgsl"),
                 include_str!(concat!($name, ".wgsl"))
             ),
         }
@@ -97,7 +102,7 @@ pub(crate) fn builtins() -> [Builtin; 8] {
         ),
     ]
     .map(|(mode, b, id, zh)| {
-        let (def, names) = b.build();
+        let (def, names) = b.reference_points().build();
         rust_builtin(
             (Arc::new(Optics { def, mode }), names),
             id,
@@ -121,7 +126,7 @@ impl Optics {
             Mode::Channel => {
                 (1..=4).map(|i| v.f(i)).fold(0., f64::max) * BLURRINESS_TO_SIGMA * 4. + 4.
             }
-            Mode::Vector => v.f(2).abs() + v.f(7) * 2. + 2.,
+            Mode::Vector => v.f(2).abs() + v.f(4) + v.f(7) * 2. + 2.,
             _ => v.f(1),
         }) * v.p.scale
     }
@@ -134,8 +139,43 @@ impl Effect for Optics {
         self.dependency(p).into_iter().collect()
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
+        if roi.is_empty() {
+            return roi;
+        }
         if matches!(self.mode, Mode::Radial | Mode::Fast) {
-            return IRect::new(-1 << 26, -1 << 26, 1 << 26, 1 << 26);
+            let v = Params::new(&self.def, p);
+            let amount = v.f(2).abs();
+            if amount == 0. {
+                return roi;
+            }
+            let fast = self.mode == Mode::Fast;
+            let center = p
+                .point(if fast { 1 } else { 4 })
+                .map(|pt| pt.map(|x| x * p.scale));
+            let [cx, cy] = match center {
+                Some(pt) => pt,
+                None if !p.layer_bounds.is_empty() => {
+                    let layer = image_grid::layer_rect(p);
+                    [
+                        0.5 * f64::from(layer.x0 + layer.x1),
+                        0.5 * f64::from(layer.y0 + layer.y1),
+                    ]
+                }
+                // The default center comes from the complete source in standalone renders.
+                None => return IRect::new(-1 << 26, -1 << 26, 1 << 26, 1 << 26),
+            };
+            let dx = (f64::from(roi.x0) - cx)
+                .abs()
+                .max((f64::from(roi.x1) - cx).abs());
+            let dy = (f64::from(roi.y0) - cy)
+                .abs()
+                .max((f64::from(roi.y1) - cy).abs());
+            let travel = if fast || v.popup(1) < 5 {
+                amount / 200.
+            } else {
+                (0.5 * amount.to_radians()).min(2.)
+            };
+            return roi.inflate((dx.hypot(dy) * travel).ceil() as i32 + 1);
         }
         roi.inflate(self.radius(Params::new(&self.def, p)).ceil() as i32 + 2)
     }
@@ -216,7 +256,7 @@ impl TargetEffect for Optics {
                 )
             }
             Mode::Channel => {
-                let dimensions = super::super::blur::dimensions(v.popup(6));
+                let dimensions = dimensions(v.popup(6));
                 let edge = if v.b(5) {
                     blur::Edge::Repeat
                 } else {

@@ -2,12 +2,10 @@
 //! or access to the full source extent when rendering a tile.
 pub(crate) mod choker;
 pub(crate) mod definitions;
-pub(crate) mod optics;
 mod pass;
 pub(crate) mod stylize;
 
-use pass::dispatch;
-pub(crate) use pass::prewarm;
+pub(crate) use pass::{dispatch, prewarm};
 
 use crate::{
     EffectTarget, TargetEffect,
