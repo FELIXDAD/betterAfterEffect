@@ -8,6 +8,7 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.effects.extend([
         strokes::stroke(),
         strokes::write_on(),
+        strokes::paint_effect(),
         strokes::scribble(),
         strokes::vegas(),
     ]);
