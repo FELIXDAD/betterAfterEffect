@@ -1,6 +1,9 @@
-use crate::{Registry, effects::text};
+mod glyphs;
+use crate::Registry;
 
 pub(crate) fn register(registry: &mut Registry) {
-    registry.effects.extend([text::numbers(), text::timecode()]);
-    registry.prewarm.push(text::prewarm);
+    registry
+        .effects
+        .extend([glyphs::numbers(), glyphs::timecode()]);
+    registry.prewarm.push(glyphs::prewarm);
 }

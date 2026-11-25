@@ -51,7 +51,7 @@ pub(crate) fn write_on() -> Builtin {
             &["None", "Size", "Hardness", "Size & Hardness"],
         );
     Generator::WriteOn.builtin(
-        style(def, 10, "Paint Style", "绘画样式", 1),
+        style(def, 10, "Paint Style", "绘画样式", 1).reference_points(),
         "write-on",
         "写入",
     )
