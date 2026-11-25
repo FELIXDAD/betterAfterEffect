@@ -263,7 +263,7 @@ pub(crate) fn entries() -> Vec<Builtin> {
             Operation::Cdl | Operation::File => {
                 b.push(1, "File", "文件", ParamKind::Button, None);
                 let inv = if op == Operation::Cdl {
-                    b = b.int(2, "CCCID", "CCCID", 1, [1, 65535]);
+                    b = b.int(2, "CCCID", "CCCID", 1, [1, 1]);
                     3
                 } else {
                     2
