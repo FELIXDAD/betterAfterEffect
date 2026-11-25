@@ -248,3 +248,39 @@ fn calibrated_warps_filter_premultiplied_color_and_alpha_together() {
         }
     }
 }
+
+#[test]
+fn editable_mesh_translates_pixels_and_other_warps_dispatch() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(32, 16);
+    let pixels = test_image(rect);
+    let mut grid = vec![2, 2];
+    for _ in 0..4 {
+        grid.extend(0.125f32.to_le_bytes());
+        grid.extend(0f32.to_le_bytes());
+    }
+    {
+        let (name, id) = ("ADBE MESH WARP", 4);
+        let out = run(
+            &gpu,
+            F32,
+            builtin(name),
+            vec![(id, Value::Bytes(grid.clone()))],
+            &pixels,
+            rect,
+            1.,
+        );
+        let expected = pixels.get(12, 8);
+        for (got, want) in out.get(16, 8).into_iter().zip(expected) {
+            assert!((got - want).abs() < 0.02, "{name}: {got} vs {want}");
+        }
+    }
+    for name in ["CC Power Pin", "CC Tiler", "ADBE BEZMESH", "ADBE Upscale"] {
+        let out = run(&gpu, F32, builtin(name), vec![], &pixels, rect, 1.);
+        for (got, want) in out.get(16, 8).into_iter().zip(pixels.get(16, 8)) {
+            assert!((got - want).abs() < 0.001, "{name}");
+        }
+    }
+}

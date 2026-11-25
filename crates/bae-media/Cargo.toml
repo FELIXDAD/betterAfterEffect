@@ -12,6 +12,7 @@ publish.workspace = true
 bae-app.workspace = true
 bae-anim.workspace = true
 cpal.workspace = true
+rtrb.workspace = true
 bae-gpu.workspace = true
 # Time (flicks) and FrameRate shared with the document model.
 bae-model.workspace = true
@@ -30,6 +31,13 @@ thiserror.workspace = true
 tiff.workspace = true
 tracing.workspace = true
 zune-jpeg.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi_Common",
+    "Win32_Media_MediaFoundation", "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader", "Win32_System_Variant",
+] }
 
 # macOS video: AVFoundation demux + VideoToolbox decode into IOSurface-backed
 # CVPixelBuffers, wrapped as Metal textures (zero copy). Same objc2 0.6 / 0.3

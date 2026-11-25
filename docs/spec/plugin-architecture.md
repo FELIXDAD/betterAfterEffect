@@ -4,7 +4,7 @@
 |---|---|
 | Status | **Design v0.1**, reconciled with the merged `bae-model` (02) and `bae-render` (04) interfaces; implemented parts are marked *(implemented)*. Normative for 02, 04, 07 and 20. |
 | Owner | 19 `core/plugins` |
-| ABI | `sdk/c/bae_plugin.h`, ABI 0.1 (major 0 = unstable; first frozen ABI is 1.0 at M1) |
+| ABI | `sdk/c/bae_plugin.h`, **ABI 1.0** (stable since M1; the 0.1 pre-release is still accepted, §14.5) |
 | Rust | `crates/bae-plugin-sdk` (shared contract + author SDK), `crates/bae-plugin` (host) |
 | Related | `docs/ARCHITECTURE.md` §2, §14, §15, §16; `docs/spec/aex-compat.md` (20) |
 
@@ -445,8 +445,9 @@ The first six map to `bae_model::ParamFlags`; the last three are kept by the plu
 Mapping to `bae_model::ParamKind` *(implemented, `bae_plugin::effect_def`)*: float →
 `Slider`, int → `Slider { integer }`, angle, checkbox, color, point, point3d, popup →
 `Popup { options }`, layer, group → `GroupStart`…`GroupEnd`, button, arbitrary →
-`ArbitraryData`, path. Relative point defaults depend on the layer size and are resolved
-by the effect implementation, not stored in the `EffectDef` (R02-9). Numeric
+`ArbitraryData`, path. Relative point defaults keep the fraction as the `EffectDef` default
+with `ParamFlags::relative_default`; `effect.apply` / `effect.reset` write `fraction ×
+layer size` (R02-9, *implemented*). Numeric
 `default` MUST lie in `range`; `slider` MUST lie within `range`.
 
 #### 5.3.8 Other contribution tables
@@ -1581,7 +1582,14 @@ Three directions, all at runtime:
 ### 14.5 Compatibility policy
 
 1. **ABI 0.x** (design and early implementation): no stability promise; 0.x hosts accept
-   only the minors they list (§6.6). ABI **1.0 is frozen at milestone M1**.
+   only the minors they list (§6.6). ABI **1.0 is frozen at milestone M1** *(implemented)*.
+   The 0.1 pre-release has the identical layout: 1.0 hosts list it in
+   `compatible_0x_minors` and present `abi_version` = 0.1 to such plugins. Suites and
+   contribution kinds a 1.0 host does not serve yet (`get_suite` returns NULL) are
+   *provisional*: their layout is frozen when a host first serves them. BAE 1.0 serves
+   the entry point, effects (filters, CPU path: `global_setup`, `define_params`,
+   `pre_render`, `render_cpu`, `release_frame_data`, `global_setdown`), `bae.core` 1,
+   `bae.param.define` 1 and `bae.render` 1.
 2. **Within a major**, only additive changes are allowed: new suites and suite versions,
    fields appended to extensible structs, callbacks appended to vtables, new flag bits and
    enum values (consumers ignore unknown ones, R9), new contribution kinds. Never:
@@ -1620,23 +1628,40 @@ Three directions, all at runtime:
 
 ### 15.1 When
 
-Opt-in per plugin: manifest `isolation = "out-of-process"` or `"prefer-out-of-process"`,
-the Plugin Manager toggle, or automatically after a crash attributed to the plugin
-(§16 item 5). AE plugins (20) use the same mechanism by default. In-process stays the default
-for BAE plugins (performance first, ARCHITECTURE §2 principle 6).
+*(implemented, M1)* A plugin crash must never take BAE down (hard requirement, M1), and an
+in-process crash cannot be recovered (§16 item 5). Native plugins therefore run out of
+process unless they are trusted for in-process use:
+
+| Manifest `isolation` | Bundled / system plugin | User / project plugin |
+|---|---|---|
+| `in-process` (default) | in process | out of process, unless the user trusts it for in-process use |
+| `prefer-out-of-process` | out of process, unless trusted | out of process, unless trusted |
+| `out-of-process` | out of process | out of process |
+
+"Trusted" = the Plugin Manager toggle (stored in user settings; until that UI exists:
+`BAE_PLUGIN_IN_PROCESS=<id>,<id>` or `*`). The cost is small for the CPU path, which
+already pays a GPU readback (§15.4); in-process stays available for trusted plugins and
+is required for `bae.gpu.native`. AE plugins (20) use the same mechanism. The runner is
+the application binary itself (`bae plugin runner`, hidden subcommand), so packaging
+ships no extra executable; `BAE_PLUGIN_RUNNER` names a dedicated runner (the
+`bae-plugin-runner` binary of `bae-plugin`, used by tests).
 
 ### 15.2 Architecture
 
 - `bae-plugin-runner`: a small helper executable shipped with BAE. One runner process per
   native library (all contributions and instances of that plugin share it, matching
   per-module globals), started lazily, connected by a local socket/pipe.
-- Control channel: versioned, length-prefixed binary messages (one request in flight per
-  render worker; responses matched by id). Suite calls that need host state
+- Control channel: length-prefixed messages over the runner's stdin/stdout (v1: JSON,
+  one request in flight per runner; the runner first points its stdout at stderr so
+  plugin `printf` cannot corrupt the channel; plugin log lines travel with the
+  responses). Suite calls that need host state
   (`checkout_input`, `checkout_param`, `bae.command`) become synchronous RPCs back to the
   host; per-pixel helpers (`parallel_for`, `alloc_cpu_image`) run inside the runner.
-- Frames: CPU images live in shared-memory slots (POSIX shm / Mach VM on macOS, file
-  mappings on Windows) allocated by the host, page-aligned, rows 64-byte aligned, reused
-  across frames. The runner hands slot memory to the plugin directly.
+- Frames: betterAfterEffects allocates a shared segment for both processes. On Unix the
+  host unlinks the POSIX shared memory name immediately and passes the descriptor over
+  the runner's stdin socket. On Windows the runner opens a named pagefile-backed
+  section. The host grows the segment on demand and reuses it across frames. The
+  runner passes its mapped pixels to the plugin with 64-byte aligned rows.
 - Host side: `OutOfProcessEffect` implements `bae_render::Effect` and forwards; the render graph
   cannot tell the difference except for cost.
 
@@ -1999,7 +2024,7 @@ These are the interfaces 19 needs. IDs are referenced from code and other specs.
 | R02-6 | Project plugin lock in `project.json` (§6.7): `[{id, version, contributions, scope_hint}]`, maintained by AddEffect/plugin update commands. |
 | R02-7 | `StageEvent` granularity down to (effect Prim, param id / state) so render caches invalidate exactly. |
 | R02-8 | `ParamKind::String` (value `String`) and `ParamKind::Asset` (value `AssetRef`) so the manifest's reserved `string` / `asset` params can be enabled. |
-| R02-9 | Relative point defaults: `ParamKind::Point { default_relative: bool }` (or a `DefaultValue::LayerRelative`) so AddEffect writes `fraction × layer size`, as AE's `PF_ADD_POINT` does. Until then `bae-plugin` leaves the `EffectDef` default empty and the effect resolves it against the layer bounds. |
+| R02-9 | *(implemented: `ParamFlags::relative_default`)* Relative point defaults so AddEffect writes `fraction × layer size`, as AE's `PF_ADD_POINT` does. Instances without a stored value still resolve the fraction against the layer bounds when rendering. |
 
 ### 23.3 04 compositor (`bae-render`)
 
@@ -2048,13 +2073,16 @@ These are the interfaces 19 needs. IDs are referenced from code and other specs.
 | D6 | Render errors pass the input through with a diagnostic | previews keep working; final renders still fail loudly |
 | D7 | Declarative effects have no per-frame host logic beyond ROI bytecode | guarantees the < 2 % budget |
 | D8 | Supervision is not re-run for undo/redo/remote ops | deterministic collaboration |
-| D9 | Out-of-process is opt-in for BAE plugins, default for AE plugins | performance first; AE plugins are the unstable ones |
+| D9 | ~~Out-of-process is opt-in for BAE plugins, default for AE plugins~~ Superseded by D16 | performance first; AE plugins are the unstable ones |
 | D10 | Project-scoped declarative plugins load without a trust prompt | they cannot do harm beyond GPU load; shared projects just work |
 | D11 | Popup values are the 1-based index (AE), choices are append-only; no separate choice ids | matches `bae_model` (merged) and AE projects 1:1 |
 | D12 | Automation scripts are `[[automation]]`, not `[[script]]` | `[script]` is the runtime table; TOML cannot hold both |
 | D13 | The render node trait is `bae_render::Effect` (04); definitions are `bae_model::EffectDef` (02) | both merged first; one trait for built-ins and every plugin form |
 | D14 | No samplers in the WGSL prelude; `bae_sample_*` is bilinear over `bae_load_*` | identical results for every working format (RGBA32F is not filterable everywhere), AE edge semantics |
 | D15 | Uniform member offsets are read from the naga IR of the compiled module | host packing and shader layout cannot drift apart |
+| D16 | (M1) Native plugins run out of process unless trusted (bundled/system with `in-process`, or user-trusted); the runner is `bae plugin runner` | "a plugin crash must not take BAE down" is a hard requirement; the CPU path already pays a readback, so isolation costs little |
+| D17 | (M1) ABI 1.0 = the 0.1 layout, frozen; 0.1 plugins still accepted; unserved suites are provisional | stable promise for what is implemented without freezing untested designs |
+| D18 | (M1) Native CPU effects are a `bae_render::Effect` that submits the frame's encoder, reads its input back, calls the plugin and uploads the result; a failing call passes the input through | one render-graph trait for every form; a broken plugin never fails a frame |
 
 ### 24.2 Open
 
