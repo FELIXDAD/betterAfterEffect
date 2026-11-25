@@ -79,6 +79,26 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     assert_eq!(view(&h), View3d::Custom(2));
 }
 
+/// Cameras and lights show in the 3D views other than their own camera's.
+#[test]
+fn cameras_and_lights_draw_in_the_3d_views() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    let light = path(&h.run("layer.create", json!({"comp": h.comp, "kind": "light"}))["path"]);
+    h.select(&[&camera, &light]);
+    for view in ["active_camera", "top", "custom_1"] {
+        tool_action(
+            &h,
+            crate::viewer::view3d::ids::SWITCH,
+            json!({"view": view}),
+        );
+        h.frame(Vec::new(), Modifiers::NONE);
+    }
+    // The camera looked through in Active Camera is the one skipped.
+    let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+    assert_eq!(comp.camera.map(|i| &comp.layers[i].path), Some(&camera));
+}
+
 /// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
 #[test]
 fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
