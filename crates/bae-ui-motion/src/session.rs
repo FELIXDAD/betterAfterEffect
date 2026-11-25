@@ -109,6 +109,9 @@ pub struct Session {
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,
+    /// Expression errors of the active comp at the current time (the viewer's
+    /// evaluation): the error banner and the timeline's warning icons.
+    pub expr_errors: Vec<bae_anim::AttrError>,
 }
 
 /// The session as an app resource (`Resources::get::<SharedSession>()`).
