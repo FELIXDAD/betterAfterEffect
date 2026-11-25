@@ -156,7 +156,7 @@ impl ProjectSettings {
                 }
                 2 => {
                     greyed(ui, "Color Engine:", "Adobe color managed");
-                    dialog::row(ui, lw, tr("Depth:"), |ui| {
+                    dialog::row(ui, lw, tr("Bit Depth:"), |ui| {
                         let names: Vec<&str> = DEPTHS.iter().map(|(_, n)| tr(n)).collect();
                         let mut i = DEPTHS
                             .iter()
@@ -236,7 +236,7 @@ pub(crate) const STRINGS: &[&str] = &[
     "Frame Count:",
     "Timecode Conversion",
     "Color Engine:",
-    "Depth:",
+    "Bit Depth:",
     "8 bits per channel",
     "16 bits per channel",
     "32 bits per channel (float)",
