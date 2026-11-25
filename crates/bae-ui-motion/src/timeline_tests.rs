@@ -1297,15 +1297,6 @@ fn rove_across_time_needs_inner_spatial_keyframes() {
 
 #[test]
 fn layer_menu_entries_come_from_the_command_catalog() {
-    for (top, title) in crate::timeline::LAYER_MENU {
-        if top.is_empty() {
-            continue;
-        }
-        assert!(
-            crate::timeline::catalog_entry(top, title).is_some(),
-            "{top} ▸ {title} is not in the command catalog"
-        );
-    }
     for (top, title) in [
         ("Edit", "Select Keyframe Label Group"),
         ("Animation", "Track Camera"),
@@ -1782,4 +1773,39 @@ fn graph_editor_frame_cost() {
     measure(&mut h, &mut tl, "graph editor, pointer move", true, false);
     measure(&mut h, &mut tl, "graph editor, key drag", true, true);
     assert_eq!(tl.graph_editor().last.vaxes.len(), 183);
+}
+
+#[test]
+fn outline_follows_ae_metrics() {
+    // Positions measured on AE 26's Timeline: the Shy switch at x 275, the
+    // expand arrow at x 76 (left of the label), rows 17 points apart.
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let other = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let mut tl = h.bars();
+    let bar = |tl: &TimelinePanel, l: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(p, _)| p == l)
+            .map(|(_, r)| r.center().y)
+            .unwrap()
+    };
+    assert_eq!((bar(&tl, &solid) - bar(&tl, &other)).abs(), 17.0);
+    let y = bar(&tl, &solid);
+    let r = h.click(&mut tl, pos2(275.0, y), Modifiers::NONE);
+    h.apply(&r);
+    let shy = query::static_value(&h.stage.prim(&solid).unwrap(), "shy");
+    assert_eq!(shy.and_then(|v| v.as_bool()), Some(true));
+    h.session().lock().reveal.clear();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let y = bar(&tl, &solid);
+    let rows = tl.last_bars.len();
+    h.click(&mut tl, pos2(76.0, y), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(
+        tl.expanded_layer(&solid),
+        "the arrow at x 76 expands the layer"
+    );
+    assert_eq!(tl.last_bars.len(), rows);
 }

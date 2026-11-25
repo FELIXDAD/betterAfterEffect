@@ -44,7 +44,7 @@ Stage ──► CompEvaluator（AnimEvaluator = 03 的 bae-anim；MockEvaluator 
 |---|---|
 | `RenderLayer::matrix_3d: Option<DMat4>` | 3D 图层：图层空间 → 合成空间的 4×4（锚点、缩放、X/Y/Z 旋转、方向、位置、父级）。`None` 是 2D 图层，用 `transform`。 |
 | `RenderComp::camera: Option<Camera>` | 活动摄像机（AE-CMP-423）；`None` = AE 默认摄像机（`Camera::default_for(w, h)`：50 mm，`zoom = W·50/36`，位于 `(W/2, H/2, −zoom)`，z = 0 与 2D 逐像素一致）。 |
-| `RenderComp::lights: Vec<Light>`、`RenderLayer::material` | 灯光和材质选项，**目前只有数据**：3D 图层不打光（等同 AE 合成里没有灯光）。下一步按 AE-CMP-436 着色。 |
+| `RenderComp::lights: Vec<Light>`、`RenderLayer::material` | 启用的灯光（点光、聚光、平行光、环境光）和图层的材质选项；3D 图层按 AE 的经典 3D 光照着色，带阴影（见下面「灯光」「阴影」）。 |
 | `RenderComp::motion_blur: Option<Arc<CompMotionBlur>>` | 本帧的采样时间（03 的 `MotionBlur::sample_times`：快门角度、相位、每帧样本数来自合成设置）和每个时间的活动摄像机、自适应采样上限。 |
 | `RenderLayer::motion_samples` | 图层在每个采样时间的变换；图层开关和合成总开关都开时才有（AE-ANI-102）。 |
 
@@ -53,15 +53,30 @@ Stage ──► CompEvaluator（AnimEvaluator = 03 的 bae-anim；MockEvaluator 
 - `Camera::project(point, comp_size)` / `Camera::unproject(pixel, depth, comp_size)`：合成空间的点 ↔ 合成像素（拖动 3D 手柄时用 `unproject` 把鼠标位置放回某个深度）。
 - `Camera::from_transform(parent, position, point_of_interest, orientation, rotation, zoom)`：按 AE 的摄像机变换建摄像机（双节点传目标点，单节点传 `None`），自定义视图（正面、左侧、顶部……）也用它。
 - `Camera::plane_homography(layer_world, comp_size)`：一个 3D 图层平面到合成像素的射影映射（`three_d::Homography`，可以 `map`、`inverse`），画图层外框、命中测试用。
+- 正交视图（AE 的正面、左侧、顶部、背面、右侧、底部，AE-CMP-410）：`Camera::orthographic(OrthoView::Top, centre, scale)`。`centre` 是落在画面中央的合成空间点，平移就改它（比如设成鼠标下那个像素的 `unproject`）；`scale` 是放大倍数（1 = 100%，正面 + 合成中心 + 1 时 z = 0 与 2D 一致）。没有透视，也不按深度裁剪，深度排序照常。查看器渲染某个视图时，把 `RenderComp::camera` 换成这个摄像机即可；`OrthoView::ALL` 是菜单顺序，`OrthoView::rotation()` 给出视图的朝向。`Camera::eye()` 是深度排序和打光用的观察点（正交视图在视线反方向很远处）。
 - 镜头换算（摄像机设置对话框，AE-CMP-418）：`zoom_from_focal_length`、`focal_length_from_zoom`、`angle_of_view`、`zoom_from_angle_of_view`、`FilmMeasure`、`PRESETS`、`default_zoom`。
 - `look_at`、`xyz_rotation`：双节点摄像机的瞄准旋转和 AE 的 X/Y/Z 旋转顺序（与 bae-anim 一致）。
 
 渲染：
 
-- 图层栈按 AE 的 3D 组划分（`three_d::segments`，AE-CMP-406）：相邻的 3D 图层一组，2D 图层、调整图层、3D 预合成（未折叠）把组隔开；摄像机、灯光、空对象不隔开。各段按图层顺序合成。
+- 图层栈按 AE 的 3D 组划分（`three_d::segments`，AE-CMP-406）：相邻的 3D 图层一组，2D 图层、调整图层、带效果/蒙版/轨道遮罩的 3D 预合成把组隔开；摄像机、灯光、空对象不隔开。各段按图层顺序合成。
 - 组内按摄像机深度排序（`three_d::depth_order`）：图层都是平面四边形，用 BSP 得到逐像素准确的前后顺序；互相穿插的图层沿交线切开（AE-CMP-405），切口抗锯齿、两侧覆盖率相加为 1；共面图层按图层顺序（上面的在前）。混合模式在组内照常起作用，能看到组下面的图层（AE-CMP-407 的「组画在下面的结果上」）。
 - 3D 图层是一次 draw：顶点阶段输出齐次坐标（w = 摄像机深度，在近平面裁剪，摄像机后面的部分不画），片元阶段用逆射影映射回图层、用局部雅可比量边缘过渡，与 2D 的采样规则一致。正对摄像机的平面按仿射画，所以 z = 0 的 3D 图层与 2D 逐像素相同。
-- 还没有：景深、灯光着色和阴影、折叠变换（预合成里的 3D 图层并入外层组）、2D 父级的 3D 子图层以外的正交视图。
+- 还没有：景深、折叠变换（预合成里的 3D 图层并入外层组）。
+
+### 灯光
+
+- 模型在 `bae_render::light`（模块文档写了公式，`light::shade` 是 CPU 参考实现），全部在 AE 26.2.1 上实测过：漫射是 Lambert，镜面是 Blinn-Phong（半角向量），指数就是「镜面反光度」的百分数；聚光的羽化在余弦上做 smoothstep（内角 = 外角 ×（1 − 羽化））；「平滑」衰减是半径到半径 + 衰减距离的 smoothstep，「反向平方限制」是半径外的 (R/d)²；法线朝向观察者（双面）；金属质感把高光颜色从白色混到图层颜色；8/16 bpc 截断到 1。
+- 什么时候打光：3D 图层、材质选项「接受灯光」开、合成里有启用的灯光。打开了「调整图层」开关的灯光只照它下面的图层；照不到的图层是暗的（有灯光但没照到），不是不打光。2D 图层永远不打光。
+- GPU：打光的图层用单独的 `fs_lit` 管线，每个 draw 带一条光照记录（世界坐标映射、法线、观察点、材质、灯光列表），不打光的图层没有任何额外开销。运动模糊的图层按帧时间的几何打光（每个采样位置取图层上同一点的光照）。
+
+### 阴影
+
+- 条件（AE-CMP-437）：灯光「投影」开（环境光不投影），投射图层「投影」开，接受图层「接受阴影」开，两者在同一个 3D 组里（2D 图层隔开的组之间没有阴影）。
+- 模型（在 AE 26.2.1 里标定，见 `light` 模块文档）：每个像素朝每盏投影灯光发一条光线，和每个投射图层的平面求交；挡住的量是投射图层在交点处的覆盖率（alpha × 不透明度），这盏灯的贡献乘以 `1 − 阴影深度 · a · (1 − 透光率 · 投射图层自身颜色)`（彩色透光，像彩色玻璃）。「阴影扩散」等于一个半边长为扩散值的方形面光源：覆盖率在灯光投到投射平面的方框里取平均（实测是线性过渡，宽度 = 2 · 扩散 · 投射到接受的距离 / 灯光到投射的距离）；扩散为 0 时也有约 1 个接受像素的柔边（AE 阴影图的过滤）。
+- GPU：纯色投射图层解析计算；有图像的投射图层（素材、文字、预合成，蒙版和效果之后的画面）先拷进这个合成的阴影图集（`exec/shadow.rs`），着色器在图集里按方框采样。每个接受图层只带可能投到它身上的投射图层（CPU 上按灯光剔除在它背后或影子落不到它上面的）。
+- 和 AE 的差别：AE 的经典 3D 用阴影图（分辨率 = 合成尺寸）画阴影，边缘的柔化随灯光视锥变化；我们按光线解析求阴影，再加固定约 1 个接受像素的柔边，不画阴影图（省 pass 和显存，也没有阴影图的锯齿和缝）。所以阴影内部和扩散的半影与 AE 一致，硬阴影的边缘像素会差 10–20 级（平行光的交角处到 33，见 `tests/ae/README.md`）。
+- 还没有：「仅」（投影仅 / 接受阴影仅）、阴影图分辨率选项、投射图层的蒙版（目前按图层画面，不含没有效果时才在绘制里应用的蒙版）。
 
 ## 运动模糊
 
@@ -79,4 +94,4 @@ Stage ──► CompEvaluator（AnimEvaluator = 03 的 bae-anim；MockEvaluator 
 - `bae render <工程> --comp <路径> [--frame N | --frames A-B|all] [-o out_####.png] [--format png|tiff|exr|h264|hevc|prores|prores4444] [--compression 档位] [--bits 8|16|32] [--threads N] [--resolution half] [--depth 8|16|32] [--alpha straight|premultiplied|background] [--roi X,Y,W,H] [--json]`。导出是流水线（异步回读 + 每核一个编码线程），`--json` 给出各阶段耗时；进程内用 `bae_render::export_frames`（渲染队列也用它）。
 - 基准 B1：`cargo xtask bench -p bae-render`，方法和结果见 `docs/perf.md`。
 
-之后又做了：蒙版、效果执行、调整图层、其余混合模式、3D 图层与摄像机、运动模糊（见上）。还没做：视口纹理输出、线性混合、灯光着色、景深。
+之后又做了：蒙版、效果执行、调整图层、其余混合模式、3D 图层与摄像机、正交视图、运动模糊、灯光着色（见上）。还没做：视口纹理输出、线性混合、阴影、景深。

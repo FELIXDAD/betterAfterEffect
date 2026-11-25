@@ -30,6 +30,17 @@ impl Mods {
         ctrl: false,
     };
 
+    /// The chord of `key` with these modifiers.
+    pub fn chord(self, key: Key) -> Chord {
+        Chord {
+            key,
+            command: self.command,
+            mac_ctrl: self.ctrl,
+            shift: self.shift,
+            alt: self.alt,
+        }
+    }
+
     pub fn of(c: &Chord) -> Mods {
         Mods {
             command: c.command,
@@ -209,7 +220,34 @@ pub const ZH: &[(&str, &str)] = &[
         "The shortcut: {chord} is already in use by the Application command: {command}. That command will be overridden by this panel command when the panel has focus.",
         "快捷键“{chord}”已被应用程序命令“{command}”使用，切换到该面板时，该命令将被此面板命令覆盖。",
     ),
+    // The legend under the keyboard ($$$/VisualShortcutsDialog/legend/*).
+    (
+        "Application shortcuts are active regardless of panel focus",
+        "无论面板焦点如何，应用程序快捷键都处于活动状态",
+    ),
+    (
+        "Panel shortcuts override application shortcuts when the panel has focus",
+        "面板具有焦点时，面板快捷键会覆盖应用程序快捷键",
+    ),
+    ("Modifier key pressed", "按下辅助按键"),
     ("Default.txt", "默认值.txt"),
+    ("Untitled Custom Preset.txt", "无标题自定义预设.txt"),
+    ("Create Preset", "创建预设"),
+    ("Preset Name:", "预设名称 -"),
+    ("Save", "保存"),
+    ("Copied to clipboard", "复制到剪贴板"),
+    (
+        "The key set name you entered is not valid. Please choose another name.",
+        "您输入的键组名称无效。请选择另一个名称。",
+    ),
+    (
+        "A custom shortcut set named “{name}” already exists. Do you want to overwrite it?",
+        "已存在名为“{name}”的自定义快捷键集。是否要将其覆盖？",
+    ),
+    (
+        "Are you sure you want to delete the keyboard layout set “{name}”?",
+        "是否确定要删除键盘布局集“{name}”？",
+    ),
     ("Custom.txt", "自定义.txt"),
     // The scopes of the Commands menu and the Panels groups (AE: $$$/AE/KB/*).
     ("Character and Paragraph Panels", "字符和段落面板"),
@@ -217,7 +255,6 @@ pub const ZH: &[(&str, &str)] = &[
     ("Effect Controls Panel", "效果控件面板"),
     ("Flowchart Panel", "流程图面板"),
     ("Layer Panel", "图层面板"),
-    ("Footage Panel", "素材面板"),
     ("Paint Panel", "绘画面板"),
     ("Project Panel", "项目面板"),
     ("Render Queue Panel", "渲染队列面板"),

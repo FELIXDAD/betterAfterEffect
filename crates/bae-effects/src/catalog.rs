@@ -38,6 +38,8 @@ pub struct EffectInfo {
     pub obsolete: bool,
     /// Chinese parameter names by parameter id.
     pub param_names_zh: Vec<(u32, String)>,
+    /// Chinese popup options by parameter id (in option order).
+    pub param_options_zh: Vec<(u32, Vec<String>)>,
 }
 
 impl EffectInfo {

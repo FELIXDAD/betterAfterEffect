@@ -17,6 +17,9 @@
 //! command had in the same scope moves, and the message bar says so, with a link
 //! to that command). Undo takes back the last change.
 
+mod keyboard;
+mod keys_ui;
+pub(crate) mod presets;
 mod text;
 mod tree;
 
@@ -51,10 +54,9 @@ pub struct CommandEntry {
     pub panel: Option<String>,
 }
 
-/// Name of the built-in preset (AE: "After Effects Default.txt"; BAE's own
-/// name is neutral) and of the preset a change to it becomes.
-const DEFAULT_PRESET: &str = "Default.txt";
-const CUSTOM_PRESET: &str = "Custom.txt";
+/// The built-in preset (AE: "After Effects Default.txt"; BAE's own name is
+/// neutral) and the preset a change to it becomes.
+use presets::{CUSTOM as CUSTOM_PRESET, DEFAULT as DEFAULT_PRESET};
 
 /// Height of a row of the command tree and the Key table.
 const ROW_H: f32 = 22.0;
@@ -72,6 +74,8 @@ mod palette {
     pub const ROW_LINE: Color32 = Color32::from_rgb(0x22, 0x22, 0x22);
     pub const FOCUS: Color32 = Color32::from_rgb(0x4e, 0xa9, 0xf6);
     pub const WARNING: Color32 = Color32::from_rgb(0xf2, 0xc2, 0x2e);
+    /// AE's "Copied to clipboard" notice.
+    pub const NOTICE: Color32 = Color32::from_rgb(0x00, 0x92, 0x65);
 }
 
 /// What the bottom bar says.
@@ -111,12 +115,29 @@ enum PillFocus {
     New,
 }
 
-/// The draft state before the last change (Undo: one level, like AE).
+/// The draft before the last change (Undo: one level, like AE; the preset
+/// keeps its name, as in AE).
 #[derive(Clone, Debug)]
 struct Undo {
     overrides: KeymapOverrides,
-    preset: String,
-    custom: Option<KeymapOverrides>,
+}
+
+/// Save As's "Create Preset" dialog.
+#[derive(Clone, Debug)]
+struct SaveAs {
+    name: String,
+    error: Option<String>,
+    /// First frame: focus the name and select it.
+    fresh: bool,
+}
+
+/// A question over the dialog.
+#[derive(Clone, Debug, PartialEq)]
+enum Confirm {
+    /// Save As onto an existing preset (file name).
+    Overwrite(String),
+    /// Delete the selected preset.
+    Delete(String),
 }
 
 /// The dialog while it is open: the draft and the view state.
@@ -129,10 +150,14 @@ pub(super) struct Session {
     keymap: Keymap,
     /// Shortcuts of every row of `keymap`.
     chords: HashMap<RowKey, Vec<Chord>>,
-    /// Selected preset (file name as shown, English) and the Custom preset's
-    /// content (kept while the built-in one is selected).
+    /// Selected preset (file name, English for the built-in ones) and the
+    /// presets with the dialog's staged Save As / Delete.
     preset: String,
-    custom: Option<KeymapOverrides>,
+    presets: presets::PresetStore,
+    save_as: Option<SaveAs>,
+    confirm: Option<Confirm>,
+    /// When Copy To Clipboard was clicked (its notice shows for a while).
+    copied_at: Option<f64>,
     undo: Option<Undo>,
     tree: Tree,
     expanded: HashSet<String>,
@@ -149,6 +174,15 @@ pub(super) struct Session {
     generation: u64,
     /// First frame: the window goes above everything.
     just_opened: bool,
+    /// The keyboard's keys, the modifier caps clicked, the key clicked and the
+    /// Key table row selected; what the keys show (cached).
+    caps: Vec<keyboard::KeyCap>,
+    latched: text::Mods,
+    key: Option<Key>,
+    key_row: Option<text::Mods>,
+    keys: keys_ui::KeyCache,
+    /// The tree node of every command row.
+    row_index: HashMap<RowKey, usize>,
 }
 
 impl Session {
@@ -165,19 +199,39 @@ impl Session {
     fn snapshot(&self) -> Undo {
         Undo {
             overrides: self.overrides.clone(),
-            preset: self.preset.clone(),
-            custom: self.custom.clone(),
         }
     }
 
-    /// After a change: the built-in preset becomes Custom (AE), and the Custom
-    /// preset follows the draft.
+    /// After a change: the built-in preset becomes Custom (AE), and the
+    /// selected preset follows the draft (written on OK).
     fn changed(&mut self, before: Undo) {
         self.undo = Some(before);
         if self.preset == DEFAULT_PRESET {
             self.preset = CUSTOM_PRESET.into();
         }
-        self.custom = Some(self.overrides.clone());
+        self.presets.put(&self.preset, self.overrides.clone());
+        self.rebuild();
+    }
+
+    /// Save As: the draft becomes preset `name` (written on OK) and is selected.
+    fn save_preset_as(&mut self, name: &str) {
+        self.presets.put(name, self.overrides.clone());
+        self.preset = name.to_owned();
+        self.undo = None;
+        self.message = Message::Hint;
+    }
+
+    /// Delete the selected preset (on OK); the built-in one is selected.
+    fn delete_preset(&mut self) {
+        if self.preset == DEFAULT_PRESET {
+            return;
+        }
+        let name = std::mem::replace(&mut self.preset, DEFAULT_PRESET.into());
+        self.presets.remove(&name);
+        self.overrides = KeymapOverrides::default();
+        self.undo = None;
+        self.focus = None;
+        self.message = Message::Hint;
         self.rebuild();
     }
 
@@ -208,8 +262,9 @@ impl Session {
     fn undo_change(&mut self) {
         if let Some(u) = self.undo.take() {
             self.overrides = u.overrides;
-            self.preset = u.preset;
-            self.custom = u.custom;
+            if self.preset != DEFAULT_PRESET {
+                self.presets.put(&self.preset, self.overrides.clone());
+            }
             self.rebuild();
             self.message = Message::Empty;
             if let Some(row) = &self.selected {
@@ -225,7 +280,7 @@ impl Session {
         self.overrides = if name == DEFAULT_PRESET {
             KeymapOverrides::default()
         } else {
-            self.custom.clone().unwrap_or_default()
+            self.presets.get(name).cloned().unwrap_or_default()
         };
         self.preset = name.to_owned();
         self.undo = None;
@@ -419,13 +474,20 @@ impl Workbench {
         let overrides = self.keymap_overrides(&keymap_id);
         let keymap = base.with_overrides(&overrides);
         let tree = self.shortcut_tree(&keymap);
-        let custom = (!overrides.is_empty()).then(|| overrides.clone());
-        let preset = if custom.is_some() {
-            CUSTOM_PRESET
-        } else {
-            DEFAULT_PRESET
+        let mut presets =
+            presets::PresetStore::load(self.shortcut_presets_dir.as_deref(), &keymap_id);
+        // The selected preset; customized shortcuts from before presets were
+        // saved count as Custom. What is live wins over the preset's file.
+        let preset = match self.state.shortcut_presets.get(&keymap_id) {
+            Some(p) if p != DEFAULT_PRESET => p.clone(),
+            _ if !overrides.is_empty() => CUSTOM_PRESET.to_owned(),
+            _ => DEFAULT_PRESET.to_owned(),
         };
+        if preset != DEFAULT_PRESET {
+            presets.adopt(&preset, overrides.clone());
+        }
         let chords = tree::chords_by_row(&keymap);
+        let row_index = tree.row_index();
         self.editor = ShortcutEditor {
             open: true,
             focus_search: true,
@@ -436,8 +498,11 @@ impl Workbench {
                 overrides,
                 keymap,
                 chords,
-                preset: preset.into(),
-                custom,
+                preset,
+                presets,
+                save_as: None,
+                confirm: None,
+                copied_at: None,
                 undo: None,
                 tree,
                 expanded: Tree::initially_expanded(),
@@ -449,16 +514,30 @@ impl Workbench {
                 visible: None,
                 generation: 0,
                 just_opened: true,
+                caps: keyboard::layout(),
+                latched: text::Mods::NONE,
+                key: None,
+                key_row: None,
+                keys: keys_ui::KeyCache::default(),
+                row_index,
             }),
         };
     }
 
-    /// OK: the draft becomes the keymap's customization (saved with the state).
+    /// OK: the draft becomes the keymap's customization (saved with the state)
+    /// and the presets saved or deleted in the dialog are written.
     fn commit_shortcut_editor(&mut self) {
-        if let Some(s) = self.editor.session.take() {
+        if let Some(mut s) = self.editor.session.take() {
+            if let Err(e) = s.presets.apply() {
+                tracing::warn!("cannot write the keyboard shortcut presets: {e}");
+            }
             let overrides = if s.preset == DEFAULT_PRESET {
+                self.state.shortcut_presets.remove(&s.keymap_id);
                 KeymapOverrides::default()
             } else {
+                self.state
+                    .shortcut_presets
+                    .insert(s.keymap_id.clone(), s.preset.clone());
                 s.overrides
             };
             self.set_keymap_overrides(&s.keymap_id, overrides);
@@ -506,7 +585,9 @@ impl Workbench {
             .stroke(Stroke::new(1.0, color::DIVIDER))
             .corner_radius(6.0)
             .inner_margin(egui::Margin::symmetric(16, 12));
-        egui::Window::new(egui::RichText::new(tr("Keyboard Shortcuts")).color(color::TEXT_STRONG))
+        let shown = egui::Window::new(
+            egui::RichText::new(tr("Keyboard Shortcuts")).color(color::TEXT_STRONG),
+        )
             .id(id)
             .order(egui::Order::Foreground)
             .frame(frame)
@@ -527,6 +608,25 @@ impl Workbench {
                     outcome = o;
                 }
             });
+        if let Some(r) = shown.map(|r| r.response.rect) {
+            copied_notice(ctx, id, r, s);
+        }
+        self.preset_dialogs(ctx, id, s);
+        // The command being dragged follows the pointer.
+        if let Some(row) = egui::DragAndDrop::payload::<RowKey>(ctx)
+            && let Some(at) = ctx.pointer_latest_pos()
+            && let Some(&i) = s.row_index.get(&*row)
+        {
+            let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, id.with("drag")));
+            let galley = p.layout_no_wrap(
+                s.tree.nodes[i].title.clone(),
+                theme::body(),
+                color::TEXT_STRONG,
+            );
+            let r = Rect::from_min_size(at + vec2(12.0, 8.0), galley.size() + vec2(12.0, 6.0));
+            p.rect_filled(r, 3.0, palette::SELECTED_ROW);
+            p.galley(r.min + vec2(6.0, 3.0), galley, color::TEXT_STRONG);
+        }
         if std::mem::take(&mut s.just_opened) {
             ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, id));
         }
@@ -538,6 +638,10 @@ impl Workbench {
 
     /// The frame's key presses: recorded into the focused pill, or Esc / Enter.
     fn shortcut_keys(&mut self, ctx: &egui::Context, s: &mut Session) -> Outcome {
+        if s.save_as.is_some() || s.confirm.is_some() {
+            // "Create Preset" or a question is open: its buttons take the keys.
+            return Outcome::None;
+        }
         let typing = ctx
             .memory(|m| m.focused())
             .is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some());
@@ -618,11 +722,18 @@ impl Workbench {
             s.focus = None;
             return;
         };
-        let own = s.chords_of(&row).to_vec();
         let replacing = match focus {
-            PillFocus::Pill(i) => own.get(i).copied(),
+            PillFocus::Pill(i) => s.chords_of(&row).get(i).copied(),
             PillFocus::New => None,
         };
+        self.assign_to(s, &row, replacing, chord);
+    }
+
+    /// Give `row` the shortcut `chord` (instead of `replacing`): a chord another
+    /// command has in the same scope moves, with AE's message.
+    fn assign_to(&mut self, s: &mut Session, row: &RowKey, replacing: Option<Chord>, chord: Chord) {
+        let row = row.clone();
+        let own = s.chords_of(&row).to_vec();
         if own.contains(&chord) {
             // Already this command's: nothing changes.
             s.focus = (!own.is_empty()).then_some(PillFocus::Pill(0));
@@ -696,6 +807,97 @@ impl Workbench {
         }
     }
 
+    /// Save As's "Create Preset" and the overwrite / delete questions.
+    fn preset_dialogs(&self, ctx: &egui::Context, id: Id, s: &mut Session) {
+        use crate::dialog::{self, Outcome as D};
+        if let Some(confirm) = s.confirm.clone() {
+            let (text, ok) = match &confirm {
+                Confirm::Overwrite(name) => (
+                    tr("A custom shortcut set named “{name}” already exists. Do you want to overwrite it?")
+                        .replace("{name}", tr(name)),
+                    tr("OK"),
+                ),
+                Confirm::Delete(name) => (
+                    tr("Are you sure you want to delete the keyboard layout set “{name}”?")
+                        .replace("{name}", tr(name)),
+                    tr("Delete"),
+                ),
+            };
+            let shown = dialog::window(ctx, id.with("confirm"), tr("Keyboard Shortcuts"), |ui| {
+                ui.set_max_width(360.0);
+                ui.label(egui::RichText::new(text).color(color::TEXT_STRONG));
+                dialog::buttons_labeled(ui, true, ok, tr("Cancel"))
+            });
+            match shown {
+                Some(D::Ok) => {
+                    s.confirm = None;
+                    match confirm {
+                        Confirm::Overwrite(name) => {
+                            s.save_preset_as(&name);
+                            s.save_as = None;
+                        }
+                        Confirm::Delete(_) => s.delete_preset(),
+                    }
+                }
+                Some(D::Cancel) => s.confirm = None,
+                None if dialog::closed_by_title_bar(ctx, id.with("confirm")) => s.confirm = None,
+                _ => {}
+            }
+            return;
+        }
+        let Some(sa) = s.save_as.as_mut() else {
+            return;
+        };
+        let field = id.with("preset_name");
+        let shown = dialog::window(ctx, id.with("save_as"), tr("Create Preset"), |ui| {
+            let r = dialog::row(ui, 90.0, tr("Preset Name:"), |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut sa.name)
+                        .id(field)
+                        .desired_width(220.0),
+                )
+            });
+            // AE: the name is focused and selected (the field's state exists
+            // from its first frame on).
+            if sa.fresh {
+                r.request_focus();
+                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field) {
+                    let all = egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(sa.name.chars().count()),
+                    );
+                    state.cursor.set_char_range(Some(all));
+                    state.store(ui.ctx(), field);
+                    sa.fresh = false;
+                }
+            }
+            if let Some(e) = &sa.error {
+                ui.colored_label(color::TRAFFIC_CLOSE, e);
+            }
+            dialog::buttons_labeled(ui, !sa.name.trim().is_empty(), tr("Save"), tr("Cancel"))
+        });
+        match shown {
+            Some(D::Ok) => match presets::file_name(&sa.name) {
+                None => {
+                    sa.error = Some(
+                        tr("The key set name you entered is not valid. Please choose another name.")
+                            .to_owned(),
+                    );
+                }
+                Some(name) if name != s.preset && s.presets.contains(&name) => {
+                    s.confirm = Some(Confirm::Overwrite(name));
+                }
+                Some(name) => {
+                    s.save_preset_as(&name);
+                    s.save_as = None;
+                }
+            },
+            Some(D::Cancel) => s.save_as = None,
+            None if dialog::closed_by_title_bar(ctx, id.with("save_as")) => s.save_as = None,
+            _ => {}
+        }
+    }
+
     /// The name a row has in the tree (or the command's title).
     fn row_title(&self, s: &Session, key: &RowKey) -> String {
         s.tree
@@ -715,30 +917,47 @@ impl Workbench {
         // Preset row.
         ui.horizontal(|ui| {
             right_label(ui, label_w, tr("Preset:"));
-            let mut names = vec![DEFAULT_PRESET];
-            if s.custom.is_some() || s.preset == CUSTOM_PRESET {
-                names.push(CUSTOM_PRESET);
-            }
+            let names = s.presets.names();
             let current = tr(&s.preset).to_owned();
             let mut picked = None;
             combo(ui, "preset", tr("Preset:"), &current, 258.0, |ui| {
                 for n in &names {
                     if check_item(ui, tr(n), *n == s.preset, true).clicked() {
-                        picked = Some(*n);
+                        picked = Some(n.clone());
                     }
                 }
             });
             if let Some(n) = picked {
-                s.choose_preset(n);
+                s.choose_preset(&n);
             }
             ui.add_space(14.0);
-            // Preset files (Save As, Delete, Copy To Clipboard) come next.
-            ui.add_enabled(false, button(tr("Save As...")));
-            ui.add_enabled(false, button(tr("Delete")));
-            ui.add_enabled(false, button(tr("Copy To Clipboard")));
+            if ui.add(button(tr("Save As..."))).clicked() {
+                let name = if s.preset == DEFAULT_PRESET {
+                    presets::UNTITLED
+                } else {
+                    &s.preset
+                };
+                s.save_as = Some(SaveAs {
+                    name: tr(name).to_owned(),
+                    error: None,
+                    fresh: true,
+                });
+            }
+            let deletable = s.preset != DEFAULT_PRESET;
+            if ui.add_enabled(deletable, button(tr("Delete"))).clicked() {
+                s.confirm = Some(Confirm::Delete(s.preset.clone()));
+            }
+            if ui.add(button(tr("Copy To Clipboard"))).clicked() {
+                ui.ctx()
+                    .copy_text(presets::clipboard_text(&s.tree, &s.chords));
+                s.copied_at = Some(ui.input(|i| i.time));
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_enabled_ui(false, |ui| {
-                    combo(ui, "layout", tr("Keyboard Layout:"), "en", 70.0, |_| {});
+                // AE lists its keyboard layouts; BAE draws the US one.
+                combo(ui, "layout", tr("Keyboard Layout:"), "en", 70.0, |ui| {
+                    for code in presets::KEYBOARD_LAYOUTS {
+                        check_item(ui, code, *code == "en", *code == "en");
+                    }
                 });
                 ui.label(egui::RichText::new(tr("Keyboard Layout:")).color(color::TEXT));
             });
@@ -766,26 +985,44 @@ impl Workbench {
                 s.choose_scope(scope);
             }
         });
-        ui.add_space(4.0);
-        // Search.
-        let before = self.editor.search.clone();
-        let search = crate::widgets::search_field(ui, &mut self.editor.search, 220.0);
-        if std::mem::take(&mut self.editor.focus_search) {
-            search.request_focus();
+        // The keyboard (AE: 385 of the dialog's 887 points) and its legend.
+        let width = ui.available_width();
+        let keyboard_h = (ui.available_height() * 0.5).clamp(90.0, keyboard::SIZE.y);
+        let held = ui.input(|i| i.modifiers);
+        if let Some(action) = self.keyboard_ui(ui, s, width, keyboard_h) {
+            self.keyboard_action(s, action, held);
         }
-        if search.gained_focus() {
-            s.focus = None;
-        }
-        if before != self.editor.search {
-            s.visible = None;
-        }
+        self.legend_ui(ui);
+
+        // Search, and "Key:" over the Key table.
+        let buttons_w = 96.0;
+        let tree_w = ((width - buttons_w - 24.0) * 0.575).max(240.0);
+        ui.horizontal(|ui| {
+            let before = self.editor.search.clone();
+            let search = crate::widgets::search_field(ui, &mut self.editor.search, 220.0);
+            if std::mem::take(&mut self.editor.focus_search) {
+                search.request_focus();
+            }
+            if search.gained_focus() {
+                s.focus = None;
+            }
+            if before != self.editor.search {
+                s.visible = None;
+            }
+            let x = ui.min_rect().left() + tree_w + 12.0;
+            let at = pos2(x, ui.min_rect().center().y);
+            ui.painter().text(
+                at,
+                Align2::LEFT_CENTER,
+                self.key_label(s),
+                theme::body(),
+                color::TEXT_STRONG,
+            );
+        });
 
         // The tree (left) and the Key table with Undo / Clear (right).
         let bottom_h = 30.0;
         let body_h = (ui.available_height() - bottom_h - 8.0).max(80.0);
-        let width = ui.available_width();
-        let buttons_w = 96.0;
-        let tree_w = ((width - buttons_w - 24.0) * 0.575).max(240.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(vec2(tree_w, body_h), Layout::top_down(Align::Min), |ui| {
                 ui.set_min_size(vec2(tree_w, body_h));
@@ -795,7 +1032,9 @@ impl Workbench {
             let table_w = (ui.available_width() - buttons_w - 12.0).max(120.0);
             ui.allocate_ui_with_layout(vec2(table_w, body_h), Layout::top_down(Align::Min), |ui| {
                 ui.set_min_size(vec2(table_w, body_h));
-                key_table_ui(ui, s);
+                if let Some((row, chord)) = self.key_table_ui(ui, s) {
+                    s.remove_chord(&row, chord);
+                }
             });
             ui.allocate_ui_with_layout(
                 vec2(buttons_w, body_h),
@@ -1008,7 +1247,13 @@ impl Workbench {
     fn tree_row(&self, ui: &mut Ui, s: &Session, i: usize, name_w: f32) -> Option<TreeClick> {
         let node = &s.tree.nodes[i];
         let width = ui.available_width();
-        let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click());
+        // A command can be dragged onto a key of the keyboard.
+        let sense = if node.is_group() {
+            Sense::click()
+        } else {
+            Sense::click_and_drag()
+        };
+        let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), sense);
         let indent = 6.0 + node.depth as f32 * 16.0;
         let font = theme::body();
         let Some(entry) = &node.entry else {
@@ -1039,6 +1284,7 @@ impl Workbench {
             return resp.clicked().then(|| TreeClick::Toggle(node.key.clone()));
         };
         let key = RowKey::of(entry);
+        resp.dnd_set_drag_payload(key.clone());
         let selected = s.selected.as_ref() == Some(&key);
         let chords = s.chords_of(&key);
         let cell = Rect::from_min_max(pos2(rect.left() + name_w, rect.top()), rect.max);
@@ -1124,63 +1370,6 @@ enum Outcome {
     None,
     Ok,
     Cancel,
-}
-
-/// The Key table: "Key:" and the commands of every modifier combination of the
-/// selected key (the visual keyboard selects keys).
-fn key_table_ui(ui: &mut Ui, _s: &Session) {
-    ui.spacing_mut().item_spacing.y = 0.0;
-    let width = ui.available_width();
-    let (r, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
-    ui.painter().text(
-        r.left_center(),
-        Align2::LEFT_CENTER,
-        tr("Key: ").trim_end(),
-        theme::body(),
-        color::TEXT_STRONG,
-    );
-    let (head, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
-    let mods_w = (width * 0.22).clamp(70.0, 130.0);
-    let p = ui.painter();
-    p.text(
-        pos2(head.left() + 16.0, head.center().y),
-        Align2::LEFT_CENTER,
-        tr("Modifiers"),
-        theme::body(),
-        color::TEXT,
-    );
-    p.text(
-        pos2(head.left() + mods_w + 8.0, head.center().y),
-        Align2::LEFT_CENTER,
-        tr("Command"),
-        theme::body(),
-        color::TEXT,
-    );
-    let list = Rect::from_min_size(ui.cursor().min, vec2(width, ui.available_height()));
-    ui.painter().rect_filled(list, 2.0, palette::LIST_BG);
-    let rows = text::Mods::table();
-    egui::ScrollArea::vertical()
-        .id_salt("shortcut_key_table")
-        .auto_shrink([false, false])
-        .show_rows(ui, ROW_H, rows.len(), |ui, range| {
-            for m in &rows[range] {
-                let (rect, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-                let p = ui.painter();
-                p.hline(
-                    rect.x_range(),
-                    rect.bottom() - 0.5,
-                    Stroke::new(1.0, palette::ROW_LINE),
-                );
-                p.text(
-                    pos2(rect.left() + 16.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    m.text(),
-                    theme::body(),
-                    color::TEXT,
-                );
-            }
-        });
 }
 
 /// A label right-aligned in a column of `width` ("Preset:").
@@ -1379,4 +1568,59 @@ fn block_background(ctx: &egui::Context, id: Id) {
         .show(ctx, |ui| {
             ui.allocate_rect(rect, Sense::click_and_drag());
         });
+}
+
+/// How long AE's "Copied to clipboard" notice stays.
+const NOTICE_SECS: f64 = 2.0;
+
+/// AE's green notice after Copy To Clipboard: check, text and ×, centred
+/// above the dialog's bottom bar.
+fn copied_notice(ctx: &egui::Context, id: Id, dialog: Rect, s: &mut Session) {
+    let Some(at) = s.copied_at else { return };
+    let now = ctx.input(|i| i.time);
+    if now - at > NOTICE_SECS {
+        s.copied_at = None;
+        return;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(NOTICE_SECS - (now - at)));
+    let text = tr("Copied to clipboard");
+    let galley =
+        ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), theme::body(), Color32::WHITE));
+    let size = vec2(galley.size().x + 86.0, 36.0);
+    let r = Rect::from_center_size(pos2(dialog.center().x, dialog.bottom() - 64.0), size);
+    let mut close = false;
+    egui::Area::new(id.with("copied"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(r.min)
+        .show(ctx, |ui| {
+            let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+            let p = ui.painter();
+            p.rect_filled(rect, 4.0, palette::NOTICE);
+            let icon =
+                Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(14.0, 14.0));
+            p.circle_filled(icon.center(), 7.0, Color32::WHITE);
+            crate::widgets::paint_check(p, icon.shrink(2.5), palette::NOTICE);
+            p.galley(
+                pos2(rect.left() + 34.0, rect.center().y - galley.size().y / 2.0),
+                galley,
+                Color32::WHITE,
+            );
+            let x = Rect::from_center_size(
+                pos2(rect.right() - 16.0, rect.center().y),
+                vec2(14.0, 14.0),
+            );
+            p.vline(
+                x.left() - 10.0,
+                rect.y_range().shrink(8.0),
+                Stroke::new(1.0, Color32::from_white_alpha(90)),
+            );
+            let resp = ui
+                .interact(x, id.with("copied_close"), Sense::click())
+                .labeled(egui::WidgetType::Button, tr("Close"));
+            crate::widgets::paint_cross(p, x, Color32::WHITE);
+            close = resp.clicked();
+        });
+    if close {
+        s.copied_at = None;
+    }
 }

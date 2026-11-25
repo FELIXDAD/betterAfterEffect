@@ -65,6 +65,7 @@ use crate::geom::{IRect, Rect, is_invertible, scale_affine};
 use crate::input::{
     CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
 };
+use crate::light::Lighting;
 use crate::mask::MaskStack;
 pub use crate::mask::{Expansion, MaskEdge, MaskNode, MaskRaster};
 use crate::request::RenderRequest;
@@ -275,8 +276,11 @@ pub struct LayerOp {
     /// sample; the draw averages the layer over them.
     pub motion: Option<Arc<[Homography]>>,
     /// Pieces of 3D layers cut at intersections: half-planes `a·x + b·y + c ≥ 0`
-    /// in input space pixels.
-    pub clips: Vec<[f64; 3]>,
+    /// in input space pixels, and how far coverage reaches past each
+    /// ([`crate::three_d::Fragment::clips`]).
+    pub clips: Vec<[f64; 4]>,
+    /// 3D layers lit by the comp's lights (AE-CMP-436).
+    pub lighting: Option<Arc<Lighting>>,
 }
 
 /// The pixels of a layer op.
@@ -648,22 +652,60 @@ impl Builder<'_, '_> {
                 None => {}
             }
         }
+        attach_shadows(comp, &mut planned);
         if planned.len() <= 1 {
             ops.extend(planned.into_iter().map(|(_, op)| op));
             return Ok(());
         }
-        let plates: Vec<Plate> = planned
-            .iter()
-            .map(|(index, op)| Plate {
-                matrix: comp.layers[*index].matrix_3d.unwrap_or_default(),
-                rect: op.content,
-            })
-            .collect();
-        let eye = comp.view_camera().position();
-        for fragment in depth_order(&plates, eye) {
-            let mut op = planned[fragment.item].1.clone();
-            op.clips = fragment.clips;
-            ops.push(op);
+        // Layers whose drawn areas do not overlap cannot hide each other: sort
+        // and cut only within clusters of overlapping layers (fewer cuts, and
+        // no cut where nothing is in front).
+        let n = planned.len();
+        let mut cluster: Vec<usize> = (0..n).collect();
+        fn root(c: &mut [usize], mut i: usize) -> usize {
+            while c[i] != i {
+                c[i] = c[c[i]];
+                i = c[i];
+            }
+            i
+        }
+        for i in 0..n {
+            for j in i + 1..n {
+                if !planned[i]
+                    .1
+                    .bounds
+                    .intersect(&planned[j].1.bounds)
+                    .is_empty()
+                {
+                    let (a, b) = (root(&mut cluster, i), root(&mut cluster, j));
+                    cluster[a.max(b)] = a.min(b);
+                }
+            }
+        }
+        let eye = comp.view_camera().eye();
+        for first in 0..n {
+            if root(&mut cluster, first) != first {
+                continue;
+            }
+            let members: Vec<usize> = (first..n)
+                .filter(|&i| root(&mut cluster, i) == first)
+                .collect();
+            if members.len() == 1 {
+                ops.push(planned[first].1.clone());
+                continue;
+            }
+            let plates: Vec<Plate> = members
+                .iter()
+                .map(|&i| Plate {
+                    matrix: comp.layers[planned[i].0].matrix_3d.unwrap_or_default(),
+                    rect: planned[i].1.content,
+                })
+                .collect();
+            for fragment in depth_order(&plates, eye) {
+                let mut op = planned[members[fragment.item]].1.clone();
+                op.clips = fragment.clips;
+                ops.push(op);
+            }
         }
         Ok(())
     }
@@ -931,6 +973,32 @@ impl Builder<'_, '_> {
         }
         self.resolving.pop();
 
+        // 3D layers that accept lights, reached by a light (AE-CMP-436): a
+        // light with its Adjustment Layer switch on lights only the layers
+        // below it (AE-CMP-435), and a layer no light reaches stays unlit
+        // (measured in AE 26.2.1).
+        let lighting = layer
+            .matrix_3d
+            .filter(|_| layer.material.accepts_lights)
+            .and_then(|matrix| {
+                let lights: Arc<[_]> = comp
+                    .lights
+                    .iter()
+                    .filter(|l| l.scope_below.is_none_or(|light| index > light))
+                    .copied()
+                    .collect();
+                (!lights.is_empty()).then(|| {
+                    let camera = comp.view_camera();
+                    Arc::new(Lighting {
+                        matrix,
+                        material: layer.material,
+                        lights,
+                        eye: camera.eye(),
+                        world_per_pixel: camera.world_per_pixel(),
+                        casters: Arc::new([]),
+                    })
+                })
+            });
         let (transform, projection, motion) = match placement {
             Placement::Affine(t) => (t, None, None),
             Placement::General {
@@ -958,6 +1026,7 @@ impl Builder<'_, '_> {
             projection,
             motion,
             clips: Vec::new(),
+            lighting,
         }))
     }
 
@@ -1062,6 +1131,7 @@ impl Builder<'_, '_> {
             projection: None,
             motion: None,
             clips: Vec::new(),
+            lighting: None,
         };
         OpInput::Image(self.push(Node {
             kind: NodeKind::Composite(CompositeNode {
@@ -1312,6 +1382,7 @@ impl Builder<'_, '_> {
             projection: None,
             motion: None,
             clips: Vec::new(),
+            lighting: None,
         }])
     }
 
@@ -1656,6 +1727,7 @@ fn covers(op: &LayerOp, canvas: IRect, scale: f64) -> bool {
         || op.matte.is_some()
         || op.projection.is_some()
         || op.motion.is_some()
+        || op.lighting.is_some()
         || !op.clips.is_empty()
     {
         return false;
@@ -1756,6 +1828,135 @@ fn placement(comp: &RenderComp, layer: &RenderLayer, content: &Rect, scale: f64)
         };
     }
     Placement::Affine(layer.transform)
+}
+
+/// Shadows inside one 3D group (AE-CMP-437): every lit layer that accepts
+/// shadows gets the other layers of the group that cast shadows, when one of
+/// its lights casts shadows.
+fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
+    use crate::light::{CasterPixels, ShadowCaster, ShadowMode};
+    let casters: Vec<(usize, ShadowCaster)> = planned
+        .iter()
+        .filter(|(index, op)| {
+            comp.layers[*index].material.casts_shadows != ShadowMode::Off && op.opacity > 0.0
+        })
+        .filter_map(|(index, op)| {
+            let pixels = match &op.input {
+                OpInput::Solid { color, .. } => CasterPixels::Solid(*color),
+                OpInput::Image(id) => CasterPixels::Image(*id),
+            };
+            Some((
+                *index,
+                ShadowCaster {
+                    matrix: comp.layers[*index].matrix_3d?,
+                    rect: op.content,
+                    opacity: op.opacity,
+                    transmission: comp.layers[*index].material.light_transmission,
+                    pixels,
+                },
+            ))
+        })
+        .collect();
+    if casters.is_empty() {
+        return;
+    }
+    for (index, op) in planned.iter_mut() {
+        let Some(lighting) = &op.lighting else {
+            continue;
+        };
+        if comp.layers[*index].material.accepts_shadows == ShadowMode::Off
+            || !lighting.lights.iter().any(|l| l.casts_shadows)
+        {
+            continue;
+        }
+        let receiver = lighting.matrix;
+        let rect = op.content;
+        let mine: Arc<[ShadowCaster]> = casters
+            .iter()
+            .filter(|(i, c)| {
+                i != index
+                    && lighting
+                        .lights
+                        .iter()
+                        .filter(|l| l.casts_shadows)
+                        .any(|l| can_shadow(&receiver, &rect, c, l))
+            })
+            .map(|(_, c)| c.clone())
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        op.lighting = Some(Arc::new(Lighting {
+            casters: mine,
+            ..(**lighting).clone()
+        }));
+    }
+}
+
+/// Whether `caster` can throw a shadow of `light` onto the receiver plane
+/// `receiver` within `rect` (layer pixels). Conservative: only rules out casters
+/// behind the receiver as seen from the light, or whose shadow lands outside it.
+fn can_shadow(
+    receiver: &glam::DMat4,
+    rect: &Rect,
+    caster: &crate::light::ShadowCaster,
+    light: &crate::light::Light,
+) -> bool {
+    use crate::light::LightKind;
+    let Some(n) = receiver
+        .x_axis
+        .truncate()
+        .cross(receiver.y_axis.truncate())
+        .try_normalize()
+    else {
+        return true;
+    };
+    let d = -n.dot(receiver.w_axis.truncate());
+    let side = |p: glam::DVec3| n.dot(p) + d;
+    let corners = caster
+        .rect
+        .corners()
+        .map(|c| caster.matrix.transform_point3(c.extend(0.0)));
+    // Where each corner's shadow falls on the receiver plane.
+    let shadow_of = |c: glam::DVec3| -> Option<glam::DVec3> {
+        match light.kind {
+            LightKind::Parallel => {
+                let dir = light.direction();
+                let toward = -n.dot(dir) * side(c);
+                (toward > 1e-9).then(|| c - dir * (side(c) / n.dot(dir)))
+            }
+            _ => {
+                let lp = light.position();
+                let (sl, sc) = (side(lp), side(c));
+                // Strictly between the light and the receiver plane.
+                (sl * sc > 1e-9 && sc.abs() < sl.abs()).then(|| lp + (c - lp) * (sl / (sl - sc)))
+            }
+        }
+    };
+    let light_side = match light.kind {
+        LightKind::Parallel => -n.dot(light.direction()),
+        _ => side(light.position()),
+    };
+    if corners.iter().all(|c| side(*c) * light_side <= 0.0) {
+        // Behind the receiver (or in its plane) as seen from the light.
+        return false;
+    }
+    let Some(shadows) = corners
+        .iter()
+        .map(|c| shadow_of(*c))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return true;
+    };
+    let to_layer = receiver.inverse();
+    let pts: Vec<glam::DVec2> = shadows
+        .iter()
+        .map(|p| to_layer.transform_point3(*p).truncate())
+        .collect();
+    let b = crate::three_d::points_bounds(&pts);
+    let px = 1.0 / receiver.x_axis.truncate().length().max(1e-12);
+    let pad = (2.0 * f64::from(light.shadow_diffusion) + 4.0) * px;
+    b.x1 + pad > rect.x0 && b.x0 - pad < rect.x1 && b.y1 + pad > rect.y0 && b.y0 - pad < rect.y1
 }
 
 /// Whether every homography of `hs` is the same map.

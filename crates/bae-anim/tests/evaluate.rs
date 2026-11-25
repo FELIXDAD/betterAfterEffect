@@ -327,6 +327,20 @@ fn motion_blur_sample_times() {
 }
 
 #[test]
+fn motion_blur_adaptive_limit() {
+    let s = stage(|_| {});
+    let ec = evaluate_comp(&s, &p("/comps/main"), Time::ZERO).unwrap();
+    assert_eq!(ec.motion_blur.adaptive_limit, 128, "AE default");
+    for (set, want) in [(40, 40), (4, 16), (999, 256)] {
+        let s = stage(|b| {
+            b.set("/comps/main", "motion_blur_adaptive_limit", Value::Int(set));
+        });
+        let ec = evaluate_comp(&s, &p("/comps/main"), Time::ZERO).unwrap();
+        assert_eq!(ec.motion_blur.adaptive_limit, want, "{set}");
+    }
+}
+
+#[test]
 fn text_source_document() {
     let s = stage(|b| {
         let l = b.layer("/comps/main", "title", "text");

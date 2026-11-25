@@ -146,7 +146,7 @@ impl TimelinePanel {
                     color::TEXT,
                 );
                 // Twirl.
-                let tw = Rect::from_center_size(pos2(l + cols.name + 6.0, cy), vec2(12.0, 12.0));
+                let tw = Rect::from_center_size(pos2(l + cols.twirl + 7.0, cy), vec2(12.0, 12.0));
                 let open = self.expanded.contains(layer.as_str())
                     || session.lock().reveal.contains_key(layer);
                 icons::paint(
@@ -176,7 +176,7 @@ impl TimelinePanel {
                 }
                 // Name (click selects, double-click renames, drag reorders).
                 let name_rect = Rect::from_min_max(
-                    pos2(l + cols.name + 14.0, rect.top()),
+                    pos2(l + cols.name + 2.0, rect.top()),
                     pos2(l + cols.switches - 2.0, rect.bottom()),
                 );
                 let name = query::display_name_of(stage, layer);
@@ -211,6 +211,10 @@ impl TimelinePanel {
                     if resp.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
+                    // An effect dragged from Effects & Presets onto the layer.
+                    if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
+                        crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
+                    }
                     let locked = query::is_locked(stage, layer);
                     if resp.double_clicked() && !locked {
                         self.rename = Some((layer.clone(), name.clone()));
@@ -241,8 +245,30 @@ impl TimelinePanel {
                         vec2(SW, ROW_H),
                     )
                 };
+                // Shy: no box, AE's figure peeking over the bar, or ducked behind it
+                // when the layer is shy.
+                let shy = bool_attr(stage, layer, "shy");
+                let resp = ui
+                    .interact(sw(0), rid("shy"), Sense::click())
+                    .labeled_toggle(
+                        egui::WidgetType::Checkbox,
+                        &bae_ui::a11y::context(&[&layer_ctx, tr("Shy")]),
+                        shy,
+                    );
+                icons::paint(
+                    ui.painter(),
+                    Rect::from_center_size(sw(0).center(), vec2(13.0, 13.0)),
+                    if shy { Icon::ShyOn } else { Icon::Shy },
+                    if resp.hovered() {
+                        color::TEXT_STRONG
+                    } else {
+                        color::ICON
+                    },
+                );
+                if resp.clicked() {
+                    cx.invoke_with("attr.set", json!({"path": layer, "attr": "shy", "value": {"type": "bool", "value": !shy}}));
+                }
                 for (i, attr, icon) in [
-                    (0, "shy", Icon::Shy),
                     (1, "collapse_transformation", Icon::Collapse),
                     (5, "motion_blur", Icon::MotionBlur),
                     (6, "adjustment_layer", Icon::Adjustment),
@@ -250,6 +276,20 @@ impl TimelinePanel {
                     let on = bool_attr(stage, layer, attr);
                     if switch(ui, sw(i), on, icon, rid(attr), &layer_ctx) {
                         cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
+                    }
+                }
+                // Effect switch (fx): only on layers with effects, like AE.
+                if !bae_motion::effect::effects_of(stage, layer).is_empty() {
+                    let on = stage
+                        .prim(layer)
+                        .and_then(|v| query::static_value(&v, "effects_enabled"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    if switch(ui, sw(3), on, Icon::Fx, rid("effects_enabled"), &layer_ctx) {
+                        cx.invoke_with(
+                            "layer.set_attr",
+                            json!({"layers": [layer], "attr": "effects_enabled", "value": {"type": "bool", "value": !on}}),
+                        );
                     }
                 }
                 let draft = stage

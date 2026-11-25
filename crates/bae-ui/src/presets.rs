@@ -137,15 +137,14 @@ pub fn ae_keymap() -> Keymap {
             Binding::new("Cmd+Shift+Z", ids::REDO),
             Binding::new("Cmd+Alt+Quote", ids::KEYBOARD_SHORTCUTS),
             // Window: panels (AE-UI-001)
+            // Panels that exist; AE's Cmd+1 … Cmd+9 for the others (Tools, Info,
+            // Audio, Effects & Presets, Character, Paragraph …) come from the AE
+            // command catalog once their panel is real (bae-ui-motion's late
+            // bindings), so a key never opens a "not implemented" placeholder
+            // whose Window item is greyed.
             panel("Cmd+0", "project"),
             panel("Cmd+Alt+0", "render_queue"),
-            panel("Cmd+1", "tools"),
-            panel("Cmd+2", "info"),
             panel("Cmd+3", "preview"),
-            panel("Cmd+4", "audio"),
-            panel("Cmd+5", "effects"),
-            panel("Cmd+6", "character"),
-            panel("Cmd+7", "paragraph"),
             panel("F3", "effect_controls"),
             // Window: workspaces (AE-UI-005). AE assigns Shift+F10 / F11 to the
             // Default and Review workspaces (Window ▸ Assign Shortcut to

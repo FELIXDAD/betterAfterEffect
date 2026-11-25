@@ -135,6 +135,27 @@
                 if (l.camera.type === "one_node") { layer.autoOrient = AutoOrientType.NO_AUTO_ORIENT; }
                 layer.property("ADBE Camera Options Group").property("ADBE Camera Zoom").setValue(l.camera.zoom);
                 if (l.poi) { layer.property("ADBE Transform Group").property("ADBE Anchor Point").setValue(l.poi); }
+            } else if (l.light) {
+                layer = comp.layers.addLight(l.name, [c.size[0] / 2, c.size[1] / 2]);
+                var lt = l.light;
+                layer.lightType = {ambient: LightType.AMBIENT, point: LightType.POINT, spot: LightType.SPOT, parallel: LightType.PARALLEL}[lt.type];
+                var lo = layer.property("ADBE Light Options Group");
+                lo.property("ADBE Light Intensity").setValue(lt.intensity !== undefined ? lt.intensity : 100);
+                lo.property("ADBE Light Color").setValue(lt.color || [1, 1, 1]);
+                if (lt.shadows) {
+                    lo.property("ADBE Casts Shadows").setValue(1);
+                    if (lt.dark !== undefined) { lo.property("ADBE Light Shadow Darkness").setValue(lt.dark); }
+                    if (lt.diff !== undefined) { lo.property("ADBE Light Shadow Diffusion").setValue(lt.diff); }
+                }
+                if (lt.cone !== undefined) { lo.property("ADBE Light Cone Angle").setValue(lt.cone); }
+                if (lt.feather !== undefined) { lo.property("ADBE Light Cone Feather 2").setValue(lt.feather); }
+                if (lt.falloff) {
+                    lo.property("ADBE Light Falloff Type").setValue({none: 1, smooth: 2, inverse_square_clamped: 3}[lt.falloff]);
+                    if (lt.radius !== undefined) { lo.property("ADBE Light Falloff Start").setValue(lt.radius); }
+                    if (lt.dist !== undefined) { lo.property("ADBE Light Falloff Distance").setValue(lt.dist); }
+                }
+                if (l.poi) { layer.property("ADBE Transform Group").property("ADBE Anchor Point").setValue(l.poi); }
+                if (l.adjustment) { layer.adjustmentLayer = true; }
             } else if (l.solid) {
                 layer = comp.layers.addSolid([l.solid[0] / 255, l.solid[1] / 255, l.solid[2] / 255],
                     c.name + "_" + l.name, l.size[0], l.size[1], 1.0);
@@ -145,15 +166,15 @@
                 layer = comp.layers.add(comps[l.comp]);
             }
             layer.name = l.name;
-            var threeD = !!(l.three_d || l.camera);
-            if (!l.camera) { layer.quality = LayerQuality.BEST; }
+            var threeD = !!(l.three_d || l.camera || l.light);
+            if (!l.camera && !l.light) { layer.quality = LayerQuality.BEST; }
             if (l.three_d) { layer.threeDLayer = true; }
             if (l.mb) { layer.motionBlur = true; }
             var tg = layer.property("ADBE Transform Group");
             var keys = l.keys || {};
             if (keys.pos) {
                 setKeys(tg.property("ADBE Position"), keys.pos, threeD);
-            } else {
+            } else if (l.pos) {
                 tg.property("ADBE Position").setValue(threeD ? v3(l.pos, 0) : l.pos);
             }
             if (l.scale) { tg.property("ADBE Scale").setValue(threeD ? v3(l.scale, 100) : l.scale); }
@@ -165,6 +186,18 @@
                 tg.property("ADBE Rotate Z").setValue(l.rot3[2]);
             }
             if (l.orient) { tg.property("ADBE Orientation").setValue(l.orient); }
+            if (l.mat) {
+                var mo = layer.property("ADBE Material Options Group");
+                if (l.mat.amb !== undefined) { mo.property("ADBE Ambient Coefficient").setValue(l.mat.amb); }
+                if (l.mat.diff !== undefined) { mo.property("ADBE Diffuse Coefficient").setValue(l.mat.diff); }
+                if (l.mat.spec !== undefined) { mo.property("ADBE Specular Coefficient").setValue(l.mat.spec); }
+                if (l.mat.shin !== undefined) { mo.property("ADBE Shininess Coefficient").setValue(l.mat.shin); }
+                if (l.mat.metal !== undefined) { mo.property("ADBE Metal Coefficient").setValue(l.mat.metal); }
+                if (l.mat.accepts === false) { mo.property("ADBE Accepts Lights").setValue(0); }
+                if (l.mat.casts !== undefined) { mo.property("ADBE Casts Shadows").setValue(l.mat.casts ? 1 : 0); }
+                if (l.mat.accepts_shadows !== undefined) { mo.property("ADBE Accepts Shadows").setValue(l.mat.accepts_shadows ? 1 : 0); }
+                if (l.mat.trans !== undefined) { mo.property("ADBE Light Transmission").setValue(l.mat.trans); }
+            }
             if (l.opacity !== undefined) { layer.property("ADBE Transform Group").property("ADBE Opacity").setValue(l.opacity); }
             if (l.mode) { layer.blendingMode = BlendingMode[l.mode === "silhouette_alpha" ? "SILHOUETE_ALPHA" : l.mode.toUpperCase()]; }
             if (l.preserve) { layer.preserveTransparency = true; }

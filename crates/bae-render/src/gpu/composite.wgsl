@@ -13,7 +13,10 @@
 // measuring edge ramps with the local Jacobian. Pieces of layers split at 3D
 // intersections carry clip half-planes in layer space. Motion-blurred layers
 // (FLAG_MOTION) draw one quad over all placements and average the layer at
-// every sample placement per pixel (AE-CMP-064).
+// every sample placement per pixel (AE-CMP-064). Lit 3D layers (FLAG_LIT) are
+// shaded with AE's Classic 3D lighting from a record in `lighting`
+// (light.rs: layout, CPU reference). Plain, lit and blurred draws use separate
+// entry points so the plain path carries none of that code.
 
 struct Draw {
     // input texel -> target texel: x' = a * x + b * y + c (a, b, c, ROI origin x), y' likewise.
@@ -46,9 +49,10 @@ struct Draw {
     fwd_w: vec4<f32>,
     // Inverse homography w row.
     inv_w: vec4<f32>,
-    // Clip half-planes a * u + b * v + c >= 0 in input texels.
+    // Clip half-planes a * u + b * v + c >= 0 in input texels; w: coverage
+    // reach past the cut in target pixels.
     clips: array<vec4<f32>, 4>,
-    // Clip count, first motion sample, sample count, unused.
+    // Clip count, first motion sample, sample count, lighting record (vec4 index).
     extra: vec4<u32>,
 }
 
@@ -110,14 +114,27 @@ const FLAG_OPAQUE: u32 = 64u;
 const FLAG_MASK: u32 = 128u;
 const FLAG_PROJECTIVE: u32 = 256u;
 const FLAG_MOTION: u32 = 512u;
+const FLAG_LIT: u32 = 1024u;
 
 @group(0) @binding(0) var<storage, read> draws: array<Draw>;
 @group(0) @binding(1) var<storage, read> samples: array<Sample>;
+// Lighting records (light.rs `Lighting::pack`): P(u) = r0 u.x + r1 u.y + r2,
+// normal + light count, eye + comp-space pixel size (> 0: per unit distance,
+// < 0: constant), material (ambient, diffuse, specular, shininess), (metal,
+// caster count, caster block offset), then 5 vec4s per light: position + kind
+// (0 ambient, 1 parallel, 2 point, 3 spot), direction + falloff (0 none,
+// 1 smooth, 2 inverse square), colour · intensity + radius, (cos outer,
+// cos inner, falloff distance), (shadow darkness, diffusion); then 8 vec4s per
+// shadow caster: plane, world -> layer px rows (2), rect, solid colour, atlas
+// uv map, atlas uv clip, (opacity, transmission, layer px per comp px, kind).
+@group(0) @binding(2) var<storage, read> lighting: array<vec4<f32>>;
 @group(1) @binding(0) var t_src: texture_2d<f32>;
 @group(1) @binding(1) var t_matte: texture_2d<f32>;
 @group(1) @binding(2) var t_dst: texture_2d<f32>;
 @group(1) @binding(3) var s_linear: sampler;
 @group(1) @binding(4) var t_mask: texture_2d<f32>;
+// Image shadow casters of the composite (exec/shadow.rs).
+@group(1) @binding(5) var t_shadow: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -263,9 +280,142 @@ struct Px {
     k: f32,
 }
 
+// GLSL smoothstep that also handles e0 == e1 (a hard step) and e0 > e1.
+fn step_smooth(e0: f32, e1: f32, x: f32) -> f32 {
+    if e0 == e1 { return select(0.0, 1.0, x >= e0); }
+    let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// AE's shadow edge without diffusion, in receiver pixels (light.rs).
+const SHADOW_SOFTNESS: f32 = 1.0;
+
+// Fraction of [c - s, c + s] inside [lo, hi].
+fn span(c: f32, s: f32, lo: f32, hi: f32) -> f32 {
+    return max(min(c + s, hi) - max(c - s, lo), 0.0) / (2.0 * s);
+}
+
+// How much of a light (l0, l1, l4 of its record) reaches p past the shadow
+// casters of record `o` (AE-CMP-437, light.rs `shadow`); `pixel` is the
+// comp-space size of a receiver pixel at p.
+fn shadow(o: u32, p: vec3<f32>, l0: vec4<f32>, l1: vec4<f32>, l4: vec4<f32>, pixel: f32) -> vec3<f32> {
+    let head = lighting[o + 6u];
+    let count = u32(head.y);
+    let block = o + u32(head.z);
+    var to = l0.xyz - p;
+    if u32(l0.w) == 1u { to = -l1.xyz * 1e6; }
+    let light_dist = max(length(l0.xyz - p), 1e-6);
+    var keep = vec3<f32>(1.0);
+    for (var i = 0u; i < count; i++) {
+        let c = block + 8u * i;
+        let plane = lighting[c];
+        let denom = dot(plane.xyz, to);
+        if abs(denom) < 1e-9 { continue; }
+        let t = -(dot(plane.xyz, p) + plane.w) / denom;
+        if t <= 1e-5 || t >= 1.0 { continue; }
+        let h = p + to * t;
+        let r0 = lighting[c + 1u];
+        let r1 = lighting[c + 2u];
+        let u = vec2<f32>(dot(r0.xyz, h) + r0.w, dot(r1.xyz, h) + r1.w);
+        let rect = lighting[c + 3u];
+        let info = lighting[c + 7u];
+        // Diffusion: a square light of that half-size seen through the caster;
+        // at least AE's shadow-map edge.
+        // (Parallel lights: an orthographic shadow map, the edge does not shrink.)
+        let frac = clamp(t * length(to) / light_dist, 0.0, 1.0);
+        let shrink = select(1.0 - frac, 1.0, u32(l0.w) == 1u);
+        let s = max(max(l4.y * frac, SHADOW_SOFTNESS * pixel * shrink) * info.z, 1e-4);
+        if u.x + s <= rect.x || u.x - s >= rect.z || u.y + s <= rect.y || u.y - s >= rect.w { continue; }
+        if info.w == 0.0 {
+            let col = lighting[c + 4u];
+            let a = span(u.x, s, rect.x, rect.z) * span(u.y, s, rect.y, rect.w) * col.a * info.x;
+            keep *= 1.0 - l4.x * a * (1.0 - info.y * col.rgb);
+        } else {
+            let map = lighting[c + 5u];
+            let clip = lighting[c + 6u];
+            let dims = vec2<f32>(textureDimensions(t_shadow));
+            let n = u32(clamp(ceil(2.0 * s * map.x * dims.x), 1.0, 6.0));
+            let sub = s / f32(n);
+            var sum = vec3<f32>(0.0);
+            for (var j = 0u; j < n; j++) {
+                for (var k = 0u; k < n; k++) {
+                    let q = u + (vec2<f32>(f32(k), f32(j)) * 2.0 + 1.0) * sub - s;
+                    let cov = span(q.x, sub, rect.x, rect.z) * span(q.y, sub, rect.y, rect.w);
+                    let uv = clamp(q * map.xy + map.zw, clip.xy, clip.zw);
+                    let texel = textureSampleLevel(t_shadow, s_linear, uv, 0.0);
+                    let col = texel.rgb / max(texel.a, 1e-6);
+                    sum += 1.0 - l4.x * cov * texel.a * info.x * (1.0 - info.y * col);
+                }
+            }
+            keep *= sum / f32(n * n);
+        }
+    }
+    return keep;
+}
+
+// AE's Classic 3D lighting (AE-CMP-436, light.rs `shade`) of straight colour
+// `c` at input texel `u`, from the lighting record at `o`.
+fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> vec3<f32> {
+    let p = lighting[o].xyz * u.x + lighting[o + 1u].xyz * u.y + lighting[o + 2u].xyz;
+    let header = lighting[o + 3u];
+    let eye = lighting[o + 4u];
+    let v = normalize(eye.xyz - p);
+    let pixel = select(-eye.w, eye.w * length(eye.xyz - p), eye.w > 0.0);
+    let mat = lighting[o + 5u];
+    var n = header.xyz;
+    if dot(n, v) < 0.0 { n = -n; }
+    var amb = vec3<f32>(0.0);
+    var diff = vec3<f32>(0.0);
+    var spec = vec3<f32>(0.0);
+    let count = u32(header.w);
+    for (var i = 0u; i < count; i++) {
+        let b = o + 7u + 5u * i;
+        let l0 = lighting[b];
+        let l1 = lighting[b + 1u];
+        let l2 = lighting[b + 2u];
+        let l3 = lighting[b + 3u];
+        let l4 = lighting[b + 4u];
+        let kind = u32(l0.w);
+        if kind == 0u {
+            amb += l2.rgb;
+            continue;
+        }
+        var to_light: vec3<f32>;
+        var dist: f32;
+        if kind == 1u {
+            to_light = -l1.xyz;
+            dist = dot(p - l0.xyz, l1.xyz);
+        } else {
+            let t = l0.xyz - p;
+            dist = length(t);
+            to_light = t / max(dist, 1e-6);
+        }
+        let nl = dot(n, to_light);
+        if nl <= 0.0 { continue; }
+        var atten = 1.0;
+        let falloff = u32(l1.w);
+        if falloff == 1u {
+            atten = 1.0 - step_smooth(l2.w, l2.w + l3.z, dist);
+        } else if falloff == 2u && dist > l2.w {
+            atten = (l2.w / dist) * (l2.w / dist);
+        }
+        if kind == 3u {
+            atten *= step_smooth(l3.x, l3.y, dot(l1.xyz, -to_light));
+        }
+        var k = l2.rgb * atten;
+        if l4.x > 0.0 { k *= shadow(o, p, l0, l1, l4, pixel); }
+        diff += k * nl;
+        let nh = max(dot(n, normalize(to_light + v)), 1e-8);
+        spec += k * select(pow(nh, mat.w), 1.0, mat.w <= 0.0);
+    }
+    let spec_color = mix(vec3<f32>(1.0), c, lighting[o + 6u].x);
+    return max(c * (mat.x * amb + mat.y * diff) + mat.z * spec_color * spec, vec3<f32>(0.0));
+}
+
 // `d` is draw `di`, loaded once by the caller (motion blur calls this per
-// sample); `k_affine` are the edge scales of an affine placement.
-fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, projective: bool, k_affine: vec2<f32>) -> Px {
+// sample); `k_affine` are the edge scales of an affine placement; `lit` turns
+// on lighting (a constant at each call site, so plain draws compile without).
+fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, projective: bool, k_affine: vec2<f32>, lit: bool) -> Px {
     let flags = d.mode.y;
     let hp = vec3<f32>(p, 1.0);
     var out: Px;
@@ -339,6 +489,12 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
         light = d.color.rgb;
         src = vec4<f32>(d.color.rgb * d.color.a, d.color.a);
     }
+    if lit && src.a > 0.0 {
+        var c = shade(d.extra.w, u, src.rgb / src.a);
+        if (flags & FLAG_CLAMP) != 0u { c = min(c, vec3<f32>(1.0)); }
+        src = vec4<f32>(c * src.a, src.a);
+        light = c;
+    }
 
     // Layer masks (AE-CMP-038): the combined mask, or one mask's coverage with
     // its value transform, in layer space.
@@ -347,13 +503,14 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
         let mv = textureSampleLevel(t_mask, s_linear, muv, 0.0).x;
         k = k * clamp(d.mask_val.x + d.mask_val.y * mv, 0.0, 1.0);
     }
-    // Pieces of 3D layers cut at intersections (AE-CMP-405): anti-aliased over
-    // one target pixel, so the two sides of a cut add up to full coverage.
+    // Pieces of 3D layers cut at intersections (AE-CMP-405): the piece drawn
+    // first reaches c.w pixels past the cut, the one drawn over it
+    // anti-aliases it, so a cut never leaves a see-through seam.
     let clip_count = min(d.extra.x, 4u);
     for (var i = 0u; i < clip_count; i++) {
         let c = draws[di].clips[i];
         let g = vec2<f32>(dot(c.xy, du_dx), dot(c.xy, du_dy));
-        k = k * clamp((dot(c.xy, u) + c.z) / max(length(g), 1e-20) + 0.5, 0.0, 1.0);
+        k = k * clamp((dot(c.xy, u) + c.z) / max(length(g), 1e-20) + 0.5 + c.w, 0.0, 1.0);
     }
     out.src = src;
     out.light = light;
@@ -364,7 +521,15 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d = draws[in.draw];
-    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw);
+    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw, false);
+    return finish(d, in.pos.xy, px.src, px.light, px.k);
+}
+
+// Lit 3D layers (their own pipeline).
+@fragment
+fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
+    let d = draws[in.draw];
+    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw, true);
     return finish(d, in.pos.xy, px.src, px.light, px.k);
 }
 
@@ -379,9 +544,10 @@ fn fs_motion(in: VsOut) -> @location(0) vec4<f32> {
     var acc_light = vec3<f32>(0.0);
     let n = max(d.extra.z, 1u);
     let projective = (d.mode.y & FLAG_PROJECTIVE) != 0u;
+    let lit = (d.mode.y & FLAG_LIT) != 0u;
     for (var i = 0u; i < n; i++) {
         let s = samples[d.extra.y + i];
-        let px = layer_px(d, in.draw, p, s.inv_x, s.inv_y, s.inv_w, projective, s.inv_w.xy);
+        let px = layer_px(d, in.draw, p, s.inv_x, s.inv_y, s.inv_w, projective, s.inv_w.xy, lit);
         acc += px.src * px.k;
         acc_light += px.light * px.k;
     }

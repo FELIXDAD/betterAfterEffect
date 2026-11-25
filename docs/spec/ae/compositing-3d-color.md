@@ -1705,15 +1705,13 @@
 ### AE-CMP-432 · Spot light cone and feather (聚光锥形和羽化)
 
 - **What it does:** Restricts a spot light to a cone around its axis with a soft edge.
-- **Exact semantics:** UNVERIFIED model (Adobe does not publish it):
+- **Exact semantics:** measured in AE 26.2.1 by 04 (feather 0 / 50 / 100 %, exact to 0/255; crates/bae-render/tests/ae/README.md):
   ```
   axis   = normalize(light.POI - light.position)       // or local +z when not auto-oriented
   theta  = angle between axis and (P - light.position)
   outer  = ConeAngle / 2
   inner  = outer * (1 - ConeFeather/100)
-  spot   = 1                              if theta <= inner
-         = smoothstep(outer, inner, theta) if inner < theta < outer   // falls 1 -> 0
-         = 0                              if theta >= outer
+  spot   = smoothstep(cos(outer), cos(inner), cos(theta))   // smoothstep in the cosine, not the angle
   ```
   - Feather 0 % ⇒ hard edge; 100 % ⇒ soft from the axis to the edge.
   - In AE CS6+ the selected spot light's cone wireframe extends to the POI (viewer only).
@@ -1729,12 +1727,9 @@
   d = distance(P, light.position)            // Parallel: see AE-CMP-431
   R = Radius, F = Falloff Distance
   None:                     atten = 1
-  Smooth:                   atten = 1                         if d <= R
-                                  = 1 - (d - R) / F           UNVERIFIED: help calls it a "smooth linear" falloff;
-                                                              linear ramp assumed (a smoothstep-shaped ramp is the alternative)
-                                  = 0                         if d >= R + F
+  Smooth:                   atten = 1 - smoothstep(R, R + F, d)   // measured in AE 26.2.1 by 04 (exact; a linear ramp is off by 9/255)
   Inverse Square Clamped:   atten = 1                         if d <= R
-                                  = (R / d)^2                 otherwise   (F unused)  UNVERIFIED
+                                  = (R / d)^2                 otherwise   (F unused)  // measured, exact
   ```
   - F = 0 with Smooth ⇒ hard cut at R. R = 0 with Inverse Square Clamped ⇒ atten = 0 everywhere except d = 0 UNVERIFIED (AE likely clamps R to a small minimum).
   - Falloff does not affect Ambient lights.
@@ -1760,7 +1755,7 @@
   - Per layer: a 3D layer is lit only if its Material Option Accepts Lights = On (AE-CMP-440). Accepts Lights does not affect shadows.
   - Per light: turning on the light layer's Adjustment Layer switch makes it affect only 3D layers **below** it in the Timeline stack; layers above it receive no light from it, regardless of 3D position. Without the switch, the light affects all 3D layers in the comp (in every 3D group, AE-CMP-406).
   - Lights do not illuminate 2D layers, and a light in comp A does not affect layers in a non-collapsed precomp (AE-CMP-424).
-  - If every light reaching a layer is excluded by scope, that layer renders as if lights exist but none reach it (dark, ambient only), not as unlit. UNVERIFIED: AE's "no lights at all ⇒ unlit" test is comp-wide, not per layer.
+  - If every light is excluded by scope, the layer renders **unlit** (its own colour), measured in AE 26.2.1 by 04 (`light_scope`): the "no lights ⇒ unlit" test is per layer.
 - **Priority:** P1
 - **Owner:** bae-render
 - **Notes:** —
@@ -1768,7 +1763,7 @@
 ### AE-CMP-436 · Classic 3D lighting model (经典 3D 光照模型)
 
 - **What it does:** Computes the lit colour of each 3D layer pixel from layer colour, material options and all lights.
-- **Exact semantics:** Adobe does not document the equation; best-known Phong-style model, all values 0–1, material percentages /100. UNVERIFIED (overall form well established; exact shininess mapping and specular colour mixing unverified):
+- **Exact semantics:** Adobe does not document the equation. Measured in AE 26.2.1 by 04 (crates/bae-render/tests/ae/README.md, errors 0–2/255): Lambert diffuse, **Blinn-Phong** specular with the half vector `H = normalize(L + V)`, exponent `n` = Specular Shininess in percent (5 % → 5), specular only where `N·L > 0`, `specColor = mix(white, C, Metal/100)`. AE's highlight peak is slightly below pure Blinn-Phong at high shininess (249/255 at 100 %). The block below is the original estimate; read `spec = … pow(max(0, dot(N, H)), n)` for the Phong term:
   ```
   // C = layer pixel colour (straight, un-premultiplied RGB), alpha unchanged by lighting
   // N = layer normal facing the camera (layers are double-sided: N flipped toward viewer)
@@ -1797,6 +1792,8 @@
 - **Exact semantics:**
   - Requires: light Casts Shadows = on (Parallel, Spot, Point; never Ambient); caster Material Casts Shadows = On or Only; receiver Accepts Shadows = On or Only; caster and receiver in the same 3D group (AE-CMP-406).
   - Algorithm: shadow maps rendered from each shadow light (perspective for Spot, cube/omni for Point, orthographic for Parallel UNVERIFIED projection details) at the Shadow Map Resolution (AE-CMP-408); the map stores caster depth and transmitted colour.
+  - Measured in AE 26.2.1 by 04 (crates/bae-render/tests/ae/README.md): darkness, opacity and transmission act exactly as below with `casterCol` = the caster's own (unlit) colour and `blocked = alpha × opacity`; Shadow Diffusion behaves as a square area light of half-size = diffusion (linear penumbra of width `2 · diffusion · d(caster, receiver) / d(light, caster)`); at diffusion 0 the shadow-map edge is about one receiver pixel wide. Shadows remove the light's diffuse and specular terms, not ambient.
+  - BAE decision (04): shadows are computed analytically per pixel (ray to the light, coverage of each caster plane averaged over the area-light footprint) plus a fixed ~1 receiver-pixel edge instead of AE's shadow maps; interiors and diffused penumbrae match AE, hard edges differ by 10–20 of 255 on edge pixels (33 at a parallel-light corner) because AE's shadow-map filtering depends on the light frustum. No shadow-map resolution option.
   - Shadow value per light at receiver point:
     ```
     occluded   = caster depth < receiver depth (with bias)
