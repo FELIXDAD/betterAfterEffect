@@ -1,7 +1,8 @@
 struct Basic {
     image:FxImage, origin:vec2i, floating:u32, flags:u32, bounds:vec4i,
     balance:vec3f, sat:f32, light:vec4f,
-    reserved:array<vec4f,10>,
+    specular_gain:f32,
+    reserved:array<vec4f,9>,
     curves:array<vec4f,48>,
 }
 @group(0) @binding(0) var<uniform> u:Basic;
@@ -29,13 +30,17 @@ fn tone(value:f32)->f32 {
 fn main(@builtin(global_invocation_id) id:vec3u) {
     if any(id.xy>=textureDimensions(dst)) {return;}
     let c=fx_sample(src,u.image,vec2f(u.origin)+vec2f(id.xy)+.5,true);
-    let scaled=linear(c.rgb)*u.light.y;
+    let scaled=linear(c.rgb)*u.light.y/u.light.w;
     let rgb=scaled+u.light.z*(1.-scaled);
     let low=least(rgb);
     let high=greatest(rgb);
     let a=tone(low);
     let b=tone(high);
     var mapped=vec3f(a)+(rgb-low)*((b-a)/max(1e-12,high-low));
-    mapped*=linear(u.balance);
+    let peak=greatest(mapped);
+    if peak>1. {
+        mapped*=(1.+(peak-1.)*u.specular_gain)/peak;
+    }
+    mapped*=u.light.w*linear(u.balance);
     textureStore(dst,id.xy,fx_output(encoded(saturation(mapped,u.sat)),c.a,u.floating!=0u));
 }

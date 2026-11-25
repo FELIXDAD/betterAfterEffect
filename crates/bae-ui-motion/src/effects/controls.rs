@@ -383,7 +383,23 @@ fn param_row(
             }
         });
     }
-    common::apply_edit(cx, session, effect, &attr, now, edit);
+    if def.match_name == "ADBE Lumetri"
+        && param.id == 94
+        && let Edit::Commit(Value::Color(sample)) = &edit
+        && let Some([temp, tint]) = bae_effects::lumetri_white_balance_settings(*sample)
+    {
+        let time = query::to_key_time(stage, effect, now);
+        let changes = [
+            (94, Value::Color(*sample)),
+            (7, Value::Float(temp)),
+            (8, Value::Float(tint)),
+        ];
+        let edits = changes.map(|(id, value)| json!({"path": effect, "attr": param_attr(id), "time": time, "value": value}));
+        session.lock().scrub = None;
+        cx.invoke_with("attr.set_many", json!({"edits": edits}));
+    } else {
+        common::apply_edit(cx, session, effect, &attr, now, edit);
+    }
 }
 
 /// The value column of one parameter (red when an expression drives it).

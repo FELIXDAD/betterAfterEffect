@@ -89,6 +89,73 @@ fn lumetri_input_and_creative_look_use_straight_color_in_order() {
 }
 
 #[test]
+fn lumetri_hdr_white_separates_diffuse_and_specular_and_scales_rgb_curves() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(2, 1);
+    let input = Pixels::new(rect, |x, _| {
+        let energy: f32 = if x == 0 { 0.5 } else { 2. };
+        let level = energy.powf(1. / 2.4);
+        [level, level, level, 1.]
+    });
+    let render = |values| {
+        run_depth(
+            &gpu,
+            F32,
+            builtin("ADBE Lumetri"),
+            values,
+            &input,
+            rect,
+            1.,
+            true,
+        )
+    };
+    let hdr = (62, Value::Bool(true));
+    let boost = (64, Value::Float(100.));
+    let boosted = render(vec![hdr.clone(), boost.clone()]);
+    assert!((boosted.get(0, 0)[0] - input.get(0, 0)[0]).abs() < 0.0001);
+    assert!((boosted.get(1, 0)[0] - 3_f32.powf(1. / 2.4)).abs() < 0.0001);
+    let raised_white = render(vec![hdr.clone(), boost.clone(), (63, Value::Float(400.))]);
+    assert_close(
+        &raised_white,
+        &input,
+        rect,
+        0.0001,
+        "diffuse white above source",
+    );
+    assert_close(&render(vec![boost]), &input, rect, 0.0001, "HDR switch off");
+
+    let identity_red = (39, Value::FloatList(vec![1., 0., 0., 1., 1., 1.]));
+    let sdr_range = render(vec![hdr.clone(), identity_red.clone()]);
+    let hdr_range = render(vec![hdr, identity_red, (65, Value::Float(400.))]);
+    assert!((sdr_range.get(1, 0)[0] - 1.).abs() < 0.001);
+    assert_close(&hdr_range, &input, rect, 0.001, "HDR RGB curve domain");
+}
+
+#[test]
+fn lumetri_sampled_white_uses_editable_sliders_and_preserves_alpha() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(2, 2);
+    let sample = [0.6, 0.4, 0.2, 1.];
+    let input = Pixels::new(rect, |_, _| [0.3, 0.2, 0.1, 0.5]);
+    let [temp, tint] = bae_effects::lumetri_white_balance_settings(sample).unwrap();
+    let params = vec![(7, Value::Float(temp)), (8, Value::Float(tint))];
+    let render = |values| run(&gpu, F32, builtin("ADBE Lumetri"), values, &input, rect, 1.);
+    let output = render(params.clone());
+    let [r, g, b, a] = output.get(0, 0);
+    assert!((r - g).abs() < 0.0001 && (g - b).abs() < 0.0001);
+    assert_eq!(a, 0.5);
+    let mut imported = params;
+    imported.push((94, Value::Color(sample)));
+    assert_close(
+        &render(imported),
+        &output,
+        rect,
+        0.0001,
+        "one correction after import",
+    );
+}
+
+#[test]
 fn lumetri_secondary_curves_change_only_enabled_channels() {
     let Some(gpu) = context() else { return };
     let rect = IRect::new(0, 0, 3, 2);
