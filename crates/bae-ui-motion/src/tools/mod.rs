@@ -992,6 +992,22 @@ impl ActionHandler for ToolActions {
 /// Chinese names of the tools and tool options (`docs/glossary.md`; names marked
 /// 待核 in the PR are best effort until R1 checks AE 26's Chinese UI).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // The shape tools' Add menu (AE's ShapeLayer/AddMenu).
+    ("Add Shape Item", "添加形状项"),
+    ("Group (empty)", "组（空）"),
+    ("Polystar", "多边星形"),
+    ("Gradient Fill", "渐变填充"),
+    ("Gradient Stroke", "渐变描边"),
+    ("Merge Paths", "合并路径"),
+    ("Offset Paths", "位移路径"),
+    ("Pucker & Bloat", "收缩和膨胀"),
+    ("Repeater", "中继器"),
+    ("Round Corners", "圆角"),
+    ("Trim Paths", "修剪路径"),
+    ("Twist", "扭转"),
+    ("Wiggle Paths", "摆动路径"),
+    ("Wiggle Transform", "摆动变换"),
+    ("Zig Zag", "Z 字形"),
     ("Orbit Around Scene Tool", "绕场景旋转工具"),
     ("Orbit Around Camera POI Tool", "绕摄像机目标点旋转工具"),
     ("Pan Camera POI Tool", "平移摄像机目标点工具"),
