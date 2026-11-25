@@ -1,5 +1,10 @@
 //! The composition viewer's producer and consumer share only the current
 //! request and finished display textures. Rendering never holds the mailbox.
+//!
+//! The producer is a two-stage pipeline: one thread evaluates and converts
+//! frame N+1 while another encodes and submits frame N, so playback runs at
+//! the slower stage instead of their sum. The UI thread only shows frames the
+//! GPU has finished.
 
 use crate::gpu_preview::{PreviewEffects, PreviewImage, PreviewSources, RenderEngine};
 use crate::preview_snapshot::PreviewSnapshot;
@@ -11,7 +16,7 @@ use bae_gpu::{
     wgpu,
 };
 use bae_model::{FrameRate, PrimPath, Stage, Time, TimeRange};
-use bae_render::IRect;
+use bae_render::{AnimEvaluator, IRect, RenderPurpose};
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -238,71 +243,81 @@ impl Drop for PlaybackPreview {
     }
 }
 
-struct Producer {
-    stage: Stage,
-    eval: Evaluator,
-    engine: RenderEngine,
+/// A frame evaluated and converted, waiting to be rendered.
+struct Job {
+    epoch: u64,
     scene: Arc<Scene>,
+    stage: Arc<Stage>,
+    time: Time,
+    rc: bae_render::RenderComp,
+    errors: Vec<AttrError>,
 }
 
-impl Producer {
-    fn new(gpu: Arc<GpuContext>, scene: Arc<Scene>) -> Result<Self, String> {
-        let mut engine = RenderEngine::new(gpu, 0);
-        if let Some(sources) = &scene.sources {
-            for entry in sources.0.snapshot().iter() {
-                engine
-                    .renderer
-                    .providers_mut()
-                    .register(entry.item().clone());
-            }
-        }
-        if let Some(effects) = &scene.effects {
-            engine.renderer.sync_effects(&effects.0);
-        }
+/// The pipeline's first stage: evaluates and converts frames ahead.
+struct Evaluate {
+    scene: Arc<Scene>,
+    stage: Arc<Stage>,
+    eval: Evaluator,
+    anim: AnimEvaluator,
+}
+
+impl Evaluate {
+    fn new(scene: Arc<Scene>) -> Result<Self, String> {
         Ok(Self {
-            stage: scene.snapshot.restore()?,
+            stage: Arc::new(scene.snapshot.restore()?),
             eval: Evaluator::new(),
-            engine,
+            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
             scene,
         })
     }
 
-    fn render(
-        &mut self,
-        time: Time,
-        registry: &Arc<ViewportTextureRegistry>,
-    ) -> Result<Arc<Slot>, String> {
+    fn frame(&mut self, epoch: u64, time: Time) -> Result<Job, String> {
         let comp = self
             .eval
             .evaluate_comp(&self.stage, &self.scene.key.path, time)
             .map_err(|e| e.to_string())?;
         let rc = self
-            .engine
             .anim
             .convert(&self.stage, &comp, 0)
             .map_err(|e| e.to_string())?;
-        let (texture, rect) = self
-            .engine
-            .render(&self.stage, &rc, self.scene.key.resolution)
-            .map_err(|e| e.to_string())?
-            // Not an interactive thread: it waits for the warm-up instead.
-            .ok_or("incomplete frame")?;
-        let slot = Arc::new(Slot {
-            registry: registry.clone(),
-            id: registry.create("playback frame"),
-            rect,
+        Ok(Job {
+            epoch,
+            scene: self.scene.clone(),
+            stage: self.stage.clone(),
             time,
+            rc,
             errors: comp.errors,
-        });
-        registry
-            .publish(slot.id, &texture, wgpu::FilterMode::Linear)
-            .map_err(|e| e.to_string())?;
-        Ok(slot)
+        })
     }
 }
 
+/// Registers `scene`'s layer sources and effects with `engine`.
+fn sync_engine(engine: &mut RenderEngine, scene: &Scene) {
+    if let Some(sources) = &scene.sources {
+        for entry in sources.0.snapshot().iter() {
+            engine
+                .renderer
+                .providers_mut()
+                .register(entry.item().clone());
+        }
+    }
+    if let Some(effects) = &scene.effects {
+        engine.renderer.sync_effects(&effects.0);
+    }
+}
+
+/// Evaluates frame N+1 while the render thread encodes and submits frame N:
+/// playback runs at the slower of the two stages, not their sum.
 fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: Arc<Shared>) {
-    let mut producer: Option<Producer> = None;
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(1);
+    {
+        let (gpu, shared) = (gpu.clone(), shared.clone());
+        std::thread::Builder::new()
+            .name("bae-playback-render".into())
+            .spawn(move || render_worker(gpu, registry, shared, rx))
+            .expect("spawn playback render thread");
+    }
+    let mut current: Option<Evaluate> = None;
     loop {
         let (epoch, scene, time) = {
             let mut state = shared.state.lock().unwrap();
@@ -322,28 +337,104 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                     state.queued.push(time);
                     break (state.epoch, scene, time);
                 }
-                if state.queued.is_empty() {
-                    state = shared.changed.wait(state).unwrap();
-                } else {
-                    drop(state);
-                    if gpu.wait_idle().is_err() {
-                        return;
-                    }
-                    state = shared.state.lock().unwrap();
-                }
+                // Frames finishing on the GPU or a new demand wake us.
+                state = shared.changed.wait(state).unwrap();
             }
         };
         let result = (|| {
-            if producer
+            if current
                 .as_ref()
-                .is_none_or(|p| !Arc::ptr_eq(&p.scene, &scene))
+                .is_none_or(|c| !Arc::ptr_eq(&c.scene, &scene))
             {
-                producer = Some(Producer::new(gpu.clone(), scene.clone())?);
+                current = Some(Evaluate::new(scene.clone())?);
             }
-            producer.as_mut().unwrap().render(time, &registry)
+            current.as_mut().unwrap().frame(epoch, time)
         })();
         match result {
+            Ok(job) => {
+                if tx.send(job).is_err() {
+                    return;
+                }
+            }
+            Err(error) => failed(&shared, epoch, time, &error),
+        }
+    }
+}
+
+fn failed(shared: &Shared, epoch: u64, time: Time, error: &str) {
+    tracing::warn!("playback: {error}");
+    let mut state = shared.state.lock().unwrap();
+    if state.epoch == epoch {
+        state.failed.push(time);
+        state.queued.retain(|t| *t != time);
+    }
+}
+
+/// The pipeline's second stage: encodes and submits converted frames; a
+/// frame is published when the GPU has finished it.
+fn render_worker(
+    gpu: Arc<GpuContext>,
+    registry: Arc<ViewportTextureRegistry>,
+    shared: Arc<Shared>,
+    rx: std::sync::mpsc::Receiver<Job>,
+) {
+    use std::sync::mpsc::TryRecvError;
+    // One renderer for the whole playback (its pipelines, texture pool and
+    // remembered vector images survive edits); sources and effects are
+    // registered again when their registries changed.
+    let mut engine = RenderEngine::new(gpu.clone(), 0);
+    let mut synced: Option<(Option<u64>, Option<u64>)> = None;
+    let mut in_flight = false;
+    loop {
+        let job = match rx.try_recv() {
+            Ok(job) => job,
+            Err(TryRecvError::Disconnected) => return,
+            Err(TryRecvError::Empty) => {
+                // Nothing to encode: let the submitted frames finish (their
+                // callbacks publish them), then wait for the next one.
+                if in_flight {
+                    if gpu.wait_idle().is_err() {
+                        return;
+                    }
+                    in_flight = false;
+                }
+                match rx.recv() {
+                    Ok(job) => job,
+                    Err(_) => return,
+                }
+            }
+        };
+        // Superseded by a seek, an edit or a stop while it waited.
+        if shared.state.lock().unwrap().epoch != job.epoch {
+            continue;
+        }
+        let generations = (job.scene.key.sources, job.scene.key.effects);
+        if synced != Some(generations) {
+            sync_engine(&mut engine, &job.scene);
+            synced = Some(generations);
+        }
+        let result = engine
+            .render(&job.stage, &job.rc, job.scene.key.resolution)
+            .map_err(|e| e.to_string())
+            // Not an interactive thread: it waits for the warm-up instead.
+            .and_then(|r| r.ok_or_else(|| "incomplete frame".to_owned()))
+            .and_then(|(texture, rect)| {
+                let slot = Arc::new(Slot {
+                    registry: registry.clone(),
+                    id: registry.create("playback frame"),
+                    rect,
+                    time: job.time,
+                    errors: job.errors,
+                });
+                registry
+                    .publish(slot.id, &texture, wgpu::FilterMode::Linear)
+                    .map_err(|e| e.to_string())?;
+                Ok(slot)
+            });
+        let (epoch, time) = (job.epoch, job.time);
+        match result {
             Ok(slot) => {
+                in_flight = true;
                 let shared = shared.clone();
                 gpu.queue().on_submitted_work_done(move || {
                     let mut state = shared.state.lock().unwrap();
@@ -360,17 +451,10 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                     if let Some(ctx) = repaint {
                         ctx.request_repaint();
                     }
-                    shared.changed.notify_one();
+                    shared.changed.notify_all();
                 });
             }
-            Err(error) => {
-                tracing::warn!("playback: {error}");
-                let mut state = shared.state.lock().unwrap();
-                if state.epoch == epoch {
-                    state.failed.push(time);
-                    state.queued.retain(|t| *t != time);
-                }
-            }
+            Err(error) => failed(&shared, epoch, time, &error),
         }
     }
 }
