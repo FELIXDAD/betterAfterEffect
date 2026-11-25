@@ -48,6 +48,71 @@ fn embedded_luts_use_the_same_transform_as_bae_color() {
 }
 
 #[test]
+fn lumetri_input_and_creative_look_use_straight_color_in_order() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-2, 7, 35, 27);
+    let input = test_image(rect);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bae-color/tests/data/ocio");
+    let assets = ["curve1d.cube", "look.spi3d"]
+        .map(|name| bae_color::lutfile::embed(&dir.join(name)).unwrap());
+    let [first, look] = assets
+        .each_ref()
+        .map(|b| bae_color::lutfile::from_embedded(b).unwrap());
+    let expected = input.map(|mut pixel| {
+        first.apply_premultiplied(std::slice::from_mut(&mut pixel));
+        let mut graded = pixel;
+        look.apply_premultiplied(std::slice::from_mut(&mut graded));
+        std::array::from_fn(|i| pixel[i] + 0.35 * (graded[i] - pixel[i]))
+    });
+    let [first, look] = assets;
+    let params = vec![
+        (125, Value::Bytes(first)),
+        (126, Value::Bytes(look)),
+        (26, Value::Float(35.)),
+    ];
+    let got = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Lumetri"),
+        params,
+        &input,
+        rect,
+        1.,
+    );
+    assert_close(
+        &got,
+        &expected,
+        rect,
+        0.0001,
+        "Lumetri LUT order and intensity",
+    );
+}
+
+#[test]
+fn lumetri_mask_refinement_and_sharpen_match_full_frame_on_a_tile() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-11, 6, 89, 58);
+    let roi = IRect::new(12, 17, 54, 35);
+    let input = test_image(rect);
+    let fx = builtin("ADBE Lumetri");
+    let params = vec![
+        (11, Value::Float(-0.5)),
+        (29, Value::Float(-67.)),
+        (70, Value::Color([0.4, 0.6, 0.5, 1.])),
+        (1007, Value::Float(80.)),
+        (1008, Value::Float(80.)),
+        (81, Value::Float(40.)),
+        (82, Value::Float(5.)),
+        (89, Value::Float(50.)),
+        (90, Value::Float(45.)),
+        (51, Value::Float(-2.)),
+    ];
+    let full = run(&gpu, Rgba32Float, fx, params.clone(), &input, rect, 1.);
+    let tile = run(&gpu, Rgba32Float, fx, params, &input, roi, 1.);
+    assert_close(&tile, &full, roi, 0.0001, "Lumetri tile");
+}
+
+#[test]
 fn full_layer_histogram_is_stable_across_tiles() {
     let Some(gpu) = context() else { return };
     let rect = IRect::new(-7, 3, 92, 54);

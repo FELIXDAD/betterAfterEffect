@@ -33,7 +33,7 @@ pub(crate) fn builtin() -> Builtin {
         (
             Arc::new(ApplyLut {
                 def,
-                cache: Mutex::default(),
+                cache: LutCache::default(),
                 ocio: None,
             }),
             zh,
@@ -47,8 +47,18 @@ pub(crate) fn builtin() -> Builtin {
 #[derive(Debug)]
 struct ApplyLut {
     def: EffectDef,
-    cache: Mutex<VecDeque<Arc<Prepared>>>,
+    cache: LutCache,
     ocio: Option<super::ocio::Operation>,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct LutCache(Mutex<VecDeque<Arc<Prepared>>>);
+
+type Processor = (super::ocio::Operation, [i64; 9]);
+
+pub(super) enum LutSource<'a> {
+    File(&'a [u8]),
+    Ocio(&'a [u8], Processor),
 }
 
 #[derive(Debug)]
@@ -56,7 +66,7 @@ struct Prepared {
     device: wgpu::Device,
     format: wgpu::TextureFormat,
     data: Vec<u8>,
-    selection: [i64; 9],
+    processor: Option<Processor>,
     kernel: Arc<Kernel>,
     values: Vec<u8>,
     views: Vec<wgpu::TextureView>,
@@ -67,7 +77,7 @@ impl Prepared {
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
         data: &[u8],
-        selection: [i64; 9],
+        processor: Option<Processor>,
         transform: bae_color::ColorTransform,
     ) -> Result<Self, RenderError> {
         let snippet = transform.to_wgsl("lut");
@@ -158,7 +168,7 @@ impl Prepared {
             device: gpu.device().clone(),
             format,
             data: data.into(),
-            selection,
+            processor,
             kernel,
             values,
             views,
@@ -169,8 +179,8 @@ impl Prepared {
 pub(super) fn ocio_effect(def: EffectDef, op: super::ocio::Operation) -> Arc<dyn TargetEffect> {
     Arc::new(ApplyLut {
         def,
+        cache: LutCache::default(),
         ocio: Some(op),
-        cache: Mutex::default(),
     })
 }
 
@@ -196,30 +206,49 @@ impl TargetEffect for ApplyLut {
         input: &GpuImage,
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        let id = self.ocio.as_ref().map_or(1, |op| op.data_id());
+        let id = self.ocio.map_or(1, |op| op.data_id());
         let data = match p.value(id) {
             Some(Value::Bytes(bytes)) => bytes.as_slice(),
             _ => &[],
         };
-        if roi.is_empty() || data.is_empty() && id != 0 {
+        let source = match self.ocio {
+            Some(op) => LutSource::Ocio(data, (op, op.selection(&self.def, p))),
+            None => LutSource::File(data),
+        };
+        self.cache.apply(target, p, input, roi, source, 1.)
+    }
+}
+
+impl LutCache {
+    pub(super) fn apply(
+        &self,
+        target: &mut dyn EffectTarget,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+        source: LutSource<'_>,
+        intensity: f32,
+    ) -> Result<GpuImage, RenderError> {
+        let (data, processor) = match source {
+            LutSource::File(data) => (data, None),
+            LutSource::Ocio(data, processor) => (data, Some(processor)),
+        };
+        let needs_data = processor.is_none_or(|(op, _)| op.data_id() != 0);
+        if (needs_data && data.is_empty()) || roi.is_empty() || intensity == 0. {
             return Ok(input.clone());
         }
-        let selection = self
-            .ocio
-            .as_ref()
-            .map_or([0; 9], |op| op.selection(&self.def, p));
         let lut = {
-            let mut cache = self.cache.lock();
+            let mut cache = self.0.lock();
             if let Some(entry) = cache.iter().find(|l| {
                 &l.device == target.gpu().device()
                     && l.format == target.format()
                     && l.data == data
-                    && l.selection == selection
+                    && l.processor == processor
             }) {
                 entry.clone()
             } else {
-                let transform = match &self.ocio {
-                    Some(op) => op.transform(data, selection)?,
+                let transform = match processor {
+                    Some((op, selection)) => op.transform(data, selection)?,
                     None => bae_color::lutfile::from_embedded(data)
                         .map_err(|e| RenderError::Other(e.to_string()))?,
                 };
@@ -230,7 +259,7 @@ impl TargetEffect for ApplyLut {
                     target.gpu(),
                     target.format(),
                     data,
-                    selection,
+                    processor,
                     transform,
                 )?);
                 // Keep adjacent looks in a stack resident across frames.
@@ -249,7 +278,8 @@ impl TargetEffect for ApplyLut {
         w.i32s(32, &[roi.x0, roi.y0])
             .u32(40, roi.width())
             .u32(44, roi.height())
-            .u32(48, u32::from(p.float));
+            .u32(48, u32::from(p.float))
+            .f32(52, intensity);
         w.bytes[64..].copy_from_slice(&lut.values);
         let mut resources = vec![
             Resource::Uniform,
