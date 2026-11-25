@@ -491,6 +491,8 @@ def overlap(pr_sha):
                     & {f for f in devf if keep(f, CFG["merge"]["overlap_ignore_dev"])})
     if shared or not devf:
         return shared  # dev changed nothing since the merge-base: nothing to relate
+    if not CFG["merge"].get("relate_crates", True):
+        return []  # file-level only; dev's post-merge CI catches cross-file breaks
     rel = crate_relation(prf, devf)
     return ["crate " + rel] if rel else []
 

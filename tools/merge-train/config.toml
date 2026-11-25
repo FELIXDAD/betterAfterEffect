@@ -64,6 +64,11 @@ squash_branch_prefixes = ["ref/"]
 overlap_ignore_pr = ["Cargo.lock"]
 # dev changes (after the PR's merge-base) that never count as overlapping.
 overlap_ignore_dev = ["Cargo.lock", "docs/"]
+# false: a PR is retested only when it and newer dev changed the same file. With crate
+# relations on, nearly every PR pair is related (the app depends on every crate), so the
+# queue merged one PR per full CI run (~25 min) while agents opened 10+ PRs an hour
+# (2026-11-24). Cross-file breaks are caught by dev's post-merge CI, which pauses the queue.
+relate_crates = false
 
 [board]
 title = "BAE 进度看板"
