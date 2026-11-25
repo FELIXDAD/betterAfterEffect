@@ -215,6 +215,7 @@ pub(super) fn bottom_bar(
                 .range(-40.0..=40.0)
                 .fixed_decimals(1),
         )
+        .labeled(egui::WidgetType::DragValue, tr("Adjust Exposure"))
         .on_hover_text(tr("Adjust Exposure"));
     }
     // 3D View popup.
