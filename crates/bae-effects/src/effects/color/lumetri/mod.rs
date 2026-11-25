@@ -1,5 +1,8 @@
 mod definition;
+mod key;
 mod menus;
+
+pub use key::lumetri_key_edits;
 
 use crate::blur::{self, Edge};
 use crate::effects::{image_grid, lut::LutCache};
@@ -478,7 +481,7 @@ impl TargetEffect for Lumetri {
         soften(&mut u, v.f(29));
         u.f32(92, (v.f(33) * 0.01) as f32).u32(108, active);
         u.f32s(160, &color(v, 70))
-            .u32(172, u32::from(p.value(70).is_some()));
+            .u32(172, u32::from(p.value(70).is_some() && v.b(1017)));
         u.f32s(
             176,
             &[

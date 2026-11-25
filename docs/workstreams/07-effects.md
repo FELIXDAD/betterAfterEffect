@@ -53,6 +53,8 @@
 
 [第一阶段清单、基准和接入记录](07-effects/history.md)
 
+- Lumetri 次要校正支持按色样扩大和收窄 HSL 选区。五条色相与饱和度曲线可同时启用，每条曲线从同一输入颜色读取色相、饱和度或亮度。
+
 - 应用界面（G，#271）：效果菜单按 AE 目录列出 299 个效果（可用 / 置灰实时读效果注册表）、效果控件按参数定义画控件、效果和预设面板（搜索、分类、双击 / 拖放应用）、时间轴 fx 开关列。下拉中文选项走 `EffectInfo.param_options_zh`（包的 `choices` 表；Rust 效果的 `options_zh` 查表在 `rust_options_zh()` 接入）。
 
 - [模糊和锐化](../../crates/bae-effects/tests/ae/categories/blur-sharpen.md#工作流进度)
