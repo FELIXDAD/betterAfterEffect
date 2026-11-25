@@ -65,6 +65,7 @@ mod source;
 pub mod still;
 pub mod time;
 pub mod trim;
+pub mod visual_audio;
 
 use std::sync::Arc;
 

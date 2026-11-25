@@ -38,6 +38,8 @@ use crate::request::RenderPurpose;
 /// frames; forward [`StageEvent`]s to [`CompEvaluator::invalidate`]).
 #[derive(Debug)]
 pub struct AnimEvaluator {
+    #[cfg(feature = "media")]
+    audio_windows: bae_media::visual_audio::AudioWindows,
     inner: Evaluator,
     assets: AssetFiles,
     purpose: RenderPurpose,
@@ -49,6 +51,8 @@ impl AnimEvaluator {
     /// project's directory).
     pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
+            #[cfg(feature = "media")]
+            audio_windows: Default::default(),
             inner: Evaluator::new(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
@@ -270,8 +274,112 @@ impl AnimEvaluator {
                         .collect(),
                 })
                 .collect();
+            #[cfg(feature = "media")]
+            for fx in &mut out.effects {
+                self.audio_visual(stage, ec, l, fx);
+            }
         }
         Ok(out)
+    }
+
+    #[cfg(feature = "media")]
+    fn audio_visual(
+        &mut self,
+        stage: &Stage,
+        ec: &EvaluatedComp,
+        owner: &EvaluatedLayer,
+        fx: &mut RenderEffect,
+    ) {
+        use bae_media::visual_audio::{self, RATE};
+        use bae_model::Value;
+        let spectrum = match fx.effect.as_str() {
+            "ADBE AudSpect" => true,
+            "ADBE AudWave" => false,
+            _ => return,
+        };
+        if !fx.enabled {
+            return;
+        }
+        let n = |id, default| fx.param(id).and_then(Value::as_f64).unwrap_or(default);
+        let duration = n(
+            if spectrum { 10 } else { 7 },
+            if spectrum { 90.0 } else { 125.0 },
+        )
+        .clamp(0.0, 30000.0)
+            * 0.001;
+        let start = ec.time
+            + Time::from_seconds(n(if spectrum { 11 } else { 8 }, 0.0) * 0.001 - duration * 0.5);
+        let points = n(
+            if spectrum { 8 } else { 5 },
+            if spectrum { 64.0 } else { 120.0 },
+        )
+        .round()
+        .clamp(1.0, if spectrum { 4096.0 } else { 44100.0 }) as usize;
+        let channel = if spectrum { 1 } else { n(14, 1.0) as i64 };
+        let layer = fx
+            .param(1)
+            .and_then(Value::as_prim_ref)
+            .unwrap_or(&owner.path);
+        let Some(view) = stage.prim(layer) else {
+            return;
+        };
+        let Some(asset) = view
+            .value("source")
+            .and_then(Value::as_prim_ref)
+            .and_then(|p| stage.prim(p))
+        else {
+            return;
+        };
+        if asset.value("has_audio").and_then(Value::as_bool) != Some(true) {
+            return;
+        }
+        let file = match self.assets.file(&asset) {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(e) => {
+                self.warn(e);
+                return;
+            }
+        };
+        let comp_duration = stage
+            .prim(&ec.path)
+            .and_then(|v| v.value("duration"))
+            .and_then(Value::as_time)
+            .unwrap_or(Time::MAX);
+        let timing = bae_anim::layer_timing(&view, comp_duration);
+        let pcm = match self.audio_windows.read(
+            &file,
+            timing,
+            start,
+            (duration * f64::from(RATE)).round().max(1.0) as usize,
+            channel,
+        ) {
+            Ok(pcm) => pcm,
+            Err(e) => {
+                self.warn(format!("{}: {e}", file.display()));
+                return;
+            }
+        };
+        let envelope = if spectrum {
+            let average = fx.param(22).and_then(Value::as_bool).unwrap_or(false);
+            visual_audio::spectrum(&pcm, points, n(6, 20.0), n(7, 2000.0), average)
+        } else {
+            visual_audio::waveform(&pcm, points)
+        };
+        if let Some(mask) = fx
+            .param(4)
+            .and_then(Value::as_prim_ref)
+            .and_then(|p| owner.masks.iter().find(|m| m.path == *p))
+        {
+            fx.params.push((
+                crate::effect::AUDIO_VISUAL_PATH,
+                Value::Bezier(mask.shape.clone()),
+            ));
+        }
+        fx.params.push((
+            crate::effect::AUDIO_VISUAL_VALUES,
+            Value::FloatList(envelope),
+        ));
     }
 
     fn content(
@@ -351,6 +459,10 @@ impl CompEvaluator for AnimEvaluator {
 
     fn invalidate(&mut self, event: &StageEvent) {
         self.inner.invalidate(event);
+        #[cfg(feature = "media")]
+        {
+            self.audio_windows = Default::default();
+        }
     }
 
     fn take_warnings(&mut self) -> Vec<String> {

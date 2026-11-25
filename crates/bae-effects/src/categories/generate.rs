@@ -3,6 +3,7 @@ use crate::Registry;
 use super::packages;
 
 pub(crate) fn register(registry: &mut Registry) {
+    crate::effects::audio_visual::register(registry);
     registry.effects.push(crate::effects::compound::fill());
     packages(
         registry,

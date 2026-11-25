@@ -19,6 +19,10 @@ use crate::input::RenderEffect;
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Audio analysis and optional mask geometry supplied only for the two Generate effects.
+pub const AUDIO_VISUAL_VALUES: u32 = u32::MAX;
+pub const AUDIO_VISUAL_PATH: u32 = u32::MAX - 1;
+
 /// Evaluated parameters of one effect instance plus the frame context an
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
