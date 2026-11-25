@@ -512,6 +512,7 @@ pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand
 pub fn register_effect_commands(r: &mut CommandRegistry, defs: Arc<Registry<EffectDef>>) {
     let results = [
         r.register(ApplyEffect::new(defs.clone())),
+        r.register(crate::tracker::ApplyTrack(defs.clone())),
         r.register(RemoveEffects),
         r.register(RemoveAllEffects),
         r.register(ReorderEffects),
