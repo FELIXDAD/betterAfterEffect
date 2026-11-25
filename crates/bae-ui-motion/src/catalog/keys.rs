@@ -265,7 +265,7 @@ pub const KEYS: &[Key] = &[
     k("CEggApp", "OpenMRUContext", "Shift+Esc", "motion.panel.activate_most_recent_viewer", "", B, Later, 0),
     k("CEggApp", "PreviewAudio", "PadDecimal|PadComma|PadDelete|macControl+.", "motion.comp.preview_audio", r#"{"work_area":false}"#, B, Later, 0),
     k("CEggApp", "PreviewAudioWorkArea", "Alt+PadDecimal|Alt+PadComma|Alt+PadDelete|macControl+Alt+.", "motion.comp.preview_audio", r#"{"work_area":true}"#, B, Later, 0),
-    k("CEggApp", "PreviewNumpad0", "Pad0|PadInsert|macControl+0", "motion.play", r#"{"preview":"numpad0"}"#, B, Todo, 0),
+    k("CEggApp", "PreviewNumpad0", "Pad0|PadInsert|macControl+0", "motion.play", r#"{"preview":"numpad0"}"#, B, Done, 0),
     k("CEggApp", "PreviewNumpad0NFrames", "Alt+Pad0|Alt+PadInsert|macControl+Alt+0", "motion.play", r#"{"preview":"numpad0_n_frames"}"#, B, Later, 0),
     k("CEggApp", "PreviewShiftNumpad0", "Shift+Pad0|Shift+PadInsert|macControl+Shift+0", "motion.play", r#"{"preview":"shift_numpad0"}"#, B, Todo, 0),
     k("CEggApp", "ShowConsole", "Ctrl+F12", "motion.window.console", "", B, Later, 0),
