@@ -1,18 +1,7 @@
-// Sum independent samples for a symmetric, approximately Gaussian distribution.
-fn grain_sample(cell: vec2<i32>, seed: u32) -> f32 {
-    return bae_hash(seed, cell) + bae_hash(seed + 1u, cell) + bae_hash(seed + 2u, cell) - 1.5;
-}
-
 fn grain_field(pos: vec2<f32>, scale: f32, seed: u32) -> f32 {
     let stock_size = select(select(0.75, 1.25, params.preset == 5u), 2.0, params.preset == 1u);
     let uv = pos / max(vec2<f32>(0.01), scale * stock_size * vec2<f32>(params.aspect_ratio, 1.0));
-    let cell = vec2<i32>(floor(uv));
-    let t = smoothstep(vec2<f32>(0), vec2<f32>(1), fract(uv));
-    let a = grain_sample(cell, seed);
-    let b = grain_sample(cell + vec2<i32>(1,0), seed);
-    let c = grain_sample(cell + vec2<i32>(0,1), seed);
-    let d = grain_sample(cell + vec2<i32>(1,1), seed);
-    return mix(a, mix(mix(a,b,t.x), mix(c,d,t.x), t.y), saturate(params.softness));
+    return grain_lattice(uv,seed,params.softness);
 }
 
 // Midtone RGB deviations relative to the default grain, measured on the AE ramp.
