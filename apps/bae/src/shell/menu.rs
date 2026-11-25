@@ -183,6 +183,8 @@ pub struct AppMenu {
     /// Registry ids of the Edit menu's Undo and Redo items.
     undo: Option<String>,
     redo: Option<String>,
+    /// Window ▸ Workspace ▸ Reset "<workspace>" to Saved Layout: id and text.
+    reset: Option<(String, String)>,
     /// Action ids modules handle (`bae_ui::menu::handled_actions`).
     actions: HashSet<String>,
     /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
@@ -217,12 +219,14 @@ impl AppMenu {
         };
         let undo = find(ids::UNDO);
         let redo = find(ids::REDO);
+        let reset = find(ids::RESET_WORKSPACE).map(|id| (id, String::new()));
         let mut menu = Self {
             menu,
             undo_state: (Some(String::new()), None),
             contributed: items,
             undo,
             redo,
+            reset,
             actions,
             generation: 0,
         };
@@ -282,6 +286,21 @@ impl AppMenu {
                 c.item.set_accelerator(chord.as_ref().and_then(accelerator));
                 c.chord = chord;
             }
+        }
+    }
+
+    /// Names the active workspace in Window ▸ Workspace ▸ Reset “<name>” to Saved
+    /// Layout, as AE does (`title`: its English title).
+    pub fn set_workspace_title(&mut self, title: &str) {
+        let Some((id, shown)) = &mut self.reset else {
+            return;
+        };
+        let text = tr("Reset “{name}” to Saved Layout").replace("{name}", tr(title));
+        if text != *shown {
+            if let Some(c) = self.contributed.get(id.as_str()) {
+                c.item.set_text(&native_text(&text));
+            }
+            *shown = text;
         }
     }
 
@@ -369,7 +388,7 @@ fn predefined(spec: &MenuItemSpec) -> Option<PredefinedMenuItem> {
     if !cfg!(target_os = "macos") || spec.path.first().map(String::as_str) != Some(APP_MENU) {
         return None;
     }
-    let owned = native_text(tr(&spec.title));
+    let owned = native_text(spec.display_title());
     let text = Some(owned.as_str());
     Some(match spec.action.as_str() {
         ids::ABOUT => PredefinedMenuItem::about(text, Some(about_metadata())),
@@ -399,7 +418,7 @@ fn append_entries(
                 let item = if spec.is_checkable() {
                     let item = CheckMenuItem::with_id(
                         menu_id,
-                        native_text(tr(&spec.title)),
+                        native_text(spec.display_title()),
                         true,
                         false,
                         None,
@@ -407,7 +426,8 @@ fn append_entries(
                     menu.append(&item)?;
                     Native::Check(item)
                 } else {
-                    let item = MenuItem::with_id(menu_id, native_text(tr(&spec.title)), true, None);
+                    let item =
+                        MenuItem::with_id(menu_id, native_text(spec.display_title()), true, None);
                     menu.append(&item)?;
                     Native::Plain(item)
                 };

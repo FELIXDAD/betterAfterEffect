@@ -15,7 +15,7 @@ use crate::error::RenderError;
 use crate::exec::{DrawBuffer, MaskBuffers, execute};
 use crate::footage::FootageCache;
 use crate::gpu::Pipelines;
-use crate::graph::{self, SourceResolver};
+use crate::graph::{self, RenderGraph, SourceResolver};
 use crate::input::{CustomContent, FootageRef, RenderComp};
 use crate::pool::{PoolStats, TexturePool};
 use crate::request::{RenderRequest, WorkFormat};
@@ -73,6 +73,15 @@ pub struct RenderedFrame {
     pub stats: FrameStats,
     /// Things that were not rendered faithfully.
     pub warnings: Vec<String>,
+    /// Something was still warming up and is missing (a vector or text layer,
+    /// an effect): the frame is not cached and should be drawn again when the
+    /// warm-up reports progress (`bae_gpu::warm_up::request_redraw`).
+    pub incomplete: bool,
+    /// CPU time spent on each top-level layer of the comp, in drawing order,
+    /// when [`Renderer::set_layer_times`] is on (AE's Render Time column);
+    /// empty otherwise and for cached frames. Drawing the layer into the comp
+    /// itself is not included (it is one batched pass for all layers).
+    pub layer_times: Vec<(PrimPath, Duration)>,
 }
 
 /// How [`Renderer::read_rgba8`] treats alpha.
@@ -116,6 +125,8 @@ pub struct Renderer {
     footage: FootageCache,
     providers: SourceProviders,
     effects: EffectLibrary,
+    /// Measure per-layer render times ([`RenderedFrame::layer_times`]).
+    layer_times: bool,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -174,8 +185,16 @@ impl Renderer {
             footage: FootageCache::new(gpu.clone()),
             providers: SourceProviders::new(),
             effects: EffectLibrary::new(),
+            layer_times: false,
             gpu,
         }
+    }
+
+    /// Measures how long each top-level layer takes to render (AE's Render
+    /// Time column, [`RenderedFrame::layer_times`]). Off by default: it times
+    /// every graph node.
+    pub fn set_layer_times(&mut self, on: bool) {
+        self.layer_times = on;
     }
 
     /// The shared GPU context.
@@ -290,6 +309,8 @@ impl Renderer {
                 from_cache: true,
                 stats: FrameStats::default(),
                 warnings: Vec::new(),
+                incomplete: false,
+                layer_times: Vec::new(),
             });
         }
 
@@ -317,12 +338,14 @@ impl Renderer {
             &mut self.mask_buffers,
             &graph,
             format,
+            self.layer_times,
         )?;
         let encode = encode_start.elapsed();
         self.pool.end_frame();
 
         let image = executed.image;
-        if !graph.time_dependent {
+        let incomplete = graph.incomplete || executed.incomplete;
+        if !graph.time_dependent && !incomplete {
             self.frames.insert(
                 key,
                 image.clone(),
@@ -348,6 +371,8 @@ impl Renderer {
                 encode,
             },
             warnings,
+            incomplete,
+            layer_times: layer_times(&graph, &executed.node_times),
         })
     }
 
@@ -477,4 +502,17 @@ impl Renderer {
         let image = self.read_rgba8(frame, alpha)?;
         crate::png_out::write_rgba8(path, &image)
     }
+}
+
+/// Node times added up per top-level layer, in drawing order.
+fn layer_times(graph: &RenderGraph, times: &[Duration]) -> Vec<(PrimPath, Duration)> {
+    let mut out: Vec<(PrimPath, Duration)> = Vec::new();
+    for (owner, time) in graph.owners.iter().zip(times) {
+        let Some(layer) = owner else { continue };
+        match out.iter_mut().find(|(l, _)| l == layer) {
+            Some((_, total)) => *total += *time,
+            None => out.push((layer.clone(), *time)),
+        }
+    }
+    out
 }

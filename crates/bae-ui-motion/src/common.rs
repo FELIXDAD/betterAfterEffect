@@ -80,15 +80,27 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
+    changes: StageChanges,
+}
+
+/// Panels observe the same committed edits, undo/redo and project replacements.
+#[derive(Default)]
+pub(crate) struct StageChanges {
     seq: Option<u64>,
+}
+
+impl StageChanges {
+    pub(crate) fn changed(&mut self, resources: &Resources) -> bool {
+        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
+        let previous = std::mem::replace(&mut self.seq, seq);
+        seq.is_none() || seq != previous
+    }
 }
 
 impl EvalCache {
     pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        if seq.is_none() || seq != self.seq {
+        if self.changes.changed(resources) {
             self.eval.clear();
-            self.seq = seq;
         }
         &mut self.eval
     }
@@ -113,6 +125,7 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 /// English label of a property (displayed through `tr`).
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
+        "audio:levels" => "Audio Levels",
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
         "transform:position_x" => "X Position",
@@ -486,21 +499,166 @@ pub(crate) fn apply_edit(
     match edit {
         Edit::None => {}
         Edit::Live(value) => {
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
             session.lock().scrub = Some(Scrub {
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value,
+                peers,
             });
         }
         Edit::Commit(value) => {
-            session.lock().scrub = None;
-            let key_time = query::to_key_time(cx.stage, path, t);
-            let value = serde_json::to_value(&value).unwrap_or_default();
-            cx.invoke_with(
-                "attr.set_at",
-                json!({"path": path, "attr": attr, "time": key_time, "value": value}),
+            // A drag moves the others by as much; a typed value sets them all.
+            let dragged = session
+                .lock()
+                .scrub
+                .take()
+                .is_some_and(|s| s.path == *path && s.attr == attr);
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
+            let edits: Vec<serde_json::Value> = std::iter::once((path.clone(), value))
+                .chain(peers)
+                .map(|(p, v)| {
+                    let time = query::to_key_time(cx.stage, &p, t);
+                    json!({"path": p, "attr": attr, "time": time, "value": v})
+                })
+                .collect();
+            if let [one] = &edits[..] {
+                cx.invoke_with("attr.set_at", one.clone());
+            } else {
+                // One undo step for all of them.
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
+        }
+    }
+}
+
+/// The same property as `attr` of `path` elsewhere in the selection, which an
+/// edit of it changes too (AE): on the other selected layers when `path`'s
+/// layer is one of several selected, and the same property selected on other
+/// layers or effects. Locked layers are left alone.
+pub(crate) fn edit_peers(
+    stage: &Stage,
+    session: &SharedSession,
+    path: &PrimPath,
+    attr: &str,
+) -> Vec<PrimPath> {
+    let Some(layer) = query::owning_layer(stage, path) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PrimPath> = Vec::new();
+    {
+        let s = session.lock();
+        if s.selected_layers.len() > 1 && s.selected_layers.contains(&layer) {
+            out.extend(
+                s.selected_layers
+                    .iter()
+                    .filter(|l| **l != layer)
+                    .filter_map(|l| counterpart(stage, &layer, path, l)),
             );
         }
+        if s.selected_props.iter().any(|(p, a)| p == path && a == attr) {
+            out.extend(
+                s.selected_props
+                    .iter()
+                    .filter(|(p, a)| a == attr && same_owner(stage, path, p))
+                    .map(|(p, _)| p.clone()),
+            );
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    // Text properties only on text layers.
+    let text = |p: &PrimPath| query::layer_kind(stage, p).as_deref() == Some("text");
+    out.retain(|p| {
+        p != path
+            && query::locked_layer_of(stage, p).is_none()
+            && (!attr.starts_with("text:") || text(p))
+            && seen.insert(p.clone())
+    });
+    out
+}
+
+fn match_name(stage: &Stage, path: &PrimPath) -> Option<String> {
+    let view = stage.prim(path)?;
+    query::static_value(&view, "match_name").and_then(|v| v.as_str().map(str::to_owned))
+}
+
+/// Whether `a` and `b` hold the same properties: the same prim type and the
+/// same effect.
+fn same_owner(stage: &Stage, a: &PrimPath, b: &PrimPath) -> bool {
+    let ty = |p: &PrimPath| stage.prim(p).and_then(|v| v.prim_type().cloned());
+    ty(a).is_some() && ty(a) == ty(b) && match_name(stage, a) == match_name(stage, b)
+}
+
+/// `path` (of `layer`) on `other`: the same prim below it, else (effects) the
+/// same instance of the same effect (the second Gaussian Blur → the second).
+fn counterpart(
+    stage: &Stage,
+    layer: &PrimPath,
+    path: &PrimPath,
+    other: &PrimPath,
+) -> Option<PrimPath> {
+    let rel = path.as_str().strip_prefix(layer.as_str())?;
+    if let Ok(p) = PrimPath::new(&format!("{other}{rel}"))
+        && stage.has_prim(&p)
+        && same_owner(stage, path, &p)
+    {
+        return Some(p);
+    }
+    let m = match_name(stage, path)?;
+    let same = |l: &PrimPath| {
+        bae_motion::effect::effects_of(stage, l)
+            .into_iter()
+            .filter(|e| match_name(stage, e).as_deref() == Some(m.as_str()))
+            .collect::<Vec<_>>()
+    };
+    let nth = same(layer).iter().position(|e| e == path)?;
+    same(other).into_iter().nth(nth)
+}
+
+/// The peers' new values for `value` of `path`: offset by the same amount
+/// (`relative`, a drag) or the same value; peers whose value has another type
+/// are left out.
+fn peer_values(
+    stage: &Stage,
+    path: &PrimPath,
+    attr: &str,
+    t: Time,
+    value: &Value,
+    peers: &[PrimPath],
+    relative: bool,
+) -> Vec<(PrimPath, Value)> {
+    let at = |p: &PrimPath| query::sample_attr(stage, p, attr, query::to_key_time(stage, p, t));
+    let from = at(path);
+    peers
+        .iter()
+        .filter_map(|p| {
+            let base = at(p)?;
+            if std::mem::discriminant(&base) != std::mem::discriminant(value) {
+                return None;
+            }
+            let v = match (relative, &from) {
+                (true, Some(from)) => offset(&base, from, value),
+                _ => value.clone(),
+            };
+            Some((p.clone(), v))
+        })
+        .collect()
+}
+
+/// `base` moved by `to - from` (numbers and vectors; other values become `to`).
+fn offset(base: &Value, from: &Value, to: &Value) -> Value {
+    match (base, from, to) {
+        (Value::Float(b), Value::Float(f), Value::Float(t)) => Value::Float(b + (t - f)),
+        (Value::Int(b), Value::Int(f), Value::Int(t)) => Value::Int(b + (t - f)),
+        (Value::Vec2(b), Value::Vec2(f), Value::Vec2(t)) => {
+            Value::Vec2(std::array::from_fn(|i| b[i] + (t[i] - f[i])))
+        }
+        (Value::Vec3(b), Value::Vec3(f), Value::Vec3(t)) => {
+            Value::Vec3(std::array::from_fn(|i| b[i] + (t[i] - f[i])))
+        }
+        _ => to.clone(),
     }
 }
 

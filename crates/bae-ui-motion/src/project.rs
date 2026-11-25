@@ -242,6 +242,7 @@ impl Panel for ProjectPanel {
         let footer_h = 28.0;
         let list_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(20.0);
         let mut open_comp: Option<PrimPath> = None;
+        let mut open_footage: Option<PrimPath> = None;
         // The Enter that commits a rename must not start a new one.
         let mut rename_finished = false;
         let mut menu_new_comp = false;
@@ -349,6 +350,8 @@ impl Panel for ProjectPanel {
                     if resp.double_clicked() {
                         match row.kind {
                             ItemKind::Comp => open_comp = Some(row.path.clone()),
+                            // AE: footage opens in the Footage panel.
+                            ItemKind::Footage => open_footage = Some(row.path.clone()),
                             ItemKind::Folder if !self.collapsed.remove(&row.path) => {
                                 self.collapsed.insert(row.path.clone());
                             }
@@ -441,6 +444,13 @@ impl Panel for ProjectPanel {
         if !delete.is_empty() {
             cx.invoke_with("item.delete", json!({"paths": delete}));
             session.lock().selected_items.clear();
+        }
+        if let Some(asset) = open_footage {
+            session.lock().footage_view = Some(asset);
+            cx.invoke_with(
+                bae_ui::action::ids::OPEN_PANEL,
+                serde_json::json!({"id": "footage"}),
+            );
         }
         if let Some(c) = open_comp {
             session.lock().open_comp(&c);
@@ -535,4 +545,59 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
             (tr(ty).to_owned(), size, String::new())
         }
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Project panel
+    ("Name", "名称"),
+    ("Type", "类型"),
+    ("Size", "大小"),
+    ("Duration", "持续时间"),
+    ("Frame Rate", "帧速率"),
+    ("Folder", "文件夹"),
+    ("Footage", "素材"),
+    ("Solid", "纯色"),
+    ("Placeholder", "占位符"),
+    ("New Composition", "新建合成"),
+    ("New Composition...", "新建合成..."),
+    ("Animation", "动画"),
+    ("Arrange", "排列"),
+    ("Edit", "编辑"),
+    ("New Folder", "新建文件夹"),
+    ("Open in Timeline", "在时间轴中打开"),
+    ("Rename", "重命名"),
+    ("Delete", "删除"),
+    ("Add to Composition", "添加到合成"),
+    ("items", "项"),
+    ("Comp", "合成"),
+    ("Untitled", "未命名"),
+    // Project panel menus (AE 26 zh_CN, MenuID 0238 / 0242 / 0244).
+    (
+        "New Adobe Photoshop File...",
+        "新建 Adobe Photoshop 文件...",
+    ),
+    (
+        "New Maxon Cinema 4D File...",
+        "新建 Maxon Cinema 4D 文件...",
+    ),
+    ("Reveal Project in Finder", "在 Finder 中显示项目"),
+    ("New Comp from Selection", "基于所选项新建合成"),
+    ("Replace with Precomp", "替换为预合成"),
+    ("Reveal in Composition", "在合成中显示"),
+    ("Solids Folder", "纯色文件夹"),
+    ("Hide This", "隐藏此项"),
+    ("Rename This...", "重命名此项..."),
+    ("Columns", "列数"),
+];
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "project",
+        bae_ui::PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
+    );
 }
