@@ -1,0 +1,22 @@
+schema_version = 1
+
+[plugin]
+id = "com.example.fade-selected"
+version = "0.1.0"
+api = "0.1"
+name = "Fade Selected Layers"
+license = "Apache-2.0"
+
+[script]
+entry = "main.js"
+
+[permissions]
+project = "write"
+
+[[command]]
+id = "fade"
+name = "Fade Selected Layers"
+entry = "fade"
+implementation = "script"
+menu = "Layer/Transform"
+schema = "args.json"
