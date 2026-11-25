@@ -94,15 +94,30 @@ def initialize():
         db.execute("""create table if not exists pulls(
             number integer primary key, item text, title text, state text, updated text)""")
         db.execute("begin immediate")
-        if db.execute("select 1 from items limit 1").fetchone():
-            return
-        rows = list(effects())
-        for line in (HERE / "milestones.tsv").read_text().splitlines():
-            module, item, name, status, *pr = line.split("\t")
-            prs = [int(n) for n in pr[0].split(",")] if pr else []
-            rows.append((item, "milestone", module, name, status, "", json.dumps(prs)))
-        db.executemany("insert into items(id,kind,module,name,status,tag,prs,updated) "
-                       "values(?,?,?,?,?,?,?,?)", [(*row, now()) for row in rows])
+        if not db.execute("select 1 from items limit 1").fetchone():
+            seed_board(db)
+        register_legacy_effects(db)
+
+
+def register_legacy_effects(db):
+    stamp = now()
+    rows = []
+    for line in (HERE / "legacy-effects.tsv").read_text(encoding="utf-8").splitlines():
+        match, name, status, tag, pr, note = line.split("\t")
+        rows.append(("fx:" + match, name, status, tag, json.dumps([int(pr)] if pr else []),
+                     note, stamp))
+    db.executemany("""insert into items(id,kind,module,name,status,tag,prs,note,updated)
+        values(?,'effect','旧版效果',?,?,?,?,?,?) on conflict(id) do nothing""", rows)
+
+
+def seed_board(db):
+    rows = list(effects())
+    for line in (HERE / "milestones.tsv").read_text().splitlines():
+        module, item, name, status, *pr = line.split("\t")
+        prs = [int(n) for n in pr[0].split(",")] if pr else []
+        rows.append((item, "milestone", module, name, status, "", json.dumps(prs)))
+    db.executemany("insert into items(id,kind,module,name,status,tag,prs,updated) "
+                   "values(?,?,?,?,?,?,?,?)", [(*row, now()) for row in rows])
 
 
 def import_github():

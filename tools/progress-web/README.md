@@ -19,9 +19,9 @@ python3 server.py
 | `~/.config/bae-board/env` | 汇报脚本读取 `BAE_BOARD_URL`、`BAE_BOARD_TOKEN` 和可选的 `BAE_BOARD_AGENT` |
 | `~/.config/bae-board/board.sqlite3` | 能力、效果、Agent、动态 |
 
-首次导入读取同目录的里程碑清单，以及仓库里的 AE 26 分类（排除 obsolete* 与 hidden-presets）。扫描 bae-effects 的 src 和 packages 中出现的完整 matchName，设置初始实现状态。完成百分比按完成项数除以总项数计算。尚无真实汇报的能力显示“待认领”，初始更新时间为导入时间。
+首次导入读取同目录的里程碑清单，以及仓库里的 AE 26 分类（常规矩阵排除 obsolete* 与 hidden-presets）。扫描 bae-effects 的 src 和 packages 中出现的完整 matchName，设置初始实现状态。完成百分比按完成项数除以总项数计算。尚无真实汇报的能力显示“待认领”，初始更新时间为导入时间。
 
-评估标签按领导的 fx-tags.md 整理在 tags.json。3D 通道和沉浸式视频整类后放。未指定策略的效果显示“待评估”。两个 AI 后续方向没有对应的 AE 26 matchName，保留在策略文件中。重启会保留已有汇报和数据。
+评估标签按领导的 fx-tags.md 整理在 tags.json。3D 通道和沉浸式视频整类后放。未指定策略的效果显示“待评估”。两个 AI 后续方向没有对应的 AE 26 matchName，保留在策略文件中。旧版效果依据两个 obsolete 分类和 #396 的 49 项核查单独登记。每次启动只插入缺失 ID；19 个新别名初始为待办并附对应 PR，3 个已注册别名和绘画按核查结果记为完成。26 个跳过项在备注中注明，保留未做状态和评估标签。重启会保留已有汇报和数据。
 
 有 gh 授权的开发机可用 `python3 server.py --github` 启动并导入 GitHub 开放及已合并的 PR。已知编号按清单归属，效果批次分支按前缀归入 fx-a，其他 PR 显示在动态里。导入按 PR 号去重，合并状态不会自动覆盖 agent 对能力的判断。
 
@@ -69,7 +69,7 @@ macOS/Linux 的 shell 脚本需要 Bash、Python 3、Git。Windows 脚本使用�
 ## AWS / systemd 部署
 
 1. 用 EC2 Instance Connect 或 SSM 连接选定的 Linux 实例。确认 8787 可用，且独立目录和同名服务未被其他应用使用。
-2. 将 server.py、index.html 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
+2. 将 server.py、index.html、legacy-effects.tsv 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
 3. 将 bae-progress-web.service 安装至 `/etc/systemd/system/`，运行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now bae-progress-web`。通过 `systemctl is-enabled bae-progress-web`、`systemctl is-active bae-progress-web` 和实际带认证的状态请求核验。服务无需管理员权限。
 4. 有域名时在 HTTPS 入口转发到本服务，关闭 SSE 响应缓冲，保持长连接，服务单元默认仅监听 127.0.0.1。临时 IP 模式需单独调整监听地址，并按来源 IP 限制安全组 TCP 8787 的访问。HTTP Basic 和 Bearer 在 HTTP 链路上以明文传递。
 5. 将各汇报机 env 的 BAE_BOARD_URL 改为已验证的 AWS 地址。用两个浏览器窗口验证汇报动态与实时更新。
