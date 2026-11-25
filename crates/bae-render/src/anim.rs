@@ -292,6 +292,9 @@ impl AnimEvaluator {
             // evaluated layer (contents, source text, animators).
             LayerSource::None if l.kind == LayerKind::Shape => Ok(custom(SHAPE_PROVIDER, l, |h| {
                 hash_prims(&l.contents, h);
+                if has_wiggle(&l.contents) {
+                    l.layer_time.hash(h);
+                }
             })),
             LayerSource::None if l.kind == LayerKind::Text => Ok(custom(TEXT_PROVIDER, l, |h| {
                 if let Some(doc) = &l.text {
@@ -373,6 +376,21 @@ fn custom(provider: &str, l: &EvaluatedLayer, hash: impl FnOnce(&mut FxHasher)) 
         size: None,
         hash: h.finish(),
         data: Arc::new(l.clone()),
+    })
+}
+
+fn has_wiggle(prims: &[EvaluatedPrim]) -> bool {
+    prims.iter().any(|p| {
+        matches!(
+            p.get("match_name")
+                .or_else(|| p.get("operator"))
+                .and_then(bae_model::Value::as_str),
+            Some("ADBE Vector Filter - Roughen" | "wiggle_paths" | "roughen")
+        ) && p
+            .f64("ae:ADBE_Vector_Temporal_Freq")
+            .or_else(|| p.f64("wiggle_paths:frequency"))
+            != Some(0.0)
+            || has_wiggle(&p.children)
     })
 }
 

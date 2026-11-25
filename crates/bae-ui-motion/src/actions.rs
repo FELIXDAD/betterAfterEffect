@@ -99,6 +99,8 @@ pub mod ids {
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
+    /// Edit > Paste Reversed Keyframes (AE Cmd/Ctrl+Shift+V).
+    pub const PASTE_REVERSED: &str = "motion.edit.paste_reversed_keyframes";
     /// Edit > Cut: Copy, then Clear.
     pub const CUT: &str = "edit.cut";
     /// Layer ▸ Switches ▸ Shy, Lock … and Layer ▸ 3D Layer: params `{"switch":
@@ -207,6 +209,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::COPY, "Copy"),
     (ids::CUT, "Cut"),
     (ids::PASTE, "Paste"),
+    (ids::PASTE_REVERSED, "Paste Reversed Keyframes"),
     (ids::LAYER_SWITCH, "Layer Switch"),
     (ids::TRACK_MATTE, "Track Matte"),
     (
@@ -1270,15 +1273,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 before,
             });
         }
-        ids::PASTE => {
+        ids::PASTE | ids::PASTE_REVERSED => {
             let Some(clip) = s.clipboard.clone() else {
-                return false;
+                return id == ids::PASTE_REVERSED;
             };
+            let reversed = id == ids::PASTE_REVERSED;
             for l in &layers {
                 let kt = query::to_key_time(stage, l, now);
                 cx.invoke_with(
                     "key.paste",
-                    json!({"path": l, "attr": clip.attr, "time": kt, "keys": clip.keys}),
+                    json!({"path": l, "attr": clip.attr, "time": kt, "keys": clip.keys, "reversed": reversed}),
                 );
             }
         }

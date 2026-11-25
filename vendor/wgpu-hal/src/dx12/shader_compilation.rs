@@ -254,7 +254,7 @@ fn compile_fxc(
     match hr {
         Ok(()) => {
             let shader_data = shader_data.unwrap();
-            // BAE patch (betterAfterEffect#154): FXC's ID3DBlob has a non-atomic
+            // BAE patch (betterAfterEffects#154): FXC's ID3DBlob has a non-atomic
             // reference count (`D3DX11Core::CBuffer::AddRef` / `Release` are plain
             // `inc` / `dec`), and the device's shader cache hands clones of a compiled
             // shader to every thread that loads it, so concurrent pipeline creation
