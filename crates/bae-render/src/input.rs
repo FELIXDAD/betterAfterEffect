@@ -138,6 +138,10 @@ impl RenderComp {
         // blurred 3D layers.
         if any_3d {
             hash_camera(&self.camera, h);
+            self.lights.len().hash(h);
+            for l in &self.lights {
+                hash_light(l, h);
+            }
             if any_blur && let Some(mb) = &self.motion_blur {
                 for c in &mb.cameras {
                     hash_camera(c, h);
@@ -304,6 +308,22 @@ impl RenderLayer {
         self.adjustment.hash(h);
         if let Some(m) = &self.matrix_3d {
             hash_mat4(m, h);
+            let mat = &self.material;
+            (
+                mat.casts_shadows,
+                mat.accepts_shadows,
+                mat.accepts_lights,
+                [
+                    mat.light_transmission,
+                    mat.ambient,
+                    mat.diffuse,
+                    mat.specular_intensity,
+                    mat.specular_shininess,
+                    mat.metal,
+                ]
+                .map(f32::to_bits),
+            )
+                .hash(h);
         }
         self.motion_samples.len().hash(h);
         for s in self.motion_samples.iter() {
@@ -323,11 +343,32 @@ fn hash_mat4(m: &DMat4, h: &mut impl Hasher) {
     }
 }
 
+fn hash_light(l: &Light, h: &mut impl Hasher) {
+    (l.kind, l.falloff, l.casts_shadows, l.scope_below).hash(h);
+    hash_mat4(&l.world, h);
+    l.point_of_interest.to_array().map(f64::to_bits).hash(h);
+    l.color.map(f32::to_bits).hash(h);
+    [
+        l.intensity,
+        l.cone_angle,
+        l.cone_feather,
+        l.radius,
+        l.falloff_distance,
+        l.shadow_darkness,
+        l.shadow_diffusion,
+    ]
+    .map(f32::to_bits)
+    .hash(h);
+}
+
 fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
     c.is_some().hash(h);
     if let Some(c) = c {
         hash_mat4(&c.world, h);
         c.zoom.to_bits().hash(h);
+        if let crate::camera::Projection::Orthographic { scale } = c.projection {
+            scale.to_bits().hash(h);
+        }
     }
 }
 

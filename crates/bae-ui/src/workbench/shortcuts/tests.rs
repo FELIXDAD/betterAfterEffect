@@ -390,3 +390,185 @@ impl Workbench {
         self.open_shortcut_editor();
     }
 }
+
+/// The keyboard: keys coloured by what they do with the shown modifiers, a
+/// modifier cap clicked holds it, a key clicked fills the Key table, a command
+/// dropped on a key gets that key with the modifiers shown.
+#[test]
+fn the_keyboard_shows_and_binds_keys() {
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let mut wb = workbench();
+    wb.open_shortcut_editor();
+    let mut s = wb.editor.session.take().unwrap();
+    let none = egui::Modifiers::NONE;
+    // No modifier: U is an application key, J a panel key, B a panel key.
+    s.refresh_for_test(text::Mods::NONE);
+    let look = |s: &Session, k: Key| s.keys_for_test(k);
+    assert_eq!(
+        look(&s, Key::U).application.as_deref(),
+        Some("Reveal Keyframes")
+    );
+    assert!(look(&s, Key::J).application.is_none() && look(&s, Key::J).panel.is_some());
+    // ⌘ clicked: the ⌘ layer (Cmd+K is Composition Settings).
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::ToggleModifier(keyboard::Modifier::Command),
+        none,
+    );
+    let cmd = s.shown_mods(none);
+    assert!(cmd.command);
+    s.refresh_for_test(cmd);
+    assert_eq!(
+        look(&s, Key::K).application.as_deref(),
+        Some("Composition Settings...")
+    );
+    assert!(look(&s, Key::U).application.is_none());
+    // A panel scope shows only that panel's keys.
+    s.choose_scope(
+        s.tree
+            .scopes
+            .iter()
+            .position(|x| x.title == "Timeline Panel"),
+    );
+    s.refresh_for_test(text::Mods::NONE);
+    assert!(look(&s, Key::U).panel.is_none() && look(&s, Key::U).application.is_none());
+    assert_eq!(
+        look(&s, Key::J).panel.as_deref(),
+        Some("Go to Previous Keyframe")
+    );
+    s.choose_scope(None);
+    // Clicking K lists its combinations; ⌘ is the selected row.
+    wb.keyboard_action(&mut s, keys_ui::KeyboardAction::SelectKey(Key::K), none);
+    assert_eq!(s.key, Some(Key::K));
+    assert_eq!(s.key_row, Some(cmd));
+    assert_eq!(wb.key_label(&s), "Key: K");
+    // Drop New Composition on ⌘J: bound, the key selected.
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::Drop(row("comp.new", None), chord("Cmd+J")),
+        none,
+    );
+    assert_eq!(
+        s.chords_of(&row("comp.new", None)),
+        [chord("Cmd+N"), chord("Cmd+J")]
+    );
+    assert_eq!(s.key, Some(Key::J));
+    // Dropping a command on a key another command has moves it, with the message.
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::Drop(row("comp.new", None), chord("Cmd+K")),
+        none,
+    );
+    assert!(s.chords_of(&row("comp.settings", None)).is_empty());
+    assert!(matches!(
+        s.message,
+        Message::Conflict {
+            kind: ConflictKind::Application,
+            ..
+        }
+    ));
+    // The tooltip names the scope, the command and its place in the tree.
+    let tip = s.tooltip_for_test(&chord("Cmd+K"));
+    assert_eq!(
+        tip,
+        [
+            "Application: New Composition... (Application \u{2192} Composition \u{2192} New Composition...)"
+        ]
+    );
+    // ⌘K is now New Composition's only: one command on K. J has two (the
+    // timeline's J and ⌘J).
+    let none_mods = egui::Modifiers::NONE;
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::SelectKey(Key::K),
+        none_mods,
+    );
+    assert_eq!(wb.key_label(&s), "Key: K");
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::SelectKey(Key::J),
+        none_mods,
+    );
+    assert_eq!(wb.key_label(&s), "Key: J (multiple commands assigned)");
+    wb.editor.session = Some(s);
+}
+
+impl Session {
+    fn refresh_for_test(&mut self, mods: text::Mods) {
+        self.keys = keys_ui::KeyCache::default();
+        self.refresh_looks(mods);
+    }
+
+    fn keys_for_test(&self, k: Key) -> keyboard::KeyLook {
+        self.keys.looks.get(&k).cloned().unwrap_or_default()
+    }
+
+    fn tooltip_for_test(&self, chord: &Chord) -> Vec<String> {
+        self.key_tooltip(chord)
+    }
+}
+
+/// Presets: Save As, switching, Delete are staged; OK writes the files; the
+/// selected preset is remembered; Copy To Clipboard writes AE's text.
+#[test]
+fn presets_are_files_written_on_ok() {
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let dir = std::env::temp_dir().join(format!("bae-presets-dialog-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut wb = workbench();
+    wb.set_shortcut_presets_dir(Some(dir.clone()));
+    wb.open_shortcut_editor();
+    let s = session(&mut wb);
+    assert_eq!(s.presets.names(), [DEFAULT_PRESET]);
+    // A change makes Custom.txt; Save As copies it to "Mine.txt" and selects it.
+    s.select(row("comp.new", None));
+    s.focus = Some(PillFocus::New);
+    run(&mut wb, vec![key(Key::J, Modifiers::COMMAND)]);
+    let s = session(&mut wb);
+    assert_eq!(s.preset, CUSTOM_PRESET);
+    s.save_preset_as("Mine.txt");
+    assert_eq!(
+        s.presets.names(),
+        [DEFAULT_PRESET, CUSTOM_PRESET, "Mine.txt"]
+    );
+    // Switching to the built-in preset and back.
+    s.choose_preset(DEFAULT_PRESET);
+    assert!(s.chords_of(&row("comp.new", None)) == [chord("Cmd+N")]);
+    s.choose_preset("Mine.txt");
+    assert!(
+        s.chords_of(&row("comp.new", None))
+            .contains(&chord("Cmd+J"))
+    );
+    // Copy To Clipboard: AE's text (tabs, CR line ends, an empty last line).
+    let text = presets::clipboard_text(&s.tree, &s.chords);
+    assert!(
+        text.starts_with("Application\t\t\r\tSelection\tV\t\r"),
+        "{text:?}"
+    );
+    assert!(text.contains("\t\tNew Composition...\t"), "{text:?}");
+    assert!(text.ends_with("\t\r\r"));
+    assert!(!dir.exists(), "nothing written before OK");
+    wb.commit_shortcut_editor();
+    assert!(dir.join("Mine.txt").is_file() && dir.join("Custom.txt").is_file());
+    assert_eq!(wb.state().shortcut_presets["km"], "Mine.txt");
+
+    // Reopened: Mine.txt selected; Delete it and Cancel: still there.
+    wb.open_shortcut_editor();
+    let s = session(&mut wb);
+    assert_eq!(s.preset, "Mine.txt");
+    s.delete_preset();
+    assert_eq!(s.preset, DEFAULT_PRESET);
+    wb.cancel_shortcut_editor();
+    assert!(dir.join("Mine.txt").is_file());
+    // Delete and OK: gone, the built-in preset selected, shortcuts reset.
+    wb.open_shortcut_editor();
+    session(&mut wb).delete_preset();
+    wb.commit_shortcut_editor();
+    assert!(!dir.join("Mine.txt").exists());
+    assert!(!wb.state().shortcut_presets.contains_key("km"));
+    assert_eq!(
+        wb.keymap().lookup(&chord("Cmd+N"), None).unwrap().action,
+        "comp.new"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

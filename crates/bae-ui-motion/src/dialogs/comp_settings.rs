@@ -738,7 +738,7 @@ impl CompSettings {
                 ui.add_space(16.0);
                 ui.label(tr("Adaptive Sample Limit:"));
                 let mut a = v.adaptive_limit as f64;
-                if fields::number(ui, &mut a, 64.0..=256.0, 0, "", tr("Adaptive Sample Limit"))
+                if fields::number(ui, &mut a, 16.0..=256.0, 0, "", tr("Adaptive Sample Limit"))
                     .changed()
                 {
                     v.adaptive_limit = a as i64;

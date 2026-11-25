@@ -133,8 +133,14 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        let mut workbench = Workbench::new(app, state);
+        // Keyboard Shortcuts presets are files in the config folder (AE: aeks/).
+        workbench.set_shortcut_presets_dir(
+            app.resource::<bae_platform::AppDirs>()
+                .map(|d| d.config.join(bae_ui::workbench::SHORTCUT_PRESETS_FOLDER)),
+        );
         Self {
-            workbench: Workbench::new(app, state),
+            workbench,
             show_about: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
@@ -201,6 +207,13 @@ impl Workspace {
                 }
             })
             .collect()
+    }
+
+    /// Where Keyboard Shortcuts keeps its presets (acceptance tests, macOS run:
+    /// a temporary folder).
+    #[cfg(all(test, target_os = "macos"))]
+    pub fn set_shortcut_presets_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.workbench.set_shortcut_presets_dir(dir);
     }
 
     /// Whether the state should be saved now (OK in Keyboard Shortcuts).
@@ -303,6 +316,20 @@ impl Workspace {
             }
             _ => Default::default(),
         }
+    }
+
+    /// Gives the panel `kind` the keyboard focus (tests: the shortcut sweep).
+    #[cfg(test)]
+    pub fn focus_panel(&mut self, kind: &str) {
+        if let Some(id) = self.open_panels().into_iter().find(|p| p.kind() == kind) {
+            self.workbench.dock_mut().focus_panel(&id);
+        }
+    }
+
+    /// The panel kind that has the keyboard focus.
+    #[cfg(test)]
+    pub fn focused_kind(&self) -> Option<String> {
+        self.workbench.focused_panel().map(|p| p.kind().to_owned())
     }
 
     /// Panels open in the dock (Window menu check marks).

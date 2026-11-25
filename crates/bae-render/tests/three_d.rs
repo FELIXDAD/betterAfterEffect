@@ -395,3 +395,101 @@ fn evaluator_feeds_3d_layers_and_the_camera() {
     assert_eq!(img.px(20, 50), [255, 0, 0, 255]);
     assert_eq!(img.px(50, 50)[3], 0);
 }
+
+#[test]
+fn orthographic_views_draw_without_perspective() {
+    use bae_render::camera::OrthoView;
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    // Far behind the default camera (it would not be drawn in perspective),
+    // and a nearer layer that must cover it where they overlap.
+    comp.layers.push(solid_3d(
+        "far",
+        RED,
+        [40, 40],
+        DVec3::new(40.0, 50.0, 5000.0),
+        DVec3::ZERO,
+    ));
+    comp.layers.push(solid_3d(
+        "near",
+        BLUE,
+        [40, 40],
+        DVec3::new(60.0, 50.0, -5000.0),
+        DVec3::ZERO,
+    ));
+    let centre = DVec3::new(50.0, 50.0, 0.0);
+    comp.camera = Some(Camera::orthographic(OrthoView::Front, centre, 1.0));
+    let img = render(&mut r, &comp);
+    // 40 px squares at any depth, nearer (blue) in front.
+    assert_eq!(img.px(25, 50), [255, 0, 0, 255]);
+    assert_eq!(img.px(50, 50), [0, 0, 255, 255]);
+    assert_eq!(img.px(79, 50), [0, 0, 255, 255]);
+    assert_eq!(img.px(80, 50)[3], 0);
+    // From the top, a floor (X rotation 90°) is its full rectangle: 60 wide,
+    // 40 deep, the front edge (z = −20) at the bottom.
+    comp.layers = vec![solid_3d(
+        "floor",
+        GREEN,
+        [60, 40],
+        DVec3::new(50.0, 80.0, 0.0),
+        DVec3::new(90.0, 0.0, 0.0),
+    )];
+    comp.camera = Some(Camera::orthographic(OrthoView::Top, centre, 1.0));
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(20, 30), [0, 255, 0, 255]);
+    assert_eq!(img.px(79, 69), [0, 255, 0, 255]);
+    assert_eq!(img.px(19, 50)[3], 0);
+    assert_eq!(img.px(50, 70)[3], 0);
+    assert_eq!(img.px(50, 29)[3], 0);
+}
+
+#[test]
+fn cuts_leave_no_see_through_seams() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    // A small layer turned 60° about y crosses a wide flat one; its plane cuts
+    // the flat layer along a line that runs on past the small layer, where
+    // nothing covers the flat layer. (The small layer is at the bottom of the
+    // stack, so its plane is the one that cuts.)
+    comp.layers.push(solid_3d(
+        "wide",
+        RED,
+        [80, 30],
+        DVec3::new(50.0, 50.0, 0.0),
+        DVec3::ZERO,
+    ));
+    comp.layers.push(solid_3d(
+        "small",
+        GREEN,
+        [10, 10],
+        DVec3::new(30.0, 50.0, 0.0),
+        DVec3::new(0.0, 60.0, 0.0),
+    ));
+    let img = render(&mut r, &comp);
+    for y in (36..44).chain(57..64) {
+        for x in 26..35 {
+            assert_eq!(img.px(x, y), [255, 0, 0, 255], "seam at ({x}, {y})");
+        }
+    }
+    // Layers that do not overlap on screen are not cut at all.
+    comp.layers[0] = solid_3d(
+        "wide",
+        RED,
+        [80, 30],
+        DVec3::new(50.0, 60.0, 0.0),
+        DVec3::ZERO,
+    );
+    comp.layers[1] = solid_3d(
+        "apart",
+        GREEN,
+        [20, 20],
+        DVec3::new(50.0, 15.0, 0.0),
+        DVec3::new(0.0, 60.0, 0.0),
+    );
+    let img = render(&mut r, &comp);
+    for x in 12..88 {
+        assert_eq!(img.px(x, 60), [255, 0, 0, 255], "x = {x}");
+    }
+}

@@ -463,7 +463,7 @@ impl Command for SetCompSettings {
                 tx,
                 &p.comp,
                 "motion_blur_adaptive_limit",
-                Value::Int(n.clamp(64, 256)),
+                Value::Int(n.clamp(16, 256)),
             )?;
         }
         if let Some(b) = p.preserve_frame_rate {
