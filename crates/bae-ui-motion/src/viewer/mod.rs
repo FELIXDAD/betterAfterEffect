@@ -49,6 +49,7 @@ const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    evaluated: Option<(u64, std::sync::Arc<EvaluatedComp>)>,
     /// The expression error banner.
     banner: errors::Banner,
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
@@ -228,7 +229,7 @@ impl CompositionViewer {
     ) -> Option<EvaluatedComp> {
         let time = session.lock().time(&info.path);
         self.eval
-            .get(cx.resources)
+            .get(cx.stage)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
     }
@@ -614,18 +615,31 @@ impl Panel for CompositionViewer {
         }
 
         // Evaluate.
-        let eval = self.eval.get(cx.resources);
-        let mut comp = match eval.evaluate_comp(cx.stage, &info.path, time) {
-            Ok(c) => c,
-            Err(e) => {
-                ui.painter().text(
-                    area.center(),
-                    Align2::CENTER_CENTER,
-                    e.to_string(),
-                    theme::body(),
-                    color::TEXT_DIM,
-                );
-                return;
+        let revision = cx.stage.revision();
+        let mut comp = if let Some((_, comp)) = self
+            .evaluated
+            .as_ref()
+            .filter(|(r, c)| *r == revision && c.path == info.path && c.time == time)
+        {
+            comp.clone()
+        } else {
+            let eval = self.eval.get(cx.stage);
+            match eval.evaluate_comp(cx.stage, &info.path, time) {
+                Ok(c) => {
+                    let c = std::sync::Arc::new(c);
+                    self.evaluated = Some((revision, c.clone()));
+                    c
+                }
+                Err(e) => {
+                    ui.painter().text(
+                        area.center(),
+                        Align2::CENTER_CENTER,
+                        e.to_string(),
+                        theme::body(),
+                        color::TEXT_DIM,
+                    );
+                    return;
+                }
             }
         };
         // Expression errors at this time: the banner and the timeline's icons.
@@ -635,10 +649,19 @@ impl Panel for CompositionViewer {
                 s.expr_errors = comp.errors.clone();
             }
         }
-        apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        if scrub.is_some() || self.select.drag.is_some() {
+            apply_overrides(
+                std::sync::Arc::make_mut(&mut comp),
+                scrub.as_ref(),
+                self.select.drag.as_ref(),
+            );
+        }
         // Text being edited is drawn by the text field, not the layer.
         if let Some(edited) = self.type_tool.edited_layer()
-            && let Some(l) = comp.layers.iter_mut().find(|l| &l.path == edited)
+            && let Some(l) = std::sync::Arc::make_mut(&mut comp)
+                .layers
+                .iter_mut()
+                .find(|l| &l.path == edited)
         {
             l.visible = false;
         }
@@ -657,15 +680,14 @@ impl Panel for CompositionViewer {
         let image = if editing {
             self.gpu
                 .as_mut()
-                .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution))
+                .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, true))
         } else {
             completed
         };
         self.on_gpu = image.is_some();
-        let mut vector = std::borrow::Cow::Borrowed(&comp);
+        let mut vector = None;
         if let Some(img) = image {
             paint_image(&clip, &view, img);
-            // Until 05's text source is registered, text layers are drawn here.
             let has_text = cx
                 .resources
                 .get::<crate::PreviewSources>()
@@ -676,27 +698,36 @@ impl Panel for CompositionViewer {
                         .iter()
                         .any(|p| p.item().id() == bae_render::anim::TEXT_PROVIDER)
                 });
-            let mut text_only = comp.clone();
-            for l in &mut text_only.layers {
-                if has_text || l.kind != LayerKind::Text {
-                    l.visible = false;
+            if !has_text
+                && comp
+                    .layers
+                    .iter()
+                    .any(|l| l.visible && l.kind == LayerKind::Text)
+            {
+                let mut text_only = (*comp).clone();
+                for l in &mut text_only.layers {
+                    l.visible &= l.kind == LayerKind::Text;
                 }
+                vector = Some(std::borrow::Cow::Owned(text_only));
             }
-            vector = std::borrow::Cow::Owned(text_only);
+        } else {
+            vector = Some(std::borrow::Cow::Borrowed(comp.as_ref()));
         }
-        let mut shapes = Vec::new();
-        let to_screen = |p: DVec2| view.to_screen(p);
-        render::paint_comp(
-            &vector,
-            &clip,
-            &to_screen,
-            Affine::new(DMat4::IDENTITY),
-            1.0,
-            f64::from(view.scale),
-            &|s| egui::FontId::proportional(s),
-            &mut shapes,
-        );
-        clip.extend(shapes);
+        if let Some(vector) = vector {
+            let mut shapes = Vec::new();
+            let to_screen = |p: DVec2| view.to_screen(p);
+            render::paint_comp(
+                &vector,
+                &clip,
+                &to_screen,
+                Affine::new(DMat4::IDENTITY),
+                1.0,
+                f64::from(view.scale),
+                &|s| egui::FontId::proportional(s),
+                &mut shapes,
+            );
+            clip.extend(shapes);
+        }
 
         self.paint_guides(cx, &painter, &clip, comp_rect, &view);
 

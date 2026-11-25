@@ -11,9 +11,9 @@ use bae_gpu::{
     wgpu,
 };
 use bae_model::{FrameRate, PrimPath, Stage, Time, TimeRange};
-use bae_render::IRect;
 use bae_render::cache::{FrameCache, FrameKey};
 use bae_render::input::Dependency;
+use bae_render::{IRect, OutputTarget};
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -52,7 +52,11 @@ struct Scene {
     effects: Option<PreviewEffects>,
 }
 
+type FreeTargets = Arc<Mutex<Vec<OutputTarget>>>;
+
 struct Slot {
+    available: FreeTargets,
+    target: Option<OutputTarget>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
     rect: IRect,
@@ -64,6 +68,12 @@ struct Slot {
 impl Drop for Slot {
     fn drop(&mut self) {
         self.registry.remove(self.id);
+        let mut available = self.available.lock().unwrap();
+        if available.len() < DEPTH
+            && let Some(target) = self.target.take()
+        {
+            available.push(target);
+        }
     }
 }
 
@@ -271,7 +281,15 @@ impl PlaybackPreview {
                 repaint: repaint.clone(),
             });
         }
-        let d = state.demand.as_mut().unwrap();
+        let Mailbox {
+            demand,
+            queued,
+            ready,
+            failed,
+            epoch,
+            ..
+        } = &mut *state;
+        let d = demand.as_mut().unwrap();
         let discontinuity = d.times.first().is_some_and(|old| time < *old)
             || d.range != range
             || d.looping != looping
@@ -297,16 +315,16 @@ impl PlaybackPreview {
                 d.times.push(t);
                 frame += 1;
             }
-            let times = d.times.clone();
+            let times = &d.times;
             if discontinuity {
                 // Jobs already encoded can finish, but cannot publish into the
                 // new epoch. Completed frames inside the new horizon are reusable.
-                state.epoch += 1;
-                state.queued.clear();
-                state.ready.retain(|slot| times.contains(&slot.time));
+                *epoch += 1;
+                queued.clear();
+                ready.retain(|slot| times.contains(&slot.time));
                 self.shown = None;
             }
-            state.failed.retain(|t| times.contains(t));
+            failed.retain(|t| times.contains(t));
             self.shared.changed.notify_one();
         }
         if let Some(slot) = state
@@ -357,6 +375,12 @@ fn time_arithmetic(source: &str) -> bool {
     })
 }
 
+struct CompletedFrame {
+    slot: Arc<Slot>,
+    deps: Option<Vec<Dependency>>,
+    dynamic: bool,
+}
+
 struct Producer {
     stage: Stage,
     eval: Evaluator,
@@ -367,18 +391,8 @@ struct Producer {
 
 impl Producer {
     fn new(gpu: Arc<GpuContext>, scene: Arc<Scene>) -> Result<Self, String> {
-        let mut engine = RenderEngine::new(gpu, 0);
-        if let Some(sources) = &scene.sources {
-            for entry in sources.0.snapshot().iter() {
-                engine
-                    .renderer
-                    .providers_mut()
-                    .register(entry.item().clone());
-            }
-        }
-        if let Some(effects) = &scene.effects {
-            engine.renderer.sync_effects(&effects.0);
-        }
+        let mut engine = RenderEngine::new(gpu);
+        engine.sync(scene.sources.as_ref(), scene.effects.as_ref());
         let stage = scene.snapshot.restore()?;
         // Pure arithmetic over time has no project reads. General JavaScript
         // can look up other compositions or sample outside this frame.
@@ -406,7 +420,9 @@ impl Producer {
         &mut self,
         time: Time,
         registry: &Arc<ViewportTextureRegistry>,
-    ) -> Result<(Arc<Slot>, Vec<Dependency>, bool), String> {
+        budget: u64,
+        free: &FreeTargets,
+    ) -> Result<CompletedFrame, String> {
         let comp = self
             .eval
             .evaluate_comp(&self.stage, &self.scene.key.path, time)
@@ -416,39 +432,54 @@ impl Producer {
             .anim
             .convert(&self.stage, &comp, 0)
             .map_err(|e| e.to_string())?;
-        let (texture, rect, temporal) = self
+        let available = free.lock().unwrap().pop();
+        let (target, rect, temporal) = self
             .engine
-            .render(&self.stage, &rc, self.scene.key.resolution)
+            .render(&self.stage, &rc, self.scene.key.resolution, available)
             .map_err(|e| e.to_string())?;
+        let size = target.size();
+        let view = target.view().clone();
         let slot = Arc::new(Slot {
+            available: free.clone(),
+            target: Some(target),
             registry: registry.clone(),
             id: registry.create("playback frame"),
             rect,
             time,
             errors: comp.errors,
-            bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+            bytes: u64::from(size[0]) * u64::from(size[1]) * 4,
         });
         registry
-            .publish(slot.id, &texture, wgpu::FilterMode::Linear)
+            .publish_view(
+                slot.id,
+                view,
+                size,
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::FilterMode::Linear,
+            )
             .map_err(|e| e.to_string())?;
-        Ok((
+        let deps = (slot.bytes <= budget).then(|| rc.dependencies());
+        Ok(CompletedFrame {
             slot,
-            rc.dependencies(),
-            self.dynamic
+            deps,
+            dynamic: self.dynamic
                 || temporal
                 || rc.motion_blur.is_some()
                 || rc
                     .layers
                     .iter()
                     .any(|l| matches!(l.content, bae_render::LayerContent::Comp(_))),
-        ))
+        })
     }
 }
 
 fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: Arc<Shared>) {
+    // Cached slots can survive an edit. Keep their spare targets with the
+    // worker so a new project revision can reuse the same bounded pool.
+    let free = FreeTargets::default();
     let mut producer: Option<Producer> = None;
     loop {
-        let (epoch, scene, time) = {
+        let (epoch, scene, time, budget) = {
             let mut state = shared.state.lock().unwrap();
             loop {
                 if state.shutdown || gpu.is_lost() {
@@ -465,7 +496,7 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                 {
                     let scene = d.scene.clone();
                     state.queued.push(time);
-                    break (state.epoch, scene, time);
+                    break (state.epoch, scene, time, state.cache.frames.stats().budget);
                 }
                 if state.queued.is_empty() {
                     state = shared.changed.wait(state).unwrap();
@@ -485,10 +516,17 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
             {
                 producer = Some(Producer::new(gpu.clone(), scene.clone())?);
             }
-            producer.as_mut().unwrap().render(time, &registry)
+            producer
+                .as_mut()
+                .unwrap()
+                .render(time, &registry, budget, &free)
         })();
         match result {
-            Ok((slot, deps, dynamic)) => {
+            Ok(CompletedFrame {
+                slot,
+                deps,
+                dynamic,
+            }) => {
                 let shared = shared.clone();
                 gpu.queue().on_submitted_work_done(move || {
                     let mut state = shared.state.lock().unwrap();
@@ -497,7 +535,9 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                     }
                     state.queued.retain(|t| *t != time);
                     let cache = &mut state.cache;
-                    if slot.bytes <= cache.frames.stats().budget {
+                    if let Some(deps) = deps
+                        && slot.bytes <= cache.frames.stats().budget
+                    {
                         cache.frames.insert(
                             scene.key.frame(time),
                             slot.clone(),

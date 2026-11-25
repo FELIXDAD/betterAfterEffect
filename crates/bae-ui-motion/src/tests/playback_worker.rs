@@ -11,13 +11,17 @@ fn playhead_has_priority_after_preview_stops() {
         return;
     };
     let mut h = super::Harness::new();
-    let (path, _, shape) = h.comp_with_layers();
+    let (path, solid, shape) = h.comp_with_layers();
+    h.run(
+        "attr.set_expression",
+        serde_json::json!({"path":solid, "attr":"transform:opacity", "source":"time*1000"}),
+    );
     h.run(
         "attr.set_expression",
         serde_json::json!({"path":shape, "attr":"transform:rotation", "source":"time*1000"}),
     );
     let registry = Arc::new(ViewportTextureRegistry::new());
-    let mut worker = PlaybackPreview::new(gpu, registry.clone());
+    let mut worker = PlaybackPreview::new(gpu.clone(), registry.clone());
     let rate = FrameRate::FPS_60;
     let range = TimeRange::new(Time::ZERO, rate.frame_to_time(60));
     let get = |worker: &mut PlaybackPreview, h: &super::Harness, frame, range, looping| {
@@ -52,9 +56,31 @@ fn playhead_has_priority_after_preview_stops() {
             std::thread::sleep(Duration::from_millis(1));
         }
     };
+    let corner = |handle| {
+        let texture = registry
+            .snapshot()
+            .into_iter()
+            .find(|e| e.id.raw() == handle)
+            .unwrap()
+            .texture
+            .unwrap();
+        let image = bae_gpu::transfer::read_texture(&gpu, texture.view.texture()).unwrap();
+        image.pixel(2, 2).to_vec()
+    };
     let first = get(&mut worker, &h, 0, range, false);
+    let original = corner(first);
     worker.stop();
-    get(&mut worker, &h, 29, range, false);
+    let later = get(&mut worker, &h, 29, range, false);
+    assert_ne!(
+        corner(later),
+        original,
+        "animated opacity must change the output"
+    );
+    assert_eq!(
+        corner(first),
+        original,
+        "a retained frame must keep its original pixels"
+    );
     assert_eq!(get(&mut worker, &h, 0, range, false), first);
     h.run("comp.create", serde_json::json!({"name":"Unrelated"}));
     assert_eq!(get(&mut worker, &h, 0, range, false), first);
@@ -370,6 +396,9 @@ fn measure_cadence(
         }
         next = index + 1;
     }
+    // The last scheduled frame is one interval before the window closes.
+    let end = start + Duration::from_secs(3 + u64::from(seconds));
+    std::thread::sleep(end.saturating_duration_since(Instant::now()));
     gpu.wait_idle().unwrap();
     samples.sort_unstable();
     let elapsed = (start.elapsed() - Duration::from_secs(3)).as_secs_f64();

@@ -59,7 +59,7 @@ fn prop_line(
             .as_ref()
             .filter(|s| s.path == *path && s.attr == attr)
             .map(|s| s.value.clone())
-            .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
+            .or_else(|| common::current_value(eval.get(cx.stage), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
@@ -69,7 +69,7 @@ fn prop_line(
     });
     // An expression pick whip dragged from the Timeline.
     if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
-        crate::expr::link(cx, eval.get(cx.resources), &whip, path, Some(attr), now);
+        crate::expr::link(cx, eval.get(cx.stage), &whip, path, Some(attr), now);
     }
 }
 
@@ -154,7 +154,7 @@ impl Panel for PropertiesPanel {
             // Text.
             if query::layer_kind(stage, &layer).as_deref() == Some("text") {
                 section(ui, tr("Text"));
-                let doc = common::current_value(self.eval.get(cx.resources), stage, &layer, "text:source", now);
+                let doc = common::current_value(self.eval.get(cx.stage), stage, &layer, "text:source", now);
                 if let Some(Value::TextDocument(doc)) = doc {
                     let key = ui.id().with(("text_src", layer.as_str()));
                     let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| doc.text.clone());
