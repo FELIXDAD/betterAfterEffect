@@ -146,11 +146,17 @@ impl Effect for Forward {
         self.0.uses_scene(p)
     }
 
-    fn parameter_window(
-        &self,
-        p: &EffectParams<'_>,
-    ) -> Option<bae_render::effect::ParameterWindow> {
-        self.0.parameter_window(p)
+    fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_times(p)
+    }
+    fn parameter_ids(&self) -> &'static [u32] {
+        self.0.parameter_ids()
+    }
+    fn integrated_parameters(&self) -> &'static [u32] {
+        self.0.integrated_parameters()
+    }
+    fn full_surface(&self) -> bool {
+        self.0.full_surface()
     }
 
     fn layer_dependencies(

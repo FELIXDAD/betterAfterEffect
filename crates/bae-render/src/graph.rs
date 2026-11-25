@@ -355,6 +355,8 @@ pub struct EffectNode {
     pub frame: EffectFrame,
     /// Samples of animated parameters used by the simulation.
     pub history: Box<[crate::effect::ParameterSample]>,
+    /// Integrated scalar curves shared with the animation evaluator.
+    pub tracks: Vec<(u32, Arc<crate::effect::ScalarTrack>)>,
     /// Scene inputs used by camera-aware effects.
     pub scene: Option<Box<crate::effect::EffectScene>>,
     /// Input node.
@@ -394,6 +396,12 @@ pub struct EffectFrame {
 }
 
 impl EffectFrame {
+    /// Map a layer sample time to the corresponding composition time.
+    pub fn comp_at(&self, local: Time) -> Time {
+        self.comp_time
+            + Time::from_seconds((local - self.time).as_seconds() * self.layer_time_scale)
+    }
+
     /// The parameters of `instance` in this frame.
     pub fn params<'a>(&self, instance: &'a RenderEffect) -> EffectParams<'a> {
         EffectParams {
@@ -453,9 +461,30 @@ impl SourceResolver for NoSources {
 /// The comp evaluated at other times, for effects that read other frames
 /// ([`LayerDependency::time`]); `crate::eval::EvaluatorFrames` evaluates the stage.
 pub trait CompFrames {
-    /// Whether any requested effect control can change with time.
+    /// Whether a sampled control may vary with time.
     fn animated_controls(&self, _effect: &PrimPath, _ids: &[u32]) -> bool {
         true
+    }
+
+    /// Sample only the selected controls at the requested layer times.
+    fn parameters_at(
+        &mut self,
+        _effect: &RenderEffect,
+        _ids: &[u32],
+        _frame: &EffectFrame,
+        _times: &[Time],
+    ) -> Vec<crate::effect::ParameterSample> {
+        Vec::new()
+    }
+
+    /// Random-access integral of an animated scalar control in layer time.
+    fn scalar_track(
+        &mut self,
+        _effect: &PrimPath,
+        _id: u32,
+        _frame: &EffectFrame,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        None
     }
 
     /// `comp` evaluated at comp time `time` (`None`: not available).
@@ -618,7 +647,7 @@ impl Builder<'_, '_> {
         }
         let mut h = FxHasher::default();
         "composite".hash(&mut h);
-        comp.hash_content(&mut h);
+        comp.hash_content(&mut h, Some(self.effects));
         rect.hash(&mut h);
         scale.to_bits().hash(&mut h);
         self.clamp.hash(&mut h);
@@ -884,6 +913,10 @@ impl Builder<'_, '_> {
         let mut rois = vec![roi; effects.len() + 1];
         for (i, (effect, instance)) in effects.iter().enumerate().rev() {
             let params = frame.params(instance);
+            if effect.full_surface() {
+                roi = bounds_chain[i + 1];
+                rois[i + 1] = roi;
+            }
             roi = effect.input_roi(&params, roi).intersect(&bounds_chain[i]);
             rois[i] = roi;
         }
@@ -1304,6 +1337,9 @@ impl Builder<'_, '_> {
         let mut rois = vec![canvas; effects.len() + 1];
         for i in (0..effects.len()).rev() {
             let params = frame.params(&effects[i].1);
+            if effects[i].0.full_surface() {
+                rois[i + 1] = domain;
+            }
             rois[i] = effects[i]
                 .0
                 .input_roi(&params, rois[i + 1])
@@ -1313,7 +1349,7 @@ impl Builder<'_, '_> {
 
         let mut h = FxHasher::default();
         "adjustment base".hash(&mut h);
-        comp.hash_content(&mut h);
+        comp.hash_content(&mut h, Some(self.effects));
         index.hash(&mut h);
         base_rect.hash(&mut h);
         scale.to_bits().hash(&mut h);
@@ -1349,7 +1385,7 @@ impl Builder<'_, '_> {
             Some(op) => {
                 let mut h = FxHasher::default();
                 "adjustment coverage".hash(&mut h);
-                comp.hash_content(&mut h);
+                comp.hash_content(&mut h, Some(self.effects));
                 index.hash(&mut h);
                 canvas.hash(&mut h);
                 scale.to_bits().hash(&mut h);
@@ -1469,37 +1505,31 @@ impl Builder<'_, '_> {
                 placement: layer.transform,
             })
         });
+        let mut tracks = Vec::new();
         let mut history = Vec::new();
-        if let Some(window) = effect.parameter_window(&params)
-            && let Some(frames) = self.frames.as_mut()
-            && frames.animated_controls(&instance.path, window.ids)
-        {
-            let count = window.samples.clamp(2, 64);
-            for index in 0..count {
-                let t = window.start
-                    + (window.end - window.start) * f64::from(index) / f64::from(count - 1);
-                let time = Time::from_seconds(t);
-                let requested = frame.comp_time
-                    + Time::from_seconds((t - frame.time.as_seconds()) * frame.layer_time_scale);
-                let other = frames.comp_at(&comp.path, requested)?;
-                let sample = other
-                    .as_ref()
-                    .and_then(|c| c.layers.iter().find(|l| l.path == layer.path))
-                    .and_then(|l| l.effects.iter().find(|fx| fx.path == instance.path));
-                let Some(sample) = sample else { continue };
-                let values = window
-                    .ids
-                    .iter()
-                    .filter_map(|id| sample.param(*id).map(|v| (*id, v.clone())))
-                    .collect::<Vec<_>>();
-                time.hash(&mut h);
-                for (id, v) in &values {
-                    id.hash(&mut h);
-                    crate::input::hash_value(v, &mut h);
+        if let Some(frames) = self.frames.as_mut() {
+            for &id in effect.integrated_parameters() {
+                if let Some(track) = frames.scalar_track(&instance.path, id, &frame) {
+                    (id, track.fingerprint()).hash(&mut h);
+                    tracks.push((id, track));
                 }
-                history.push(crate::effect::ParameterSample { time, values });
             }
-            self.time_dependent = true;
+            let params = EffectParams {
+                tracks: &tracks,
+                ..params
+            };
+            if frames.animated_controls(&instance.path, effect.parameter_ids()) {
+                let times = effect.parameter_times(&params);
+                history = frames.parameters_at(&instance, effect.parameter_ids(), &frame, &times);
+                for sample in &history {
+                    sample.time.hash(&mut h);
+                    for (id, value) in &sample.values {
+                        id.hash(&mut h);
+                        crate::input::hash_value(value, &mut h);
+                    }
+                }
+            }
+            self.time_dependent |= !history.is_empty() || !tracks.is_empty();
         }
         let mut layers = Vec::new();
         for dep in effect.layer_dependencies(&params) {
@@ -1524,6 +1554,7 @@ impl Builder<'_, '_> {
                 instance,
                 frame,
                 history: history.into_boxed_slice(),
+                tracks,
                 scene,
                 input,
                 layers,

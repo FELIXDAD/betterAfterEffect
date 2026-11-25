@@ -1,7 +1,7 @@
 // Positions and velocities are in full-resolution layer pixels and seconds.
 struct Config {
     kind: u32, padding0: u32, seed: u32, padding1: u32,
-    size: vec2f, padding2: u32, total: u32, control: array<vec4f, 145>,
+    size: vec2f, padding2: vec2u, control: array<vec4f, 145>,
     history: vec4u, trajectory: array<vec4f, 64>,
 }
 
@@ -11,7 +11,7 @@ struct Frame {
     projection: mat4x4f,
     light: vec4f,
     light_color: vec4f,
-    side_size: vec4f, batch: vec4u,
+    side_size: vec4f, batch: vec4u, emission: vec4f, lifespan: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> cfg: Config;

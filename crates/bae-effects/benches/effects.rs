@@ -152,6 +152,16 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
     let roi = effect.output_bounds(&params, image.rect);
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba16Float);
     effect_inputs(&mut target, &*effect, &params, &image);
+    if case.match_name == "CC Particle World" {
+        bae_effects::prewarm(gpu, wgpu::TextureFormat::Rgba16Float).unwrap();
+        let start = Instant::now();
+        let _ = fx.render(&mut target, &params, &image, roi).unwrap();
+        target.finish().unwrap();
+        println!(
+            "first 50k particle frame after background warm-up: {:.3} ms",
+            start.elapsed().as_secs_f64() * 1000.
+        );
+    }
     // Warm up (pipelines, pool).
     for _ in 0..3 {
         let _ = fx.render(&mut target, &params, &image, roi).unwrap();

@@ -120,7 +120,7 @@ impl Engine {
         let viewport = wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: true,
-            min_binding_size: std::num::NonZeroU64::new(240),
+            min_binding_size: std::num::NonZeroU64::new(272),
         };
         let write = buf(wgpu::BufferBindingType::Storage { read_only: false });
         let mut entries = vec![
@@ -283,7 +283,7 @@ pub(super) fn render(
         Kind::Drizzle => 2,
         _ => 3,
     };
-    let total = scene.count(kind);
+    let batches = super::emission::batches(kind, scene);
     let blend = match kind {
         Kind::World => {
             if p.popup(39) == 4 {
@@ -309,7 +309,7 @@ pub(super) fn render(
     let engine = Engine::get(&mut slot, &rt.device)?;
     let advance = engine.advance[advance].clone();
     let mut frame = surface::frame(scene, input, roi, maps);
-    let controls = scene.controls(kind, total, seed);
+    let controls = scene.controls(kind, seed);
     let config_offset = rt.uniform(&controls.bytes);
     let config = wgpu::BindGroupEntry {
         binding: 0,
@@ -330,60 +330,65 @@ pub(super) fn render(
         target.allocate_format(roi, input.pixel_scale, wgpu::TextureFormat::Rgba16Float)?;
     // Split large image grids at the device storage-binding limit. The source
     // index is global, so fragments at the bottom of a 4K layer are retained.
-    let mut start = 0;
-    loop {
-        let count = (total - start).min(max);
-        frame.u32(224, start).u32(228, count);
-        let offsets = [config_offset, rt.uniform(&frame.bytes)];
-        let size = u64::from(count.max(1)) * SPRITE_BYTES;
-        let scratch = engine
-            .scratch
-            .get_or_insert_with(|| storage(&rt.device, size));
-        if scratch.size() < size {
-            *scratch = storage(&rt.device, size);
-        }
-        let mut entries = vec![config.clone(), buffer_entry(3, scratch), viewport.clone()];
-        entries.extend_from_slice(&textures);
-        let bind = group(&rt.device, &advance.get_bind_group_layout(0), &entries);
-        dispatch(target.encoder(), &advance, &bind, count, &offsets);
-        let mut entries = vec![config.clone(), viewport.clone()];
-        entries.extend_from_slice(&textures);
-        let bind = group(
-            &rt.device,
-            &engine.draw[blend].get_bind_group_layout(0),
-            &entries,
-        );
-        let mut pass = target
-            .encoder()
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some(LABEL),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &overlay.view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if start == 0 {
-                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                        } else {
-                            wgpu::LoadOp::Load
+    let capacity = batches
+        .iter()
+        .map(|b| b.count)
+        .max()
+        .unwrap_or(0)
+        .clamp(1, max);
+    let size = u64::from(capacity) * SPRITE_BYTES;
+    let scratch = engine
+        .scratch
+        .get_or_insert_with(|| storage(&rt.device, size));
+    if scratch.size() < size {
+        *scratch = storage(&rt.device, size);
+    }
+    let mut entries = vec![config.clone(), buffer_entry(3, scratch), viewport.clone()];
+    entries.extend_from_slice(&textures);
+    let compute_bind = group(&rt.device, &advance.get_bind_group_layout(0), &entries);
+    let mut entries = vec![config, viewport];
+    entries.extend_from_slice(&textures);
+    let draw_bind = group(
+        &rt.device,
+        &engine.draw[blend].get_bind_group_layout(0),
+        &entries,
+    );
+    let mut clear = true;
+    for batch in batches {
+        for offset in (0..batch.count.max(1)).step_by(max as usize) {
+            let count = (batch.count - offset).min(max);
+            batch.write(&mut frame, offset, count);
+            let offsets = [config_offset, rt.uniform(&frame.bytes)];
+            dispatch(target.encoder(), &advance, &compute_bind, count, &offsets);
+            let mut pass = target
+                .encoder()
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(LABEL),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &overlay.view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: if clear {
+                                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                            } else {
+                                wgpu::LoadOp::Load
+                            },
+                            store: wgpu::StoreOp::Store,
                         },
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-        pass.set_pipeline(&engine.draw[blend]);
-        pass.set_bind_group(0, &bind, &offsets);
-        pass.set_vertex_buffer(0, scratch.slice(..));
-        pass.set_viewport(0., 0., roi.width() as f32, roi.height() as f32, 0., 1.);
-        pass.draw(0..4, 0..count);
-        drop(pass);
-        start += count;
-        if start == total {
-            break;
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            pass.set_pipeline(&engine.draw[blend]);
+            pass.set_bind_group(0, &draw_bind, &offsets);
+            pass.set_vertex_buffer(0, scratch.slice(..));
+            pass.set_viewport(0., 0., roi.width() as f32, roi.height() as f32, 0., 1.);
+            pass.draw(0..4, 0..count);
+            drop(pass);
+            clear = false;
         }
     }
     drop(slot);

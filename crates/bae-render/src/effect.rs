@@ -32,17 +32,96 @@ pub struct EffectScene {
     pub placement: glam::DAffine2,
 }
 
-/// An effect's bounded request for earlier values of animated controls.
-#[derive(Clone, Copy, Debug)]
-pub struct ParameterWindow {
-    /// Controls to evaluate in layer time.
-    pub ids: &'static [u32],
-    /// Inclusive range in layer seconds.
-    pub start: f64,
-    /// End of the range in layer seconds.
-    pub end: f64,
-    /// Number of evenly spaced samples, including the endpoints.
-    pub samples: u32,
+/// Nonnegative animated scalar in layer seconds. Each knot carries the integral
+/// from zero, so a seek only searches authored curve intervals.
+#[derive(Debug, Clone, Default)]
+pub struct ScalarTrack {
+    knots: Vec<ScalarKnot>,
+    fingerprint: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScalarKnot {
+    time: f64,
+    value: f64,
+    incoming: f64,
+    area: f64,
+    peak: f64,
+}
+
+impl ScalarTrack {
+    pub(crate) fn push(&mut self, time: Time, value: f64, incoming: f64) {
+        use std::hash::{Hash, Hasher};
+        let time = time.as_seconds();
+        let (value, incoming) = (value.max(0.), incoming.max(0.));
+        let area = self.knots.last().map_or(0., |p| {
+            p.area + (time - p.time) * (p.value + incoming) * 0.5
+        });
+        let peak = self
+            .knots
+            .last()
+            .map_or(value, |p| p.peak.max(value).max(incoming));
+        self.knots.push(ScalarKnot {
+            time,
+            value,
+            incoming,
+            area,
+            peak,
+        });
+        let mut h = rustc_hash::FxHasher::default();
+        (
+            self.fingerprint,
+            time.to_bits(),
+            value.to_bits(),
+            incoming.to_bits(),
+        )
+            .hash(&mut h);
+        self.fingerprint = h.finish();
+    }
+
+    pub(crate) fn fingerprint(&self) -> u64 {
+        self.fingerprint
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.knots.len()
+    }
+
+    /// Largest value reached up to t, independent of any later samples.
+    pub fn maximum_through(&self, t: f64) -> f64 {
+        let n = self.knots.partition_point(|k| k.time <= t);
+        self.at(t)
+            .0
+            .max(n.checked_sub(1).map_or(0., |i| self.knots[i].peak))
+    }
+
+    /// Authored or sampled knot times strictly inside the interval.
+    pub fn breaks(&self, start: f64, end: f64) -> impl Iterator<Item = f64> + '_ {
+        let first = self.knots.partition_point(|k| k.time <= start);
+        self.knots[first..]
+            .iter()
+            .take_while(move |k| k.time < end)
+            .map(|k| k.time)
+    }
+
+    /// Left limit at a key. Hold interpolation can jump at the exact key.
+    pub fn incoming(&self, t: f64) -> f64 {
+        self.knots
+            .binary_search_by(|k| k.time.total_cmp(&t))
+            .map_or_else(|_| self.at(t).0, |i| self.knots[i].incoming)
+    }
+
+    /// Value and cumulative integral at a nonnegative layer time.
+    pub fn at(&self, t: f64) -> (f64, f64) {
+        let i = self.knots.partition_point(|k| k.time <= t);
+        let Some(a) = i.checked_sub(1).map(|i| self.knots[i]) else {
+            return (0., 0.);
+        };
+        let dt = t - a.time;
+        let end = self.knots.get(i).map_or(a.value, |b| {
+            a.value + (b.incoming - a.value) * dt / (b.time - a.time)
+        });
+        (end, a.area + dt * (a.value + end) * 0.5)
+    }
 }
 
 /// One evaluated set of controls in layer time.
@@ -62,6 +141,8 @@ pub struct EffectParams<'a> {
     pub effect: &'a RenderEffect,
     /// Prior values of animated controls requested by this effect.
     pub history: &'a [ParameterSample],
+    /// Cumulative scalar controls requested by the effect, in layer time.
+    pub tracks: &'a [(u32, Arc<ScalarTrack>)],
     /// Scene camera and lighting for the effect.
     pub scene: Option<&'a EffectScene>,
     /// Layer time of the frame.
@@ -113,6 +194,7 @@ impl<'a> EffectParams<'a> {
         Self {
             effect,
             history: &[],
+            tracks: &[],
             scene: None,
             time: Time::ZERO,
             comp_time: Time::ZERO,
@@ -268,8 +350,23 @@ pub trait Effect: Send + Sync {
     }
 
     /// A window of parameter values needed to simulate this frame.
-    fn parameter_window(&self, _params: &EffectParams<'_>) -> Option<ParameterWindow> {
-        None
+    fn parameter_times(&self, _params: &EffectParams<'_>) -> Vec<Time> {
+        Vec::new()
+    }
+
+    /// Controls to sample at parameter_times. Empty selects all authored controls.
+    fn parameter_ids(&self) -> &'static [u32] {
+        &[]
+    }
+
+    /// Animated scalars for which the effect needs a random-access integral.
+    fn integrated_parameters(&self) -> &'static [u32] {
+        &[]
+    }
+
+    /// Whether drawing this effect needs the whole output surface at once.
+    fn full_surface(&self) -> bool {
+        false
     }
 
     /// Other layers this instance reads (scheduled before it). Default: none.

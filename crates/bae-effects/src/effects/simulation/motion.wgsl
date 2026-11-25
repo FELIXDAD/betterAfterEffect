@@ -1,26 +1,12 @@
 struct State {
-    pos: vec3f, birth: f32, vel: vec3f, variation: f32
+    pos: vec3f, birth: f32, vel: vec3f, variation: f32, touched_floor: bool
 }
 
-fn life() -> f32 {
-    switch cfg.kind {
-        case WORLD: {
-            return max(.001, f(5));
-        }
-        case SYSTEMS, DRIZZLE: {
-            return max(.001, f(2));
-        }
-        default: {
-            return 0.;
-        }
-    }
-}
-
-fn spawn(id: u32, generation: i32, birth: f32) -> State {
-    let key = hash(id + u32(generation) * 0x9e3779b9u);
+fn spawn(id: u32, birth: f32) -> State {
+    let key = hash(id);
     let q = noise3(key) * 2.-1.;
     let r = noise3(key + 3u) * 2.-1.;
-    var s = State(vec3f(q.xy * cfg.size, 0.), birth, vec3f(0.), random(key + 6u));
+    var s = State(vec3f(q.xy * cfg.size, 0.), birth, vec3f(0.), random(key + 6u), false);
     let width = cfg.size.x;
     switch cfg.kind {
         case WORLD, SYSTEMS: {
@@ -121,26 +107,48 @@ fn integrate(s: State, dt: f32) -> State {
     return next;
 }
 
-fn birth_cycle(id: u32, t: f32, l: f32) -> i32 {
-    return i32(floor(t / l-(f32(id) + .5) / max(1., f32(cfg.total))));
+// Invert the integral of r(t) = r0 + slope*t within this birth interval.
+fn birth_offset(index: u32) -> f32 {
+    let n = frame.emission.y + f32(index);
+    let r = frame.emission.z;
+    return 2. * n / max(1e-12, r + sqrt(max(0., r*r + 2.*frame.emission.w*n)));
 }
 
-fn born(id: u32, cycle: i32, l: f32) -> f32 {
-    return (f32(cycle) + (f32(id) + .5) / max(1., f32(cfg.total))) * l;
-}
-
-fn motion_age(t: f32, birth: f32) -> f32 {
-    let hold = select(0., f(91) * .01 * life(), cfg.kind == WORLD);
-    return max(0., t - birth - hold);
-}
-
-fn at_time(id: u32, t: f32) -> State {
-    let l = life();
-    var cycle = 0;
-    var birth = 0.;
-    if l>0. {
-        cycle = birth_cycle(id, t, l);
-        birth = born(id, cycle, l);
+fn at_age(id: u32, birth: f32, age: f32) -> State {
+    var s = spawn(id,birth);
+    let action = u32(f(66));
+    let collide = cfg.kind == WORLD && action > 1u;
+    let turbulent = (cfg.kind == WORLD && f(15)>=13.) || (cfg.kind == SYSTEMS && f(9)==2.);
+    if !collide && !turbulent { return integrate(s,age); }
+    let phase = noise3(hash(id))*TAU;
+    let floor_y = cfg.size.y * .5 + f(3)*cfg.size.x;
+    let bounce = clamp((f(67)+(s.variation-.5)*f(68))*.01,0.,2.);
+    let scatter = (s.variation-.5)*f(69)*.01;
+    // Collision and noise forces use a fixed grid anchored at birth.
+    for (var step = 0u; f32(step)/60. < age; step++) {
+        let dt = min(1./60., age-f32(step)/60.);
+        if turbulent {
+            let strength = select(f(15),f(19),cfg.kind==WORLD)*cfg.size.x*0.07;
+            let field = sin(s.pos.yzx * (8./cfg.size.x) + phase + vec3f(f32(step)/30.));
+            s.vel += field*strength*dt;
+        }
+        var next = integrate(s,dt);
+        if collide && next.pos.y >= floor_y && next.vel.y >= 0. {
+            let hit = dt * clamp((floor_y-s.pos.y)/max(1e-6,next.pos.y-s.pos.y),0.,1.);
+            var contact = integrate(s,hit);
+            contact.pos.y = floor_y;
+            contact.touched_floor = true;
+            if action == 3u { contact.vel = vec3f(0.); return contact; }
+            let impact = max(0.,contact.vel.y);
+            contact.vel.y = select(0.,-impact*bounce,action == 4u);
+            contact.vel.x += select(0.,impact*scatter,action == 4u);
+            next = integrate(contact,dt-hit);
+            if next.pos.y >= floor_y {
+                next.pos.y = floor_y;
+                next.vel.y = min(0.,next.vel.y);
+            }
+        }
+        s = next;
     }
-    return integrate(spawn(id, cycle, birth), motion_age(t,birth));
+    return s;
 }

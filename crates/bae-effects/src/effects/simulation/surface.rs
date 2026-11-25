@@ -13,7 +13,7 @@ pub(super) fn frame(
     maps: &[Option<GpuImage>],
 ) -> UniformWriter {
     let scale = scene.p.p.scale as f32;
-    let mut u = UniformWriter::with_size(240);
+    let mut u = UniformWriter::with_size(272);
     u.f32s(0, &[scene.p.p.time.as_seconds().max(0.) as f32, scale]);
     u.f32s(
         16,
