@@ -20,6 +20,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
+    // Composition viewer: an effect or the text renderer still warming up.
+    ("Preparing…", "正在准备…"),
     ("Time Stretch", "时间伸缩"),
     // Panel-scoped zoom shortcuts (timeline: = / -, viewer: . / , / ?)
     ("Zoom In Time", "放大时间"),

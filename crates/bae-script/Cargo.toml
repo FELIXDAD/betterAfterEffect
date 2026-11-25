@@ -14,6 +14,7 @@ workspace = true
 # No GPU, window or platform dependencies (ARCHITECTURE §2 rule 2): scripts run in
 # the app, in `bae --headless` and through MCP alike.
 [dependencies]
+bae-anim.workspace = true
 bae-app.workspace = true
 bae-model.workspace = true
 bae-motion.workspace = true

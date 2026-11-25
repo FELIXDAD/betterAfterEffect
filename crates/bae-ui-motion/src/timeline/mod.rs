@@ -21,6 +21,7 @@ mod rows;
 mod switches;
 #[cfg(test)]
 mod tests;
+mod waveform;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -41,7 +42,7 @@ use crate::common::{self, EvalCache};
 use crate::graph::GraphEditor;
 use crate::project::ItemDrag;
 use crate::props::{self, Node};
-use crate::session::{Session, SharedSession};
+use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
@@ -141,6 +142,7 @@ impl Cols {
 #[derive(Clone, Debug)]
 enum RowKind {
     Layer,
+    Waveform,
     Group {
         id: String,
         label: String,
@@ -244,6 +246,7 @@ struct TimelineLayers {
 pub struct TimelinePanel {
     eval: EvalCache,
     pub(crate) expanded: HashSet<String>,
+    waveforms: waveform::Waveforms,
     /// 0 = whole comp, 1 = a few frames.
     zoom: f32,
     /// Start of the visible range when zoomed (comp time).
@@ -480,6 +483,15 @@ impl TimelinePanel {
                 depth: 0,
             });
             if let Some(r) = s.reveal.get(layer) {
+                if matches!(r, Reveal::Attrs(attrs) if attrs.iter().any(|a| a == "audio:waveform"))
+                    && bae_media::audio::layer_file(stage, layer).is_some()
+                {
+                    out.push(Row {
+                        kind: RowKind::Waveform,
+                        layer: layer.clone(),
+                        depth: 1,
+                    });
+                }
                 for n in props::revealed(stage, layer, r) {
                     if let Node::Prop { path, attr, label } = n {
                         push_prop(&path, &attr, &label, layer, 1, stage, &mut out);
@@ -852,6 +864,7 @@ impl Panel for TimelinePanel {
 fn row_key(row: &Row) -> String {
     match &row.kind {
         RowKind::Layer => "layer".into(),
+        RowKind::Waveform => "waveform".into(),
         RowKind::Group { id, .. } => id.clone(),
         RowKind::Prop { path, attr, .. } => format!("{path}.{attr}"),
         RowKind::Expression {

@@ -365,6 +365,16 @@ impl TimelinePanel {
                     self.layer_markers_ui(ui, cx, session, info, axis, layer, rect);
                 }
             }
+            RowKind::Waveform => {
+                ui.painter().text(
+                    pos2(l + cols.name + 14.0, cy),
+                    Align2::LEFT_CENTER,
+                    tr("Waveform"),
+                    theme::body(),
+                    color::TEXT,
+                );
+                self.waveforms.draw(ui, stage, layer, axis, graph);
+            }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.name + row.depth as f32 * 14.0;
                 let tw = Rect::from_center_size(pos2(x + 6.0, cy), vec2(12.0, 12.0));

@@ -765,8 +765,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTwirlAnchorPointAddState` | `motion.reveal` | `{"what":"transform:anchor_point","add":true}` | Shift+A | Shift+A |  | B | ✅ |
 | `CompTwirlAnchorPointAddStateNewKF` | `motion.toggle_key` | `{"attr":"transform:anchor_point"}` | Alt+Shift+A | Opt+Shift+A |  | B | ✅ |
 | `CompTwirlAnchorPointNewKF` | `motion.toggle_key` | `{"attr":"transform:anchor_point","only":true}` |  | Opt+A |  | B | ☐ |
-| `CompTwirlAudio` | `motion.reveal` | `{"what":"audio:levels","add":false}` | L | L |  | B | ☐ |
-| `CompTwirlAudioAddState` | `motion.reveal` | `{"what":"audio:levels","add":true}` | Shift+L | Shift+L |  | B | ☐ |
+| `CompTwirlAudio` | `motion.reveal` | `{"what":"audio:levels","add":false}` | L | L |  | B | ✅ |
+| `CompTwirlAudioAddState` | `motion.reveal` | `{"what":"audio:levels","add":true}` | Shift+L | Shift+L |  | B | ✅ |
 | `CompTwirlAudioAddStateNewKF` | `motion.toggle_key` | `{"attr":"audio:levels"}` | Alt+Shift+L | Opt+Shift+L |  | B | ☐ |
 | `CompTwirlAudioNewKF` | `motion.toggle_key` | `{"attr":"audio:levels","only":true}` |  | Opt+L |  | B | ☐ |
 | `CompTwirlOpacity` | `motion.reveal` | `{"what":"transform:opacity","add":false}` | T | T |  | B | ✅ |

@@ -322,6 +322,16 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         r#"{"what":"animated","add":false}"#,
         "Reveal Animated Properties",
     ),
+    (
+        ids::REVEAL,
+        r#"{"what":"audio:levels","add":false}"#,
+        "Reveal Audio Levels",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"audio:levels","add":true}"#,
+        "Add Audio Levels to Revealed Properties",
+    ),
 ];
 
 /// Layer kinds by name, for both the UI action and the model command it runs.
@@ -742,6 +752,30 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             common::new_layer(cx, session, kind, extra);
             return true;
         }
+        "motion.effect.open_color_file" => {
+            use bae_ui::files::{OpenRequest, SharedFilePicker};
+            let cdl = inv.params["cdl"].as_bool() == Some(true);
+            let extensions = if cdl {
+                vec!["cc", "ccc", "cdl"]
+            } else {
+                vec!["cube", "spi1d", "spi3d"]
+            };
+            let request = OpenRequest {
+                title: bae_ui::tr("Open...").into(),
+                filters: vec![(
+                    if cdl { "ASC CDL" } else { "LUT" }.into(),
+                    extensions.into_iter().map(str::to_owned).collect(),
+                )],
+                ..Default::default()
+            };
+            if let Some(path) = SharedFilePicker::open(cx.resources, &request).first() {
+                match bae_effects::embed_color_file(path,cdl){
+                    Ok(bytes)=>cx.invoke_with("attr.set_at",json!({"path":inv.params["path"],"attr":bae_model::effect::param_attr(if cdl{6}else{5}),"time":inv.params["time"],"value":bae_model::Value::Bytes(bytes)})),
+                    Err(error)=>crate::dialogs::alert(cx,"OCIO",error.to_string()),
+                }
+            }
+            return true;
+        }
         ids::IMPORT_FILE => {
             crate::import::import_file(cx, session);
             return true;
@@ -1136,6 +1170,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 query::comp_layers(stage, &info.path)
             } else {
                 layers.clone()
+            };
+            let what = if what == "audio:levels" && !add {
+                let previous = s.last_l.take();
+                if previous.is_some_and(|at| at.elapsed() < Duration::from_millis(450)) {
+                    "audio:waveform"
+                } else {
+                    s.last_l = Some(Instant::now());
+                    what
+                }
+            } else {
+                what
             };
             let reveal = if what == "animated" {
                 let double = s
@@ -1644,7 +1689,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Out Point to Current Time", "将出点移到当前时间"),
     ("Set Work Area Start", "将工作区域开头设置为当前时间"),
     ("Set Work Area End", "将工作区域结尾设置为当前时间"),
-    ("Trim Comp to Work Area", "将合成修剪至工作区域"),
+    ("Trim Comp to Work Area", "将合成裁剪到工作区"),
     // Layer > Transform (AE 26's Chinese menu).
     ("Flip Horizontal", "水平翻转"),
     ("Flip Vertical", "垂直翻转"),

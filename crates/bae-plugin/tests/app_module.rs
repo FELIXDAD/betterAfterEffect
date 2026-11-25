@@ -19,13 +19,20 @@ fn grid_plugin_runs_both_exports_in_the_callers_transaction() {
     use std::sync::Arc;
 
     #[derive(Debug)]
-    struct View(PrimPath, PrimPath);
+    struct View(PrimPath, PrimPath, std::sync::Mutex<Time>);
     impl ScriptView for View {
+        fn time(&self, _: &PrimPath) -> Time {
+            *self.2.lock().unwrap()
+        }
+        fn set_time(&self, _: &bae_motion::query::CompInfo, time: Time) {
+            *self.2.lock().unwrap() = time;
+        }
+
         fn selection(&self) -> ScriptSelection {
             ScriptSelection {
                 comp: Some(self.0.clone()),
                 layers: vec![self.1.clone()],
-                time: Time::ZERO,
+                time: self.time(&self.0),
             }
         }
     }
@@ -44,7 +51,10 @@ fn grid_plugin_runs_both_exports_in_the_callers_transaction() {
     let comp = PrimPath::new(paths[0]["item"].as_str().unwrap()).unwrap();
     let layer = PrimPath::new(paths[1]["layer"].as_str().unwrap()).unwrap();
     let mut builder = AppBuilder::new();
-    builder.insert_resource::<Arc<dyn ScriptView>>(Arc::new(View(comp, layer)));
+    builder.add_module(bae_motion::MotionModule);
+    let view = Arc::new(View(comp.clone(), layer, Default::default()));
+    builder.insert_resource::<Arc<dyn ScriptView>>(view.clone());
+    builder.add_module(bae_script::ScriptModule);
     builder.add_module(PluginModule);
     let app = builder.build();
     let runtime = app.resource::<PluginRuntime>().unwrap();
@@ -55,6 +65,73 @@ fn grid_plugin_runs_both_exports_in_the_callers_transaction() {
     let commands = app.get_registry::<dyn DynCommand>().unwrap();
     let command = "plugin.com.example.align-to-grid.align-to-grid";
     let automation = "script.com.example.align-to-grid.report-off-grid";
+    let run = commands.get("script.run").unwrap();
+    let (report, _) = stage
+        .transact(&author, "Playhead", |tx| {
+            run.run_json(
+                tx,
+                json!({
+                    "source": "app.project.activeItem.time = 0.405; app.project.activeItem.time"
+                }),
+            )
+        })
+        .unwrap();
+    assert!(report["error"].is_null(), "{report}");
+    assert_eq!(view.time(&comp), Time::from_seconds(0.4));
+
+    let package = bae_plugin::MemorySource::new("permissions")
+        .with_file("bae-plugin.toml", r#"
+schema_version = 1
+[plugin]
+id = "org.test.permissions"
+version = "1.0.0"
+api = "0.1"
+name = "Permissions"
+[permissions]
+project = "write"
+[script]
+entry = "main.js"
+[[automation]]
+id = "invoke"
+name = "Invoke"
+entry = "invoke"
+"#)
+        .with_file("main.js", "import { bae } from 'bae'; export function invoke({ id, params }) { return bae.commands.invoke(id, params); }");
+    let installed = runtime.load(&package, Scope::User).unwrap();
+    // Resolve a command published after installation through the application registry.
+    let registry = CommandRegistry::with_builtins();
+    commands
+        .register_arc(
+            Owner::Core,
+            "test.rename",
+            registry.get("attr.set").unwrap().clone(),
+        )
+        .unwrap();
+    let dispatch = commands.get("script.org.test.permissions.invoke").unwrap();
+    let call = |id: &str, params| serde_json::json!({"id": id, "params": params});
+    for id in ["item.import", "asset.set_file"] {
+        let error = stage
+            .transact(&author, "Permissions", |tx| {
+                dispatch.run_json(tx, call(id, json!({})))
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("file handle"), "{error}");
+    }
+    stage
+        .transact(&author, "Rename comp", |tx| {
+            dispatch.run_json(
+                tx,
+                call(
+                    "test.rename",
+                    json!({
+                        "path": comp, "attr": "name", "value":{"type":"string","value":"Renamed"}
+                    }),
+                ),
+            )
+        })
+        .unwrap();
+    runtime.unload(&installed).unwrap();
+
     let snapshot = commands.snapshot();
     assert_eq!(
         snapshot.entry(command).unwrap().owner(),
@@ -77,6 +154,27 @@ fn grid_plugin_runs_both_exports_in_the_callers_transaction() {
     assert_eq!(invoke(&mut stage, automation), json!({"layers":[]}));
     stage.undo(&author).unwrap();
     assert_eq!(invoke(&mut stage, automation), json!({"layers":["Guide"]}));
+    for (example, entry, expected) in [
+        (
+            "composition-report",
+            "script.com.example.composition-report.summary",
+            json!({"name":"Renamed","layers":1,"duration":2,"frameRate":25}),
+        ),
+        (
+            "fade-selected",
+            "plugin.com.example.fade-selected.fade",
+            json!({"animated":1}),
+        ),
+    ] {
+        let source = DirSource::new(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../plugins/examples")
+                .join(example),
+        );
+        let installed = runtime.load(&source, Scope::User).unwrap();
+        assert_eq!(invoke(&mut stage, entry), expected);
+        runtime.unload(&installed).unwrap();
+    }
     runtime.unload(&id).unwrap();
     assert!(commands.get(command).is_none() && commands.get(automation).is_none());
 }

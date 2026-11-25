@@ -191,6 +191,8 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// View ▸ rulers, guides, grid and safe areas (the viewer's options).
+    pub(crate) view_options: crate::viewer::guides::ViewOptions,
     /// Each comp's 3D views (View ▸ Switch 3D View).
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
@@ -212,8 +214,12 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// When L was last pressed to reveal the audio waveform on a second press.
+    pub(crate) last_l: Option<Instant>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The footage item the Footage panel shows.
+    pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
@@ -307,11 +313,7 @@ impl Session {
 
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
-        let last = info.duration - info.frame_duration();
-        let t = info
-            .frame_rate
-            .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
-        self.times.insert(info.path.clone(), t);
+        self.times.insert(info.path.clone(), info.playhead_time(t));
     }
 
     /// Make `comp` the active comp (opening a timeline tab for it).
