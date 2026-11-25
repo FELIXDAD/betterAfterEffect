@@ -419,6 +419,18 @@ impl TimelinePanel {
             }
             f += step;
         }
+        if let Some((path, revision, spans)) = &session.lock().cached_preview
+            && path == &info.path
+            && *revision == cx.stage.revision()
+        {
+            for span in spans {
+                p.hline(
+                    axis.x(span.start)..=axis.x(span.end),
+                    ruler.bottom() - 1.5,
+                    Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
+                );
+            }
+        }
         // CTI handle.
         let x = axis.x(now);
         p.add(Shape::convex_polygon(

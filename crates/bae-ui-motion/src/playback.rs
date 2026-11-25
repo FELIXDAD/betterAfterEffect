@@ -16,6 +16,7 @@ use bae_gpu::{
     wgpu,
 };
 use bae_model::{FrameRate, PrimPath, Stage, Time, TimeRange};
+use bae_render::cache::{FrameCache, FrameKey};
 use bae_render::{AnimEvaluator, IRect, RenderPurpose};
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
@@ -31,6 +32,23 @@ struct SceneKey {
     effects: Option<u64>,
 }
 
+impl SceneKey {
+    fn frame(&self, time: Time) -> FrameKey {
+        FrameKey {
+            comp: self.path.clone(),
+            time,
+            request: u64::from(self.resolution),
+        }
+    }
+
+    fn same_view(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.resolution == other.resolution
+            && self.sources == other.sources
+            && self.effects == other.effects
+    }
+}
+
 struct Scene {
     key: SceneKey,
     snapshot: PreviewSnapshot,
@@ -44,6 +62,7 @@ struct Slot {
     rect: IRect,
     time: Time,
     errors: Vec<AttrError>,
+    bytes: u64,
 }
 
 impl Drop for Slot {
@@ -70,8 +89,54 @@ struct Demand {
     repaint: egui::Context,
 }
 
+struct DisplayCache {
+    frames: FrameCache<Arc<Slot>>,
+    scene: Option<SceneKey>,
+    revision: u64,
+    dynamic: bool,
+}
+
+impl Default for DisplayCache {
+    fn default() -> Self {
+        Self {
+            frames: FrameCache::new(1024 << 20),
+            scene: None,
+            revision: 1,
+            dynamic: false,
+        }
+    }
+}
+
+impl DisplayCache {
+    fn sync(&mut self, stage: &Stage, key: &SceneKey, budget: u64) {
+        if self.frames.stats().budget != budget {
+            self.frames.set_budget(budget);
+            self.revision += 1;
+        }
+        if self.scene.as_ref() == Some(key) {
+            return;
+        }
+        let previous = self.scene.replace(key.clone());
+        if !self.dynamic
+            && let Some(old) = previous
+            && old.same_view(key)
+            && let Some(changes) = stage.changes_since(old.revision)
+        {
+            for event in changes {
+                self.frames.invalidate(event);
+            }
+        } else {
+            self.frames.clear();
+        }
+        self.dynamic = false;
+        let _ = stage.changes_since(stage.revision());
+        self.revision += 1;
+    }
+}
+
 #[derive(Default)]
 struct Mailbox {
+    cache: DisplayCache,
     demand: Option<Demand>,
     ready: VecDeque<Arc<Slot>>,
     queued: Vec<Time>,
@@ -92,6 +157,7 @@ pub(super) struct PlaybackPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
     running: bool,
+    ranges_revision: u64,
 }
 
 impl PlaybackPreview {
@@ -102,7 +168,35 @@ impl PlaybackPreview {
             gpu,
             registry,
             running: false,
+            ranges_revision: 0,
         }
+    }
+
+    pub(super) fn publish_ranges(
+        &mut self,
+        session: &crate::session::SharedSession,
+        rate: FrameRate,
+    ) {
+        let state = self.shared.state.lock().unwrap();
+        if self.ranges_revision == state.cache.revision {
+            return;
+        }
+        self.ranges_revision = state.cache.revision;
+        let Some(scene) = &state.cache.scene else {
+            return;
+        };
+        let mut spans: Vec<TimeRange> = Vec::new();
+        for time in state.cache.frames.cached_times(&scene.path) {
+            let end = rate.frame_to_time(rate.time_to_frame(time) + 1);
+            if let Some(last) = spans.last_mut()
+                && last.end == time
+            {
+                last.end = end;
+            } else {
+                spans.push(TimeRange::new(time, end));
+            }
+        }
+        session.lock().cached_preview = Some((scene.path.clone(), scene.revision, spans));
     }
 
     pub(super) fn stop(&mut self) {
@@ -151,6 +245,15 @@ impl PlaybackPreview {
             effects: effects.map(|e| e.0.generation()),
         };
         let mut state = self.shared.state.lock().unwrap();
+        let budget_mib = resources
+            .get::<Arc<bae_prefs::PrefsStore>>()
+            .map_or(1024, |store| {
+                store.current().int(bae_prefs::keys::PREVIEW_CACHE_MIB)
+            });
+        state
+            .cache
+            .sync(stage, &key, (budget_mib.max(0) as u64) << 20);
+        let frame_key = key.frame(time);
         let replaced = state.demand.as_ref().is_none_or(|d| d.scene.key != key);
         if replaced {
             state.epoch += 1;
@@ -211,6 +314,13 @@ impl PlaybackPreview {
             self.shared.changed.notify_one();
         }
         if let Some(slot) = state
+            .cache
+            .frames
+            .get(&frame_key)
+            .filter(|s| s.image().is_some())
+        {
+            self.shown = Some(slot.clone());
+        } else if let Some(slot) = state
             .ready
             .iter()
             .filter(|s| {
@@ -251,6 +361,17 @@ struct Job {
     time: Time,
     rc: bae_render::RenderComp,
     errors: Vec<AttrError>,
+    /// The project has expressions beyond time arithmetic (or linked
+    /// projects): cached frames cannot be invalidated selectively.
+    dynamic: bool,
+}
+
+/// Recognizes only the numeric/time subset needed for dependency tracking.
+fn time_arithmetic(source: &str) -> bool {
+    source.split("time").all(|part| {
+        part.bytes()
+            .all(|b| b.is_ascii_digit() || b.is_ascii_whitespace() || b"+-*/%().".contains(&b))
+    })
 }
 
 /// The pipeline's first stage: evaluates and converts frames ahead.
@@ -259,12 +380,28 @@ struct Evaluate {
     stage: Arc<Stage>,
     eval: Evaluator,
     anim: AnimEvaluator,
+    dynamic: bool,
 }
 
 impl Evaluate {
     fn new(scene: Arc<Scene>) -> Result<Self, String> {
+        let stage = scene.snapshot.restore()?;
+        // Pure arithmetic over time has no project reads. General JavaScript
+        // can look up other compositions or sample outside this frame.
+        let dynamic = stage.sublayers().any(|l| {
+            l.paths().any(|p| {
+                l.spec(p).is_some_and(|s| {
+                    s.attrs.values().any(|a| {
+                        a.expression
+                            .as_ref()
+                            .is_some_and(|e| e.enabled && !time_arithmetic(&e.source))
+                    })
+                })
+            })
+        }) || stage.attached_projects().next().is_some();
         Ok(Self {
-            stage: Arc::new(scene.snapshot.restore()?),
+            dynamic,
+            stage: Arc::new(stage),
             eval: Evaluator::new(),
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
             scene,
@@ -287,6 +424,7 @@ impl Evaluate {
             time,
             rc,
             errors: comp.errors,
+            dynamic: self.dynamic,
         })
     }
 }
@@ -328,7 +466,8 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                 if let Some(d) = &state.demand
                     && state.queued.len() < DEPTH
                     && let Some(&time) = d.times.iter().find(|t| {
-                        !state.ready.iter().any(|s| s.time == **t)
+                        !state.cache.frames.contains(&d.scene.key.frame(**t))
+                            && !state.ready.iter().any(|s| s.time == **t)
                             && !state.queued.contains(t)
                             && !state.failed.contains(t)
                     })
@@ -418,22 +557,34 @@ fn render_worker(
             .map_err(|e| e.to_string())
             // Not an interactive thread: it waits for the warm-up instead.
             .and_then(|r| r.ok_or_else(|| "incomplete frame".to_owned()))
-            .and_then(|(texture, rect)| {
+            .and_then(|(texture, rect, temporal)| {
                 let slot = Arc::new(Slot {
                     registry: registry.clone(),
                     id: registry.create("playback frame"),
                     rect,
                     time: job.time,
                     errors: job.errors,
+                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
                 });
                 registry
                     .publish(slot.id, &texture, wgpu::FilterMode::Linear)
                     .map_err(|e| e.to_string())?;
-                Ok(slot)
+                Ok((slot, temporal))
             });
         let (epoch, time) = (job.epoch, job.time);
+        // What the frame depends on (selective invalidation), unless it reads
+        // other times, nested comps or motion-blur samples.
+        let deps = job.rc.dependencies();
+        let dynamic_rc = job.rc.motion_blur.is_some()
+            || job
+                .rc
+                .layers
+                .iter()
+                .any(|l| matches!(l.content, bae_render::LayerContent::Comp(_)));
+        let scene = job.scene.clone();
         match result {
-            Ok(slot) => {
+            Ok((slot, temporal)) => {
+                let dynamic = job.dynamic || temporal || dynamic_rc;
                 in_flight = true;
                 let shared = shared.clone();
                 gpu.queue().on_submitted_work_done(move || {
@@ -442,6 +593,18 @@ fn render_worker(
                         return;
                     }
                     state.queued.retain(|t| *t != time);
+                    let cache = &mut state.cache;
+                    if slot.bytes <= cache.frames.stats().budget {
+                        cache.frames.insert(
+                            scene.key.frame(time),
+                            slot.clone(),
+                            slot.bytes,
+                            deps,
+                            0,
+                        );
+                        cache.dynamic |= dynamic;
+                        cache.revision += 1;
+                    }
                     state.ready.push_back(slot);
                     while state.ready.len() > DEPTH {
                         state.ready.pop_front();

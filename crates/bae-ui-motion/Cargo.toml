@@ -38,6 +38,7 @@ tracing.workspace = true
 flate2.workspace = true
 
 [dev-dependencies]
+egui-wgpu.workspace = true
 bae-vector = { workspace = true, features = ["render"] }
 # Render queue tests write TIFF too (bae-media encoders).
 bae-render = { workspace = true, features = ["media"] }

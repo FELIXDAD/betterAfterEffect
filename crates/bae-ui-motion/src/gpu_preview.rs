@@ -75,7 +75,7 @@ impl RenderEngine {
         stage: &Stage,
         rc: &bae_render::RenderComp,
         resolution: u32,
-    ) -> Result<Option<(wgpu::Texture, IRect)>, bae_render::RenderError> {
+    ) -> Result<Option<(wgpu::Texture, IRect, bool)>, bae_render::RenderError> {
         let request = RenderRequest {
             resolution: match resolution {
                 0 | 1 => Resolution::Full,
@@ -87,9 +87,12 @@ impl RenderEngine {
             purpose: RenderPurpose::Preview,
             ..RenderRequest::full()
         };
-        let mut frames = bae_render::eval::EvaluatorFrames {
-            stage,
-            evaluator: &mut self.anim,
+        let mut frames = SampledFrames {
+            sampled: false,
+            inner: bae_render::eval::EvaluatorFrames {
+                stage,
+                evaluator: &mut self.anim,
+            },
         };
         // The frame and its 8-bit conversion in one GPU submission.
         let (frame, texture) = self.renderer.render_frame_output(
@@ -101,7 +104,25 @@ impl RenderEngine {
         if frame.incomplete {
             return Ok(None);
         }
-        Ok(Some((texture, frame.image.rect)))
+        Ok(Some((texture, frame.image.rect, frames.sampled)))
+    }
+}
+
+/// Other frames the render sampled (time effects): such frames depend on
+/// more than their own time.
+struct SampledFrames<'a> {
+    inner: bae_render::eval::EvaluatorFrames<'a>,
+    sampled: bool,
+}
+
+impl bae_render::graph::CompFrames for SampledFrames<'_> {
+    fn comp_at(
+        &mut self,
+        path: &bae_model::PrimPath,
+        t: Time,
+    ) -> Result<Option<bae_render::RenderComp>, bae_render::RenderError> {
+        self.sampled = true;
+        self.inner.comp_at(path, t)
     }
 }
 
@@ -120,8 +141,6 @@ pub(crate) struct GpuPreview {
     /// pixel read: (texel, value).
     texture: Option<wgpu::Texture>,
     sampled: Option<((u32, u32, u64), [u8; 4])>,
-    /// Text layers have a source provider (otherwise the viewer draws them).
-    pub has_text: bool,
     /// The newest frame was incomplete (something still warming up): the
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
@@ -153,7 +172,6 @@ impl GpuPreview {
             rect: None,
             texture: None,
             sampled: None,
-            has_text: false,
             preparing: false,
         }
     }
@@ -180,7 +198,6 @@ impl GpuPreview {
         for entry in registry.snapshot().iter() {
             providers.register(entry.item().clone());
         }
-        self.has_text = providers.get(bae_render::anim::TEXT_PROVIDER).is_some();
         self.last = None;
     }
 
@@ -238,7 +255,7 @@ impl GpuPreview {
             // frame stays, and the frame is rendered again on the redraw the
             // warm-up requests when it is ready.
             self.preparing = rendered.is_none();
-            let Some((texture, rect)) = rendered else {
+            let Some((texture, rect, _)) = rendered else {
                 return Some(PreviewImage {
                     handle: self.registry.display_handle(self.id)?,
                     rect: self.rect?,
