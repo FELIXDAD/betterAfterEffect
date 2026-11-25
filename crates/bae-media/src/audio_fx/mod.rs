@@ -12,7 +12,14 @@ struct Definition {
     reverse: bool,
     create: fn() -> Box<dyn Processor>,
 }
-const DEFINITIONS: &[Definition] = &[];
+mod filter;
+mod svf;
+const DEFINITIONS: &[Definition] = &[Definition {
+    name: "ADBE Aud HiLo",
+    defaults: &[1.0, 2000.0, 0.0, 100.0],
+    reverse: false,
+    create: || Box::new(filter::Main::default()),
+}];
 
 fn number(value: &Value) -> Option<f64> {
     value
