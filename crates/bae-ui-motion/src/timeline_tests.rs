@@ -2300,3 +2300,102 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     h.undo();
     assert!(request(&h).motion_blur.is_none());
 }
+
+#[test]
+fn locked_switches_preserve_selection_and_video_solo_follows_the_eye() {
+    let mut h = H::new();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let asset = path(
+        &h.run(
+            "item.import",
+            json!({"files":[{"path":file.path(), "attrs":{
+                "kind": Value::Enum("footage".into()), "has_audio": Value::Bool(true),
+                "duration": Value::Time(Time::from_seconds(2.0))
+            }}]}),
+        )["items"][0],
+    );
+    let mut make_layer = |name| {
+        path(
+            &h.run(
+                "layer.create",
+                json!({
+                    "kind":"footage", "comp":h.comp, "source":asset, "name":name
+                }),
+            )["path"],
+        )
+    };
+    let other = make_layer("Other");
+    let locked = make_layer("Locked");
+    h.run(
+        "attr.set",
+        json!({"path":locked,"attr":"locked","value":Value::Bool(true)}),
+    );
+    let mut tl = h.bars();
+    let y = |path: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(p, _)| p == path)
+            .unwrap()
+            .1
+            .center()
+            .y
+    };
+    let (y1, y2) = (y(&locked), y(&other));
+    let switches = tl.last_axis.unwrap().left - 2.0 - 120.0 - 134.0;
+    let point = |col: usize, y| pos2(5.0 + 15.0 * (col as f32 + 0.5), y);
+    let click = |h: &mut H, tl: &mut TimelinePanel, pos| {
+        let request = h.click(tl, pos, Modifiers::NONE);
+        h.apply(&request);
+        assert!(h.stage.is_layer_locked(&locked));
+        assert!(!h.session().lock().selected_layers.contains(&locked));
+    };
+    let check = |h: &H, shown: [bool; 2], audio_enabled: bool| {
+        let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, Time::ZERO).unwrap();
+        assert_eq!(
+            [
+                comp.layer(&locked).unwrap().visible,
+                comp.layer(&other).unwrap().visible
+            ],
+            shown
+        );
+        let audio = h
+            .stage
+            .prim(&locked)
+            .unwrap()
+            .value("audio_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        assert_eq!(audio, audio_enabled);
+    };
+    click(&mut h, &mut tl, pos2(switches - 60.0, y1)); // name stays unselected
+    check(&h, [true, true], true);
+    click(&mut h, &mut tl, point(2, y1)); // solo locked layer
+    check(&h, [true, false], true);
+    click(&mut h, &mut tl, point(0, y1)); // close its eye
+    check(&h, [false, true], true);
+    click(&mut h, &mut tl, point(1, y1)); // mute its audio
+    check(&h, [false, true], false);
+    click(&mut h, &mut tl, point(0, y1));
+    check(&h, [true, false], false);
+    click(&mut h, &mut tl, point(1, y1));
+    click(&mut h, &mut tl, point(2, y1));
+    click(&mut h, &mut tl, point(2, y2)); // now solo the unlocked layer
+    check(&h, [false, true], true);
+    for (col, attr) in [(0, "shy"), (5, "motion_blur")] {
+        for expected in [true, false] {
+            click(
+                &mut h,
+                &mut tl,
+                pos2(switches + 15.0 * (col as f32 + 0.5), y1),
+            );
+            assert_eq!(
+                h.stage
+                    .prim(&locked)
+                    .unwrap()
+                    .value(attr)
+                    .and_then(Value::as_bool),
+                Some(expected)
+            );
+        }
+    }
+}
