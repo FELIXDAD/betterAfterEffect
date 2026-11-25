@@ -229,7 +229,8 @@ impl TransformDrag {
                 let lock = shift && matches!(self.kind, Kind::Move { .. });
                 let axis = |mut d: DVec2| {
                     if lock {
-                        if (p - start).x.abs() > (p - start).y.abs() {
+                        // AE 26: |dx| ≥ |dy| locks horizontally (R1).
+                        if (p - start).x.abs() >= (p - start).y.abs() {
                             d.y = 0.0;
                         } else {
                             d.x = 0.0;
@@ -268,7 +269,20 @@ impl TransformDrag {
                 let d = DVec2::new(hp.x - a.x, hp.y - a.y);
                 let s0 = e0.start.scale;
                 let (mut rx, mut ry) = (1.0, 1.0);
-                if shift {
+                if shift && ax && ay {
+                    // A corner keeps the proportions with the larger of the two
+                    // ratios (AE 26: max(|sx|, |sy|), R1 transform-tools.md §1).
+                    let ratio = |q: f64, d: f64, s: f64| {
+                        if d.abs() > 1e-9 && s.abs() > 1e-9 {
+                            100.0 * q / d / s
+                        } else {
+                            1.0
+                        }
+                    };
+                    let (sx, sy) = (ratio(q.x, d.x, s0.x), ratio(q.y, d.y, s0.y));
+                    let m = if sx.abs() >= sy.abs() { sx } else { sy };
+                    (rx, ry) = (m, m);
+                } else if shift {
                     // Keep the proportions: the handle moves along its line
                     // through the anchor.
                     let dd = DVec2::new(
