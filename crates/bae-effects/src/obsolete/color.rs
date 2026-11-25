@@ -1,7 +1,6 @@
 //! Color aliases keep the old AE controls and translate only the changed parameters.
 use super::*;
 use crate::catalog::DefBuilder;
-use bae_model::ParamFlags;
 
 pub(super) fn register(target: &Builtin, out: &mut Vec<Builtin>) {
     let alias = match target.info.match_name.as_str() {
@@ -57,11 +56,11 @@ fn brightness(target: &Builtin) -> Builtin {
     a.finish(
         target,
         Some(|p| {
-            vec![
+            Translation::replace([
                 (1, Value::Float(p.f(1))),
                 (2, Value::Float(p.f(2))),
                 (3, Value::Bool(true)),
-            ]
+            ])
         }),
     )
 }
@@ -134,18 +133,17 @@ fn photo_filter(target: &Builtin) -> Builtin {
     a.finish(
         target,
         Some(|p| {
-            let mut values = p.p.effect.params.clone();
-            if let Some(color) = p.value(2) {
-                assign(&mut values, 2, color.clone());
-            }
             let old = p.popup(1);
             let new = match old {
                 1 => 1,
                 2 | 3 => old + 1,
                 _ => old + 2,
             };
-            assign(&mut values, 1, Value::Int(new));
-            values
+            let color = match p.value(2) {
+                Some(Value::Color(rgb)) => Some(Value::Color(*rgb)),
+                _ => None,
+            };
+            Translation::patch(p, [(1, Some(Value::Int(new))), (2, color)])
         }),
     )
 }
@@ -158,19 +156,6 @@ fn levels(target: &Builtin, individual: bool) -> Builtin {
     };
     let mut a = Definition::inherit(target, old, id, &target.info.name, &target.info.name_zh);
     legacy_channel(&mut a);
-    // The histogram is a UI-only arbitrary parameter. Keep its original disk slot.
-    a.def.params.insert(
-        1,
-        EffectParamDef {
-            id: 2,
-            name: "Histogram".into(),
-            match_name: Some(format!("{old}-0002")),
-            kind: ParamKind::ArbitraryData,
-            default: None,
-            flags: ParamFlags::default(),
-        },
-    );
-    a.info.param_names_zh.push((2, "直方图".into()));
     for id in [black, black + 1] {
         let param = a.param(id);
         param.kind = ParamKind::Checkbox;
@@ -188,23 +173,14 @@ fn levels(target: &Builtin, individual: bool) -> Builtin {
     a.finish(target, Some(map_levels))
 }
 
-fn map_levels(p: Params<'_>) -> Vec<(u32, Value)> {
+fn map_levels(p: Params<'_>) -> Translation<'_> {
     let id = if p.def.match_name == "ADBE Pro Levels" {
         38
     } else {
         8
     };
-    let mut values =
-        p.p.effect
-            .params
-            .iter()
-            .filter(|(i, _)| *i != 2)
-            .cloned()
-            .collect();
-    for id in [id, id + 1] {
-        assign(&mut values, id, Value::Int(if p.b(id) { 1 } else { 2 }));
-    }
-    values
+    let clip = |i| Some(Value::Int(if p.b(i) { 1 } else { 2 }));
+    Translation::patch(p, [(2, None), (id, clip(id)), (id + 1, clip(id + 1))])
 }
 
 fn alpha_levels(target: &Builtin, old: &str, id: &str, white: f64) -> Builtin {
@@ -230,7 +206,7 @@ fn alpha_levels(target: &Builtin, old: &str, id: &str, white: f64) -> Builtin {
             } else {
                 1.
             };
-            vec![
+            Translation::replace([
                 (1, Value::Int(5)),
                 (3, Value::Float(p.f(1) / white)),
                 (4, Value::Float(p.f(2) / white)),
@@ -239,7 +215,7 @@ fn alpha_levels(target: &Builtin, old: &str, id: &str, white: f64) -> Builtin {
                 (7, Value::Float(p.f(5) / white)),
                 (8, Value::Int(1)),
                 (9, Value::Int(1)),
-            ]
+            ])
         }),
     )
 }

@@ -34,6 +34,28 @@ fn prop(stage: &Stage, path: &PrimPath, attr: &str, three_d: bool) -> Node {
     }
 }
 
+/// Text > Path Options: Path, and once a mask is chosen the options of text on
+/// a path (AE shows them only then).
+fn path_options(stage: &Stage, layer: &PrimPath, three_d: bool) -> Node {
+    let mut children = vec![prop(stage, layer, "text:path", three_d)];
+    if common::text_path_mask(stage, layer).is_some() {
+        for attr in [
+            "text:reverse_path",
+            "text:perpendicular_to_path",
+            "text:force_alignment",
+            "text:first_margin",
+            "text:last_margin",
+        ] {
+            children.push(prop(stage, layer, attr, three_d));
+        }
+    }
+    Node::Group {
+        id: format!("{layer}#path_options"),
+        label: tr("Path Options").to_owned(),
+        children,
+    }
+}
+
 /// Transform properties of a layer (AE order).
 pub(crate) fn transform_attrs(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
     let mut attrs = transform_attrs_combined(stage, layer);
@@ -183,7 +205,10 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
     let three_d = common::is_3d(stage, layer);
     let mut out = Vec::new();
     if kind == "text" {
-        let mut children = vec![prop(stage, layer, "text:source", three_d)];
+        let mut children = vec![
+            prop(stage, layer, "text:source", three_d),
+            path_options(stage, layer, three_d),
+        ];
         for (i, a) in bae_motion::text_animators::animators_of(stage, layer)
             .iter()
             .enumerate()
@@ -383,6 +408,7 @@ pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<
             match reveal {
                 Reveal::Animated => spec.is_some_and(|s| s.is_animated() || s.expression.is_some()),
                 Reveal::Modified => spec.is_some_and(|s| !s.is_empty()),
+                Reveal::Props(list) => list.iter().any(|(p, a)| p == path && a == attr),
                 Reveal::Attrs(list) => {
                     path == layer
                         && list.iter().any(|a| {

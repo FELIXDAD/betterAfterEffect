@@ -50,7 +50,8 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
-        comp_layers: &[PrimPath],
+        layers: &super::TimelineLayers,
+        parent_items: &[&str],
         key_rects: &mut Vec<(Rect, KeyRef)>,
     ) {
         let stage = cx.stage;
@@ -134,10 +135,7 @@ impl TimelinePanel {
                     9.0,
                     theme::label_color(label_of(stage, layer)),
                 );
-                let index = comp_layers
-                    .iter()
-                    .position(|x| x == layer)
-                    .map_or(0, |i| i + 1);
+                let index = layers.numbers[layer];
                 p.text(
                     pos2(l + cols.index + 4.0, cy),
                     Align2::LEFT_CENTER,
@@ -238,139 +236,150 @@ impl TimelinePanel {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
                 }
-                // Switches.
-                let sw = |i: usize| {
-                    Rect::from_min_size(
-                        pos2(l + cols.switches + SW * i as f32, rect.top()),
-                        vec2(SW, ROW_H),
-                    )
-                };
-                // Shy: no box, AE's figure peeking over the bar, or ducked behind it
-                // when the layer is shy.
-                let shy = bool_attr(stage, layer, "shy");
-                let resp = ui
-                    .interact(sw(0), rid("shy"), Sense::click())
-                    .labeled_toggle(
-                        egui::WidgetType::Checkbox,
-                        &bae_ui::a11y::context(&[&layer_ctx, tr("Shy")]),
-                        shy,
-                    );
-                icons::paint(
-                    ui.painter(),
-                    Rect::from_center_size(sw(0).center(), vec2(13.0, 13.0)),
-                    if shy { Icon::ShyOn } else { Icon::Shy },
-                    if resp.hovered() {
-                        color::TEXT_STRONG
-                    } else {
-                        color::ICON
-                    },
-                );
-                if resp.clicked() {
-                    cx.invoke_with("attr.set", json!({"path": layer, "attr": "shy", "value": {"type": "bool", "value": !shy}}));
-                }
-                for (i, attr, icon) in [
-                    (1, "collapse_transformation", Icon::Collapse),
-                    (5, "motion_blur", Icon::MotionBlur),
-                    (6, "adjustment_layer", Icon::Adjustment),
-                ] {
-                    let on = bool_attr(stage, layer, attr);
-                    if switch(ui, sw(i), on, icon, rid(attr), &layer_ctx) {
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
-                    }
-                }
-                // Effect switch (fx): only on layers with effects, like AE.
-                if !bae_motion::effect::effects_of(stage, layer).is_empty() {
-                    let on = stage
-                        .prim(layer)
-                        .and_then(|v| query::static_value(&v, "effects_enabled"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true);
-                    if switch(ui, sw(3), on, Icon::Fx, rid("effects_enabled"), &layer_ctx) {
-                        cx.invoke_with(
-                            "layer.set_attr",
-                            json!({"layers": [layer], "attr": "effects_enabled", "value": {"type": "bool", "value": !on}}),
-                        );
-                    }
-                }
-                let draft = stage
-                    .prim(layer)
-                    .and_then(|v| query::static_value(&v, "quality"))
-                    .is_some_and(|v| v.as_str() == Some("draft"));
-                if switch(ui, sw(2), !draft, Icon::Quality, rid("quality"), &layer_ctx) {
-                    let to = if draft { "best" } else { "draft" };
-                    cx.invoke_with("attr.set", json!({"path": layer, "attr": "quality", "value": {"type": "enum", "value": to}}));
-                }
-                let three_d = bool_attr(stage, layer, "three_d");
-                if switch(ui, sw(7), three_d, Icon::Cube, rid("three_d"), &layer_ctx) {
-                    cx.invoke_with("attr.set", json!({"path": layer, "attr": "three_d", "value": {"type": "bool", "value": !three_d}}));
-                }
-                // Parent & Link: pick whip (left-aligned with the column title, as in
-                // AE) and dropdown.
-                let whip = Rect::from_min_size(
-                    pos2(l + cols.parent + PARENT_PAD, cy - 7.0),
-                    vec2(14.0, 14.0),
-                );
-                icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
-                let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
-                    egui::WidgetType::Button,
-                    &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
-                );
-                if wresp.drag_started() {
-                    let layers = if layer_selected {
-                        session.lock().selected_layers.clone()
-                    } else {
-                        vec![layer.clone()]
+                if cols.panes.switches {
+                    // Switches.
+                    let sw = |i: usize| {
+                        Rect::from_min_size(
+                            pos2(l + cols.switches + SW * i as f32, rect.top()),
+                            vec2(SW, ROW_H),
+                        )
                     };
-                    self.drag = Some(Drag::PickWhip {
-                        layers,
-                        origin: whip.center(),
-                    });
-                }
-                let parent = stage
-                    .prim(layer)
-                    .and_then(|v| v.value("parent").and_then(|v| v.as_prim_ref()).cloned());
-                let mut names: Vec<String> = vec![tr("None").to_owned()];
-                names.extend(
-                    comp_layers
-                        .iter()
-                        .enumerate()
-                        .map(|(i, p)| format!("{}. {}", i + 1, query::display_name_of(stage, p))),
-                );
-                let items: Vec<&str> = names.iter().map(String::as_str).collect();
-                let mut sel = parent
-                    .as_ref()
-                    .and_then(|p| comp_layers.iter().position(|x| x == p))
-                    .map_or(0, |i| i + 1);
-                let before = sel;
-                let drop_rect = Rect::from_min_max(
-                    pos2(whip.right() + 4.0, rect.top() + 1.0),
-                    pos2(l + cols.end - 4.0, rect.bottom() - 1.0),
-                );
-                let mut child = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(drop_rect)
-                        .id_salt(rid("parent")),
-                );
-                let current = items.get(sel).map(|s| s.to_string()).unwrap_or_default();
-                widgets::dropdown(
-                    &mut child,
-                    rid("parent_dd"),
-                    &mut sel,
-                    &items,
-                    drop_rect.width(),
-                )
-                .labeled_value(
-                    egui::WidgetType::ComboBox,
-                    &bae_ui::a11y::context(&[&layer_ctx, tr("Parent & Link")]),
-                    &current,
-                );
-                if sel != before {
-                    let parent = (sel > 0).then(|| comp_layers[sel - 1].clone());
-                    if parent.as_ref() != Some(layer) {
-                        cx.invoke_with(
-                            "layer.set_parent",
-                            json!({"layers": [layer], "parent": parent, "time": now}),
+                    // Shy: no box, AE's figure peeking over the bar, or ducked behind it
+                    // when the layer is shy.
+                    let shy = bool_attr(stage, layer, "shy");
+                    let resp = ui
+                        .interact(sw(0), rid("shy"), Sense::click())
+                        .labeled_toggle(
+                            egui::WidgetType::Checkbox,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Shy")]),
+                            shy,
                         );
+                    icons::paint(
+                        ui.painter(),
+                        Rect::from_center_size(sw(0).center(), vec2(13.0, 13.0)),
+                        if shy { Icon::ShyOn } else { Icon::Shy },
+                        if resp.hovered() {
+                            color::TEXT_STRONG
+                        } else {
+                            color::ICON
+                        },
+                    );
+                    if resp.clicked() {
+                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "shy", "value": {"type": "bool", "value": !shy}}));
+                    }
+                    for (i, attr, icon) in [
+                        (1, "collapse_transformation", Icon::Collapse),
+                        (5, "motion_blur", Icon::MotionBlur),
+                        (6, "adjustment_layer", Icon::Adjustment),
+                    ] {
+                        let on = bool_attr(stage, layer, attr);
+                        if switch(ui, sw(i), on, icon, rid(attr), &layer_ctx) {
+                            cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
+                        }
+                    }
+                    // Effect switch (fx): only on layers with effects, like AE.
+                    if !bae_motion::effect::effects_of(stage, layer).is_empty() {
+                        let on = stage
+                            .prim(layer)
+                            .and_then(|v| query::static_value(&v, "effects_enabled"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+                        if switch(ui, sw(3), on, Icon::Fx, rid("effects_enabled"), &layer_ctx) {
+                            cx.invoke_with(
+                                "layer.set_attr",
+                                json!({"layers": [layer], "attr": "effects_enabled", "value": {"type": "bool", "value": !on}}),
+                            );
+                        }
+                    }
+                    let draft = stage
+                        .prim(layer)
+                        .and_then(|v| query::static_value(&v, "quality"))
+                        .is_some_and(|v| v.as_str() == Some("draft"));
+                    if switch(ui, sw(2), !draft, Icon::Quality, rid("quality"), &layer_ctx) {
+                        let to = if draft { "best" } else { "draft" };
+                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "quality", "value": {"type": "enum", "value": to}}));
+                    }
+                    let three_d = bool_attr(stage, layer, "three_d");
+                    if switch(ui, sw(7), three_d, Icon::Cube, rid("three_d"), &layer_ctx) {
+                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "three_d", "value": {"type": "bool", "value": !three_d}}));
+                    }
+                }
+                // Modes: Mode, T, Track Matte.
+                if cols.panes.modes {
+                    self.modes_cells(
+                        ui,
+                        cx,
+                        session,
+                        cols,
+                        rect,
+                        layer,
+                        &layers.paths,
+                        layer_selected,
+                        &layer_ctx,
+                        base,
+                    );
+                }
+                if cols.panes.parent {
+                    // Parent & Link: pick whip (left-aligned with the column title, as in
+                    // AE) and dropdown.
+                    let whip = Rect::from_min_size(
+                        pos2(l + cols.parent + PARENT_PAD, cy - 7.0),
+                        vec2(14.0, 14.0),
+                    );
+                    icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
+                    let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
+                        egui::WidgetType::Button,
+                        &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
+                    );
+                    if wresp.drag_started() {
+                        let layers = if layer_selected {
+                            session.lock().selected_layers.clone()
+                        } else {
+                            vec![layer.clone()]
+                        };
+                        self.drag = Some(Drag::PickWhip {
+                            layers,
+                            origin: whip.center(),
+                        });
+                    }
+                    let parent = stage
+                        .prim(layer)
+                        .and_then(|v| v.value("parent").and_then(|v| v.as_prim_ref()).cloned());
+                    let mut sel = parent
+                        .as_ref()
+                        .and_then(|p| layers.numbers.get(p).copied())
+                        .unwrap_or(0);
+                    let before = sel;
+                    let drop_rect = Rect::from_min_max(
+                        pos2(whip.right() + 4.0, rect.top() + 1.0),
+                        pos2(l + cols.end - 4.0, rect.bottom() - 1.0),
+                    );
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(drop_rect)
+                            .id_salt(rid("parent")),
+                    );
+                    let current = parent_items[sel];
+                    widgets::dropdown(
+                        &mut child,
+                        rid("parent_dd"),
+                        &mut sel,
+                        parent_items,
+                        drop_rect.width(),
+                    )
+                    .labeled_value(
+                        egui::WidgetType::ComboBox,
+                        &bae_ui::a11y::context(&[&layer_ctx, tr("Parent & Link")]),
+                        current,
+                    );
+                    if sel != before {
+                        let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
+                        if parent.as_ref() != Some(layer) {
+                            cx.invoke_with(
+                                "layer.set_parent",
+                                json!({"layers": [layer], "parent": parent, "time": now}),
+                            );
+                        }
                     }
                 }
                 // Duration bar.
@@ -685,7 +694,20 @@ impl TimelinePanel {
             .filter(|s| s.path == *path && s.attr == attr)
             .map(|s| s.value.clone())
             .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
-        if let Some(value) = value {
+        if attr == "text:path" {
+            // Path Options > Path: a popup of the layer's masks, even when unset.
+            let vr = Rect::from_min_max(
+                pos2(l + cols.switches, rect.top()),
+                pos2(l + cols.end - 2.0, rect.bottom()),
+            );
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(vr)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .id_salt(id.with("val")),
+            );
+            common::text_path_picker(&mut child, cx, path, id.with("path"));
+        } else if let Some(value) = value {
             let vr = Rect::from_min_max(
                 pos2(l + cols.switches, rect.top()),
                 pos2(l + cols.end - 2.0, rect.bottom()),
@@ -712,7 +734,18 @@ impl TimelinePanel {
                 _ => &[],
             };
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
-            let edit = if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
+            let edit = if let bae_model::Value::Bool(on) = value {
+                // AE's timeline switches On/Off with hot text, not a checkbox.
+                let text = tr(if on { "On" } else { "Off" });
+                if widgets::link(&mut child, text)
+                    .labeled_toggle(egui::WidgetType::Checkbox, &prop_name, on)
+                    .clicked()
+                {
+                    common::Edit::Commit(bae_model::Value::Bool(!on))
+                } else {
+                    common::Edit::None
+                }
+            } else if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
                 let names: Vec<&str> = options.iter().map(|o| option_label(o)).collect();
                 let mut sel = options.iter().position(|o| o == cur).unwrap_or(0);
                 let before = sel;

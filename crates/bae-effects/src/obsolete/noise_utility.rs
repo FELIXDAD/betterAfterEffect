@@ -86,14 +86,12 @@ fn cineon(target: &Builtin) -> Builtin {
     a.finish(
         target,
         Some(|p| {
-            let mut values = p.p.effect.params.clone();
             let conversion = match p.popup(1) {
                 2 => 1,
                 4 | 6 => 3,
                 _ => 2,
             };
-            assign(&mut values, 1, Value::Int(conversion));
-            values
+            Translation::patch(p, [(1, Some(Value::Int(conversion)))])
         }),
     )
 }
@@ -115,12 +113,11 @@ fn composite(target: &Builtin) -> Builtin {
     a.finish(
         target,
         Some(|p| {
-            p.p.effect
-                .params
-                .iter()
-                .filter(|(id, _)| (1..=3).contains(id))
-                .cloned()
-                .collect()
+            Translation::replace([
+                (1, Value::Float(p.f(1))),
+                (2, Value::Int(p.popup(2))),
+                (3, Value::Bool(p.b(3))),
+            ])
         }),
     )
 }

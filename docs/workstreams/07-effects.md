@@ -53,6 +53,8 @@
 
 [第一阶段清单、基准和接入记录](07-effects/history.md)
 
+- 旧颜色效果（#393 后续）：ROI、依赖查询和 GPU 渲染借用同一个效果实例与未改动的参数。照片滤镜只转换预设和色值，旧色阶只转换剪切开关并跳过直方图。
+
 - 应用界面（G，#271）：效果菜单按 AE 目录列出 299 个效果（可用 / 置灰实时读效果注册表）、效果控件按参数定义画控件、效果和预设面板（搜索、分类、双击 / 拖放应用）、时间轴 fx 开关列。下拉中文选项走 `EffectInfo.param_options_zh`（包的 `choices` 表；Rust 效果的 `options_zh` 查表在 `rust_options_zh()` 接入）。
 
 - [模糊和锐化](../../crates/bae-effects/tests/ae/categories/blur-sharpen.md#工作流进度)
@@ -64,6 +66,7 @@
 - [抠像](../../crates/bae-effects/tests/ae/categories/keying.md#工作流进度)
 - [遮罩](../../crates/bae-effects/tests/ae/categories/matte.md#工作流进度)
 - [杂色和颗粒](../../crates/bae-effects/tests/ae/categories/noise-grain.md#工作流进度)
+  - 杂色完成湍流杂色、匹配颗粒、移除颗粒、杂色 Alpha 和 HLS 两种模式。旧版中间值使用现有中间值内核。
 - [透视](../../crates/bae-effects/tests/ae/categories/perspective.md#工作流进度)
 - [风格化](../../crates/bae-effects/tests/ae/categories/stylize.md#工作流进度)
 - [过渡](../../crates/bae-effects/tests/ae/categories/transition.md#工作流进度)
@@ -82,3 +85,7 @@
 完成应用颜色 LUT、色光、灰度系数 / 基值 / 增益、保留颜色、可选颜色、自动色阶、自动对比度、自动颜色、色调均化、广播颜色。四个整层直方图效果在 GPU 上归约。131 张 AE 26.2.1 参考图覆盖三个工程位深。自动颜色的“对齐中性中间调”经 2×2 色块和裁剪扫描校准，原近中性色卡平均差从 22.491 降至 2.297/255。其余误差见 #301 及效果库分类说明。
 
 LUT 字节和文件名随项目保存。效果面板的文件选择按钮交由 G 接入。三个自动校正效果的瞬时平滑和场景检测等待 #286 提供跨帧输入。
+
+### Lumetri 颜色（2026-11-24）
+
+完成六个 GPU 分组、输入和创意 LUT 接口、主曲线与色相对饱和度曲线、三路色轮、HSL 辅助和晕影。AE 26.2.1 的逐组及串联对照见[颜色校正记录](../../crates/bae-effects/tests/ae/categories/color.md#lumetri-颜色)。输入 LUT 的文件选择器可复用效果面板工作流的 LUT 接口。

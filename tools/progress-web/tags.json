@@ -1,0 +1,8 @@
+{
+  "新算法": "摄像机镜头模糊|调整柔和遮罩|调整实边遮罩|移除颗粒|镜头光晕|保留细节放大|时间扭曲|像素运动模糊",
+  "合并": "智能模糊|CC Radial Blur|CC Radial Fast Blur|CC Cross Blur|湍流杂色|杂色 HLS|杂色 HLS 自动|CC Light Burst 2.5|视频限幅器|CC Toner|范围扩散|CC Vignette|CC Threshold|CC Threshold RGB|算术|混合|计算|复合运算|CC Composite|CC Particle Systems II|低音和高音",
+  "不做": "摄像机抖动去模糊|内部/外部键|中间值（旧版）|改变形状|漩涡条纹|PS 任意映射|Cineon 转换器|颜色配置文件转换器|HDR 压缩扩展器|HDR 高光压缩|3D 眼镜|Mocha AE|Cineware",
+  "后放": "差值遮罩|CC Simple Wire Removal|分形|CC Threads|CC Glue Gun|CC Glass Wipe|CC Jaws|CC Twister|CC WarpoMatic|CC Line Sweep|CC Bender|CC Blobbylize|CC Flo Motion|CC Ripple Pulse|CC Slant|CC Smear|CC Split|CC Split 2|变形稳定器|果冻效应修复|CC Color Neutralizer|颜色链接|颜色稳定器|CC Overbrights|CC HexTile|CC Plastic|CC Block Load|CC Burn Film|CC Mr. Smoothie|CC Environment|3D 摄像机跟踪器|粒子运动场|CC Ball Action|CC Mr. Mercury|CC Hair|泡沫|焦散|波形环境|压缩程序|门|调制器|扭曲|音调|变调与合声",
+  "做": "双向模糊|通道模糊|CC Vector Blur|Keylight (1.2)|Key Cleaner|提取|Unmult|匹配颗粒|杂色 Alpha|光束|高级闪电|无线电波|吸管填充|油漆桶|CC Light Rays|CC Light Sweep|音频频谱|音频波形|编号|时间码|光圈擦除|卡片擦除|CC Light Wipe|CC Radial ScaleWipe|CC Grid Wipe|CC Image Wipe|CC Scale Wipe|CC Power Pin|网格变形|贝塞尔曲线变形|变形|放大|CC Page Turn|CC Lens|CC Bend It|CC Tiler|CC Griddler|液化|CC Color Offset|CC Kernel|散布|画笔描边|CC Kaleida|CC RepeTile|CC Glass|边缘斜面|CC Sphere|CC Cylinder|CC Spotlight|设置通道|通道合成器|移除颜色遮罩|固态层合成|CC Force Motion Blur|CC Wide Time|时差|CC Particle World|CC Rainfall|CC Snowfall|CC Bubbles|CC Drizzle|CC Star Burst|CC Scatterize|CC Pixel Polly|碎片|卡片动画|立体声混合器|倒放|高通/低通|参数均衡|延迟|混响",
+  "AI·后续": "无绿幕人像抠像|AI 插帧"
+}
