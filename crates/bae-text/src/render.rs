@@ -431,6 +431,12 @@ impl TextProvider {
         }
     }
 
+    /// Expressions' `sourceRectAtTime` measures text and shapes with this
+    /// provider (process-wide).
+    pub fn measure_expressions(self: &Arc<Self>) {
+        bae_anim::set_source_bounds(self.clone());
+    }
+
     /// Lays out `doc` with the provider's fonts.
     pub fn layout(&self, doc: &TextDocument) -> TextLayout {
         let mut fonts = self.fonts.lock();
@@ -494,5 +500,26 @@ impl SourceProvider for TextProvider {
         let source = Arc::new(TextSource::new(self.layout_of(content)?));
         self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
+    }
+}
+
+/// `sourceRectAtTime` for the expression engine: text laid out with the
+/// provider's fonts, shapes from their geometry (the app registers the
+/// provider with `bae_anim::set_source_bounds`).
+impl bae_anim::SourceBounds for TextProvider {
+    fn text(&self, doc: &TextDocument, include_extents: bool) -> Option<bae_anim::SourceRect> {
+        let r = self.layout(doc).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
+    }
+
+    fn shapes(
+        &self,
+        contents: &[bae_anim::EvaluatedPrim],
+        include_extents: bool,
+    ) -> Option<bae_anim::SourceRect> {
+        let mut warnings = Vec::new();
+        let group = bae_vector::ShapeGroup::from_evaluated(contents, &mut warnings);
+        let r = bae_vector::VectorScene::from_group(&group).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
     }
 }

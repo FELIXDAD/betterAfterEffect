@@ -19,7 +19,9 @@ use std::sync::Arc;
 
 use bae_model::{PrimPath, Time, Value};
 use rquickjs::context::EvalOptions;
-use rquickjs::{Array, CatchResultExt, CaughtError, Context, Ctx, Function, Object, Runtime};
+use rquickjs::{
+    Array, CatchResultExt, CaughtError, Context, Ctx, Function, IntoJs, Object, Runtime,
+};
 
 use crate::eval::{CompiledComp, Cx, ExprProp, num};
 use crate::evaluated::AttrError;
@@ -595,6 +597,11 @@ const LOCALS: &[(&str, &str)] = &[
     ("height", "thisLayer.height"),
     ("source", "thisLayer.source"),
     ("transform", "thisLayer.transform"),
+    ("text", "thisLayer.text"),
+    (
+        "sourceRectAtTime",
+        "thisLayer.sourceRectAtTime.bind(thisLayer)",
+    ),
     ("anchorPoint", "thisLayer.anchorPoint"),
     ("position", "thisLayer.position"),
     ("scale", "thisLayer.scale"),
@@ -767,8 +774,16 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         };
     }
     if let Value::TextDocument(doc) = template {
-        // Numbers on Source Text show as text, as in AE.
         let mut doc = doc.clone();
+        // A text style (`text.sourceText.style.setFontSize(60)` …, AE 17.0+).
+        if let Some(o) = js.as_object()
+            && o.get::<_, bool>("__style").unwrap_or(false)
+        {
+            let changes: Object<'_> = o.get("changes").map_err(|e| e.to_string())?;
+            apply_style(&mut doc, &changes);
+            return Ok(Value::TextDocument(doc));
+        }
+        // Numbers on Source Text show as text, as in AE.
         doc.text = js_display(&js);
         return Ok(Value::TextDocument(doc));
     }
@@ -813,6 +828,92 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         Value::FloatList(_) => Value::FloatList(comps),
         other => other.clone(),
     })
+}
+
+/// The changes a text style carries (its `set…` calls) applied to `doc`.
+fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
+    let num = |k: &str| c.get::<_, Option<f64>>(k).ok().flatten();
+    let flag = |k: &str| c.get::<_, Option<bool>>(k).ok().flatten();
+    let rgb = |k: &str| {
+        c.get::<_, Option<Vec<f64>>>(k)
+            .ok()
+            .flatten()
+            .filter(|v| v.len() >= 3)
+    };
+    if let Ok(Some(text)) = c.get::<_, Option<String>>("text") {
+        doc.text = text;
+    }
+    if let Ok(Some(font)) = c.get::<_, Option<String>>("font") {
+        doc.font = font;
+    }
+    if let Some(v) = num("fontSize") {
+        doc.font_size = v;
+    }
+    if let Some(v) = rgb("fillColor") {
+        doc.fill_color = [v[0], v[1], v[2], doc.fill_color[3]];
+    }
+    if let Some(v) = rgb("strokeColor") {
+        let a = doc.stroke_color.map_or(1.0, |c| c[3]);
+        doc.stroke_color = Some([v[0], v[1], v[2], a]);
+    }
+    if let Some(v) = num("strokeWidth") {
+        doc.stroke_width = v;
+    }
+    if let Some(v) = num("tracking") {
+        doc.tracking = v;
+    }
+    if let Some(v) = num("leading") {
+        doc.leading = Some(v);
+    }
+    if flag("autoLeading") == Some(true) {
+        doc.leading = None;
+    }
+    if let Some(v) = num("baselineShift") {
+        doc.baseline_shift = v;
+    }
+    for (k, field) in [
+        ("fauxBold", &mut doc.faux_bold),
+        ("fauxItalic", &mut doc.faux_italic),
+        ("allCaps", &mut doc.all_caps),
+        ("smallCaps", &mut doc.small_caps),
+    ] {
+        if let Some(v) = flag(k) {
+            *field = v;
+        }
+    }
+    if flag("applyStroke") == Some(false) {
+        doc.stroke_color = None;
+    }
+    if flag("applyFill") == Some(false) {
+        doc.fill_color[3] = 0.0;
+    }
+}
+
+/// A text document's style as the expression `TextStyle` reads it.
+fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextDocument) -> rquickjs::Result<Object<'js>> {
+    let o = Object::new(ctx.clone())?;
+    o.set("text", doc.text.as_str())?;
+    o.set("font", doc.font.as_str())?;
+    o.set("fontSize", doc.font_size)?;
+    o.set("fillColor", doc.fill_color[..3].to_vec())?;
+    o.set(
+        "strokeColor",
+        doc.stroke_color
+            .map_or_else(|| vec![0.0; 3], |c| c[..3].to_vec()),
+    )?;
+    o.set("strokeWidth", doc.stroke_width)?;
+    o.set("tracking", doc.tracking)?;
+    o.set("autoLeading", doc.leading.is_none())?;
+    // AE's auto leading: 120% of the font size.
+    o.set("leading", doc.leading.unwrap_or(doc.font_size * 1.2))?;
+    o.set("baselineShift", doc.baseline_shift)?;
+    o.set("fauxBold", doc.faux_bold)?;
+    o.set("fauxItalic", doc.faux_italic)?;
+    o.set("allCaps", doc.all_caps)?;
+    o.set("smallCaps", doc.small_caps)?;
+    o.set("applyFill", doc.fill_color[3] > 0.0)?;
+    o.set("applyStroke", doc.stroke_color.is_some())?;
+    Ok(o)
 }
 
 fn js_display(v: &rquickjs::Value<'_>) -> String {
@@ -971,6 +1072,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 } else {
                     prop.sample(&cx)
                 };
+                // Source Text reads as its string (AE).
+                if let Value::TextDocument(doc) = &v {
+                    return doc.text.as_str().into_js(&ctx);
+                }
                 let mut out = components(&v);
                 if !layer.switches.three_d
                     && own(&prim, layer) == layer.path.as_str()
@@ -978,7 +1083,85 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 {
                     out.truncate(2);
                 }
-                Ok::<_, rquickjs::Error>(out)
+                out.into_js(&ctx)
+            },
+        )?,
+    )?;
+
+    h.set(
+        "textStyle",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, t: f64| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                let Some(prop) = layer.find_prop(own(&prim, layer), &attr) else {
+                    return throw(&ctx, &format!("property {attr} does not exist"));
+                };
+                note_dependency(c as usize, li);
+                let ct = Time::from_seconds(t);
+                let cx = Cx {
+                    comp: c as usize,
+                    layer: li,
+                    ct,
+                    lt: layer.timing.layer_time(ct),
+                    js: Some(&ctx),
+                };
+                match prop.sample(&cx) {
+                    Value::TextDocument(doc) => text_style(&ctx, &doc),
+                    _ => throw(&ctx, "style is only available on Source Text"),
+                }
+            },
+        )?,
+    )?;
+
+    h.set(
+        "sourceRect",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, t: f64, extents: bool| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                note_dependency(c as usize, li);
+                let ct = Time::from_seconds(t);
+                let cx = Cx {
+                    comp: c as usize,
+                    layer: li,
+                    ct,
+                    lt: layer.timing.layer_time(ct),
+                    js: Some(&ctx),
+                };
+                use bae_model::LayerKind as K;
+                let measured = match layer.kind {
+                    K::Text => layer.text.as_ref().and_then(|p| match p.sample(&cx) {
+                        Value::TextDocument(doc) => {
+                            crate::bounds::source_bounds()?.text(&doc, extents)
+                        }
+                        _ => None,
+                    }),
+                    K::Shape => {
+                        let contents = crate::eval::sample_prims(
+                            &layer.contents,
+                            layer.fixed_contents.as_ref(),
+                            &cx,
+                        );
+                        crate::bounds::source_bounds().and_then(|b| b.shapes(&contents, extents))
+                    }
+                    _ => None,
+                };
+                // Without content (or a measurer): AE's empty rect; a null is
+                // 100 × 100; footage, solids and comps their source size.
+                let r = measured.unwrap_or_else(|| match layer.kind {
+                    K::Text | K::Shape | K::Camera | K::Light => [0.0; 4],
+                    K::Null => [0.0, 0.0, 100.0, 100.0],
+                    _ => {
+                        let (w, h) = layer.source_size(&comp);
+                        [0.0, 0.0, f64::from(w), f64::from(h)]
+                    }
+                });
+                Ok::<_, rquickjs::Error>(r.to_vec())
             },
         )?,
     )?;

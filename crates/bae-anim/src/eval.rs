@@ -866,7 +866,7 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
 }
 
 /// `prims` evaluated, shared as is when none of them animates.
-fn sample_prims(
+pub(crate) fn sample_prims(
     prims: &[CompiledPrim],
     fixed: Option<&Arc<[EvaluatedPrim]>>,
     cx: &Cx<'_, '_>,

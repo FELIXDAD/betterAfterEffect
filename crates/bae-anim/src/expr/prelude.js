@@ -24,7 +24,10 @@ var __now = 0;
 // Property objects stand for their value in arithmetic and library calls (AE).
 function __val(a) {
   if (a === undefined) throw new Error("Undefined value used in expression (could be an out of range array subscript?)");
-  return a instanceof Property ? a.value : a;
+  if (a instanceof Property) return a.value;
+  // `text.sourceText` (a String carrying the property's methods) is its text.
+  if (a instanceof String) return a.valueOf();
+  return a;
 }
 function __isArr(a) { return Array.isArray(a); }
 function __isNum(a) { return typeof a === "number" || typeof a === "boolean"; }
@@ -282,7 +285,10 @@ function __call(fn, c, l, prim, attr, t, seed) {
   __env_c = c;
   __resetRandom(seed);
   try {
-    return __val(fn(c, l, prim, attr, t));
+    var r = fn(c, l, prim, attr, t);
+    // A Source Text expression may end with a text style (AE 17.0+).
+    if (r instanceof TextStyle) return { __style: true, changes: r.__c };
+    return __val(r);
   } finally {
     __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __timeless = saveTl;
   }
@@ -294,7 +300,7 @@ function __prop(c, l, p, a) { return new Property(c, l, p, a); }
 // Time grid of AE's valueAtTime: 1/1024 of a frame (measured in AE 26 at 30 fps).
 function __tick() { return __h.compInfo(__env_c).frameDuration / 1024; }
 function __q(t) { var k = __tick(); return Math.round(t / k) * k; }
-function __unwrap(r) { return r.length === 1 ? r[0] : r; }
+function __unwrap(r) { return typeof r === "string" || r.length !== 1 ? r : r[0]; }
 Property.prototype = {
   get value() { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, __now, false)); },
   valueAtTime: function (t) { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, t, false)); },
@@ -418,15 +424,72 @@ Property.prototype = {
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
   get propertyIndex() { return 1; },
 };
+// ---- text (AE: thisLayer.text.sourceText and the 17.0+ style API) ----
+Property.prototype.getStyleAt = function (charIndex, t) {
+  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t), {});
+};
+Property.prototype.createStyle = function () { return this.getStyleAt(0, __now); };
+Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, __now); } });
+
+function __TextGroup(c, l) { this.__c = c; this.__l = l; }
+__TextGroup.prototype = {
+  // The text as a string (string methods, concatenation, length) that also has
+  // the property's methods, as AE's sourceText behaves.
+  get sourceText() {
+    var p = __prop(this.__c, this.__l, "", "text:source");
+    var s = new String(p.value);
+    ["valueAtTime", "velocityAtTime", "key", "nearestKey", "getStyleAt", "createStyle"].forEach(function (k) {
+      s[k] = function () { return p[k].apply(p, arguments); };
+    });
+    ["value", "style", "numKeys"].forEach(function (k) {
+      Object.defineProperty(s, k, { get: function () { return p[k]; } });
+    });
+    return s;
+  },
+};
+
+// A text style: what the text uses (`__f`, from the host) plus the `set…`
+// calls made on it (`__c`), each returning a new style.
+function TextStyle(fields, changes) { this.__f = fields; this.__c = changes; }
+TextStyle.prototype = {
+  get horizontalScale() { return "horizontalScale" in this.__c ? this.__c.horizontalScale : 100; },
+  get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
+};
+[
+  ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
+  ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
+  ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
+  ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
+].forEach(function (p) {
+  Object.defineProperty(TextStyle.prototype, p[0], {
+    get: function () { return p[1] in this.__c ? this.__c[p[1]] : this.__f[p[1]]; },
+  });
+});
+[
+  ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
+  ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
+  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineShift", "baselineShift"],
+  ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
+  ["setSmallCaps", "smallCaps"], ["setApplyFill", "applyFill"], ["setApplyStroke", "applyStroke"],
+  ["setHorizontalScale", "horizontalScale"], ["setVerticalScale", "verticalScale"],
+].forEach(function (p) {
+  TextStyle.prototype[p[0]] = function (v) {
+    var c = {};
+    for (var k in this.__c) c[k] = this.__c[k];
+    c[p[1]] = __val(v);
+    return new TextStyle(this.__f, c);
+  };
+});
+
 // `transform.position[0]` and `.length` read the value, as in AE: getters on
 // the prototype (a Proxy would trap every method and field access).
 (function () {
   function index(i) {
-    return function () { var v = this.value; return __isArr(v) ? v[i] : undefined; };
+    return function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v[i] : undefined; };
   }
   for (var i = 0; i < 16; i++) Object.defineProperty(Property.prototype, String(i), { get: index(i) });
   Object.defineProperty(Property.prototype, "length", {
-    get: function () { var v = this.value; return __isArr(v) ? v.length : 1; },
+    get: function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v.length : 1; },
   });
 })();
 
@@ -488,6 +551,11 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
   get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
+  get text() { return new __TextGroup(this.__c, this.__l); },
+  sourceRectAtTime: function (t, includeExtents) {
+    var r = __h.sourceRect(this.__c, this.__l, t === undefined ? __now : t, !!includeExtents);
+    return { top: r[1], left: r[0], width: r[2], height: r[3] };
+  },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
