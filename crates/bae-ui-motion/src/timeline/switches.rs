@@ -1,5 +1,6 @@
 //! Paint the starting switch's value down its column. One release is one edit.
 use super::*;
+use bae_anim::FrameBlending;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy)]
@@ -8,11 +9,13 @@ pub(super) struct SwitchInput {
     release: bool,
     pos: Option<Pos2>,
     cancel: bool,
+    pixel_motion: bool,
 }
 
 impl SwitchInput {
-    pub(super) fn read(i: &egui::InputState) -> Self {
+    pub(super) fn read(i: &egui::InputState, pixel_motion: bool) -> Self {
         Self {
+            pixel_motion,
             press: i.pointer.primary_pressed(),
             release: i.pointer.primary_released(),
             pos: i.pointer.interact_pos(),
@@ -21,46 +24,58 @@ impl SwitchInput {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum SwitchValue {
+    Toggle(bool),
+    Frames(FrameBlending),
+}
+
+impl From<bool> for SwitchValue {
+    fn from(on: bool) -> Self {
+        Self::Toggle(on)
+    }
+}
+
+impl SwitchValue {
+    fn next(self, pixel_motion: bool) -> Self {
+        match self {
+            Self::Toggle(on) => Self::Toggle(!on),
+            Self::Frames(mode) => Self::Frames(match mode {
+                FrameBlending::Off => FrameBlending::FrameMix,
+                FrameBlending::FrameMix if pixel_motion => FrameBlending::PixelMotion,
+                _ => FrameBlending::Off,
+            }),
+        }
+    }
+}
+
 pub(super) struct SwitchDrag {
     attr: &'static str,
-    value: bool,
-    /// Frame Blending: the mode painted (`off`, `frame_mix`, `pixel_motion`).
-    mode: Option<&'static str>,
+    value: SwitchValue,
     previous: Pos2,
     changed: BTreeSet<PrimPath>,
-}
-
-/// AE's Frame Blending switch cycles Off → Frame Mix → Pixel Motion → Off.
-fn next_frame_blending(mode: &str) -> &'static str {
-    match mode {
-        "off" => "frame_mix",
-        "frame_mix" => "pixel_motion",
-        _ => "off",
-    }
-}
-
-fn frame_blending_of(stage: &Stage, layer: &PrimPath) -> &'static str {
-    match rows::footage_frame_blending(stage, layer) {
-        Some("frame_mix") => "frame_mix",
-        Some("pixel_motion") => "pixel_motion",
-        _ => "off",
-    }
 }
 
 fn set_switch(
     cx: &mut PanelContext<'_>,
     paths: impl serde::Serialize,
     attr: &str,
-    on: bool,
-    mode: Option<&str>,
+    value: SwitchValue,
 ) {
     use bae_model::Value;
-    let value = match attr {
-        "quality" => Value::Enum(if on { "best" } else { "draft" }.into()),
-        "frame_blending" => {
-            Value::Enum(mode.unwrap_or(if on { "frame_mix" } else { "off" }).into())
+    let value = match value {
+        SwitchValue::Toggle(on) if attr == "quality" => {
+            Value::Enum(if on { "best" } else { "draft" }.into())
         }
-        _ => Value::Bool(on),
+        SwitchValue::Toggle(on) => Value::Bool(on),
+        SwitchValue::Frames(mode) => Value::Enum(
+            match mode {
+                FrameBlending::Off => "off",
+                FrameBlending::FrameMix => "frame_mix",
+                FrameBlending::PixelMotion => "pixel_motion",
+            }
+            .into(),
+        ),
     };
     cx.invoke_with(
         "layer.set_attr",
@@ -81,7 +96,7 @@ impl TimelinePanel {
         label: &str,
         attr: &'static str,
         icon: Icon,
-        mut on: bool,
+        mut value: SwitchValue,
         locked: bool,
     ) -> egui::Response {
         let resp = ui.interact(rect, id, Sense::click_and_drag());
@@ -90,12 +105,9 @@ impl TimelinePanel {
                 && resp.is_pointer_button_down_on()
                 && let Some(pos) = input.pos
             {
-                let mode = (attr == "frame_blending")
-                    .then(|| next_frame_blending(frame_blending_of(cx.stage, layer)));
                 self.switch_drag = Some(SwitchDrag {
                     attr,
-                    value: mode.map_or(!on, |m| m != "off"),
-                    mode,
+                    value: value.next(input.pixel_motion),
                     previous: pos,
                     changed: BTreeSet::new(),
                 });
@@ -111,29 +123,39 @@ impl TimelinePanel {
                             && cell.x_range().contains(drag.previous.x)
                             && cell.bottom() >= pos.y.min(drag.previous.y)
                             && cell.top() <= pos.y.max(drag.previous.y));
-                    let differs = match drag.mode {
-                        Some(mode) => frame_blending_of(cx.stage, layer) != mode,
-                        None => on != drag.value,
-                    };
-                    if traversed && differs {
+                    if traversed && value != drag.value {
                         drag.changed.insert(layer.clone());
                     }
                 }
                 if drag.changed.contains(layer) {
-                    on = drag.value;
+                    value = drag.value;
                 }
             } else if resp.clicked() && !input.release {
                 // Activation through the keyboard or accessibility tree has no pointer stroke.
-                let mode = (attr == "frame_blending")
-                    .then(|| next_frame_blending(frame_blending_of(cx.stage, layer)));
-                set_switch(cx, [layer], attr, !on, mode);
+                set_switch(cx, [layer], attr, value.next(input.pixel_motion));
             }
         }
-        let resp = resp.labeled_toggle(
-            egui::WidgetType::Checkbox,
-            &bae_ui::a11y::context(&[label, tr(rows::switch_name(icon))]),
-            on,
-        );
+        let name = tr(rows::switch_name(icon));
+        let (on, mode) = match value {
+            SwitchValue::Toggle(on) => (on, None),
+            SwitchValue::Frames(FrameBlending::Off) => (false, Some(tr("Off"))),
+            SwitchValue::Frames(FrameBlending::FrameMix) => (true, Some(tr("Frame Mix"))),
+            SwitchValue::Frames(FrameBlending::PixelMotion) => (true, Some(tr("Pixel Motion"))),
+        };
+        let resp = if let Some(mode) = mode {
+            resp.labeled_toggle(
+                egui::WidgetType::Button,
+                &bae_ui::a11y::context(&[label, name, mode]),
+                on,
+            )
+            .on_hover_text(mode)
+        } else {
+            resp.labeled_toggle(
+                egui::WidgetType::Checkbox,
+                &bae_ui::a11y::context(&[label, name]),
+                on,
+            )
+        };
         if matches!(icon, Icon::Shy) {
             icons::paint(
                 ui.painter(),
@@ -145,6 +167,25 @@ impl TimelinePanel {
                     color::ICON
                 },
             );
+        } else if value == SwitchValue::Frames(FrameBlending::PixelMotion) {
+            let p = ui.painter();
+            let rect = rect.shrink2(vec2(1.0, 2.0));
+            p.rect_filled(rect.shrink(0.5), 1.0, color::SWITCH_BG);
+            let stroke = Stroke::new(
+                1.2,
+                if resp.hovered() {
+                    color::TEXT_STRONG
+                } else {
+                    color::ICON
+                },
+            );
+            for dy in [-2.0, 2.0] {
+                p.arrow(
+                    rect.center() + vec2(-4.0, dy + 1.0),
+                    vec2(8.0, -2.0),
+                    stroke,
+                );
+            }
         } else {
             widgets::paint_switch(
                 ui.painter(),
@@ -165,7 +206,7 @@ impl TimelinePanel {
             self.switch_drag = None;
         } else if input.release {
             if !drag.changed.is_empty() {
-                set_switch(cx, &drag.changed, drag.attr, drag.value, drag.mode);
+                set_switch(cx, &drag.changed, drag.attr, drag.value);
             }
             self.switch_drag = None;
         } else if let Some(pos) = input.pos {

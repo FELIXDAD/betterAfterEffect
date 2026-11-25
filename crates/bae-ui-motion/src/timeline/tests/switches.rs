@@ -165,9 +165,8 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     assert!(rc.motion_blur.is_some());
     assert!(rc.layers.iter().any(|l| !l.motion_samples.is_empty()));
     // Draft 3D has no renderer. Frame Mix is available with its sampling backend.
-    let mix = bae_motion::layer::LAYER_SWITCH_ATTRS.contains(&"frame_blending");
     for (dx, attr, on) in [
-        (52.0, "frame_blending", mix),
+        (52.0, "frame_blending", true),
         (78.0, "hide_shy_layers", true),
         (104.0, "draft_3d", false),
     ] {
@@ -184,12 +183,10 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     );
     h.apply(&r);
     assert!(request(&h).layers.iter().any(|l| l.matrix_3d.is_some()));
-    // Undo the 3D layer, Hide Shy and (when enabled) Frame Mix.
+    // Undo the 3D layer, Hide Shy and Frame Mix.
     h.undo();
     h.undo();
-    if mix {
-        h.undo();
-    }
+    h.undo();
     assert!(request(&h).motion_blur.is_some());
     h.undo();
     assert!(request(&h).motion_blur.is_none());
@@ -408,8 +405,28 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
             Some(Value::Enum("frame_mix".into()))
         );
     }
-    // The layer switch cycles Frame Mix → Pixel Motion → Off (AE).
-    for expected in ["pixel_motion", "off", "frame_mix"] {
+    // Without an interpolator, a second click goes straight back to Off.
+    let r = h.click(&mut tl, row, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(
+        query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
+        Some(Value::Enum("off".into()))
+    );
+
+    let mut app = bae_app::AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    let effects = app
+        .build()
+        .get_registry::<dyn bae_render::Effect>()
+        .unwrap();
+    let pixel_motion = effects.contains(super::super::FRAME_INTERPOLATOR_ID);
+    h.resources
+        .insert(crate::gpu_preview::PreviewEffects(effects));
+    let modes = ["frame_mix", "pixel_motion", "off"];
+    for expected in modes
+        .into_iter()
+        .filter(|mode| *mode != "pixel_motion" || pixel_motion)
+    {
         let r = h.click(&mut tl, row, Modifiers::NONE);
         assert_eq!(r.invocations.len(), 1, "one edit per click");
         h.apply(&r);
