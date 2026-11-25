@@ -8,6 +8,7 @@
 
 pub(crate) mod browser;
 pub(crate) mod controls;
+mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
 
