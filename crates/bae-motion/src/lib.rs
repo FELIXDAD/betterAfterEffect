@@ -70,6 +70,7 @@ pub mod keys;
 pub mod layer;
 pub mod markers;
 pub mod names;
+pub mod paint;
 pub mod path;
 pub mod precompose;
 pub mod query;
@@ -114,6 +115,7 @@ pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(paint::AddStroke),
         r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
