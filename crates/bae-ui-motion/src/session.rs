@@ -87,6 +87,7 @@ pub struct Session {
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    pub(crate) master_db: f32,
     audio_clock: bool,
     last_scrub: Option<Time>,
     mix_revision: Option<u64>,
@@ -318,6 +319,10 @@ impl Session {
                 }
             }
         }
+        self.output
+            .as_ref()
+            .unwrap()
+            .set_gain(10.0_f32.powf(self.master_db / 20.0));
         self.output
             .as_mut()
             .unwrap()

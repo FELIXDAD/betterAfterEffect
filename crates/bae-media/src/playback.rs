@@ -183,6 +183,15 @@ impl AudioOutput {
     pub fn set_loop(&self, repeat: bool) {
         self.repeat.store(repeat, Ordering::Relaxed);
     }
+    /// Change the monitor gain in linear amplitude.
+    pub fn set_gain(&self, gain: f32) {
+        self.sink.lock().gain = gain;
+    }
+    /// Peak amplitudes after the monitor gain, before device clipping.
+    pub fn peaks(&self) -> [f32; 2] {
+        self.sink.lock().peaks
+    }
+
     /// Stop delivering queued audio.
     pub fn stop(&mut self) {
         let mut s = self.sink.lock();

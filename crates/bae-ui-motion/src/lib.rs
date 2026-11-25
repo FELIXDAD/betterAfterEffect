@@ -91,7 +91,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 8] = [
+        let panels: [(&str, PanelKind); 9] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -115,6 +115,10 @@ impl AppModule for MotionUiModule {
                 PanelKind::new("Effect Controls", |_| {
                     Box::new(EffectControlsPanel::default())
                 }),
+            ),
+            (
+                "audio",
+                PanelKind::new("Audio", |_| Box::new(panels::AudioPanel::default())),
             ),
             (
                 "preview",

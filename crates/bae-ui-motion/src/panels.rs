@@ -327,6 +327,62 @@ impl Panel for EffectControlsPanel {
 
 // ---------------------------------------------------------------------------
 
+pub(crate) struct AudioPanel {
+    levels: [f32; 2],
+}
+
+impl Default for AudioPanel {
+    fn default() -> Self {
+        Self { levels: [-60.0; 2] }
+    }
+}
+impl Panel for AudioPanel {
+    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
+        TabInfo::new(tr("Audio")).min_size(vec2(180.0, 100.0))
+    }
+
+    fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let session = common::session(cx.resources);
+        let mut s = session.lock();
+        let peaks = s.output.as_ref().map_or([0.0; 2], |o| o.peaks());
+        let decay = ui.input(|i| i.stable_dt) * 32.0;
+        for (i, title) in ["Left Channel", "Right Channel"].into_iter().enumerate() {
+            let db = (20.0 * peaks[i].log10()).max(-60.0);
+            if s.output.is_none() {
+                self.levels[i] = -60.0;
+            } else {
+                self.levels[i] = db.max(self.levels[i] - decay);
+            }
+            ui.horizontal(|ui| {
+                ui.label(tr(title));
+                let meter =
+                    egui::ProgressBar::new(((self.levels[i] + 60.0) / 60.0).clamp(0.0, 1.0))
+                        .fill(if self.levels[i] >= 0.0 {
+                            egui::Color32::LIGHT_RED
+                        } else {
+                            color::ACCENT
+                        })
+                        .text(format!("{:.1} dBFS", self.levels[i]));
+                ui.add(meter);
+            });
+        }
+        let response = ui.add(
+            egui::Slider::new(&mut s.master_db, -60.0..=12.0)
+                .text(tr("Master Volume"))
+                .suffix(" dB"),
+        );
+        if response.changed()
+            && let Some(output) = &s.output
+        {
+            output.set_gain(10.0_f32.powf(s.master_db / 20.0));
+        }
+        if s.output.is_some() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(33));
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct PreviewPanel;
 

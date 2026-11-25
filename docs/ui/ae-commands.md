@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 155，◐ 8，☐ 169，⏸ 208，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 157 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 148 条，macOS 148 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 156，◐ 8，☐ 168，⏸ 208，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 158 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 149 条，macOS 149 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -623,7 +623,7 @@
 | Mask Interpolation | 524316 | `window.panel` | `{"id":"mask_interpolation","toggle":true}` |  |  | E | ⏸ |
 | Tracker | 524317 | `window.panel` | `{"id":"tracker","toggle":true}` |  |  | E | ⏸ |
 | Progress | 524318 | `window.panel` | `{"id":"progress","toggle":true}` |  |  | E | ⏸ |
-| Audio | 524319 | `window.panel` | `{"id":"audio","toggle":true}` | Ctrl+4 | Cmd+4 | E | ☐ |
+| Audio | 524319 | `window.panel` | `{"id":"audio","toggle":true}` | Ctrl+4 | Cmd+4 | E | ✅ |
 | Preview | 524320 | `window.panel` | `{"id":"preview","toggle":true}` | Ctrl+3 | Cmd+3 | B | ✅ |
 | Composition | 524322 | `window.panel` | `{"id":"composition","toggle":true}` |  |  | B | ✅ |
 | Layer | 524323 | `window.panel` | `{"id":"layer","toggle":true}` |  |  | E | ⏸ |

@@ -205,6 +205,7 @@ fn module_registers_panels_shortcuts_and_commands() {
         "properties",
         "effect_controls",
         "preview",
+        "audio",
     ] {
         let entry = kinds.snapshot();
         let e = entry.entry(id).unwrap_or_else(|| panic!("{id}"));
