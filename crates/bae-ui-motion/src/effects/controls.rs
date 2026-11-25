@@ -101,7 +101,11 @@ fn header(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     let name = query::display_name_of(stage, effect);
+    let session = common::session(cx.resources);
+    let selected = session.lock().selected_effects.contains(effect);
     ui.add_space(2.0);
+    // Selected effects are highlighted like AE's (their points show in the viewer).
+    let highlight = ui.painter().add(egui::Shape::Noop);
     let row = ui.horizontal(|ui| {
         ui.set_min_height(20.0);
         let mut open = !state.collapsed.contains(effect.as_str());
@@ -130,6 +134,17 @@ fn header(
             )
             .sense(Sense::click_and_drag()),
         );
+        if title.clicked() {
+            let toggle = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+            let mut s = session.lock();
+            if !toggle {
+                s.selected_effects = vec![effect.clone()];
+            } else if let Some(i) = s.selected_effects.iter().position(|e| e == effect) {
+                s.selected_effects.remove(i);
+            } else {
+                s.selected_effects.push(effect.clone());
+            }
+        }
         // Drag an effect header onto another one to reorder (AE).
         title.dnd_set_drag_payload(EffectMove(effect.clone()));
         if let Some(moved) = title.dnd_release_payload::<EffectMove>()
@@ -176,6 +191,13 @@ fn header(
         });
     });
     let r = row.response.rect;
+    if selected {
+        let full = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), r.y_range());
+        ui.painter().set(
+            highlight,
+            egui::Shape::rect_filled(full, 0.0, color::ROW_SELECTED),
+        );
+    }
     ui.painter().hline(
         r.x_range(),
         r.bottom() + 1.0,
@@ -278,7 +300,7 @@ fn param_row(
         .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
         .or_else(|| {
             let layer = super::layer_of(effect)?;
-            bae_motion::effect::instance_default(stage, &layer, def, param)
+            bae_motion::effect::instance_default(stage, &layer, param)
         });
     let key = format!("{effect}#{}", param.id);
     let twirl = matches!(param.kind, ParamKind::Slider { .. } | ParamKind::Angle);
