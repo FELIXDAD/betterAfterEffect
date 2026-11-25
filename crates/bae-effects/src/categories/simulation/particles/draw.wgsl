@@ -1,12 +1,12 @@
 @compute @workgroup_size(128)
 fn advance_emitter(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= frame.batch.y {
+    if tid.x >= frame.count {
         return;
     }
-    let id = frame.batch.x + tid.x;
-    let dt = birth_offset(tid.x);
-    let birth = frame.emission.x + dt;
-    let life = frame.lifespan.x + dt*frame.lifespan.y;
+    let particle_birth = birth_at(tid.x);
+    let id = particle_birth.id;
+    let birth = particle_birth.time;
+    let life = particle_birth.life;
     let age = max(0.,frame.timing.x-birth);
     if age >= life {
         sprites[tid.x] = Sprite();
@@ -18,33 +18,31 @@ fn advance_emitter(@builtin(global_invocation_id) tid: vec3u) {
 
 @compute @workgroup_size(128)
 fn advance_weather(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= frame.batch.y {
+    if tid.x >= frame.count {
         return;
     }
-    let id = frame.batch.x + tid.x;
+    let id = frame.first_interval.first_id + tid.x;
     sprites[tid.x] = weather(id, frame.timing.x, integrate(spawn(id,0.),frame.timing.x));
 }
 
 @compute @workgroup_size(128)
 fn advance_drizzle(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= frame.batch.y {
+    if tid.x >= frame.count {
         return;
     }
-    let id = frame.batch.x + tid.x;
-    let t = frame.timing.x;
-    let dt = birth_offset(tid.x);
-    let s = spawn(id,frame.emission.x+dt);
-    let age = clamp((t-s.birth) / max(.000001,frame.lifespan.x+dt*frame.lifespan.y), 0., 1.);
+    let birth = birth_at(tid.x);
+    let s = spawn(birth.id,birth.time);
+    let age = clamp((frame.timing.x-s.birth) / max(.000001,birth.life), 0., 1.);
     let r = max(1., age * f(6) * cfg.size.x * .001);
     sprites[tid.x] = sprite(s.pos.xy, vec2f(r), 0., 11., vec4f(age, f(3) / 360., 0., select(0., 1.-age, s.birth >= 0.)));
 }
 
 @compute @workgroup_size(128)
 fn advance_tiles(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x >= frame.batch.y {
+    if tid.x >= frame.count {
         return;
     }
-    sprites[tid.x] = tiles(frame.batch.x + tid.x, frame.timing.x);
+    sprites[tid.x] = tiles(frame.first_interval.first_id + tid.x, frame.timing.x);
 }
 
 struct Vary {

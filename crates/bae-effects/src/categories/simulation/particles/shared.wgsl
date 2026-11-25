@@ -5,13 +5,19 @@ struct Config {
     history: vec4u, trajectory: array<vec4f, 64>,
 }
 
+struct BirthInterval {
+    slot: u32, first_id: u32, start: f32, ordinal: f32,
+    rate: f32, slope: f32, life: f32, life_slope: f32,
+}
+@group(0) @binding(1) var<storage, read> intervals: array<BirthInterval>;
+
 struct Frame {
     timing: vec4f, viewport: vec4f, source: vec4f,
     maps: array<vec4f, 4>,
     projection: mat4x4f,
     light: vec4f,
     light_color: vec4f,
-    side_size: vec4f, batch: vec4u, emission: vec4f, lifespan: vec4f,
+    side_size: vec4f, count: u32, interval_count: u32, padding: vec2u, first_interval: BirthInterval,
 }
 
 @group(0) @binding(0) var<uniform> cfg: Config;

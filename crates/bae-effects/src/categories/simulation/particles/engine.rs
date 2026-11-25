@@ -1,6 +1,6 @@
-use super::{Kind, Scene, surface};
+use super::{Kind, Scene, emission, surface};
 use crate::{EffectTarget, gpu};
-use bae_gpu::wgpu;
+use bae_gpu::wgpu::{self, util::DeviceExt as _};
 use bae_render::{GpuImage, IRect, RenderError};
 
 const SPRITE_BYTES: u64 = 64;
@@ -10,6 +10,7 @@ pub(crate) struct Engine {
     advance: [wgpu::ComputePipeline; 4],
     draw: [wgpu::RenderPipeline; 5],
     scratch: wgpu::Buffer,
+    unused_intervals: wgpu::Buffer,
 }
 
 fn buffer_entry(binding: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
@@ -125,6 +126,11 @@ impl Engine {
         let write = buf(wgpu::BufferBindingType::Storage { read_only: false });
         let mut entries = vec![
             (0, Stage::COMPUTE, uniform),
+            (
+                1,
+                Stage::COMPUTE,
+                buf(wgpu::BufferBindingType::Storage { read_only: true }),
+            ),
             (3, Stage::COMPUTE, write),
             (4, Stage::COMPUTE, viewport),
         ];
@@ -225,6 +231,13 @@ impl Engine {
         Ok(Self {
             advance,
             draw,
+            // A single interval travels inline in Frame; the table binding is unused.
+            unused_intervals: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("particle inline interval placeholder"),
+                size: emission::INTERVAL_BYTES as u64,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            }),
             scratch: storage(
                 device,
                 (device.limits().max_storage_buffer_binding_size / SPRITE_BYTES)
@@ -335,9 +348,15 @@ pub(super) fn render(
     // index is global, so fragments at the bottom of a 4K layer are retained.
     let scratch = &engine.scratch;
     let max = (scratch.size() / SPRITE_BYTES) as u32;
-    let mut entries = vec![config.clone(), buffer_entry(3, scratch), viewport.clone()];
-    entries.extend_from_slice(&textures);
-    let compute_bind = group(&rt.device, &advance.get_bind_group_layout(0), &entries);
+    let mut compute_entries = vec![
+        config.clone(),
+        buffer_entry(1, &engine.unused_intervals),
+        buffer_entry(3, scratch),
+        viewport.clone(),
+    ];
+    compute_entries.extend_from_slice(&textures);
+    let compute_layout = advance.get_bind_group_layout(0);
+    let inline_bind = group(&rt.device, &compute_layout, &compute_entries);
     let mut entries = vec![config, viewport];
     entries.extend_from_slice(&textures);
     let draw_bind = group(
@@ -345,43 +364,59 @@ pub(super) fn render(
         &engine.draw[blend].get_bind_group_layout(0),
         &entries,
     );
-    let mut clear = true;
-    for batch in batches {
-        for offset in (0..batch.count.max(1)).step_by(max as usize) {
-            let count = (batch.count - offset).min(max);
-            batch.write(&mut frame, offset, count);
-            let offsets = [config_offset, rt.uniform(&frame.bytes)];
-            dispatch(target.encoder(), &advance, &compute_bind, count, &offsets);
-            let mut pass = target
-                .encoder()
-                .begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some(LABEL),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &overlay.view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: if clear {
-                                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                            } else {
-                                wgpu::LoadOp::Load
-                            },
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
+    for (page_index, page) in emission::pages(&batches, max).enumerate() {
+        let count = page.count;
+        let records = &page.intervals.bytes;
+        let interval_count = records.len() / emission::INTERVAL_BYTES;
+        frame.u32(224, count).u32(228, interval_count as u32);
+        let table_bind;
+        let compute_bind = if interval_count == 1 {
+            frame.bytes[240..272].copy_from_slice(records);
+            &inline_bind
+        } else {
+            // Immutable for this submission, including when several effects
+            // are encoded before the queue is submitted.
+            let table = rt
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("particle birth intervals"),
+                    contents: records,
+                    usage: wgpu::BufferUsages::STORAGE,
                 });
-            pass.set_pipeline(&engine.draw[blend]);
-            pass.set_bind_group(0, &draw_bind, &offsets);
-            pass.set_vertex_buffer(0, scratch.slice(..));
-            pass.set_viewport(0., 0., roi.width() as f32, roi.height() as f32, 0., 1.);
-            pass.draw(0..4, 0..count);
-            drop(pass);
-            clear = false;
-        }
+            let mut entries = compute_entries.clone();
+            entries[1] = buffer_entry(1, &table);
+            table_bind = group(&rt.device, &compute_layout, &entries);
+            &table_bind
+        };
+        let offsets = [config_offset, rt.uniform(&frame.bytes)];
+        dispatch(target.encoder(), &advance, compute_bind, count, &offsets);
+        let mut pass = target
+            .encoder()
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(LABEL),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &overlay.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: if page_index == 0 {
+                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        pass.set_pipeline(&engine.draw[blend]);
+        pass.set_bind_group(0, &draw_bind, &offsets);
+        pass.set_vertex_buffer(0, scratch.slice(..));
+        pass.set_viewport(0., 0., roi.width() as f32, roi.height() as f32, 0., 1.);
+        pass.draw(0..4, 0..count);
     }
     drop(slot);
     surface::composite(kind, target, scene, input, &overlay)

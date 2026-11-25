@@ -41,6 +41,12 @@ fn stopped_emitter_keeps_birth_position_and_lifespan_on_seek() {
             );
         }
     }
+    // Two emission intervals share a draw but have distinct birth times and IDs.
+    fx.run(
+        "key.set",
+        json!({"path":emitter, "attr":"param:0001",
+        "time":Time::from_seconds(0.25).flicks(), "keyframe":Keyframe::hold(Value::Float(0.5))}),
+    );
     let Some(renderer) = fx.renderer.as_mut() else {
         return;
     };
@@ -81,6 +87,10 @@ fn stopped_emitter_keeps_birth_position_and_lifespan_on_seek() {
     assert!(
         visible.iter().any(|&x| (12..19).contains(&x)),
         "early births retain their producer position"
+    );
+    assert!(
+        visible.iter().any(|&x| (24..28).contains(&x)),
+        "births after the rate change keep their positions"
     );
     assert!(
         visible.iter().all(|&x| x < 32),

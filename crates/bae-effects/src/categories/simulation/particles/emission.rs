@@ -14,23 +14,54 @@ pub(super) struct Batch {
     life_slope: f64,
 }
 
-impl Batch {
-    pub(super) fn write(&self, frame: &mut UniformWriter, offset: u32, count: u32) {
-        let id = self.first + u64::from(offset);
-        frame
-            .u32(224, id as u32)
-            .u32(228, count)
-            .f32s(
-                240,
-                &[
-                    self.start as f32,
-                    (id as f64 + 0.5 - self.area) as f32,
-                    self.rate as f32,
-                    self.slope as f32,
-                ],
-            )
-            .f32s(256, &[self.life as f32, self.life_slope as f32]);
-    }
+// GPU layout of BirthInterval in shared.wgsl.
+pub(super) const INTERVAL_BYTES: usize = 32;
+
+pub(super) struct Page {
+    pub count: u32,
+    pub intervals: UniformWriter,
+}
+
+/// Pack consecutive birth intervals in draw order. An interval crossing a page
+/// boundary starts the next page at the same birth ID and fractional ordinal.
+pub(super) fn pages(mut batches: &[Batch], capacity: u32) -> impl Iterator<Item = Page> {
+    let mut offset = 0;
+    std::iter::from_fn(move || {
+        batches.first()?;
+        let mut page = Page {
+            count: 0,
+            intervals: UniformWriter::with_size(0),
+        };
+        while let Some(batch) = batches.first() {
+            let count = (batch.count - offset).min(capacity - page.count);
+            let first = batch.first + u64::from(offset);
+            let at = page.intervals.bytes.len();
+            page.intervals
+                .u32(at, page.count)
+                .u32(at + 4, first as u32)
+                .f32s(
+                    at + 8,
+                    &[
+                        batch.start as f32,
+                        (first as f64 + 0.5 - batch.area) as f32,
+                        batch.rate as f32,
+                        batch.slope as f32,
+                        batch.life as f32,
+                        batch.life_slope as f32,
+                    ],
+                );
+            page.count += count;
+            offset += count;
+            if offset == batch.count {
+                batches = &batches[1..];
+                offset = 0;
+            }
+            if page.count == capacity {
+                break;
+            }
+        }
+        Some(page)
+    })
 }
 
 struct Control<'a> {
@@ -108,4 +139,44 @@ pub(super) fn batches(kind: Kind, scene: &Scene<'_>) -> Vec<Batch> {
         batches.push(Batch::default());
     }
     batches
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_intervals_preserve_slots_and_birth_ids_across_draws() {
+        const CAPACITY: u32 = 65_536;
+        let mut batches: Vec<_> = (0..64u64)
+            .map(|i| {
+                let first = i * 4096;
+                Batch {
+                    first,
+                    count: 1024,
+                    area: first as f64 + 0.25,
+                    ..Batch::default()
+                }
+            })
+            .collect();
+        assert_eq!(pages(&batches, CAPACITY).count(), 1);
+        batches[63].count += 17;
+        let mut draws = pages(&batches, CAPACITY);
+        let full = draws.next().unwrap();
+        assert_eq!(full.count, CAPACITY);
+        let records = full.intervals.bytes.as_chunks::<INTERVAL_BYTES>().0;
+        assert_eq!(records.len(), 64);
+        for (i, record) in records.iter().enumerate() {
+            assert_eq!(record[0..4], (i as u32 * 1024).to_le_bytes());
+            assert_eq!(record[4..8], (i as u32 * 4096).to_le_bytes());
+        }
+        let tail = draws.next().unwrap();
+        assert_eq!(tail.count, 17);
+        let record = tail.intervals.bytes;
+        assert_eq!(record.len(), INTERVAL_BYTES);
+        assert_eq!(record[0..4], 0u32.to_le_bytes());
+        assert_eq!(record[4..8], (63u32 * 4096 + 1024).to_le_bytes());
+        assert_eq!(record[12..16], 1024.25f32.to_le_bytes());
+        assert!(draws.next().is_none());
+    }
 }
