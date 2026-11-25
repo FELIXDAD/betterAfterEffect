@@ -825,6 +825,8 @@ impl Workbench {
     fn collect_shortcuts(&mut self, ctx: &Context) {
         let focus = KeyFocus::of(ctx);
         let typing = focus == KeyFocus::Text;
+        // An open menu or popup closes on Esc before Esc is a shortcut.
+        let popup = egui::Popup::is_any_open(ctx);
         let focused = self.dock.focused_panel().map(|p| p.kind().to_owned());
         let keymap = &self.keymap;
         let mut hits = Vec::new();
@@ -869,7 +871,9 @@ impl Workbench {
                     else {
                         return true;
                     };
-                    if focus.reserves(&binding.chord) {
+                    if focus.reserves(&binding.chord)
+                        || (popup && *key == Key::Escape && modifiers.is_none())
+                    {
                         return true;
                     }
                     hits.push(binding.invocation());
