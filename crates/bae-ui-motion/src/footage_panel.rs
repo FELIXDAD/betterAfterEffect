@@ -15,7 +15,7 @@ use bae_render::{
     RenderRequest, Renderer, RendererConfig,
 };
 use bae_ui::theme::{self, color};
-use bae_ui::{Panel, PanelContext, TabInfo, tr};
+use bae_ui::{Panel, PanelContext, PanelKind, TabInfo, tr};
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::common;
@@ -147,6 +147,15 @@ impl Drop for Gpu {
     fn drop(&mut self) {
         self.registry.remove(self.id);
     }
+}
+
+/// Registers the panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    crate::register_panel(
+        app,
+        "footage",
+        PanelKind::new("Footage", |_| Box::new(FootagePanel::default())),
+    );
 }
 
 /// The Footage panel.
@@ -318,6 +327,3 @@ impl FootagePanel {
         }
     }
 }
-
-/// Chinese for the panel (AE 26).
-pub(crate) const ZH: &[(&str, &str)] = &[("(none)", "(无)")];

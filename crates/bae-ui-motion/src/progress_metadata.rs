@@ -14,6 +14,21 @@ use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use crate::common;
 use crate::render_queue::{ItemStatus, SharedRenderQueue};
 
+/// Registers the panels and their Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "progress",
+        bae_ui::PanelKind::new("Progress", |_| Box::new(ProgressPanel)),
+    );
+    crate::register_panel(
+        app,
+        "metadata",
+        bae_ui::PanelKind::new("Metadata", |_| Box::new(MetadataPanel::default())),
+    );
+}
+
 /// The Progress panel.
 #[derive(Default)]
 pub struct ProgressPanel;
