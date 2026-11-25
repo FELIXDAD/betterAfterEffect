@@ -91,6 +91,21 @@
                 mask.maskMode = MaskMode.ADD;
             }
         }
+        if (c.paths) {
+            for (var i = 0; i < c.paths.length; i++) {
+                var path = c.paths[i];
+                var shape = new Shape();
+                shape.vertices = path.vertices;
+                var zero = [];
+                for (var j = 0; j < path.vertices.length; j++) zero.push([0, 0]);
+                shape.inTangents = path.inTangents || zero;
+                shape.outTangents = path.outTangents || zero;
+                shape.closed = path.closed !== false;
+                var mask = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom");
+                mask.property("ADBE Mask Shape").setValue(shape);
+                mask.maskMode = MaskMode.NONE;
+            }
+        }
         var fx = layer.property("ADBE Effect Parade").addProperty(c.effect);
         for (var id in c.params) {
             var pad = ("0000" + id).slice(-4);
@@ -102,6 +117,15 @@
             if (value.layer !== undefined) value = refs[value.layer].index;
             if (value.mask !== undefined) value = value.mask;
             prop.setValue(value);
+        }
+        if (c.keys) {
+            for (var id in c.keys) {
+                var prop = fx.property(c.effect + "-" + ("0000" + id).slice(-4));
+                for (var k = 0; k < c.keys[id].length; k++) {
+                    var key = c.keys[id][k];
+                    prop.setValueAtTime(key[0], key[1].length === 1 ? key[1][0] : key[1]);
+                }
+            }
         }
         return comp;
     }

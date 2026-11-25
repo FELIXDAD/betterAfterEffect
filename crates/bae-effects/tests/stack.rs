@@ -144,7 +144,7 @@ fn levels_then_exposure(fx: &mut Fx, layer: &PrimPath) -> (PrimPath, PrimPath) {
 }
 
 #[test]
-fn distort_point_defaults_use_the_source_on_apply_and_reset() {
+fn relative_point_defaults_use_the_source_on_apply_and_reset() {
     let mut fx = Fx::new();
     let comp = fx.comp();
     let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
@@ -152,6 +152,7 @@ fn distort_point_defaults_use_the_source_on_apply_and_reset() {
         ("ADBE Mirror", 1, [31., 6.5]),
         ("ADBE Corner Pin", 4, [31., 13.]),
         ("ADBE Geometry2", 2, [15.5, 6.5]),
+        ("ADBE Write-on", 1, [15.5, 6.5]),
     ] {
         let effect = fx.apply(&layer, effect_name);
         let prop = format!("param:{id:04}");
@@ -528,4 +529,31 @@ fn spatial_point_defaults_follow_source_dimensions_on_apply_and_reset() {
         fx.run("effect.reset", json!({"effects":[effect]}));
         assert_eq!(point(&fx), expected);
     }
+}
+
+#[test]
+fn stroke_reads_a_mask_in_none_mode() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.2; 3], [64, 32]);
+    let mask = fx.run(
+        "mask.create",
+        json!({"layer": layer, "kind": "rect", "position": [32., 16.], "size": [32., 16.]}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path": mask["mask"], "attr": "mode", "value": {"type": "enum", "value": "none"}}),
+    );
+    let effect = fx.apply(&layer, "ADBE Stroke");
+    fx.param(
+        &effect,
+        1,
+        json!({"type": "prim_ref", "value": mask["mask"]}),
+    );
+    fx.param(&effect, 7, json!({"type": "int", "value": 2}));
+    let Some(edge) = fx.pixel(&comp, 24, 8) else {
+        return;
+    };
+    assert!(edge[3] > 200);
+    assert_eq!(fx.pixel(&comp, 24, 16).unwrap(), [0; 4]);
 }

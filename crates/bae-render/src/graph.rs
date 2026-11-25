@@ -359,6 +359,13 @@ pub struct EffectNode {
     pub layers: Vec<(LayerDependency, NodeId)>,
     /// Mask coverage images it reads ([`Effect::mask_dependencies`]).
     pub masks: Vec<(MaskSelect, NodeId)>,
+    /// Raw mask paths and historical parameters, for effects that read them.
+    pub(crate) samples: Option<Box<EffectSamples>>,
+}
+
+pub(crate) struct EffectSamples {
+    pub paths: Vec<RenderMask>,
+    pub history: Vec<(Time, RenderEffect)>,
 }
 
 /// The frame context of an effect call, stored per effect node (everything in
@@ -369,6 +376,8 @@ pub struct EffectFrame {
     pub time: Time,
     /// Comp time.
     pub comp_time: Time,
+    /// Comp time when the layer first becomes active.
+    pub layer_in: Time,
     /// Comp-time seconds per layer-time second.
     pub layer_time_scale: f64,
     /// Resolution scale.
@@ -395,6 +404,7 @@ impl EffectFrame {
         EffectParams {
             time: self.time,
             comp_time: self.comp_time,
+            layer_in: self.layer_in,
             layer_time_scale: self.layer_time_scale,
             scale: self.scale,
             layer_bounds: self.layer_bounds,
@@ -451,6 +461,24 @@ impl SourceResolver for NoSources {
 pub trait CompFrames {
     /// `comp` evaluated at comp time `time` (`None`: not available).
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError>;
+
+    /// Evaluated parameters of one effect at a comp time.
+    fn effect_at(
+        &mut self,
+        comp: &PrimPath,
+        layer: &PrimPath,
+        effect: &PrimPath,
+        time: Time,
+    ) -> Result<Option<RenderEffect>, RenderError> {
+        Ok(self.comp_at(comp, time)?.and_then(|comp| {
+            comp.layers
+                .into_iter()
+                .find(|l| l.path == *layer)?
+                .effects
+                .into_iter()
+                .find(|fx| fx.path == *effect)
+        }))
+    }
 }
 
 /// Builds the graph for `comp` under `request`.
@@ -754,6 +782,7 @@ impl Builder<'_, '_> {
             time: layer.time,
             comp_time: comp.time,
             layer_time_scale: layer.time_scale,
+            layer_in: layer.in_point,
             scale: 1.0 / scale,
             layer_bounds: content_rect.round_out(),
             frame_rate: comp.frame_rate,
@@ -1271,6 +1300,7 @@ impl Builder<'_, '_> {
             time: layer.time,
             comp_time: comp.time,
             layer_time_scale: layer.time_scale,
+            layer_in: layer.in_point,
             scale: 1.0 / scale,
             layer_bounds: comp_px.round_out(),
             frame_rate: comp.frame_rate,
@@ -1434,6 +1464,40 @@ impl Builder<'_, '_> {
                 masks.push((select, node));
             }
         }
+        let paths: Vec<_> = match effect.path_dependencies(&params) {
+            Some(MaskSelect::All) => layer.masks.clone(),
+            Some(MaskSelect::One(path)) => layer
+                .masks
+                .iter()
+                .filter(|mask| mask.path == path)
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        for mask in &paths {
+            mask.hash_into(&mut h);
+        }
+        let mut history = Vec::new();
+        for time in effect.parameter_sample_times(&params) {
+            let sample = if time == comp.time {
+                Some(instance.clone())
+            } else {
+                self.time_dependent = true;
+                match self.frames.as_mut() {
+                    Some(frames) => {
+                        frames.effect_at(&comp.path, &layer.path, &instance.path, time)?
+                    }
+                    None => None,
+                }
+            };
+            if let Some(sample) = sample {
+                time.hash(&mut h);
+                sample.hash_into(&mut h);
+                history.push((time, sample));
+            }
+        }
+        let samples = (!paths.is_empty() || !history.is_empty())
+            .then(|| Box::new(EffectSamples { paths, history }));
         Ok(self.push(Node {
             kind: NodeKind::Effect(EffectNode {
                 layer: layer.path.clone(),
@@ -1443,6 +1507,7 @@ impl Builder<'_, '_> {
                 input,
                 layers,
                 masks,
+                samples,
             }),
             rect,
             pixel_scale: scale,
@@ -1580,6 +1645,7 @@ impl Builder<'_, '_> {
                 time: layer.time,
                 comp_time: comp.time,
                 layer_time_scale: layer.time_scale,
+                layer_in: layer.in_point,
                 scale: 1.0 / scale,
                 layer_bounds: content_rect.round_out(),
                 frame_rate: comp.frame_rate,
