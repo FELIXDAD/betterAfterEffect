@@ -170,6 +170,8 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// When L was last pressed to reveal the audio waveform on a second press.
+    pub(crate) last_l: Option<Instant>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
     /// The footage item the Footage panel shows.

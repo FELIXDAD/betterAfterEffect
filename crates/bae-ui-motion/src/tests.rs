@@ -1891,6 +1891,55 @@ impl bae_ui::files::FilePicker for Picker {
 }
 
 #[test]
+fn double_l_reveals_the_imported_audio_layer_waveform() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tone.wav");
+    // One mono 16-bit PCM sample at 8 kHz.
+    std::fs::write(&file,b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\xff\x3f").unwrap();
+    let probed = crate::import::probe(std::slice::from_ref(&file), &Default::default());
+    h.run("item.import", json!({"files":probed.files}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "tone.wav")
+        .unwrap();
+    let layer = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp":comp,"kind":"footage","source":asset}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        bae_media::audio::layer_file(&h.stage, &layer)
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        file.canonicalize().unwrap()
+    );
+    h.session().lock().selected_layers = vec![layer.clone()];
+    let mut panel = TimelinePanel::default();
+    for expected in ["audio:levels", "audio:waveform"] {
+        h.action(
+            &mut panel,
+            Invocation::with_params(
+                crate::actions::ids::REVEAL,
+                json!({"what":"audio:levels","add":false}),
+            ),
+        );
+        assert_eq!(
+            h.session().lock().reveal.get(&layer),
+            Some(&crate::session::Reveal::Attrs(vec![expected.into()]))
+        );
+    }
+}
+
+#[test]
 fn import_file_and_files_dropped_on_the_project_panel() {
     let dir = import_fixture("ui");
     let mut h = Harness::new();
