@@ -786,7 +786,7 @@ impl TimelinePanel {
         if attr == "text:path" {
             // Path Options > Path: a popup of the layer's masks, even when unset.
             let vr = Rect::from_min_max(
-                pos2(l + cols.switches, rect.top()),
+                pos2(l + cols.x(Column::Switches), rect.top()),
                 pos2(l + cols.end - 2.0, rect.bottom()),
             );
             let mut child = ui.new_child(
