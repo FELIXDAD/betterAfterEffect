@@ -1,79 +1,114 @@
-//! Native output for preview and CTI scrubbing. The audio thread only copies
-//! prepared samples. Decoding, resampling and automation run on a producer.
-use crate::audio::{sample_to_time, time_to_sample};
+//! Native preview and CTI scrubbing. One producer fills an SPSC ring. The device
+//! callback copies those samples and publishes the DAC clock without taking locks.
+mod clock;
+mod producer;
+
+use crate::audio::sample_to_time;
 use crate::mix::AudioMix;
 use bae_model::{Time, TimeRange};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamInstant};
-use parking_lot::Mutex;
-use std::collections::VecDeque;
+use cpal::{FromSample, Sample, SampleFormat, SizedSample};
+use rtrb::{Consumer, RingBuffer};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Sender};
 
-#[derive(Default)]
-struct Sink {
-    queue: Option<Receiver<Vec<[f32; 2]>>>,
-    block: std::vec::IntoIter<[f32; 2]>,
-    consumed: i64,
-    stamps: VecDeque<(StreamInstant, i64, i64)>,
-    finished: bool,
-    gain: f32,
-    peaks: [f32; 2],
+const BLOCK_FRAMES: usize = 512;
+struct Block {
+    epoch: u64,
+    len: usize,
+    samples: [[f32; 2]; BLOCK_FRAMES],
 }
-impl Sink {
-    fn pull<T: Sample + FromSample<f32>>(
-        &mut self,
-        data: &mut [T],
-        channels: usize,
-        when: StreamInstant,
-    ) {
-        let start = self.consumed;
-        let mut peaks = [0.0_f32; 2];
-        for out in data.chunks_exact_mut(channels) {
-            if self.block.len() == 0 {
-                let Some(queue) = &self.queue else { break };
-                match queue.try_recv() {
-                    Ok(block) => self.block = block.into_iter(),
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        self.finished = true;
-                        break;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                }
-            }
-            let Some(frame) = self.block.next() else {
-                break;
-            };
-            let frame = frame.map(|s| s * self.gain);
-            for (p, s) in peaks.iter_mut().zip(frame) {
-                *p = p.max(s.abs());
-            }
-            if channels == 1 {
-                out[0] = T::from_sample(((frame[0] + frame[1]) * 0.5).clamp(-1.0, 1.0));
-            } else {
-                out[0] = T::from_sample(frame[0].clamp(-1.0, 1.0));
-                out[1] = T::from_sample(frame[1].clamp(-1.0, 1.0));
-            }
-            self.consumed += 1;
+impl Default for Block {
+    fn default() -> Self {
+        Self {
+            epoch: 0,
+            len: 0,
+            samples: [[0.0; 2]; BLOCK_FRAMES],
         }
-        self.peaks = peaks;
-        if self.stamps.len() == 64 {
-            self.stamps.pop_front();
-        }
-        self.stamps.push_back((when, start, self.consumed - start));
     }
 }
 
-/// One default output stream, reused across scrubs and previews.
-pub struct AudioOutput {
-    stream: cpal::Stream,
-    sink: Arc<Mutex<Sink>>,
-    failed: Arc<AtomicBool>,
-    repeat: Arc<AtomicBool>,
-    rate: u32,
+#[derive(Default)]
+struct Monitor {
+    epoch: AtomicU64,
+    repeat: AtomicBool,
+    failed: AtomicBool,
+    ended_epoch: AtomicU64,
+    ended_at: AtomicU64,
+    clock: clock::Clock,
 }
 
+struct Sink {
+    ring: Consumer<Block>,
+    monitor: Arc<Monitor>,
+    epoch: u64,
+    offset: usize,
+    consumed: u64,
+}
+impl Sink {
+    fn pull<T: Sample + FromSample<f32>>(&mut self, data: &mut [T], channels: usize, nanos: u64) {
+        data.fill(T::EQUILIBRIUM);
+        let epoch = self.monitor.epoch.load(Ordering::Acquire);
+        if epoch != self.epoch {
+            self.epoch = epoch;
+            self.offset = 0;
+            self.consumed = 0;
+        }
+        let first = self.consumed;
+        let mut output = data.chunks_exact_mut(channels);
+        while output.len() > 0 {
+            let Ok(block) = self.ring.peek() else { break };
+            if block.epoch > epoch {
+                break;
+            }
+            if block.epoch != epoch {
+                self.ring.pop().expect("peeked block");
+                self.offset = 0;
+                continue;
+            }
+            if block.len == 0 {
+                self.monitor
+                    .ended_at
+                    .store(self.consumed, Ordering::Relaxed);
+                self.monitor.ended_epoch.store(epoch, Ordering::Release);
+                self.ring.pop().expect("end marker");
+                break;
+            }
+            let count = (block.len - self.offset).min(output.len());
+            for (frame, out) in block.samples[self.offset..self.offset + count]
+                .iter()
+                .zip(output.by_ref())
+            {
+                if channels == 1 {
+                    out[0] = T::from_sample(((frame[0] + frame[1]) * 0.5).clamp(-1.0, 1.0));
+                } else {
+                    out[0] = T::from_sample(frame[0].clamp(-1.0, 1.0));
+                    out[1] = T::from_sample(frame[1].clamp(-1.0, 1.0));
+                }
+            }
+            self.consumed += count as u64;
+            self.offset += count;
+            if self.offset == block.len {
+                self.ring.pop().expect("consumed block");
+                self.offset = 0;
+            }
+        }
+        if self.consumed != first {
+            self.monitor
+                .clock
+                .publish(epoch, nanos, first, self.consumed - first);
+        }
+    }
+}
+
+/// Default device with a reusable decoding/mixing thread.
+pub struct AudioOutput {
+    stream: cpal::Stream,
+    commands: Sender<producer::Command>,
+    monitor: Arc<Monitor>,
+    rate: u32,
+}
 impl std::fmt::Debug for AudioOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AudioOutput")
@@ -83,142 +118,159 @@ impl std::fmt::Debug for AudioOutput {
 }
 
 impl AudioOutput {
-    /// Opens the native system output using its negotiated default format.
+    /// Negotiate the device's native sample format and start the producer.
     pub fn open() -> Result<Self, String> {
         let device = cpal::default_host()
             .default_output_device()
             .ok_or("No audio output device")?;
         let config = device.default_output_config().map_err(|e| e.to_string())?;
         let rate = config.sample_rate();
-        let sink = Arc::new(Mutex::new(Sink {
-            gain: 1.0,
-            stamps: VecDeque::with_capacity(64),
-            ..Default::default()
-        }));
-        let failed = Arc::new(AtomicBool::new(false));
+        let (writer, reader) = RingBuffer::new(8);
+        let monitor = Arc::new(Monitor::default());
+        let sink = Sink {
+            ring: reader,
+            monitor: monitor.clone(),
+            epoch: 0,
+            consumed: 0,
+            offset: 0,
+        };
         macro_rules! build {
             ($t:ty) => {
-                stream::<$t>(&device, config.into(), sink.clone(), failed.clone())
+                stream::<$t>(&device, config.into(), sink)
             };
         }
         let stream = match config.sample_format() {
             SampleFormat::F32 => build!(f32),
             SampleFormat::I16 => build!(i16),
             SampleFormat::I24 => build!(cpal::I24),
+            SampleFormat::U16 => build!(u16),
             SampleFormat::I32 => build!(i32),
             SampleFormat::F64 => build!(f64),
-            SampleFormat::U16 => build!(u16),
-            other => return Err(format!("Unsupported audio output format: {other}")),
+            format => return Err(format!("Unsupported output format: {format}")),
         }
         .map_err(|e| e.to_string())?;
         stream.play().map_err(|e| e.to_string())?;
+        let (commands, messages) = mpsc::channel();
+        let worker_monitor = monitor.clone();
+        std::thread::Builder::new()
+            .name("bae-audio-mix".into())
+            .spawn(move || producer::run(&messages, writer, &worker_monitor, rate))
+            .map_err(|e| e.to_string())?;
         Ok(Self {
             stream,
-            sink,
-            failed,
-            repeat: Arc::default(),
+            commands,
+            monitor,
             rate,
         })
     }
 
-    /// Replace queued sound atomically. Dropping its receiver stops the old producer.
-    pub fn start(&mut self, mut mix: AudioMix, from: Time, range: TimeRange, repeat: bool) {
-        let (tx, rx) = mpsc::sync_channel(6);
-        self.stop();
-        self.sink.lock().queue = Some(rx);
-        self.repeat = Arc::new(AtomicBool::new(repeat));
-        let repeat = self.repeat.clone();
-        let rate = self.rate;
-        std::thread::spawn(move || {
-            let first = time_to_sample(range.start, rate);
-            let end = time_to_sample(range.end, rate);
-            let mut cursor = time_to_sample(from, rate).clamp(first, end.max(first));
-            if end <= first {
-                return;
-            }
-            loop {
-                if cursor >= end {
-                    if !repeat.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    cursor = first;
-                }
-                let count = (end - cursor).min(512) as usize;
-                let mut block = vec![[0.0; 2]; count];
-                if let Err(error) = mix.render(cursor, rate, &mut block) {
-                    tracing::warn!(%error, "Audio preview decode failed");
-                    break;
-                }
-                cursor += count as i64;
-                if tx.send(block).is_err() {
-                    break;
-                }
-            }
+    /// Install a snapshot on the producer. Media probing happens there.
+    pub fn prepare(&self, mix: AudioMix) {
+        self.monitor.epoch.fetch_add(1, Ordering::AcqRel);
+        let _ = self.commands.send(producer::Command::Prepare(mix));
+    }
+    /// Start or seek within the prepared mix; retain its decoders.
+    pub fn seek(&self, from: Time, range: TimeRange, repeat: bool) {
+        self.set_loop(repeat);
+        let epoch = self.monitor.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        let _ = self.commands.send(producer::Command::Seek {
+            epoch,
+            at: from,
+            range,
         });
     }
-
-    /// Samples heard since the start, using DAC timestamps and its stream clock.
+    fn heard(&self) -> u64 {
+        let now = self.stream.now().as_nanos() as u64;
+        self.monitor
+            .clock
+            .heard(self.monitor.epoch.load(Ordering::Acquire), now, self.rate)
+    }
+    /// Samples heard since the latest seek, measured against DAC presentation time.
     pub fn elapsed(&self) -> Time {
-        let now = self.stream.now();
-        let sink = self.sink.lock();
-        for &(when, first, count) in sink.stamps.iter().rev() {
-            if let Some(offset) = now.checked_duration_since(when) {
-                let n = (offset.as_secs_f64() * f64::from(self.rate)) as i64;
-                return sample_to_time(first + n.min(count), self.rate);
-            }
-        }
-        Time::ZERO
+        sample_to_time(self.heard() as i64, self.rate)
     }
-
-    /// True once the last sample has reached the output or the device is lost.
+    /// The operating system invalidated the audio stream.
+    pub fn device_lost(&self) -> bool {
+        self.monitor.failed.load(Ordering::Relaxed)
+    }
+    /// The last queued sample has reached the speakers, or the device was lost.
     pub fn finished(&self) -> bool {
-        let (done, count) = {
-            let s = self.sink.lock();
-            (s.finished, s.consumed)
-        };
-        self.failed.load(Ordering::Relaxed)
-            || (done && self.elapsed() >= sample_to_time(count, self.rate))
+        let epoch = self.monitor.epoch.load(Ordering::Acquire);
+        self.device_lost()
+            || (epoch != 0
+                && self.monitor.ended_epoch.load(Ordering::Acquire) == epoch
+                && self.heard() >= self.monitor.ended_at.load(Ordering::Relaxed))
     }
-    /// Set the loop switch while playing.
+    /// Change the active work area's repeat mode.
     pub fn set_loop(&self, repeat: bool) {
-        self.repeat.store(repeat, Ordering::Relaxed);
+        self.monitor.repeat.store(repeat, Ordering::Relaxed);
     }
-    /// Stop delivering queued audio.
-    pub fn stop(&mut self) {
-        let mut s = self.sink.lock();
-        s.queue = None;
-        s.block = Vec::new().into_iter();
-        s.stamps.clear();
-        s.consumed = 0;
-        s.finished = false;
-        s.peaks = [0.0; 2];
+    /// Silence queued audio while retaining the device and the prepared sources.
+    pub fn stop(&self) {
+        self.monitor.epoch.fetch_add(1, Ordering::AcqRel);
+        let _ = self.commands.send(producer::Command::Stop);
     }
 }
 
 fn stream<T: SizedSample + FromSample<f32>>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
-    sink: Arc<Mutex<Sink>>,
-    failed: Arc<AtomicBool>,
+    mut sink: Sink,
 ) -> Result<cpal::Stream, cpal::Error> {
     let channels = usize::from(config.channels);
+    let monitor = sink.monitor.clone();
     device.build_output_stream(
         config,
         move |data: &mut [T], info| {
-            data.fill(T::EQUILIBRIUM);
-            if let Some(mut sink) = sink.try_lock() {
-                sink.pull(data, channels, info.timestamp().playback);
-            }
+            sink.pull(data, channels, info.timestamp().playback.as_nanos() as u64)
         },
-        move |err| {
-            tracing::warn!(%err,"Audio device callback");
+        move |error| {
+            tracing::warn!(%error, "Audio device callback");
             if !matches!(
-                err.kind(),
+                error.kind(),
                 cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied
             ) {
-                failed.store(true, Ordering::Relaxed);
+                monitor.failed.store(true, Ordering::Relaxed);
             }
         },
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seek_discards_queued_audio_and_underruns_hold_the_dac_clock() {
+        let (mut writer, ring) = RingBuffer::new(4);
+        let monitor = Arc::new(Monitor::default());
+        let mut sink = Sink {
+            ring,
+            monitor: monitor.clone(),
+            epoch: 0,
+            offset: 0,
+            consumed: 0,
+        };
+        for (epoch, value) in [(1, 0.25), (2, 0.75)] {
+            let mut chunk = writer.write_chunk(1).unwrap();
+            let block = &mut chunk.as_mut_slices().0[0];
+            block.epoch = epoch;
+            block.len = 3;
+            block.samples[..3].fill([value; 2]);
+            chunk.commit_all();
+        }
+        let mut mono = [0.0; 2];
+        monitor.epoch.store(1, Ordering::Release);
+        sink.pull(&mut mono, 1, 1_000_000);
+        assert_eq!(mono, [0.25; 2]);
+        monitor.epoch.store(2, Ordering::Release);
+        sink.pull(&mut mono, 1, 3_000_000);
+        assert_eq!(mono, [0.75; 2]);
+        sink.pull(&mut mono, 1, 5_000_000);
+        assert_eq!(mono, [0.75, 0.0]);
+        assert_eq!(monitor.clock.heard(2, 2_500_000, 1000), 0);
+        assert_eq!(monitor.clock.heard(2, 4_000_000, 1000), 1);
+        assert_eq!(monitor.clock.heard(2, 8_000_000, 1000), 3);
+    }
 }

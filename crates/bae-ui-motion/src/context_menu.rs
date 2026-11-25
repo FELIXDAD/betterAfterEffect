@@ -321,5 +321,20 @@ pub(crate) const TIMELINE_HEADER: &[Entry] = &[
     ),
 ];
 
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Context menus (AE 26).
+    ("Layer Styles", "图层样式"),
+    ("Open Effect Controls", "打开效果控件"),
+    // Layer context menu items that are not in the menu bar.
+    ("Invert Selection", "反向选择"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+}
+
 #[cfg(test)]
 mod tests;

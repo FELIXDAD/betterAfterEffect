@@ -13,6 +13,7 @@ tempfile.workspace = true
 bae-app.workspace = true
 bae-anim.workspace = true
 cpal.workspace = true
+rtrb.workspace = true
 bae-gpu.workspace = true
 # Time (flicks) and FrameRate shared with the document model.
 bae-model.workspace = true

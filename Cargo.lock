@@ -532,7 +532,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bae"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "bae-agent",
@@ -572,14 +572,14 @@ dependencies = [
 
 [[package]]
 name = "bae-aex-host"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-model",
 ]
 
 [[package]]
 name = "bae-agent"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-model",
  "bae-package",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "bae-anim"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-model",
  "glam",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "bae-app"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "indexmap",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "bae-color"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-gpu",
  "bae-media",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "bae-dep-probe"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "bae-effects"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-app",
@@ -658,6 +658,7 @@ dependencies = [
  "bae-motion",
  "bae-plugin",
  "bae-render",
+ "chrono",
  "glam",
  "half",
  "parking_lot",
@@ -673,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "bae-gpu"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-app",
  "bae-platform",
@@ -691,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "bae-hub"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "bae-model",
@@ -711,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "bae-interop-ai"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-model",
@@ -726,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "bae-media"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-app",
@@ -747,6 +748,7 @@ dependencies = [
  "objc2-video-toolbox",
  "parking_lot",
  "png",
+ "rtrb",
  "serde",
  "serde_json",
  "symphonia",
@@ -760,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "bae-model"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "blake3",
  "indexmap",
@@ -776,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "bae-motion"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-app",
@@ -789,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "bae-package"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-model",
  "schemars",
@@ -802,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "bae-platform"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "bae-app",
@@ -819,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "bae-plugin"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "bae-app",
@@ -828,11 +830,16 @@ dependencies = [
  "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
+ "cc",
  "clap",
  "half",
+ "libc",
+ "libloading",
+ "memmap2",
  "naga",
  "parking_lot",
  "rustc-hash 2.1.3",
+ "rustix 1.1.6",
  "semver",
  "serde",
  "serde_json",
@@ -840,15 +847,17 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "bae-plugin-sdk"
-version = "0.0.1"
+version = "0.0.2"
 
 [[package]]
 name = "bae-prefs"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-platform",
  "serde",
@@ -859,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "bae-render"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "bae-anim",
@@ -885,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "bae-sync"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-model",
  "blake3",
@@ -902,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "bae-text"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-gpu",
@@ -924,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "bae-ui"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-app",
  "bae-model",
@@ -943,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "bae-ui-motion"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-app",
@@ -956,6 +965,7 @@ dependencies = [
  "bae-prefs",
  "bae-render",
  "bae-ui",
+ "bae-vector",
  "egui",
  "flate2",
  "serde",
@@ -966,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "bae-vector"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-effects",
@@ -4698,6 +4708,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtrb"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5974e397833d890f2f74963408e0d4a6cd8eda2f6a445ae06750291b5d7a997e"
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6605,7 +6621,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "png",

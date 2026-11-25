@@ -370,12 +370,9 @@ impl FileAudio {
     }
 }
 
-impl AudioSource for FileAudio {
-    fn info(&self) -> &AudioInfo {
-        &self.info
-    }
-
-    fn read(&mut self, start: u64, count: u64) -> Result<AudioBuffer, MediaError> {
+impl FileAudio {
+    /// Borrow decoded PCM from the streaming window until the next read.
+    pub(crate) fn read_window(&mut self, start: u64, count: u64) -> Result<&[f32], MediaError> {
         let channels = self.channels();
         // Encoder padding past the valid length is not audio.
         let end = start
@@ -396,10 +393,20 @@ impl AudioSource for FileAudio {
         }
         let from = ((start.saturating_sub(self.start)) as usize * channels).min(self.window.len());
         let to = ((end.saturating_sub(self.start)) as usize * channels).min(self.window.len());
+        Ok(&self.window[from..to])
+    }
+}
+
+impl AudioSource for FileAudio {
+    fn info(&self) -> &AudioInfo {
+        &self.info
+    }
+
+    fn read(&mut self, start: u64, count: u64) -> Result<AudioBuffer, MediaError> {
         Ok(AudioBuffer {
             sample_rate: self.info.sample_rate,
             channels: self.info.channels,
-            samples: self.window[from..to].to_vec(),
+            samples: self.read_window(start, count)?.to_vec(),
         })
     }
 }

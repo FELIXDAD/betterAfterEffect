@@ -36,8 +36,8 @@ pub use error::EvalError;
 pub use eval::{Evaluator, layer_timing};
 pub use evaluated::{
     AssetInfo, AttrError, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer,
-    EvaluatedMask, EvaluatedPrim, LayerSource, LayerSwitches, LightFalloff, LightState, LightType,
-    TextPathOptions, TrackMatte,
+    EvaluatedMask, EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff,
+    LightState, LightType, TextPathOptions, TrackMatte,
 };
 pub use time::{LayerTiming, MotionBlur};
 pub use transform::{AutoOrientRotation, Transform};

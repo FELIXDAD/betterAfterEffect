@@ -22,6 +22,8 @@ pub enum Reveal {
     Modified,
     /// P, S, R, T, A (Shift adds): exactly these layer attributes.
     Attrs(Vec<String>),
+    /// Exactly these properties (Reveal Expression Errors).
+    Props(Vec<(PrimPath, String)>),
 }
 
 /// Real-time playback of one comp.
@@ -64,6 +66,14 @@ pub enum Pending {
         /// Its layers before the command.
         before: Vec<PrimPath>,
     },
+    /// Select the effects a command adds to layers (Effect menu, Effects &
+    /// Presets): those not in `before`.
+    NewEffects {
+        /// The layers.
+        layers: Vec<PrimPath>,
+        /// Their effects before the command.
+        before: Vec<PrimPath>,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +87,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// Effects selected in Effect Controls: the viewer draws their point
+    /// controls (AE).
+    pub selected_effects: Vec<PrimPath>,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
@@ -87,9 +100,12 @@ pub struct Session {
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    retry_audio_after: Option<Instant>,
+    opening_audio: bool,
     audio_clock: bool,
     last_scrub: Option<Time>,
-    mix_revision: Option<u64>,
+    mix_revision: Option<(PrimPath, u64)>,
+    mix_has_audio: bool,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -100,6 +116,8 @@ pub struct Session {
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
+    /// The layer the Layer panel shows (opened from the Timeline).
+    pub(crate) layer_panel: Option<PrimPath>,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
@@ -135,6 +153,57 @@ impl Default for SharedSession {
 impl SharedSession {
     pub fn lock(&self) -> MutexGuard<'_, Session> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Called on a background thread. Device negotiation may block in the OS.
+    pub(crate) fn open_audio(&self) -> Result<(), String> {
+        let device = bae_media::playback::AudioOutput::open();
+        let mut s = self.lock();
+        s.opening_audio = false;
+        match device {
+            Ok(output) => {
+                let previous = s.output.replace(output);
+                s.mix_revision = None;
+                s.retry_audio_after = None;
+                drop(s);
+                drop(previous);
+                Ok(())
+            }
+            Err(error) => {
+                s.retry_audio_after = Some(Instant::now() + std::time::Duration::from_secs(2));
+                Err(error)
+            }
+        }
+    }
+
+    /// A user can connect a device after starting the application.
+    pub(crate) fn retry_audio(&self) {
+        let mut s = self.lock();
+        let needed = s.retry_audio_after.map_or_else(
+            || {
+                s.output
+                    .as_ref()
+                    .is_some_and(bae_media::playback::AudioOutput::device_lost)
+            },
+            |at| Instant::now() >= at,
+        );
+        if !needed || s.opening_audio {
+            return;
+        }
+        s.opening_audio = true;
+        drop(s);
+        let session = self.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("bae-audio-reopen".into())
+            .spawn(move || {
+                if let Err(error) = session.open_audio() {
+                    tracing::warn!(%error, "Audio output unavailable");
+                }
+            })
+        {
+            self.lock().opening_audio = false;
+            tracing::warn!(%error, "Could not start the audio device worker");
+        }
     }
 }
 
@@ -212,6 +281,19 @@ impl Session {
     pub fn sync(&mut self, stage: &Stage) {
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewEffects { layers, before } = &what {
+                let added: Vec<PrimPath> = layers
+                    .iter()
+                    .flat_map(|l| bae_motion::effect::effects_of(stage, l))
+                    .filter(|e| !before.contains(e))
+                    .collect();
+                if !added.is_empty() {
+                    self.selected_effects = added;
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewLayers { comp, before } = &what {
                 let added: Vec<PrimPath> = query::comp_layers(stage, comp)
                     .into_iter()
@@ -227,7 +309,9 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } => unreachable!("handled above"),
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                    unreachable!("handled above")
+                }
             };
             if stage.has_prim(path) {
                 match what {
@@ -239,7 +323,7 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } => {}
+                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -251,7 +335,7 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } => None,
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
             })
             .collect();
         self.reserved
@@ -278,6 +362,7 @@ impl Session {
         self.selected_props
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
+        self.selected_effects.retain(|e| stage.has_prim(e));
     }
 
     pub fn is_playing(&self) -> bool {
@@ -303,60 +388,77 @@ impl Session {
         });
     }
 
-    fn start_sound(
-        &mut self,
-        stage: &Stage,
-        comp: &PrimPath,
-        from: Time,
-        range: TimeRange,
-        looping: bool,
-    ) -> bool {
-        let mix = bae_media::mix::AudioMix::from_stage(stage, comp);
-        if mix.is_empty() {
+    /// Refresh the producer's snapshot once per composition edit. Timeline seeks
+    /// reuse the same producer, snapshot and open decoders.
+    fn prepare_mix(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) -> bool {
+        let Some(output) = &self.output else {
+            return false;
+        };
+        let revision = cx
+            .resources
+            .get::<Arc<bae_ui::history::HistoryLog>>()
+            .map_or(0, |h| h.last_seq());
+        if self
+            .mix_revision
+            .as_ref()
+            .is_some_and(|(comp, seq)| comp == &info.path && *seq == revision)
+        {
             return false;
         }
-        if self.output.is_none() {
-            match bae_media::playback::AudioOutput::open() {
-                Ok(output) => self.output = Some(output),
-                Err(error) => {
-                    tracing::warn!(%error, "Cannot open audio device");
-                    return false;
-                }
-            }
-        }
-        self.output
-            .as_mut()
-            .unwrap()
-            .start(mix, from, range, looping);
+        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path);
+        self.mix_has_audio = !mix.is_empty();
+        output.prepare(mix);
+        self.mix_revision = Some((info.path.clone(), revision));
         true
     }
 
-    pub(crate) fn preview(&mut self, stage: &Stage, info: &CompInfo) {
-        self.play(info);
-        let pb = self.playback.as_ref().unwrap();
-        self.audio_clock =
-            self.start_sound(stage, &info.path, pb.from, pb.range, self.loop_playback);
+    fn sound(&self, at: Time, range: TimeRange, repeat: bool) -> bool {
+        if self.mix_has_audio
+            && let Some(output) = &self.output
+        {
+            output.seek(at, range, repeat);
+            return true;
+        }
+        false
     }
 
-    pub(crate) fn scrub_to(&mut self, stage: &Stage, info: &CompInfo, time: Time, sound: bool) {
+    pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        self.prepare_mix(cx, info);
+        self.play(info);
+        let pb = self.playback.as_ref().unwrap();
+        self.audio_clock = self.sound(pb.from, pb.range, self.loop_playback);
+    }
+
+    pub(crate) fn scrub_to(
+        &mut self,
+        cx: &bae_ui::PanelContext<'_>,
+        info: &CompInfo,
+        time: Time,
+        sound: bool,
+    ) {
         if self.is_playing() || !sound {
             self.stop();
         }
         self.set_time(info, time);
         let at = self.time(&info.path);
         if sound && self.last_scrub != Some(at) {
+            self.prepare_mix(cx, info);
             let end = (at + Time::from_seconds(0.08)).min(info.duration);
-            self.start_sound(stage, &info.path, at, TimeRange::new(at, end), false);
-            self.last_scrub = Some(at);
+            if self.sound(at, TimeRange::new(at, end), false) {
+                self.last_scrub = Some(at);
+            }
         }
     }
 
     pub fn stop(&mut self) {
+        if (self.audio_clock || self.last_scrub.is_some())
+            && let Some(output) = &self.output
+        {
+            output.stop();
+        }
         self.playback = None;
         self.last_scrub = None;
-        self.output = None;
         self.audio_clock = false;
-        self.mix_revision = None;
     }
 
     pub(crate) fn update_preview(
@@ -364,16 +466,14 @@ impl Session {
         cx: &bae_ui::PanelContext<'_>,
         info: &CompInfo,
     ) -> bool {
-        if self.is_playing() {
-            let revision = cx
-                .resources
-                .get::<Arc<bae_ui::history::HistoryLog>>()
-                .map(|h| h.last_seq());
-            if self.mix_revision.is_some() && self.mix_revision != revision {
-                self.stop();
-                self.preview(cx.stage, info);
-            }
-            self.mix_revision = revision;
+        if self.prepare_mix(cx, info) && self.is_playing() {
+            // Pick up a late device or a live layer edit at the current CTI.
+            let from = self.time(&info.path);
+            let pb = self.playback.as_mut().unwrap();
+            pb.from = from;
+            pb.started = Instant::now();
+            let range = pb.range;
+            self.audio_clock = self.sound(from, range, self.loop_playback);
         }
         self.tick(info)
     }
