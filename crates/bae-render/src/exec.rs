@@ -149,7 +149,7 @@ pub(crate) struct Executed {
     pub image: GpuImage,
     pub draw_calls: usize,
     pub passes: usize,
-    /// The frame converted into a new RGBA8 texture (when asked for),
+    /// The frame converted into the requested RGBA8 target (when asked for),
     /// recorded in the frame's own submission.
     pub output: Option<crate::OutputTarget>,
 }
@@ -168,7 +168,7 @@ impl ImageAllocator for PoolAllocator<'_> {
 }
 
 /// Executes `graph` and submits it once. Returns the output node's image and,
-/// with `output`, its conversion into a new RGBA8 texture recorded before the
+/// with `output`, its conversion into the requested RGBA8 target recorded before the
 /// same submission (the viewer path: one submit per frame).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(

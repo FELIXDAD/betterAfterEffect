@@ -81,8 +81,14 @@ fn output_targets_reuse_only_the_returned_storage() {
         .output_texture(&frame, OutputAlpha::Straight, None)
         .unwrap();
     let storage = spare.view().texture().clone();
-    let spare = renderer
-        .output_texture(&frame, OutputAlpha::Over([0.0, 0.0, 1.0]), Some(spare))
+    let (_, spare) = renderer
+        .render_frame_output(
+            &comp,
+            &RenderRequest::full(),
+            None,
+            OutputAlpha::Over([0.0, 0.0, 1.0]),
+            Some(spare),
+        )
         .unwrap();
     assert_eq!(spare.view().texture(), &storage);
     assert_ne!(target.view().texture(), &storage);
@@ -107,6 +113,24 @@ fn output_targets_reuse_only_the_returned_storage() {
     assert_eq!(resized.size(), [32, 24]);
     assert_ne!(resized.view().texture(), &storage);
     assert_eq!(renderer.frame_cache().stats().entries, 0);
+    renderer.set_frame_cache_budget(1 << 20);
+    renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    let (cached, output) = renderer
+        .render_frame_output(
+            &comp,
+            &RenderRequest::full(),
+            None,
+            OutputAlpha::Over([0.0, 1.0, 0.0]),
+            Some(target),
+        )
+        .unwrap();
+    assert!(cached.from_cache);
+    assert_eq!(
+        pixels(output.view().texture()).pixel(0, 0),
+        [0, 255, 0, 255]
+    );
 }
 
 #[test]
