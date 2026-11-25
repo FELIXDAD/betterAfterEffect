@@ -67,6 +67,7 @@
 
 pub mod camera;
 pub mod comp;
+pub mod content;
 pub mod dimensions;
 pub mod effect;
 pub mod expressions;
@@ -98,6 +99,7 @@ pub use comp::{
     CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
     TrimCompToWorkArea,
 };
+pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
 pub use dimensions::SeparateDimensions;
 pub use expressions::{ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput};
@@ -174,6 +176,9 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateText),
         r.register(SetText),
         r.register(SetExpressions),
+        r.register(DuplicateContent),
+        r.register(PasteContent),
+        r.register(DeleteContent),
         r.register(AnimateText),
         r.register(AddTextSelector),
         r.register(RemoveTextAnimators),

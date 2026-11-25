@@ -179,6 +179,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Edit / layer commands
     ("Duplicate", "重复"),
     ("Split Layer", "拆分图层"),
+    ("Select", "选择"),
     ("Select All", "全选"),
     ("Deselect All", "全部取消选择"),
     ("Copy", "复制"),
