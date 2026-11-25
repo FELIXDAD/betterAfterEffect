@@ -475,6 +475,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Select a layer to see its properties.",
         "选择一个图层以查看其属性。",
     ),
+    ("Master Volume", "主音量"),
+    ("Left output level", "左输出电平"),
+    ("Right output level", "右输出电平"),
     // Preview panel
     ("First Frame", "第一帧"),
     ("Previous Frame", "上一帧"),

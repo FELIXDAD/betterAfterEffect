@@ -33,7 +33,7 @@ impl Panel for AudioPanel {
         ui.horizontal_top(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(57.0, height), Sense::hover());
             let y = |db: f32| r.bottom() - ((db.clamp(-60.0, 12.0) + 60.0) / 72.0) * r.height();
-            for (i, label) in ["Left Channel", "Right Channel"].into_iter().enumerate() {
+            for (i, label) in ["Left output level", "Right output level"].into_iter().enumerate() {
                 let bar =
                     Rect::from_min_size(r.min + vec2(13.0 * i as f32, 0.0), vec2(10.0, height));
                 ui.painter().rect_filled(bar, 0.0, color::FIELD);
