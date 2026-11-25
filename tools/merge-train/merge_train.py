@@ -686,6 +686,14 @@ def scratch_at(commit):
     return w
 
 
+def fast_ci_active(head):
+    """The fast workflow can be waiting for a runner before its required job exists."""
+    endpoint = "repos/%s/actions/workflows/ci-fast.yml/runs?head_sha=%s&per_page=100" % (
+        CFG["repo"], head)
+    pages = gh_json(["api", "--paginate", "--slurp", endpoint])
+    return any(run["status"] != "completed" for page in pages for run in page["workflow_runs"])
+
+
 def nudge_ci(pr, ps):
     """Required checks never started on this head (e.g. it predates a CI change, or
     the run was never triggered): make GitHub run CI on a new head. Behind dev →
@@ -829,13 +837,16 @@ def process_head(pr, st):
             if why:
                 fail_pr(pr, why, data.get("checks", ()))
                 return True
-        # Nothing queued or running, only missing/skipped: CI will never come by itself.
+        # The required fast job appears only after its prerequisite, changes, finishes.
         states = [st_ for _, st_, _ in data.get("checks", ()) if st_ != "success"]
         if states and all(x in ("missing", "skipped") for x in states):
             ps.setdefault("stuck_since", now_utc().isoformat())
             stuck = (now_utc() - dt.datetime.fromisoformat(ps["stuck_since"])).total_seconds() / 60
             if stuck >= CFG.get("missing_nudge_minutes", 10) and ps.get("nudged_head") != pr["headRefOid"]:
-                nudge_ci(pr, ps)
+                if fast_ci_active(pr["headRefOid"]):
+                    ps.pop("stuck_since")
+                else:
+                    nudge_ci(pr, ps)
         else:
             ps.pop("stuck_since", None)
         return False
