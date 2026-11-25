@@ -36,7 +36,7 @@ pub struct ScriptEntry {
 /// An installed module. Its exports share the source and limits.
 #[derive(Debug, Clone)]
 pub struct ScriptPackage {
-    source: Arc<str>,
+    module: Arc<bae_script::CompiledModule>,
     heap_bytes: usize,
     access: ProjectAccess,
     pub(crate) entries: Vec<ScriptEntry>,
@@ -115,14 +115,14 @@ impl ScriptPackage {
             .read_text(&script.entry)
             .map_err(|e| Diagnostic::error(&script.entry, e.to_string()))?;
         let heap_bytes = (script.memory_limit_mb.unwrap_or(64) as usize) << 20;
-        bae_script::check_module(
+        let module = bae_script::prepare_module(
             &source,
             heap_bytes,
             entries.iter().map(|e| e.export.as_str()),
         )
         .map_err(|e| Diagnostic::error(&script.entry, e))?;
         Ok(Some(Self {
-            source: source.into(),
+            module: Arc::new(module),
             heap_bytes,
             access: m.permissions.project.unwrap_or(ProjectAccess::Read),
             entries,
@@ -140,7 +140,7 @@ struct Services {
 struct ScriptCommand {
     info: CommandInfo,
     export: String,
-    source: Arc<str>,
+    module: Arc<bae_script::CompiledModule>,
     heap_bytes: usize,
     access: ProjectAccess,
     services: Arc<Services>,
@@ -161,7 +161,8 @@ impl DynCommand for ScriptCommand {
         let commands = self
             .services
             .commands
-            .get_or_init(|| bae_script::standard_commands(self.services.defs.clone()));
+            .get()
+            .expect("script commands are prepared before registration");
         let env = ScriptEnv {
             commands: &|id| commands.get(id).cloned(),
             effects: &|name| bae_script::find_effect(&self.services.defs, name),
@@ -171,7 +172,7 @@ impl DynCommand for ScriptCommand {
             time_limit: Some(Duration::from_secs(10)),
         };
         let entry = ModuleEntry {
-            source: &self.source,
+            module: &self.module,
             export: &self.export,
             args: &params,
             heap_bytes: self.heap_bytes,
@@ -215,6 +216,11 @@ impl ScriptCommands {
         package: Option<&ScriptPackage>,
         scope: crate::Scope,
     ) -> Result<(), Diagnostic> {
+        if package.is_some_and(|p| !p.entries.is_empty()) {
+            self.services
+                .commands
+                .get_or_init(|| bae_script::standard_commands(self.services.defs.clone()));
+        }
         let owner = Owner::plugin(id);
         self.registry.batch(|tx| {
             let snapshot = self.registry.snapshot();
@@ -239,7 +245,7 @@ impl ScriptCommands {
                     let command = ScriptCommand {
                         info: info.clone(),
                         export: entry.export.clone(),
-                        source: p.source.clone(),
+                        module: p.module.clone(),
                         heap_bytes: p.heap_bytes,
                         access: if scope == crate::Scope::Project {
                             p.access.min(ProjectAccess::Read)

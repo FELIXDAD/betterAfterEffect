@@ -27,7 +27,7 @@ mod convert;
 mod engine;
 mod host;
 
-pub use engine::check_module;
+pub use engine::{CompiledModule, prepare_module, prewarm};
 
 use std::sync::{Arc, Mutex};
 
@@ -131,7 +131,7 @@ pub trait ScriptView: std::fmt::Debug + Send + Sync {
 
 /// An exported function of an installed ES module.
 pub struct ModuleEntry<'a> {
-    pub source: &'a str,
+    pub module: &'a CompiledModule,
     pub export: &'a str,
     pub args: &'a serde_json::Value,
     pub heap_bytes: usize,

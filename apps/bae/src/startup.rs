@@ -70,7 +70,14 @@ pub fn run(mut app: App) -> ExitCode {
     }
     app.insert_resource(dirs);
     // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
-    bae_plugin::load_installed(&app);
+    // The GUI loads packages on its warm-up worker. A native runner must only
+    // load the library requested by its parent over the protocol.
+    match &invocation {
+        Invocation::Gui(_) => {}
+        Invocation::Subcommand { name, matches, .. }
+            if name == "plugin" && matches.subcommand_name() == Some("runner") => {}
+        _ => bae_plugin::load_installed(&app),
+    }
 
     // Messages of subcommands (e.g. why `bae export-json` cannot open a file)
     // follow the UI language too.

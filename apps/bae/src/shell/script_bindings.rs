@@ -80,7 +80,7 @@ mod tests {
         let app = builder.build();
         let mut document = Document::new(None);
         document.add_module_commands(&app);
-        let runtime = app.resource::<PluginRuntime>().unwrap();
+        let runtime = app.resource::<std::sync::Arc<PluginRuntime>>().unwrap();
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../plugins/examples/align-to-grid");
         let id = runtime.load(&DirSource::new(dir), Scope::User).unwrap();

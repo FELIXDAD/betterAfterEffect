@@ -120,6 +120,8 @@ enum UserEvent {
     Menu(muda::MenuEvent, Option<egui::Modifiers>),
     /// The GPU device was lost (not destroyed on purpose).
     DeviceLost,
+    /// Installed plugins have published their menus and model commands.
+    PluginsReady,
     /// A screen reader or UI automation client asked for the accessibility
     /// tree or for an action (accesskit).
     AccessKit(egui_winit::accesskit_winit::Event),
@@ -447,7 +449,12 @@ impl Shell {
             })
         };
         self.app.insert_resource(gpu.clone());
-        warm_up(gpu.clone());
+        let plugins = self
+            .app
+            .resource::<Arc<bae_plugin::PluginRuntime>>()
+            .cloned()
+            .zip(self.app.resource::<AppDirs>().map(bae_plugin::plugin_dirs));
+        warm_up(gpu.clone(), plugins, self.proxy.clone());
 
         let egui_ctx = egui::Context::default();
         bae_ui::theme::apply(&egui_ctx);
@@ -705,7 +712,7 @@ impl Shell {
     fn show_plugin_notices(&mut self) {
         let notice = self
             .app
-            .resource::<bae_plugin::PluginRuntime>()
+            .resource::<Arc<bae_plugin::PluginRuntime>>()
             .and_then(|r| r.take_notices().pop());
         if let Some(notice) = notice {
             self.set_notice(ui::plugin_notice(&notice));
@@ -1357,6 +1364,11 @@ impl ApplicationHandler<UserEvent> for Shell {
                 self.pending.push(inv);
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
+            UserEvent::PluginsReady => {
+                self.workspace.set_extra_commands(self.document.command_titles());
+                self.build_menu();
+                self.request_redraw();
+            }
             #[cfg(target_os = "macos")]
             UserEvent::OpenFiles(paths) => {
                 // A file command like File > Open: `dispatch` runs it through
@@ -1461,7 +1473,11 @@ impl ApplicationHandler<UserEvent> for Shell {
 /// text layer or effect does not stall the UI for seconds compiling shaders
 /// (a first text layer took 2.2 s on an RTX 5090). A draw that needs the
 /// vector renderer meanwhile waits for it instead of compiling it again.
-fn warm_up(gpu: Arc<GpuContext>) {
+fn warm_up(
+    gpu: Arc<GpuContext>,
+    plugins: Option<(Arc<bae_plugin::PluginRuntime>, Vec<bae_plugin::PluginDir>)>,
+    proxy: EventLoopProxy<UserEvent>,
+) {
     let spawned = std::thread::Builder::new()
         .name("bae-gpu-warm-up".into())
         .spawn(move || {
@@ -1474,9 +1490,15 @@ fn warm_up(gpu: Arc<GpuContext>) {
             if let Err(e) = bae_effects::prewarm(&gpu, format) {
                 tracing::warn!("effects warm-up: {e}");
             }
+            let effects = start.elapsed() - vector;
+            let plugin_start = Instant::now();
+            if let Some((plugins, dirs)) = plugins {
+                plugins.warm_up(&dirs, &gpu);
+                let _ = proxy.send_event(UserEvent::PluginsReady);
+            }
             tracing::info!(
-                "GPU warm-up: vector renderer {vector:?}, effects {:?}",
-                start.elapsed() - vector
+                "GPU warm-up: vector renderer {vector:?}, effects {effects:?}, plugins {:?}",
+                plugin_start.elapsed()
             );
         });
     if let Err(e) = spawned {

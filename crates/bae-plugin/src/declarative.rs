@@ -10,7 +10,7 @@
 
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use bae_gpu::GpuContext;
 use bae_gpu::wgpu::{self, util::DeviceExt as _};
@@ -52,7 +52,13 @@ pub struct DeclarativeEffect {
     extent: RoiExtent,
     grows: bool,
     sources: Vec<Source>,
-    programs: Mutex<Vec<(wgpu::TextureFormat, Arc<GpuProgram>)>>,
+    programs: Mutex<Vec<CachedProgram>>,
+}
+
+struct CachedProgram {
+    gpu: Weak<GpuContext>,
+    format: wgpu::TextureFormat,
+    program: Arc<GpuProgram>,
 }
 
 impl std::fmt::Debug for DeclarativeEffect {
@@ -202,7 +208,7 @@ impl DeclarativeEffect {
     /// Compiles the pipelines for `format` ahead of the first frame.
     pub fn prewarm(
         &self,
-        gpu: &GpuContext,
+        gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
     ) -> Result<(), RenderError> {
         self.program(gpu, format).map(|_| ())
@@ -215,18 +221,24 @@ impl DeclarativeEffect {
 
     fn program(
         &self,
-        gpu: &GpuContext,
+        gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
     ) -> Result<Arc<GpuProgram>, RenderError> {
-        if let Some((_, p)) = self.programs.lock().iter().find(|(f, _)| *f == format) {
-            return Ok(p.clone());
+        let device = Arc::downgrade(gpu);
+        let mut programs = self.programs.lock();
+        programs.retain(|entry| entry.gpu.strong_count() > 0);
+        if let Some(entry) = programs
+            .iter()
+            .find(|p| p.gpu.ptr_eq(&device) && p.format == format)
+        {
+            return Ok(entry.program.clone());
         }
         let program = Arc::new(GpuProgram::build(self, gpu, format)?);
-        let mut programs = self.programs.lock();
-        if let Some((_, p)) = programs.iter().find(|(f, _)| *f == format) {
-            return Ok(p.clone());
-        }
-        programs.push((format, program.clone()));
+        programs.push(CachedProgram {
+            gpu: device,
+            format,
+            program: program.clone(),
+        });
         Ok(program)
     }
 
@@ -486,7 +498,7 @@ impl DeclarativeEffect {
     #[allow(clippy::too_many_arguments)]
     pub fn render_with(
         &self,
-        gpu: &GpuContext,
+        gpu: &Arc<GpuContext>,
         encoder: &mut wgpu::CommandEncoder,
         format: wgpu::TextureFormat,
         allocate: &mut dyn FnMut(IRect, f64, wgpu::TextureFormat) -> Result<GpuImage, RenderError>,

@@ -53,6 +53,6 @@ pub use host::{
     Scope,
 };
 pub use manifest::{EffectDecl, ParamDecl, PluginManifest};
-pub use module::{PluginModule, PluginRuntime, load_installed};
+pub use module::{PluginModule, PluginRuntime, load_installed, plugin_dirs};
 pub use native::{NativeConfig, NativeEffect, NativePlugin, Notice, NoticeKind, Notices};
 pub use package::{DirSource, EffectPackage, MemorySource, Package, PackageSource};

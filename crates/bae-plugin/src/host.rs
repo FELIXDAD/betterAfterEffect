@@ -239,6 +239,7 @@ pub struct PluginHost {
     bindings: Option<Arc<dyn crate::scripts::ScriptBindings>>,
     native: NativeConfig,
     notices: Notices,
+    gpu: std::sync::Weak<bae_gpu::GpuContext>,
 }
 
 impl PluginHost {
@@ -271,6 +272,18 @@ impl PluginHost {
         &self.notices
     }
 
+    /// Selects the device for new packages and snapshots effects already published.
+    pub(crate) fn warm_device(
+        &mut self,
+        gpu: &Arc<bae_gpu::GpuContext>,
+    ) -> Vec<Arc<DeclarativeEffect>> {
+        self.gpu = Arc::downgrade(gpu);
+        self.plugins
+            .values()
+            .flat_map(|p| p.effects.iter().cloned())
+            .collect()
+    }
+
     /// Commands published by loaded script packages.
     pub fn commands(&self) -> &Registry<dyn bae_model::DynCommand> {
         &self.scripts.registry
@@ -286,6 +299,7 @@ impl PluginHost {
             bindings,
             native: NativeConfig::from_env(),
             notices: Notices::default(),
+            gpu: Default::default(),
         }
     }
 
@@ -429,6 +443,18 @@ impl PluginHost {
             }
         }
         let effects = DeclarativeEffect::from_package(&package).map_err(LoadError::Invalid)?;
+        if let Some(gpu) = self.gpu.upgrade() {
+            for effect in &effects {
+                effect
+                    .prewarm(&gpu, bae_render::WorkFormat::default().texture_format())
+                    .map_err(|error| {
+                        LoadError::Invalid(vec![Diagnostic::error(
+                            MANIFEST_FILE,
+                            format!("{}: {error}", effect.def().match_name),
+                        )])
+                    })?;
+            }
+        }
         let mut warnings = package.warnings.clone();
         let (native, native_effects) = match self.load_native(&package, scope) {
             Ok(n) => n,

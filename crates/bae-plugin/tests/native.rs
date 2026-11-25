@@ -693,7 +693,7 @@ entry = "report"
     let mut app = AppBuilder::new();
     app.add_module(PluginModule);
     let app = app.build();
-    let runtime = app.resource::<PluginRuntime>().unwrap();
+    let runtime = app.resource::<std::sync::Arc<PluginRuntime>>().unwrap();
     let source = DirSource::new(&dir);
     let id = runtime.load(&source, Scope::Bundled).unwrap();
     let defs = app.get_registry::<EffectDef>().unwrap();

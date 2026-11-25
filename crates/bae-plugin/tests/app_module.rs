@@ -47,7 +47,7 @@ fn grid_plugin_runs_both_exports_in_the_callers_transaction() {
     builder.insert_resource::<Arc<dyn ScriptView>>(Arc::new(View(comp, layer)));
     builder.add_module(PluginModule);
     let app = builder.build();
-    let runtime = app.resource::<PluginRuntime>().unwrap();
+    let runtime = app.resource::<std::sync::Arc<PluginRuntime>>().unwrap();
     let package = DirSource::new(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/examples/align-to-grid"),
     );
@@ -110,7 +110,7 @@ schema = "args.json"
     let mut builder = AppBuilder::new();
     builder.add_module(PluginModule);
     let app = builder.build();
-    let runtime = app.resource::<PluginRuntime>().unwrap();
+    let runtime = app.resource::<std::sync::Arc<PluginRuntime>>().unwrap();
     let deferred = package("{}").with_file(
         "main.js",
         "throw new Error('installation executed top-level code'); function work() {} export { work as run };",
@@ -144,6 +144,33 @@ schema = "args.json"
         .unwrap_err();
     assert!(err.to_string().contains("write permission"), "{err}");
     assert!(!stage.can_undo(&author));
+}
+
+#[test]
+fn warm_up_prepares_installed_and_replaced_effects_before_first_render() {
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let home = tempfile::tempdir().unwrap();
+    let path = write_package(&home.path().join("fx"), "org.test.warm", "1.0.0");
+    let dirs = [bae_plugin::PluginDir::new(&path, Scope::User)];
+    let mut builder = AppBuilder::new();
+    builder.add_module(PluginModule);
+    let app = builder.build();
+    let runtime = app.resource::<std::sync::Arc<PluginRuntime>>().unwrap();
+    runtime.warm_up(&dirs, &gpu);
+    let effect = || runtime.with_host(|host| host.get("org.test.warm").unwrap().effects[0].clone());
+    let first = effect();
+    assert_eq!(first.compiled_formats(), 1);
+    runtime
+        .load(&DirSource::new(path.clone()), Scope::User)
+        .unwrap();
+    let replaced = effect();
+    assert!(!std::sync::Arc::ptr_eq(&first, &replaced));
+    assert_eq!(replaced.compiled_formats(), 1);
+    runtime.unload("org.test.warm").unwrap();
+    runtime.warm_up(&dirs, &gpu);
+    assert!(runtime.with_host(|host| host.get("org.test.warm").is_none()));
 }
 
 fn write_package(root: &Path, id: &str, version: &str) -> PathBuf {
@@ -231,7 +258,7 @@ fn installed_plugins_are_published_in_the_app_registries() {
     );
     // The built-in keeps its id; the clash and the broken package are reported.
     assert_eq!(defs.get("com.example.clash/fx").unwrap().name, "Built-in");
-    let runtime = app.resource::<PluginRuntime>().unwrap();
+    let runtime = app.resource::<std::sync::Arc<PluginRuntime>>().unwrap();
     let problems = runtime.problems();
     assert_eq!(problems.len(), 2, "{problems:#?}");
     assert!(problems.iter().any(|(_, d)| {

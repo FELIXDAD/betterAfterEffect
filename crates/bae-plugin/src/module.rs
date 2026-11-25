@@ -17,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::{Arc, Once};
 
 use bae_app::{App, AppBuilder, AppModule};
 use bae_model::EffectDef;
@@ -37,6 +38,7 @@ pub const PLUGIN_PATH_ENV: &str = "BAE_PLUGIN_PATH";
 /// The running plugin host (an app resource).
 #[derive(Debug)]
 pub struct PluginRuntime {
+    initial_load: Once,
     host: Mutex<PluginHost>,
     registries: AppEffectRegistries,
     problems: Mutex<Vec<(PathBuf, Vec<Diagnostic>)>>,
@@ -47,6 +49,7 @@ impl PluginRuntime {
     fn new(registries: AppEffectRegistries, host: PluginHost) -> Self {
         let notices = host.notices().clone();
         Self {
+            initial_load: Once::new(),
             host: Mutex::new(host),
             registries,
             problems: Mutex::new(Vec::new()),
@@ -81,6 +84,22 @@ impl PluginRuntime {
         let (loaded, problems) = self.host.lock().load_dirs(dirs, &mut target);
         *self.problems.lock() = problems;
         loaded
+    }
+
+    /// Loads installed plugins once and prepares their GPU pipelines on the shell worker.
+    /// Device recovery reuses the loaded packages and warms their new device.
+    pub fn warm_up(&self, dirs: &[PluginDir], gpu: &Arc<bae_gpu::GpuContext>) {
+        if let Err(error) = bae_script::prewarm() {
+            tracing::warn!("script warm-up: {error}");
+        }
+        let existing = self.host.lock().warm_device(gpu);
+        let format = bae_render::WorkFormat::default().texture_format();
+        for effect in existing {
+            if let Err(error) = effect.prewarm(gpu, format) {
+                tracing::warn!("plugin warm-up {}: {error}", effect.def().match_name);
+            }
+        }
+        self.initial_load.call_once(|| load_and_log(self, dirs));
     }
 
     /// Loads (or updates) one package without restarting; returns its id.
@@ -124,12 +143,19 @@ pub fn plugin_dirs(dirs: &AppDirs) -> Vec<PluginDir> {
 /// after `AppDirs` is in the resources and logging is initialized; problems are
 /// logged and kept in [`PluginRuntime::problems`], never fatal.
 pub fn load_installed(app: &App) {
-    let (Some(runtime), Some(dirs)) = (app.resource::<PluginRuntime>(), app.resource::<AppDirs>())
-    else {
+    let (Some(runtime), Some(dirs)) = (
+        app.resource::<Arc<PluginRuntime>>(),
+        app.resource::<AppDirs>(),
+    ) else {
         return;
     };
-    let dirs = plugin_dirs(dirs);
-    let loaded = runtime.load_dirs(&dirs);
+    runtime
+        .initial_load
+        .call_once(|| load_and_log(runtime, &plugin_dirs(dirs)));
+}
+
+fn load_and_log(runtime: &PluginRuntime, dirs: &[PluginDir]) {
+    let loaded = runtime.load_dirs(dirs);
     for (path, diags) in runtime.problems() {
         for d in diags {
             tracing::warn!("plugin {}: {d}", path.display());
@@ -170,7 +196,7 @@ impl AppModule for PluginModule {
                     Some(("runner", _)) => Ok(crate::native::runner_main()),
                     Some(("check", m)) => check(m),
                     Some(("list", m)) => {
-                        let runtime = ctx.app.resource::<PluginRuntime>();
+                        let runtime = ctx.app.resource::<Arc<PluginRuntime>>().map(Arc::as_ref);
                         list(m, &dirs, runtime)
                     }
                     _ => Ok(ExitCode::from(2)),
@@ -201,7 +227,7 @@ impl AppModule for PluginModule {
             },
             PluginHost::with_scripts(scripts, bindings),
         );
-        app.insert_resource(runtime);
+        app.insert_resource(Arc::new(runtime));
     }
 }
 
