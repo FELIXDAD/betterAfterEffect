@@ -83,6 +83,9 @@ impl Slot {
 struct Demand {
     scene: Arc<Scene>,
     times: Vec<Time>,
+    /// Frames to render into the cache once `times` are done (the first frames
+    /// playback would show, prepared while the viewer is idle).
+    prefetch: Vec<Time>,
     range: TimeRange,
     looping: bool,
     rate: FrameRate,
@@ -199,6 +202,18 @@ impl PlaybackPreview {
         session.lock().cached_preview = Some((scene.path.clone(), scene.revision, spans));
     }
 
+    /// Renders `times` into the cache after the demanded frames (the frames
+    /// playback would start with, while the viewer is idle).
+    pub(super) fn prefetch(&self, times: Vec<Time>) {
+        let mut state = self.shared.state.lock().unwrap();
+        if let Some(d) = state.demand.as_mut()
+            && d.prefetch != times
+        {
+            d.prefetch = times;
+            self.shared.changed.notify_all();
+        }
+    }
+
     pub(super) fn stop(&mut self) {
         let mut state = self.shared.state.lock().unwrap();
         if state.demand.take().is_some() {
@@ -269,6 +284,7 @@ impl PlaybackPreview {
                     effects: effects.cloned(),
                 }),
                 times: Vec::with_capacity(DEPTH),
+                prefetch: Vec::new(),
                 range,
                 looping,
                 rate,
@@ -305,6 +321,7 @@ impl PlaybackPreview {
             if discontinuity {
                 // Jobs already encoded can finish, but cannot publish into the
                 // new epoch. Completed frames inside the new horizon are reusable.
+                d.prefetch.clear();
                 state.epoch += 1;
                 state.queued.clear();
                 state.ready.retain(|slot| times.contains(&slot.time));
@@ -465,7 +482,7 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                 }
                 if let Some(d) = &state.demand
                     && state.queued.len() < DEPTH
-                    && let Some(&time) = d.times.iter().find(|t| {
+                    && let Some(&time) = d.times.iter().chain(&d.prefetch).find(|t| {
                         !state.cache.frames.contains(&d.scene.key.frame(**t))
                             && !state.ready.iter().any(|s| s.time == **t)
                             && !state.queued.contains(t)

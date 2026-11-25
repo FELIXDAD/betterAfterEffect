@@ -330,14 +330,21 @@ impl Session {
 
     /// Start playing the active comp from the current time through the work area
     /// (from the work area start when the current time is outside it).
-    pub fn play(&mut self, info: &CompInfo) {
+    /// Where playback of `info` would start: the current time inside the
+    /// work area (not on its last frame), else the work area's start.
+    pub fn play_start(&self, info: &CompInfo) -> Time {
         let range = info.work_area;
         let now = self.time(&info.path);
-        let from = if range.contains(now) && now + info.frame_duration() < range.end {
+        if range.contains(now) && now + info.frame_duration() < range.end {
             now
         } else {
             range.start
-        };
+        }
+    }
+
+    pub fn play(&mut self, info: &CompInfo) {
+        let range = info.work_area;
+        let from = self.play_start(info);
         self.times.insert(info.path.clone(), from);
         self.playback = Some(Playback {
             comp: info.path.clone(),

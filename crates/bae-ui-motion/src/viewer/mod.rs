@@ -101,7 +101,15 @@ pub struct CompositionViewer {
     esc_taken: bool,
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
+    /// The current time and since when it has not changed (idle prefetch).
+    idle: Option<(Time, std::time::Instant)>,
 }
+
+/// How long the current time stays put before the frames playback would
+/// start with are prepared.
+const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300);
+/// Frames prepared from where playback would start.
+const PREFETCH_FRAMES: i64 = 3;
 
 impl CompositionViewer {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
@@ -607,6 +615,32 @@ impl Panel for CompositionViewer {
                         let mut s = session.lock();
                         if s.expr_errors != errors {
                             s.expr_errors = errors.to_vec();
+                        }
+                    }
+                }
+                // Idle (the current time still for a moment): prepare the first
+                // frames playback would show, so pressing play shows them at
+                // once while the pipeline fills.
+                if playback.is_none() {
+                    let now = std::time::Instant::now();
+                    match self.idle {
+                        Some((at, since)) if at == time => {
+                            if now.duration_since(since) >= IDLE_PREFETCH {
+                                let from = session.lock().play_start(&info);
+                                let rate = info.frame_rate;
+                                let first = rate.time_to_frame(from);
+                                let times = (0..PREFETCH_FRAMES)
+                                    .map(|k| rate.frame_to_time(first + k))
+                                    .filter(|t| *t != time && info.work_area.contains(*t))
+                                    .collect();
+                                gpu.playback.prefetch(times);
+                            } else {
+                                ui.ctx().request_repaint_after(IDLE_PREFETCH);
+                            }
+                        }
+                        _ => {
+                            self.idle = Some((time, now));
+                            ui.ctx().request_repaint_after(IDLE_PREFETCH);
                         }
                     }
                 }
