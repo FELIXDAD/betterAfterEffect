@@ -517,7 +517,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "RotateAll", "Ctrl+Shift+R", "motion.layer.transform_dialog", r#"{"attr":"rotation"}"#, E, Todo, 0),
     k("CSwitchboard", "Save", "Ctrl+S", "file.save", "", B, Done, 0),
     k("CSwitchboard", "SaveAs", "Ctrl+Shift+S", "file.save_as", "", B, Done, 0),
-    k("CSwitchboard", "SaveFrameAs", "Ctrl+Alt+S", "motion.comp.save_frame_as_file", "", B, Todo, 0),
+    k("CSwitchboard", "SaveFrameAs", "Ctrl+Alt+S", "motion.comp.save_frame_as_file", "", B, Done, 0),
     k("CSwitchboard", "SavePreviewCurrent", "macControl+Shift+C|Ctrl+Pad0|Ctrl+PadInsert", "motion.comp.save_current_preview", "", B, Later, 0),
     k("CSwitchboard", "SavePreviewShiftNumpad0", "Ctrl+Shift+Pad0|Ctrl+Shift+PadInsert", "motion.comp.save_current_preview", r#"{"shift":true}"#, B, Later, 0),
     k("CSwitchboard", "ScanForChangedFootage", "Ctrl+Alt+Shift+Q", "motion.file.scan_for_changed_footage", "", E, Later, 0),
