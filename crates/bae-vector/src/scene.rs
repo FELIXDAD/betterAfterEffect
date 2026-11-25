@@ -24,10 +24,12 @@ use kurbo::{Affine, BezPath, Rect, Shape};
 use rustc_hash::FxHasher;
 
 use crate::content::{Operator, ShapeGroup, ShapeItem};
-use crate::ops::{merge_concat, trim_shapes};
+use crate::operators;
+use crate::ops::trim_shapes;
 use crate::paint::{
     BlendMode, Brush, Composite, FillRule, Paint, PaintKind, StrokeStyle, hash_f64,
 };
+use crate::path::{append_bezier, from_bez_path, point};
 
 /// A filled compound path.
 #[derive(Clone, Debug, PartialEq)]
@@ -206,7 +208,15 @@ impl VectorScene {
     /// Evaluates a shape layer's contents (the root group; its own transform,
     /// opacity and blend mode are applied like any group's).
     pub fn from_group(root: &ShapeGroup) -> Self {
-        let mut b = Builder::default();
+        Self::at_time(root, 0.0)
+    }
+
+    /// Evaluate auto-animated operators at the specified layer time in seconds.
+    pub fn at_time(root: &ShapeGroup, seconds: f64) -> Self {
+        let mut b = Builder {
+            seconds,
+            slots: Vec::new(),
+        };
         let plan = b.plan_group(&root.items, false);
         let items = b.emit(&plan, root.transform.matrix());
         Self {
@@ -314,6 +324,7 @@ enum PlanEntry {
 
 #[derive(Default)]
 struct Builder {
+    seconds: f64,
     slots: Vec<Slot>,
 }
 
@@ -334,7 +345,36 @@ impl Builder {
         }
 
         let mut plan = GroupPlan::default();
-        for (i, item) in items.iter().enumerate() {
+        // A repeater instances both the accumulated draws and their open geometry.
+        // Copies own separate slots so later operators can edit them in parent space.
+        let mut start = 0;
+        if let Some(i) = items
+            .iter()
+            .rposition(|item| matches!(item, ShapeItem::Operator(Operator::Repeater(_))))
+        {
+            let ShapeItem::Operator(Operator::Repeater(r)) = &items[i] else {
+                unreachable!()
+            };
+            let count = r.copies.ceil() as usize;
+            for copy in 0..count {
+                let sub = self.plan_group(&items[..i], suppress_at[i]);
+                let matrix = r.transform(copy);
+                plan.open
+                    .extend(sub.open.iter().map(|&(id, a)| (id, matrix * a)));
+                plan.entries.push(PlanEntry::Group {
+                    plan: sub,
+                    matrix,
+                    opacity: r.opacity(copy),
+                    blend: BlendMode::Normal,
+                    composite: Composite::Below,
+                });
+            }
+            if r.order == Composite::Above {
+                plan.entries.reverse();
+            }
+            start = i + 1;
+        }
+        for (i, item) in items.iter().enumerate().skip(start) {
             match item {
                 ShapeItem::Path(p) => {
                     self.slots.push(Slot {
@@ -382,9 +422,7 @@ impl Builder {
                     self.slots[*id].path = path;
                 }
             }
-            Operator::Merge(_) => {
-                // Boolean modes need the path finder (planned); until then every
-                // mode combines the paths like `merge` (the parser warns).
+            Operator::Merge(mode) => {
                 let shapes: Vec<BezPath> = open
                     .iter()
                     .map(|&(id, a)| a * &self.slots[id].path)
@@ -393,11 +431,43 @@ impl Builder {
                     self.slots[id].path = BezPath::new();
                 }
                 self.slots.push(Slot {
-                    path: merge_concat(&shapes),
+                    path: operators::merge(&shapes, *mode),
                 });
                 *open = vec![(self.slots.len() - 1, Affine::IDENTITY)];
             }
-            Operator::Unsupported(_) => {}
+            Operator::Unsupported(_) | Operator::Repeater(_) => {}
+            op => {
+                for &(id, transform) in open.iter() {
+                    if transform.determinant() == 0.0 {
+                        continue;
+                    }
+                    let input = transform * &self.slots[id].path;
+                    let result = if let Operator::Offset(offset) = op {
+                        offset.apply(&input)
+                    } else {
+                        let mut out = BezPath::new();
+                        for mut p in from_bez_path(&input) {
+                            match op {
+                                Operator::Pucker(k) => operators::pucker(&mut p, *k),
+                                Operator::Round(r) => p = operators::round(&p, *r),
+                                Operator::Twist { angle, center } => {
+                                    p = operators::twist(&p, *angle, point(*center))
+                                }
+                                Operator::Zigzag {
+                                    size,
+                                    detail,
+                                    smooth,
+                                } => p = operators::zigzag(&p, *size, *detail, *smooth),
+                                Operator::Wiggle(w) => p = w.apply(&p, self.seconds),
+                                _ => unreachable!(),
+                            }
+                            append_bezier(&p, &mut out);
+                        }
+                        out
+                    };
+                    self.slots[id].path = transform.inverse() * result;
+                }
+            }
         }
     }
 
