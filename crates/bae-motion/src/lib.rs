@@ -64,6 +64,7 @@ pub mod camera;
 pub mod comp;
 pub mod dimensions;
 pub mod effect;
+pub mod expressions;
 pub mod import;
 pub mod keys;
 pub mod layer;
@@ -90,6 +91,7 @@ pub use comp::{
     TrimCompToWorkArea,
 };
 pub use dimensions::SeparateDimensions;
+pub use expressions::{ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
@@ -158,6 +160,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(DeleteVertex),
         r.register(CreateText),
         r.register(SetText),
+        r.register(SetExpressions),
         r.register(AnimateText),
         r.register(AddTextSelector),
         r.register(RemoveTextAnimators),

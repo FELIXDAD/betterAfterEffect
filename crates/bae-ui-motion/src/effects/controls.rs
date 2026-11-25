@@ -280,7 +280,8 @@ fn param_row(
     let key = format!("{effect}#{}", param.id);
     let twirl = matches!(param.kind, ParamKind::Slider { .. } | ParamKind::Angle);
     let mut edit = Edit::None;
-    ui.horizontal(|ui| {
+    let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
+    let row = ui.horizontal(|ui| {
         ui.set_min_height(20.0);
         ui.add_space(indent(depth) - 16.0);
         if twirl {
@@ -326,10 +327,23 @@ fn param_row(
             ui.colored_label(color::TEXT_DISABLED, tr("Not available in BAE yet"));
         } else {
             ui.add_enabled_ui(!disabled, |ui| {
-                edit = value_control(ui, cx, effect, def, param, value.as_ref(), &label);
+                edit = value_control(
+                    ui,
+                    cx,
+                    effect,
+                    def,
+                    param,
+                    value.as_ref(),
+                    &label,
+                    expression,
+                );
             });
         }
     });
+    // An expression pick whip dragged from the Timeline.
+    if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
+        crate::expr::link(cx, eval.get(cx.resources), &whip, effect, Some(&attr), now);
+    }
     if twirl && state.open_params.contains(&key) {
         ui.horizontal(|ui| {
             ui.add_space(LABEL_WIDTH + 36.0);
@@ -341,7 +355,8 @@ fn param_row(
     common::apply_edit(cx, session, effect, &attr, now, edit);
 }
 
-/// The value column of one parameter.
+/// The value column of one parameter (red when an expression drives it).
+#[allow(clippy::too_many_arguments)]
 fn value_control(
     ui: &mut Ui,
     cx: &PanelContext<'_>,
@@ -350,6 +365,7 @@ fn value_control(
     param: &EffectParamDef,
     value: Option<&Value>,
     label: &str,
+    expression: bool,
 ) -> Edit {
     let id = ui.id().with(("fx-param", effect.as_str(), param.id));
     match &param.kind {
@@ -383,6 +399,7 @@ fn value_control(
                 *valid_min..=*valid_max,
                 suffix,
                 label,
+                expression,
             ) {
                 Num::None => Edit::None,
                 Num::Live(v) => Edit::Live(to_value(v)),
@@ -392,7 +409,7 @@ fn value_control(
         // AE angles: revolutions + degrees (0x+30.0°), like Rotation.
         ParamKind::Angle => {
             let v = value.cloned().unwrap_or(Value::Float(0.0));
-            common::value_editor(ui, id, "rotation", &v, 1, label)
+            common::value_editor(ui, id, "rotation", &v, 1, label, expression)
         }
         ParamKind::Checkbox => {
             let on = value.and_then(Value::as_bool).unwrap_or(false);
@@ -443,7 +460,7 @@ fn value_control(
             } else {
                 2
             };
-            common::value_editor(ui, id, "param", &v, dims, label)
+            common::value_editor(ui, id, "param", &v, dims, label, expression)
         }
         ParamKind::Layer => layer_picker(ui, cx, effect, id, value),
         ParamKind::Path => mask_picker(ui, cx, effect, id, value),
@@ -611,6 +628,7 @@ enum Num {
 }
 
 /// A hot number clamped to the valid range; one command per drag.
+#[allow(clippy::too_many_arguments)]
 fn hot_number(
     ui: &mut Ui,
     id: egui::Id,
@@ -619,6 +637,7 @@ fn hot_number(
     range: std::ops::RangeInclusive<f64>,
     suffix: &str,
     name: &str,
+    expression: bool,
 ) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
@@ -627,6 +646,11 @@ fn hot_number(
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
+                    .tint(if expression {
+                        common::EXPRESSION_VALUE
+                    } else {
+                        color::ACCENT
+                    })
                     .decimals(decimals)
                     .speed(speed)
                     .range(range)

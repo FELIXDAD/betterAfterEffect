@@ -67,6 +67,9 @@ pub mod ids {
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
     /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
     pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
+    /// Animation > Add Expression (AE Alt+Shift+=): toggles the selected
+    /// properties' expressions.
+    pub const ADD_EXPRESSION: &str = "motion.anim.add_expression";
     /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
     pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
     /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
@@ -165,6 +168,7 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::ADD_EXPRESSION, "Add Expression"),
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
@@ -618,6 +622,38 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_FILE => {
             crate::import::import_file(cx, session);
+            return true;
+        }
+        ids::ADD_EXPRESSION => {
+            // AE toggles: the selected properties get their default expression;
+            // when all of them have one, the expressions are removed.
+            let props: Vec<(PrimPath, String)> = session
+                .lock()
+                .selected_props
+                .iter()
+                .filter(|(p, a)| {
+                    query::locked_layer_of(stage, p).is_none()
+                        && stage
+                            .prim(p)
+                            .is_some_and(|v| bae_model::schema::is_animatable(v.prim_type(), a))
+                })
+                .cloned()
+                .collect();
+            let has = |p: &PrimPath, a: &str| {
+                query::attr_spec(stage, p, a).is_some_and(|s| s.expression.is_some())
+            };
+            let remove = props.iter().all(|(p, a)| has(p, a));
+            let items: Vec<_> = props
+                .iter()
+                .filter(|(p, a)| remove || !has(p, a))
+                .map(|(p, a)| {
+                    let source = (!remove).then(|| crate::expr::default_expression(stage, p, a));
+                    json!({"path": p, "attr": a, "source": source})
+                })
+                .collect();
+            if !items.is_empty() {
+                cx.invoke_with("attr.set_expressions", json!({"items": items}));
+            }
             return true;
         }
         ids::IMPORT_MULTIPLE => {

@@ -1801,6 +1801,299 @@ fn blending_mode_menu_sets_and_steps_the_selected_layers() {
     assert_eq!(mode(&h, &a), Some(Value::Enum("luminescent_premul".into())));
 }
 
+/// Frame cost with the B1-sized project (61 layers × Position, Scale, Rotation with
+/// three eased keys each), every layer selected so the Graph Editor shows 183
+/// properties. Run with
+/// `cargo test --release -p bae-ui-motion graph_editor_frame_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "benchmark"]
+fn graph_editor_frame_cost() {
+    let mut h = H::new();
+    h.tessellate = true;
+    let comp = h.comp.clone();
+    let mut layers = vec![h.layer.clone()];
+    for _ in 0..60 {
+        layers.push(path(
+            &h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"],
+        ));
+    }
+    for l in &layers {
+        for (attr, vals) in [
+            (
+                POS,
+                vec![vec3(0.0, 0.0), vec3(300.0, 100.0), vec3(500.0, 300.0)],
+            ),
+            (
+                "transform:scale",
+                vec![vec3(100.0, 100.0), vec3(150.0, 150.0), vec3(80.0, 80.0)],
+            ),
+            (ROT, vec![float(0.0), float(90.0), float(180.0)]),
+        ] {
+            h.run(
+                "attr.set_animated",
+                json!({"path": l, "attr": attr, "animated": true, "time": 0}),
+            );
+            for (i, v) in vals.into_iter().enumerate() {
+                h.run(
+                    "attr.set_at",
+                    json!({"path": l, "attr": attr, "time": Time::from_seconds(i as f64 * 2.0), "value": v}),
+                );
+            }
+            let keys: Vec<KeyRef> = (0..3)
+                .map(|i| KeyRef::new(l.clone(), attr, Time::from_seconds(i as f64 * 2.0)))
+                .collect();
+            h.run("key.ease", json!({"keys": keys}));
+        }
+    }
+    h.session().lock().selected_layers = layers.clone();
+    let mut tl = TimelinePanel::default();
+    let n = 30;
+    let measure = |h: &mut H, tl: &mut TimelinePanel, label: &str, graph: bool, drag: bool| {
+        h.session().lock().graph_editor = graph;
+        h.frame(tl, Vec::new(), Modifiers::NONE);
+        let k = h.key(ROT, 2.0);
+        h.session().lock().selected_keys = vec![k.clone()];
+        h.frame(tl, Vec::new(), Modifiers::NONE);
+        let from = if graph {
+            key_pos(tl, &k, 0)
+        } else {
+            pos2(900.0, 400.0)
+        };
+        h.frame(tl, vec![Event::PointerMoved(from)], Modifiers::NONE);
+        if drag {
+            h.frame(
+                tl,
+                vec![button(from, true, Modifiers::NONE)],
+                Modifiers::NONE,
+            );
+        }
+        let t0 = std::time::Instant::now();
+        for i in 1..=n {
+            let to = from + vec2(i as f32 * 3.0, -(i as f32));
+            h.frame(tl, vec![Event::PointerMoved(to)], Modifiers::NONE);
+        }
+        let ms = t0.elapsed().as_secs_f64() * 1000.0 / f64::from(n);
+        if drag {
+            let to = from + vec2(n as f32 * 3.0, -(n as f32));
+            // The commit request is dropped: every pass starts from the same keys.
+            h.frame(
+                tl,
+                vec![button(to, false, Modifiers::NONE)],
+                Modifiers::NONE,
+            );
+        }
+        eprintln!("PERF {label}: {ms:.2} ms/frame (UI + tessellation)");
+    };
+    measure(
+        &mut h,
+        &mut tl,
+        "layer bar mode, pointer move",
+        false,
+        false,
+    );
+    measure(&mut h, &mut tl, "graph editor, pointer move", true, false);
+    measure(&mut h, &mut tl, "graph editor, key drag", true, true);
+    assert_eq!(tl.graph_editor().last.vaxes.len(), 183);
+}
+
+#[test]
+fn expressions_add_pick_whip_switch_and_multiline_edit() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (1.0, float(90.0))]);
+    let layer = h.layer.clone();
+    let expr = |h: &H| {
+        query::attr_spec(&h.stage, &layer, POS)
+            .and_then(|s| s.expression.clone())
+            .map(|e| (e.source, e.enabled))
+    };
+    // Animation > Add Expression on the selected Position: AE's default text.
+    h.session().lock().selected_props = vec![(layer.clone(), POS.to_owned())];
+    let mut tl = h.bars();
+    let r = h.action(&mut tl, Invocation::new(ids::ADD_EXPRESSION));
+    h.apply(&r);
+    assert_eq!(expr(&h), Some(("transform.position".into(), true)));
+    // Pick whip onto Rotation (one value into two): AE's temp spread.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let row = |tl: &TimelinePanel| tl.last_expr.iter().find(|e| e.1 == POS).cloned().unwrap();
+    let (_, _, _, whip) = row(&tl);
+    let rot = bar_key(&tl, &h.key(ROT, 1.0));
+    let r = h.drag(&mut tl, whip, rot, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(
+        expr(&h),
+        Some(("temp = transform.rotation;\n[temp, temp]".into(), true))
+    );
+    // Two lines: the expression takes two rows, Rotation moves down one.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let rot2 = bar_key(&tl, &h.key(ROT, 1.0));
+    assert!(rot2.y > rot.y + 10.0, "{rot:?} {rot2:?}");
+    // The = switch disables it.
+    let (_, _, eq, _) = row(&tl);
+    let r = h.click(&mut tl, eq, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(expr(&h).map(|e| e.1), Some(false));
+    // Edit: Return adds a line, keypad Enter ends editing (one step).
+    let field = pos2(tl.last_axis.unwrap().left + 60.0, eq.y);
+    h.click(&mut tl, field, Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![
+            Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: cmd(),
+            },
+            Event::Text("time".into()),
+        ],
+        Modifiers::NONE,
+    );
+    bae_ui::set_keypad_enter(false);
+    h.frame(
+        &mut tl,
+        vec![press(egui::Key::Enter), Event::Text("+ 1".into())],
+        Modifiers::NONE,
+    );
+    bae_ui::set_keypad_enter(true);
+    let r = h.frame(&mut tl, vec![press(egui::Key::Enter)], Modifiers::NONE);
+    bae_ui::set_keypad_enter(false);
+    h.apply(&r);
+    assert_eq!(expr(&h), Some(("time\n+ 1".into(), false)));
+    // Alt+Shift+= again removes it; undo brings it back.
+    let r = h.action(&mut tl, Invocation::new(ids::ADD_EXPRESSION));
+    h.apply(&r);
+    assert_eq!(expr(&h), None);
+    h.undo();
+    assert_eq!(expr(&h), Some(("time\n+ 1".into(), false)));
+}
+
+#[test]
+fn pick_whip_references_follow_ae() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let a = h.layer.clone();
+    let b = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let name = query::display_name_of(&h.stage, &b);
+    let r = |from: &PrimPath, to: &PrimPath, attr: Option<&str>| {
+        crate::expr::reference(&h.stage, from, to, attr).unwrap()
+    };
+    assert_eq!(r(&a, &a, Some(ROT)), "transform.rotation");
+    assert_eq!(
+        r(&a, &b, Some(POS)),
+        format!("thisComp.layer(\"{name}\").transform.position")
+    );
+    assert_eq!(r(&a, &b, None), format!("thisComp.layer(\"{name}\")"));
+    assert_eq!(r(&a, &a, None), "thisLayer");
+    assert_eq!(
+        crate::expr::default_expression(&h.stage, &a, "transform:opacity"),
+        "transform.opacity"
+    );
+}
+
+#[test]
+fn expression_language_menu_groups_follow_ae() {
+    let groups = crate::expr_menu::groups();
+    let names: Vec<&str> = groups.iter().map(|(n, _)| *n).collect();
+    assert_eq!(
+        names,
+        [
+            "Global",
+            "Vector Math",
+            "Random Numbers",
+            "Interpolation",
+            "Color Conversion",
+            "Other Math",
+            "JavaScript Math",
+            "Comp",
+            "Footage",
+            "Layer",
+            "Camera",
+            "Light",
+            "Effect",
+            "Path Property",
+            "Property",
+            "Key",
+            "MarkerKey",
+            "Project",
+            "Text",
+        ]
+    );
+    for done in [
+        "Global",
+        "Random Numbers",
+        "Interpolation",
+        "Comp",
+        "Layer",
+        "Property",
+    ] {
+        assert!(groups.iter().any(|(n, c)| *n == done && *c > 0), "{done}");
+    }
+    // Pressing the menu button while editing keeps the field's selection: the
+    // item replaces it.
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.run(
+        "attr.set_expression",
+        json!({"path": layer, "attr": POS, "source": "value"}),
+    );
+    let mut tl = h.bars();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let (_, _, eq, _) = tl.last_expr[0].clone();
+    let field = pos2(tl.last_axis.unwrap().left + 60.0, eq.y);
+    h.click(&mut tl, field, Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: cmd(),
+        }],
+        Modifiers::NONE,
+    );
+    let menu = tl.last_lang[0].2;
+    h.click(&mut tl, menu, Modifiers::NONE);
+    assert_eq!(tl.lang_insert(), Some(("value".to_owned(), 0..5)));
+}
+
+#[test]
+fn outline_follows_ae_metrics() {
+    // Positions measured on AE 26's Timeline: the Shy switch at x 275, the
+    // expand arrow at x 76 (left of the label), rows 17 points apart.
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let other = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let mut tl = h.bars();
+    let bar = |tl: &TimelinePanel, l: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(p, _)| p == l)
+            .map(|(_, r)| r.center().y)
+            .unwrap()
+    };
+    assert_eq!((bar(&tl, &solid) - bar(&tl, &other)).abs(), 17.0);
+    let y = bar(&tl, &solid);
+    let r = h.click(&mut tl, pos2(275.0, y), Modifiers::NONE);
+    h.apply(&r);
+    let shy = query::static_value(&h.stage.prim(&solid).unwrap(), "shy");
+    assert_eq!(shy.and_then(|v| v.as_bool()), Some(true));
+    h.session().lock().reveal.clear();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let y = bar(&tl, &solid);
+    let rows = tl.last_bars.len();
+    h.click(&mut tl, pos2(76.0, y), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(
+        tl.expanded_layer(&solid),
+        "the arrow at x 76 expands the layer"
+    );
+    assert_eq!(tl.last_bars.len(), rows);
+}
+
 /// F4: the Modes column instead of Switches (AE starts with Switches).
 fn show_modes(h: &mut H, tl: &mut TimelinePanel) {
     h.action(
@@ -1953,101 +2246,6 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
     );
 }
 
-/// Frame cost with the B1-sized project (61 layers × Position, Scale, Rotation with
-/// three eased keys each), every layer selected so the Graph Editor shows 183
-/// properties. Run with
-/// `cargo test --release -p bae-ui-motion graph_editor_frame_cost -- --ignored --nocapture`.
-#[test]
-#[ignore = "benchmark"]
-fn graph_editor_frame_cost() {
-    let mut h = H::new();
-    h.tessellate = true;
-    let comp = h.comp.clone();
-    let mut layers = vec![h.layer.clone()];
-    for _ in 0..60 {
-        layers.push(path(
-            &h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"],
-        ));
-    }
-    for l in &layers {
-        for (attr, vals) in [
-            (
-                POS,
-                vec![vec3(0.0, 0.0), vec3(300.0, 100.0), vec3(500.0, 300.0)],
-            ),
-            (
-                "transform:scale",
-                vec![vec3(100.0, 100.0), vec3(150.0, 150.0), vec3(80.0, 80.0)],
-            ),
-            (ROT, vec![float(0.0), float(90.0), float(180.0)]),
-        ] {
-            h.run(
-                "attr.set_animated",
-                json!({"path": l, "attr": attr, "animated": true, "time": 0}),
-            );
-            for (i, v) in vals.into_iter().enumerate() {
-                h.run(
-                    "attr.set_at",
-                    json!({"path": l, "attr": attr, "time": Time::from_seconds(i as f64 * 2.0), "value": v}),
-                );
-            }
-            let keys: Vec<KeyRef> = (0..3)
-                .map(|i| KeyRef::new(l.clone(), attr, Time::from_seconds(i as f64 * 2.0)))
-                .collect();
-            h.run("key.ease", json!({"keys": keys}));
-        }
-    }
-    h.session().lock().selected_layers = layers.clone();
-    let mut tl = TimelinePanel::default();
-    let n = 30;
-    let measure = |h: &mut H, tl: &mut TimelinePanel, label: &str, graph: bool, drag: bool| {
-        h.session().lock().graph_editor = graph;
-        h.frame(tl, Vec::new(), Modifiers::NONE);
-        let k = h.key(ROT, 2.0);
-        h.session().lock().selected_keys = vec![k.clone()];
-        h.frame(tl, Vec::new(), Modifiers::NONE);
-        let from = if graph {
-            key_pos(tl, &k, 0)
-        } else {
-            pos2(900.0, 400.0)
-        };
-        h.frame(tl, vec![Event::PointerMoved(from)], Modifiers::NONE);
-        if drag {
-            h.frame(
-                tl,
-                vec![button(from, true, Modifiers::NONE)],
-                Modifiers::NONE,
-            );
-        }
-        let t0 = std::time::Instant::now();
-        for i in 1..=n {
-            let to = from + vec2(i as f32 * 3.0, -(i as f32));
-            h.frame(tl, vec![Event::PointerMoved(to)], Modifiers::NONE);
-        }
-        let ms = t0.elapsed().as_secs_f64() * 1000.0 / f64::from(n);
-        if drag {
-            let to = from + vec2(n as f32 * 3.0, -(n as f32));
-            // The commit request is dropped: every pass starts from the same keys.
-            h.frame(
-                tl,
-                vec![button(to, false, Modifiers::NONE)],
-                Modifiers::NONE,
-            );
-        }
-        eprintln!("PERF {label}: {ms:.2} ms/frame (UI + tessellation)");
-    };
-    measure(
-        &mut h,
-        &mut tl,
-        "layer bar mode, pointer move",
-        false,
-        false,
-    );
-    measure(&mut h, &mut tl, "graph editor, pointer move", true, false);
-    measure(&mut h, &mut tl, "graph editor, key drag", true, true);
-    assert_eq!(tl.graph_editor().last.vaxes.len(), 183);
-}
-
 #[test]
 fn comp_switches_and_layer_switches_reach_the_render_request() {
     use crate::actions::ids;
@@ -2101,39 +2299,4 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     assert!(request(&h).motion_blur.is_some());
     h.undo();
     assert!(request(&h).motion_blur.is_none());
-}
-
-#[test]
-fn outline_follows_ae_metrics() {
-    // Positions measured on AE 26's Timeline: the Shy switch at x 275, the
-    // expand arrow at x 76 (left of the label), rows 17 points apart.
-    let mut h = H::new();
-    let comp = h.comp.clone();
-    let solid = h.layer.clone();
-    let other = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
-    let mut tl = h.bars();
-    let bar = |tl: &TimelinePanel, l: &PrimPath| {
-        tl.last_bars
-            .iter()
-            .find(|(p, _)| p == l)
-            .map(|(_, r)| r.center().y)
-            .unwrap()
-    };
-    assert_eq!((bar(&tl, &solid) - bar(&tl, &other)).abs(), 17.0);
-    let y = bar(&tl, &solid);
-    let r = h.click(&mut tl, pos2(275.0, y), Modifiers::NONE);
-    h.apply(&r);
-    let shy = query::static_value(&h.stage.prim(&solid).unwrap(), "shy");
-    assert_eq!(shy.and_then(|v| v.as_bool()), Some(true));
-    h.session().lock().reveal.clear();
-    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
-    let y = bar(&tl, &solid);
-    let rows = tl.last_bars.len();
-    h.click(&mut tl, pos2(76.0, y), Modifiers::NONE);
-    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
-    assert!(
-        tl.expanded_layer(&solid),
-        "the arrow at x 76 expands the layer"
-    );
-    assert_eq!(tl.last_bars.len(), rows);
 }
