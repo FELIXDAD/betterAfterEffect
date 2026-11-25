@@ -510,6 +510,15 @@ impl Shared {
         composite_pipeline(&self.device, &self.base.module, &self.base.layout, key)
     }
 
+    /// Compiles the composite pipeline `key` unless it exists.
+    fn warm_one(&self, key: CompositeKey) {
+        if matches!(self.composite.lock().get(&key), Some(Some(_))) {
+            return;
+        }
+        let p = self.create(key);
+        self.composite.lock().insert(key, Some(p));
+    }
+
     /// Compiles the composite pipelines of `formats` (with whether the format
     /// blends in fixed function), the mask passes and the adjustment mixes.
     pub fn warm(&self, formats: &[(wgpu::TextureFormat, bool)]) {
@@ -526,12 +535,7 @@ impl Shared {
             };
             for &kind in kinds {
                 for variant in [Variant::Plain, Variant::Lit, Variant::Motion] {
-                    let key = (format, kind, variant);
-                    if matches!(self.composite.lock().get(&key), Some(Some(_))) {
-                        continue;
-                    }
-                    let p = self.create(key);
-                    self.composite.lock().insert(key, Some(p));
+                    self.warm_one((format, kind, variant));
                 }
             }
         }
@@ -551,27 +555,50 @@ impl Shared {
     }
 }
 
-/// Compiles the compositor's pipelines during the app's warm-up (after the
-/// vector renderer, before the effects).
-#[derive(Debug, Default)]
-pub struct CompositorWarmUp;
+/// Compiles the compositor's pipelines during the app's warm-up: first only
+/// what plain text and shape layers need ([`CompositorWarmUp::Basic`], right
+/// after the vector renderer, so a layer created early shows at once), the
+/// other formats, blend kinds, variants, mask passes and mixes later
+/// ([`CompositorWarmUp::Full`], before the effects).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompositorWarmUp {
+    /// RGBA16F, normal blending, no lighting or motion blur.
+    Basic,
+    /// Everything else.
+    Full,
+}
 
 impl bae_gpu::WarmUp for CompositorWarmUp {
     fn name(&self) -> &str {
-        "compositor"
+        match self {
+            CompositorWarmUp::Basic => "compositor (text and shapes)",
+            CompositorWarmUp::Full => "compositor",
+        }
     }
 
     fn priority(&self) -> u8 {
-        5
+        match self {
+            CompositorWarmUp::Basic => 2,
+            CompositorWarmUp::Full => 10,
+        }
     }
 
     fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        let shared = Shared::get(gpu);
+        if *self == CompositorWarmUp::Basic {
+            shared.warm_one((
+                wgpu::TextureFormat::Rgba16Float,
+                BlendKind::Normal,
+                Variant::Plain,
+            ));
+            return Ok(());
+        }
         let float32 = wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE;
         let mut formats = vec![(wgpu::TextureFormat::Rgba16Float, true)];
         if gpu.features().contains(float32) {
             formats.push((wgpu::TextureFormat::Rgba32Float, true));
         }
-        Shared::get(gpu).warm(&formats);
+        shared.warm(&formats);
         Ok(())
     }
 }
