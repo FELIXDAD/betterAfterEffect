@@ -780,24 +780,24 @@ impl RenderQueuePanel {
         let mut remove = None;
         let mut cancel = None;
         let mut requeue = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (i, item) in q.items.iter_mut().enumerate() {
-                let last =
-                    bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
-                ui.push_id(item.id, |ui| {
-                    item_ui(
-                        ui,
-                        i + 1,
-                        item,
-                        last,
-                        &mut remove,
-                        &mut cancel,
-                        &mut requeue,
-                    );
-                });
-                ui.separator();
-            }
-        });
+        // No scroll area of its own: the dock scrolls a panel that does not fit
+        // (AE opens the Render Queue in the short Timeline frame).
+        for (i, item) in q.items.iter_mut().enumerate() {
+            let last =
+                bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
+            ui.push_id(item.id, |ui| {
+                item_ui(
+                    ui,
+                    i + 1,
+                    item,
+                    last,
+                    &mut remove,
+                    &mut cancel,
+                    &mut requeue,
+                );
+            });
+            ui.separator();
+        }
         if let Some(id) = remove {
             q.remove(id);
         }
