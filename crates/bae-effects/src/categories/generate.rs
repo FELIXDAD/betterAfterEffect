@@ -1,9 +1,18 @@
+mod cc;
 pub(crate) mod strokes;
 use crate::Registry;
 
 use super::packages;
 
 pub(crate) fn register(registry: &mut Registry) {
+    super::packages(
+        registry,
+        &[embedded!(
+            "generate",
+            ["shaders/fractal.wgsl", "shaders/cc_threads.wgsl"]
+        )],
+    );
+    cc::register(registry);
     registry.effects.push(crate::effects::compound::fill());
     registry.effects.extend([
         strokes::stroke(),
