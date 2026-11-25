@@ -151,27 +151,23 @@ fn alpha_levels_converts_8bit_controls_and_brightness_selects_legacy_mode() {
 }
 
 #[test]
-fn noise_and_utility_aliases_follow_the_installed_targets() {
-    check_schemas(&["ADBE Noise"]);
+fn noise_and_utility_aliases_and_targets_are_registered() {
     for (old, modern) in [
+        ("ADBE Noise", "ADBE Noise2"),
         ("ADBE Noise Alpha", "ADBE Noise Alpha2"),
         ("ADBE Noise HLS", "ADBE Noise HLS2"),
         ("ADBE Noise HLS Auto", "ADBE Noise HLS Auto2"),
         ("ADBE Cineon Converter", "ADBE Cineon Converter2"),
         ("CC Composite", "CS Composite"),
     ] {
-        assert_eq!(get(old).is_some(), get(modern).is_some(), "{old}");
-        if get(modern).is_some() {
-            check_schemas(&[old]);
-        }
+        get(modern).unwrap_or_else(|| panic!("missing {modern}"));
+        check_schemas(&[old]);
     }
 }
 
 #[test]
 fn legacy_composite_reads_its_own_source() {
-    let Some(fx) = get("CC Composite") else {
-        return;
-    };
+    let fx = get("CC Composite").unwrap();
     let instance = common::instance("CC Composite", vec![]);
     let params = bae_render::EffectParams::new(&instance);
     let dependencies = fx.effect().layer_dependencies(&params);
@@ -188,9 +184,7 @@ fn legacy_composite_reads_its_own_source() {
 
 #[test]
 fn cineon_legacy_modes_use_the_modern_conversion_directions() {
-    let Some(old) = get("ADBE Cineon Converter") else {
-        return;
-    };
+    let old = get("ADBE Cineon Converter").unwrap();
     let modern = get("ADBE Cineon Converter2").unwrap();
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(7, 1);
