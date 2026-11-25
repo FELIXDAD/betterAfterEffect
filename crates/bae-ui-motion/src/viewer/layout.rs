@@ -89,10 +89,16 @@ impl CompositionViewer {
             if self.gpu.is_some() && self.extra_gpu[i].is_none() {
                 self.extra_gpu[i] = GpuPreview::new(cx.resources);
             }
-            if let Some(img) = self.extra_gpu[i]
-                .as_mut()
-                .and_then(|g| g.frame(cx.resources, cx.stage, comp, self.render_factor, camera))
-            {
+            if let Some(img) = self.extra_gpu[i].as_mut().and_then(|g| {
+                g.frame(
+                    cx.resources,
+                    cx.stage,
+                    comp,
+                    self.render_factor,
+                    camera,
+                    false,
+                )
+            }) {
                 let r = img.rect;
                 let at = |x: i32, y: i32| view.to_screen(DVec2::new(f64::from(x), f64::from(y)));
                 painter.with_clip_rect(frame.intersect(rect)).image(
