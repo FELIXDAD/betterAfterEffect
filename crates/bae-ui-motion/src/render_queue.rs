@@ -1003,11 +1003,8 @@ fn item_ui(
             ui.add_space(12.0);
             ui.label(tr("Log:"));
             let mut j = 0;
-            bae_ui::widgets::dropdown(ui, "log", &mut j, &[tr("Errors Only")], 110.0).labeled_value(
-                egui::WidgetType::ComboBox,
-                &name("Log"),
-                tr("Errors Only"),
-            );
+            bae_ui::widgets::dropdown(ui, "log", &mut j, &[tr("Errors Only")], 110.0)
+                .labeled_value(egui::WidgetType::ComboBox, &name("Log"), tr("Errors Only"));
         });
     });
     ui.add_enabled_ui(editable, |ui| {
