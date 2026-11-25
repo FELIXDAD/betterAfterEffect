@@ -408,6 +408,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             time("work_area_start", 0),
             time_none("work_area_duration").doc("None = to the end."),
             time("display_start_time", 0),
+            AttrDef::new("guides", ValueType::FloatList, DefaultValue::None, false)
+                .doc("Viewer guides: pairs of (0 horizontal / 1 vertical, comp pixels)."),
             boolean("motion_blur", false),
             AttrDef::new(
                 "shutter_angle",

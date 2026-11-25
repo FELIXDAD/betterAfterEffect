@@ -25,6 +25,7 @@ use crate::tools::{Tool, ViewRequest};
 mod bar;
 pub(crate) mod errors;
 mod free_transform;
+pub(crate) mod guides;
 mod menu;
 mod motion_path;
 mod overlay;
@@ -55,9 +56,14 @@ pub struct CompositionViewer {
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
     zoom: Option<f32>,
     pan: Vec2,
-    safe: bool,
-    grid: bool,
+    /// Title/action safe and grid from the saved panel state, given to the
+    /// session's view options on the first frame.
+    restore: Option<(bool, bool)>,
     checker: bool,
+    /// A guide being dragged out of a ruler or moved.
+    guide_drag: Option<guides::GuideDrag>,
+    /// The view options of the last frame (saved with the panel).
+    saved: guides::ViewOptions,
     locked: bool,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
@@ -103,8 +109,8 @@ impl CompositionViewer {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
         let mut v = CompositionViewer::default();
         if let Some(s) = state {
-            v.safe = s.get("safe").and_then(|v| v.as_bool()).unwrap_or(false);
-            v.grid = s.get("grid").and_then(|v| v.as_bool()).unwrap_or(false);
+            let b = |k: &str| s.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            v.restore = Some((b("safe"), b("grid")));
             v.checker = s.get("checker").and_then(|v| v.as_bool()).unwrap_or(false);
         }
         v
@@ -342,7 +348,8 @@ impl Panel for CompositionViewer {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(json!({"safe": self.safe, "grid": self.grid, "checker": self.checker}))
+        let (safe, grid) = self.restore.unwrap_or((self.saved.safe, self.saved.grid));
+        Some(json!({"safe": safe, "grid": grid, "checker": self.checker}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -394,6 +401,13 @@ impl Panel for CompositionViewer {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
+        if let Some((safe, grid)) = self.restore.take() {
+            let mut s = session.lock();
+            s.view_options.safe = safe;
+            s.view_options.grid = grid;
+        }
+        let opts = session.lock().view_options;
+        self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
@@ -409,6 +423,8 @@ impl Panel for CompositionViewer {
         let bar_h = 28.0;
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
+        // View ▸ Show Rulers: along the top and left of the viewer.
+        let (rulers, area) = guides::layout(area, opts.rulers);
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
@@ -649,10 +665,13 @@ impl Panel for CompositionViewer {
 
         // Preferences > Grids & Guides (bae-prefs, workstream D).
         let guides = bae_ui::settings::GridGuides::current(cx.resources);
-        if self.grid {
+        if opts.grid {
             guides.paint_grid(&clip, comp_rect, view.scale);
         }
-        if self.safe {
+        if opts.proportional {
+            guides::paint_proportional(&clip, comp_rect, guides.proportional, guides.grid_color);
+        }
+        if opts.safe {
             guides.paint_safe(
                 &painter,
                 comp_rect,
@@ -818,7 +837,18 @@ impl Panel for CompositionViewer {
             &painter,
             &self.prefs,
         );
-        let select_cursor = if path.owns {
+        let guide_busy = guides::frame(
+            &mut self.guide_drag,
+            ui,
+            cx,
+            &info,
+            &view,
+            area,
+            rulers,
+            &opts,
+            effective == Tool::Selection && !path.owns,
+        );
+        let select_cursor = if path.owns || guide_busy {
             path.cursor
         } else {
             path.cursor.or(select_tool::frame(

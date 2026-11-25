@@ -155,6 +155,10 @@ pub(super) struct TransformDrag {
     snapping: Option<Snapping>,
     /// The point snapped to in the last frame (comp space).
     guide: Option<DVec2>,
+    /// Guides and grid lines the snapping point snaps to (View ▸ Snap to
+    /// Guides / Grid): `(vertical, at)` comp pixels, within `line_snap`.
+    lines: Vec<(bool, f64)>,
+    line_snap: f64,
 }
 
 impl TransformDrag {
@@ -171,7 +175,16 @@ impl TransformDrag {
             kind,
             snapping: None,
             guide: None,
+            lines: Vec::new(),
+            line_snap: 0.0,
         }
+    }
+
+    /// Guide and grid lines to snap to, within `distance` comp pixels.
+    pub fn with_lines(mut self, lines: Vec<(bool, f64)>, distance: f64) -> Self {
+        self.lines = lines;
+        self.line_snap = distance;
+        self
     }
 
     /// Snapping as AE 26 does it (R1, transform-tools.md §4): only one point
@@ -241,6 +254,22 @@ impl TransformDrag {
                 if let Some(t) = self.snap_target(d, snap) {
                     d = axis(t - self.snapping.as_ref().expect("snapping").feature);
                     self.guide = Some(t);
+                } else if let Some(s) = &self.snapping {
+                    // Guides and grid lines: each axis on its own.
+                    let f = s.feature + d;
+                    let near = |vertical: bool, v: f64| {
+                        self.lines
+                            .iter()
+                            .filter(|(vv, at)| *vv == vertical && (v - at).abs() <= self.line_snap)
+                            .min_by(|a, b| (v - a.1).abs().total_cmp(&(v - b.1).abs()))
+                            .map(|(_, at)| *at)
+                    };
+                    if let Some(x) = near(true, f.x) {
+                        d.x += x - f.x;
+                    }
+                    if let Some(y) = near(false, f.y) {
+                        d.y += y - f.y;
+                    }
                 }
                 d
             }

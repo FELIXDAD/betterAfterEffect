@@ -397,7 +397,17 @@ pub(super) fn frame(
                     _ => Kind::Move { start: at },
                 };
                 let drag = TransformDrag::new(stage, comp, &layers, kind);
-                state.drag = Some(primary_first(drag.with_snapping(comp, &layer, at), &layer));
+                let lines = super::guides::snap_lines(
+                    stage,
+                    info,
+                    &session.lock().view_options,
+                    &bae_ui::settings::GridGuides::current(cx.resources),
+                );
+                let reach = f64::from(transform::SNAP_DISTANCE / view.scale.max(1e-6));
+                let drag = drag
+                    .with_snapping(comp, &layer, at)
+                    .with_lines(lines, reach);
+                state.drag = Some(primary_first(drag, &layer));
             }
             Press::Empty if tool == Tool::Selection => {
                 state.marquee = Some(Marquee {
