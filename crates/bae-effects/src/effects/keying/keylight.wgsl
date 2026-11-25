@@ -6,14 +6,14 @@ fn excess(rgb:vec3f, key:vec3f, balance:f32) -> f32 {
     else if key.b>=key.g {v=rgb.brg;}
     return v.x-mix(v.y,v.z,balance);
 }
-fn raw_matte(p:vec2f)->f32 {
+fn raw_matte(source:vec3f)->f32 {
     let key=u.values[4].rgb;
     let balance=value(6)*0.01;
     let denom=excess(key,key,balance);
     if denom<=0.0001 {return 1.0;}
     let bias=select(u.values[8].rgb,u.values[7].rgb,enabled(9u));
     let weights=max(bias,vec3f(0.001));
-    let rgb=aux_c(p).rgb * dot(weights,vec3f(1./3.))/weights;
+    let rgb=source * dot(weights,vec3f(1./3.))/weights;
     return saturate(1.-excess(rgb,key,balance)*value(5)*0.01/denom);
 }
 fn clipped(a:f32)->f32 {
@@ -55,6 +55,18 @@ fn crop_axis(x:f32,a:f32,b:f32,mode:u32)->f32 {
     return clamp(x,min(a+0.5,b-0.5),max(a+0.5,b-0.5));
 }
 fn evaluate(pixel:vec2f)->vec4f {
+    if u.stage == 2u {
+        return fx_bilinear(input_tex, u.images[0], pixel, false);
+    }
+    if u.stage == 1u {
+        let raw = raw_matte(src(pixel).rgb);
+        var inside = 0.;
+        var outside = 0.;
+        if has(0u) { inside = aux_a(pixel).a; if enabled(25u) { inside = 1.-inside; } }
+        if has(1u) { outside = aux_b(pixel).a; if enabled(33u) { outside = 1.-outside; } }
+        // Raw values consumed independently by the final pass. Only alpha is filtered.
+        return vec4f(raw, inside, outside, clipped(raw));
+    }
     let size=vec2f(u.layer.zw-u.layer.xy);
     let lo=vec2f(u.layer.xy)+size*vec2f(value(75),value(77))*0.01;
     let hi=vec2f(u.layer.xy)+size*vec2f(value(76),value(78))*0.01;
@@ -71,26 +83,15 @@ fn evaluate(pixel:vec2f)->vec4f {
     let view=u32(value(2));
     if view==1u {return output(source.rgb,source.a);}
     if view==2u {return gray(source.a);}
-    let raw=raw_matte(p);
-    var screen=clipped(raw);
-    let grow=value(15);
-    let radius=max(max(abs(grow),value(16)),max(max(value(17),value(18)),value(14)))*u.scale;
-    if radius>0. {
-        var low=screen; var high=screen; var sum=screen;
-        for(var i=0;i<8;i++){
-            let a=f32(i)*0.785398;
-            let q=clipped(raw_matte(p+radius*vec2f(cos(a),sin(a))));
-            low=min(low,q);high=max(high,q);sum+=q;
-        }
-        screen=mix(screen,select(low,high,grow>0.),saturate(abs(grow)));
-        screen=mix(screen,sum/9.,saturate(value(16)));
-        if value(17)>0. && sum/9.>0.7 {screen=high;}
-        if value(18)>0. && sum/9.<0.3 {screen=low;}
-        screen=mix(screen,raw,saturate(value(14))*saturate(high-low));
+    let matte = fx_bilinear(map_a, u.images[1], p, false);
+    let raw = matte.r;
+    var inside = matte.g;
+    let outside = matte.b;
+    var screen = aux_b(p).a;
+    if has(2u) {
+        let blurred = aux_c(p).a;
+        screen = mix(screen, raw, saturate(4. * blurred * (1. - blurred)));
     }
-    var inside=0.;var outside=0.;
-    if has(0u) {inside=aux_a(p).a;if enabled(25){inside=1.-inside;}}
-    if has(1u) {outside=aux_b(p).a;if enabled(33){outside=1.-outside;}}
     if value(28)==2. {inside=max(inside,source.a);}
     let coverage=max(screen,inside)*(1.-outside);
     let alpha=coverage*select(1.,source.a,value(28)==3.);
@@ -106,7 +107,8 @@ fn evaluate(pixel:vec2f)->vec4f {
     let edge_width=max(value(54)+abs(value(55)),0.)*u.scale;
     var edge=4.*coverage*(1.-coverage);
     if edge_width>0. {
-        let span=abs(raw_matte(p+vec2f(edge_width,0.))-raw_matte(p-vec2f(edge_width,0.)));
+        let dx=vec2f(edge_width,0.);
+        let span=abs(fx_bilinear(map_a,u.images[1],p+dx,false).r-fx_bilinear(map_a,u.images[1],p-dx,false).r);
         edge=saturate(edge+span*sign(value(55))+0.5*span*sign(value(54)));
     }
     edge=pow(saturate(edge),exp2((value(53)-50.)/50.));
