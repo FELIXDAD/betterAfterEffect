@@ -115,6 +115,28 @@ impl AudioSource for MemoryAudio {
     }
 }
 
+/// Metadata for a standalone sound asset. Video containers use their picture
+/// decoder's metadata, including audio track information.
+pub fn file_info(path: &std::path::Path) -> Option<crate::MediaInfo> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    if !matches!(
+        ext.as_str(),
+        "wav" | "wave" | "aif" | "aiff" | "aifc" | "m4a" | "mp3" | "flac" | "aac"
+    ) {
+        return None;
+    }
+    let audio = FileAudio::open(path).ok()?;
+    Some(crate::MediaInfo {
+        path: path.to_owned(),
+        kind: crate::MediaKind::Audio,
+        format: audio.info.codec.clone(),
+        video: None,
+        audio: vec![audio.info.clone()],
+        timecode: None,
+        sequence: None,
+    })
+}
+
 /// Audio streams of a file (empty when it has none or the container is not
 /// supported). Reads headers only.
 pub fn probe(path: &std::path::Path) -> Vec<AudioInfo> {

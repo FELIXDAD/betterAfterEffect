@@ -120,8 +120,8 @@ fn character_opacity_composites_fill_and_stroke_together() {
     let group = bae_anim::EvaluatedPrim {
         path: bae_model::PrimPath::new("/animator").unwrap(),
         prim_type: Some(bae_model::PrimType::TEXT_ANIMATOR),
-        attrs: [("animator:opacity".into(), bae_model::Value::Float(50.))].into(),
-        children: vec![],
+        attrs: Arc::new([("animator:opacity".into(), bae_model::Value::Float(50.))].into()),
+        children: Vec::new().into(),
     };
     bae_text::animator::apply_animators(&mut layout, &[group]);
     let source = TextSource::new(Arc::new(layout));

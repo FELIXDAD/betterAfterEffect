@@ -20,6 +20,7 @@
 //! This crate has no GPU, window or platform dependencies.
 
 mod bezier;
+mod bounds;
 mod curve;
 pub mod edit;
 mod error;
@@ -31,6 +32,7 @@ pub mod time;
 mod transform;
 
 pub use bae_model::{Stage, Time, Value};
+pub use bounds::{SourceBounds, SourceRect, set_source_bounds};
 pub use curve::{Curve, CurveKind};
 pub use error::EvalError;
 pub use eval::{Evaluator, layer_timing};
@@ -39,6 +41,7 @@ pub use evaluated::{
     EvaluatedMask, EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff,
     LightState, LightType, TextPathOptions, TrackMatte,
 };
+pub use expr::prewarm as prewarm_expressions;
 pub use time::{LayerTiming, MotionBlur};
 pub use transform::{AutoOrientRotation, Transform};
 

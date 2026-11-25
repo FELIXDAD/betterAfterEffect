@@ -414,6 +414,8 @@ impl LayerSource for TextSource {
 #[derive(Debug, Default)]
 pub struct TextProvider {
     fonts: Mutex<Option<FontSystem>>,
+    /// The fonts are loaded (scanning the system fonts takes a while).
+    ready: std::sync::atomic::AtomicBool,
     cache: Mutex<SourceCache<TextSource>>,
 }
 
@@ -427,8 +429,40 @@ impl TextProvider {
     pub fn with_fonts(fonts: FontSystem) -> Self {
         Self {
             fonts: Mutex::new(Some(fonts)),
+            ready: std::sync::atomic::AtomicBool::new(true),
             cache: Mutex::default(),
         }
+    }
+
+    /// Expressions' `sourceRectAtTime` measures text and shapes with this
+    /// provider (process-wide).
+    pub fn measure_expressions(self: &Arc<Self>) {
+        bae_anim::set_source_bounds(self.clone());
+    }
+
+    /// Scans the system fonts now (the app's warm-up) instead of at the first
+    /// text layer.
+    pub fn load_fonts(&self) {
+        self.fonts.lock().get_or_insert_with(FontSystem::new);
+        self.ready.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// The fonts for the render path. On an interactive thread it never waits
+    /// for the warm-up still scanning them (the frame is drawn again later).
+    fn render_fonts(&self) -> Result<parking_lot::MutexGuard<'_, Option<FontSystem>>, RenderError> {
+        if !self.ready.load(std::sync::atomic::Ordering::Acquire)
+            && bae_render::is_interactive_thread()
+            && bae_gpu::warm_up::is_running()
+        {
+            return match self.fonts.try_lock() {
+                Some(fonts) if fonts.is_some() => Ok(fonts),
+                _ => Err(bae_render::warming_up("the font list")),
+            };
+        }
+        let mut fonts = self.fonts.lock();
+        fonts.get_or_insert_with(FontSystem::new);
+        self.ready.store(true, std::sync::atomic::Ordering::Release);
+        Ok(fonts)
     }
 
     /// Lays out `doc` with the provider's fonts.
@@ -444,12 +478,16 @@ impl TextProvider {
             return Ok(Arc::new(layout.clone()));
         }
         if let Some(doc) = content.data.downcast_ref::<TextDocument>() {
-            return Ok(Arc::new(self.layout(doc)));
+            let mut fonts = self.render_fonts()?;
+            return Ok(Arc::new(layout_text(
+                fonts.get_or_insert_with(FontSystem::new),
+                doc,
+            )));
         }
         if let Some(layer) = content.data.downcast_ref::<EvaluatedLayer>() {
             return Ok(Arc::new(match &layer.text {
                 Some(doc) => {
-                    let mut fonts = self.fonts.lock();
+                    let mut fonts = self.render_fonts()?;
                     let mut layout = crate::animator::layout_animated(
                         fonts.get_or_insert_with(FontSystem::new),
                         doc,
@@ -494,5 +532,43 @@ impl SourceProvider for TextProvider {
         let source = Arc::new(TextSource::new(self.layout_of(content)?));
         self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
+    }
+}
+
+/// `sourceRectAtTime` for the expression engine: text laid out with the
+/// provider's fonts, shapes from their geometry (the app registers the
+/// provider with `bae_anim::set_source_bounds`).
+impl bae_anim::SourceBounds for TextProvider {
+    fn text(&self, doc: &TextDocument, include_extents: bool) -> Option<bae_anim::SourceRect> {
+        // Expressions run on the UI thread: never wait for the font warm-up.
+        let mut fonts = self.render_fonts().ok()?;
+        let r = layout_text(fonts.as_mut()?, doc).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
+    }
+
+    fn shapes(
+        &self,
+        contents: &[bae_anim::EvaluatedPrim],
+        include_extents: bool,
+    ) -> Option<bae_anim::SourceRect> {
+        let mut warnings = Vec::new();
+        let group = bae_vector::ShapeGroup::from_evaluated(contents, &mut warnings);
+        let r = bae_vector::VectorScene::from_group(&group).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
+    }
+}
+
+impl bae_gpu::WarmUp for TextProvider {
+    fn name(&self) -> &str {
+        "fonts"
+    }
+
+    fn priority(&self) -> u8 {
+        10
+    }
+
+    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        self.load_fonts();
+        Ok(())
     }
 }

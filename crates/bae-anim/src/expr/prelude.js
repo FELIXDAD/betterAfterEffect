@@ -24,7 +24,10 @@ var __now = 0;
 // Property objects stand for their value in arithmetic and library calls (AE).
 function __val(a) {
   if (a === undefined) throw new Error("Undefined value used in expression (could be an out of range array subscript?)");
-  return a instanceof Property ? a.value : a;
+  if (a instanceof Property) return a.value;
+  // `text.sourceText` (a String carrying the property's methods) is its text.
+  if (a instanceof String) return a.valueOf();
+  return a;
 }
 function __isArr(a) { return Array.isArray(a); }
 function __isNum(a) { return typeof a === "number" || typeof a === "boolean"; }
@@ -204,8 +207,11 @@ function __hash(a, b) {
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
   return (h ^ (h >>> 16)) >>> 0;
 }
-var __rng = new __Rng(1), __rngBase = 1, __timeless = false;
-function __resetRandom(seed) { __rngBase = seed >>> 0; __timeless = false; __reseed(); }
+// The generator is seeded on the first random() of an evaluation (most
+// expressions draw none): null until then.
+var __rng = null, __rngBase = 1, __timeless = false;
+function __resetRandom(seed) { __rngBase = seed >>> 0; __timeless = false; __rng = null; }
+function __R() { if (__rng === null) __reseed(); return __rng; }
 function __reseed() {
   var tick = __timeless ? 0 : Math.floor(__now * 1000 + 1e-6);
   __rng = new __Rng(__hash(__rngBase, tick));
@@ -216,18 +222,18 @@ function seedRandom(seed, timeless) {
   __reseed();
 }
 function random(a, b) {
-  var r = __rng.next();
+  var r = __R().next();
   if (a === undefined) return r;
   if (b === undefined) {
-    if (__isArr(a)) return a.map(function (x) { return __rng.next() * x; });
+    if (__isArr(a)) return a.map(function (x) { return __R().next() * x; });
     return r * a;
   }
-  if (__isArr(a)) return a.map(function (x, i) { return x + __rng.next() * (b[i] - x); });
+  if (__isArr(a)) return a.map(function (x, i) { return x + __R().next() * (b[i] - x); });
   return a + r * (b - a);
 }
 function gaussRandom(a, b) {
   function g() {
-    var u = 1 - __rng.next(), v = __rng.next();
+    var u = 1 - __R().next(), v = __R().next();
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) / 6 + 0.5;
   }
   if (a === undefined) return g();
@@ -279,8 +285,10 @@ function __call(fn, c, l, prim, attr, t, seed) {
   __env_c = c;
   __resetRandom(seed);
   try {
-    var env = { thisComp: new Comp(c), thisLayer: new Layer(c, l), thisProperty: __prop(c, l, prim, attr), time: t };
-    return __val(fn(env));
+    var r = fn(c, l, prim, attr, t);
+    // A Source Text expression may end with a text style (AE 17.0+).
+    if (r instanceof TextStyle) return { __style: true, changes: r.__c };
+    return __val(r);
   } finally {
     __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __timeless = saveTl;
   }
@@ -288,21 +296,11 @@ function __call(fn, c, l, prim, attr, t, seed) {
 
 // ---- object model ----
 function Property(c, l, p, a) { this.__c = c; this.__l = l; this.__p = p; this.__a = a; }
-// `transform.position[0]` and `.length` read the value, as in AE.
-var __propHandler = {
-  get: function (target, key, receiver) {
-    if (typeof key === "string" && (key === "length" || /^[0-9]+$/.test(key))) {
-      var v = target.value;
-      return __isArr(v) ? v[key] : (key === "length" ? 1 : undefined);
-    }
-    return Reflect.get(target, key, receiver);
-  },
-};
-function __prop(c, l, p, a) { return new Proxy(new Property(c, l, p, a), __propHandler); }
+function __prop(c, l, p, a) { return new Property(c, l, p, a); }
 // Time grid of AE's valueAtTime: 1/1024 of a frame (measured in AE 26 at 30 fps).
 function __tick() { return __h.compInfo(__env_c).frameDuration / 1024; }
 function __q(t) { var k = __tick(); return Math.round(t / k) * k; }
-function __unwrap(r) { return r.length === 1 ? r[0] : r; }
+function __unwrap(r) { return typeof r === "string" || r.length !== 1 ? r : r[0]; }
 Property.prototype = {
   get value() { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, __now, false)); },
   valueAtTime: function (t) { return __unwrap(__h.prop(this.__c, this.__l, this.__p, this.__a, t, false)); },
@@ -426,6 +424,74 @@ Property.prototype = {
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
   get propertyIndex() { return 1; },
 };
+// ---- text (AE: thisLayer.text.sourceText and the 17.0+ style API) ----
+Property.prototype.getStyleAt = function (charIndex, t) {
+  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t), {});
+};
+Property.prototype.createStyle = function () { return this.getStyleAt(0, __now); };
+Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, __now); } });
+
+function __TextGroup(c, l) { this.__c = c; this.__l = l; }
+__TextGroup.prototype = {
+  // The text as a string (string methods, concatenation, length) that also has
+  // the property's methods, as AE's sourceText behaves.
+  get sourceText() {
+    var p = __prop(this.__c, this.__l, "", "text:source");
+    var s = new String(p.value);
+    ["valueAtTime", "velocityAtTime", "key", "nearestKey", "getStyleAt", "createStyle"].forEach(function (k) {
+      s[k] = function () { return p[k].apply(p, arguments); };
+    });
+    ["value", "style", "numKeys"].forEach(function (k) {
+      Object.defineProperty(s, k, { get: function () { return p[k]; } });
+    });
+    return s;
+  },
+};
+
+// A text style: what the text uses (`__f`, from the host) plus the `set…`
+// calls made on it (`__c`), each returning a new style.
+function TextStyle(fields, changes) { this.__f = fields; this.__c = changes; }
+TextStyle.prototype = {
+  get horizontalScale() { return "horizontalScale" in this.__c ? this.__c.horizontalScale : 100; },
+  get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
+};
+[
+  ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
+  ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
+  ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
+  ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
+].forEach(function (p) {
+  Object.defineProperty(TextStyle.prototype, p[0], {
+    get: function () { return p[1] in this.__c ? this.__c[p[1]] : this.__f[p[1]]; },
+  });
+});
+[
+  ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
+  ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
+  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineShift", "baselineShift"],
+  ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
+  ["setSmallCaps", "smallCaps"], ["setApplyFill", "applyFill"], ["setApplyStroke", "applyStroke"],
+  ["setHorizontalScale", "horizontalScale"], ["setVerticalScale", "verticalScale"],
+].forEach(function (p) {
+  TextStyle.prototype[p[0]] = function (v) {
+    var c = {};
+    for (var k in this.__c) c[k] = this.__c[k];
+    c[p[1]] = __val(v);
+    return new TextStyle(this.__f, c);
+  };
+});
+
+// `transform.position[0]` and `.length` read the value, as in AE: getters on
+// the prototype (a Proxy would trap every method and field access).
+(function () {
+  function index(i) {
+    return function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v[i] : undefined; };
+  }
+  for (var i = 0; i < 16; i++) Object.defineProperty(Property.prototype, String(i), { get: index(i) });
+  Object.defineProperty(Property.prototype, "length", {
+    get: function () { var v = this.value; return __isArr(v) || typeof v === "string" ? v.length : 1; },
+  });
+})();
 
 var __TRANSFORM = {
   anchorPoint: "transform:anchor_point", position: "transform:position", scale: "transform:scale",
@@ -485,6 +551,12 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
   get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
+  get marker() { return new MarkerProperty(this.__c, this.__l); },
+  get text() { return new __TextGroup(this.__c, this.__l); },
+  sourceRectAtTime: function (t, includeExtents) {
+    var r = __h.sourceRect(this.__c, this.__l, t === undefined ? __now : t, !!includeExtents);
+    return { top: r[1], left: r[0], width: r[2], height: r[3] };
+  },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
@@ -534,8 +606,54 @@ Layer.prototype = {
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
+// ---- markers (AE: thisLayer.marker, thisComp.marker, MarkerKey) ----
+function MarkerProperty(c, l) { this.__c = c; this.__l = l; this.__m = null; }
+MarkerProperty.prototype = {
+  get __keys() {
+    if (this.__m === null) {
+      this.__m = __h.markers(this.__c, this.__l).map(function (m, i) { return new MarkerKey(m, i + 1); });
+    }
+    return this.__m;
+  },
+  get numKeys() { return this.__keys.length; },
+  // key(index) or key(comment), as AE.
+  key: function (k) {
+    var ks = this.__keys;
+    if (typeof k === "string") {
+      for (var i = 0; i < ks.length; i++) if (ks[i].comment === k) return ks[i];
+      throw new Error("Marker key " + JSON.stringify(k) + " does not exist");
+    }
+    if (k < 1 || k > ks.length) throw new Error("Key index " + k + " out of range");
+    return ks[k - 1];
+  },
+  nearestKey: function (t) {
+    var ks = this.__keys, best = -1, bd = Infinity;
+    for (var i = 0; i < ks.length; i++) {
+      var d = Math.abs(ks[i].time - t);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) throw new Error("property has no keyframes");
+    return ks[best];
+  },
+};
+function MarkerKey(m, index) {
+  this.time = m.time;
+  this.index = index;
+  this.duration = m.duration;
+  this.comment = m.comment;
+  this.value = m.comment;
+  this.chapter = m.chapter;
+  this.url = m.url;
+  this.frameTarget = m.frameTarget;
+  this.eventCuePoint = false;
+  this.cuePointName = m.cuePointName;
+  this.parameters = {};
+  this.protectedRegion = m.protectedRegion;
+}
+
 function Comp(c) { this.__c = c; this.__i = null; }
 Comp.prototype = {
+  get marker() { return new MarkerProperty(this.__c, -1); },
   get __info() { return this.__i || (this.__i = __h.compInfo(this.__c)); },
   get name() { return this.__info.name; },
   get width() { return this.__info.width; },
