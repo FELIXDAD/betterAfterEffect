@@ -366,35 +366,20 @@ impl Panel for BrushesPanel {
     }
 }
 
-/// AE's Paint workspace: the viewer with the Paint and Brushes panels at the
-/// side (the Layer panel opens next to the viewer when a layer is opened).
-pub fn workspace() -> bae_ui::WorkspacePreset {
-    use bae_ui::dock::{Frame, Node};
-    bae_ui::WorkspacePreset::new(
-        "Paint",
-        bae_ui::presets::AE_KEYMAP,
-        Node::row(vec![
-            (
-                1406.0,
-                Node::column(vec![
-                    (640.0, Node::tabs(&["composition"])),
-                    (295.0, Node::tabs(&["timeline"])),
-                ]),
-            ),
-            (
-                316.0,
-                Node::column(vec![
-                    (52.0, Node::tabs(&["preview"])),
-                    (
-                        883.0,
-                        Node::frame(Frame::new(&["paint", "brushes"]).stacked(Some(420.0))),
-                    ),
-                ]),
-            ),
-        ]),
-    )
-    .order(3)
-    .description("Paint on layers in the Layer panel with the Brush, Clone Stamp and Eraser.")
+/// The Paint and Brushes panels and their Chinese (AE's Paint workspace, in
+/// `workspaces`, lays them out).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "paint",
+        bae_ui::PanelKind::new("Paint", |_| Box::new(PaintPanel)),
+    );
+    crate::register_panel(
+        app,
+        "brushes",
+        bae_ui::PanelKind::new("Brushes", |_| Box::new(BrushesPanel)),
+    );
 }
 
 /// Chinese of the Paint and Brushes panels (AE's zh_CN dictionary,
