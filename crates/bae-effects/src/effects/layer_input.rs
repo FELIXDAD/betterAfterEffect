@@ -6,11 +6,11 @@ use bae_render::{
 
 use crate::catalog::layer_stage_id;
 
-pub(super) fn own_layer(params: &EffectParams<'_>) -> Option<PrimPath> {
+pub(crate) fn own_layer(params: &EffectParams<'_>) -> Option<PrimPath> {
     params.effect.path.parent()?.parent()
 }
 
-pub(super) fn dependency(
+pub(crate) fn dependency(
     params: &EffectParams<'_>,
     id: u32,
     default_self: bool,

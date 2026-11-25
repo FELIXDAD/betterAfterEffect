@@ -96,7 +96,7 @@ impl Effect for PaintEffect {
     fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<bae_render::effect::LayerDependency> {
         match self.kind {
             Generator::Vegas if Params::new(&self.def, p).popup(52) == 1 => {
-                super::layer_input::dependency(p, 2, false)
+                crate::effects::layer_input::dependency(p, 2, false)
                     .into_iter()
                     .collect()
             }
@@ -106,7 +106,7 @@ impl Effect for PaintEffect {
 
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         if matches!(self.kind, Generator::Vegas) && Params::new(&self.def, p).popup(52) == 1 {
-            return roi.union(&super::image_grid::layer_rect(p));
+            return roi.union(&crate::effects::image_grid::layer_rect(p));
         }
         roi
     }

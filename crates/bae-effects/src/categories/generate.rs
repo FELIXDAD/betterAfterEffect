@@ -1,16 +1,17 @@
-use crate::{Registry, effects::generate};
+pub(crate) mod strokes;
+use crate::Registry;
 
 use super::packages;
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.effects.push(crate::effects::compound::fill());
     registry.effects.extend([
-        generate::stroke(),
-        generate::write_on(),
-        generate::scribble(),
-        generate::vegas(),
+        strokes::stroke(),
+        strokes::write_on(),
+        strokes::scribble(),
+        strokes::vegas(),
     ]);
-    registry.prewarm.push(generate::prewarm);
+    registry.prewarm.push(strokes::prewarm);
     packages(
         registry,
         &[

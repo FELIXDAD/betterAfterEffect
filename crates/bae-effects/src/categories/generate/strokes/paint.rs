@@ -200,7 +200,7 @@ pub(super) fn kernel(
                 label: LABEL,
                 wgsl: [
                     image_grid::CHANNEL_MATH,
-                    include_str!("../../shaders/image_grid.wgsl"),
+                    include_str!("../../../shaders/image_grid.wgsl"),
                     include_str!("paint.wgsl"),
                 ]
                 .concat()
