@@ -137,6 +137,12 @@ pub mod ids {
     /// Layer ▸ Transform ▸ Anchor Point… / Position… / Scale… / Orientation… /
     /// Rotation… / Opacity…: params `{"attr": "position"}` (the value dialog).
     pub const TRANSFORM_DIALOG: &str = "motion.layer.transform_dialog";
+    /// Layer ▸ Time: Enable Time Remapping (Cmd/Ctrl+Alt+T, toggles),
+    /// Time-Reverse Layer (Cmd/Ctrl+Alt+R), Freeze Frame, Freeze On Last Frame.
+    pub const TIME_REMAP: &str = "motion.layer.enable_time_remapping";
+    pub const TIME_REVERSE: &str = "motion.layer.time_reverse_layer";
+    pub const FREEZE_FRAME: &str = "motion.layer.freeze_frame";
+    pub const FREEZE_LAST: &str = "motion.layer.freeze_on_last_frame";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -168,6 +174,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("adjustment_layer", "Adjustment Layer"),
     ("three_d", "3D Layer"),
     ("preserve_transparency", "Preserve Transparency"),
+    ("guide", "Guide Layer"),
 ];
 
 /// Whether a switch is on for a layer.
@@ -260,6 +267,10 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
     (ids::TRANSFORM_DIALOG, "Transform"),
     (ids::RESET_TRANSFORM, "Reset"),
+    (ids::TIME_REMAP, "Enable Time Remapping"),
+    (ids::TIME_REVERSE, "Time-Reverse Layer"),
+    (ids::FREEZE_FRAME, "Freeze Frame"),
+    (ids::FREEZE_LAST, "Freeze On Last Frame"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -1364,6 +1375,41 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
+        ids::TIME_REMAP | ids::TIME_REVERSE | ids::FREEZE_FRAME | ids::FREEZE_LAST => {
+            // Layers with time to remap: footage with a duration and pre-comps.
+            let timed: Vec<PrimPath> = layers
+                .iter()
+                .filter(|l| {
+                    !query::is_locked(stage, l)
+                        && matches!(
+                            query::layer_kind(stage, l).as_deref(),
+                            Some("footage" | "pre_comp" | "audio")
+                        )
+                        && query::source_duration(stage, l).is_some()
+                })
+                .cloned()
+                .collect();
+            if !timed.is_empty() {
+                match id {
+                    ids::TIME_REMAP => {
+                        // AE toggles: off when every layer has it on.
+                        let on = !timed
+                            .iter()
+                            .all(|l| switch_on(stage, l, "time_remap_enabled"));
+                        cx.invoke_with("layer.time_remap", json!({"layers": timed, "enabled": on}));
+                    }
+                    ids::TIME_REVERSE => {
+                        cx.invoke_with("layer.time_reverse", json!({ "layers": timed }));
+                    }
+                    ids::FREEZE_FRAME => {
+                        cx.invoke_with("layer.freeze_frame", json!({"layers": timed, "time": now}));
+                    }
+                    _ => {
+                        cx.invoke_with("layer.freeze_on_last_frame", json!({ "layers": timed }));
+                    }
+                }
+            }
+        }
         ids::TRANSFORM_DIALOG => {
             let kind = inv
                 .params
@@ -1575,6 +1621,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Layer ▸ Time and switches (AE 26's Chinese).
+    ("Enable Time Remapping", "启用时间重映射"),
+    ("Time-Reverse Layer", "时间反向图层"),
+    ("Freeze Frame", "冻结帧"),
+    ("Freeze On Last Frame", "在最后一帧上冻结"),
+    ("Guide Layer", "参考图层"),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
