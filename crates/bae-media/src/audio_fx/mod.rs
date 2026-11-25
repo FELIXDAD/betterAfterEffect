@@ -12,7 +12,13 @@ struct Definition {
     reverse: bool,
     create: fn() -> Box<dyn Processor>,
 }
-const DEFINITIONS: &[Definition] = &[];
+mod stereo;
+const DEFINITIONS: &[Definition] = &[Definition {
+    name: "ADBE Aud Stereo Mixer",
+    defaults: &[100.0, 100.0, -100.0, 100.0, 0.0],
+    reverse: false,
+    create: || Box::new(stereo::Main),
+}];
 
 fn number(value: &Value) -> Option<f64> {
     value
