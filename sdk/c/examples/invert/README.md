@@ -28,7 +28,7 @@ Windows（x64，MSVC 开发者命令行）：
 
 ```bat
 mkdir bin\windows-x86_64
-cl /O2 /LD /I..\.. invert.c /Fe:bin\windows-x86_64\invert.dll
+cl /std:c11 /O2 /LD /I..\.. invert.c /Fe:bin\windows-x86_64\invert.dll
 ```
 
 Linux（无界面渲染 / CI）：
