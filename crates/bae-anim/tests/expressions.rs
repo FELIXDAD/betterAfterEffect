@@ -622,6 +622,295 @@ fn property_index_and_length_read_its_value() {
     assert_eq!(ec.layers[0].transform.rotation.z, 122.0);
 }
 
+fn doc(text: &str) -> Value {
+    Value::TextDocument(Box::new(TextDocument::new(text, "ArialMT", 50.0)))
+}
+
+/// `text.sourceText` reads as a string with the property's methods; `value` on
+/// Source Text is the text; the AE 17.0+ style API reads and sets the style.
+#[test]
+fn source_text_strings_and_styles() {
+    let s = stage(|b| {
+        let a = b.layer(MAIN, "A", "text");
+        b.set(&a, "text:source", doc("Hello world"));
+        let c = b.layer(MAIN, "C", "text");
+        b.expr(
+            &c,
+            "text:source",
+            doc("x"),
+            r#"thisComp.layer("A").text.sourceText + "!""#,
+        );
+        let v = b.layer(MAIN, "V", "text");
+        b.expr(&v, "text:source", doc("Hi"), r#"value + " there""#);
+        let st = b.layer(MAIN, "S", "text");
+        b.expr(
+            &st,
+            "text:source",
+            doc("Styled"),
+            "text.sourceText.style.setFontSize(80).setFillColor([1, 0, 0]).setText(\"New\").setFauxBold(true)",
+        );
+        let n = b.layer(MAIN, "N", "null");
+        b.expr(
+            &n,
+            "transform:rotation",
+            0.0,
+            r#"var t = thisComp.layer("A").text.sourceText; t.length * 100 + t.split(" ").length * 10 + t.style.fontSize / 10"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let text = |i: usize| ec.layers[i].text.as_ref().unwrap();
+    assert_eq!(text(1).text, "Hello world!");
+    assert_eq!(text(2).text, "Hi there");
+    let styled = text(3);
+    assert_eq!(styled.text, "New");
+    assert_eq!(styled.font_size, 80.0);
+    assert_eq!(styled.fill_color[..3], [1.0, 0.0, 0.0]);
+    assert!(styled.faux_bold);
+    // 11 characters, 2 words, 50 pt.
+    assert_eq!(ec.layers[4].transform.rotation.z, 1100.0 + 20.0 + 5.0);
+}
+
+/// `sourceRectAtTime`: the measured text through the registered measurer, a
+/// solid's own size, a null's 100 × 100.
+#[test]
+fn source_rect_at_time() {
+    struct Fixed;
+    impl bae_anim::SourceBounds for Fixed {
+        fn text(&self, doc: &TextDocument, extents: bool) -> Option<bae_anim::SourceRect> {
+            let pad = if extents { 1.0 } else { 0.0 };
+            Some([
+                -10.0 - pad,
+                -20.0 - pad,
+                doc.text.len() as f64 * 10.0 + 2.0 * pad,
+                30.0,
+            ])
+        }
+        fn shapes(&self, _: &[bae_anim::EvaluatedPrim], _: bool) -> Option<bae_anim::SourceRect> {
+            None
+        }
+    }
+    bae_anim::set_source_bounds(std::sync::Arc::new(Fixed));
+    let s = stage(|b| {
+        let t = b.layer(MAIN, "T", "text");
+        b.set(&t, "text:source", doc("Hello"));
+        let n = b.layer(MAIN, "N", "null");
+        b.expr(
+            &n,
+            "transform:position",
+            Value::Vec3([0.0; 3]),
+            r#"var r = thisComp.layer("T").sourceRectAtTime(time, true); [r.left + r.width, r.top + r.height]"#,
+        );
+        b.expr(&n, "transform:rotation", 0.0, "sourceRectAtTime().width");
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let p = ec.layers[1].transform.position;
+    assert_eq!([p.x, p.y], [-11.0 + 52.0, -21.0 + 30.0]);
+    assert_eq!(
+        ec.layers[1].transform.rotation.z, 100.0,
+        "a null is 100 × 100"
+    );
+}
+
+/// `marker` / `thisComp.marker`: numKeys, key(index), key(comment), nearestKey and
+/// the MarkerKey fields; layer marker times are comp time (AE).
+#[test]
+fn markers_in_expressions() {
+    let s = stage(|b| {
+        b.prim(&format!("{MAIN}/markers"), PrimType::FOLDER)
+            .prim(&format!("{MAIN}/markers/m1"), PrimType::MARKER)
+            .set(
+                &format!("{MAIN}/markers/m1"),
+                "time",
+                Value::Time(secs(2.0)),
+            )
+            .set(&format!("{MAIN}/markers/m1"), "comment", "intro")
+            .set(
+                &format!("{MAIN}/markers/m1"),
+                "duration",
+                Value::Time(secs(0.5)),
+            );
+        let l = b.layer(MAIN, "A", "null");
+        b.set(&l, "start_time", Value::Time(secs(1.0)))
+            .prim(&format!("{l}/markers"), PrimType::FOLDER)
+            .prim(&format!("{l}/markers/a"), PrimType::MARKER)
+            .set(&format!("{l}/markers/a"), "time", Value::Time(secs(3.0)))
+            .set(&format!("{l}/markers/a"), "comment", "late")
+            .prim(&format!("{l}/markers/b"), PrimType::MARKER)
+            .set(&format!("{l}/markers/b"), "time", Value::Time(secs(0.5)))
+            .set(&format!("{l}/markers/b"), "chapter", "One")
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"marker.numKeys * 1000 + marker.key(1).time * 100 + marker.key("late").time * 10
+                   + thisComp.marker.key("intro").duration + marker.nearestKey(4).index / 10"#,
+            )
+            .expr(
+                &l,
+                "transform:opacity",
+                0.0,
+                r#"marker.key(1).chapter == "One" && thisComp.marker.numKeys == 1 ? 50 : 0"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    // 2 markers; b at layer 0.5 s = comp 1.5 s; "late" at comp 4 s; intro 0.5 s
+    // long; the nearest to 4 s is "late", index 2.
+    let r = ec.layers[0].transform.rotation.z;
+    assert!(
+        (r - (2000.0 + 150.0 + 40.0 + 0.5 + 0.2)).abs() < 1e-9,
+        "{r}"
+    );
+    assert_eq!(ec.layers[0].transform.opacity, 50.0);
+}
+
+fn rect_path() -> Value {
+    Value::Bezier(bae_model::BezierPath {
+        vertices: vec![
+            [100.0, 100.0],
+            [300.0, 100.0],
+            [300.0, 200.0],
+            [100.0, 200.0],
+        ],
+        in_tangents: vec![[0.0; 2]; 4],
+        out_tangents: vec![[0.0; 2]; 4],
+        closed: true,
+        feather: Vec::new(),
+    })
+}
+
+/// Path properties: points / tangents / isClosed, pointOnPath at an arc-length
+/// percentage (AE 26: 174.9986, 100 on this rectangle), and a path expression
+/// returning createPath(…).
+#[test]
+fn path_property_methods_and_create_path() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "A", "solid");
+        b.prim(&format!("{l}/masks"), PrimType::FOLDER)
+            .prim(&format!("{l}/masks/m1"), PrimType::MASK)
+            .set(&format!("{l}/masks/m1"), "name", "Mask 1")
+            .set(&format!("{l}/masks/m1"), "path", rect_path())
+            .prim(&format!("{l}/masks/m2"), PrimType::MASK)
+            .set(&format!("{l}/masks/m2"), "name", "Mask 2")
+            .expr(
+                &format!("{l}/masks/m2"),
+                "path",
+                rect_path(),
+                r#"var p = mask("Mask 1").maskPath;
+                   createPath(p.points().map(function (v) { return [v[0] + 10, v[1]]; }),
+                              p.inTangents(), p.outTangents(), false)"#,
+            )
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var p = mask("Mask 1").maskPath; p.points()[1][0] + p.isClosed() * 1000 + p.tangentOnPath(0.875)[1]"#,
+            )
+            .expr(
+                &l,
+                "transform:position",
+                Value::Vec3([0.0; 3]),
+                r#"mask(1).maskPath.pointOnPath(0.125) + mask(1).maskPath.normalOnPath(0.125)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let l = &ec.layers[0];
+    assert_eq!(l.transform.rotation.z, 300.0 + 1000.0 - 1.0);
+    // (175, 100) plus the normal (0, 1).
+    assert!(
+        (l.transform.position.x - 175.0).abs() < 0.01,
+        "{:?}",
+        l.transform.position
+    );
+    assert!((l.transform.position.y - 101.0).abs() < 0.01);
+    let shifted = &l.masks[1].shape;
+    assert_eq!(shifted.vertices[0], [110.0, 100.0]);
+    assert!(!shifted.closed);
+}
+
+/// Shape layer contents: content(name / index) down to a path, a fill and the
+/// group's transform, with AE's property names.
+#[test]
+fn shape_contents_in_expressions() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "S", "shape");
+        let g = format!("{l}/contents/g");
+        b.prim(&format!("{l}/contents"), PrimType::FOLDER)
+            .prim(&g, PrimType::SHAPE_GROUP)
+            .set(&g, "name", "Group 1")
+            .set(&g, "transform:position", Value::Vec2([40.0, 50.0]))
+            .prim(&format!("{g}/contents"), PrimType::FOLDER)
+            .prim(&format!("{g}/contents/p"), PrimType::PATH)
+            .set(&format!("{g}/contents/p"), "name", "Path 1")
+            .set(&format!("{g}/contents/p"), "path", rect_path())
+            .prim(&format!("{g}/contents/f"), PrimType::FILL)
+            .set(&format!("{g}/contents/f"), "name", "Fill 1")
+            .set(&format!("{g}/contents/f"), "color", Value::Color([0.25, 0.5, 1.0, 1.0]))
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var g = content("Group 1");
+                   g.content("Path 1").path.points()[1][0] + g.transform.position[1] * 10
+                   + content(1).content(2).color[0] * 4 + (g.content(1).path.pointOnPath(0)[0] == 100)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 300.0 + 500.0 + 1.0 + 1.0);
+}
+
+/// Camera, light and material options, AE property names and property groups.
+#[test]
+fn camera_light_material_and_property_names() {
+    let s = stage(|b| {
+        let cam = b.layer(MAIN, "Cam", "camera");
+        b.set(&cam, "camera:zoom", 1500.0)
+            .set(&cam, "camera:depth_of_field", true);
+        let light = b.layer(MAIN, "Key", "light");
+        b.set(&light, "light:intensity", 80.0)
+            .set(&light, "light:casts_shadows", true);
+        let solid = b.layer(MAIN, "Plate", "solid");
+        b.set(&solid, "three_d", true)
+            .set(&solid, "material:accepts_lights", false)
+            .prim(&format!("{solid}/masks"), PrimType::FOLDER)
+            .prim(&format!("{solid}/masks/m"), PrimType::MASK)
+            .set(&format!("{solid}/masks/m"), "name", "Mask 1")
+            .set(
+                &format!("{solid}/masks/m"),
+                "path",
+                Value::Bezier(bae_model::BezierPath {
+                    vertices: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+                    in_tangents: vec![[0.0; 2]; 3],
+                    out_tangents: vec![[0.0; 2]; 3],
+                    closed: true,
+                    feather: Vec::new(),
+                }),
+            );
+        let t = b.layer(MAIN, "Names", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var c = thisComp.layer("Cam"), k = thisComp.layer("Key"), p = thisComp.layer("Plate");
+               [c.zoom.value, c.cameraOption.zoom.value, c.depthOfField.value, c.irisShape,
+                k.intensity.value, k.castsShadows.value, p.castsShadows.value, p.acceptsLights.value,
+                p.transform.position.name, p.transform.rotation.name, p.mask(1).maskPath.name,
+                p.transform.position.propertyGroup(1).name, p.transform.position.propertyGroup(2).name,
+                p.mask(1).maskPath.propertyGroup(1).name, p.mask(1).maskPath.propertyGroup(2).name].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "1500|1500|1|1|80|1|0|0|Position|Z Rotation|Mask Path|Transform|Plate|Mask 1|Masks"
+    );
+}
+
 /// footage(name), a footage layer's source, colorDepth / thisProject, NTSC and
 /// feet + frames timecode, and fromCompToSurface on a 2D layer.
 #[test]
@@ -729,7 +1018,8 @@ fn traced_attribute_reports_its_reads() {
                 "param:0001",
                 0.0,
                 r#"var b = thisComp.layer("B");
-                   transform.opacity + b.transform.position.valueAtTime(time - 1)[0] + b.transform.rotation"#,
+                   transform.opacity + b.transform.position.valueAtTime(time - 1)[0] + b.transform.rotation
+                   + thisComp.layer("C").marker.numKeys"#,
             );
     });
     let mut ev = bae_anim::Evaluator::new();
@@ -749,6 +1039,11 @@ fn traced_attribute_reports_its_reads() {
         attr(&b, "transform:position", 1.0),
         attr(&b, "transform:rotation", 2.0),
         attr(&c, "transform:scale", 2.0),
+        ExprRead {
+            prim: p(&format!("{c}/markers")),
+            kind: ReadKind::Subtree,
+            time: None,
+        },
     ] {
         assert!(reads.contains(&want), "missing {want:?} in {reads:#?}");
     }
