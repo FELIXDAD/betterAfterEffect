@@ -52,6 +52,12 @@ pub(crate) struct PreviewImage {
 pub(super) struct RenderEngine {
     pub(super) renderer: Renderer,
     pub(super) anim: AnimEvaluator,
+    /// The comp and per-layer render times of the last frame rendered (not
+    /// from the cache) while [`Renderer::set_layer_times`] was on.
+    pub(super) layer_times: Option<(
+        bae_model::PrimPath,
+        Vec<(bae_model::PrimPath, std::time::Duration)>,
+    )>,
 }
 
 impl RenderEngine {
@@ -65,6 +71,7 @@ impl RenderEngine {
                 },
             ),
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            layer_times: None,
         }
     }
 
@@ -120,6 +127,7 @@ impl RenderEngine {
             Some(&mut frames),
             OutputAlpha::Premultiplied,
         )?;
+        self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
         if frame.incomplete {
             return Ok(None);
         }
@@ -245,6 +253,7 @@ impl GpuPreview {
         comp: &EvaluatedComp,
         resolution: u32,
         camera: Option<bae_render::Camera>,
+        measure_layer_times: bool,
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
@@ -287,6 +296,7 @@ impl GpuPreview {
         }
         let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         if self.last != Some(key) {
+            self.engine.renderer.set_layer_times(measure_layer_times);
             let rendered = match self.engine.render(stage, &rc, resolution) {
                 Ok(rendered) => rendered,
                 Err(e) => {
@@ -294,6 +304,14 @@ impl GpuPreview {
                     return None;
                 }
             };
+            if let Some((comp, times)) = self.engine.layer_times.take()
+                && measure_layer_times
+                && let Some(session) = resources.get::<crate::session::SharedSession>()
+            {
+                let mut s = session.lock();
+                s.layer_times.retain(|layer, _| !comp.is_prefix_of(layer));
+                s.layer_times.extend(times);
+            }
             // Like AE, an incomplete frame (an effect pipeline or the text
             // renderer still warming up) is never shown: the last complete
             // frame stays, and the frame is rendered again on the redraw the

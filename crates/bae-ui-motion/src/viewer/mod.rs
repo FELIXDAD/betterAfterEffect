@@ -699,10 +699,21 @@ impl Panel for CompositionViewer {
             select_tool::center_anchors(cx, &session, &info, &comp);
         }
 
-        let image = self
-            .gpu
-            .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
+        let frame_nr = ui.ctx().cumulative_frame_nr();
+        let measure = session
+            .lock()
+            .timing_column_frame
+            .is_some_and(|shown| frame_nr.saturating_sub(shown) <= 1);
+        let image = self.gpu.as_mut().and_then(|g| {
+            g.frame(
+                cx.resources,
+                cx.stage,
+                &comp,
+                resolution,
+                view_camera,
+                measure,
+            )
+        });
         self.on_gpu = image.is_some();
         if self
             .gpu

@@ -221,7 +221,7 @@ impl LayerPanel {
         let image = self
             .gpu
             .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None));
+            .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None, false));
         if self
             .gpu
             .as_ref()
