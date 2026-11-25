@@ -50,7 +50,7 @@ rfd.workspace = true
 # Save As on Windows drives IFileSaveDialog itself (`shell::win_save`, issue #126).
 # Same 0.62 line wgpu-hal already links; only the shell dialog bindings are added.
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Shell_Common", "Win32_System_Com"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_UI_Shell_Common", "Win32_System_Com"] }
 windows-core = { workspace = true, features = ["std"] }
 
 # Projects opened from Finder (double-click, Dock drop) arrive as an Apple event:
@@ -58,7 +58,7 @@ windows-core = { workspace = true, features = ["std"] }
 # crates are already linked through winit / wgpu-hal / muda.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = ["NSArray", "NSString", "NSURL"] }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSLocale", "NSString", "NSURL"] }
 
 [dev-dependencies]
 # Glyph coverage test (ui_text.rs) reads font character maps; already linked through

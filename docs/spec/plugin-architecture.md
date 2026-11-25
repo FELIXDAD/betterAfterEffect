@@ -445,8 +445,9 @@ The first six map to `bae_model::ParamFlags`; the last three are kept by the plu
 Mapping to `bae_model::ParamKind` *(implemented, `bae_plugin::effect_def`)*: float →
 `Slider`, int → `Slider { integer }`, angle, checkbox, color, point, point3d, popup →
 `Popup { options }`, layer, group → `GroupStart`…`GroupEnd`, button, arbitrary →
-`ArbitraryData`, path. Relative point defaults depend on the layer size and are resolved
-by the effect implementation, not stored in the `EffectDef` (R02-9). Numeric
+`ArbitraryData`, path. Relative point defaults keep the fraction as the `EffectDef` default
+with `ParamFlags::relative_default`; `effect.apply` / `effect.reset` write `fraction ×
+layer size` (R02-9, *implemented*). Numeric
 `default` MUST lie in `range`; `slider` MUST lie within `range`.
 
 #### 5.3.8 Other contribution tables
@@ -2022,7 +2023,7 @@ These are the interfaces 19 needs. IDs are referenced from code and other specs.
 | R02-6 | Project plugin lock in `project.json` (§6.7): `[{id, version, contributions, scope_hint}]`, maintained by AddEffect/plugin update commands. |
 | R02-7 | `StageEvent` granularity down to (effect Prim, param id / state) so render caches invalidate exactly. |
 | R02-8 | `ParamKind::String` (value `String`) and `ParamKind::Asset` (value `AssetRef`) so the manifest's reserved `string` / `asset` params can be enabled. |
-| R02-9 | Relative point defaults: `ParamKind::Point { default_relative: bool }` (or a `DefaultValue::LayerRelative`) so AddEffect writes `fraction × layer size`, as AE's `PF_ADD_POINT` does. Until then `bae-plugin` leaves the `EffectDef` default empty and the effect resolves it against the layer bounds. |
+| R02-9 | *(implemented: `ParamFlags::relative_default`)* Relative point defaults so AddEffect writes `fraction × layer size`, as AE's `PF_ADD_POINT` does. Instances without a stored value still resolve the fraction against the layer bounds when rendering. |
 
 ### 23.3 04 compositor (`bae-render`)
 

@@ -114,7 +114,7 @@
 插件宿主已经把清单里的参数映射成 `bae_model::EffectDef`（`bae_plugin::effect_def`，规格 `docs/spec/plugin-architecture.md` §5.3.7），`match_name` = `<插件 ID>/<效果 ID>`，弹出菜单沿用 AE 的 1 起始序号。还差两点：
 
 1. **R02-8 字符串和素材参数。** `ParamKind` 加 `String`（值 `Value::String`）和 `Asset`（值 `Value::AssetRef`）。清单里的 `string` / `asset` 参数类型先保留不开放，等这两个类型合并后再打开。
-2. **R02-9 相对坐标的点参数默认值。** AE 的 `PF_ADD_POINT` 默认值是图层尺寸的比例（例如 50%,50% = 图层中心），添加效果时才换算成像素。`EffectParamDef.default` 是静态值，表达不了。建议 `ParamKind::Point { default_relative: bool }`（或 `DefaultValue` 加一种"按图层尺寸换算"），由添加效果的命令写入 `比例 × 图层尺寸`。在这之前，插件宿主在 `EffectDef` 里不填这类默认值，渲染时由效果按图层范围自行换算。
+2. **R02-9 相对坐标的点参数默认值。** AE 的 `PF_ADD_POINT` 默认值是图层尺寸的比例（例如 50%,50% = 图层中心），添加效果时才换算成像素。`EffectParamDef.default` 是静态值，表达不了。建议 `ParamKind::Point { default_relative: bool }`（或 `DefaultValue` 加一种"按图层尺寸换算"），由添加效果的命令写入 `比例 × 图层尺寸`。在这之前，插件宿主在 `EffectDef` 里不填这类默认值，渲染时由效果按图层范围自行换算。（已实现：`ParamFlags::relative_default`，默认值存比例，`effect.apply` / `effect.reset` 写入 `比例 × 图层尺寸`。）
 
 ### 20 interop/aex-compat → 02（2026-11-20）
 

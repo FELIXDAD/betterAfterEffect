@@ -19,7 +19,8 @@
 //! * [`scene`] – the result type: [`VectorScene`], a flat display list of
 //!   [`FillDraw`] / [`StrokeDraw`] / [`LayerDraw`] in layer space, with bounds
 //!   (`sourceRectAtTime`) and a content hash.
-//! * [`ops`] – path operators on kurbo paths (Trim Paths; more to come).
+//! * [`ops`] – Trim Paths and compound-path geometry.
+//! * [`operators`] – merge, offset, pucker/bloat, repeater, round, twist, wiggle and zigzag.
 //! * `render` (feature `render`) – Vello encoding of a [`VectorScene`], the shared
 //!   [`render::VelloRenderer`], and the bae-render layer source / provider
 //!   ([`SHAPE_PROVIDER`]).
@@ -29,6 +30,7 @@
 //! `render` feature this crate has no GPU, window or platform dependencies.
 
 pub mod content;
+pub mod operators;
 pub mod ops;
 pub mod paint;
 pub mod path;
@@ -59,5 +61,8 @@ pub const SHAPE_PROVIDER: &str = "bae.shape";
 /// The display list of a shape layer evaluated by 03. Problems (unsupported
 /// operators or blend modes) are appended to `warnings`.
 pub fn shape_layer_scene(layer: &EvaluatedLayer, warnings: &mut Vec<String>) -> VectorScene {
-    VectorScene::from_group(&ShapeGroup::from_evaluated(&layer.contents, warnings))
+    VectorScene::at_time(
+        &ShapeGroup::from_evaluated(&layer.contents, warnings),
+        layer.layer_time.as_seconds(),
+    )
 }
