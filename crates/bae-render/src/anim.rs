@@ -509,7 +509,7 @@ fn hash_prims(prims: &[EvaluatedPrim], h: &mut FxHasher) {
         p.path.hash(h);
         p.prim_type.hash(h);
         p.attrs.len().hash(h);
-        for (name, value) in &p.attrs {
+        for (name, value) in p.attrs.iter() {
             name.hash(h);
             hash_value(value, h);
         }

@@ -329,6 +329,9 @@ pub(crate) struct CompiledPrim {
     pub(crate) prim_type: Option<PrimType>,
     pub(crate) attrs: Vec<(String, Prop)>,
     pub(crate) children: Vec<CompiledPrim>,
+    /// Its evaluated form when nothing in it animates: every frame shares it
+    /// (1000 shape layers used to rebuild every fill and path each frame).
+    pub(crate) fixed: Option<EvaluatedPrim>,
 }
 
 /// A text layer's Path Options (AE: Text > Path Options), compiled.
@@ -369,14 +372,15 @@ pub(crate) struct CompiledLight {
 #[derive(Debug)]
 pub(crate) struct CompiledLayer {
     pub(crate) path: PrimPath,
-    pub(crate) name: String,
+    /// Shared with every frame's evaluated layer (no per-frame copies).
+    pub(crate) name: Arc<str>,
     pub(crate) kind: LayerKind,
     pub(crate) timing: LayerTiming,
     pub(crate) switches: LayerSwitches,
     pub(crate) source: CompiledSource,
     pub(crate) time_remap: Option<Prop>,
     pub(crate) parent: Option<usize>,
-    pub(crate) blend_mode: String,
+    pub(crate) blend_mode: Arc<str>,
     pub(crate) track_matte: TrackMatte,
     pub(crate) track_matte_layer: Option<usize>,
     pub(crate) auto_orient: AutoOrient,
@@ -384,8 +388,12 @@ pub(crate) struct CompiledLayer {
     pub(crate) masks: Vec<CompiledMask>,
     pub(crate) effects: Vec<CompiledEffect>,
     pub(crate) contents: Vec<CompiledPrim>,
+    /// `contents` evaluated, when nothing in them animates.
+    pub(crate) fixed_contents: Option<Arc<[EvaluatedPrim]>>,
     pub(crate) text: Option<Prop>,
     pub(crate) text_animators: Vec<CompiledPrim>,
+    /// `text_animators` evaluated, when nothing in them animates.
+    pub(crate) fixed_animators: Option<Arc<[EvaluatedPrim]>>,
     pub(crate) text_path: Option<CompiledTextPath>,
     pub(crate) camera: Option<CompiledCamera>,
     pub(crate) light: Option<CompiledLight>,
@@ -725,7 +733,7 @@ fn compile_layer(
             })
         })
         .collect();
-    let contents = child_prims(l::CONTENTS)
+    let contents: Vec<CompiledPrim> = child_prims(l::CONTENTS)
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
         .collect();
@@ -735,7 +743,7 @@ fn compile_layer(
                 .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TEXT_SOURCE))
         })
         .flatten();
-    let text_animators = child_prims(l::ANIMATORS)
+    let text_animators: Vec<CompiledPrim> = child_prims(l::ANIMATORS)
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
         .collect();
@@ -758,14 +766,16 @@ fn compile_layer(
             .value(l::NAME)
             .and_then(|n| n.as_str())
             .unwrap_or(v.name())
-            .to_owned(),
+            .into(),
         kind,
         timing: layer_timing(v, comp_duration),
         switches,
         source,
         time_remap,
         parent: None,
-        blend_mode: setting_str(v, lt, l::BLEND_MODE).unwrap_or_else(|| "normal".into()),
+        blend_mode: setting_str(v, lt, l::BLEND_MODE)
+            .unwrap_or_else(|| "normal".into())
+            .into(),
         track_matte: TrackMatte::from_token(
             setting_str(v, lt, l::TRACK_MATTE)
                 .as_deref()
@@ -776,8 +786,10 @@ fn compile_layer(
         transform,
         masks,
         effects,
+        fixed_contents: fixed_list(&contents),
         contents,
         text,
+        fixed_animators: fixed_list(&text_animators),
         text_animators,
         text_path,
         camera,
@@ -843,12 +855,36 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, depth + 1))
         .collect();
-    Some(CompiledPrim {
+    let mut prim = CompiledPrim {
         path: path.clone(),
         prim_type,
         attrs,
         children,
-    })
+        fixed: None,
+    };
+    prim.fixed = prim.fixed_form();
+    Some(prim)
+}
+
+/// `prims` evaluated, shared as is when none of them animates.
+fn sample_prims(
+    prims: &[CompiledPrim],
+    fixed: Option<&Arc<[EvaluatedPrim]>>,
+    cx: &Cx<'_, '_>,
+) -> Arc<[EvaluatedPrim]> {
+    match fixed {
+        Some(f) => f.clone(),
+        None => prims.iter().map(|p| sample_generic(p, cx)).collect(),
+    }
+}
+
+/// The evaluated form of `prims` when none of them animates.
+fn fixed_list(prims: &[CompiledPrim]) -> Option<Arc<[EvaluatedPrim]>> {
+    prims
+        .iter()
+        .map(|p| p.fixed.clone())
+        .collect::<Option<Vec<_>>>()
+        .map(Into::into)
 }
 
 // ---------------------------------------------------------------------------
@@ -953,20 +989,16 @@ impl CompiledComp {
                         .iter()
                         .map(|e| sample_effect(e, &cx))
                         .collect(),
-                    contents: layer
-                        .contents
-                        .iter()
-                        .map(|p| sample_generic(p, &cx))
-                        .collect(),
+                    contents: sample_prims(&layer.contents, layer.fixed_contents.as_ref(), &cx),
                     text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
                         Value::TextDocument(doc) => Some(doc),
                         _ => None,
                     }),
-                    text_animators: layer
-                        .text_animators
-                        .iter()
-                        .map(|p| sample_generic(p, &cx))
-                        .collect(),
+                    text_animators: sample_prims(
+                        &layer.text_animators,
+                        layer.fixed_animators.as_ref(),
+                        &cx,
+                    ),
                     text_path: layer.text_path.as_ref().map(|t| crate::TextPathOptions {
                         mask: t.mask.clone(),
                         reverse: t.reverse,
@@ -1338,14 +1370,18 @@ fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
 }
 
 fn sample_generic(p: &CompiledPrim, cx: &Cx<'_, '_>) -> EvaluatedPrim {
+    if let Some(fixed) = &p.fixed {
+        return fixed.clone();
+    }
     EvaluatedPrim {
         path: p.path.clone(),
         prim_type: p.prim_type.clone(),
-        attrs: p
-            .attrs
-            .iter()
-            .map(|(n, v)| (n.clone(), v.sample(cx)))
-            .collect::<BTreeMap<_, _>>(),
+        attrs: Arc::new(
+            p.attrs
+                .iter()
+                .map(|(n, v)| (n.clone(), v.sample(cx)))
+                .collect::<BTreeMap<_, _>>(),
+        ),
         children: p.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }
@@ -1634,6 +1670,24 @@ impl CompiledPrim {
     fn has_expressions(&self) -> bool {
         self.attrs.iter().any(|(_, p)| p.has_expression())
             || self.children.iter().any(CompiledPrim::has_expressions)
+    }
+
+    /// What it evaluates to at any time, if nothing in it animates.
+    fn fixed_form(&self) -> Option<EvaluatedPrim> {
+        let attrs = self
+            .attrs
+            .iter()
+            .map(|(n, p)| match p {
+                Prop::Static(v) => Some((n.clone(), v.clone())),
+                _ => None,
+            })
+            .collect::<Option<BTreeMap<_, _>>>()?;
+        Some(EvaluatedPrim {
+            path: self.path.clone(),
+            prim_type: self.prim_type.clone(),
+            attrs: Arc::new(attrs),
+            children: fixed_list(&self.children)?,
+        })
     }
 }
 
