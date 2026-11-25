@@ -976,12 +976,13 @@ fn bounding_box_handles_scale_around_the_anchor() {
         "not moved"
     );
     h.stage.undo(&h.author).unwrap();
-    // Shift keeps the proportions.
+    // Shift keeps the proportions with the larger ratio (AE 26: 200 % × 120 %
+    // becomes 200 % × 200 %).
     let r = h.drag((420.0, 230.0), (520.0, 240.0), Modifiers::SHIFT);
     h.apply(&r);
     let s = h.v3(&a, "transform:scale");
     assert!(
-        (s[0] - 184.0).abs() < 0.01 && (s[0] - s[1]).abs() < 1e-9,
+        (s[0] - 200.0).abs() < 0.01 && (s[0] - s[1]).abs() < 1e-9,
         "{s:?}"
     );
     h.stage.undo(&h.author).unwrap();
@@ -1695,4 +1696,193 @@ fn resolution_recurse_sets_nested_comps_and_ae_shortcuts_are_bound() {
         .find(|b| b.action == crate::tools::ids::RESOLUTION && b.params == json!({"factor": 2}))
         .expect("Half bound");
     assert_eq!(half.chord.to_string(), "Cmd+Shift+J");
+}
+
+#[test]
+fn effect_point_crosshairs_drag_with_the_selection_tool() {
+    let mut h = H::new();
+    let mut app = bae_app::AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    let mut app = app.build();
+    let registries = crate::effects::EffectRegistries {
+        defs: app.registry::<bae_model::EffectDef>(),
+        infos: app.registry::<bae_effects::EffectInfo>(),
+    };
+    bae_motion::effect::register_effect_commands(&mut h.reg, registries.defs.clone());
+    h.resources.insert(registries);
+    let solid = h.layer("solid");
+    h.select(&[&solid]);
+    let out = h.run(
+        "effect.apply",
+        json!({"layers": [solid], "match_name": "ADBE Ramp"}),
+    );
+    let fx = path(&out["effects"][0]);
+    let start = bae_model::effect::param_attr(1);
+    h.run(
+        "attr.set",
+        json!({"path": fx, "attr": start, "value": {"type": "vec2", "value": [100.0, 50.0]}}),
+    );
+    let position = h.value(&solid, "transform:position");
+    // Only selected effects show (and drag) their points.
+    h.session().lock().selected_effects = vec![fx.clone()];
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.tools().lock().set(Tool::Selection);
+    h.drag_to((100.0, 50.0), (200.0, 80.0), Modifiers::NONE);
+    let r = h.release((200.0, 80.0), Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "one undo step");
+    h.apply(&r);
+    assert!(close(vec2v(h.value(&fx, &start)), [200.0, 80.0]));
+    assert_eq!(
+        h.value(&solid, "transform:position"),
+        position,
+        "the layer stays"
+    );
+    h.stage.undo(&h.author).unwrap();
+    assert!(close(vec2v(h.value(&fx, &start)), [100.0, 50.0]));
+}
+
+#[test]
+fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
+    use super::view3d::{View3d, ids};
+    use bae_render::camera::OrthoView;
+    let mut h = H::new();
+    // A 3D solid one default zoom behind z = 0 (640 × 50 / 36 px): the default
+    // camera shows it at half size, halfway to the comp centre.
+    let far = h.solid([100.0, 100.0], [480.0, 180.0]);
+    h.run(
+        "attr.set",
+        json!({"path": far, "attr": "three_d", "value": {"type": "bool", "value": true}}),
+    );
+    let z = 640.0 * 50.0 / 36.0;
+    h.run(
+        "attr.set",
+        json!({"path": far, "attr": "transform:position", "value": {"type": "vec3", "value": [480.0, 180.0, z]}}),
+    );
+    let view = |h: &H| {
+        h.session()
+            .lock()
+            .views3d
+            .get(&h.comp)
+            .map_or(View3d::Active, |v| v.current)
+    };
+    let pick = |h: &mut H, x: f64| {
+        h.session().lock().selected_layers.clear();
+        h.click(x, 180.0, Modifiers::NONE);
+        !h.session().lock().selected_layers.is_empty()
+    };
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(pick(&mut h, 400.0), "Active Camera: at x 375–425");
+    assert!(!pick(&mut h, 470.0));
+    // Front is orthographic: full size where the 2D position puts it.
+    tool_action(&h, ids::SWITCH, json!({"view": "front"}));
+    assert_eq!(view(&h), View3d::Ortho(OrthoView::Front));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(pick(&mut h, 470.0), "Front: at x 430–530");
+    // F10, F11, F12: Front, Custom View 1, Active Camera (AE's defaults).
+    for (slot, v) in [
+        ("b", View3d::Custom(1)),
+        ("c", View3d::Active),
+        ("a", View3d::Ortho(OrthoView::Front)),
+    ] {
+        tool_action(&h, ids::SHORTCUT, json!({"slot": slot}));
+        assert_eq!(view(&h), v);
+    }
+    // Esc in the Composition panel: the previous view; an open menu takes it
+    // first.
+    assert!(
+        crate::tools::bindings()
+            .iter()
+            .any(|b| b.action == ids::LAST && b.when.as_deref() == Some("composition"))
+    );
+    h.right_click(100.0, 100.0);
+    assert!(h.labeled("Composition Settings...").is_some());
+    assert!(h.action(ids::LAST));
+    assert_eq!(
+        view(&h),
+        View3d::Ortho(OrthoView::Front),
+        "the menu took Esc"
+    );
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(
+        h.labeled("Composition Settings...").is_none(),
+        "menu closed"
+    );
+    assert!(h.action(ids::LAST));
+    assert_eq!(view(&h), View3d::Active);
+    // Assign 3D View Shortcut ▸ A: F10 goes to the current view from now on.
+    tool_action(&h, ids::SWITCH, json!({"view": "custom_2"}));
+    tool_action(&h, ids::ASSIGN, json!({"slot": "a"}));
+    tool_action(&h, ids::SWITCH, json!({"view": "top"}));
+    tool_action(&h, ids::SHORTCUT, json!({"slot": "a"}));
+    assert_eq!(view(&h), View3d::Custom(2));
+}
+
+/// #400: with a layer selected, the viewer edits it even where layers above it
+/// cover it; a click on empty space deselects, and then a click picks the
+/// topmost layer.
+#[test]
+fn the_viewer_edits_the_selected_layer_under_others() {
+    let mut h = H::new();
+    let bottom = h.solid([200.0, 200.0], [320.0, 180.0]);
+    let top = h.solid([100.0, 100.0], [320.0, 180.0]);
+    h.select(&[&bottom]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.drag((320.0, 180.0), (340.0, 180.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(
+        h.v3(&bottom, "transform:position"),
+        [340.0, 180.0, 0.0]
+    ));
+    assert!(close3(
+        h.v3(&top, "transform:position"),
+        [320.0, 180.0, 0.0]
+    ));
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&bottom)
+    );
+    // Outside every layer: nothing selected; then the topmost layer.
+    h.click(10.0, 10.0, Modifiers::NONE);
+    assert!(h.session().lock().selected_layers.is_empty());
+    h.click(320.0, 180.0, Modifiers::NONE);
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&top)
+    );
+}
+
+/// #400: Cmd/Ctrl+Shift+A and F2 deselect (bound in the motion keymap); then
+/// a shape tool makes a new shape layer instead of a mask on the image.
+#[test]
+fn deselect_all_then_shape_tools_make_a_new_layer() {
+    let b = crate::actions::bindings().bindings;
+    let deselect: Vec<String> = b
+        .iter()
+        .filter(|b| b.action == crate::actions::ids::DESELECT_ALL)
+        .map(|b| b.chord.to_string())
+        .collect();
+    assert!(deselect.iter().any(|c| c == "F2"), "{deselect:?}");
+    assert!(
+        deselect.iter().any(|c| c.ends_with("Shift+A")),
+        "{deselect:?}"
+    );
+    let mut h = H::new();
+    let image = h.solid([640.0, 360.0], [320.0, 180.0]);
+    h.select(&[&image]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (200.0, 150.0));
+    assert!(
+        r.invocations.iter().any(|i| i.id == "mask.create"),
+        "a mask on the image"
+    );
+    assert!(h.action(crate::actions::ids::DESELECT_ALL));
+    assert!(h.session().lock().selected_layers.is_empty());
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (200.0, 150.0));
+    let add = one(&r, "shape.add");
+    assert!(
+        add.get("layer").is_none() && add.get("comp").is_some(),
+        "a new shape layer: {add}"
+    );
 }

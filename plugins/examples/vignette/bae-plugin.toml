@@ -6,7 +6,7 @@ schema_version = 1
 [plugin]
 id = "com.example.vignette"
 version = "1.0.0"
-api = "0.1"
+api = "1.0"
 name = "Vignette"
 description = "Darkens or tints the edges of a layer."
 authors = ["BAE example plugins"]

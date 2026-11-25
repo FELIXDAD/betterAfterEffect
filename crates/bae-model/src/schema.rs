@@ -281,6 +281,8 @@ const LAYER: &[AttrDef] = &[
         .doc("AE 'Preserve Underlying Transparency' (T switch): draw only where layers below are opaque."),
     boolean("collapse_transformation", false).doc("Continuous rasterization for vectors."),
     boolean("motion_blur", false),
+    choice("frame_blending", "off", &["off", "frame_mix", "pixel_motion"])
+        .doc("AE Frame Blending switch; renders only when the comp switch is on too."),
     choice("quality", "best", &["best", "draft", "wireframe"]),
     choice("sampling", "bilinear", &["bilinear", "bicubic"]),
     boolean("guide", false),
@@ -305,6 +307,16 @@ const LAYER: &[AttrDef] = &[
     prim_ref("text:path")
         .kinds(&["text"])
         .doc("Mask used as the text path."),
+    // AE's Path Options (Text > Path Options) of text on a path.
+    boolean("text:reverse_path", false).kinds(&["text"]),
+    boolean("text:perpendicular_to_path", true).kinds(&["text"]),
+    boolean("text:force_alignment", false).kinds(&["text"]),
+    float("text:first_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path before the text."),
+    float("text:last_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path after the text."),
     choice("camera:type", "two_node", &["one_node", "two_node"]).kinds(&["camera"]),
     float("camera:zoom", 1777.8)
         .kinds(&["camera"])
@@ -399,6 +411,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
             time_none("work_area_duration").doc("None = to the end."),
             time("display_start_time", 0),
             boolean("motion_blur", false),
+            boolean("frame_blending", false).doc("AE Enable Frame Blending (comp switch)."),
             AttrDef::new(
                 "shutter_angle",
                 ValueType::Float,
@@ -420,6 +433,9 @@ pub static SCHEMAS: &[PrimSchema] = &[
             ),
             boolean("preserve_frame_rate", false),
             boolean("preserve_resolution", false),
+            boolean("hide_shy_layers", false)
+                .doc("Timeline: hide layers whose Shy switch is on (AE Hide Shy Layers)."),
+            boolean("draft_3d", false).doc("AE Draft 3D: fast 3D previews."),
             int("label", 15),
         ],
     },
@@ -569,18 +585,35 @@ pub static SCHEMAS: &[PrimSchema] = &[
                 "simultaneously",
                 &["simultaneously", "individually"],
             ),
-            float("repeater:copies", 3.0),
+            float("repeater:copies", 1.0),
             float("repeater:offset", 0.0),
             choice("repeater:composite", "below", COMPOSITE),
-            vec2("repeater:position", [100.0, 0.0]),
+            vec2("repeater:position", [0.0, 0.0]),
             vec2("repeater:scale", [100.0, 100.0]),
             float("repeater:rotation", 0.0),
             float("repeater:start_opacity", 100.0),
             float("repeater:end_opacity", 100.0),
-            float("offset:amount", 0.0),
+            float("offset:amount", 10.0),
             float("round_corners:radius", 10.0),
-            float("twist:angle", 0.0),
-            float("pucker_bloat:amount", 0.0),
+            float("twist:angle", 10.0),
+            float("pucker_bloat:amount", 10.0),
+            float("offset:line_join", 1.0),
+            float("offset:miter_limit", 4.0),
+            float("offset:copies", 1.0),
+            float("offset:copy_offset", 1.0),
+            float("wiggle_paths:size", 10.0),
+            float("wiggle_paths:detail", 10.0),
+            float("wiggle_paths:points", 1.0),
+            float("wiggle_paths:frequency", 2.0),
+            float("wiggle_paths:correlation", 50.0),
+            float("wiggle_paths:temporal_phase", 0.0),
+            float("wiggle_paths:spatial_phase", 0.0),
+            float("wiggle_paths:seed", 0.0),
+            float("zig_zag:size", 5.0),
+            float("zig_zag:detail", 10.0),
+            float("zig_zag:points", 1.0),
+            vec2("twist:center", [0.0; 2]),
+            vec2("repeater:anchor_point", [0.0; 2]),
         ],
     },
     PrimSchema {
@@ -621,6 +654,45 @@ pub static SCHEMAS: &[PrimSchema] = &[
             string("plugin:version"),
             AttrDef::new("state", ValueType::Bytes, DefaultValue::None, false)
                 .doc("Opaque per-instance plugin state (AE sequence data)."),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::PAINT_STROKE,
+        doc: "A paint stroke under a Paint effect (AE's Brush / Clone / Eraser strokes), \
+              in layer space; shown from `in_point` to `out_point` (layer time).",
+        attrs: &[
+            string("name"),
+            choice("tool", "brush", &["brush", "clone", "eraser"]).fixed(),
+            bezier("path").doc("The stroke's path (layer pixels)."),
+            float("start", 0.0).doc("Percent of the path drawn from."),
+            float("end", 100.0).doc("Percent of the path drawn to (Write On animates it)."),
+            color("color", [1.0, 1.0, 1.0, 1.0]),
+            float("diameter", 10.0),
+            float("angle", 0.0),
+            float("hardness", 100.0),
+            float("roundness", 100.0),
+            float("spacing", 25.0),
+            choice("channels", "rgba", &["rgba", "rgb", "alpha"]),
+            float("opacity", 100.0),
+            float("flow", 100.0),
+            choice("mode", "normal", BLEND_MODES),
+            choice(
+                "erase",
+                "layer_and_paint",
+                &["layer_and_paint", "paint", "last_stroke"],
+            )
+            .fixed(),
+            prim_ref("clone:source").doc("Clone Stamp: the source layer (none = this layer)."),
+            vec2("clone:position", [0.0, 0.0]).doc("Clone Stamp: where the source is sampled."),
+            time("clone:time", 0).doc("Clone Stamp: the source time (Lock Source Time)."),
+            time("clone:time_shift", 0).doc("Clone Stamp: source time offset."),
+            boolean("clone:lock_time", false).fixed(),
+            vec2("transform:anchor_point", [0.0, 0.0]),
+            vec2("transform:position", [0.0, 0.0]),
+            vec2("transform:scale", [100.0, 100.0]),
+            float("transform:rotation", 0.0),
+            time("in_point", 0).fixed(),
+            time("out_point", 0).fixed(),
         ],
     },
     PrimSchema {
