@@ -46,7 +46,7 @@ cp /private/tmp/bae-04-ae/ae/*.png crates/bae-render/tests/ae/golden/
 
 新增的 33 个 `blend_` 用例检查小图层的内外边界，在 80% 不透明度的底层上以 65% 不透明度叠加源层。两种溶解改用 100% 不透明度，以便与 AE 逐像素核对确定性端点；半透明像素的随机选择、跨帧及 ROI 一致性由 GPU/CPU 测试覆盖。
 
-`grid_` 用例读取 `cases.json` 的 `hsl_pairs`（底色、源色）。每行一对 RGB，每四列依次使用 25/50/75/100% 的底层不透明度，组内四列按同一顺序改变源层不透明度。四种模式共 384 格，8 bpc、每通道满值 255；Metal 上色相、饱和度、颜色、明度最大差为 2、3、1、2。单独的半透明样本中，色相和饱和度的最大差为 0 和 1。[饱和度校准跟踪 #257](https://github.com/FELIXDAD/betterAfterEffect/issues/257)
+`grid_` 用例读取 `cases.json` 的 `hsl_pairs`（底色、源色）。每行一对 RGB，每四列依次使用 25/50/75/100% 的底层不透明度，组内四列按同一顺序改变源层不透明度。四种模式共 384 格，8 bpc、每通道满值 255；Metal 上色相、饱和度、颜色、明度最大差为 2、3、1、2。单独的半透明样本中，色相和饱和度的最大差为 0 和 1。[饱和度校准跟踪 #257](https://github.com/FELIXDAD/betterAfterEffects/issues/257)
 
 ## 3D 图层与运动模糊（AE 26.2.1，2026-11-24）
 

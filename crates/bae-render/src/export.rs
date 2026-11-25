@@ -569,9 +569,9 @@ pub enum ExportFormat {
     Tiff,
     /// OpenEXR sequence (half or float, premultiplied).
     Exr,
-    /// H.264 movie (macOS).
+    /// H.264 movie.
     H264,
-    /// HEVC movie (macOS).
+    /// HEVC movie.
     Hevc,
     /// ProRes 422 HQ movie (macOS).
     ProRes,

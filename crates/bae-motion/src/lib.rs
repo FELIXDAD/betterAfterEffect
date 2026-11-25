@@ -69,6 +69,7 @@ pub mod import;
 pub mod keys;
 pub mod layer;
 pub mod markers;
+pub mod matte;
 pub mod names;
 pub mod path;
 pub mod precompose;
@@ -77,6 +78,7 @@ pub mod shape;
 pub mod solid;
 pub mod text;
 pub mod text_animators;
+pub mod text_path;
 mod util;
 
 use std::sync::Arc;
@@ -103,12 +105,14 @@ pub use layer::{
     ShiftLayers, SlipLayers, SplitLayers, TrimLayers, copy_layers,
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
+pub use matte::SetTrackMatte;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
+pub use text_path::SetTextPath;
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -131,6 +135,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimLayers),
         r.register(ShiftLayers),
         r.register(SlipLayers),
+        r.register(SetTrackMatte),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),
@@ -161,6 +166,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(AnimateText),
         r.register(AddTextSelector),
         r.register(RemoveTextAnimators),
+        r.register(SetTextPath),
     ];
     for res in results {
         res.expect("motion command IDs are unique");
