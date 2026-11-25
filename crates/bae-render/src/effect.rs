@@ -15,21 +15,25 @@ use rustc_hash::FxHashMap;
 
 use crate::error::RenderError;
 use crate::geom::IRect;
-use crate::input::RenderEffect;
+use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
-/// Composition view and first enabled light for camera-aware effects.
-#[derive(Clone, Copy, Debug)]
+/// Composition projection and lighting for effects with an internal 3D scene.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EffectScene {
-    /// Active camera (none uses the effect's camera).
+    /// Layer plane to composition pixels (homogeneous coordinates).
+    pub projection: glam::DMat3,
+    /// First composition light, in layer units; RGB includes intensity.
+    pub light: Option<([f64; 3], [f32; 3])>,
+    /// Active composition camera for volumetric effects.
     pub camera: Option<crate::camera::Camera>,
-    /// First enabled light reaching this layer, in comp space.
-    pub light: Option<crate::light::Light>,
-    /// Size of the containing comp, in pixels.
+    /// Composition size in pixels.
     pub size: [u32; 2],
-    /// Layer to comp coordinates.
+    /// Layer placement used to map projected particles back to effect pixels.
     pub placement: glam::DAffine2,
+    /// First enabled light whose scope includes this layer, in composition space.
+    pub layer_light: Option<crate::light::Light>,
 }
 
 /// Nonnegative animated scalar in layer seconds. Each knot carries the integral
@@ -140,15 +144,21 @@ pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
     /// Prior values of animated controls requested by this effect.
-    pub history: &'a [ParameterSample],
+    pub parameter_samples: &'a [ParameterSample],
     /// Cumulative scalar controls requested by the effect, in layer time.
     pub tracks: &'a [(u32, Arc<ScalarTrack>)],
-    /// Scene camera and lighting for the effect.
+    /// Composition scene requested by the effect.
     pub scene: Option<&'a EffectScene>,
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
     pub comp_time: Time,
+    /// Comp time at the first visible frame of the effect's layer.
+    pub layer_in: Time,
+    /// Ordered, evaluated masks requested through [`Effect::path_dependencies`].
+    pub mask_paths: &'a [RenderMask],
+    /// Evaluated parameters requested through [`Effect::parameter_sample_times`].
+    pub history: &'a [(Time, RenderEffect)],
     /// Comp-time seconds per layer-time second (AE time stretch).
     pub layer_time_scale: f64,
     /// Resolution scale (0.5 at half resolution): pixel-sized parameters such as a
@@ -193,11 +203,14 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
-            history: &[],
+            parameter_samples: &[],
             tracks: &[],
             scene: None,
             time: Time::ZERO,
             comp_time: Time::ZERO,
+            layer_in: Time::ZERO,
+            mask_paths: &[],
+            history: &[],
             layer_time_scale: 1.0,
             scale: 1.0,
             layer_bounds: IRect::EMPTY,
@@ -311,14 +324,15 @@ pub enum LayerStage {
     BeforeEffect(PrimPath),
 }
 
-/// Masks of the effect's own layer an effect reads (AE path parameters, Fill's
-/// All Masks): delivered as a layer-space image whose alpha is the coverage.
+/// Selects masks of an effect's own layer (AE path parameters and All Masks).
+/// Effects can request either rendered coverage or the evaluated paths.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MaskSelect {
-    /// One mask (a `Mask` prim of the layer), with its inversion, feather and
-    /// expansion; its mode is ignored.
+    /// One mask (a `Mask` prim of the layer). Its coverage includes inversion,
+    /// feather and expansion and ignores the mask mode.
     One(PrimPath),
-    /// Every mask of the layer combined, as they cut the layer.
+    /// Every mask in layer order. A coverage request combines them as they
+    /// cut the layer.
     All,
 }
 
@@ -344,7 +358,12 @@ pub trait Effect: Send + Sync {
         output_roi
     }
 
-    /// Whether camera or light edits affect this effect's output.
+    /// Part of the available input needed to produce the requested output.
+    fn required_input(&self, params: &EffectParams<'_>, output: IRect, available: IRect) -> IRect {
+        self.input_roi(params, output).intersect(&available)
+    }
+
+    /// Requests the composition camera and first light for its internal scene.
     fn uses_scene(&self, _params: &EffectParams<'_>) -> bool {
         false
     }
@@ -376,6 +395,17 @@ pub trait Effect: Send + Sync {
 
     /// Masks of its own layer this instance reads. Default: none.
     fn mask_dependencies(&self, _params: &EffectParams<'_>) -> Vec<MaskSelect> {
+        Vec::new()
+    }
+
+    /// Raw, evaluated mask geometry, in layer order and without rasterization.
+    fn path_dependencies(&self, _params: &EffectParams<'_>) -> Option<MaskSelect> {
+        None
+    }
+
+    /// Comp times to sample the parameters of this same effect, without rendering
+    /// layer pixels. Available in `EffectParams::history` during rendering.
+    fn parameter_sample_times(&self, _params: &EffectParams<'_>) -> Vec<Time> {
         Vec::new()
     }
 
