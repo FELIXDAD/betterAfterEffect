@@ -345,6 +345,8 @@ impl AnimEvaluator {
                     },
                     size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
                     source_time: *time,
+                    sequence: (info.kind == "sequence")
+                        .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
                 }),
                 _ => LayerContent::None,
             }),
