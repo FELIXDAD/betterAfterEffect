@@ -11,6 +11,8 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
+mod audio;
+
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::props::{self, Node};
@@ -327,62 +329,6 @@ impl Panel for EffectControlsPanel {
 
 // ---------------------------------------------------------------------------
 
-pub(crate) struct AudioPanel {
-    levels: [f32; 2],
-}
-
-impl Default for AudioPanel {
-    fn default() -> Self {
-        Self { levels: [-60.0; 2] }
-    }
-}
-impl Panel for AudioPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        TabInfo::new(tr("Audio")).min_size(vec2(180.0, 100.0))
-    }
-
-    fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let session = common::session(cx.resources);
-        let mut s = session.lock();
-        let peaks = s.output.as_ref().map_or([0.0; 2], |o| o.peaks());
-        let decay = ui.input(|i| i.stable_dt) * 32.0;
-        for (i, title) in ["Left Channel", "Right Channel"].into_iter().enumerate() {
-            let db = (20.0 * peaks[i].log10()).max(-60.0);
-            if s.output.is_none() {
-                self.levels[i] = -60.0;
-            } else {
-                self.levels[i] = db.max(self.levels[i] - decay);
-            }
-            ui.horizontal(|ui| {
-                ui.label(tr(title));
-                let meter =
-                    egui::ProgressBar::new(((self.levels[i] + 60.0) / 60.0).clamp(0.0, 1.0))
-                        .fill(if self.levels[i] >= 0.0 {
-                            egui::Color32::LIGHT_RED
-                        } else {
-                            color::ACCENT
-                        })
-                        .text(format!("{:.1} dBFS", self.levels[i]));
-                ui.add(meter);
-            });
-        }
-        let response = ui.add(
-            egui::Slider::new(&mut s.master_db, -60.0..=12.0)
-                .text(tr("Master Volume"))
-                .suffix(" dB"),
-        );
-        if response.changed()
-            && let Some(output) = &s.output
-        {
-            output.set_gain(10.0_f32.powf(s.master_db / 20.0));
-        }
-        if s.output.is_some() {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(33));
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct PreviewPanel;
 
@@ -470,4 +416,103 @@ impl Panel for PreviewPanel {
         }
         let _ = Rect::NOTHING;
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Properties
+    ("Transform", "变换"),
+    ("Layer Transform", "图层变换"),
+    ("Layer Contents", "图层内容"),
+    ("Contents", "内容"),
+    ("Masks", "蒙版"),
+    ("Effects", "效果"),
+    ("Anchor Point", "锚点"),
+    ("Position", "位置"),
+    ("Scale", "缩放"),
+    ("Rotation", "旋转"),
+    ("X Rotation", "X 轴旋转"),
+    ("Y Rotation", "Y 轴旋转"),
+    ("Z Rotation", "Z 轴旋转"),
+    ("Orientation", "方向"),
+    ("Opacity", "不透明度"),
+    ("Point of Interest", "目标点"),
+    ("Source Text", "源文本"),
+    ("Path Options", "路径选项"),
+    ("Reverse Path", "反转路径"),
+    ("Perpendicular To Path", "垂直于路径"),
+    ("Force Alignment", "强制对齐"),
+    ("First Margin", "首字边距"),
+    ("Last Margin", "末字边距"),
+    ("Roundness", "圆度"),
+    ("Points", "点"),
+    ("Inner Radius", "内径"),
+    ("Outer Radius", "外径"),
+    ("Inner Roundness", "内圆度"),
+    ("Outer Roundness", "外圆度"),
+    ("Fill", "填充"),
+    ("Stroke", "描边"),
+    ("Color", "颜色"),
+    ("Stroke Width", "描边宽度"),
+    ("Skew", "倾斜"),
+    ("Skew Axis", "倾斜轴"),
+    ("Path", "路径"),
+    ("Mask Path", "蒙版路径"),
+    ("Mask Feather", "蒙版羽化"),
+    ("Mask Opacity", "蒙版不透明度"),
+    ("Mask Expansion", "蒙版扩展"),
+    ("Reset", "重置"),
+    ("Param", "参数"),
+    ("Expression", "表达式"),
+    ("Font Size", "字体大小"),
+    ("Fill Color", "填充颜色"),
+    ("Zoom", "缩放"),
+    ("Intensity", "强度"),
+    ("No layer selected", "未选择图层"),
+    ("No effects applied", "未应用效果"),
+    (
+        "Select a layer to see its properties.",
+        "选择一个图层以查看其属性。",
+    ),
+    // Preview panel
+    ("First Frame", "第一帧"),
+    ("Previous Frame", "上一帧"),
+    ("Play/Stop", "播放/停止"),
+    ("Next Frame", "下一帧"),
+    ("Last Frame", "最后一帧"),
+    ("Loop", "循环"),
+    ("Frame Rate (Auto)", "帧速率（自动）"),
+    ("Playing", "正在播放"),
+    ("Go to Start", "转到开头"),
+    ("Go to End", "转到结尾"),
+    ("Go to Layer In Point", "转到图层入点"),
+    ("Go to Layer Out Point", "转到图层出点"),
+];
+
+/// Registers this module's Chinese strings and panels (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "audio",
+        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+    );
+    crate::register_panel(
+        app,
+        "properties",
+        bae_ui::PanelKind::new("Properties", |_| Box::new(PropertiesPanel::default())),
+    );
+    crate::register_panel(
+        app,
+        "effect_controls",
+        bae_ui::PanelKind::new("Effect Controls", |_| {
+            Box::new(EffectControlsPanel::default())
+        }),
+    );
+    crate::register_panel(
+        app,
+        "preview",
+        bae_ui::PanelKind::new("Preview", |_| Box::new(PreviewPanel)),
+    );
 }

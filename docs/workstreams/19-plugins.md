@@ -43,6 +43,7 @@
 
 ## 进度
 
+- betterAfterEffects 的原生插件子进程直接进入渲染协议。Windows 用分页文件支持的内存映射，Unix 在创建共享内存后立即删除名字，通过描述符交给子进程。后续帧复用这段内存，容量不足时重新分配。
 - [x] 设计规格 `docs/spec/plugin-architecture.md`（v0.1，已对齐合并后的 `bae_render::Effect` 和 `bae_model::EffectDef`）
 - [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
 - [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）
@@ -54,9 +55,17 @@
 - [x] 示例：posterize、vignette、box-blur（声明式），align-to-grid（脚本），invert（纯 C）
 - [x] 应用接入：`PluginModule` + 启动时 `load_installed`（`AppDirs::plugin_dirs()` + `BAE_PLUGIN_PATH`），插件效果发布到 `bae_app::Registry<EffectDef>` / `Registry<dyn bae_render::Effect>`；`bae plugin check|list [--json]`
 - [ ] 渲染耗时对照基准（声明式 vs 同功能内置效果 < 2%，等 04 的执行器和 07 的内置效果）
-- [ ] 原生插件加载（libloading）+ Rust SDK
+- [x] 原生插件（M1）：C ABI 定为 **1.0**（0.1 预发布版仍接受）；libloading 加载、`bae.core` / `bae.param.define` / `bae.render` 套件、效果 CPU 路径（`NativeEffect`：GPU 读回 → `render_cpu` → 上传）；**进程外模式**（`bae plugin runner`，管道 + 共享内存，崩溃 / 卡死只结束子进程、自动重启、一分钟三次停用）；用户级插件默认进程外，随 BAE 安装的 / 系统级可信插件进程内；失败时效果直通输入、插件停用并在状态栏提示（`PluginRuntime::take_notices`）；Rust SDK（`bae_plugin_sdk::abi` 布局镜像 + `effect::CpuEffect` + `export_plugin!`，panic → `BAE_ERR_PANIC`）；示例 `plugins/examples/duotone-rs`（Rust，进程外）+ `sdk/c/examples/invert`（C，进程内）；文档 `docs/plugins/native-c.md`、`native-rust.md`
 - [ ] 脚本插件
 - [ ] 其余示例插件
+
+### M1 记录（原生插件）
+
+- 规格变更（D16–D18）：原生插件默认进程外运行，除非可信（随 BAE 安装 / 系统级且清单写 `in-process`，或用户设为进程内；开发用 `BAE_PLUGIN_IN_PROCESS`）。原因是协调人定的硬要求“插件崩溃不能拖垮主程序”，进程内崩溃无法恢复（规格 §16 第 5 条）。ARCHITECTURE §14“稳定性”一句（“原生插件默认在进程内运行”）需要单独 PR 改成“可信插件进程内，其余进程外”，留给领导决定。
+- 进程外的运行器就是应用自己（隐藏子命令 `bae plugin runner`），打包不用多带一个可执行文件；`bae-plugin` 另有 `bae-plugin-runner` 二进制给测试和工具用（`BAE_PLUGIN_RUNNER`）。
+- 根 `Cargo.toml`：`libloading` 固定改为 0.8.9（wgpu-hal 在 Windows 上已经链接的同一份，原来的 0.9.1 没人用）；新增 `memmap2 = 0.9.12`（fontique 已经链接的同一份）和测试用的 `cc = 1.11.2`（构建脚本已经在用）。
+- `apps/bae` 只改状态栏：每帧取 `PluginRuntime::take_notices()`，显示“插件 X 无法加载 / 崩溃 / 已停用”（中英文）。
+- 还没做：GPU 路径（`render_gpu`、`bae.gpu.*`）、实例状态、参数监视、图层参数输入、插件管理界面（启用 / 停用、进程内开关；接口是 `PluginRuntime` + `NativeConfig::in_process`，可交给 09fe9cc0）。
 
 ### 0.0.1 记录
 
@@ -66,6 +75,37 @@
 - 给 02 的请求：R02-8（字符串/素材参数）、R02-9（相对坐标点参数默认值）；给 04 的请求：R04-11（`EffectParams` 补字段）、R04-12（在 crate 外构造 `EncodeContext`）。
 - 第三个 PR（应用接入，协调人决定由 19 做）：`apps/bae` 只改三行（依赖、`add_module`、启动时调用 `load_installed`）。`PluginHost` 改为通过 `EffectRegistrar` 注册（`EffectRegistries` 普通注册表 / `AppEffectRegistries` 应用注册表）。release 体积 15.98 → 16.72 MiB（含 bae-render 首次链接进应用）。给 04 的请求 R04-13：`bae render` 和渲染器从 `Registry<dyn Effect>` 取效果（和 `Registry<dyn SourceProvider>` 一样）。
 - 第二个 PR：`DeclarativeEffect`、`PluginHost`、`load_builtin`、检查工具、posterize 示例、`docs/plugins/`。`EffectParams` 没有图层范围、帧率等信息前（R04-11），`BaeFrame.layer_bounds` 用输入范围代替，其余未知字段为 0；`layer` 参数和转场的 `to` 源要等渲染图支持（R04-1），现在绑定为空纹理。
+
+### 交接（2026-11-25，给接手的 Codex）
+
+插件体系后续交给 5090 上的 Codex 接手。原生插件部分在 PR「plugins: native plugins (C ABI 1.0) …」（分支 `plugins/v1`）；脚本部分在 `plugins/scripting` 的 Draft PR（它自己的交接写在同一节里）。
+
+**已完成（原生插件）**：见上面“进度”和下面“M1 记录”。可以直接用的入口：`PluginHost::load_from`（会自动加载原生库）、`bae_plugin::native::{load_plugin, NativeEffect, NativeConfig, Notices}`、`bae plugin runner|list|check`。
+
+**剩余清单（按顺序做）**：
+1. 插件管理界面（启用 / 停用、“在进程内运行”开关、显示 `bae plugin list` 的信息和 `Notice`）：数据在 `PluginRuntime`（`with_host`、`load`、`unload`、`take_notices`）；开关写进用户设置后传给 `NativeConfig::in_process`（`PluginHost::set_native_config`）。界面放 bae-ui-motion 或 bae-ui，命令（启用、停用）放在不依赖界面的 crate 里。
+2. ARCHITECTURE §14“稳定性”一句按规格 D16 改（单独 PR，领导同意后再改）。
+3. GPU 路径：`render_gpu` + `bae.gpu.compute`（宿主编码，进程外也能用），然后 `bae.gpu.native`（只能进程内，需要 `gpu_native` 权限）。规格 §12、§15.3。
+4. 实例状态（`STATEFUL`：`instance_*`，状态 blob 存在效果 prim 上）和参数监视（`param_changed` + `bae.param.edit`），需要 02 的状态字段。现在加载时会拒绝 `STATEFUL` 效果。
+5. 图层参数和转场输入（`checkout_input` 的 `PARAM_LAYER` / `TRANSITION_TO`，现在返回空）：用 `Effect::layer_dependencies` + `EncodeContext::effect_layer`，和声明式效果一样。
+6. 其他贡献种类：命令（`BAE_KIND_COMMAND` + `bae.command`，注册成 `DynCommand`，MCP 自动可用）、导入器 / 导出器、表达式库。现在这些会出现在 `LibraryInfo::ignored` 里，并给出警告。
+7. 进程外的性能：现在消息用 JSON，像素多拷贝一次（宿主缓冲区 → 共享内存）。要优化的话，改成直接把像素转换进共享内存，消息改成二进制。
+8. 渲染耗时基准（声明式 vs 同功能内置效果 < 2%），以及 ABI 稳定性的 CI（保留用 1.0 头文件编译出来的示例二进制，在新宿主上跑）。
+9. 其余示例：原生 GPU 互操作、导入器、命令插件。
+
+**关键设计决定**（规格 §24.1 D16–D18）：
+- 用户级 / 工程内的原生插件默认进程外运行，可信的才进程内（崩溃不能拖垮主程序是硬要求）。运行器就是 `bae plugin runner`，测试用 `bae-plugin-runner` 二进制（`BAE_PLUGIN_RUNNER`）。
+- ABI 1.0 = 0.1 的布局，冻结；宿主还没提供的套件是“暂定”的；0.1 插件仍然接受（`HostApiSupport::compatible_0x_minors`）。
+- 原生 CPU 效果就是一个 `bae_render::Effect`：提交这一帧的 encoder、读回输入、调用插件、上传结果。调用失败时直通输入，绝不让整帧失败；失败都发到 `Notices`。
+- 参数以 `define_params` 为准；清单里的参数表是可选的列表副本，有的话必须一致（`check_listing`）。弹出菜单在文档里存 1 起的序号，传给插件时换成选项 ID。
+
+**主要文件**：
+- `sdk/c/bae_plugin.h`（ABI，权威）、`sdk/c/tests/`（C 侧自检）、`sdk/c/examples/invert`
+- `crates/bae-plugin-sdk/src/abi.rs`（Rust 镜像 + 布局 / 常量测试）、`effect.rs`（`CpuEffect`、`export_plugin!`）、`version.rs`（版本规则）
+- `crates/bae-plugin/src/native/`：`mod.rs`（配置、隔离策略、`Notices`、`NativePlugin`、`NativeEffect`、参数转换）、`library.rs`（进程内加载 + 宿主套件）、`runner.rs`（进程外：协议、runner 主循环、客户端、共享内存）、`pixels.rs`（格式转换）
+- `crates/bae-plugin/src/host.rs`（`load_native`）、`module.rs`（CLI、`PluginRuntime::take_notices`）、`src/bin/runner.rs`
+- 测试：`crates/bae-plugin/tests/native.rs`（会编译 C 插件、构建 `plugins/examples/duotone-rs`）、`tests/fixtures/crash/`
+- 应用：`apps/bae/src/shell/mod.rs` 的 `show_plugin_notices`，`apps/bae/src/ui/workspace.rs` 的 `plugin_notice`
 
 ## 请求（其他工作流在这里留言）
 

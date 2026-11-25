@@ -22,6 +22,8 @@ pub enum Reveal {
     Modified,
     /// P, S, R, T, A (Shift adds): exactly these layer attributes.
     Attrs(Vec<String>),
+    /// Exactly these properties (Reveal Expression Errors).
+    Props(Vec<(PrimPath, String)>),
 }
 
 /// Real-time playback of one comp.
@@ -64,6 +66,14 @@ pub enum Pending {
         /// Its layers before the command.
         before: Vec<PrimPath>,
     },
+    /// Select the effects a command adds to layers (Effect menu, Effects &
+    /// Presets): those not in `before`.
+    NewEffects {
+        /// The layers.
+        layers: Vec<PrimPath>,
+        /// Their effects before the command.
+        before: Vec<PrimPath>,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +87,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// Effects selected in Effect Controls: the viewer draws their point
+    /// controls (AE).
+    pub selected_effects: Vec<PrimPath>,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
@@ -100,6 +113,12 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// Each comp's 3D views (View ▸ Switch 3D View).
+    pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
+    /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
+    pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
+    /// The layer the Layer panel shows (opened from the Timeline).
+    pub(crate) layer_panel: Option<PrimPath>,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
@@ -112,6 +131,8 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// What the viewer reports to the Info panel.
+    pub info: crate::ae_panels::info::Readout,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
@@ -262,6 +283,19 @@ impl Session {
     pub fn sync(&mut self, stage: &Stage) {
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewEffects { layers, before } = &what {
+                let added: Vec<PrimPath> = layers
+                    .iter()
+                    .flat_map(|l| bae_motion::effect::effects_of(stage, l))
+                    .filter(|e| !before.contains(e))
+                    .collect();
+                if !added.is_empty() {
+                    self.selected_effects = added;
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewLayers { comp, before } = &what {
                 let added: Vec<PrimPath> = query::comp_layers(stage, comp)
                     .into_iter()
@@ -277,7 +311,9 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } => unreachable!("handled above"),
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                    unreachable!("handled above")
+                }
             };
             if stage.has_prim(path) {
                 match what {
@@ -289,7 +325,7 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } => {}
+                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -301,7 +337,7 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } => None,
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
             })
             .collect();
         self.reserved
@@ -328,6 +364,7 @@ impl Session {
         self.selected_props
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
+        self.selected_effects.retain(|e| stage.has_prim(e));
     }
 
     pub fn is_playing(&self) -> bool {

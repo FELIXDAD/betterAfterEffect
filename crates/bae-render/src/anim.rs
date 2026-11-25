@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 
 use bae_anim::{
-    CameraState, EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, LayerSource, LightState,
+    CameraState, EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, FrameBlending,
+    LayerSource, LightState,
 };
 use bae_model::{LayerKind, PrimPath, Stage, StageEvent, Time};
 use glam::{DAffine2, DMat4, DVec2};
@@ -27,8 +28,8 @@ use crate::error::RenderError;
 use crate::eval::CompEvaluator;
 use crate::graph::MAX_DEPTH;
 use crate::input::{
-    CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
-    TrackMatte, hash_value,
+    CustomContent, FootageRef, FrameBlend, LayerContent, RenderComp, RenderEffect, RenderLayer,
+    RenderMask, TrackMatte, hash_value,
 };
 use crate::light::{Falloff, Light, LightKind, Material, ShadowMode};
 use crate::motion::{CompMotionBlur, LayerSample};
@@ -74,6 +75,11 @@ impl AnimEvaluator {
     pub fn with_purpose(mut self, purpose: RenderPurpose) -> Self {
         self.purpose = purpose;
         self
+    }
+
+    /// Drops compiled animation when the caller observed edits without individual stage events.
+    pub fn clear_compiled(&mut self) {
+        self.inner.clear();
     }
 
     fn warn(&mut self, message: String) {
@@ -241,9 +247,12 @@ impl AnimEvaluator {
             .and_then(|mode| l.track_matte_layer.map(|layer| TrackMatte { layer, mode }));
         if out.active {
             out.content = self.content(stage, ec, l, depth)?;
+            // A mask a text layer uses as its path does not mask (AE).
+            let text_path = l.text_path.as_ref().map(|t| &t.mask);
             out.masks = l
                 .masks
                 .iter()
+                .filter(|m| text_path != Some(&m.path))
                 .map(|m| RenderMask {
                     path: m.path.clone(),
                     shape: m.shape.clone(),
@@ -301,6 +310,13 @@ impl AnimEvaluator {
                     serde_json::to_vec(doc).unwrap_or_default().hash(h);
                 }
                 hash_prims(&l.text_animators, h);
+                // Text on a path: its options and the mask's shape.
+                if let Some(tp) = &l.text_path {
+                    serde_json::to_vec(tp).unwrap_or_default().hash(h);
+                    if let Some(m) = l.masks.iter().find(|m| m.path == tp.mask) {
+                        serde_json::to_vec(&m.shape).unwrap_or_default().hash(h);
+                    }
+                }
             })),
             LayerSource::None => Ok(LayerContent::None),
             LayerSource::Comp { comp, nested, .. } => match nested {
@@ -335,6 +351,12 @@ impl AnimEvaluator {
                     },
                     size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
                     source_time: *time,
+                    sequence: (info.kind == "sequence")
+                        .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
+                    blend: l.frame_blend_span.map(|span| FrameBlend {
+                        span,
+                        pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
+                    }),
                 }),
                 _ => LayerContent::None,
             }),
