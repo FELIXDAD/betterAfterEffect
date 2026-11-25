@@ -38,7 +38,7 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
     let b=tone(high);
     var mapped=vec3f(a)+(rgb-low)*((b-a)/max(1e-12,high-low));
     let peak=greatest(mapped);
-    if peak>1. {
+    if u.specular_gain!=1. && peak>1. {
         mapped*=(1.+(peak-1.)*u.specular_gain)/peak;
     }
     mapped*=u.light.w*linear(u.balance);

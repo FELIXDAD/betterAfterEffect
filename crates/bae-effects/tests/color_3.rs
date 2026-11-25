@@ -126,9 +126,19 @@ fn lumetri_hdr_white_separates_diffuse_and_specular_and_scales_rgb_curves() {
 
     let identity_red = (39, Value::FloatList(vec![1., 0., 0., 1., 1., 1.]));
     let sdr_range = render(vec![hdr.clone(), identity_red.clone()]);
-    let hdr_range = render(vec![hdr, identity_red, (65, Value::Float(400.))]);
+    let hdr_range = render(vec![hdr.clone(), identity_red, (65, Value::Float(400.))]);
     assert!((sdr_range.get(1, 0)[0] - 1.).abs() < 0.001);
     assert_close(&hdr_range, &input, rect, 0.001, "HDR RGB curve domain");
+
+    let lift = (1013, Value::Float(60.));
+    let normal = render(vec![hdr.clone(), lift.clone()]);
+    let white4 = render(vec![hdr, lift, (66, Value::Float(400.))]);
+    let white = 4_f32.powf(1. / 2.4);
+    for x in 0..2 {
+        let c = input.get(x, 0)[0];
+        assert!((normal.get(x, 0)[0] - (c + 0.15 * (1. - c))).abs() < 0.0001);
+        assert!((white4.get(x, 0)[0] - (c + 0.15 * (white - c))).abs() < 0.0001);
+    }
 }
 
 #[test]
