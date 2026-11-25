@@ -6,8 +6,6 @@
 //! (`text.set_style`, one undo step per change; drags commit on release); with
 //! no text layer selected they are the settings new text gets, as in AE.
 
-use std::cell::RefCell;
-
 use bae_model::{PrimPath, Stage, TextDocument, Value};
 use bae_motion::query;
 use bae_motion::text::{DEFAULT_FONT, DEFAULT_SIZE, SOURCE};
@@ -20,16 +18,29 @@ use serde_json::{Value as Json, json};
 
 use crate::common;
 
-thread_local! {
-    /// The installed fonts (scanned once, on the UI thread).
-    static FONTS: RefCell<Option<bae_text::FontSystem>> = const { RefCell::new(None) };
+/// The installed fonts, scanned once in the background ([`prewarm`]) so the
+/// panel never waits for the scan.
+static FONTS: std::sync::OnceLock<std::sync::Mutex<bae_text::FontSystem>> =
+    std::sync::OnceLock::new();
+
+/// Starts scanning the installed fonts on a background thread (at startup,
+/// before the Character panel first needs them).
+pub(crate) fn prewarm() {
+    if FONTS.get().is_some() {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("bae-font-scan".into())
+        .spawn(|| {
+            FONTS.get_or_init(|| std::sync::Mutex::new(bae_text::FontSystem::new()));
+        });
 }
 
-fn with_fonts<R>(f: impl FnOnce(&mut bae_text::FontSystem) -> R) -> R {
-    FONTS.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        f(slot.get_or_insert_with(bae_text::FontSystem::new))
-    })
+/// `f` on the installed fonts, or `None` while they are still being scanned.
+fn with_fonts<R>(f: impl FnOnce(&mut bae_text::FontSystem) -> R) -> Option<R> {
+    let fonts = FONTS.get()?;
+    let mut fonts = fonts.lock().unwrap_or_else(|e| e.into_inner());
+    Some(f(&mut fonts))
 }
 
 /// AE's size and leading presets (px).
@@ -119,7 +130,8 @@ impl Panel for CharacterPanel {
         let (family, face_style) = with_fonts(|f| match f.resolve(&doc.font) {
             bae_text::FontMatch::Found(face) => (face.family.clone(), style_name(&face)),
             bae_text::FontMatch::Missing => (doc.font.clone(), String::new()),
-        });
+        })
+        .unwrap_or_else(|| (doc.font.clone(), String::new()));
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         ui.add_space(4.0);
 
@@ -128,10 +140,10 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             let resp = combo(ui, &family, 122.0, tr("Set the font family"));
-            let families = self
-                .families
-                .get_or_insert_with(|| with_fonts(|f| f.families()))
-                .clone();
+            if self.families.is_none() {
+                self.families = with_fonts(|f| f.families());
+            }
+            let families = self.families.clone().unwrap_or_default();
             egui::Popup::menu(&resp).id(id.with("family")).show(|ui| {
                 egui::ScrollArea::vertical().max_height(320.0).show_rows(
                     ui,
@@ -143,7 +155,8 @@ impl Panel for CharacterPanel {
                                 let ps = with_fonts(|f| match f.resolve(name) {
                                     bae_text::FontMatch::Found(face) => face.postscript_name,
                                     bae_text::FontMatch::Missing => name.clone(),
-                                });
+                                })
+                                .unwrap_or_else(|| name.clone());
                                 change["font"] = json!(ps);
                             }
                         }
@@ -157,7 +170,7 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             let resp = combo(ui, &face_style, 122.0, tr("Set the font style"));
-            let faces = with_fonts(|f| f.faces(&family));
+            let faces = with_fonts(|f| f.faces(&family)).unwrap_or_default();
             egui::Popup::menu(&resp).id(id.with("style")).show(|ui| {
                 for face in &faces {
                     let name = style_name(face);
