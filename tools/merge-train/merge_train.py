@@ -435,7 +435,8 @@ def check_runs(sha):
 
 def required_checks():
     c = CFG["checks"]
-    return list(c.get("fast", [])) + list(c.get("full", []))
+    full = list(c.get("full", [])) if c.get("pr_full", True) else []
+    return list(c.get("fast", [])) + full
 
 
 def evaluate_checks(sha):

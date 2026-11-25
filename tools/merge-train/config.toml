@@ -54,7 +54,10 @@ reference_data = "reference-data"    # squash-merged, like branches under ref/
 # `fast` runs on every PR push; `full` runs on dev/main pushes and on PRs labelled
 # merge-ready (labeled/synchronize), so it reruns by itself after update-branch.
 fast = ["fast / Windows x64"]  # macOS runs only in the full tier
-full = ["full / macOS arm64", "full / Windows x64"]
+full = ["full / macOS arm64", "full / Windows x64"]  # checked on dev after each merge
+# false: a PR merges once its fast checks are green; the full tier runs only on dev after
+# the merge (backstop; red dev pauses the queue). Simplified 2026-11-24.
+pr_full = false
 # Any other check run that concludes failure/timed_out on the head also blocks the merge.
 fail_on_other_failures = true
 
