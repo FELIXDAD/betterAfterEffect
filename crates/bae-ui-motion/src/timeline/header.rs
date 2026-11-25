@@ -190,7 +190,15 @@ impl TimelinePanel {
         }
         gresp.on_hover_text(tr("Graph Editor"));
 
-        // Column headers.
+        // Column headers (right-click: AE's Hide This / Columns ▸ menu).
+        let cresp = ui.interact(
+            colrow,
+            ui.id().with("timeline_columns"),
+            egui::Sense::click(),
+        );
+        crate::common::context_menu(&cresp, &mut |ui| {
+            crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_HEADER);
+        });
         let p = ui.painter();
         p.rect_filled(colrow, 0.0, color::PANEL);
         p.hline(

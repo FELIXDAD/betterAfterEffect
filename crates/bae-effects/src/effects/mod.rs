@@ -5,6 +5,7 @@
 pub mod blur;
 pub(crate) mod controls;
 mod image_grid;
+mod layer_input;
 pub(crate) mod lut;
 pub(crate) mod morphology;
 pub(crate) mod set_matte;
@@ -12,6 +13,7 @@ pub(crate) mod set_matte;
 pub use blur::{BoxBlur, GaussianBlur};
 
 pub(crate) mod color;
+pub(crate) mod compound;
 pub mod distort;
 pub mod spatial;
 

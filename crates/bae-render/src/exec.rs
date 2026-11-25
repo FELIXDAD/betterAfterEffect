@@ -25,12 +25,17 @@ use crate::blend::BlendMode;
 use crate::error::RenderError;
 use crate::geom::IRect;
 use crate::gpu::{BlendKind, DrawData, Pipelines, SampleData, Variant, flags};
-use crate::graph::{CompositeNode, LayerOp, Node, NodeKind, OpInput, RenderGraph};
+use crate::graph::{CompositeNode, LayerOp, Node, NodeId, NodeKind, OpInput, RenderGraph};
+use rustc_hash::FxHashMap;
 
 pub(crate) mod adjust;
 mod masks;
+mod shadow;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
+
+/// A composite's shadow atlas and where each image caster sits in it.
+type ShadowAtlas = (GpuImage, FxHashMap<NodeId, [u32; 2]>);
 
 /// Per-renderer buffers of draw records and motion-blur samples (grown on
 /// demand, reused across frames) and their bind group.
@@ -174,7 +179,8 @@ pub(crate) fn execute(
         .nodes
         .iter()
         .map(|n| match &n.kind {
-            NodeKind::Composite(c) => c.ops.len(),
+            // Layer draws plus the shadow atlas copies.
+            NodeKind::Composite(c) => c.ops.len() + shadow::casters(c).len(),
             NodeKind::Fill(_) => 1,
             _ => 0,
         })
@@ -200,7 +206,7 @@ pub(crate) fn execute(
                 .ops
                 .iter()
                 .filter_map(|op| op.lighting.as_ref())
-                .map(|l| crate::light::HEADER_VEC4S + crate::light::LIGHT_VEC4S * l.lights.len())
+                .map(|l| l.record_len())
                 .sum(),
             _ => 0,
         })
@@ -251,7 +257,25 @@ pub(crate) fn execute(
                 } else {
                     None
                 };
-                ctx.composite(&mut encoder, node, c, &target, scratch.as_ref(), &outputs)?;
+                // Image layers casting shadows here, copied into one atlas.
+                let casters = shadow::casters(c);
+                let atlas = if casters.is_empty() {
+                    None
+                } else {
+                    let (slots, size) = shadow::layout(&casters, &outputs);
+                    let atlas = pool.acquire(device, format, shadow::atlas_rect(size), 1.0)?;
+                    ctx.blit_atlas(&mut encoder, &atlas, &slots, &outputs)?;
+                    Some((atlas, slots))
+                };
+                ctx.composite(
+                    &mut encoder,
+                    node,
+                    c,
+                    &target,
+                    scratch.as_ref(),
+                    &outputs,
+                    atlas.as_ref(),
+                )?;
                 target
             }
             NodeKind::Fill(fill) => {
@@ -404,6 +428,7 @@ impl ExecCtx<'_> {
         first
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn composite(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -412,6 +437,7 @@ impl ExecCtx<'_> {
         target: &GpuImage,
         scratch: Option<&GpuImage>,
         outputs: &[Option<GpuImage>],
+        atlas: Option<&ShadowAtlas>,
     ) -> Result<(), RenderError> {
         let device = self.gpu.device();
         let tsize = target.texture_size();
@@ -440,6 +466,7 @@ impl ExecCtx<'_> {
                 tsize,
                 &mut samples,
                 &mut lighting,
+                atlas,
             )?
             else {
                 continue;
@@ -485,17 +512,26 @@ impl ExecCtx<'_> {
             } else {
                 None
             };
+            // Lit layers with image shadow casters read the shadow atlas.
+            let shadow_view = atlas
+                .filter(|_| op.lighting.as_ref().is_some_and(|l| !l.casters.is_empty()))
+                .map(|(image, _)| &image.view);
             let textures = if src_view.is_none()
                 && matte_view.is_none()
                 && dst_view.is_none()
                 && mask_view.is_none()
+                && shadow_view.is_none()
             {
                 None
             } else {
-                Some(
-                    self.pipelines
-                        .textures(device, src_view, matte_view, dst_view, mask_view),
-                )
+                Some(self.pipelines.textures(
+                    device,
+                    src_view,
+                    matte_view,
+                    dst_view,
+                    mask_view,
+                    shadow_view,
+                ))
             };
             let bounds = if op.blend.is_stencil() {
                 IRect::from_size(tsize[0], tsize[1])
@@ -798,6 +834,7 @@ fn clear(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
 /// Motion-blurred ops append their sample placements to `samples`, lit ones
 /// their lighting record to `lighting` (the caller offsets `extra.y` / `extra.w`
 /// by where the composite's records land).
+#[allow(clippy::too_many_arguments)]
 fn plan_op(
     node: &Node,
     op: &LayerOp,
@@ -806,6 +843,7 @@ fn plan_op(
     target_size: [u32; 2],
     samples: &mut Vec<SampleData>,
     lighting: &mut Vec<[f32; 4]>,
+    atlas: Option<&ShadowAtlas>,
 ) -> Result<Option<DrawData>, RenderError> {
     // Composite texel → … : target texel = comp px / scale − rect origin.
     let to_target = DAffine2::from_translation(DVec2::new(
@@ -900,7 +938,12 @@ fn plan_op(
         (OpInput::Image(_), None) => unreachable!("images resolved above"),
     }
     if let Some(l) = &op.lighting {
-        data.extra[3] = l.pack(&from_texel, lighting);
+        let map = |id: NodeId| {
+            let (image, slots) = atlas?;
+            let img = outputs[id.index()].as_ref()?;
+            Some(shadow::uv_map(img, *slots.get(&id)?, image.texture_size()))
+        };
+        data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
         data.mode[1] |= flags::LIT;
     }
     if !op.clips.is_empty() {

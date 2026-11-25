@@ -88,10 +88,11 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
 }
 
 fn catalog_item(ui: &mut Ui, cx: &mut PanelContext<'_>, it: &'static catalog::Item) {
-    if !it.platform.current() {
+    // Run-time lists (recent files …) are filled elsewhere.
+    if !it.platform.current() || it.status == catalog::Status::Dynamic {
         return;
     }
-    let enabled = it.status.works();
+    let enabled = crate::context_menu::runs(cx, it);
     if ui
         .add_enabled(enabled, egui::Button::new(tr(menu_title(it.title))))
         .clicked()
@@ -106,113 +107,32 @@ fn catalog_item(ui: &mut Ui, cx: &mut PanelContext<'_>, it: &'static catalog::It
     }
 }
 
-/// AE 26's layer context menu (R1, a solid layer), as catalog entries `(top-level
-/// menu, title)`; `("", "")` is a separator and `("", name)` a group this function
-/// builds itself (Track & Stabilize ▸, Open ▸, the context-only items).
-pub(crate) const LAYER_MENU: &[(&str, &str)] = &[
-    ("Layer", "Mask"),
-    ("", ""),
-    ("Layer", "Quality"),
-    ("Layer", "Switches"),
-    ("Layer", "Transform"),
-    ("Layer", "Time"),
-    ("Layer", "Frame Blending"),
-    ("Layer", "3D Layer"),
-    ("Layer", "Guide Layer"),
-    ("Layer", "Environment Layer"),
-    ("Layer", "Markers"),
-    ("", ""),
-    ("", "Track & Stabilize"),
-    ("", ""),
-    ("", "Open"),
-    ("Layer", "Reveal"),
-    ("", ""),
-    ("Layer", "Pre-compose..."),
-    ("", ""),
-    ("", "selection"),
-    ("", "Add to Essential Graphics"),
-    ("Composition", "Crop Comp to Selected Layer(s) Bounds"),
-    ("Layer", "Scene Edit Detection..."),
-];
-
-/// Track & Stabilize ▸: these Animation menu items.
-const TRACK_ITEMS: [&str; 4] = [
-    "Track Camera",
-    "Warp Stabilizer VFX",
-    "Track Motion",
-    "Track Mask",
-];
-/// Open ▸: these Layer menu items.
-const OPEN_ITEMS: [&str; 2] = ["Open Layer", "Open Layer Source"];
-
 /// What the layer menu asks the Timeline to do itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum LayerMenuOut {
     Rename,
 }
 
-/// Right-click on a layer (its name or bar): AE's layer context menu.
+/// Right-click on a layer (its name or bar): AE's layer context menu, the same
+/// table as the Composition panel's (`context_menu::VIEWER_LAYER`).
 pub(crate) fn layer_menu(
     ui: &mut Ui,
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
     layer: &PrimPath,
 ) -> Option<LayerMenuOut> {
-    let stage = cx.stage;
-    let mut out = None;
-    for (top, title) in LAYER_MENU {
-        match (*top, *title) {
-            ("", "") => {
-                ui.separator();
-            }
-            ("", "Track & Stabilize") => {
-                common::submenu(ui, tr("Track & Stabilize"), &mut |ui| {
-                    for t in TRACK_ITEMS {
-                        if let Some(n) = catalog_entry("Animation", t) {
-                            catalog_node(ui, cx, n);
-                        }
-                    }
-                });
-            }
-            ("", "Open") => {
-                common::submenu(ui, tr("Open"), &mut |ui| {
-                    for t in OPEN_ITEMS {
-                        if let Some(n) = catalog_entry("Layer", t) {
-                            catalog_node(ui, cx, n);
-                        }
-                    }
-                });
-            }
-            ("", "selection") => {
-                if ui.button(tr("Invert Selection")).clicked() {
-                    invert_layer_selection(stage, session, layer);
-                    ui.close();
-                }
-                if ui.button(tr("Select Children")).clicked() {
-                    select_children(stage, session);
-                    ui.close();
-                }
-                let locked = query::is_locked(stage, layer);
-                if ui
-                    .add_enabled(!locked, egui::Button::new(tr("Rename")))
-                    .clicked()
-                {
-                    out = Some(LayerMenuOut::Rename);
-                    ui.close();
-                }
-            }
-            // Not built yet (needs the Essential Graphics panel).
-            ("", name) => {
-                ui.add_enabled(false, egui::Button::new(tr(name)));
-            }
-            (top, title) => {
-                if let Some(n) = catalog_entry(top, title) {
-                    catalog_node(ui, cx, n);
-                }
-            }
-        }
+    let locked: &[&str] = if query::is_locked(cx.stage, layer) {
+        &["Rename"]
+    } else {
+        &[]
+    };
+    match crate::context_menu::show_with(ui, cx, crate::context_menu::VIEWER_LAYER, locked) {
+        Some("Rename") => return Some(LayerMenuOut::Rename),
+        Some("Invert Selection") => invert_layer_selection(cx.stage, session, layer),
+        Some("Select Children") => select_children(cx.stage, session),
+        _ => {}
     }
-    out
+    None
 }
 
 /// Invert Selection: the comp's other unlocked layers become the selection.

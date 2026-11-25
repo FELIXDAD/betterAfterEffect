@@ -127,7 +127,7 @@ fn prewarm_compiles_every_pipeline() {
 }
 
 #[test]
-fn controls_and_channel_defs_follow_the_ae_26_reference() {
+fn builtin_defs_follow_the_ae_26_reference() {
     let names = [
         "ADBE Invert",
         "ADBE Shift Channels",
@@ -138,12 +138,22 @@ fn controls_and_channel_defs_follow_the_ae_26_reference() {
         "ADBE Vibrance",
         "ADBE PhotoFilterPS",
         "ADBE Color Balance 2",
+        "ADBE Gradient Wipe",
+        "ADBE Displacement Map",
+        "ADBE Compound Blur",
+        "ADBE Texturize",
+        "ADBE Fill",
     ];
     let refs = [
         include_str!("../../../docs/reference/ae/effects/expression-controls.json"),
         include_str!("../../../docs/reference/ae/effects/channel.json"),
         include_str!("../../../docs/reference/ae/effects/matte.json"),
         include_str!("../../../docs/reference/ae/effects/color-correction.json"),
+        include_str!("../../../docs/reference/ae/effects/transition.json"),
+        include_str!("../../../docs/reference/ae/effects/distort.json"),
+        include_str!("../../../docs/reference/ae/effects/blur-and-sharpen.json"),
+        include_str!("../../../docs/reference/ae/effects/stylize.json"),
+        include_str!("../../../docs/reference/ae/effects/generate.json"),
     ];
     let mut count = 0;
     for text in refs {
@@ -158,8 +168,9 @@ fn controls_and_channel_defs_follow_the_ae_26_reference() {
             assert_eq!(fx.effect().renders_pixels(), !control);
             assert_eq!(fx.info.name_zh, reference["displayName"].as_str().unwrap());
             let properties = reference["properties"].as_array().unwrap();
-            assert_eq!(fx.def().params.len(), properties.len() - 1);
-            for (p, ae) in fx.def().params.iter().zip(properties) {
+            let params = fx.def().params.iter().filter(|p| p.match_name.is_some());
+            assert_eq!(params.clone().count(), properties.len() - 1, "{name}");
+            for (p, ae) in params.zip(properties) {
                 assert_eq!(p.match_name.as_deref(), ae["matchName"].as_str(), "{name}");
                 assert_eq!(fx.info.param_name_zh(p.id), ae["name"].as_str(), "{name}");
                 let value = &ae["defaultValue"];
@@ -179,8 +190,8 @@ fn controls_and_channel_defs_follow_the_ae_26_reference() {
                     Some(bae_model::Value::Vec2(v)) => check_vector(v),
                     Some(bae_model::Value::Vec3(v)) => check_vector(v),
                     None => {
-                        assert_eq!(p.kind, ParamKind::Layer);
-                        assert_eq!(value.as_i64(), Some(1));
+                        assert!(matches!(p.kind, ParamKind::Layer | ParamKind::Path));
+                        assert!(matches!(value.as_i64(), Some(0 | 1)));
                     }
                     other => panic!("{name}: unexpected default {other:?}"),
                 }
@@ -207,5 +218,5 @@ fn controls_and_channel_defs_follow_the_ae_26_reference() {
             count += 1;
         }
     }
-    assert_eq!(count, 17);
+    assert_eq!(count, 22);
 }

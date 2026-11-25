@@ -28,6 +28,8 @@ fn same_title(ae: &str, ours: &str) -> bool {
         "Active Camera (Camera 1)" => "Active Camera (Default)",
         "Reset Camera 1" => "Reset 3D View",
         "Camera 1 Settings..." => "Camera Settings...",
+        // Layer ▸ Transform on a camera.
+        "Point of Interest..." => "Anchor Point...",
         t => t,
     };
     ae == ours
@@ -53,7 +55,9 @@ fn node_lines(nodes: &'static [Node], out: &mut Vec<Line>) {
             continue;
         }
         match &nodes[i] {
-            Node::Item(it) if it.platform.current() => out.push(item(it.title)),
+            Node::Item(it) if it.platform.current() && it.status != catalog::Status::Dynamic => {
+                out.push(item(it.title))
+            }
             Node::Item(_) => {}
             Node::Separator => out.push(Line::Sep),
             Node::Submenu(s) => {
@@ -114,8 +118,10 @@ fn compare(ae: &[Value], ours: &[Line], path: &str, errors: &mut Vec<String>) {
                     return errors.push(format!("{path}: AE {at:?} vs ours {t:?}"));
                 }
                 match (x["items"].as_array(), sub) {
-                    // Filled when it opens (Layer Styles).
+                    // Filled when it opens (Layer Styles) or at run time (recent
+                    // footage).
                     (Some(_), Some(s)) if s.is_empty() => {}
+                    (Some(items), Some(_)) if items.is_empty() => {}
                     (Some(items), Some(s)) => compare(items, s, &format!("{path} ▸ {t}"), errors),
                     (None, None) => {}
                     _ => errors.push(format!("{path}: {t} submenu on one side only")),
@@ -139,9 +145,18 @@ fn check(name: &str, menu: &'static [Entry]) {
 }
 
 #[test]
-fn viewer_menus_match_ae() {
+fn menus_match_ae() {
     check("viewer.blank", VIEWER_BLANK);
     check("viewer.layer.solid", VIEWER_LAYER);
+    check("timeline.blank", TIMELINE_BLANK);
+    // The Timeline's layer menu is the same table (AE 26 on the Mac).
+    check("timeline.layer.camera", VIEWER_LAYER);
+    check("timeline.header", TIMELINE_HEADER);
+    check("project.blank", PROJECT_BLANK);
+    check("project.header", PROJECT_HEADER);
+    for kind in ["comp", "footage", "folder"] {
+        check(&format!("project.item.{kind}"), PROJECT_ITEM);
+    }
 }
 
 #[test]
@@ -161,7 +176,14 @@ fn every_title_has_chinese() {
             }
         }
     }
-    for menu in [VIEWER_BLANK, VIEWER_LAYER] {
+    for menu in [
+        VIEWER_BLANK,
+        VIEWER_LAYER,
+        TIMELINE_HEADER,
+        PROJECT_BLANK,
+        PROJECT_ITEM,
+        PROJECT_HEADER,
+    ] {
         walk(&lines(menu), &mut missing);
     }
     missing.sort();
