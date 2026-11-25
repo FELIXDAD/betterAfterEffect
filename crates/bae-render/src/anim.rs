@@ -76,6 +76,11 @@ impl AnimEvaluator {
         self
     }
 
+    /// Drops compiled animation when the caller observed edits without individual stage events.
+    pub fn clear_compiled(&mut self) {
+        self.inner.clear();
+    }
+
     fn warn(&mut self, message: String) {
         if !self.warnings.contains(&message) {
             self.warnings.push(message);
