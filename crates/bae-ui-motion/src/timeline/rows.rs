@@ -802,8 +802,8 @@ impl TimelinePanel {
             .lock()
             .scrub
             .as_ref()
-            .filter(|s| s.path == *path && s.attr == attr)
-            .map(|s| s.value.clone())
+            .and_then(|s| s.value_for(path, attr))
+            .cloned()
             .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
         if attr == "text:path" {
             // Path Options > Path: a popup of the layer's masks, even when unset.
