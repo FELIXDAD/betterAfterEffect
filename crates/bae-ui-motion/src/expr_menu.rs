@@ -1,6 +1,6 @@
 //! The expression language menu (the ▸ button of an expression row): AE's groups
 //! in AE's order, the items inserted as written. AE shows this menu in English in
-//! every language. Groups without items yet are listed disabled.
+//! every language.
 
 use egui::Ui;
 
@@ -9,7 +9,6 @@ use crate::common;
 enum Group {
     Items(&'static [&'static str]),
     Sub(&'static [(&'static str, &'static [&'static str])]),
-    Later,
 }
 
 const MENU: &[(&str, Group)] = &[
@@ -32,7 +31,22 @@ const MENU: &[(&str, Group)] = &[
             "timeToCurrentFormat(t = time + thisComp.displayStartTime, fps = 1.0 / thisComp.frameDuration, isDuration = false)",
         ]),
     ),
-    ("Vector Math", Group::Later),
+    (
+        "Vector Math",
+        Group::Items(&[
+            "add(vec1, vec2)",
+            "sub(vec1, vec2)",
+            "mul(vec, amount)",
+            "div(vec, amount)",
+            "clamp(value, limit1, limit2)",
+            "dot(vec1, vec2)",
+            "cross(vec1, vec2)",
+            "normalize(vec)",
+            "length(vec)",
+            "length(point1, point2)",
+            "lookAt(fromPoint, atPoint)",
+        ]),
+    ),
     (
         "Random Numbers",
         Group::Items(&[
@@ -59,9 +73,47 @@ const MENU: &[(&str, Group)] = &[
             "easeOut(t, tMin, tMax, value1, value2)",
         ]),
     ),
-    ("Color Conversion", Group::Later),
-    ("Other Math", Group::Later),
-    ("JavaScript Math", Group::Later),
+    (
+        "Color Conversion",
+        Group::Items(&[
+            "rgbToHsl(rgbaArray)",
+            "hslToRgb(hslaArray)",
+            "hexToRgb(hexString)",
+        ]),
+    ),
+    (
+        "Other Math",
+        Group::Items(&["degreesToRadians(degrees)", "radiansToDegrees(radians)"]),
+    ),
+    (
+        "JavaScript Math",
+        Group::Items(&[
+            "Math.cos(value)",
+            "Math.acos(value)",
+            "Math.tan(value)",
+            "Math.atan(value)",
+            "Math.atan2(y, x)",
+            "Math.sin(value)",
+            "Math.sqrt(value)",
+            "Math.exp(value)",
+            "Math.pow(value, exponent)",
+            "Math.log(value)",
+            "Math.abs(value)",
+            "Math.round(value)",
+            "Math.ceil(value)",
+            "Math.floor(value)",
+            "Math.min(value1, value2)",
+            "Math.max(value1, value2)",
+            "Math.PI",
+            "Math.E",
+            "Math.LOG2E",
+            "Math.LOG10E",
+            "Math.LN2",
+            "Math.LN10",
+            "Math.SQRT2",
+            "Math.SQRT1_2",
+        ]),
+    ),
     (
         "Comp",
         Group::Items(&[
@@ -84,7 +136,24 @@ const MENU: &[(&str, Group)] = &[
             "name",
         ]),
     ),
-    ("Footage", Group::Later),
+    (
+        "Footage",
+        Group::Items(&[
+            "width",
+            "height",
+            "duration",
+            "frameDuration",
+            "ntscDropFrame",
+            "pixelAspect",
+            "name",
+            "sourceText",
+            "sourceData",
+            "dataValue(dataPath)",
+            "dataKeyCount(dataPath)",
+            "dataKeyTimes(dataPath, t0 = startTime, t1 = endTime)",
+            "dataKeyValues(dataPath, t0 = startTime, t1 = endTime)",
+        ]),
+    ),
     (
         "Layer",
         Group::Sub(&[
@@ -167,10 +236,55 @@ const MENU: &[(&str, Group)] = &[
             ),
         ]),
     ),
-    ("Camera", Group::Later),
-    ("Light", Group::Later),
-    ("Effect", Group::Later),
-    ("Path Property", Group::Later),
+    (
+        "Camera",
+        Group::Items(&[
+            "pointOfInterest",
+            "zoom",
+            "depthOfField",
+            "focusDistance",
+            "aperture",
+            "blurLevel",
+            "irisShape",
+            "irisRotation",
+            "irisRoundness",
+            "irisAspectRatio",
+            "irisDiffractionFringe",
+            "highlightGain",
+            "highlightThreshold",
+            "highlightSaturation",
+            "active",
+        ]),
+    ),
+    (
+        "Light",
+        Group::Items(&[
+            "pointOfInterest",
+            "intensity",
+            "color",
+            "coneAngle",
+            "coneFeather",
+            "shadowDarkness",
+            "shadowDiffusion",
+        ]),
+    ),
+    (
+        "Effect",
+        Group::Items(&["active", "param(name)", "param(index)", "name"]),
+    ),
+    (
+        "Path Property",
+        Group::Items(&[
+            "points(t = time)",
+            "inTangents(t = time)",
+            "outTangents(t = time)",
+            "isClosed()",
+            "pointOnPath(percentage = 0.5, t = time)",
+            "tangentOnPath(percentage = 0.5, t = time)",
+            "normalOnPath(percentage = 0.5, t = time)",
+            "createPath(points = [[0,0], [100,0], [100,100], [0,100]], inTangents = [], outTangents = [], is_closed = true)",
+        ]),
+    ),
     (
         "Property",
         Group::Items(&[
@@ -198,10 +312,34 @@ const MENU: &[(&str, Group)] = &[
             "propertyIndex",
         ]),
     ),
-    ("Key", Group::Later),
-    ("MarkerKey", Group::Later),
-    ("Project", Group::Later),
-    ("Text", Group::Later),
+    ("Key", Group::Items(&["value", "time", "index"])),
+    (
+        "MarkerKey",
+        Group::Items(&[
+            "duration",
+            "comment",
+            "chapter",
+            "url",
+            "frameTarget",
+            "eventCuePoint",
+            "cuePointName",
+            "parameters",
+            "protectedRegion",
+        ]),
+    ),
+    (
+        "Project",
+        Group::Items(&["fullPath", "bitsPerChannel", "linearBlending"]),
+    ),
+    (
+        "Text",
+        Group::Items(&[
+            "sourceText",
+            "sourceText.style",
+            "sourceText.getStyleAt(charIndex, t = time)",
+            "sourceText.createStyle()",
+        ]),
+    ),
 ];
 
 fn items(ui: &mut Ui, list: &'static [&'static str], chosen: &mut Option<&'static str>) {
@@ -223,9 +361,6 @@ pub(crate) fn ui(ui: &mut Ui, chosen: &mut Option<&'static str>) {
                     common::submenu(ui, sub, &mut |ui| items(ui, list, chosen));
                 }
             }),
-            Group::Later => {
-                ui.add_enabled(false, egui::Button::new(*name));
-            }
         }
     }
 }
@@ -237,7 +372,6 @@ pub(crate) fn groups() -> Vec<(&'static str, usize)> {
             let count = match g {
                 Group::Items(l) => l.len(),
                 Group::Sub(s) => s.iter().map(|(_, l)| l.len()).sum(),
-                Group::Later => 0,
             };
             (*n, count)
         })
