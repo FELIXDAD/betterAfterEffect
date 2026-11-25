@@ -471,7 +471,7 @@ fn panels_render_a_project() {
 #[test]
 fn every_english_ui_string_has_chinese() {
     // The language is process-global, so check the table instead of switching it.
-    let zh = crate::i18n::ZH;
+    let zh = crate::i18n::all();
     for (_, en) in crate::actions::ACTIONS {
         assert!(zh.iter().any(|(e, _)| e == en), "missing zh for {en}");
     }
@@ -927,7 +927,7 @@ impl Panel for NoopPanel {
 /// Every menu title (items and submenus) has a Chinese name.
 #[test]
 fn every_menu_title_has_chinese() {
-    bae_ui::i18n::register(crate::i18n::ZH);
+    bae_ui::i18n::register(&crate::i18n::all());
     bae_ui::i18n::register(crate::catalog::MENU_ZH);
     let mut missing = std::collections::BTreeSet::new();
     let mut check = |t: &str| {
@@ -1284,7 +1284,7 @@ fn accessibility_labels_have_chinese() {
         "Degrees",
         "Project Items",
     ];
-    let zh = crate::i18n::ZH;
+    let zh = crate::i18n::all();
     let missing: Vec<_> = labels
         .iter()
         .filter(|l| !zh.iter().any(|(en, _)| en == *l) && !bae_ui::i18n::has_translation(l))
@@ -1438,7 +1438,7 @@ fn dialog_strings_have_chinese() {
     let missing: Vec<_> = crate::dialogs::strings()
         .into_iter()
         .filter(|s| {
-            !bae_ui::i18n::has_translation(s) && !crate::i18n::ZH.iter().any(|(en, _)| en == s)
+            !bae_ui::i18n::has_translation(s) && !crate::i18n::all().iter().any(|(en, _)| en == s)
         })
         .collect();
     assert!(missing.is_empty(), "no Chinese for {missing:?}");

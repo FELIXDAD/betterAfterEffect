@@ -26,11 +26,7 @@ pub(super) fn register(target: &Builtin, out: &mut Vec<Builtin>) {
             }
             a.finish(
                 target,
-                Some(|p| {
-                    let mut values = p.p.effect.params.clone();
-                    assign(&mut values, 3, Value::Float(p.f(3) / 255.));
-                    values
-                }),
+                Some(|p| Translation::patch(p, [(3, Some(Value::Float(p.f(3) / 255.)))])),
             )
         }
         "ADBE Set Matte3" => Definition::inherit(
@@ -52,11 +48,7 @@ pub(super) fn register(target: &Builtin, out: &mut Vec<Builtin>) {
             a.param(11).default = Some(Value::Bool(false));
             a.finish(
                 target,
-                Some(|p| {
-                    let mut values = p.p.effect.params.clone();
-                    assign(&mut values, 11, Value::Bool(p.b(11)));
-                    values
-                }),
+                Some(|p| Translation::patch(p, [(11, Some(Value::Bool(p.b(11))))])),
             )
         }
         "ADBE Fill" => {
@@ -76,7 +68,10 @@ pub(super) fn register(target: &Builtin, out: &mut Vec<Builtin>) {
                 Some(Value::Color([0., 0., 1., 1.])),
             );
             (a.def, a.info.param_names_zh) = b.build();
-            a.finish(target, Some(|p| vec![(2, p.value(1).unwrap().clone())]))
+            a.finish(
+                target,
+                Some(|p| Translation::replace([(2, p.value(1).unwrap().clone())])),
+            )
         }
         "ADBE Spill2" => spill(target),
         _ => return,
@@ -120,12 +115,12 @@ fn fast_blur(target: &Builtin) -> Builtin {
     a.finish(
         target,
         Some(|p| {
-            vec![
+            Translation::replace([
                 (1, Value::Float(p.f(1))),
                 (2, Value::Int(3)),
                 (3, Value::Int(p.popup(2))),
                 (4, Value::Bool(p.b(3))),
-            ]
+            ])
         }),
     )
 }
@@ -162,11 +157,11 @@ fn spill(target: &Builtin) -> Builtin {
     a.finish(
         target,
         Some(|p| {
-            vec![
+            Translation::replace([
                 (1, Value::Int(2)),
                 (3, p.value(1).unwrap().clone()),
                 (5, Value::Float(p.f(3) * 0.5)),
-            ]
+            ])
         }),
     )
 }
