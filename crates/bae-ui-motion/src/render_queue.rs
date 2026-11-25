@@ -825,6 +825,7 @@ impl RenderQueuePanel {
         let mut remove = None;
         let mut cancel = None;
         let mut requeue = None;
+        let mut open = None;
         // No scroll area of its own: the dock scrolls a panel that does not fit
         // (AE opens the Render Queue in the short Timeline frame).
         for (i, item) in q.items.iter_mut().enumerate() {
@@ -839,6 +840,7 @@ impl RenderQueuePanel {
                     &mut remove,
                     &mut cancel,
                     &mut requeue,
+                    &mut open,
                 );
             });
             ui.separator();
@@ -856,6 +858,13 @@ impl RenderQueuePanel {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         }
+        drop(q);
+        // The item's settings links (the dialogs read the queue themselves).
+        match open {
+            Some((id, true)) => crate::dialogs::render_settings(cx, id),
+            Some((id, false)) => crate::dialogs::output_module(cx, id),
+            None => {}
+        }
     }
 }
 
@@ -868,6 +877,7 @@ fn item_ui(
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
+    open: &mut Option<(u64, bool)>,
 ) {
     let editable = matches!(
         item.status,
@@ -990,21 +1000,32 @@ fn item_ui(
         );
     }
     // Render Settings and Log (AE's templates; BAE renders at Best Settings).
-    ui.add_enabled_ui(false, |ui| {
+    // AE's template links: Render Settings and Output Module open their
+    // dialogs; Log keeps AE's default.
+    ui.add_enabled_ui(editable, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Render Settings:"));
-            let mut i = 0;
-            bae_ui::widgets::dropdown(ui, "render-settings", &mut i, &[tr("Best Settings")], 130.0)
-                .labeled_value(
-                    egui::WidgetType::ComboBox,
-                    &name("Render Settings"),
-                    tr("Best Settings"),
-                );
+            if bae_ui::widgets::link(ui, tr("Best Settings"))
+                .labeled(egui::WidgetType::Link, &name("Render Settings"))
+                .clicked()
+            {
+                *open = Some((item.id, true));
+            }
             ui.add_space(12.0);
-            ui.label(tr("Log:"));
-            let mut j = 0;
-            bae_ui::widgets::dropdown(ui, "log", &mut j, &[tr("Errors Only")], 110.0)
-                .labeled_value(egui::WidgetType::ComboBox, &name("Log"), tr("Errors Only"));
+            ui.add_enabled_ui(false, |ui| {
+                ui.label(tr("Log:"));
+                let mut j = 0;
+                bae_ui::widgets::dropdown(ui, "log", &mut j, &[tr("Errors Only")], 110.0)
+                    .labeled_value(egui::WidgetType::ComboBox, &name("Log"), tr("Errors Only"));
+            });
+            ui.add_space(12.0);
+            ui.label(tr("Output Module:"));
+            if bae_ui::widgets::link(ui, tr(format_label(item.format)))
+                .labeled(egui::WidgetType::Link, &name("Output Module"))
+                .clicked()
+            {
+                *open = Some((item.id, false));
+            }
         });
     });
     ui.add_enabled_ui(editable, |ui| {
@@ -1157,7 +1178,7 @@ fn item_ui(
 }
 
 /// The format's name in AE's output module (translated with `tr`).
-fn format_label(format: ExportFormat) -> &'static str {
+pub(crate) fn format_label(format: ExportFormat) -> &'static str {
     match format {
         ExportFormat::Png => "PNG Sequence",
         ExportFormat::Tiff => "TIFF Sequence",
@@ -1170,7 +1191,7 @@ fn format_label(format: ExportFormat) -> &'static str {
 }
 
 /// AE's names for the channels (the same in its Chinese UI).
-fn channels_label(channels: Channels) -> &'static str {
+pub(crate) fn channels_label(channels: Channels) -> &'static str {
     match channels {
         Channels::Rgb => "RGB",
         Channels::RgbAlpha => "RGB + Alpha",
@@ -1185,6 +1206,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Render Time:", "渲染时间:"),
     ("Render Settings", "渲染设置"),
     ("Log", "日志"),
+    ("Output Module", "输出模块"),
+    ("Output Module:", "输出模块:"),
     ("Render Settings:", "渲染设置:"),
     ("Best Settings", "最佳设置"),
     ("Log:", "日志:"),
