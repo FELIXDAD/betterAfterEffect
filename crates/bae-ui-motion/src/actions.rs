@@ -70,6 +70,15 @@ pub mod ids {
     /// Animation > Add Expression (AE Alt+Shift+=): toggles the selected
     /// properties' expressions.
     pub const ADD_EXPRESSION: &str = "motion.anim.add_expression";
+    /// Layer > Switches > Enable / Disable Expressions: every expression of the
+    /// selected layers.
+    pub const ENABLE_EXPRESSIONS: &str = "motion.layer.enable_expressions";
+    pub const DISABLE_EXPRESSIONS: &str = "motion.layer.disable_expressions";
+    /// Layer > Reveal > Reveal Expression Errors: the properties whose expressions
+    /// fail, revealed in the Timeline.
+    pub const REVEAL_EXPRESSION_ERRORS: &str = "motion.layer.reveal_expression_errors";
+    /// Animation > Keyframe Assistant > Convert Expression to Keyframes.
+    pub const CONVERT_EXPRESSION: &str = "motion.anim.convert_expression_to_keyframes";
     /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
     pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
     /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
@@ -163,6 +172,10 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ADD_EXPRESSION, "Add Expression"),
+    (ids::ENABLE_EXPRESSIONS, "Enable Expressions"),
+    (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
+    (ids::REVEAL_EXPRESSION_ERRORS, "Reveal Expression Errors"),
+    (ids::CONVERT_EXPRESSION, "Convert Expression to Keyframes"),
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
@@ -1217,6 +1230,74 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 attr: first.attr.clone(),
                 keys: copied,
             });
+        }
+        ids::ENABLE_EXPRESSIONS | ids::DISABLE_EXPRESSIONS => {
+            let enabled = id == ids::ENABLE_EXPRESSIONS;
+            let mut items = Vec::new();
+            for l in layers.iter().filter(|l| !query::is_locked(stage, l)) {
+                for n in crate::props::revealed(stage, l, &Reveal::Animated) {
+                    if let crate::props::Node::Prop { path, attr, .. } = n
+                        && let Some(e) =
+                            query::attr_spec(stage, &path, &attr).and_then(|s| s.expression.clone())
+                        && e.enabled != enabled
+                    {
+                        items.push(json!({"path": path, "attr": attr, "source": e.source, "enabled": enabled}));
+                    }
+                }
+            }
+            if !items.is_empty() {
+                cx.invoke_with("attr.set_expressions", json!({"items": items}));
+            }
+        }
+        ids::REVEAL_EXPRESSION_ERRORS => {
+            let mut by_layer: Vec<(PrimPath, Vec<(PrimPath, String)>)> = Vec::new();
+            for e in s.expr_errors.clone() {
+                let Some(l) = query::owning_layer(stage, &e.prim) else {
+                    continue;
+                };
+                let prop = (e.prim, e.attr);
+                match by_layer.iter_mut().find(|(x, _)| *x == l) {
+                    Some((_, props)) => props.push(prop),
+                    None => by_layer.push((l, vec![prop])),
+                }
+            }
+            for (l, props) in by_layer {
+                s.reveal.insert(l, Reveal::Props(props));
+            }
+        }
+        ids::CONVERT_EXPRESSION => {
+            // Every frame of the layer's span in the comp becomes a keyframe.
+            let props: Vec<(PrimPath, String)> = s
+                .selected_props
+                .iter()
+                .filter(|(p, a)| {
+                    query::locked_layer_of(stage, p).is_none()
+                        && query::attr_spec(stage, p, a)
+                            .and_then(|s| s.expression.as_ref())
+                            .is_some_and(|e| e.enabled)
+                })
+                .cloned()
+                .collect();
+            let mut eval = bae_anim::Evaluator::new();
+            for (path, attr) in props {
+                let Some(layer) = query::owning_layer(stage, &path) else {
+                    continue;
+                };
+                let timing = query::layer_timing(stage, &layer);
+                let end = timing.out_point.max(timing.in_point).min(info.duration);
+                let mut t = timing.in_point.min(timing.out_point).max(Time::ZERO);
+                let mut keys = Vec::new();
+                while t < end {
+                    if let Some(v) = common::current_value(&mut eval, stage, &path, &attr, t) {
+                        keys.push(json!({"time": query::to_key_time(stage, &path, t), "value": v}));
+                    }
+                    t += frame;
+                }
+                cx.invoke_with(
+                    "attr.bake_expression",
+                    json!({"path": path, "attr": attr, "keys": keys}),
+                );
+            }
         }
         ids::PASTE if !s.layer_clipboard.is_empty() => {
             // Above the topmost selected layer, else on top; named like
