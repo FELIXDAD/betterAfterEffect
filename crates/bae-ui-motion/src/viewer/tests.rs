@@ -1807,3 +1807,38 @@ fn the_viewer_edits_the_selected_layer_under_others() {
         std::slice::from_ref(&top)
     );
 }
+
+/// #400: Cmd/Ctrl+Shift+A and F2 deselect (bound in the motion keymap); then
+/// a shape tool makes a new shape layer instead of a mask on the image.
+#[test]
+fn deselect_all_then_shape_tools_make_a_new_layer() {
+    let b = crate::actions::bindings().bindings;
+    let deselect: Vec<String> = b
+        .iter()
+        .filter(|b| b.action == crate::actions::ids::DESELECT_ALL)
+        .map(|b| b.chord.to_string())
+        .collect();
+    assert!(deselect.iter().any(|c| c == "F2"), "{deselect:?}");
+    assert!(
+        deselect.iter().any(|c| c.ends_with("Shift+A")),
+        "{deselect:?}"
+    );
+    let mut h = H::new();
+    let image = h.solid([640.0, 360.0], [320.0, 180.0]);
+    h.select(&[&image]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (200.0, 150.0));
+    assert!(
+        r.invocations.iter().any(|i| i.id == "mask.create"),
+        "a mask on the image"
+    );
+    assert!(h.action(crate::actions::ids::DESELECT_ALL));
+    assert!(h.session().lock().selected_layers.is_empty());
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (200.0, 150.0));
+    let add = one(&r, "shape.add");
+    assert!(
+        add.get("layer").is_none() && add.get("comp").is_some(),
+        "a new shape layer: {add}"
+    );
+}
