@@ -3,6 +3,7 @@ use crate::Registry;
 use super::packages;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.prewarm.push(crate::effects::grain::prewarm);
     registry.effects.extend(crate::effects::grain::builtins());
     packages(
         registry,

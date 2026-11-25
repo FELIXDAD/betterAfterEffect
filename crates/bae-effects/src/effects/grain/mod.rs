@@ -36,6 +36,16 @@ const REDUCE: Shader = Shader {
     label: "bae.effects.grain-profile",
     source: concat!(include_str!("../sampled.wgsl"), include_str!("reduce.wgsl")),
 };
+pub(crate) fn prewarm(
+    rt: &crate::gpu::Runtime,
+    format: bae_gpu::wgpu::TextureFormat,
+) -> Result<(), RenderError> {
+    for shader in [MATCH, REMOVE, PROFILE, REDUCE] {
+        shader.kernel(rt, format)?;
+    }
+    Ok(())
+}
+
 struct Grain {
     def: EffectDef,
     matching: bool,
