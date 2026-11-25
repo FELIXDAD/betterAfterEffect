@@ -8,10 +8,16 @@ use winit::keyboard::KeyCode;
 
 /// The key standing for a numpad press, if AE's shortcuts use it. Only presses
 /// that type a character: with NumLock off (Windows) numpad 4 / 6 / 8 / 2 / 7 /
-/// 1 / 9 / 3 / 0 / . are arrows, Home, End, Page Up / Down, Insert and Delete
+/// 1 / 9 / 3 / . are arrows, Home, End, Page Up / Down and Delete
 /// and stay those keys.
 pub fn key(code: KeyCode, logical: &winit::keyboard::Key) -> Option<egui::Key> {
-    if !matches!(logical, winit::keyboard::Key::Character(_)) {
+    // AE binds both Num 0 and Num Insert to the same preview transport.
+    let pad_insert = code == KeyCode::Numpad0
+        && matches!(
+            logical,
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Insert)
+        );
+    if !pad_insert && !matches!(logical, winit::keyboard::Key::Character(_)) {
         return None;
     }
     let name = match code {
@@ -95,6 +101,12 @@ mod tests {
             egui::Event::Key { key, modifiers, .. } if key == pad1 && modifiers.alt
         ));
         assert!(key(KeyCode::Digit1, &ch("1")).is_none());
+        let insert = winit::keyboard::Key::Named(winit::keyboard::NamedKey::Insert);
+        assert_eq!(
+            key(KeyCode::Numpad0, &insert),
+            key(KeyCode::Numpad0, &ch("0"))
+        );
+        assert!(key(KeyCode::Digit0, &ch("0")).is_none());
         assert!(key(KeyCode::NumpadMultiply, &ch("*")).is_some());
         // NumLock off: numpad 4 is the left arrow, not Pad4.
         let left = winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft);
