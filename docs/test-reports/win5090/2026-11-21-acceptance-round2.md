@@ -20,13 +20,13 @@
 | 项 | 验收范围 | 实测基线 | 结论 | 关联 Issue | 摘要 |
 |---|---|---|---|---|---|
 | **A** | 启动和欢迎框 | `fb08040` | **通过** | — | 冷启动 0.94 s 弹出欢迎框；Esc、关闭按钮（×）、点框外均可关闭；Motion / Review / Agent 三个入口按钮均正确切换工作区；正常关闭后热启动 0.82 s 不再弹出欢迎框 |
-| **B** | 新建合成、图层 ▸ 新建、菜单与快捷键 | `fb08040`（`763eaad` / `c20770a` 已复测修复） | **初测失败 → 复测通过** | [#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117)（已关）, [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118)（已关） | 新建合成与 `Layer ▸ New` 全部 9 项图层创建及 `export-json` 均通过；菜单置灰逻辑正确；#117（菜单快捷键显示）与 #118（Window ▸ Render Queue 及 `Ctrl+Alt+0`）在 `c20770a` 复测均通过；`Ctrl+Shift+S` 在本机被系统全局热键占用（1409），属**环境/自动化受限** |
-| **C** | 时间轴改名（IME / 空格 / Emoji / 超长名） | `fb08040` | **通过** | [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106)（已关）, [#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113)（已关） | 真实微软拼音 IME 组字选词（`ni'hao` → `你好`）、含空格名（不触发播放）、Emoji（`🎬 场记测试`）、323 字符超长名全部正常显示且经保存—重开与 `export-json` 逐字一致；初测复现的 #106、#113 在 `c20770a` 复测均已通过 |
+| **B** | 新建合成、图层 ▸ 新建、菜单与快捷键 | `fb08040`（`763eaad` / `c20770a` 已复测修复） | **初测失败 → 复测通过** | [#117](https://github.com/FELIXDAD/betterAfterEffects/issues/117)（已关）, [#118](https://github.com/FELIXDAD/betterAfterEffects/issues/118)（已关） | 新建合成与 `Layer ▸ New` 全部 9 项图层创建及 `export-json` 均通过；菜单置灰逻辑正确；#117（菜单快捷键显示）与 #118（Window ▸ Render Queue 及 `Ctrl+Alt+0`）在 `c20770a` 复测均通过；`Ctrl+Shift+S` 在本机被系统全局热键占用（1409），属**环境/自动化受限** |
+| **C** | 时间轴改名（IME / 空格 / Emoji / 超长名） | `fb08040` | **通过** | [#106](https://github.com/FELIXDAD/betterAfterEffects/issues/106)（已关）, [#113](https://github.com/FELIXDAD/betterAfterEffects/issues/113)（已关） | 真实微软拼音 IME 组字选词（`ni'hao` → `你好`）、含空格名（不触发播放）、Emoji（`🎬 场记测试`）、323 字符超长名全部正常显示且经保存—重开与 `export-json` 逐字一致；初测复现的 #106、#113 在 `c20770a` 复测均已通过 |
 | **D** | 关键帧、播放、焦点与撤销重做 | `fb08040` | **通过** | — | 秒表与导航器 ◆ 打 3 个关键帧（0s/1s/2s）均确认 ◆ 变蓝并落盘；J/K 精准跳转；空格播放/停止在 4 个面板生效，在搜索框与改名框不触发播放；连续 4 步图层与 3 步关键帧撤销/重做经 `export-json` 核验一致；选中关键帧后 `Animation` 菜单 5 项全启用 |
-| **E** | 保存和打开（边界与异常） | `fb08040`（#111 在 `c20770a` 复核） | **失败** | [#126](https://github.com/FELIXDAD/betterAfterEffect/issues/126)（OPEN）, [#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111)（OPEN） | `.bae`/`.baez` 保存重开、`Ctrl+S`、脏关闭三键、空格/中文路径、只读目录报错不崩、命令行打开、`.baez` 覆盖确认均通过；Windows 另存为覆盖已存在 `.bae` 文件夹会直接进入该目录（#126）；#111 GUI 报错在 `c20770a` 已改善但 CLI 仍多输出一行 timestamped `ERROR` 日志 |
-| **F** | 渲染队列（格式 / 停止 / 错误 / 满盘 / 多合成） | `c20770a` | **通过**（满盘**自动化受限**） | [#110](https://github.com/FELIXDAD/betterAfterEffect/issues/110)（已关）, [#133](https://github.com/FELIXDAD/betterAfterEffect/issues/133)（OPEN，布局裁切见 H） | PNG / 未压缩 TIFF（Tag 259=1）/ OpenEXR 均输出合法像素；在资源管理器中显示打开准确目录；非法路径报明确 OS 错误不崩；3000 帧渲染中途点击 Stop 精确停在 `1523/3000` 且磁盘恰 1523 帧；渲染中删层不崩且首末帧均为隔离快照像素；多合成依次排队渲染完成；**满盘项因非管理员会话无法挂载小容量 VHD 归类为自动化受限** |
-| **G** | 语言（`BAE_LANG=zh` / `en`） | `c20770a` | **失败** | [#136](https://github.com/FELIXDAD/betterAfterEffect/issues/136)（OPEN）, [#135](https://github.com/FELIXDAD/betterAfterEffect/issues/135)（OPEN） | `BAE_LANG=en` 无中文泄漏；`BAE_LANG=zh` 主菜单、工作区、欢迎框、渲染队列状态/报错、脏关闭弹窗与关于框均已中文化，但存在 **14 个未翻译英文命令名**（导致 `编辑 ▸ 撤消 New Layer`、历史记录与快捷键对话框中英混排）及 **3 个原始面板 ID**（`character`/`paragraph`/`tools`）（#136）；空渲染队列提示 `▸` 缺字成 `□`（#135） |
-| **H** | 150% DPI 清晰度与布局 | `c20770a` | **失败** | [#133](https://github.com/FELIXDAD/betterAfterEffect/issues/133)（OPEN）, [#134](https://github.com/FELIXDAD/betterAfterEffect/issues/134)（OPEN）, [#135](https://github.com/FELIXDAD/betterAfterEffect/issues/135)（OPEN） | 字体、图标、时间轴刻度与画布在 `@1.50x` 下清晰锐利；但存在三处明显布局/渲染问题：1) `Motion` 默认布局中 **Preview 播放控制栏被纵向腰斩**、**Render Queue 右侧按钮被裁出窄左栏**（#133）；2) **键盘快捷键对话框命令列被挤压至 ~45 px 强制断词，右半边大片空白**（#134）；3) 渲染队列空提示 `▸` 显示为缺字方块 `□`（#135） |
+| **E** | 保存和打开（边界与异常） | `fb08040`（#111 在 `c20770a` 复核） | **失败** | [#126](https://github.com/FELIXDAD/betterAfterEffects/issues/126)（OPEN）, [#111](https://github.com/FELIXDAD/betterAfterEffects/issues/111)（OPEN） | `.bae`/`.baez` 保存重开、`Ctrl+S`、脏关闭三键、空格/中文路径、只读目录报错不崩、命令行打开、`.baez` 覆盖确认均通过；Windows 另存为覆盖已存在 `.bae` 文件夹会直接进入该目录（#126）；#111 GUI 报错在 `c20770a` 已改善但 CLI 仍多输出一行 timestamped `ERROR` 日志 |
+| **F** | 渲染队列（格式 / 停止 / 错误 / 满盘 / 多合成） | `c20770a` | **通过**（满盘**自动化受限**） | [#110](https://github.com/FELIXDAD/betterAfterEffects/issues/110)（已关）, [#133](https://github.com/FELIXDAD/betterAfterEffects/issues/133)（OPEN，布局裁切见 H） | PNG / 未压缩 TIFF（Tag 259=1）/ OpenEXR 均输出合法像素；在资源管理器中显示打开准确目录；非法路径报明确 OS 错误不崩；3000 帧渲染中途点击 Stop 精确停在 `1523/3000` 且磁盘恰 1523 帧；渲染中删层不崩且首末帧均为隔离快照像素；多合成依次排队渲染完成；**满盘项因非管理员会话无法挂载小容量 VHD 归类为自动化受限** |
+| **G** | 语言（`BAE_LANG=zh` / `en`） | `c20770a` | **失败** | [#136](https://github.com/FELIXDAD/betterAfterEffects/issues/136)（OPEN）, [#135](https://github.com/FELIXDAD/betterAfterEffects/issues/135)（OPEN） | `BAE_LANG=en` 无中文泄漏；`BAE_LANG=zh` 主菜单、工作区、欢迎框、渲染队列状态/报错、脏关闭弹窗与关于框均已中文化，但存在 **14 个未翻译英文命令名**（导致 `编辑 ▸ 撤消 New Layer`、历史记录与快捷键对话框中英混排）及 **3 个原始面板 ID**（`character`/`paragraph`/`tools`）（#136）；空渲染队列提示 `▸` 缺字成 `□`（#135） |
+| **H** | 150% DPI 清晰度与布局 | `c20770a` | **失败** | [#133](https://github.com/FELIXDAD/betterAfterEffects/issues/133)（OPEN）, [#134](https://github.com/FELIXDAD/betterAfterEffects/issues/134)（OPEN）, [#135](https://github.com/FELIXDAD/betterAfterEffects/issues/135)（OPEN） | 字体、图标、时间轴刻度与画布在 `@1.50x` 下清晰锐利；但存在三处明显布局/渲染问题：1) `Motion` 默认布局中 **Preview 播放控制栏被纵向腰斩**、**Render Queue 右侧按钮被裁出窄左栏**（#133）；2) **键盘快捷键对话框命令列被挤压至 ~45 px 强制断词，右半边大片空白**（#134）；3) 渲染队列空提示 `▸` 显示为缺字方块 `□`（#135） |
 
 > 结论汇总：本轮未发现 **`0.0.1-blocker`**（无崩溃、无卡死、无数据丢失、无核心主流程不可用）；共新提 **5 个 `bug`**（#117、#118 已修并关闭；**#126、#133、#134、#135、#136** 仍 OPEN），跨平台复测并验证 **12 个已有 issue 全部通过**（#106–#110、#112–#114、#116–#118、#124，其中在 Windows 上直接关闭 #124 并在其余已关 issue 下补发 Windows 复测记录），在 **#111** 与 **#128**（OPEN）补充了 Windows 实机现象。
 
@@ -56,7 +56,7 @@
 
 ## B. 新建合成、图层 ▸ 新建、菜单状态与快捷键
 
-**结论：失败（bug：[#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117)、[#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118)）**
+**结论：失败（bug：[#117](https://github.com/FELIXDAD/betterAfterEffects/issues/117)、[#118](https://github.com/FELIXDAD/betterAfterEffects/issues/118)）**
 
 通过用户桌面 Win32 `GetMenuItemInfoW` 枚举全部菜单文本、快捷键字符串与启用状态，并在界面中逐一执行新建合成、新建 9 种图层及主要快捷键，最后保存至 `E:\bae-test\acc2\b_9layers.bae` 并用 `bae.exe export-json` 核验数据结构。
 
@@ -67,8 +67,8 @@
 | 无合成时 `Layer ▸ New` 置灰 | **通过** | `GetMenuItemInfoW` 实测无合成时 `Layer ▸ New` 下全部 9 项均为 `OFF`（`MFS_DISABLED`）；新建合成后全部变为 `ON` |
 | 合成 / 动画 / 编辑 / 排列菜单可用状态 | **通过** | 无合成：`Trim Comp to Work Area`、`Add to Render Queue`、`Undo`/`Redo`、`Duplicate`/`Split Layer`、`Arrange` 4 项、`Animation` 5 项全 `OFF`；有合成无选中图层：`Composition` 3 项与 `Undo New Composition` 变为 `ON`，`Arrange`/`Duplicate`/`Split Layer`/`Animation` 仍 `OFF`；选中图层后：`Arrange` 4 项与 `Duplicate`/`Split Layer` 变为 `ON`，`Animation` 5 项因无选中关键帧仍 `OFF`（选中关键帧后的启用态将在 D 项一并复核） |
 | 主要快捷键功能验证 | **通过**（`Ctrl+Shift+S` 自动化受限） | `Ctrl+N`（新建合成）、`Ctrl+Y`（新建纯色）、`Ctrl+D`（复制图层）、`Ctrl+Z`（撤销）、`Ctrl+Shift+Z`（重做）、`Ctrl+M`（加入渲染队列）、`Ctrl+S`（弹出 `Save As` 对话框并落盘）、`Ctrl+O`（弹出 `Open Project` 对话框，取消后 `IsWindowEnabled=True`）均生效；**`Ctrl+Shift+S` 自动化/环境受限**：经用户桌面 `RegisterHotKey(MOD_CONTROL\|MOD_SHIFT, 'S')` 确认返回 `ERROR_HOTKEY_ALREADY_REGISTERED (1409)`，被本机系统级热键拦截（`Ctrl+Shift+Z`/`Ctrl+Shift+D`/`Ctrl+S` 均空闲），非 BAE 缺陷 |
-| 菜单显示快捷键与键位表一致性 | **失败（#117）** | 模块贡献项与 File 菜单项（`Ctrl+Alt+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` / `Ctrl+N` / `Ctrl+M` / `Ctrl+Y` / `Ctrl+D` / `Ctrl+Shift+D` / `F9` 等）显示一致；但 **`Edit ▸ Undo` 与 `Edit ▸ Redo` 未显示 `Ctrl+Z` / `Ctrl+Shift+Z`**（同属 Shell 硬编码的 `Keyboard Shortcuts`、`Exit` 及 `Window` 面板项也均缺失快捷键显示），已两次复现并提 [#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117) |
-| Window 菜单面板完整性 | **失败（#118）** | `Window` 菜单缺少 **`Render Queue`（渲染队列）** 入口（与 `render_queue.rs` 注释及 `Ctrl+Alt+0` 不一致），已提 [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118) |
+| 菜单显示快捷键与键位表一致性 | **失败（#117）** | 模块贡献项与 File 菜单项（`Ctrl+Alt+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` / `Ctrl+N` / `Ctrl+M` / `Ctrl+Y` / `Ctrl+D` / `Ctrl+Shift+D` / `F9` 等）显示一致；但 **`Edit ▸ Undo` 与 `Edit ▸ Redo` 未显示 `Ctrl+Z` / `Ctrl+Shift+Z`**（同属 Shell 硬编码的 `Keyboard Shortcuts`、`Exit` 及 `Window` 面板项也均缺失快捷键显示），已两次复现并提 [#117](https://github.com/FELIXDAD/betterAfterEffects/issues/117) |
+| Window 菜单面板完整性 | **失败（#118）** | `Window` 菜单缺少 **`Render Queue`（渲染队列）** 入口（与 `render_queue.rs` 注释及 `Ctrl+Alt+0` 不一致），已提 [#118](https://github.com/FELIXDAD/betterAfterEffects/issues/118) |
 
 ![图 2：通过 Layer ▸ New 创建全部 9 种图层后的主界面](./acceptance-round2-shots/02-b-all-layers.jpg)
 
@@ -92,7 +92,7 @@
 
 ![图 4：保存并重新打开工程后，4 个特殊图层名（中文 / 空格 / Emoji / 323 字符）全部保持](./acceptance-round2-shots/04-c-timeline-rename.jpg)
 
-> 附注（已有 issue 跨平台复现）：测试中同时复现了 [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106)（时间轴选中图层按 `Enter` 不能开始改名；双击进入改名框后未全选原名）和 [#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113)（重开工程后未自动打开合成），均已在原 issue 下补充 Windows 实机复现评论，未重复开 issue。
+> 附注（已有 issue 跨平台复现）：测试中同时复现了 [#106](https://github.com/FELIXDAD/betterAfterEffects/issues/106)（时间轴选中图层按 `Enter` 不能开始改名；双击进入改名框后未全选原名）和 [#113](https://github.com/FELIXDAD/betterAfterEffects/issues/113)（重开工程后未自动打开合成），均已在原 issue 下补充 Windows 实机复现评论，未重复开 issue。
 
 ---
 
@@ -118,7 +118,7 @@
 
 ## E. 保存和打开
 
-**结论：失败（新提 bug：[#126](https://github.com/FELIXDAD/betterAfterEffect/issues/126)；复现并评论已有 bug：[#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111)）**
+**结论：失败（新提 bug：[#126](https://github.com/FELIXDAD/betterAfterEffects/issues/126)；复现并评论已有 bug：[#111](https://github.com/FELIXDAD/betterAfterEffects/issues/111)）**
 
 本节全部用例均测于 `origin/dev` @ `fb08040`，结果均经 Win32 对话框检查、`IsWindowEnabled` 与 `bae.exe export-json` 核对。
 
@@ -133,8 +133,8 @@
 | 路径带中文 | 另存为 `E:\bae-test\acc2\中文目录\测试工程.bae` 与 `测试工程.baez`，均命令行重开并 `export-json` 核对 | **通过** | `.bae` 与 `.baez` 均保存与重开正常，标题无乱码，`export-json` 核验一致 |
 | 保存到只读目录 | 1) `icacls /deny` 只读目录 `Save As`：系统对话框提示无写权限；2) 打开只读目录内 `locked.baez` 与 `locked.bae` 后修改并 `Ctrl+S` | **通过** | BAE 弹出明确错误弹窗（`.baez` 报 `Could not save the project... 拒绝访问。 (os error 5)`，`.bae` 报 `os error 183`），不崩溃；点确定后 `IsWindowEnabled=True`，标题仍带 `*`，内存工程未丢失 |
 | 另存为覆盖已存在文件 — `.baez` | 另存为覆盖磁盘已有 1 层 `e_ow_clean.baez` | **通过** | 弹出系统 `确认另存为`（`是(Y)` / `否(N)`），按 `Y` 确认后 `export-json` 更新为新工程 2 层 |
-| 另存为覆盖已存在工程 — `.bae` | 另存为覆盖磁盘已有 `e_ow.bae` / `e_ow2.bae` 目录（复现两次） | **失败（#126）** | 因 `.bae` 在 Windows 上为普通文件夹，`IFileSaveDialog` 点击 `保存(S)` 后**直接进入该目录内部**（地址栏变为 `地址: E:\bae-test\acc2\e_ow2.bae`），既不提示覆盖也不写入，已提 [#126](https://github.com/FELIXDAD/betterAfterEffect/issues/126) |
-| 打开损坏文件（`.bae` / `.baez`） | 1) 在已打开工程中通过 `File ▸ Open` 打开非 zip 垃圾 `.baez`；2) 命令行分别启动截断 `project.json` 的 `.bae` 与损坏 `.baez` | **部分通过 / 复现 #111** | 均弹出错误弹窗、不崩溃、GUI 下原打开工程保持不受影响；但错误文案直接暴露底层 `zip: invalid Zip archive: Could not find EOCD` 与 serde 行列报错，已在 [#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111) 下补充 Windows 复现评论 |
+| 另存为覆盖已存在工程 — `.bae` | 另存为覆盖磁盘已有 `e_ow.bae` / `e_ow2.bae` 目录（复现两次） | **失败（#126）** | 因 `.bae` 在 Windows 上为普通文件夹，`IFileSaveDialog` 点击 `保存(S)` 后**直接进入该目录内部**（地址栏变为 `地址: E:\bae-test\acc2\e_ow2.bae`），既不提示覆盖也不写入，已提 [#126](https://github.com/FELIXDAD/betterAfterEffects/issues/126) |
+| 打开损坏文件（`.bae` / `.baez`） | 1) 在已打开工程中通过 `File ▸ Open` 打开非 zip 垃圾 `.baez`；2) 命令行分别启动截断 `project.json` 的 `.bae` 与损坏 `.baez` | **部分通过 / 复现 #111** | 均弹出错误弹窗、不崩溃、GUI 下原打开工程保持不受影响；但错误文案直接暴露底层 `zip: invalid Zip archive: Could not find EOCD` 与 serde 行列报错，已在 [#111](https://github.com/FELIXDAD/betterAfterEffects/issues/111) 下补充 Windows 复现评论 |
 | 命令行 `bae.exe <工程>` 打开 | 依次用命令行打开 `.bae`、`.baez`、空格路径与中文路径工程 | **通过** | 全部正常启动并加载对应工程 |
 
 ---
@@ -145,20 +145,20 @@
 
 | Issue | 标题摘要 | 复测提交 | Windows 复测结果 | Issue 状态与操作 | 实测步骤与证据 |
 |---|---|---|---|---|---|
-| [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106) | 时间轴 Enter 改名并全选原名 | `d23a328` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 选中 `Solid 2` 按 `Enter` 立即进入改名且全选原名；不按 Ctrl+A/Backspace 直接键入 `RenamedByEnter` 并回车，保存后 `export-json` 确认完整替换而非追加 |
-| [#107](https://github.com/FELIXDAD/betterAfterEffect/issues/107) | 时间轴 Shift+单击选连续范围 | `d23a328` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 5 个纯色图层，单击第 1 行后 `Shift+单击` 第 4 行并按 `Delete`，连续删除 4 层，仅剩 `Solid 1` |
-| [#108](https://github.com/FELIXDAD/betterAfterEffect/issues/108) | 复制/拆分后选中新图层 | `c20770a` | **通过** | 已关（已补 Windows 复测评论） | `Ctrl+D` 复制后新图层直接被选中（`Enter` 改名为 `DupSelected`）；在 0.1s / 0.2s 连续两次 `Ctrl+Shift+D` 拆分成功切出 3 段不重叠区间（`0..70560000` / `70560000..141120000` / `141120000..end`） |
-| [#109](https://github.com/FELIXDAD/betterAfterEffect/issues/109) | 修剪快捷键与 5 个中文菜单名 | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | Win32 `GetMenuItemInfoW` 确认英文 `Trim Comp to Work Area\tCtrl+Shift+X`、中文 `将合成修剪至工作区域\tCtrl+Shift+X`，中文菜单名与 AE 26 对齐 |
-| [#110](https://github.com/FELIXDAD/betterAfterEffect/issues/110) | 渲染队列空路径/目录/扩展名/帧范围 | `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 1) 空路径报 `Failed` + `Choose where to render: Output To is empty.`，未写当前目录；2) 无扩展名 `clip_[####]` 自动补 `.png`；3) 尾斜杠 `dir_slash\` 与已有文件夹 `existing_dir` 均写入文件夹内部（`Comp 1_0000.png`..）；4) 格式与扩展名不匹配（TIFF + `.png`）给出提示并写出合法 TIFF（`49 49 2a 00`）；5) `-10..500` 在 300 帧合成上自动钳制为 `0..299` |
-| [#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111) | 损坏/不存在工程的报错信息 | `c20770a` | **部分通过**（按规则保持打开） | **OPEN**（已补 Windows 复测评论） | GUI 中文报错弹窗已明确写出文件名与原因（不再透出 zip EOCD）；CLI 错误已含文件名，但 `bae export-json` 在 `bae export-json: error: ...` 之前仍多打印一行带时间戳的 `ERROR bae_platform::cli: ...` 日志 |
-| [#112](https://github.com/FELIXDAD/betterAfterEffect/issues/112) | 欢迎框打开时屏蔽快捷键 | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 冷启动欢迎框打开期间连续按 `Ctrl+N` / `Ctrl+Y` 均被拦截，关闭欢迎框后仍为空工程（EN/ZH 均验证） |
-| [#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113) | 重开工程恢复上次打开的合成 | `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 应用内 `New Project` → `Open Project` 与命令行 `bae.exe <工程>` 两种方式均自动恢复打开 `Comp 1`（时间轴与查看器均正常显示全部图层） |
-| [#114](https://github.com/FELIXDAD/betterAfterEffect/issues/114) | 同一帧连按 Ctrl+Y 生成唯一图层名 | `763eaad` / `d23a328` | **通过** | 已关（已补 Windows 复测评论） | 连续快速按 5 次 `Ctrl+Y`，生成唯一名称 `Solid 1`–`Solid 5` |
-| [#116](https://github.com/FELIXDAD/betterAfterEffect/issues/116) | 自绘控件 accesskit / Windows UIA 标签 | `d23a328` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | `orca computer get-app-state` 暴露 **132（EN）/ 135（ZH）** 个完整 UIA 控件；工具栏 18 工具、项目面板、时间轴、渲染队列、预览、属性均可读且 `--element-index` 可靠点击（控件清单见下） |
-| [#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117) | Shell 自有菜单项显示快捷键 | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | EN/ZH `HMENU` 均已显示 `Undo\tCtrl+Z` / `Redo\tCtrl+Shift+Z` / `Keyboard Shortcuts\tCtrl+Alt+'` / `Exit\tCtrl+Q` 及 `Window` 面板快捷键（`Ctrl+0`/`F3`/`Ctrl+5`/`Ctrl+3`/`Ctrl+Alt+0`/`Ctrl+2`） |
-| [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118) | Window 菜单加 Render Queue 及 `Ctrl+Alt+0` | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | `Window ▸ Render Queue\tCtrl+Alt+0` / `窗口 ▸ 渲染队列\tCtrl+Alt+0` 均存在；按 `Ctrl+Alt+0` 正常打开并聚焦渲染队列 |
-| [#124](https://github.com/FELIXDAD/betterAfterEffect/issues/124) | 锁定图层不可选中/编辑，查看器点击穿透 | `c20770a` | **通过** | **已由 Windows 复测关闭** | 锁定中间层 `Solid 2` 后，单击、`Shift+单击` 范围删除、`Ctrl+A` 全选删除均跳过锁定的 `Solid 2`；锁定上方两层（`Solid 3`/`Solid 2`）并在合成查看器中心点击，命中穿透至下方未锁定的 `Solid 1` |
-| [#128](https://github.com/FELIXDAD/betterAfterEffect/issues/128) | 无障碍同类控件标签重名 | `c20770a` | **复现确认** | **OPEN**（已补 Windows 评论） | 确认 Windows UIA 树同样存在 5× `Time-Vary Stopwatch`、时间轴开关不带图层名、多个 `Close Panel`/`Panel Menu`；另补充发现渲染队列 `Format`/`Output To`/`Frames` 控件 UIA `name` 为空，属性面板旋转圈数（`0x+`）误标为 `Points`（`点`） |
+| [#106](https://github.com/FELIXDAD/betterAfterEffects/issues/106) | 时间轴 Enter 改名并全选原名 | `d23a328` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 选中 `Solid 2` 按 `Enter` 立即进入改名且全选原名；不按 Ctrl+A/Backspace 直接键入 `RenamedByEnter` 并回车，保存后 `export-json` 确认完整替换而非追加 |
+| [#107](https://github.com/FELIXDAD/betterAfterEffects/issues/107) | 时间轴 Shift+单击选连续范围 | `d23a328` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 5 个纯色图层，单击第 1 行后 `Shift+单击` 第 4 行并按 `Delete`，连续删除 4 层，仅剩 `Solid 1` |
+| [#108](https://github.com/FELIXDAD/betterAfterEffects/issues/108) | 复制/拆分后选中新图层 | `c20770a` | **通过** | 已关（已补 Windows 复测评论） | `Ctrl+D` 复制后新图层直接被选中（`Enter` 改名为 `DupSelected`）；在 0.1s / 0.2s 连续两次 `Ctrl+Shift+D` 拆分成功切出 3 段不重叠区间（`0..70560000` / `70560000..141120000` / `141120000..end`） |
+| [#109](https://github.com/FELIXDAD/betterAfterEffects/issues/109) | 修剪快捷键与 5 个中文菜单名 | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | Win32 `GetMenuItemInfoW` 确认英文 `Trim Comp to Work Area\tCtrl+Shift+X`、中文 `将合成修剪至工作区域\tCtrl+Shift+X`，中文菜单名与 AE 26 对齐 |
+| [#110](https://github.com/FELIXDAD/betterAfterEffects/issues/110) | 渲染队列空路径/目录/扩展名/帧范围 | `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 1) 空路径报 `Failed` + `Choose where to render: Output To is empty.`，未写当前目录；2) 无扩展名 `clip_[####]` 自动补 `.png`；3) 尾斜杠 `dir_slash\` 与已有文件夹 `existing_dir` 均写入文件夹内部（`Comp 1_0000.png`..）；4) 格式与扩展名不匹配（TIFF + `.png`）给出提示并写出合法 TIFF（`49 49 2a 00`）；5) `-10..500` 在 300 帧合成上自动钳制为 `0..299` |
+| [#111](https://github.com/FELIXDAD/betterAfterEffects/issues/111) | 损坏/不存在工程的报错信息 | `c20770a` | **部分通过**（按规则保持打开） | **OPEN**（已补 Windows 复测评论） | GUI 中文报错弹窗已明确写出文件名与原因（不再透出 zip EOCD）；CLI 错误已含文件名，但 `bae export-json` 在 `bae export-json: error: ...` 之前仍多打印一行带时间戳的 `ERROR bae_platform::cli: ...` 日志 |
+| [#112](https://github.com/FELIXDAD/betterAfterEffects/issues/112) | 欢迎框打开时屏蔽快捷键 | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 冷启动欢迎框打开期间连续按 `Ctrl+N` / `Ctrl+Y` 均被拦截，关闭欢迎框后仍为空工程（EN/ZH 均验证） |
+| [#113](https://github.com/FELIXDAD/betterAfterEffects/issues/113) | 重开工程恢复上次打开的合成 | `c20770a` | **通过** | 已关（已补 Windows 复测评论） | 应用内 `New Project` → `Open Project` 与命令行 `bae.exe <工程>` 两种方式均自动恢复打开 `Comp 1`（时间轴与查看器均正常显示全部图层） |
+| [#114](https://github.com/FELIXDAD/betterAfterEffects/issues/114) | 同一帧连按 Ctrl+Y 生成唯一图层名 | `763eaad` / `d23a328` | **通过** | 已关（已补 Windows 复测评论） | 连续快速按 5 次 `Ctrl+Y`，生成唯一名称 `Solid 1`–`Solid 5` |
+| [#116](https://github.com/FELIXDAD/betterAfterEffects/issues/116) | 自绘控件 accesskit / Windows UIA 标签 | `d23a328` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | `orca computer get-app-state` 暴露 **132（EN）/ 135（ZH）** 个完整 UIA 控件；工具栏 18 工具、项目面板、时间轴、渲染队列、预览、属性均可读且 `--element-index` 可靠点击（控件清单见下） |
+| [#117](https://github.com/FELIXDAD/betterAfterEffects/issues/117) | Shell 自有菜单项显示快捷键 | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | EN/ZH `HMENU` 均已显示 `Undo\tCtrl+Z` / `Redo\tCtrl+Shift+Z` / `Keyboard Shortcuts\tCtrl+Alt+'` / `Exit\tCtrl+Q` 及 `Window` 面板快捷键（`Ctrl+0`/`F3`/`Ctrl+5`/`Ctrl+3`/`Ctrl+Alt+0`/`Ctrl+2`） |
+| [#118](https://github.com/FELIXDAD/betterAfterEffects/issues/118) | Window 菜单加 Render Queue 及 `Ctrl+Alt+0` | `763eaad` / `c20770a` | **通过** | 已关（已补 Windows 复测评论） | `Window ▸ Render Queue\tCtrl+Alt+0` / `窗口 ▸ 渲染队列\tCtrl+Alt+0` 均存在；按 `Ctrl+Alt+0` 正常打开并聚焦渲染队列 |
+| [#124](https://github.com/FELIXDAD/betterAfterEffects/issues/124) | 锁定图层不可选中/编辑，查看器点击穿透 | `c20770a` | **通过** | **已由 Windows 复测关闭** | 锁定中间层 `Solid 2` 后，单击、`Shift+单击` 范围删除、`Ctrl+A` 全选删除均跳过锁定的 `Solid 2`；锁定上方两层（`Solid 3`/`Solid 2`）并在合成查看器中心点击，命中穿透至下方未锁定的 `Solid 1` |
+| [#128](https://github.com/FELIXDAD/betterAfterEffects/issues/128) | 无障碍同类控件标签重名 | `c20770a` | **复现确认** | **OPEN**（已补 Windows 评论） | 确认 Windows UIA 树同样存在 5× `Time-Vary Stopwatch`、时间轴开关不带图层名、多个 `Close Panel`/`Panel Menu`；另补充发现渲染队列 `Format`/`Output To`/`Frames` 控件 UIA `name` 为空，属性面板旋转圈数（`0x+`）误标为 `Points`（`点`） |
 
 > **#116 Windows UIA 树主要控件名称抽样（`c20770a`，EN / ZH 均核对）**：
 > - **工具栏（18 项）**：`Home` / `Selection Tool` / `Hand Tool` / `Zoom Tool` / `Camera Tool` / `Pan Behind (Anchor Point) Tool` / `Rotation Tool` / `Shape Tool` / `Pen Tool` / `Type Tool` / `Brush Tool` / `Clone Stamp Tool` / `Eraser Tool` / `Roto Brush Tool` / `Puppet Position Pin Tool` 等。
@@ -171,7 +171,7 @@
 
 ## F. 渲染队列（测于 `c20770a`）
 
-**结论：通过（满盘项自动化受限；面板窄栏按钮裁切归入 H 项 [#133](https://github.com/FELIXDAD/betterAfterEffect/issues/133)）**
+**结论：通过（满盘项自动化受限；面板窄栏按钮裁切归入 H 项 [#133](https://github.com/FELIXDAD/betterAfterEffects/issues/133)）**
 
 本节全部按钮与输入框操作均通过 Windows UIA（`orca computer get-app-state` + `--element-index`）执行，输出文件均以 Python 解析图像头与中心像素核验。
 
@@ -193,7 +193,7 @@
 
 ## G. 语言（`BAE_LANG=zh` / `en`，测于 `c20770a`）
 
-**结论：失败（新提 bug：[#136](https://github.com/FELIXDAD/betterAfterEffect/issues/136)、[#135](https://github.com/FELIXDAD/betterAfterEffect/issues/135)）**
+**结论：失败（新提 bug：[#136](https://github.com/FELIXDAD/betterAfterEffects/issues/136)、[#135](https://github.com/FELIXDAD/betterAfterEffects/issues/135)）**
 
 分别以 `BAE_LANG=zh` 和 `BAE_LANG=en` 独立启动 `bae.exe`，逐一枚举 Win32 全部菜单项（`GetMenuItemInfoW`）、欢迎框、主工作区（Motion / Review / Agent）、空/完成/报错渲染队列、键盘快捷键对话框、关于框及脏关闭弹窗并核对 UIA 全树字符串。
 
@@ -201,8 +201,8 @@
 |---|---|---|
 | `BAE_LANG=en` 无中文泄漏 | **通过** | 全菜单（File / Edit / Composition / Layer / Animation / Window / Help）、欢迎框、三套工作区、渲染队列、快捷键对话框与关于框全部为英文，UIA 132 节点审计零 BAE 中文泄漏（仅 Windows 11 系统标题栏 chrome 为系统语言）（见图 8） |
 | `BAE_LANG=zh` 主界面与系统弹窗 | **通过** | 7 个顶层菜单与子菜单（`文件`/`编辑`/`合成`/`图层`/`动画`/`窗口`/`帮助`）、欢迎框（`欢迎使用 BAE` / `动效` / `审阅` / `Agent`）、时间轴与属性面板（见图 7）、渲染队列状态（`完成 · 2 · 0.0 s` / `在资源管理器中显示` / `重新渲染` / `移除` / `失败` / `请选择渲染输出位置：“输出到”为空。`）、脏关闭弹窗（`关闭前是否保存对“未命名项目”的更改？`）及关于框（`关于 BAE`）均已正确中文化 |
-| `BAE_LANG=zh` 命令名与面板 ID 漏译 | **失败（#136）** | UIA 树与 HMENU 审计发现 **14 个命令名未翻译**：导致 **`编辑 ▸ 撤消 New Layer`** 中英混排、`历史记录` 面板显示英文 `New Layer`、`键盘快捷键` 对话框大量中英夹杂（`Accept Proposal`、`Change Value`、`Change Values`、`Delete Keyframes`、`Delete Layers`、`Move Keyframes`、`Move Layer in Time`、`New Layer`、`Paste Keyframes`、`Reject Proposal`、`Reorder Layers`、`Set Parent`、`Set Work Area`、`Trim Layer`），另有 3 项透出原始面板 ID（`打开面板: character` / `paragraph` / `tools`）（见图 9），已提 [#136](https://github.com/FELIXDAD/betterAfterEffect/issues/136) |
-| 中文提示缺字方块 `□` | **失败（#135）** | 空渲染队列提示中的 `▸`（`U+25B8`）在中文（`用“合成 □ 添加到渲染队列”添加合成。`）与英文（`Composition □ Add to Render Queue.`）下均渲染为缺字豆腐块 `□`（见图 10），已提 [#135](https://github.com/FELIXDAD/betterAfterEffect/issues/135) |
+| `BAE_LANG=zh` 命令名与面板 ID 漏译 | **失败（#136）** | UIA 树与 HMENU 审计发现 **14 个命令名未翻译**：导致 **`编辑 ▸ 撤消 New Layer`** 中英混排、`历史记录` 面板显示英文 `New Layer`、`键盘快捷键` 对话框大量中英夹杂（`Accept Proposal`、`Change Value`、`Change Values`、`Delete Keyframes`、`Delete Layers`、`Move Keyframes`、`Move Layer in Time`、`New Layer`、`Paste Keyframes`、`Reject Proposal`、`Reorder Layers`、`Set Parent`、`Set Work Area`、`Trim Layer`），另有 3 项透出原始面板 ID（`打开面板: character` / `paragraph` / `tools`）（见图 9），已提 [#136](https://github.com/FELIXDAD/betterAfterEffects/issues/136) |
+| 中文提示缺字方块 `□` | **失败（#135）** | 空渲染队列提示中的 `▸`（`U+25B8`）在中文（`用“合成 □ 添加到渲染队列”添加合成。`）与英文（`Composition □ Add to Render Queue.`）下均渲染为缺字豆腐块 `□`（见图 10），已提 [#135](https://github.com/FELIXDAD/betterAfterEffects/issues/135) |
 | 附注：中文 Windows 默认启动语言 | 观察项 | 不设 `BAE_LANG` 直接启动 `bae.exe` 在中文 Windows 11（`zh-CN`）上默认进入英文界面（因 `apps/bae/src/i18n.rs` 仅读取 `BAE_LANG`/`LC_ALL`/`LC_MESSAGES`/`LANG`，未读取 Windows 系统 UI 语言），已在 #136 中附注说明 |
 
 ![图 7：BAE_LANG=zh 中文主界面（菜单、渲染队列、时间轴、属性、工作区栏）](./acceptance-round2-shots/07-g-lang-zh.jpg)
@@ -213,17 +213,17 @@
 
 ## H. 150% DPI 清晰度与布局（测于 `c20770a`）
 
-**结论：失败（新提 bug：[#133](https://github.com/FELIXDAD/betterAfterEffect/issues/133)、[#134](https://github.com/FELIXDAD/betterAfterEffect/issues/134)、[#135](https://github.com/FELIXDAD/betterAfterEffect/issues/135)）**
+**结论：失败（新提 bug：[#133](https://github.com/FELIXDAD/betterAfterEffects/issues/133)、[#134](https://github.com/FELIXDAD/betterAfterEffects/issues/134)、[#135](https://github.com/FELIXDAD/betterAfterEffects/issues/135)）**
 
 在 3840×2160、Windows 系统缩放 **150%**（`AppliedDPI=144`，窗口实际渲染 `2160×1320 @1.50x`）下检查文字与图标清晰度、默认布局边界、浮窗布局以及退出—重启后的窗口尺寸持久化。
 
 | 检查项 | 结果 | 实测现象与证据 |
 |---|---|---|
 | 字体、图标、画布与时间轴清晰度 | **通过** | 状态栏确认 `@1.50x` 原生高 DPI 渲染；中英文文字、工具栏矢量图标、时间轴刻度线与合成查看器边缘均锐利清晰，无拉伸模糊 |
-| 默认布局 — Preview 面板纵向裁切 | **失败（#133）** | 在默认 `Motion`（动效）工作区中，右上角 **Preview（预览）** 面板高度过小，整行播放按钮（首帧 / 上一帧 / 播放 / 下一帧 / 末帧 / `Loop`/`循环` 复选框）被下方 `Properties` 面板**纵向裁掉下半截**（EN/ZH 均稳定复现，见图 6、图 7、图 8、图 10），已提 [#133](https://github.com/FELIXDAD/betterAfterEffect/issues/133) |
-| 默认布局 — Render Queue 横向裁切 | **失败（#133）** | 渲染队列默认停靠在窄左栏，渲染完成或停止后单行排布状态与操作按钮超出右边界：`重新渲染` / `Render again` 被截断、`移除` / `Remove` 完全不可见（英文停止态连 `Show in Explorer` 也被裁切）；`Output To` 输入框右端贴边截断；英文左栏 `Project` + `Effect Controls` 占满后 `Render Queue` 页签被隐藏至 `>>`（见图 6、图 8），合并计入 [#133](https://github.com/FELIXDAD/betterAfterEffect/issues/133) |
-| 键盘快捷键对话框列宽崩溃 | **失败（#134）** | 按 `Ctrl+Alt+'` 打开键盘快捷键浮窗后，左侧命令名称列被压窄至 ~45 logical px，导致所有命令名和 ID 强制逐字断行（如 `Accept / Propos / al`、`BAE 帮 / 助`、`Delete / Keyfra / mes`），而对话框右半边 50% 以上区域完全空白（EN/ZH 均稳定复现，见图 9），已提 [#134](https://github.com/FELIXDAD/betterAfterEffect/issues/134) |
-| 缺字渲染 `▸` → `□` | **失败（#135）** | 空渲染队列提示中的 `▸`（`U+25B8`）在 EN/ZH 下均显示为缺字方块 `□`（见图 10），已提 [#135](https://github.com/FELIXDAD/betterAfterEffect/issues/135) |
+| 默认布局 — Preview 面板纵向裁切 | **失败（#133）** | 在默认 `Motion`（动效）工作区中，右上角 **Preview（预览）** 面板高度过小，整行播放按钮（首帧 / 上一帧 / 播放 / 下一帧 / 末帧 / `Loop`/`循环` 复选框）被下方 `Properties` 面板**纵向裁掉下半截**（EN/ZH 均稳定复现，见图 6、图 7、图 8、图 10），已提 [#133](https://github.com/FELIXDAD/betterAfterEffects/issues/133) |
+| 默认布局 — Render Queue 横向裁切 | **失败（#133）** | 渲染队列默认停靠在窄左栏，渲染完成或停止后单行排布状态与操作按钮超出右边界：`重新渲染` / `Render again` 被截断、`移除` / `Remove` 完全不可见（英文停止态连 `Show in Explorer` 也被裁切）；`Output To` 输入框右端贴边截断；英文左栏 `Project` + `Effect Controls` 占满后 `Render Queue` 页签被隐藏至 `>>`（见图 6、图 8），合并计入 [#133](https://github.com/FELIXDAD/betterAfterEffects/issues/133) |
+| 键盘快捷键对话框列宽崩溃 | **失败（#134）** | 按 `Ctrl+Alt+'` 打开键盘快捷键浮窗后，左侧命令名称列被压窄至 ~45 logical px，导致所有命令名和 ID 强制逐字断行（如 `Accept / Propos / al`、`BAE 帮 / 助`、`Delete / Keyfra / mes`），而对话框右半边 50% 以上区域完全空白（EN/ZH 均稳定复现，见图 9），已提 [#134](https://github.com/FELIXDAD/betterAfterEffects/issues/134) |
+| 缺字渲染 `▸` → `□` | **失败（#135）** | 空渲染队列提示中的 `▸`（`U+25B8`）在 EN/ZH 下均显示为缺字方块 `□`（见图 10），已提 [#135](https://github.com/FELIXDAD/betterAfterEffects/issues/135) |
 | 窗口尺寸持久化（冷启动 → 正常退出 → 热重启） | 通过（轻微小偏移） | 冷启动 `2160×1320 @1.50x` 退出时写入 `window.json`（`size: [1440.0, 880.0]`）；第 2 次启动恢复为 `2160×1290 @1.50x`（高度一次性减少 30 物理像素，约等于 20 pt 菜单栏高度），第 3 次启动稳定保持 `2160×1290 @1.50x` 且 `window.json` 仍为 `[1440.0, 880.0]`，无持续收缩循环 |
 
 ![图 9：键盘快捷键对话框左侧命令列被严重挤压断词（#134），且中文下残留未翻译英文命令名（#136）](./acceptance-round2-shots/09-gh-shortcuts-layout-i18n.jpg)
@@ -242,15 +242,15 @@
 
 | Issue | 状态 | 级别 | 所属项 | 概要 |
 |---|---|---|---|---|
-| [#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117) | **CLOSED**（已在 `763eaad` / `c20770a` 复测通过） | `bug` | B | Edit 菜单 Undo/Redo 及部分 Shell 自有菜单项缺少快捷键显示 |
-| [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118) | **CLOSED**（已在 `763eaad` / `c20770a` 复测通过） | `bug` | B | Window 菜单缺少 Render Queue 入口 |
-| [#126](https://github.com/FELIXDAD/betterAfterEffect/issues/126) | **OPEN** | `bug` | E | Windows 另存为覆盖已存在的 `.bae` 工程目录时，文件对话框直接进入该目录而非提示覆盖 |
-| [#133](https://github.com/FELIXDAD/betterAfterEffect/issues/133) | **OPEN** | `bug` | F / H | 150% DPI 默认布局裁切：预览面板播放控制栏被腰斩；渲染队列操作按钮在左栏被裁出右边界 |
-| [#134](https://github.com/FELIXDAD/betterAfterEffect/issues/134) | **OPEN** | `bug` | H | 键盘快捷键对话框左侧命令列被严重挤压断词，右侧留出大片空白 |
-| [#135](https://github.com/FELIXDAD/betterAfterEffect/issues/135) | **OPEN** | `bug` | G / H | 渲染队列空状态提示中的右三角符号 `▸`（U+25B8）渲染为缺字方块 `□` |
-| [#136](https://github.com/FELIXDAD/betterAfterEffect/issues/136) | **OPEN** | `bug` | G | `BAE_LANG=zh` 中文界面残留 14 个未翻译英文命令名及 3 个原始面板 ID |
-| [#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111) | **OPEN**（已有 issue，已补 Windows 复测评论） | `bug` | E | 损坏/不存在工程报错：GUI 已修复，CLI `export-json` 报错前仍多输出一行时间戳 `ERROR` 日志 |
-| [#128](https://github.com/FELIXDAD/betterAfterEffect/issues/128) | **OPEN**（已有 issue，已补 Windows 复测评论） | `bug` | 复测 | 无障碍同类控件标签重名；另补渲染队列 3 控件空名、属性旋转圈数误标为 `Points`/`点` |
+| [#117](https://github.com/FELIXDAD/betterAfterEffects/issues/117) | **CLOSED**（已在 `763eaad` / `c20770a` 复测通过） | `bug` | B | Edit 菜单 Undo/Redo 及部分 Shell 自有菜单项缺少快捷键显示 |
+| [#118](https://github.com/FELIXDAD/betterAfterEffects/issues/118) | **CLOSED**（已在 `763eaad` / `c20770a` 复测通过） | `bug` | B | Window 菜单缺少 Render Queue 入口 |
+| [#126](https://github.com/FELIXDAD/betterAfterEffects/issues/126) | **OPEN** | `bug` | E | Windows 另存为覆盖已存在的 `.bae` 工程目录时，文件对话框直接进入该目录而非提示覆盖 |
+| [#133](https://github.com/FELIXDAD/betterAfterEffects/issues/133) | **OPEN** | `bug` | F / H | 150% DPI 默认布局裁切：预览面板播放控制栏被腰斩；渲染队列操作按钮在左栏被裁出右边界 |
+| [#134](https://github.com/FELIXDAD/betterAfterEffects/issues/134) | **OPEN** | `bug` | H | 键盘快捷键对话框左侧命令列被严重挤压断词，右侧留出大片空白 |
+| [#135](https://github.com/FELIXDAD/betterAfterEffects/issues/135) | **OPEN** | `bug` | G / H | 渲染队列空状态提示中的右三角符号 `▸`（U+25B8）渲染为缺字方块 `□` |
+| [#136](https://github.com/FELIXDAD/betterAfterEffects/issues/136) | **OPEN** | `bug` | G | `BAE_LANG=zh` 中文界面残留 14 个未翻译英文命令名及 3 个原始面板 ID |
+| [#111](https://github.com/FELIXDAD/betterAfterEffects/issues/111) | **OPEN**（已有 issue，已补 Windows 复测评论） | `bug` | E | 损坏/不存在工程报错：GUI 已修复，CLI `export-json` 报错前仍多输出一行时间戳 `ERROR` 日志 |
+| [#128](https://github.com/FELIXDAD/betterAfterEffects/issues/128) | **OPEN**（已有 issue，已补 Windows 复测评论） | `bug` | 复测 | 无障碍同类控件标签重名；另补渲染队列 3 控件空名、属性旋转圈数误标为 `Points`/`点` |
 
 ### 3. 自动化 / 环境受限项
 

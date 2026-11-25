@@ -13,6 +13,7 @@ impl TimelinePanel {
         graph_body: Rect,
         key_rects: &[(Rect, KeyRef)],
         layer_rows: &[(Rect, PrimPath)],
+        prop_rows: &[(Rect, PrimPath, String)],
         comp_layers: &[PrimPath],
     ) {
         let pointer = ui.input(|i| i.pointer.interact_pos());
@@ -108,6 +109,28 @@ impl TimelinePanel {
                             "layer.set_parent",
                             json!({"layers": layers, "parent": target, "time": now}),
                         );
+                    }
+                }
+            }
+            Some(Drag::ExprWhip { whip, origin }) => {
+                if let Some(p) = pointer {
+                    ui.painter()
+                        .line_segment([origin, p], Stroke::new(1.5, color::ACCENT));
+                }
+                if released {
+                    self.drag = None;
+                    let now = session.lock().time(&info.path);
+                    let eval = self.eval.get(cx.resources);
+                    if let Some(p) = pointer {
+                        if let Some((_, path, attr)) =
+                            prop_rows.iter().find(|(r, ..)| r.contains(p))
+                        {
+                            crate::expr::link(cx, eval, &whip, path, Some(attr), now);
+                        } else if let Some((_, layer)) =
+                            layer_rows.iter().find(|(r, _)| r.contains(p))
+                        {
+                            crate::expr::link(cx, eval, &whip, layer, None, now);
+                        }
                     }
                 }
             }

@@ -17,6 +17,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import merge_train as mt  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools", "ci"))
+import affected  # noqa: E402  (tools/ci/affected.py of this checkout)
+sys.path.pop(0)
+
+# A small fake workspace: fx depends on render; ui and other stand alone. docs/ui/menu.md
+# is read by ui's sources (string literal), so it counts as a ui change.
+FAKE_GRAPH = (affected,
+              {"crates/fx": "fx", "crates/render": "render", "crates/ui": "ui", "crates/other": "other"},
+              {"fx": {"render"}, "render": set(), "ui": set(), "other": set()},
+              ["crates"], [], {"ui": {"docs/ui/menu.md"}})
 
 
 def run(cwd, *cmd):
@@ -34,8 +44,11 @@ class Base(unittest.TestCase):
         mt.CFG["cargo_target_dir"] = os.path.join(self.tmp, "target")
         mt.CFG["runner_dir"] = os.path.join(self.tmp, "repo")
         mt.ARGS = mt.argparse.Namespace(dry_run=False, once=True, simulate=[], ignore_draft=False)
+        self._graph = mock.patch.object(mt, "crate_graph", return_value=FAKE_GRAPH)
+        self._graph.start()
 
     def tearDown(self):
+        self._graph.stop()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def make_repo(self):
@@ -84,7 +97,7 @@ class TomlTest(unittest.TestCase):
         self.assertTrue(cfg["checks"]["full"])
         leaders = mt.load_toml(os.path.join(HERE, "leaders.toml"))
         self.assertIn(leaders["default"], leaders["leaders"])
-        for rule in leaders["rules"]:
+        for rule in leaders.get("rules", []):
             self.assertIn(rule["leader"], leaders["leaders"])
 
 
@@ -97,16 +110,16 @@ class OverlapTest(Base):
     def test_overlap_and_ignores(self):
         repo = self.make_repo()
         run(repo, "git", "checkout", "-qb", "feat")
-        pr = self.commit(repo, {"a.txt": "pr\n", "docs/x.md": "pr\n", "Cargo.lock": "pr\n"}, "pr")
+        pr = self.commit(repo, {"crates/ui/a.rs": "pr\n", "docs/x.md": "pr\n", "Cargo.lock": "pr\n"}, "pr")
         run(repo, "git", "checkout", "-q", "dev")
-        self.commit(repo, {"docs/x.md": "dev\n", "Cargo.lock": "dev\n", "b.txt": "b\n"}, "dev1")
+        self.commit(repo, {"docs/x.md": "dev\n", "Cargo.lock": "dev\n", "crates/other/b.rs": "b\n"}, "dev1")
         run(repo, "git", "push", "-q", "origin", "dev")
         run(repo, "git", "fetch", "-q", "origin")
         self.assertEqual(mt.overlap(pr), [])  # docs/ and Cargo.lock never count
-        self.commit(repo, {"a.txt": "dev\n"}, "dev2")
+        self.commit(repo, {"crates/ui/a.rs": "dev\n"}, "dev2")
         run(repo, "git", "push", "-q", "origin", "dev")
         run(repo, "git", "fetch", "-q", "origin")
-        self.assertEqual(mt.overlap(pr), ["a.txt"])
+        self.assertEqual(mt.overlap(pr), ["crates/ui/a.rs"])
 
 
 class RunnerTest(Base):
@@ -170,7 +183,7 @@ class DecideTest(Base):
         with mock.patch.object(mt, "check_runs", return_value=runs(**ok)):
             self.assertEqual(mt.evaluate_checks("s")[0], "green")
         for bad, want in ((("completed", "skipped"), "pending"), (("in_progress", None), "pending"),
-                          (("completed", "cancelled"), "failed"), (("completed", "failure"), "failed")):
+                          (("completed", "cancelled"), "pending"), (("completed", "failure"), "failed")):
             st = dict(ok)
             st[names[-1]] = bad
             with mock.patch.object(mt, "check_runs", return_value=runs(**st)):
@@ -209,7 +222,7 @@ class ProcessTest(Base):
         merge = [c for c in calls if c[:3] == ["gh", "pr", "merge"]][0]
         self.assertIn("--squash", merge)
         self.assertIn("--match-head-commit", merge)
-        self.assertEqual(send.call_args[0][0], "09fe9cc0")
+        self.assertEqual(send.call_args[0][0], mt.LEADERS["default"])
         self.assertIn("#7", send.call_args[0][1])
         self.assertEqual(st["merged"][-1]["dev"], "abc1234")
 
@@ -230,7 +243,7 @@ class ProcessTest(Base):
             mt.process_head(pr(), {})
         rl.assert_called_once_with(7, "merge-ready")
         self.assertIn("full / Windows x64：failure http://x", cm.call_args[0][1])
-        self.assertEqual([c[0][0] for c in send.call_args_list], ["orca_session_id:aaaa", "ca3a6511"])
+        self.assertEqual([c[0][0] for c in send.call_args_list], ["orca_session_id:aaaa", mt.LEADERS["default"]])
 
     def test_wait_mergeable_unknown_is_not_failure(self):
         with mock.patch.object(mt, "decide", return_value=("wait-mergeable", "UNKNOWN", {})), \
@@ -263,10 +276,12 @@ class ProcessTest(Base):
     def test_leader_rules(self):
         milan = {"host": "米兰Mac", "name": "bae-13-ui-design"}
         local12 = {"host": "local", "name": "bae-12-menus"}
-        self.assertEqual(mt.leader_for(pr(headRefName="ui/design"), milan), "milan")
-        self.assertEqual(mt.leader_for(pr(headRefName="fix/226"), local12), "09fe9cc0")
-        self.assertEqual(mt.leader_for(pr(headRefName="ui/x"), None), "09fe9cc0")
-        self.assertEqual(mt.leader_for(pr(headRefName="core/x"), None), "ca3a6511")
+        # One leader since 2026-11-24: no routing rules, everything goes to the default.
+        lead = mt.LEADERS["default"]
+        self.assertEqual(mt.leader_for(pr(headRefName="ui/design"), milan), lead)
+        self.assertEqual(mt.leader_for(pr(headRefName="fix/226"), local12), lead)
+        self.assertEqual(mt.leader_for(pr(headRefName="ui/x"), None), lead)
+        self.assertEqual(mt.leader_for(pr(headRefName="core/x"), None), lead)
 
 
 class ConflictRepairTest(Base):
@@ -386,6 +401,9 @@ class UnstickTest(Base):
         verdicts = {1: ("wait-ci", "x", {}), 2: ("wait-ci", "y", {}), 3: ("merge", "ok", {})}
         st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=31)).isoformat()}
         with mock.patch.object(mt, "decide", side_effect=lambda p, s: verdicts[p["number"]]), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "changed_files", side_effect=lambda sha: {
+                    {"h1": "crates/ui/a.rs", "h2": "crates/other/b.rs", "h3": "crates/fx/c.rs"}[sha]}), \
                 mock.patch.object(mt, "do_merge", return_value=True) as merge:
             self.assertTrue(mt.skip_ahead(self.queue(), st))
         self.assertEqual(merge.call_args[0][0]["number"], 3)
@@ -421,6 +439,91 @@ class UnstickTest(Base):
         self.assertEqual(sk.call_count, 2)
 
 
+class CancelledTest(Base):
+    NAME = "full / macOS arm64"
+
+    def runs(self, cid, minutes_ago=5):
+        done = (mt.now_utc() - mt.dt.timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return {self.NAME: {"id": cid, "name": self.NAME, "status": "completed",
+                            "conclusion": "cancelled", "completed_at": done, "html_url": "u"}}
+
+    def rerun(self, ps, runs, rc=0, infra=False):
+        calls = []
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return (rc, "", "busy")
+        with mock.patch.object(mt, "check_runs", return_value=runs), \
+                mock.patch.object(mt, "runner_not_acquired", return_value=infra), \
+                mock.patch.object(mt, "sh", side_effect=fake_sh):
+            why = mt.rerun_cancelled(pr(), ps, [self.NAME])
+        return why, calls
+
+    def test_first_cancel_reruns_job_second_cancel_fails(self):
+        ps = {}
+        why, calls = self.rerun(ps, self.runs(101))
+        self.assertIsNone(why)
+        self.assertEqual(calls[0][:4], ["gh", "api", "-X", "POST"])
+        self.assertTrue(calls[0][4].endswith("/actions/jobs/101/rerun"))
+        why, calls = self.rerun(ps, self.runs(101))     # same cancelled run: just wait
+        self.assertIsNone(why)
+        self.assertEqual(calls, [])
+        why, calls = self.rerun(ps, self.runs(102))     # the rerun was cancelled too
+        self.assertIn("2 次", why)
+        self.assertEqual(calls, [])
+
+    def test_no_runner_cancels_are_rerun_without_counting(self):
+        ps = {}
+        for cid in (201, 202, 203):  # GitHub capacity: never counted toward the limit
+            why, calls = self.rerun(ps, self.runs(cid), infra=True)
+            self.assertIsNone(why)
+            self.assertEqual(len(calls), 1)
+        why, calls = self.rerun(ps, self.runs(203), infra=True)  # same run: wait
+        self.assertEqual(calls, [])
+        self.rerun(ps, self.runs(204))                             # a real cancel: rerun, 1/2
+        why, _ = self.rerun(ps, self.runs(205))                    # second real cancel: fail
+        self.assertIn("2 次", why)
+
+    def test_runner_not_acquired_reads_annotations(self):
+        notes = [{"message": "The job was not acquired by Runner of type hosted even after multiple attempts"}]
+        with mock.patch.object(mt, "gh_json", return_value=notes):
+            self.assertTrue(mt.runner_not_acquired(1))
+        with mock.patch.object(mt, "gh_json", return_value=[{"message": "Canceling since a higher priority waiting request exists"}]):
+            self.assertFalse(mt.runner_not_acquired(1))
+
+    def test_fresh_cancel_waits_for_replacing_run(self):
+        why, calls = self.rerun({}, self.runs(101, minutes_ago=0))
+        self.assertIsNone(why)
+        self.assertEqual(calls, [])
+
+    def test_rerun_refused_is_retried_next_pass(self):
+        ps = {}
+        why, calls = self.rerun(ps, self.runs(101), rc=1)  # run still has other jobs going
+        self.assertIsNone(why)
+        self.assertNotIn(101, ps["cancelled_runs"].get(self.NAME, []))
+        why, calls = self.rerun(ps, self.runs(101), rc=0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(ps["cancelled_runs"][self.NAME], [101])
+
+    def test_process_head_does_not_fail_on_cancel(self):
+        checks = [(self.NAME, "cancelled", "u"), ("full / Windows x64", "success", "u")]
+        with mock.patch.object(mt, "decide", return_value=("wait-ci", "等 CI", {"checks": checks})), \
+                mock.patch.object(mt, "rerun_cancelled", return_value=None) as rr, \
+                mock.patch.object(mt, "fail_pr") as fail, \
+                mock.patch.object(mt, "nudge_ci") as nudge:
+            self.assertFalse(mt.process_head(pr(), {}))
+        rr.assert_called_once()
+        fail.assert_not_called()
+        nudge.assert_not_called()
+
+    def test_new_head_resets_cancel_count(self):
+        st = {"prs": {"7": {"head": "old", "since": mt.now_utc().isoformat(),
+                            "cancelled_runs": {self.NAME: [1]}}}}
+        with mock.patch.object(mt, "decide", return_value=("wait-ci", "x", {"checks": []})):
+            mt.process_head(pr(headRefOid="new"), st)
+        self.assertNotIn("cancelled_runs", st["prs"]["7"])
+
+
 class BoardTest(Base):
     def test_handoff_section_preserved(self):
         old = "x\n%s\n谁在做什么：A 在写 B\n%s\ny" % (mt.HANDOFF_START, mt.HANDOFF_END)
@@ -443,6 +546,202 @@ class BoardTest(Base):
         self.assertIn("c\\|d", body)
         self.assertIn("#9 Ready", body)
         self.assertEqual(body.count(mt.HANDOFF_START), 1)
+
+
+class SkipAheadOverlapTest(Base):
+    def test_ready_pr_sharing_files_with_head_does_not_jump(self):
+        repo = self.make_repo()
+        heads = {}
+        for name, files in (("head", {"crates/fx/lib.rs": "h\n", "docs/a.md": "h\n"}),
+                            ("same", {"crates/fx/lib.rs": "s\n"}),
+                            ("docs", {"docs/a.md": "d\n", "Cargo.lock": "d\n"}),
+                            ("other", {"crates/other/x.rs": "o\n"})):
+            run(repo, "git", "checkout", "-q", "-b", name, "dev")
+            heads[name] = self.commit(repo, files, name)
+        run(repo, "git", "checkout", "-q", "dev")
+        q = [pr(number=1, headRefName="head", headRefOid=heads["head"]),
+             pr(number=2, headRefName="same", headRefOid=heads["same"]),
+             pr(number=3, headRefName="docs", headRefOid=heads["docs"]),
+             pr(number=4, headRefName="other", headRefOid=heads["other"])]
+        old = (mt.now_utc() - mt.dt.timedelta(minutes=45)).isoformat()
+        with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "do_merge", return_value=True) as merge:
+            st = {"head_pr": 1, "head_since": old}
+            self.assertTrue(mt.skip_ahead(q, st))
+            # #2 shares crates/fx/lib.rs with the head: waits. #3 only shares docs/ and
+            # Cargo.lock, which never count: it may go first.
+            self.assertEqual(merge.call_args[0][0]["number"], 3)
+            self.assertEqual(st["prs"]["2"]["decision"], "wait-head")
+            self.assertIn("crates/fx/lib.rs", st["prs"]["2"]["detail"])
+            merge.reset_mock()
+            self.assertTrue(mt.skip_ahead([q[0], q[1], q[3]], {"head_pr": 1, "head_since": old}))
+            self.assertEqual(merge.call_args[0][0]["number"], 4)
+            merge.reset_mock()
+            self.assertFalse(mt.skip_ahead(q[:2], {"head_pr": 1, "head_since": old}))
+            merge.assert_not_called()
+
+
+class CrateRelationTest(Base):
+    """Overlap by crate dependency: #303 changed bae-render's LayerDependency, #299 built
+    that struct in bae-effects; no shared file, but together dev did not compile."""
+
+    def rel(self, a, b):
+        return mt.crate_relation(set(a), set(b))
+
+    def test_dependency_in_either_direction_is_related(self):
+        self.assertIn("fx 依赖 render", self.rel(["crates/fx/src/a.rs"], ["crates/render/src/layer.rs"]))
+        self.assertIn("fx 依赖 render", self.rel(["crates/render/src/layer.rs"], ["crates/fx/src/a.rs"]))
+        self.assertIn("同一个 crate：ui", self.rel(["crates/ui/a.rs"], ["crates/ui/b.rs"]))
+
+    def test_unrelated_crates_docs_tools_github_are_not(self):
+        self.assertEqual(self.rel(["crates/fx/a.rs"], ["crates/ui/b.rs"]), "")
+        for other in (["docs/spec/x.md"], ["tools/merge-train/merge_train.py"],
+                      [".github/workflows/ci.yml"], ["Cargo.lock"], ["README.md"]):
+            self.assertEqual(self.rel(["crates/fx/a.rs"], other), "", other)
+
+    def test_docs_read_by_code_and_root_manifest_count(self):
+        self.assertIn("ui", self.rel(["docs/ui/menu.md"], ["crates/ui/a.rs"]))
+        self.assertIn("所有 crate", self.rel(["Cargo.toml"], ["crates/other/a.rs"]))
+
+    def test_unknown_graph_is_treated_as_related(self):
+        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")):
+            self.assertIn("算不出来", self.rel(["crates/fx/a.rs"], ["crates/ui/b.rs"]))
+
+    def test_overlap_reports_crate_dependency_without_shared_files(self):
+        repo = self.make_repo()
+        run(repo, "git", "checkout", "-qb", "feat")
+        pr_head = self.commit(repo, {"crates/fx/src/stack.rs": "uses LayerDependency\n"}, "pr")
+        run(repo, "git", "checkout", "-q", "dev")
+        self.commit(repo, {"crates/render/src/layer.rs": "LayerDependency changed\n"}, "dev")
+        run(repo, "git", "push", "-q", "origin", "dev")
+        run(repo, "git", "fetch", "-q", "origin")
+        # File-level only (the repo default since 2026-11-24): different files, no overlap.
+        with mock.patch.dict(mt.CFG["merge"], {"relate_crates": False}):
+            self.assertEqual(mt.overlap(pr_head), [])
+        with mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
+            over = mt.overlap(pr_head)
+        self.assertEqual(len(over), 1)
+        self.assertIn("fx 依赖 render", over[0])
+        # After update-branch the merge-base is dev's head: nothing to relate any more,
+        # even if the graph cannot be computed (no update-branch loop).
+        run(repo, "git", "checkout", "-q", "feat")
+        run(repo, "git", "merge", "-q", "--no-edit", "origin/dev")
+        merged = run(repo, "git", "rev-parse", "HEAD")
+        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")), \
+                mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
+            self.assertEqual(mt.overlap(merged), [])
+
+    def test_related_pr_does_not_skip_ahead(self):
+        q = [pr(number=1, headRefOid="h1"), pr(number=2, headRefOid="h2"), pr(number=3, headRefOid="h3")]
+        files = {"h1": {"crates/render/src/layer.rs"}, "h2": {"crates/fx/src/a.rs"}, "h3": {"crates/ui/a.rs"}}
+        st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=40)).isoformat()}
+        with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "changed_files", side_effect=lambda sha: files[sha]), \
+                mock.patch.object(mt, "do_merge", return_value=True) as merge:
+            self.assertTrue(mt.skip_ahead(q, st))
+        self.assertEqual(merge.call_args[0][0]["number"], 3)
+        self.assertIn("fx 依赖 render", st["prs"]["2"]["detail"])
+
+
+class DevCancelledTest(Base):
+    def run_check(self, st, conclusion="cancelled", minutes_ago=5, rc=0, cid=900):
+        done = (mt.now_utc() - mt.dt.timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        latest = {n: {"id": cid, "name": n, "status": "completed", "conclusion": conclusion,
+                      "completed_at": done, "html_url": "u"} for n in mt.CFG["checks"]["full"][:1]}
+        calls = []
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return (rc, "", "run in progress")
+        with mock.patch.object(mt, "sh", side_effect=fake_sh):
+            mt.rerun_dev_cancelled(st, "d" * 40, latest)
+        return [c for c in calls if c[:4] == ["gh", "api", "-X", "POST"]]
+
+    def test_cancelled_dev_job_is_rerun_until_it_has_a_result(self):
+        st = {}
+        self.assertEqual(len(self.run_check(st)), 1)          # rerun
+        self.assertEqual(self.run_check(st), [])               # same job: already rerun
+        self.assertEqual(len(self.run_check(st, cid=901)), 1)  # cancelled again: rerun again
+        self.assertEqual(self.run_check(st, conclusion="success", cid=902), [])
+
+    def test_waits_for_grace_and_retries_when_refused(self):
+        st = {}
+        self.assertEqual(self.run_check(st, minutes_ago=0), [])
+        self.assertEqual(len(self.run_check(st, rc=1)), 1)  # GitHub refused (run still going)
+        self.assertEqual(len(self.run_check(st, rc=0)), 1)  # retried next pass
+        self.assertEqual(self.run_check(st), [])
+
+    def test_check_dev_red_reruns_before_ack_shortcut(self):
+        with mock.patch.object(mt, "git", return_value="d" * 40 + "\n"), \
+                mock.patch.object(mt, "check_runs", return_value={}), \
+                mock.patch.object(mt, "red_ack_get", return_value="d" * 40), \
+                mock.patch.object(mt, "rerun_dev_cancelled") as rr:
+            self.assertFalse(mt.check_dev_red({}))
+        rr.assert_called_once()
+
+
+class AutoResumeTest(Base):
+    def latest(self, conclusion="success", status="completed"):
+        return {n: {"id": i, "name": n, "status": status, "conclusion": conclusion,
+                    "completed_at": "2026-11-24T00:00:00Z", "html_url": "u"}
+                for i, n in enumerate(mt.CFG["checks"]["full"])}
+
+    def check(self, st, sha, latest, ack=""):
+        with mock.patch.object(mt, "git", return_value=sha + "\n"), \
+                mock.patch.object(mt, "check_runs", return_value=latest), \
+                mock.patch.object(mt, "board_issue_number", return_value=250), \
+                mock.patch.object(mt, "sh", return_value=(0, "", "")) as sh, \
+                mock.patch.object(mt, "send") as send:
+            mt.check_dev_red(st)
+        return sh, send
+
+    def test_red_dev_pauses_and_green_dev_resumes_with_one_line(self):
+        st = {}
+        red, green = "a" * 40, "b" * 40
+        _, send = self.check(st, red, self.latest("failure"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        self.assertEqual(mt.auto_paused_sha(), red)
+        self.assertEqual(send.call_count, len(mt.LEADERS["pause_notify"]))
+        # dev still running on the fix: stay paused
+        _, send = self.check(st, green, self.latest(None, "in_progress"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
+        # the fix is green: resume, drop the label, tell both leaders in one line
+        sh, send = self.check(st, green, self.latest("success"))
+        self.assertFalse(os.path.exists(mt.pause_file()))
+        self.assertEqual(mt.auto_paused_sha(), "")
+        self.assertTrue(any("--remove-label" in c[0][0] for c in sh.call_args_list))
+        self.assertEqual([c[0][0] for c in send.call_args_list], mt.LEADERS["pause_notify"])
+        self.assertIn("自动恢复", send.call_args[0][1])
+        self.assertIn(green[:7], send.call_args[0][1])
+
+    def test_manual_pause_is_not_lifted(self):
+        mt.ARGS.reason = "等 #123"
+        with mock.patch.object(mt, "board_issue_number", return_value=None):
+            mt.cmd_pause()
+        sh, send = self.check({}, "c" * 40, self.latest("success"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
+
+    def test_manual_pause_over_auto_pause_wins(self):
+        st = {}
+        self.check(st, "a" * 40, self.latest("failure"))
+        mt.ARGS.reason = "人为暂停"
+        with mock.patch.object(mt, "board_issue_number", return_value=None):
+            mt.cmd_pause()
+        _, send = self.check(st, "b" * 40, self.latest("success"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
+
+    def test_dry_run_only_reports(self):
+        st = {}
+        self.check(st, "a" * 40, self.latest("failure"))
+        mt.ARGS.dry_run = True
+        sh, send = self.check(st, "b" * 40, self.latest("success"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
 
 
 if __name__ == "__main__":

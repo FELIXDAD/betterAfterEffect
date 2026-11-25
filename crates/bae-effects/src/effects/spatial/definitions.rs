@@ -110,7 +110,7 @@ fn shadow() -> DefBuilder {
 }
 
 impl DefBuilder {
-    fn angle(self, id: u32, en: &str, zh: &str, degrees: f64) -> Self {
+    pub(crate) fn angle(self, id: u32, en: &str, zh: &str, degrees: f64) -> Self {
         param(self, id, en, zh, ParamKind::Angle, Value::Float(degrees))
     }
 }
@@ -259,11 +259,18 @@ fn glow() -> DefBuilder {
     )
 }
 
-pub(super) fn entries() -> [Builtin; 6] {
-    let mosaic = DefBuilder::new("ADBE Mosaic", "Mosaic", "Stylize")
-        .int(1, "Horizontal Blocks", "水平块", 10, [1, 4000])
-        .int(2, "Vertical Blocks", "垂直块", 10, [1, 4000])
-        .checkbox(3, "Sharp Colors", "锐化颜色", false);
+fn make((kind, b, id, zh): (Kind, DefBuilder, &str, &str)) -> Builtin {
+    let (mut def, names) = b.build();
+    if kind == Kind::Radial {
+        let control = &mut def.params[0];
+        control.flags.hidden = true;
+        control.flags.cannot_animate = true;
+        control.flags.custom_ui = true;
+    }
+    rust_builtin((Arc::new(Spatial { kind, def }), names), id, zh, &[id, zh])
+}
+
+pub(crate) fn blur_sharpen() -> [Builtin; 3] {
     [
         (
             Kind::Directional,
@@ -283,19 +290,23 @@ pub(super) fn entries() -> [Builtin; 6] {
             "定向模糊",
         ),
         (Kind::Radial, radial(), "radial-blur", "径向模糊"),
-        (Kind::Mosaic, mosaic, "mosaic", "马赛克"),
-        (Kind::Glow, glow(), "glow", "发光"),
-        (Kind::Shadow, shadow(), "drop-shadow", "投影"),
         (Kind::Unsharp, unsharp(), "unsharp-mask", "钝化蒙版"),
     ]
-    .map(|(kind, b, id, zh)| {
-        let (mut def, names) = b.build();
-        if kind == Kind::Radial {
-            let control = &mut def.params[0];
-            control.flags.hidden = true;
-            control.flags.cannot_animate = true;
-            control.flags.custom_ui = true;
-        }
-        rust_builtin((Arc::new(Spatial { kind, def }), names), id, zh, &[id, zh])
-    })
+    .map(make)
+}
+
+pub(crate) fn stylize() -> [Builtin; 2] {
+    let mosaic = DefBuilder::new("ADBE Mosaic", "Mosaic", "Stylize")
+        .int(1, "Horizontal Blocks", "水平块", 10, [1, 4000])
+        .int(2, "Vertical Blocks", "垂直块", 10, [1, 4000])
+        .checkbox(3, "Sharp Colors", "锐化颜色", false);
+    [
+        (Kind::Mosaic, mosaic, "mosaic", "马赛克"),
+        (Kind::Glow, glow(), "glow", "发光"),
+    ]
+    .map(make)
+}
+
+pub(crate) fn perspective() -> Builtin {
+    make((Kind::Shadow, shadow(), "drop-shadow", "投影"))
 }

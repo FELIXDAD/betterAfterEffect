@@ -1204,7 +1204,8 @@ pub(crate) fn delete_prims(
     Ok(())
 }
 
-/// Attributes [`SetLayerAttr`] writes: the layer switches, quality and label.
+/// Attributes [`SetLayerAttr`] writes: the layer switches, quality, label and
+/// blending mode.
 pub const LAYER_SWITCH_ATTRS: &[&str] = &[
     "shy",
     "locked",
@@ -1218,6 +1219,7 @@ pub const LAYER_SWITCH_ATTRS: &[&str] = &[
     "three_d",
     "quality",
     "label",
+    "blend_mode",
 ];
 
 pub struct SetLayerAttr;
@@ -1229,7 +1231,8 @@ pub struct SetLayerAttrParams {
     /// One of the layer switches (`shy`, `locked`, `enabled` = Video,
     /// `effects_enabled` = Effect (fx), `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
     /// `adjustment_layer`, `three_d`), `quality` (`best` / `draft` /
-    /// `wireframe`) or `label` (0 = none, 1–16 = AE's label colours).
+    /// `wireframe`), `label` (0 = none, 1–16 = AE's label colours) or `blend_mode`
+    /// (AE's 38 modes, `multiply` …).
     pub attr: String,
     pub value: Value,
 }
@@ -1244,7 +1247,7 @@ impl Command for SetLayerAttr {
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         if !LAYER_SWITCH_ATTRS.contains(&p.attr.as_str()) {
             return Err(fail(format!(
-                "layer.set_attr sets switches, quality and label, not `{}`",
+                "layer.set_attr sets switches, quality, label and blending mode, not `{}`",
                 p.attr
             )));
         }

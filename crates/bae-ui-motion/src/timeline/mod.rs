@@ -46,24 +46,30 @@ pub(crate) use markers::MarkerDialog;
 pub(crate) use markers::parse_timecode;
 pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
+pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    LAYER_MENU, Related, catalog_entry, invert_layer_selection, rove_state, select_children,
-    select_label_group, select_related,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
 };
-pub(crate) use menus::{key_menu, keyframe_menu};
 
-const ROW_H: f32 = 19.0;
+/// Row height and switch cell width: AE 26's (17 and about 15 points).
+const ROW_H: f32 = 17.0;
 const TABS_H: f32 = 22.0;
 const HEAD_H: f32 = 34.0;
 const COLS_H: f32 = 20.0;
 const FOOT_H: f32 = 22.0;
-const SW: f32 = 18.0;
+const SW: f32 = 15.0;
+/// Rows an expression field grows to.
+const MAX_EXPR_LINES: usize = 30;
+/// Left inset of the Parent & Link title and pick whip.
+const PARENT_PAD: f32 = 6.0;
 /// Left padding of the time graph so frame 0 is not on the edge.
 const PAD: f32 = 8.0;
 
 /// Outline column x offsets (relative to the panel's left edge).
 struct Cols {
     av: f32,
+    /// The layer's expand arrow (AE: between the A/V switches and the label).
+    twirl: f32,
     label: f32,
     index: f32,
     name: f32,
@@ -74,16 +80,21 @@ struct Cols {
 
 impl Cols {
     fn new(width: f32) -> Cols {
-        let av = 4.0;
-        let label = av + 4.0 * SW + 4.0;
+        // Positions measured on AE 26's Timeline (points from the panel's left).
+        let av = 5.0;
+        let twirl = av + 4.0 * SW + 4.0;
+        let label = twirl + 15.0;
         let index = label + 18.0;
-        let name = index + 26.0;
-        let name_w = 150.0_f32.max(width * 0.0);
+        let name = index + 28.0;
+        let name_w = 138.0_f32.max(width * 0.0);
         let switches = name + name_w;
-        let parent = switches + 7.0 * SW + 6.0;
-        let end = parent + 128.0;
+        // AE's eight switches: Shy, Collapse, Quality, fx, Frame Blending, Motion
+        // Blur, Adjustment Layer, 3D Layer.
+        let parent = switches + 8.0 * SW + 14.0;
+        let end = parent + 120.0;
         Cols {
             av,
+            twirl,
             label,
             index,
             name,
@@ -107,9 +118,13 @@ enum RowKind {
         attr: String,
         label: String,
     },
+    /// One row per line of the expression (`line` of `lines`): the first has the
+    /// name and switches, the last draws the field over all of them.
     Expression {
         path: PrimPath,
         attr: String,
+        line: usize,
+        lines: usize,
     },
 }
 
@@ -156,6 +171,11 @@ enum Drag {
         layers: Vec<PrimPath>,
         origin: Pos2,
     },
+    /// Expression pick whip: drop on a property or a layer.
+    ExprWhip {
+        whip: crate::expr::Whip,
+        origin: Pos2,
+    },
     Reorder {
         layers: Vec<PrimPath>,
     },
@@ -185,6 +205,13 @@ pub struct TimelinePanel {
     rename: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
+    /// The field being edited: its text and selection (chars), for the pick whip
+    /// and the language menu, which take its focus.
+    expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
+    /// [`Self::expr_caret`] as it was when the pick whip was pressed.
+    expr_press: Option<crate::expr::Selection>,
+    /// The property whose language menu is open and its field's selection then.
+    lang_press: Option<(PrimPath, String, Option<crate::expr::Selection>)>,
     /// AE layer numbers (# column) of the shown comp, for accessibility names:
     /// two layers may share a name (issue #128).
     layer_numbers: HashMap<PrimPath, usize>,
@@ -210,6 +237,12 @@ pub struct TimelinePanel {
     /// Where the last frame drew the markers (glyph centres), for tests.
     #[cfg(test)]
     pub(crate) last_markers: Vec<(PrimPath, Pos2)>,
+    /// Expression rows: property, Enable switch, pick whip.
+    #[cfg(test)]
+    pub(crate) last_expr: Vec<(PrimPath, String, Pos2, Pos2)>,
+    /// Expression rows: property, language menu button.
+    #[cfg(test)]
+    pub(crate) last_lang: Vec<(PrimPath, String, Pos2)>,
     /// The comp marker bin, for tests.
     #[cfg(test)]
     pub(crate) last_marker_bin: Option<Rect>,
@@ -304,6 +337,8 @@ fn push_prop(
             kind: RowKind::Expression {
                 path: path.clone(),
                 attr: attr.to_owned(),
+                line: 0,
+                lines: 1,
             },
             layer: layer.clone(),
             depth: depth + 1,
@@ -328,6 +363,12 @@ fn label_of(stage: &Stage, path: &PrimPath) -> usize {
 }
 
 impl TimelinePanel {
+    /// The field selection the language menu will replace (tests).
+    #[cfg(test)]
+    pub(crate) fn lang_insert(&self) -> Option<crate::expr::Selection> {
+        self.lang_press.as_ref().and_then(|(.., i)| i.clone())
+    }
+
     fn axis(&self, info: &CompInfo, left: f32, width: f32) -> TimeAxis {
         let full = info.duration;
         let min = Time(info.frame_duration().0 * 10).min(full);
@@ -365,6 +406,38 @@ impl TimelinePanel {
                     stage,
                     &mut out,
                 );
+            }
+        }
+        self.expression_lines(stage, out)
+    }
+
+    /// Multi-line expressions take one row per line (the text being edited, else
+    /// the expression; at most [`MAX_EXPR_LINES`]).
+    fn expression_lines(&self, stage: &Stage, rows: Vec<Row>) -> Vec<Row> {
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let RowKind::Expression { path, attr, .. } = &row.kind else {
+                out.push(row);
+                continue;
+            };
+            let lines = match &self.expr_edit {
+                Some((p, a, buf)) if p == path && a == attr => buf.split('\n').count(),
+                _ => query::attr_spec(stage, path, attr)
+                    .and_then(|s| s.expression.as_ref())
+                    .map_or(1, |e| e.source.split('\n').count()),
+            }
+            .clamp(1, MAX_EXPR_LINES);
+            for line in 0..lines {
+                out.push(Row {
+                    kind: RowKind::Expression {
+                        path: path.clone(),
+                        attr: attr.clone(),
+                        line,
+                        lines,
+                    },
+                    layer: row.layer.clone(),
+                    depth: row.depth,
+                });
             }
         }
         out
@@ -406,6 +479,11 @@ impl TimelinePanel {
             self.layer_numbers.get(layer).copied(),
             &query::display_name_of(stage, layer),
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn expanded_layer(&self, layer: &PrimPath) -> bool {
+        self.expanded.contains(layer.as_str())
     }
 
     #[cfg(test)]
@@ -487,6 +565,8 @@ impl Panel for TimelinePanel {
             self.last_axis = Some(axis);
             self.last_keys.clear();
             self.last_markers.clear();
+            self.last_expr.clear();
+            self.last_lang.clear();
             self.last_bars.clear();
         }
 
@@ -554,11 +634,10 @@ impl Panel for TimelinePanel {
                 s.selected_layers.clear();
                 s.selected_props.clear();
             }
-            // Right-click on empty space: New ▸ (as Layer ▸ New).
+            // Right-click on empty space: AE 26's comp menu (New ▸, Composition
+            // Settings, Preview ▸ …).
             crate::common::context_menu(&bg, &mut |ui| {
-                if let Some(n) = menus::catalog_entry("Layer", "New") {
-                    menus::catalog_node(ui, cx, n);
-                }
+                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
             // Dropped project items.
             if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {
@@ -568,11 +647,14 @@ impl Panel for TimelinePanel {
 
         let mut key_rects: Vec<(Rect, KeyRef)> = Vec::new();
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
+        let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
         egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
+                // Rows touch, as in AE (a 1-point line between them).
+                ui.spacing_mut().item_spacing.y = 0.0;
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =
@@ -589,8 +671,12 @@ impl Panel for TimelinePanel {
                         &comp_layers,
                         &mut key_rects,
                     );
-                    if matches!(row.kind, RowKind::Layer) {
-                        layer_rows.push((rect, row.layer.clone()));
+                    match &row.kind {
+                        RowKind::Layer => layer_rows.push((rect, row.layer.clone())),
+                        RowKind::Prop { path, attr, .. } => {
+                            prop_rows.push((rect, path.clone(), attr.clone()))
+                        }
+                        _ => {}
                     }
                 }
             });
@@ -604,6 +690,7 @@ impl Panel for TimelinePanel {
             graph_body,
             &key_rects,
             &layer_rows,
+            &prop_rows,
             &comp_layers,
         );
 
@@ -656,7 +743,9 @@ fn row_key(row: &Row) -> String {
         RowKind::Layer => "layer".into(),
         RowKind::Group { id, .. } => id.clone(),
         RowKind::Prop { path, attr, .. } => format!("{path}.{attr}"),
-        RowKind::Expression { path, attr } => format!("{path}.{attr}=expr"),
+        RowKind::Expression {
+            path, attr, line, ..
+        } => format!("{path}.{attr}=expr{line}"),
     }
 }
 

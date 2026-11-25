@@ -242,7 +242,7 @@ pub fn level_sigma(sigma: f64, factor: i32) -> f64 {
 /// output region `output`.
 pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -> Plan {
     let clamp = edge == Edge::Repeat;
-    let factor = [level_factor(sigma[0]), level_factor(sigma[1])];
+    let factor = sigma.map(level_factor);
     if factor == [1, 1] {
         return plan_direct(input, sigma, clamp, output);
     }
@@ -336,6 +336,29 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
         output,
         read,
     }
+}
+
+/// A 2 × 2 area reduction aligned to the input texel grid.
+pub(crate) fn half_level(
+    target: &mut dyn EffectTarget,
+    input: &GpuImage,
+) -> Result<GpuImage, RenderError> {
+    let r = input.rect;
+    let output = IRect::new(
+        r.x0.div_euclid(2),
+        r.y0.div_euclid(2),
+        (r.x1 + 1).div_euclid(2),
+        (r.y1 + 1).div_euclid(2),
+    );
+    let mut step = Step::new("downsample", 0, None, r, output);
+    step.factor = [2, 2];
+    Plan {
+        images: Vec::new(),
+        steps: vec![step],
+        output,
+        read: r,
+    }
+    .encode_steps(target, input, true)
 }
 
 fn plan_direct(input: IRect, sigma: [f64; 2], clamp: bool, output: IRect) -> Plan {
@@ -458,6 +481,23 @@ pub fn plan_box(input: IRect, r: [f64; 2], iterations: u32, edge: Edge, output: 
 }
 
 impl Plan {
+    /// Uses a tent in place of the Gaussian weights on the already-planned
+    /// direct passes. The Gaussian footprint must contain the tent.
+    pub(crate) fn with_tent(mut self, half_width: f64) -> Self {
+        for step in &mut self.steps {
+            if step.entry == "conv_line" {
+                for (offset, weight) in step.weights.iter_mut().enumerate() {
+                    *weight = (1. - offset as f64 / half_width).max(0.) as f32;
+                }
+                let sum = step.weights[0] + 2. * step.weights[1..].iter().sum::<f32>();
+                for weight in &mut step.weights {
+                    *weight /= sum;
+                }
+            }
+        }
+        self
+    }
+
     /// Filters in linear light: what the plan reads from the input is raised
     /// to `gamma` (straight colour), its output to `1 / gamma`. No extra passes.
     #[must_use]
@@ -480,12 +520,50 @@ impl Plan {
         target: &mut dyn EffectTarget,
         input: &GpuImage,
     ) -> Result<GpuImage, RenderError> {
+        self.encode_steps(target, input, false)
+    }
+
+    /// Encodes in the input texel grid and leaves the final bilinear upsample
+    /// to the caller. The returned rect and pixel scale describe that level in
+    /// the input grid, so a following pass can sample it directly.
+    pub(crate) fn encode_level(
+        mut self,
+        target: &mut dyn EffectTarget,
+        input: &GpuImage,
+    ) -> Result<GpuImage, RenderError> {
+        let last = self.steps.last().unwrap();
+        if last.entry != "upsample" || last.factor[0] != last.factor[1] {
+            return self.encode_steps(target, input, true);
+        }
+        let step = self.steps.pop().unwrap();
+        self.images.pop();
+        self.output = step.src_rect;
+        self.steps.last_mut().unwrap().dst = None;
+        let mut image = self.encode_steps(target, input, true)?;
+        let [x, y] = step.base;
+        let factor = step.factor[0];
+        image.rect = IRect::new(
+            x + image.rect.x0 * factor,
+            y + image.rect.y0 * factor,
+            x + image.rect.x1 * factor,
+            y + image.rect.y1 * factor,
+        );
+        image.pixel_scale *= f64::from(factor);
+        Ok(image)
+    }
+
+    fn encode_steps(
+        &self,
+        target: &mut dyn EffectTarget,
+        input: &GpuImage,
+        texel_grid: bool,
+    ) -> Result<GpuImage, RenderError> {
         let rt = gpu::runtime(target.gpu());
         let format = target.format();
         let scale = input.pixel_scale;
         let mut images = Vec::with_capacity(self.images.len());
         for (rect, k) in &self.images {
-            images.push(target.allocate(*rect, scale * k)?);
+            images.push(target.allocate(*rect, if texel_grid { 1. } else { scale * k })?);
         }
         let output = target.allocate(self.output, scale)?;
         let mut prepared = Vec::with_capacity(self.steps.len());

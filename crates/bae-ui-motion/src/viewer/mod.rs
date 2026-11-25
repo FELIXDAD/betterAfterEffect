@@ -23,7 +23,9 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+pub(crate) mod errors;
 mod free_transform;
+mod menu;
 mod motion_path;
 mod overlay;
 mod path_edit;
@@ -35,6 +37,7 @@ mod shape_tool;
 mod tests;
 mod transform;
 mod type_tool;
+pub(crate) mod view3d;
 
 pub(crate) use transform::nudge_layers;
 
@@ -47,6 +50,8 @@ const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    /// The expression error banner.
+    banner: errors::Banner,
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
     zoom: Option<f32>,
     pan: Vec2,
@@ -75,6 +80,10 @@ pub struct CompositionViewer {
     select: select_tool::SelectState,
     /// Magnification of the last frame (arrow keys nudge by screen pixels).
     mag: f32,
+    /// Layers under the pointer when the context menu opened (topmost first).
+    menu_layers: Vec<PrimPath>,
+    /// Pixel step the last frame rendered at (1 Full, 2 Half …).
+    render_factor: u32,
     /// Type tool: text being typed or edited.
     type_tool: type_tool::TypeState,
     /// Settings read at the start of each frame.
@@ -83,6 +92,11 @@ pub struct CompositionViewer {
     last_view: Option<View>,
     /// Motion paths of the selected layers (C).
     motion_path: motion_path::MotionPathState,
+    /// Something in the viewer uses Esc (a drag, text, Free Transform, a
+    /// menu): Esc goes to it instead of switching to the last 3D view.
+    esc_taken: bool,
+    /// Esc to give back to the viewer's widgets this frame.
+    escape: bool,
 }
 
 impl CompositionViewer {
@@ -111,6 +125,7 @@ impl CompositionViewer {
                 origin,
                 scale,
                 point,
+                camera: None,
             },
             scale * ppp,
         )
@@ -224,6 +239,16 @@ fn apply_overrides(
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
+        // A scrubbed effect parameter of this layer (Effect Controls, timeline).
+        if let Some(s) = scrub.filter(|s| s.attr.starts_with("param:"))
+            && crate::effects::layer_of(&s.path).as_ref() == Some(&layer.path)
+            && let Some(e) = layer.effects.iter_mut().find(|e| e.path == s.path)
+        {
+            e.params.insert(
+                s.attr.trim_start_matches("param:").to_owned(),
+                s.value.clone(),
+            );
+        }
         if let Some(s) = scrub.filter(|s| s.path == layer.path) {
             touched = true;
             let v3 = |v: &Value| match v {
@@ -321,6 +346,13 @@ impl Panel for CompositionViewer {
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
+        if action.id == view3d::ids::LAST && self.esc_taken {
+            self.escape = true;
+            return true;
+        }
+        if view3d::handle(action, cx) {
+            return true;
+        }
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
         if self.shape.is_some() || self.pen.busy() || self.select.busy() {
@@ -380,6 +412,17 @@ impl Panel for CompositionViewer {
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
+        if std::mem::take(&mut self.escape) {
+            ui.input_mut(|i| {
+                i.events.push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            });
+        }
 
         if let Some(up) = self.pending_zoom.take() {
             self.step_zoom(up, area, &info, ppp);
@@ -465,6 +508,13 @@ impl Panel for CompositionViewer {
                 return;
             }
         };
+        // Expression errors at this time: the banner and the timeline's icons.
+        {
+            let mut s = session.lock();
+            if s.expr_errors != comp.errors {
+                s.expr_errors = comp.errors.clone();
+            }
+        }
         // A value drag that ended without a commit (e.g. cancelled) must not leave
         // its preview behind.
         if !ui.input(|i| i.pointer.any_down()) {
@@ -472,6 +522,21 @@ impl Panel for CompositionViewer {
         }
         let scrub = session.lock().scrub.clone();
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        // The 3D view: 3D layers are seen through its camera.
+        let size = DVec2::new(f64::from(info.width), f64::from(info.height));
+        let view_camera = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .and_then(|v| v.camera(size));
+        let view = View {
+            camera: Some((
+                view_camera.unwrap_or_else(|| view3d::active_camera(&comp, size)),
+                size,
+            )),
+            ..view
+        };
+        self.last_view = Some(view);
         // Text being edited is drawn by the text field, not the layer.
         if let Some(edited) = self.type_tool.edited_layer()
             && let Some(l) = comp.layers.iter_mut().find(|l| &l.path == edited)
@@ -522,11 +587,12 @@ impl Panel for CompositionViewer {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
         }
-        let resolution = session.lock().resolution;
+        let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
+        self.render_factor = resolution;
         let image = self
             .gpu
             .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution));
+            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
         self.on_gpu = image.is_some();
         let mut vector = std::borrow::Cow::Borrowed(&comp);
         if let Some(img) = image {
@@ -614,7 +680,9 @@ impl Panel for CompositionViewer {
                 }
             }
             let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-            let ap = view.to_screen(DVec2::new(a.x, a.y));
+            let Some(ap) = view.project(a, render::is_3d(l)) else {
+                continue;
+            };
             painter.circle_stroke(ap, 4.0, Stroke::new(1.0, c));
             painter.line_segment(
                 [ap - vec2(7.0, 0.0), ap + vec2(7.0, 0.0)],
@@ -780,12 +848,89 @@ impl Panel for CompositionViewer {
                 }
             }
         }
+        menu::frame(&mut self.menu_layers, &resp, cx, &session, &comp, &view);
+
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
             add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
         }
+        // An effect dropped on a layer (Effects & Presets) is applied to it.
+        if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
+            && let Some(p) = pointer
+            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, p)
+        {
+            crate::effects::apply(cx, &[layer], &fx.0);
+        }
 
-        bar::bottom_bar(ui, bar, self, &info, time, mag, &session);
+        self.banner.ui(ui, cx, &session, area);
+        bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+        self.esc_taken = self.shape.is_some()
+            || self.pen.busy()
+            || self.select.busy()
+            || self.select.free.is_some()
+            || ui.ctx().text_edit_focused()
+            || egui::Popup::is_any_open(ui.ctx());
+    }
+}
+
+/// The comp's resolution as a pixel step (Composition Settings > Resolution:
+/// 1 Full, 2 Half, 3 Third, 4 Quarter, more Custom).
+pub(crate) fn comp_resolution(stage: &bae_model::Stage, comp: &PrimPath) -> u32 {
+    match stage
+        .prim(comp)
+        .and_then(|v| query::static_value(&v, "resolution"))
+    {
+        Some(Value::Vec2([h, _])) => (h as u32).max(1),
+        _ => 1,
+    }
+}
+
+/// The pixel step the viewer renders at: the comp's resolution, or on Auto the
+/// coarsest step the magnification hides (50 % → Half, 25 % → Quarter).
+fn render_factor(stage: &bae_model::Stage, comp: &PrimPath, auto: bool, mag: f32) -> u32 {
+    if auto {
+        (1.0 / mag.max(0.01) + 0.01).floor().max(1.0) as u32
+    } else {
+        comp_resolution(stage, comp)
+    }
+}
+
+/// Set the active comp's resolution (View > Resolution, the viewer's menu) and,
+/// with `nested`, of the comps nested in it (AE's "… Recurse" shortcuts); turns
+/// Auto off. One `comp.set_settings` per comp, like Composition Settings.
+pub(crate) fn set_resolution(
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    factor: u32,
+    nested: bool,
+) {
+    let Some(comp) = session.lock().active_comp.clone() else {
+        return;
+    };
+    session.lock().auto_resolution = false;
+    let mut comps = vec![comp];
+    let mut i = 0;
+    while nested && i < comps.len() {
+        for l in query::comp_layers(cx.stage, &comps[i]) {
+            if let Some(Value::PrimRef(src)) = cx
+                .stage
+                .prim(&l)
+                .and_then(|v| query::static_value(&v, "source"))
+                && query::comp_info(cx.stage, &src).is_some()
+                && !comps.contains(&src)
+            {
+                comps.push(src);
+            }
+        }
+        i += 1;
+    }
+    for c in comps {
+        if comp_resolution(cx.stage, &c) != factor {
+            cx.invoke_with(
+                "comp.set_settings",
+                json!({"comp": c, "resolution": [factor, factor]}),
+            );
+        }
     }
 }
 

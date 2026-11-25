@@ -68,6 +68,11 @@ pub enum MediaError {
     /// The operation is not supported by this source or platform (yet).
     #[error("not supported: {0}")]
     Unsupported(String),
+    /// The system cannot decode the requested HEVC video.
+    #[error(
+        "HEVC decoding is unsupported. Check that Windows HEVC Video Extensions are installed."
+    )]
+    HevcDecoderUnavailable,
     /// The operation was cancelled (render queue).
     #[error("cancelled")]
     Canceled,

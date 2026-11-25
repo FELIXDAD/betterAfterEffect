@@ -490,38 +490,36 @@ fn paint_control(
 ) {
     // The label opens Fill / Stroke Options (type, blend mode, opacity).
     let lr = widgets::link(ui, tr(label)).on_hover_text(tr(options));
-    egui::Popup::menu(&lr)
-        .id(Id::new(("paint_options", id)))
-        .show(|ui| {
-            ui.set_min_width(180.0);
-            ui.label(egui::RichText::new(tr(options)).strong());
-            for (kind, name, available) in [
-                (PaintKind::None, "None", true),
-                (PaintKind::Solid, "Solid Color", true),
-                (PaintKind::LinearGradient, "Linear Gradient", false),
-                (PaintKind::RadialGradient, "Radial Gradient", false),
-            ] {
-                ui.add_enabled_ui(available, |ui| {
-                    if ui.radio(paint.kind == kind, tr(name)).clicked() {
-                        paint.kind = kind;
-                    }
-                });
-            }
-            ui.horizontal(|ui| {
-                ui.label(tr("Opacity"));
-                ui.add(
-                    egui::DragValue::new(&mut paint.opacity)
-                        .range(0.0..=100.0)
-                        .suffix("%"),
-                );
+    common::popup_menu(&lr, &mut |ui| {
+        ui.set_min_width(180.0);
+        ui.label(egui::RichText::new(tr(options)).strong());
+        for (kind, name, available) in [
+            (PaintKind::None, "None", true),
+            (PaintKind::Solid, "Solid Color", true),
+            (PaintKind::LinearGradient, "Linear Gradient", false),
+            (PaintKind::RadialGradient, "Radial Gradient", false),
+        ] {
+            ui.add_enabled_ui(available, |ui| {
+                if ui.radio(paint.kind == kind, tr(name)).clicked() {
+                    paint.kind = kind;
+                }
             });
-            ui.add_enabled_ui(false, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(tr("Blend Mode"));
-                    ui.label(tr("Normal"));
-                });
+        }
+        ui.horizontal(|ui| {
+            ui.label(tr("Opacity"));
+            ui.add(
+                egui::DragValue::new(&mut paint.opacity)
+                    .range(0.0..=100.0)
+                    .suffix("%"),
+            );
+        });
+        ui.add_enabled_ui(false, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(tr("Blend Mode"));
+                ui.label(tr("Normal"));
             });
         });
+    });
     // The swatch: Alt/Option-click cycles the type, click picks the color.
     let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 16.0), Sense::click());
     let hex = {

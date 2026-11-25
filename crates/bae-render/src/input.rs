@@ -18,11 +18,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bae_model::{BezierPath, FrameRate, PrimPath, Time, Value};
-use glam::DAffine2;
+use glam::{DAffine2, DMat4};
 use rustc_hash::FxHasher;
 
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
+use crate::camera::Camera;
 use crate::geom::Rect;
+use crate::light::{Light, Material};
+use crate::motion::{CompMotionBlur, LayerSample};
 
 /// One composition at one time, ready to render.
 #[derive(Clone, Debug)]
@@ -47,6 +50,16 @@ pub struct RenderComp {
     /// Layers, **top first** (AE layer index 1 is `layers[0]`). Includes layers
     /// that are not drawn themselves but are referenced as track mattes.
     pub layers: Vec<RenderLayer>,
+    /// The active camera (AE-CMP-423): 3D layers are seen through it. `None` =
+    /// AE's default comp camera ([`Camera::default_for`], AE-CMP-403).
+    pub camera: Option<Camera>,
+    /// Enabled lights (data only for now: 3D layers render unlit, see
+    /// [`crate::light`]).
+    pub lights: Vec<Light>,
+    /// Motion blur samples of this frame (AE-CMP-064); `None` when the comp's
+    /// Enable Motion Blur switch is off (or no layer is blurred). Blurred layers
+    /// carry their placements in [`RenderLayer::motion_samples`].
+    pub motion_blur: Option<Arc<CompMotionBlur>>,
 }
 
 impl RenderComp {
@@ -62,6 +75,30 @@ impl RenderComp {
             background: [0.0, 0.0, 0.0, 1.0],
             shutter: [180.0, -90.0],
             layers: Vec::new(),
+            camera: None,
+            lights: Vec::new(),
+            motion_blur: None,
+        }
+    }
+
+    /// The camera 3D layers are seen through: the active camera or AE's default
+    /// camera for this comp size.
+    pub fn view_camera(&self) -> Camera {
+        self.camera
+            .unwrap_or_else(|| Camera::default_for(self.width, self.height))
+    }
+
+    /// The camera at motion-blur sample `k` (the frame's camera when the comp
+    /// has no samples).
+    pub fn sample_camera(&self, k: usize) -> Camera {
+        match &self.motion_blur {
+            Some(mb) => mb
+                .cameras
+                .get(k)
+                .copied()
+                .flatten()
+                .unwrap_or_else(|| Camera::default_for(self.width, self.height)),
+            None => self.view_camera(),
         }
     }
 
@@ -87,11 +124,32 @@ impl RenderComp {
         self.height.hash(h);
         self.pixel_aspect.to_bits().hash(h);
         self.layers.len().hash(h);
+        let mut any_3d = false;
+        let mut any_blur = false;
         for layer in &self.layers {
             layer.hash_composite(h);
             if layer.blend_mode == BlendMode::DancingDissolve {
                 self.frame_rate.time_to_frame(self.time).hash(h);
             }
+            any_3d |= layer.matrix_3d.is_some();
+            any_blur |= !layer.motion_samples.is_empty();
+        }
+        // The camera only matters to 3D layers, the sample cameras only to
+        // blurred 3D layers.
+        if any_3d {
+            hash_camera(&self.camera, h);
+            self.lights.len().hash(h);
+            for l in &self.lights {
+                hash_light(l, h);
+            }
+            if any_blur && let Some(mb) = &self.motion_blur {
+                for c in &mb.cameras {
+                    hash_camera(c, h);
+                }
+            }
+        }
+        if any_blur && let Some(mb) = &self.motion_blur {
+            mb.adaptive_limit.hash(h);
         }
     }
 
@@ -150,6 +208,8 @@ pub struct RenderLayer {
     /// layer's own keyframes (and those of its masks, effects and contents) are in
     /// layer time (data-model.md §10), so cache invalidation uses it.
     pub time: Time,
+    /// Comp-time seconds per layer-time second (AE time stretch).
+    pub time_scale: f64,
     /// What the layer draws.
     pub content: LayerContent,
     /// Layer space → comp space (pixels). Combines anchor point, position, scale,
@@ -176,6 +236,17 @@ pub struct RenderLayer {
     pub masks: Vec<RenderMask>,
     /// Effects in stack order (applied through the effect registry).
     pub effects: Vec<RenderEffect>,
+    /// 3D layer (AE-CMP-400): layer space → comp space as a 4×4 matrix (anchor,
+    /// scale, X/Y/Z rotation, orientation, position, parents). The layer is a
+    /// plane seen through [`RenderComp::camera`] and depth sorted with the
+    /// adjacent 3D layers. `None` for 2D layers, which use `transform`.
+    pub matrix_3d: Option<DMat4>,
+    /// Motion blur (AE-CMP-064): the layer's placement at each of the comp's
+    /// sample times ([`RenderComp::motion_blur`]); empty when the layer is not
+    /// blurred (its switch or the comp's is off).
+    pub motion_samples: Arc<[LayerSample]>,
+    /// Material Options of 3D layers (data only for now).
+    pub material: Material,
 }
 
 impl RenderLayer {
@@ -184,6 +255,7 @@ impl RenderLayer {
         Self {
             path,
             time: Time::ZERO,
+            time_scale: 1.0,
             content,
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
@@ -195,6 +267,9 @@ impl RenderLayer {
             adjustment: false,
             masks: Vec::new(),
             effects: Vec::new(),
+            matrix_3d: None,
+            motion_samples: Arc::new([]),
+            material: Material::default(),
         }
     }
 
@@ -231,6 +306,69 @@ impl RenderLayer {
         self.visible.hash(h);
         self.active.hash(h);
         self.adjustment.hash(h);
+        if let Some(m) = &self.matrix_3d {
+            hash_mat4(m, h);
+            let mat = &self.material;
+            (
+                mat.casts_shadows,
+                mat.accepts_shadows,
+                mat.accepts_lights,
+                [
+                    mat.light_transmission,
+                    mat.ambient,
+                    mat.diffuse,
+                    mat.specular_intensity,
+                    mat.specular_shininess,
+                    mat.metal,
+                ]
+                .map(f32::to_bits),
+            )
+                .hash(h);
+        }
+        self.motion_samples.len().hash(h);
+        for s in self.motion_samples.iter() {
+            for v in s.transform.to_cols_array() {
+                v.to_bits().hash(h);
+            }
+            if let Some(m) = &s.matrix_3d {
+                hash_mat4(m, h);
+            }
+        }
+    }
+}
+
+fn hash_mat4(m: &DMat4, h: &mut impl Hasher) {
+    for v in m.to_cols_array() {
+        v.to_bits().hash(h);
+    }
+}
+
+fn hash_light(l: &Light, h: &mut impl Hasher) {
+    (l.kind, l.falloff, l.casts_shadows, l.scope_below).hash(h);
+    hash_mat4(&l.world, h);
+    l.point_of_interest.to_array().map(f64::to_bits).hash(h);
+    l.color.map(f32::to_bits).hash(h);
+    [
+        l.intensity,
+        l.cone_angle,
+        l.cone_feather,
+        l.radius,
+        l.falloff_distance,
+        l.shadow_darkness,
+        l.shadow_diffusion,
+    ]
+    .map(f32::to_bits)
+    .hash(h);
+}
+
+fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
+    c.is_some().hash(h);
+    if let Some(c) = c {
+        hash_mat4(&c.world, h);
+        c.zoom.to_bits().hash(h);
+        if let crate::camera::Projection::Orthographic { scale } = c.projection {
+            scale.to_bits().hash(h);
+        }
     }
 }
 

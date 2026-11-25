@@ -569,9 +569,9 @@ pub enum ExportFormat {
     Tiff,
     /// OpenEXR sequence (half or float, premultiplied).
     Exr,
-    /// H.264 movie (macOS).
+    /// H.264 movie.
     H264,
-    /// HEVC movie (macOS).
+    /// HEVC movie.
     Hevc,
     /// ProRes 422 HQ movie (macOS).
     ProRes,
@@ -1450,7 +1450,14 @@ pub fn export_frames(
             let rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
             let eval = t0.elapsed();
             let t1 = Instant::now();
-            let rendered = renderer.render_frame(&rc, job.request).map_err(at)?;
+            // Effects reading other frames evaluate them with the same evaluator.
+            let mut frames = crate::eval::EvaluatorFrames {
+                stage: job.stage,
+                evaluator: &mut *evaluator,
+            };
+            let rendered = renderer
+                .render_frame_with(&rc, job.request, Some(&mut frames))
+                .map_err(at)?;
             let render = t1.elapsed();
             run.stats.eval += eval;
             run.stats.render += render;

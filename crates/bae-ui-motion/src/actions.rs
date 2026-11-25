@@ -67,6 +67,9 @@ pub mod ids {
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
     /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
     pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
+    /// Animation > Add Expression (AE Alt+Shift+=): toggles the selected
+    /// properties' expressions.
+    pub const ADD_EXPRESSION: &str = "motion.anim.add_expression";
     /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
     pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
     /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
@@ -77,6 +80,12 @@ pub mod ids {
     /// Layer > Markers > Add Marker (AE numpad *, Mac Control+8): a layer marker at
     /// the current time on each selected layer, or a comp marker when none is.
     pub const ADD_MARKER: &str = "motion.layer.add_marker";
+    /// Animation > Animate Text > … (params `{"property": "position"}`): a new
+    /// animator on each selected text layer.
+    pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
+    /// Animation > Add Text Selector > Range: to the last animator.
+    pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
+    pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
     /// Numbered comp marker N at the current time (AE Shift+0–9 on the main
     /// keyboard; params `{"number": n}`): the comp marker whose comment is "N",
     /// moved here when it exists, else added.
@@ -95,6 +104,10 @@ pub mod ids {
     /// Layer ▸ Switches ▸ Shy, Lock … and Layer ▸ 3D Layer: params `{"switch":
     /// "<attr>"}` (see [`super::SWITCHES`]); toggles the selected layers.
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
+    /// Layer ▸ Blending Mode ▸ … (params `{"mode": "multiply"}`).
+    pub const BLENDING_MODE: &str = "motion.layer.blending_mode";
+    /// Layer ▸ Next / Previous Blending Mode (AE Shift+= / Shift+-; `{"step": ±1}`).
+    pub const BLENDING_MODE_STEP: &str = "motion.layer.blending_mode_step";
     pub const UNLOCK_ALL_LAYERS: &str = "motion.layer.unlock_all_layers";
     pub const SHOW_ALL_VIDEO: &str = "motion.layer.show_all_video";
     pub const HIDE_OTHER_VIDEO: &str = "motion.layer.hide_other_video";
@@ -112,6 +125,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("locked", "Lock"),
     ("audio_enabled", "Audio"),
     ("enabled", "Video"),
+    ("effects_enabled", "Effect"),
     ("solo", "Solo"),
     ("collapse_transformation", "Collapse"),
     ("motion_blur", "Motion Blur"),
@@ -148,6 +162,7 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::ADD_EXPRESSION, "Add Expression"),
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
@@ -187,6 +202,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::CUT, "Cut"),
     (ids::PASTE, "Paste"),
     (ids::LAYER_SWITCH, "Layer Switch"),
+    (ids::BLENDING_MODE, "Blending Mode"),
+    (ids::BLENDING_MODE_STEP, "Next Blending Mode"),
     (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
     (ids::SHOW_ALL_VIDEO, "Show All Video"),
     (ids::HIDE_OTHER_VIDEO, "Hide Other Video"),
@@ -198,6 +215,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::KEY_VELOCITY, "Keyframe Velocity"),
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
+    (ids::ANIMATE_TEXT, "Animate Text"),
+    (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
+    (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
     (ids::GO_TO_COMP_MARKER, "Go to Composition Marker"),
     (ids::ADD_MARKER_DIALOG, "Add Marker with Dialog"),
@@ -223,6 +243,16 @@ const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
 /// Variants with fixed parameters: (command, parameters as JSON, English name). A
 /// table rather than `json!` calls keeps the code small (parsed once at startup).
 const VARIANTS: &[(&str, &str, &str)] = &[
+    (
+        ids::BLENDING_MODE_STEP,
+        r#"{"step":1}"#,
+        "Next Blending Mode",
+    ),
+    (
+        ids::BLENDING_MODE_STEP,
+        r#"{"step":-1}"#,
+        "Previous Blending Mode",
+    ),
     (ids::STEP, r#"{"frames":-1}"#, "Previous Frame"),
     (ids::STEP, r#"{"frames":1}"#, "Next Frame"),
     (ids::STEP, r#"{"frames":-10}"#, "Back 10 Frames"),
@@ -582,6 +612,38 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::import::import_file(cx, session);
             return true;
         }
+        ids::ADD_EXPRESSION => {
+            // AE toggles: the selected properties get their default expression;
+            // when all of them have one, the expressions are removed.
+            let props: Vec<(PrimPath, String)> = session
+                .lock()
+                .selected_props
+                .iter()
+                .filter(|(p, a)| {
+                    query::locked_layer_of(stage, p).is_none()
+                        && stage
+                            .prim(p)
+                            .is_some_and(|v| bae_model::schema::is_animatable(v.prim_type(), a))
+                })
+                .cloned()
+                .collect();
+            let has = |p: &PrimPath, a: &str| {
+                query::attr_spec(stage, p, a).is_some_and(|s| s.expression.is_some())
+            };
+            let remove = props.iter().all(|(p, a)| has(p, a));
+            let items: Vec<_> = props
+                .iter()
+                .filter(|(p, a)| remove || !has(p, a))
+                .map(|(p, a)| {
+                    let source = (!remove).then(|| crate::expr::default_expression(stage, p, a));
+                    json!({"path": p, "attr": a, "source": source})
+                })
+                .collect();
+            if !items.is_empty() {
+                cx.invoke_with("attr.set_expressions", json!({"items": items}));
+            }
+            return true;
+        }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
             return true;
@@ -783,6 +845,37 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             s.key_dialog = crate::timeline::VelocityDialog::new(stage, keys)
                 .map(crate::timeline::KeyDialog::Velocity);
         }
+        ids::ANIMATE_TEXT | ids::ADD_TEXT_SELECTOR | ids::REMOVE_ALL_TEXT_ANIMATORS => {
+            let texts: Vec<PrimPath> = layers
+                .iter()
+                .filter(|l| query::layer_kind(stage, l).as_deref() == Some("text"))
+                .cloned()
+                .collect();
+            if texts.is_empty() {
+                return true;
+            }
+            match id {
+                ids::ANIMATE_TEXT => {
+                    let property = inv
+                        .params
+                        .get("property")
+                        .cloned()
+                        .unwrap_or(json!("position"));
+                    cx.invoke_with(
+                        "text.animate",
+                        json!({"layers": texts, "property": property}),
+                    );
+                }
+                ids::ADD_TEXT_SELECTOR => {
+                    if let Some(a) =
+                        bae_motion::text_animators::animators_of(stage, &texts[0]).last()
+                    {
+                        cx.invoke_with("text.add_selector", json!({ "animator": a }));
+                    }
+                }
+                _ => cx.invoke_with("text.remove_animators", json!({ "layers": texts })),
+            }
+        }
         ids::SET_COMP_MARKER | ids::GO_TO_COMP_MARKER => {
             let n = inv
                 .params
@@ -958,6 +1051,39 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 "layer.reorder",
                 json!({"layers": s.selected_layers, "index": index}),
             );
+        }
+        ids::BLENDING_MODE if !layers.is_empty() => {
+            if let Some(mode) = inv.params.get("mode").and_then(|v| v.as_str()) {
+                cx.invoke_with(
+                    "layer.set_attr",
+                    json!({"layers": layers, "attr": "blend_mode", "value": {"type": "enum", "value": mode}}),
+                );
+            }
+        }
+        ids::BLENDING_MODE_STEP if !layers.is_empty() => {
+            // Each layer steps from its own mode through AE's menu order.
+            let step = inv.params.get("step").and_then(|v| v.as_i64()).unwrap_or(1);
+            let modes = bae_model::schema::BLEND_MODES;
+            let mut by_mode: Vec<(&str, Vec<PrimPath>)> = Vec::new();
+            for l in &layers {
+                let current = stage
+                    .prim(l)
+                    .and_then(|v| query::static_value(&v, "blend_mode"))
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "normal".into());
+                let i = modes.iter().position(|m| *m == current).unwrap_or(0) as i64;
+                let next = modes[(i + step).rem_euclid(modes.len() as i64) as usize];
+                match by_mode.iter_mut().find(|(m, _)| *m == next) {
+                    Some((_, ls)) => ls.push(l.clone()),
+                    None => by_mode.push((next, vec![l.clone()])),
+                }
+            }
+            for (mode, ls) in by_mode {
+                cx.invoke_with(
+                    "layer.set_attr",
+                    json!({"layers": ls, "attr": "blend_mode", "value": {"type": "enum", "value": mode}}),
+                );
+            }
         }
         ids::LAYER_SWITCH => {
             let Some(attr) = inv.params.get("switch").and_then(|v| v.as_str()) else {

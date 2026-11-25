@@ -27,6 +27,10 @@ pub struct EffectParams<'a> {
     pub effect: &'a RenderEffect,
     /// Layer time of the frame.
     pub time: Time,
+    /// Time in the comp containing the layer.
+    pub comp_time: Time,
+    /// Comp-time seconds per layer-time second (AE time stretch).
+    pub layer_time_scale: f64,
     /// Resolution scale (0.5 at half resolution): pixel-sized parameters such as a
     /// blur radius must be multiplied by it (AE `downsample_x/y`).
     pub scale: f64,
@@ -48,6 +52,8 @@ pub struct EffectParams<'a> {
     /// clamped like AE's integer buffers, and AE options such as Levels' "Off
     /// for 32 bpc Color" clip.
     pub float: bool,
+    /// 16-bpc integer project (AE uses 32768 for white).
+    pub sixteen_bpc: bool,
     /// Comp shutter angle in degrees (AE default 180).
     pub shutter_angle: f64,
     /// Comp shutter phase in degrees (AE default −90).
@@ -68,6 +74,8 @@ impl<'a> EffectParams<'a> {
         Self {
             effect,
             time: Time::ZERO,
+            comp_time: Time::ZERO,
+            layer_time_scale: 1.0,
             scale: 1.0,
             layer_bounds: IRect::EMPTY,
             frame_rate: FrameRate::FPS_30,
@@ -75,6 +83,7 @@ impl<'a> EffectParams<'a> {
             linear: false,
             purpose: RenderPurpose::Preview,
             float: false,
+            sixteen_bpc: false,
             shutter_angle: 180.0,
             shutter_phase: -90.0,
             seed: h.finish(),
@@ -129,19 +138,77 @@ impl EffectParams<'_> {
     }
 }
 
-/// A dependency of an effect on another layer's pixels (AE layer parameters).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A layer's pixels an effect reads (AE layer parameters; also the effect's
+/// own layer before its effect stack). The image is in that layer's own
+/// space: its transform, opacity, visibility and track matte do not apply.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LayerDependency {
-    /// The layer.
+    /// The layer (of the comp the effect's layer is in).
     pub layer: PrimPath,
-    /// The comp time to sample it at.
+    /// The comp time to sample it at (another time: previous / next frames).
     pub time: Time,
+    /// How much of the layer: its source, with its masks, or with masks and
+    /// effects (AE's Source / Masks / Effects & Masks).
+    pub stage: LayerStage,
+}
+
+impl LayerDependency {
+    /// The source of `layer` at comp time `time` (AE's default).
+    pub fn source(layer: PrimPath, time: Time) -> Self {
+        Self {
+            layer,
+            time,
+            stage: LayerStage::Source,
+        }
+    }
+
+    /// The layer with masks and the effects that precede `effect` in its stack.
+    pub fn before_effect(layer: PrimPath, time: Time, effect: PrimPath) -> Self {
+        Self {
+            layer,
+            time,
+            stage: LayerStage::BeforeEffect(effect),
+        }
+    }
+}
+
+/// How much of a referenced layer an effect reads (AE's layer popup).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum LayerStage {
+    /// The layer's source.
+    #[default]
+    Source,
+    /// The source with the layer's masks.
+    Masks,
+    /// The source with masks and effects. A reference back to a layer whose
+    /// effects are being resolved (A reads B, B reads A) uses `Masks` and
+    /// warns.
+    EffectsAndMasks,
+    /// The prefix of the layer’s effect stack, stopping at this effect prim.
+    BeforeEffect(PrimPath),
+}
+
+/// Masks of the effect's own layer an effect reads (AE path parameters, Fill's
+/// All Masks): delivered as a layer-space image whose alpha is the coverage.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MaskSelect {
+    /// One mask (a `Mask` prim of the layer), with its inversion, feather and
+    /// expansion; its mode is ignored.
+    One(PrimPath),
+    /// Every mask of the layer combined, as they cut the layer.
+    All,
 }
 
 /// GPU implementation of an effect.
 pub trait Effect: Send + Sync {
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
+
+    /// Whether this effect contributes a render node. Parameter-only controls
+    /// are registered so their definitions are available without encoding GPU work.
+    fn renders_pixels(&self) -> bool {
+        true
+    }
 
     /// Output bounds for input bounds (layer pixels at the request scale).
     /// Default: unchanged. A blur grows them by its radius.
@@ -156,6 +223,11 @@ pub trait Effect: Send + Sync {
 
     /// Other layers this instance reads (scheduled before it). Default: none.
     fn layer_dependencies(&self, _params: &EffectParams<'_>) -> Vec<LayerDependency> {
+        Vec::new()
+    }
+
+    /// Masks of its own layer this instance reads. Default: none.
+    fn mask_dependencies(&self, _params: &EffectParams<'_>) -> Vec<MaskSelect> {
         Vec::new()
     }
 

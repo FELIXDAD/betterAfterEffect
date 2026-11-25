@@ -63,6 +63,8 @@ pub enum ParamKind {
     /// Start of a twirly group; parameters until the matching `GroupEnd` belong to it.
     GroupStart,
     GroupEnd,
+    /// Curves as a flat list of (channel, x, y) control points.
+    CurvePoints,
     /// Opaque plugin-defined data (value: bytes).
     ArbitraryData,
     /// A mask of the layer (value: prim_ref to a Mask prim).
@@ -87,6 +89,7 @@ impl ParamKind {
             ParamKind::Point3d => ValueType::Vec3,
             ParamKind::Popup { .. } => ValueType::Int,
             ParamKind::Layer | ParamKind::Path => ValueType::PrimRef,
+            ParamKind::CurvePoints => ValueType::FloatList,
             ParamKind::ArbitraryData => ValueType::Bytes,
             ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Button => return None,
         })
@@ -113,6 +116,11 @@ pub struct ParamFlags {
     /// Parameter has a custom-drawn UI (control panel or comp viewer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub custom_ui: bool,
+    /// The default (a point) is a fraction of the layer size, as AE's
+    /// `PF_ADD_POINT` percentages: an instance starts at `default × layer
+    /// size`. A 3D point's z stays absolute.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relative_default: bool,
 }
 
 /// One parameter of an effect definition.

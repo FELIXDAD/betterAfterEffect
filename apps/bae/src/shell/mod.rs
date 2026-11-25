@@ -18,6 +18,7 @@
 
 mod dialogs;
 mod menu;
+mod numpad;
 #[cfg(target_os = "macos")]
 mod open_documents;
 #[cfg(any(windows, test))]
@@ -1187,7 +1188,33 @@ impl ApplicationHandler<UserEvent> for Shell {
             self.redraw(event_loop);
             return;
         }
+        // egui reports keypad Enter as Enter; AE tells them apart.
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && key.state.is_pressed()
+            && let winit::keyboard::PhysicalKey::Code(
+                code @ (winit::keyboard::KeyCode::Enter | winit::keyboard::KeyCode::NumpadEnter),
+            ) = key.physical_key
+        {
+            bae_ui::set_keypad_enter(code == winit::keyboard::KeyCode::NumpadEnter);
+        }
+        let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
+        // Numpad keys are their own keys in AE's shortcuts (#261).
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
+            && let Some(pad) = numpad::key(code, &key.logical_key)
+        {
+            // egui-winit sends no event for numpad `*`: the modifiers held now.
+            let modifiers = view.egui_ctx.input(|i| i.modifiers);
+            numpad::rewrite(
+                &mut view.egui_state.egui_input_mut().events,
+                before,
+                pad,
+                key.state.is_pressed(),
+                key.repeat,
+                modifiers,
+            );
+        }
         tracing::trace!(
             event = egui_winit::short_window_event_description(&event),
             repaint = response.repaint,
@@ -1314,6 +1341,10 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.run_pending(event_loop);
         self.sync_prefs();
         self.run_settings_requests();
+        // OK in Keyboard Shortcuts: save the shortcuts now, not only at exit.
+        if self.workspace.take_save_request() {
+            self.save_window_state();
+        }
         let autosave_at = self.run_autosave();
         // Every project change goes through the dispatch above.
         self.sync_window_title();

@@ -348,12 +348,18 @@ impl Builder {
                 }
                 Node::Effects => {
                     // One submenu per category, sorted by its localized name like
-                    // AE; the effects are listed once `motion.effect.apply` exists.
+                    // AE, listing AE's effects (greyed unless BAE implements them).
                     for category in catalog::effect_categories() {
                         path.push(category);
                         let mut at = levels.to_vec();
                         at.push(pos.sorted());
-                        self.placeholder(path, &at);
+                        let items = crate::effects::menu_items(path, &at, category, WORKSPACE);
+                        if items.is_empty() {
+                            self.placeholder(path, &at);
+                        }
+                        for (title, spec) in items {
+                            self.push(item_id(path, title), spec);
+                        }
                         path.pop();
                     }
                 }
@@ -411,6 +417,8 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        crate::effects::LAST_EFFECT => spec.enabled_when(crate::effects::last_effect_enabled),
+        crate::effects::REMOVE_ALL => spec.enabled_when(crate::effects::remove_all_enabled),
         actions::ids::LAYER_SWITCH => {
             let attr = spec_param(item.params, "switch").unwrap_or_default();
             let bit = actions::SWITCHES
@@ -426,6 +434,10 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .position(|x| *x == q)
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
+        }
+        crate::viewer::view3d::ids::SWITCH => {
+            let view = spec_param(item.params, "view").unwrap_or_default();
+            spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
         }
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
