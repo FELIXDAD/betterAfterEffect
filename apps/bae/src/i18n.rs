@@ -24,6 +24,11 @@ const ZH: &[(&str, &str)] = &[
     ("Help", "帮助"),
     ("Quit BAE", "退出 BAE"),
     ("Window", "窗口"),
+    // Window ▸ Workspace (AE 26: 将“默认”重置为已保存的布局).
+    (
+        "Reset “{name}” to Saved Layout",
+        "将“{name}”重置为已保存的布局",
+    ),
     ("Workspace", "工作区"),
     ("Minimize", "最小化"),
     ("Full Screen", "全屏"),
@@ -151,6 +156,23 @@ const ZH: &[(&str, &str)] = &[
         "The last action failed: {reason}",
         "上一个操作失败：{reason}",
     ),
+    // Status bar: plugin problems (bae-plugin notices)
+    (
+        "Plugin {plugin} could not be loaded and is disabled: {detail}",
+        "插件 {plugin} 无法加载，已停用：{detail}",
+    ),
+    (
+        "Plugin {plugin} failed to render a frame: {detail}",
+        "插件 {plugin} 渲染一帧时出错：{detail}",
+    ),
+    (
+        "Plugin {plugin} crashed and will be restarted: {detail}",
+        "插件 {plugin} 崩溃，将自动重启：{detail}",
+    ),
+    (
+        "Plugin {plugin} stopped working and was disabled for this session: {detail}",
+        "插件 {plugin} 多次出错，本次运行中已停用：{detail}",
+    ),
     (
         "GPU-first motion graphics and compositing.",
         "以 GPU 为基础的动态图形与合成应用。",
@@ -163,20 +185,53 @@ pub fn register_tables() {
     i18n::register(ZH);
 }
 
-/// Registers the shell strings and picks the language from `BAE_LANG`, then
-/// `LC_ALL` / `LC_MESSAGES` / `LANG`.
+/// Registers the shell strings and picks the system language: `BAE_LANG`, then
+/// `LC_ALL` / `LC_MESSAGES` / `LANG`, then the system's preferred language (an
+/// app opened from Finder or the Start menu has no locale variables).
 pub fn init_from_env() {
     register_tables();
-    let locale = std::env::var(LANG_ENV)
-        .ok()
-        .or_else(|| std::env::var("LC_ALL").ok())
-        .or_else(|| std::env::var("LC_MESSAGES").ok())
-        .or_else(|| std::env::var("LANG").ok())
+    let locale = [LANG_ENV, "LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
+        .or_else(system_locale)
         .unwrap_or_default();
     let lang = Lang::from_locale(&locale);
+    i18n::set_system_lang(lang);
+    set(lang);
+}
+
+/// Switches to the language Preferences > Appearance > Language picks
+/// (`system`, `zh-CN`, `en`); the UI follows on the next frame.
+pub fn apply_setting(value: &str) {
+    set(i18n::lang_for_setting(value));
+}
+
+fn set(lang: Lang) {
     i18n::set_lang(lang);
     // New folders, comps, layers and shape contents are named in it (AE).
     bae_motion::names::set_chinese(lang == Lang::Zh);
+}
+
+/// The first of the user's preferred languages (macOS: System Settings >
+/// Language & Region), e.g. `zh-Hans-CN`.
+#[cfg(target_os = "macos")]
+fn system_locale() -> Option<String> {
+    let languages = objc2_foundation::NSLocale::preferredLanguages();
+    languages.firstObject().map(|l| l.to_string())
+}
+
+/// The user's locale name (Windows: Settings > Time & language), e.g. `zh-CN`.
+#[cfg(windows)]
+fn system_locale() -> Option<String> {
+    let mut name = [0u16; 85];
+    // SAFETY: the buffer is LOCALE_NAME_MAX_LENGTH (85) UTF-16 units.
+    let n = unsafe { windows::Win32::Globalization::GetUserDefaultLocaleName(&mut name) };
+    (n > 1).then(|| String::from_utf16_lossy(&name[..n as usize - 1]))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn system_locale() -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -209,6 +264,15 @@ mod tests {
                 "The last action failed: {reason}",
             ]
             .map(String::from),
+        );
+        strings.extend(
+            [
+                bae_plugin::NoticeKind::LoadFailed,
+                bae_plugin::NoticeKind::RenderFailed,
+                bae_plugin::NoticeKind::Crashed,
+                bae_plugin::NoticeKind::Disabled,
+            ]
+            .map(|kind| crate::ui::plugin_notice_template(kind).to_owned()),
         );
         let missing: Vec<_> = strings
             .iter()
