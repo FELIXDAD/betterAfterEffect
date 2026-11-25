@@ -61,10 +61,13 @@ impl TimelinePanel {
                     .any(|(p, a)| p == path && a == attr),
                 _ => false,
             };
-            let bg = match row.kind {
+            let bg = match &row.kind {
                 RowKind::Layer if layer_selected => color::ROW_SELECTED,
                 RowKind::Layer => color::ROW,
                 RowKind::Prop { .. } if prop_selected => color::ROW_SELECTED,
+                RowKind::Group { id, .. } if session.lock().selected_groups.contains(id) => {
+                    color::ROW_SELECTED
+                }
                 _ => color::PANEL,
             };
             p.rect_filled(outline, 0.0, bg);
@@ -466,22 +469,51 @@ impl TimelinePanel {
                     },
                     color::ICON,
                 );
-                let resp = ui
-                    .interact(
-                        Rect::from_min_max(
-                            pos2(x, rect.top()),
-                            pos2(l + cols.x(Column::Switches), rect.bottom()),
-                        ),
-                        rid("group"),
-                        Sense::click(),
-                    )
+                // AE: only the arrow expands; the name selects the row (Shift or
+                // Cmd/Ctrl adds), for Copy, Paste, Duplicate and Delete.
+                let twirl = ui
+                    .interact(tw.expand(3.0), rid("group"), Sense::click())
                     .labeled_toggle(
                         egui::WidgetType::CollapsingHeader,
                         &bae_ui::a11y::context(&[&layer_ctx, tr(label)]),
                         *open,
                     );
-                if resp.clicked() {
+                if twirl.clicked() {
                     self.toggle(id);
+                }
+                let selected = session.lock().selected_groups.contains(id);
+                let name = ui
+                    .interact(
+                        Rect::from_min_max(
+                            pos2(x + 12.0, rect.top()),
+                            pos2(l + cols.x(Column::Switches), rect.bottom()),
+                        ),
+                        rid("group_name"),
+                        Sense::click(),
+                    )
+                    .labeled_toggle(
+                        egui::WidgetType::SelectableLabel,
+                        &bae_ui::a11y::context(&[&layer_ctx, tr(label), tr("Select")]),
+                        selected,
+                    );
+                #[cfg(test)]
+                self.last_groups
+                    .push((id.clone(), tw.center(), pos2(x + 30.0, cy)));
+                if name.clicked() && query::locked_layer_of(stage, layer).is_none() {
+                    let mods = ui.input(|i| i.modifiers);
+                    let mut s = session.lock();
+                    if mods.shift || mods.command {
+                        if let Some(i) = s.selected_groups.iter().position(|g| g == id) {
+                            s.selected_groups.remove(i);
+                        } else {
+                            s.selected_groups.push(id.clone());
+                        }
+                    } else {
+                        s.selected_groups = vec![id.clone()];
+                        s.selected_props.clear();
+                        s.selected_keys.clear();
+                    }
+                    s.selected_layers = vec![layer.clone()];
                 }
                 ui.painter().text(
                     pos2(x + 14.0, cy),
@@ -760,6 +792,7 @@ impl TimelinePanel {
                 }
             } else {
                 s.selected_props = vec![id_pair.clone()];
+                s.selected_groups.clear();
                 s.selected_keys = keys;
                 s.selected_layers = vec![row.layer.clone()];
             }

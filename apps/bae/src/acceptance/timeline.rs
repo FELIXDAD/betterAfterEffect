@@ -497,6 +497,7 @@ fn enter_on_a_focused_button_does_not_start_a_rename() {
         h.state().render_queue().lock().items().is_empty(),
         "Enter did not press the button"
     );
+    to_front(&mut h, "timeline");
     assert!(
         rename_field_value(&h).is_none(),
         "Enter on a button also started a rename"

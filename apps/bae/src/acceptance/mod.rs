@@ -486,6 +486,16 @@ pub(crate) fn settle(h: &mut Ui) {
     }
 }
 
+/// Brings `panel` to the front of its frame (as clicking its tab does): Add to
+/// Render Queue opens the Render Queue in front of the Timeline (AE).
+pub(crate) fn to_front(h: &mut Ui, panel: &str) {
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::action::ids::OPEN_PANEL,
+        serde_json::json!({ "id": panel }),
+    ));
+    settle(h);
+}
+
 /// One input event in its own frame, then the dispatch: what the shell does
 /// for an event that arrives on its own (`about_to_wait` after each redraw).
 pub(crate) fn send(h: &mut Ui, event: Event) {
