@@ -1773,3 +1773,25 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     tool_action(&h, ids::SHORTCUT, json!({"slot": "a"}));
     assert_eq!(view(&h), View3d::Custom(2));
 }
+
+/// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
+#[test]
+fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    h.run(
+        "attr.set",
+        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [10.0, 20.0, -300.0]}}),
+    );
+    let r = tool_action(&h, super::view3d::ids::RESET, json!({}));
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let zoom = match h.value(&camera, "camera:zoom") {
+        Some(Value::Float(z)) => z,
+        other => panic!("{other:?}"),
+    };
+    assert!(close3(
+        h.v3(&camera, "transform:position"),
+        [320.0, 180.0, -zoom]
+    ));
+}
