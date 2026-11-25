@@ -27,12 +27,13 @@ bae-model.workspace = true
 bae-platform.workspace = true
 bae-plugin-sdk.workspace = true
 bae-render.workspace = true
+bae-script.workspace = true
 clap.workspace = true
 half.workspace = true
 libloading.workspace = true
-memmap2.workspace = true
 naga.workspace = true
 parking_lot.workspace = true
+rayon.workspace = true
 rustc-hash.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -43,11 +44,15 @@ tracing.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+memmap2.workspace = true
+rustix.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console"] }
+uuid.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Memory"] }
 
 [dev-dependencies]
+bae-motion.workspace = true
 # Builds the C example and test plugins in tests/native.rs (already in the lockfile).
 cc.workspace = true
 tempfile.workspace = true

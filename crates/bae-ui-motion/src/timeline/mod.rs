@@ -3,7 +3,7 @@
 //! navigators, values and expressions, and the time graph (comp tabs, current time,
 //! ruler, work area, CTI, layer duration bars, keyframes).
 //!
-//! Every edit is a command: switches → `attr.set`, values → `attr.set_at`, stopwatch
+//! Every edit is a command: switches → `layer.set_attr`, values → `attr.set_at`, stopwatch
 //! → `attr.set_animated`, dragging bars → `layer.shift_time` / `layer.trim`, dragging
 //! keyframes → `key.move`, work area → `comp.set_work_area`, reordering →
 //! `layer.reorder`, parenting → `layer.set_parent`. Drags preview locally and run
@@ -18,8 +18,13 @@ mod markers;
 mod menus;
 mod modes;
 mod rows;
+mod switches;
+#[cfg(test)]
+mod tests;
+mod waveform;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use bae_model::{Interpolation, Keyframe, PrimPath, Stage, Time};
 use bae_motion::KeyRef;
@@ -37,7 +42,7 @@ use crate::common::{self, EvalCache};
 use crate::graph::GraphEditor;
 use crate::project::ItemDrag;
 use crate::props::{self, Node};
-use crate::session::{Session, SharedSession};
+use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
@@ -137,6 +142,7 @@ impl Cols {
 #[derive(Clone, Debug)]
 enum RowKind {
     Layer,
+    Waveform,
     Group {
         id: String,
         label: String,
@@ -160,7 +166,7 @@ enum RowKind {
 #[derive(Clone, Debug)]
 struct Row {
     kind: RowKind,
-    layer: PrimPath,
+    layer_index: usize,
     depth: usize,
 }
 
@@ -227,15 +233,26 @@ enum Drag {
     },
 }
 
+/// The layer order and parent-menu labels only change when the project changes.
+struct TimelineLayers {
+    revision: u64,
+    comp: PrimPath,
+    paths: Vec<PrimPath>,
+    parent_numbers: Vec<usize>,
+    parent_labels: Vec<String>,
+}
+
 #[derive(Default)]
 pub struct TimelinePanel {
     eval: EvalCache,
-    expanded: HashSet<String>,
+    pub(crate) expanded: HashSet<String>,
+    waveforms: waveform::Waveforms,
     /// 0 = whole comp, 1 = a few frames.
     zoom: f32,
     /// Start of the visible range when zoomed (comp time).
     scroll: Time,
     drag: Option<Drag>,
+    switch_drag: Option<switches::SwitchDrag>,
     rename: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
@@ -246,9 +263,7 @@ pub struct TimelinePanel {
     expr_press: Option<crate::expr::Selection>,
     /// The property whose language menu is open and its field's selection then.
     lang_press: Option<(PrimPath, String, Option<crate::expr::Selection>)>,
-    /// AE layer numbers (# column) of the shown comp, for accessibility names:
-    /// two layers may share a name (issue #128).
-    layer_numbers: HashMap<PrimPath, usize>,
+    layers: Option<Arc<TimelineLayers>>,
     /// Graph Editor mode state (shown when the session's `graph_editor` is on).
     graph: GraphEditor,
     /// This frame shows the Graph Editor.
@@ -289,6 +304,9 @@ pub struct TimelinePanel {
     /// Where the last frame drew the layer bars, for tests.
     #[cfg(test)]
     pub(crate) last_bars: Vec<(PrimPath, Rect)>,
+    /// Group rows: id, twirl arrow, name.
+    #[cfg(test)]
+    pub(crate) last_groups: Vec<(String, Pos2, Pos2)>,
 }
 
 /// Comp time ↔ x in the graph.
@@ -320,7 +338,7 @@ impl TimeAxis {
 
 fn flatten_tree(
     nodes: &[Node],
-    layer: &PrimPath,
+    layer_index: usize,
     depth: usize,
     expanded: &HashSet<String>,
     stage: &Stage,
@@ -340,15 +358,15 @@ fn flatten_tree(
                         label: label.clone(),
                         open,
                     },
-                    layer: layer.clone(),
+                    layer_index,
                     depth,
                 });
                 if open {
-                    flatten_tree(children, layer, depth + 1, expanded, stage, out);
+                    flatten_tree(children, layer_index, depth + 1, expanded, stage, out);
                 }
             }
             Node::Prop { path, attr, label } => {
-                push_prop(path, attr, label, layer, depth, stage, out);
+                push_prop(path, attr, label, layer_index, depth, stage, out);
             }
         }
     }
@@ -358,7 +376,7 @@ fn push_prop(
     path: &PrimPath,
     attr: &str,
     label: &str,
-    layer: &PrimPath,
+    layer_index: usize,
     depth: usize,
     stage: &Stage,
     out: &mut Vec<Row>,
@@ -369,7 +387,7 @@ fn push_prop(
             attr: attr.to_owned(),
             label: label.to_owned(),
         },
-        layer: layer.clone(),
+        layer_index,
         depth,
     });
     if query::attr_spec(stage, path, attr).is_some_and(|s| s.expression.is_some()) {
@@ -380,7 +398,7 @@ fn push_prop(
                 line: 0,
                 lines: 1,
             },
-            layer: layer.clone(),
+            layer_index,
             depth: depth + 1,
         });
     }
@@ -423,28 +441,75 @@ impl TimelinePanel {
         }
     }
 
-    fn rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<Row> {
+    fn layer_list(&mut self, stage: &Stage, comp: &PrimPath) -> Arc<TimelineLayers> {
+        if let Some(layers) = &self.layers
+            && layers.revision == stage.revision()
+            && &layers.comp == comp
+        {
+            return layers.clone();
+        }
+        let paths = query::comp_layers(stage, comp);
+        let numbers: HashMap<_, _> = paths.iter().enumerate().map(|(i, p)| (p, i + 1)).collect();
+        let parent_numbers = paths
+            .iter()
+            .map(|path| {
+                stage
+                    .prim(path)
+                    .and_then(|prim| {
+                        prim.value("parent")
+                            .and_then(|v| v.as_prim_ref())
+                            .and_then(|p| numbers.get(p).copied())
+                    })
+                    .unwrap_or(0)
+            })
+            .collect();
+        let parent_labels = paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("{}. {}", i + 1, query::display_name_of(stage, p)))
+            .collect();
+        let layers = Arc::new(TimelineLayers {
+            revision: stage.revision(),
+            comp: comp.clone(),
+            paths,
+            parent_numbers,
+            parent_labels,
+        });
+        self.layers = Some(layers.clone());
+        layers
+    }
+
+    fn rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
-        let hide_shy = bool_attr(stage, comp, "hide_shy_layers");
-        for layer in query::comp_layers(stage, comp) {
-            if hide_shy && bool_attr(stage, &layer, "shy") {
+        let hide_shy = bool_attr(stage, &layers.comp, "hide_shy_layers");
+        for (layer_index, layer) in layers.paths.iter().enumerate() {
+            if hide_shy && bool_attr(stage, layer, "shy") {
                 continue;
             }
             out.push(Row {
                 kind: RowKind::Layer,
-                layer: layer.clone(),
+                layer_index,
                 depth: 0,
             });
-            if let Some(r) = s.reveal.get(&layer) {
-                for n in props::revealed(stage, &layer, r) {
+            if let Some(r) = s.reveal.get(layer) {
+                if matches!(r, Reveal::Attrs(attrs) if attrs.iter().any(|a| a == "audio:waveform"))
+                    && bae_media::audio::layer_file(stage, layer).is_some()
+                {
+                    out.push(Row {
+                        kind: RowKind::Waveform,
+                        layer_index,
+                        depth: 1,
+                    });
+                }
+                for n in props::revealed(stage, layer, r) {
                     if let Node::Prop { path, attr, label } = n {
-                        push_prop(&path, &attr, &label, &layer, 1, stage, &mut out);
+                        push_prop(&path, &attr, &label, layer_index, 1, stage, &mut out);
                     }
                 }
             } else if self.expanded.contains(layer.as_str()) {
                 flatten_tree(
-                    &props::layer_tree(stage, &layer),
-                    &layer,
+                    &props::layer_tree(stage, layer),
+                    layer_index,
                     1,
                     &self.expanded,
                     stage,
@@ -479,7 +544,7 @@ impl TimelinePanel {
                         line,
                         lines,
                     },
-                    layer: row.layer.clone(),
+                    layer_index: row.layer_index,
                     depth: row.depth,
                 });
             }
@@ -517,14 +582,6 @@ impl TimelinePanel {
 }
 
 impl TimelinePanel {
-    /// "Layer 2 “Solid”": the accessibility context of a layer's controls.
-    fn layer_ctx(&self, stage: &bae_model::Stage, layer: &PrimPath) -> String {
-        bae_ui::a11y::layer(
-            self.layer_numbers.get(layer).copied(),
-            &query::display_name_of(stage, layer),
-        )
-    }
-
     #[cfg(test)]
     pub(crate) fn expanded_layer(&self, layer: &PrimPath) -> bool {
         self.expanded.contains(layer.as_str())
@@ -610,7 +667,7 @@ impl Panel for TimelinePanel {
             );
             return;
         };
-        if session.lock().tick(&info) {
+        if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
         let now = session.lock().time(&info.path);
@@ -628,6 +685,7 @@ impl Panel for TimelinePanel {
             self.last_expr.clear();
             self.last_lang.clear();
             self.last_bars.clear();
+            self.last_groups.clear();
         }
 
         let head = Rect::from_min_max(
@@ -654,22 +712,29 @@ impl Panel for TimelinePanel {
         self.bar_plan = self.plan_bar_drag(stage, &info, &axis, now, pointer_x, shift);
         self.header(ui, cx, &session, &info, head, colrow, &cols, &axis, now);
 
-        // Rows.
+        // Share one parent menu across the visible rows.
+        let layers = self.layer_list(stage, &info.path);
+        let comp_layers = &layers.paths;
+        let parent_items: Vec<_> = std::iter::once(tr("None"))
+            .chain(layers.parent_labels.iter().map(String::as_str))
+            .collect();
         let rows = {
             let s = session.lock();
-            self.rows(stage, &info.path, &s)
+            self.rows(stage, &layers, &s)
         };
         if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
             self.press_mods = m;
         }
-        self.key_plan = self.plan_key_drag(stage, &info, &axis, &rows, now, pointer_x, shift);
-        let comp_layers = query::comp_layers(stage, &info.path);
-        self.layer_numbers = comp_layers
-            .iter()
-            .enumerate()
-            .map(|(i, l)| (l.clone(), i + 1))
-            .collect();
-
+        self.key_plan = self.plan_key_drag(
+            stage,
+            &info,
+            &axis,
+            &rows,
+            &layers.paths,
+            now,
+            pointer_x,
+            shift,
+        );
         // Background of the graph body: marquee selection and deselect (the Graph
         // Editor has its own).
         if !self.graph_mode {
@@ -693,6 +758,7 @@ impl Panel for TimelinePanel {
                 s.selected_keys.clear();
                 s.selected_layers.clear();
                 s.selected_props.clear();
+                s.selected_groups.clear();
             }
             // Right-click on empty space: AE 26's comp menu (New ▸, Composition
             // Settings, Preview ▸ …).
@@ -709,6 +775,7 @@ impl Panel for TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
+        let switch_input = ui.input(switches::SwitchInput::read);
         egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
@@ -728,11 +795,15 @@ impl Panel for TimelinePanel {
                         &axis,
                         row,
                         rect,
-                        &comp_layers,
+                        switch_input,
+                        &layers,
+                        &parent_items,
                         &mut key_rects,
                     );
                     match &row.kind {
-                        RowKind::Layer => layer_rows.push((rect, row.layer.clone())),
+                        RowKind::Layer => {
+                            layer_rows.push((rect, layers.paths[row.layer_index].clone()))
+                        }
                         RowKind::Prop { path, attr, .. } => {
                             prop_rows.push((rect, path.clone(), attr.clone()))
                         }
@@ -740,6 +811,8 @@ impl Panel for TimelinePanel {
                     }
                 }
             });
+
+        self.finish_switch_drag(switch_input, cx);
 
         // Drags that span rows.
         self.finish_drags(
@@ -751,7 +824,7 @@ impl Panel for TimelinePanel {
             &key_rects,
             &layer_rows,
             &prop_rows,
-            &comp_layers,
+            comp_layers,
         );
 
         let mut cti_body = graph_body;
@@ -801,6 +874,7 @@ impl Panel for TimelinePanel {
 fn row_key(row: &Row) -> String {
     match &row.kind {
         RowKind::Layer => "layer".into(),
+        RowKind::Waveform => "waveform".into(),
         RowKind::Group { id, .. } => id.clone(),
         RowKind::Prop { path, attr, .. } => format!("{path}.{attr}"),
         RowKind::Expression {
@@ -855,5 +929,95 @@ fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: 
         s.selected_layers = vec![layer.clone()];
         s.selected_keys.clear();
         s.selected_props.clear();
+        s.selected_groups.clear();
     }
+}
+
+#[cfg(test)]
+mod layer_list_tests {
+    use super::*;
+    use bae_model::{AuthorId, CommandRegistry, Value};
+    use serde_json::json;
+
+    #[test]
+    fn parent_choices_follow_edits_and_project_replacement() {
+        let mut registry = CommandRegistry::with_builtins();
+        bae_motion::register_commands(&mut registry);
+        let author = AuthorId::new("user:test").unwrap();
+        let run = |stage: &mut Stage, id, params| {
+            registry.execute(stage, &author, id, params).unwrap().output
+        };
+        let create_comp = |stage: &mut Stage| {
+            let result = run(stage, "comp.create", json!({"name":"Playback"}));
+            PrimPath::new(result["path"].as_str().unwrap()).unwrap()
+        };
+        let mut stage = Stage::new();
+        let comp = create_comp(&mut stage);
+        let mut panel = TimelinePanel::default();
+        for name in ["A", "B"] {
+            run(
+                &mut stage,
+                "layer.create",
+                json!({"comp":comp, "kind":"solid", "name":name}),
+            );
+        }
+        let initial = panel.layer_list(&stage, &comp);
+        assert_eq!(initial.parent_labels, ["1. B", "2. A"]);
+        let mut session = Session::default();
+        let info = query::comp_info(&stage, &comp).unwrap();
+        session.play(&info);
+        session.set_time(&info, info.frame_rate.frame_to_time(3));
+        assert!(Arc::ptr_eq(&initial, &panel.layer_list(&stage, &comp)));
+
+        let a = &initial.paths[1];
+        let b = &initial.paths[0];
+        run(
+            &mut stage,
+            "layer.set_parent",
+            json!({"layers":[b], "parent":a, "time":Time::ZERO}),
+        );
+        assert_eq!(panel.layer_list(&stage, &comp).parent_numbers, [2, 0]);
+        run(
+            &mut stage,
+            "attr.set",
+            json!({"path":a, "attr":"name", "value":Value::String("Renamed".into())}),
+        );
+        assert_eq!(
+            panel.layer_list(&stage, &comp).parent_labels,
+            ["1. B", "2. Renamed"]
+        );
+        run(
+            &mut stage,
+            "layer.reorder",
+            json!({"layers":[a], "index":0}),
+        );
+        let reordered = panel.layer_list(&stage, &comp);
+        let rows = panel.rows(&stage, &reordered, &session);
+        assert_eq!(rows[0].layer_index, 0);
+        assert_eq!(&reordered.paths[rows[0].layer_index], a);
+        assert_eq!(reordered.parent_labels, ["1. Renamed", "2. B"]);
+        assert_eq!(reordered.parent_numbers, [0, 1]);
+        stage.undo(&author).unwrap();
+        assert_eq!(
+            panel.layer_list(&stage, &comp).parent_labels,
+            ["1. B", "2. Renamed"]
+        );
+
+        let mut other = Stage::new();
+        assert_eq!(create_comp(&mut other), comp);
+        assert!(panel.layer_list(&other, &comp).paths.is_empty());
+    }
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "timeline",
+        bae_ui::PanelKind::new("Timeline", |_| Box::new(TimelinePanel::default())),
+    );
 }

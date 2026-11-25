@@ -16,7 +16,8 @@ use crate::curve::Curve;
 use crate::error::EvalError;
 use crate::evaluated::{
     AssetInfo, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer, EvaluatedMask,
-    EvaluatedPrim, LayerSource, LayerSwitches, LightFalloff, LightState, LightType, TrackMatte,
+    EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff, LightState, LightType,
+    TrackMatte,
 };
 use crate::expr;
 use crate::schema::{
@@ -45,6 +46,10 @@ pub(crate) struct ExprProp {
     pub attr: Arc<str>,
     /// Range the result is clamped to (Opacity), as after interpolation.
     pub clamp: Option<(f64, f64)>,
+    /// The source compiled for the Rust fast path, when it is one of its shapes.
+    pub fast: Option<crate::expr::fast::Fast>,
+    /// Random seed state after `prim` and `attr` (see `expr::seed_prefix`).
+    pub seed: u32,
 }
 
 /// Where and when a property is sampled.
@@ -106,6 +111,8 @@ impl Prop {
                     prim: prim.clone(),
                     attr: attr.into(),
                     clamp: schema::clamp_range(prim_type, attr),
+                    fast: crate::expr::fast::Fast::compile(&e.source),
+                    seed: crate::expr::seed_prefix(prim.as_str(), attr),
                 })))
             }
             _ => base,
@@ -239,6 +246,9 @@ pub(crate) struct CompiledComp {
     pub(crate) name: String,
     /// Some property of some layer has an enabled expression.
     pub(crate) has_expressions: bool,
+    /// Some of them need JavaScript (not the Rust fast path), so they are
+    /// warmed up before the pass (see `expr::warm_up`).
+    pub(crate) has_js_expressions: bool,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) pixel_aspect: f64,
@@ -246,7 +256,10 @@ pub(crate) struct CompiledComp {
     pub(crate) duration: Time,
     pub(crate) bg_color: [f64; 4],
     pub(crate) motion_blur: MotionBlur,
+    pub(crate) frame_blending: bool,
     pub(crate) layers: Vec<CompiledLayer>,
+    /// Comp markers, by time (expressions' `thisComp.marker`).
+    pub(crate) markers: Vec<CompiledMarker>,
     /// Prims whose changes invalidate this compiled comp (the comp and its sources).
     pub(crate) deps: Vec<PrimPath>,
 }
@@ -318,6 +331,61 @@ pub(crate) struct CompiledPrim {
     pub(crate) prim_type: Option<PrimType>,
     pub(crate) attrs: Vec<(String, Prop)>,
     pub(crate) children: Vec<CompiledPrim>,
+    /// Its evaluated form when nothing in it animates: every frame shares it
+    /// (1000 shape layers used to rebuild every fill and path each frame).
+    pub(crate) fixed: Option<EvaluatedPrim>,
+}
+
+/// A comp or layer marker as expressions read it (AE's MarkerKey). Times are
+/// in the owner's time base (comp time / layer time).
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledMarker {
+    pub(crate) time: Time,
+    pub(crate) duration: Time,
+    pub(crate) comment: String,
+    pub(crate) chapter: String,
+    pub(crate) url: String,
+    pub(crate) frame_target: String,
+    pub(crate) cue_point_name: String,
+    pub(crate) protected_region: bool,
+}
+
+/// The markers of a comp or layer (`<owner>/markers/*`), by time.
+fn compile_markers(stage: &Stage, owner: &PrimPath) -> Vec<CompiledMarker> {
+    let Ok(folder) = owner.child("markers") else {
+        return Vec::new();
+    };
+    let mut out: Vec<CompiledMarker> = stage
+        .children(&folder)
+        .into_iter()
+        .filter_map(|p| {
+            let v = stage.prim(&p)?;
+            if v.prim_type() != Some(&PrimType::MARKER) {
+                return None;
+            }
+            let text = |a: &str| {
+                v.value(a)
+                    .and_then(|s| s.as_str().map(str::to_owned))
+                    .unwrap_or_default()
+            };
+            let time = |a: &str| v.value(a).and_then(|t| t.as_time()).unwrap_or(Time::ZERO);
+            Some(CompiledMarker {
+                time: time("time"),
+                duration: time("duration"),
+                comment: text("comment"),
+                chapter: text("chapter"),
+                url: text("url"),
+                frame_target: text("frame_target"),
+                cue_point_name: text("cue_point_name"),
+                protected_region: v
+                    .value("protected_region")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false),
+            })
+        })
+        .collect();
+    out.sort_by_key(|m| m.time);
+    out
 }
 
 /// A text layer's Path Options (AE: Text > Path Options), compiled.
@@ -358,23 +426,30 @@ pub(crate) struct CompiledLight {
 #[derive(Debug)]
 pub(crate) struct CompiledLayer {
     pub(crate) path: PrimPath,
-    pub(crate) name: String,
+    /// Shared with every frame's evaluated layer (no per-frame copies).
+    pub(crate) name: Arc<str>,
     pub(crate) kind: LayerKind,
     pub(crate) timing: LayerTiming,
     pub(crate) switches: LayerSwitches,
     pub(crate) source: CompiledSource,
     pub(crate) time_remap: Option<Prop>,
     pub(crate) parent: Option<usize>,
-    pub(crate) blend_mode: String,
+    pub(crate) blend_mode: Arc<str>,
     pub(crate) track_matte: TrackMatte,
     pub(crate) track_matte_layer: Option<usize>,
     pub(crate) auto_orient: AutoOrient,
     pub(crate) transform: CompiledTransform,
     pub(crate) masks: Vec<CompiledMask>,
     pub(crate) effects: Vec<CompiledEffect>,
+    /// Layer markers, by layer time (expressions' `thisLayer.marker`).
+    pub(crate) markers: Vec<CompiledMarker>,
     pub(crate) contents: Vec<CompiledPrim>,
+    /// `contents` evaluated, when nothing in them animates.
+    pub(crate) fixed_contents: Option<Arc<[EvaluatedPrim]>>,
     pub(crate) text: Option<Prop>,
     pub(crate) text_animators: Vec<CompiledPrim>,
+    /// `text_animators` evaluated, when nothing in them animates.
+    pub(crate) fixed_animators: Option<Arc<[EvaluatedPrim]>>,
     pub(crate) text_path: Option<CompiledTextPath>,
     pub(crate) camera: Option<CompiledCamera>,
     pub(crate) light: Option<CompiledLight>,
@@ -409,7 +484,8 @@ fn comp_layers(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
 }
 
 /// Timing of a layer prim (used by `evaluate_attribute` without compiling the comp).
-fn layer_timing(view: &PrimView<'_>, comp_duration: Time) -> LayerTiming {
+/// Shared layer source-time mapping and active interval for picture and sound.
+pub fn layer_timing(view: &PrimView<'_>, comp_duration: Time) -> LayerTiming {
     let t = &PrimType::LAYER;
     LayerTiming {
         start_time: setting_time(view, t, l::START_TIME).unwrap_or(Time::ZERO),
@@ -474,6 +550,10 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
     }
 
     let has_expressions = layers.iter().any(CompiledLayer::has_expressions);
+    let has_js_expressions = has_expressions
+        && layers
+            .iter()
+            .any(|l| l.expr_props().iter().any(|e| e.fast.is_none()));
     Ok(CompiledComp {
         name: view
             .value(schema::layer::NAME)
@@ -481,6 +561,7 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
             .unwrap_or(view.name())
             .to_owned(),
         has_expressions,
+        has_js_expressions,
         path: path.clone(),
         width: int(c::WIDTH, 1920.0).max(0.0) as u32,
         height: int(c::HEIGHT, 1080.0).max(0.0) as u32,
@@ -489,6 +570,8 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         duration,
         bg_color,
         motion_blur,
+        frame_blending: setting_bool(&view, ct, c::FRAME_BLENDING),
+        markers: compile_markers(stage, path),
         layers,
         deps,
     })
@@ -518,6 +601,11 @@ fn compile_layer(
         motion_blur: setting_bool(v, lt, l::MOTION_BLUR),
         collapse_transformation: setting_bool(v, lt, l::COLLAPSE_TRANSFORMATION),
         preserve_transparency: setting_bool(v, lt, l::PRESERVE_TRANSPARENCY),
+        frame_blending: match setting_str(v, lt, l::FRAME_BLENDING).as_deref() {
+            Some("frame_mix") => FrameBlending::FrameMix,
+            Some("pixel_motion") => FrameBlending::PixelMotion,
+            _ => FrameBlending::Off,
+        },
     };
 
     let source = match setting_ref(v, l::SOURCE) {
@@ -702,7 +790,7 @@ fn compile_layer(
             })
         })
         .collect();
-    let contents = child_prims(l::CONTENTS)
+    let contents: Vec<CompiledPrim> = child_prims(l::CONTENTS)
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
         .collect();
@@ -712,7 +800,7 @@ fn compile_layer(
                 .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TEXT_SOURCE))
         })
         .flatten();
-    let text_animators = child_prims(l::ANIMATORS)
+    let text_animators: Vec<CompiledPrim> = child_prims(l::ANIMATORS)
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
         .collect();
@@ -735,14 +823,16 @@ fn compile_layer(
             .value(l::NAME)
             .and_then(|n| n.as_str())
             .unwrap_or(v.name())
-            .to_owned(),
+            .into(),
         kind,
         timing: layer_timing(v, comp_duration),
         switches,
         source,
         time_remap,
         parent: None,
-        blend_mode: setting_str(v, lt, l::BLEND_MODE).unwrap_or_else(|| "normal".into()),
+        blend_mode: setting_str(v, lt, l::BLEND_MODE)
+            .unwrap_or_else(|| "normal".into())
+            .into(),
         track_matte: TrackMatte::from_token(
             setting_str(v, lt, l::TRACK_MATTE)
                 .as_deref()
@@ -753,8 +843,11 @@ fn compile_layer(
         transform,
         masks,
         effects,
+        markers: compile_markers(stage, v.path()),
+        fixed_contents: fixed_list(&contents),
         contents,
         text,
+        fixed_animators: fixed_list(&text_animators),
         text_animators,
         text_path,
         camera,
@@ -820,12 +913,36 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, depth + 1))
         .collect();
-    Some(CompiledPrim {
+    let mut prim = CompiledPrim {
         path: path.clone(),
         prim_type,
         attrs,
         children,
-    })
+        fixed: None,
+    };
+    prim.fixed = prim.fixed_form();
+    Some(prim)
+}
+
+/// `prims` evaluated, shared as is when none of them animates.
+fn sample_prims(
+    prims: &[CompiledPrim],
+    fixed: Option<&Arc<[EvaluatedPrim]>>,
+    cx: &Cx<'_, '_>,
+) -> Arc<[EvaluatedPrim]> {
+    match fixed {
+        Some(f) => f.clone(),
+        None => prims.iter().map(|p| sample_generic(p, cx)).collect(),
+    }
+}
+
+/// The evaluated form of `prims` when none of them animates.
+fn fixed_list(prims: &[CompiledPrim]) -> Option<Arc<[EvaluatedPrim]>> {
+    prims
+        .iter()
+        .map(|p| p.fixed.clone())
+        .collect::<Option<Vec<_>>>()
+        .map(Into::into)
 }
 
 // ---------------------------------------------------------------------------
@@ -840,18 +957,20 @@ impl CompiledComp {
         js: Option<&Ctx<'_>>,
     ) -> EvaluatedComp {
         let n = self.layers.len();
-        let has_solo = self
+        let video_solo = self
             .layers
             .iter()
-            .any(|l| l.switches.solo && l.switches.enabled);
+            .any(|l| l.switches.solo && l.switches.enabled && l.kind != LayerKind::Audio);
 
-        // Expressions: memoise them first so long chains stay shallow (see warm_up).
-        if js.is_some() && self.has_expressions {
+        // Expressions: memoise them first so long chains stay shallow (see
+        // warm_up). Fast-path ones read only their own property: no chains.
+        if js.is_some() && self.has_js_expressions {
             let props: Vec<(usize, &ExprProp)> = self
                 .layers
                 .iter()
                 .enumerate()
                 .flat_map(|(i, l)| l.expr_props().into_iter().map(move |e| (i, e)))
+                .filter(|(_, e)| e.fast.is_none())
                 .collect();
             let cx_of = |i: usize| Cx {
                 comp: comp_id,
@@ -889,7 +1008,7 @@ impl CompiledComp {
                 };
                 let active = layer.timing.is_active(time);
                 let visible =
-                    layer.switches.enabled && active && (!has_solo || layer.switches.solo);
+                    layer.switches.enabled && active && (!video_solo || layer.switches.solo);
                 let tf = sample_transform(layer, &cx);
                 EvaluatedLayer {
                     path: layer.path.clone(),
@@ -910,6 +1029,10 @@ impl CompiledComp {
                     } else {
                         Vec::new()
                     },
+                    frame_blend_span: (self.frame_blending
+                        && layer.switches.frame_blending != FrameBlending::Off
+                        && matches!(layer.source, CompiledSource::Asset(..)))
+                    .then(|| source_span(layer, &cx, self.frame_rate.frame_duration())),
                     parent: layer.parent,
                     opacity: (tf.opacity / 100.0).clamp(0.0, 1.0),
                     local_matrix: DMat4::IDENTITY,
@@ -924,20 +1047,16 @@ impl CompiledComp {
                         .iter()
                         .map(|e| sample_effect(e, &cx))
                         .collect(),
-                    contents: layer
-                        .contents
-                        .iter()
-                        .map(|p| sample_generic(p, &cx))
-                        .collect(),
+                    contents: sample_prims(&layer.contents, layer.fixed_contents.as_ref(), &cx),
                     text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
                         Value::TextDocument(doc) => Some(doc),
                         _ => None,
                     }),
-                    text_animators: layer
-                        .text_animators
-                        .iter()
-                        .map(|p| sample_generic(p, &cx))
-                        .collect(),
+                    text_animators: sample_prims(
+                        &layer.text_animators,
+                        layer.fixed_animators.as_ref(),
+                        &cx,
+                    ),
                     text_path: layer.text_path.as_ref().map(|t| crate::TextPathOptions {
                         mask: t.mask.clone(),
                         reverse: t.reverse,
@@ -1024,6 +1143,7 @@ impl CompiledComp {
             duration: self.duration,
             bg_color: self.bg_color,
             motion_blur: self.motion_blur,
+            frame_blending: self.frame_blending,
             layers: out,
             camera,
             errors: Vec::new(),
@@ -1231,6 +1351,22 @@ fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>, tick: Time) -> Opt
     (d.length_squared() > 0.0).then_some(d)
 }
 
+/// The source time one comp frame `frame` spans around now: the time remap's
+/// change over the frame centred here, or the frame scaled by the stretch.
+fn source_span(layer: &CompiledLayer, cx: &Cx<'_, '_>, frame: Time) -> Time {
+    let Some(p) = &layer.time_remap else {
+        let stretch = layer.timing.stretch.abs().max(1.0);
+        return Time((frame.0 as f64 * 100.0 / stretch).round() as i64);
+    };
+    let at =
+        |ct: Time| match p.sample(&cx.at_layer_time(layer.timing.layer_time(ct), &layer.timing)) {
+            Value::Time(t) => t,
+            other => Time::from_seconds(num(&other)),
+        };
+    let half = Time(frame.0 / 2);
+    Time((at(cx.ct + half) - at(cx.ct - half)).0.abs())
+}
+
 fn sample_source(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> LayerSource {
     let source_time = match &layer.time_remap {
         Some(p) => match p.sample(cx) {
@@ -1292,14 +1428,18 @@ fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
 }
 
 fn sample_generic(p: &CompiledPrim, cx: &Cx<'_, '_>) -> EvaluatedPrim {
+    if let Some(fixed) = &p.fixed {
+        return fixed.clone();
+    }
     EvaluatedPrim {
         path: p.path.clone(),
         prim_type: p.prim_type.clone(),
-        attrs: p
-            .attrs
-            .iter()
-            .map(|(n, v)| (n.clone(), v.sample(cx)))
-            .collect::<BTreeMap<_, _>>(),
+        attrs: Arc::new(
+            p.attrs
+                .iter()
+                .map(|(n, v)| (n.clone(), v.sample(cx)))
+                .collect::<BTreeMap<_, _>>(),
+        ),
         children: p.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }
@@ -1588,6 +1728,24 @@ impl CompiledPrim {
     fn has_expressions(&self) -> bool {
         self.attrs.iter().any(|(_, p)| p.has_expression())
             || self.children.iter().any(CompiledPrim::has_expressions)
+    }
+
+    /// What it evaluates to at any time, if nothing in it animates.
+    fn fixed_form(&self) -> Option<EvaluatedPrim> {
+        let attrs = self
+            .attrs
+            .iter()
+            .map(|(n, p)| match p {
+                Prop::Static(v) => Some((n.clone(), v.clone())),
+                _ => None,
+            })
+            .collect::<Option<BTreeMap<_, _>>>()?;
+        Some(EvaluatedPrim {
+            path: self.path.clone(),
+            prim_type: self.prim_type.clone(),
+            attrs: Arc::new(attrs),
+            children: fixed_list(&self.children)?,
+        })
     }
 }
 

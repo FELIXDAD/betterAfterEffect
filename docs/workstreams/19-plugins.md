@@ -43,6 +43,10 @@
 
 ## 进度
 
+- betterAfterEffects 脚本在同次运行里复用项目条目、合成图层和关键帧列表，按索引创建所取的对象。增删或移动图层、修改关键帧后，脚本持有的集合会反映新的顺序和值。
+- betterAfterEffects 的原生插件子进程直接进入渲染协议。Windows 用分页文件支持的内存映射，Unix 在创建共享内存后立即删除名字，通过描述符交给子进程。后续帧复用这段内存，容量不足时重新分配。
+- betterAfterEffects 原生渲染直接读写共享内存，复用上传缓冲。宿主按行转换像素，并复用输入范围一致的预渲染查询。声明可并发的效果可在两个 runner 中同时处理帧。
+- betterAfterEffects 脚本插件安装时编译，调用时使用应用命令注册表并检查文件权限。脚本支持读写合成播放头、读取表达式结果和使用属性类型与混合模式枚举。SDK 示例包含只读合成摘要和选中图层淡入。
 - [x] 设计规格 `docs/spec/plugin-architecture.md`（v0.1，已对齐合并后的 `bae_render::Effect` 和 `bae_model::EffectDef`）
 - [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
 - [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）
@@ -55,7 +59,8 @@
 - [x] 应用接入：`PluginModule` + 启动时 `load_installed`（`AppDirs::plugin_dirs()` + `BAE_PLUGIN_PATH`），插件效果发布到 `bae_app::Registry<EffectDef>` / `Registry<dyn bae_render::Effect>`；`bae plugin check|list [--json]`
 - [ ] 渲染耗时对照基准（声明式 vs 同功能内置效果 < 2%，等 04 的执行器和 07 的内置效果）
 - [x] 原生插件（M1）：C ABI 定为 **1.0**（0.1 预发布版仍接受）；libloading 加载、`bae.core` / `bae.param.define` / `bae.render` 套件、效果 CPU 路径（`NativeEffect`：GPU 读回 → `render_cpu` → 上传）；**进程外模式**（`bae plugin runner`，管道 + 共享内存，崩溃 / 卡死只结束子进程、自动重启、一分钟三次停用）；用户级插件默认进程外，随 BAE 安装的 / 系统级可信插件进程内；失败时效果直通输入、插件停用并在状态栏提示（`PluginRuntime::take_notices`）；Rust SDK（`bae_plugin_sdk::abi` 布局镜像 + `effect::CpuEffect` + `export_plugin!`，panic → `BAE_ERR_PANIC`）；示例 `plugins/examples/duotone-rs`（Rust，进程外）+ `sdk/c/examples/invert`（C，进程内）；文档 `docs/plugins/native-c.md`、`native-rust.md`
-- [ ] 脚本插件
+- [x] 脚本：AE 风格脚本 API 子集（`crates/bae-script`，QuickJS 与表达式共用）；文件 ▸ 脚本（运行脚本文件、安装脚本文件、脚本文件夹列表）；命令 `script.run`（MCP 工具，同一套命令）；一次运行 = 一个撤销步骤；文档 `docs/plugins/scripting.md`，示例 `plugins/examples/scripts/`
+- [x] 脚本插件：清单里的 `[[command]]` / `[[automation]]` 通过 `bae-script` 注册成命令（ES 模块 + `import from "bae"`）
 - [ ] 其余示例插件
 
 ### M1 记录（原生插件）
@@ -74,6 +79,22 @@
 - 给 02 的请求：R02-8（字符串/素材参数）、R02-9（相对坐标点参数默认值）；给 04 的请求：R04-11（`EffectParams` 补字段）、R04-12（在 crate 外构造 `EncodeContext`）。
 - 第三个 PR（应用接入，协调人决定由 19 做）：`apps/bae` 只改三行（依赖、`add_module`、启动时调用 `load_installed`）。`PluginHost` 改为通过 `EffectRegistrar` 注册（`EffectRegistries` 普通注册表 / `AppEffectRegistries` 应用注册表）。release 体积 15.98 → 16.72 MiB（含 bae-render 首次链接进应用）。给 04 的请求 R04-13：`bae render` 和渲染器从 `Registry<dyn Effect>` 取效果（和 `Registry<dyn SourceProvider>` 一样）。
 - 第二个 PR：`DeclarativeEffect`、`PluginHost`、`load_builtin`、检查工具、posterize 示例、`docs/plugins/`。`EffectParams` 没有图层范围、帧率等信息前（R04-11），`BaeFrame.layer_bounds` 用输入范围代替，其余未知字段为 0；`layer` 参数和转场的 `to` 源要等渲染图支持（R04-1），现在绑定为空纹理。
+
+### 脚本（交接）
+
+2026-11-24，分支 `plugins/scripting`（Draft PR）。
+
+- **已完成**：`crates/bae-script`（无 GPU / 界面依赖）：AE 脚本 API 常用子集（`app.project`、items、`CompItem`、`layers.addSolid/addText/addNull/addShape/addCamera/addLight/add`、Layer 属性和顺序、`property()` / `setValue` / `setValueAtTime` / 关键帧 / 插值 / 表达式、效果组 `addProperty`、蒙版属性、`TextDocument`、`alert` / `$.writeln`、`bae.commands.invoke`）；命令 `script.run`（自动成为 MCP 工具）；文件 ▸ 脚本（运行脚本文件、安装脚本文件、脚本文件夹列表）；文档 `docs/plugins/scripting.md`；示例 `plugins/examples/scripts/`。`cargo test -p bae-script`（11 个）和 `bae-ui-motion` 的 `scripts` 测试通过，clippy 全工作区通过。
+- **后续**：命令目录可以把“运行脚本文件…”“安装脚本文件…”标为 Done。Recent Script Files、表达式求值、工程选区和文件读写留给后续脚本 API。
+- **关键设计**：一次运行 = 一个 `Stage` 事务 = 一个撤销步骤；所有修改都在同一事务里调用已注册命令（`cmd.run_json(tx, …)`，和 MCP 同一套）；读取走 `tx.stage()`，能看到本次运行自己的修改；出错时保留之前的修改并报告行号（AE 行为）；`script.run` 返回报告（log / alerts / error / result），界面在 `script.run` 后排一个 `motion.file.script_report` 动作，从 `ScriptConsole` 资源取报告弹窗；JS 对象模型写在 prelude 里，Rust 侧只有一个 `__host(method, json)`；每次运行一个独立 QuickJS 运行时（128 MiB、默认 30 s 中断）；经 `script.run` 时撤销名称是命令标题“运行脚本”，直接调 `bae_script::run` 时用第一个 `beginUndoGroup` 的名字。
+- **文件**：`crates/bae-script/src/{lib.rs（ScriptModule、RunScript、ScriptConsole、run/run_in）, engine.rs（运行时、限制、错误行号）, host.rs（__host 方法 → 读取 / 命令）, convert.rs（值 ⇄ AE 单位）, prelude.js（AE 对象模型）}`、`crates/bae-script/tests/scripts.rs`、`crates/bae-ui-motion/src/scripts.rs`（菜单和动作）、`apps/bae/src/main.rs`（加 `ScriptModule`）。
+
+### betterAfterEffects 脚本插件（2026-11-25，PR #329）
+
+- 清单里的脚本命令和自动化脚本均注册到应用命令表，所有者是插件 ID。菜单、快捷键和 MCP 使用同一条命令。重新加载会替换该插件的入口，卸载会移除它们。
+- 安装和热更新时先检查清单中的每个导出名。缺少导出会报告脚本文件和名称，旧入口继续可用。插件顶层代码只在调用时执行。
+- 网格示例覆盖选区和显式图层路径、静态位置和带关键帧的位置。自动化入口报告偏离网格的图层。每次修改可一次撤销，插件入口出错会回滚本次事务。
+- 原生插件的进程策略见 ARCHITECTURE §14 与 D16。原生实现由 PR #332 交付。
 
 ### 交接（2026-11-25，给接手的 Codex）
 

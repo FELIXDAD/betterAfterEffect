@@ -10,6 +10,7 @@
 //! [`Transform::opacity`] keeps AE's percent.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bae_model::{BezierPath, FrameRate, LayerKind, PrimPath, PrimType, TextDocument, Time, Value};
 use glam::{DMat4, DVec3};
@@ -31,6 +32,8 @@ pub struct EvaluatedComp {
     pub duration: Time,
     pub bg_color: [f64; 4],
     pub motion_blur: MotionBlur,
+    /// The comp's Enable Frame Blending switch.
+    pub frame_blending: bool,
     /// Layers in AE stacking order: `layers[0]` is the top layer (AE index 1). The
     /// renderer composites from the last to the first. Every layer is listed, including
     /// invisible ones (track mattes, parents, cameras), so indices are stable.
@@ -60,7 +63,7 @@ impl EvaluatedComp {
 pub struct EvaluatedLayer {
     pub path: PrimPath,
     /// Display name (`name` attribute, falling back to the prim name).
-    pub name: String,
+    pub name: Arc<str>,
     pub kind: LayerKind,
     pub timing: LayerTiming,
     /// The layer time that was evaluated (keyframe time base, see [`crate::time`]).
@@ -77,6 +80,10 @@ pub struct EvaluatedLayer {
     /// Comp times at which to sample this layer for motion blur (AE-ANI-103), in
     /// shutter order. Empty when motion blur is off for the comp or the layer.
     pub motion_blur_times: Vec<Time>,
+    /// Frame blending (AE-CMP-065): the source time one comp frame spans around
+    /// now (remapped or stretched speed × frame duration) when the comp and layer
+    /// switches are on and the layer shows footage; `None` otherwise.
+    pub frame_blend_span: Option<Time>,
     /// Index of the parent layer in [`EvaluatedComp::layers`].
     pub parent: Option<usize>,
     pub transform: Transform,
@@ -87,18 +94,18 @@ pub struct EvaluatedLayer {
     /// 0–1, not inherited from parents.
     pub opacity: f64,
     /// Blend mode token (`bae_model::schema::BLEND_MODES`).
-    pub blend_mode: String,
+    pub blend_mode: Arc<str>,
     pub track_matte: TrackMatte,
     /// Index of the matte layer (the layer above when the attribute is unset).
     pub track_matte_layer: Option<usize>,
     pub masks: Vec<EvaluatedMask>,
     pub effects: Vec<EvaluatedEffect>,
     /// Shape layer contents (groups, paths, fills, operators …), in order.
-    pub contents: Vec<EvaluatedPrim>,
+    pub contents: Arc<[EvaluatedPrim]>,
     /// Text layers: the source text at this time (`text:source`).
     pub text: Option<Box<TextDocument>>,
     /// Text layers: animators with their selectors (`animators` folder), evaluated.
-    pub text_animators: Vec<EvaluatedPrim>,
+    pub text_animators: Arc<[EvaluatedPrim]>,
     /// Text layers on a path (AE: Text > Path Options with a mask chosen).
     pub text_path: Option<TextPathOptions>,
     pub camera: Option<CameraState>,
@@ -124,6 +131,20 @@ pub struct LayerSwitches {
     pub collapse_transformation: bool,
     /// AE "Preserve Underlying Transparency" (T switch).
     pub preserve_transparency: bool,
+    /// The layer's Frame Blending switch (AE-CMP-065).
+    pub frame_blending: FrameBlending,
+}
+
+/// A layer's Frame Blending switch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameBlending {
+    #[default]
+    Off,
+    /// Weighted mix of the neighbouring source frames.
+    FrameMix,
+    /// Optical-flow interpolation (AE Pixel Motion).
+    PixelMotion,
 }
 
 /// Where a layer's pixels come from.
@@ -248,8 +269,9 @@ impl EvaluatedEffect {
 pub struct EvaluatedPrim {
     pub path: PrimPath,
     pub prim_type: Option<PrimType>,
-    pub attrs: BTreeMap<String, Value>,
-    pub children: Vec<EvaluatedPrim>,
+    /// Shared between frames when nothing in the prim animates.
+    pub attrs: Arc<BTreeMap<String, Value>>,
+    pub children: Arc<[EvaluatedPrim]>,
 }
 
 impl EvaluatedPrim {

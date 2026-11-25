@@ -1130,24 +1130,24 @@
 - **Exact semantics:**
   - Layer switch values (scripting `AVLayer.frameBlendingType`, `FrameBlendingType.`): Off (`NO_FRAME_BLEND`), Frame Mix (帧混合, `FRAME_MIX`), Pixel Motion (像素运动, `PIXEL_MOTION`). Only applied when the comp's Enable Frame Blending switch is on (previews) / Render Settings frame blending is on (output).
   ```
-  Frame Mix:
-    s  = source time for this comp frame (in source frames, fractional)   # see transform-
-                                                                          # keyframes-expressions.md
-    f0 = floor(s); w = s - f0
-    img = (1 - w) * frame(f0) + w * frame(f0 + 1)     # premultiplied blend; UNVERIFIED
-    # when several source frames fall within one comp frame (speed-up), AE averages them
-    # (UNVERIFIED: average of all source frames inside the comp frame duration)
+  Frame Mix (measured in AE 2026, 9 cases, weights fit within 0.02):
+    s = source time for this comp frame × source fps     # fractional source frames
+    v = source frames one comp frame spans               # |remap(t+T/2) − remap(t−T/2)|·fps,
+                                                         # or T·100/|stretch|·fps
+    h = 0.74 if v <= 1 else 0.93·v                       # tent half-width
+    w(k) = tent_cdf(k + 0.5 − s, h) − tent_cdf(k − 0.5 − s, h)
+    img = Σ w(k) · frame(clamp(k, 0, last))              # premultiplied, Σ w = 1
+    # frame-aligned s still mixes about 89 / 5.5 / 5.5 %
   Pixel Motion:
     img = optical-flow interpolation between frame(f0) and frame(f0+1) at phase w
           (motion vectors estimated per pixel; AE's algorithm is proprietary)
   ```
-  - Integer `s` (no fractional phase) → the frame itself, no blending.
   - Frame blending applies before masks/effects (it produces the layer's source frame).
   - Quality interaction: a frame-blended layer in Draft quality always uses Frame Mix, even if Pixel Motion is selected (Adobe help).
   - Gate: the comp's Enable Frame Blending switch disables frame blending for all layers in that comp regardless of layer switches (Adobe help); Render Settings can enable it for output.
 - **Priority:** P1 (Frame Mix); Pixel Motion P2.
 - **Owner:** bae-render (+ bae-media, bae-anim)
-- **Notes:** Source: https://helpx.adobe.com/after-effects/using/time-stretching-time-remapping.html (Frame blending). zh-CN: menu 图层 > 帧混合 > 帧混合 / 像素运动. Which source frames and weights are used is defined in transform-keyframes-expressions.md, frame blending; this item covers only the pixel combination. Cost: Frame Mix decodes two frames per output frame (cache-friendly); Pixel Motion needs a flow pass (GPU compute, e.g. pyramidal Lucas-Kanade/DIS) — BAE decision: Pixel Motion may ship later behind Frame Mix.
+- **Notes:** Source: https://helpx.adobe.com/after-effects/using/time-stretching-time-remapping.html (Frame blending). zh-CN: menu 图层 > 帧混合 > 帧混合 / 像素运动. Which source frames and weights are used is defined in transform-keyframes-expressions.md, frame blending; this item covers only the pixel combination. Cost: Frame Mix decodes two frames per output frame (cache-friendly); Pixel Motion needs a flow pass (GPU compute, e.g. pyramidal Lucas-Kanade/DIS) — BAE decision: Pixel Motion may ship later behind Frame Mix. **BAE (2026-11-25):** Frame Mix is implemented as above (`bae-render` `frame_blend.rs`; one source node per frame summed with Alpha Add; at most 64 frames). Pixel Motion renders as Frame Mix with a warning until the optical-flow pass (shared with Pixel Motion Blur and Timewarp) lands.
 
 ## Other compositing behaviour
 

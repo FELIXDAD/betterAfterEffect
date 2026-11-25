@@ -262,6 +262,13 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             children: effects,
         });
     }
+    if bae_media::audio::layer_file(stage, layer).is_some() {
+        out.push(Node::Group {
+            id: format!("{layer}#audio"),
+            label: tr("Audio").to_owned(),
+            children: vec![prop(stage, layer, "audio:levels", false)],
+        });
+    }
     out.push(Node::Group {
         id: format!("{layer}#transform"),
         label: tr("Transform").to_owned(),
@@ -408,6 +415,7 @@ pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<
             match reveal {
                 Reveal::Animated => spec.is_some_and(|s| s.is_animated() || s.expression.is_some()),
                 Reveal::Modified => spec.is_some_and(|s| !s.is_empty()),
+                Reveal::Props(list) => list.iter().any(|(p, a)| p == path && a == attr),
                 Reveal::Attrs(list) => {
                     path == layer
                         && list.iter().any(|a| {

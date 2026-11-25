@@ -1,6 +1,7 @@
+mod expression;
 use crate::Registry;
-use crate::effects;
+pub(crate) use expression::Control;
 
 pub(crate) fn register(registry: &mut Registry) {
-    registry.effects.extend(effects::controls::builtins());
+    registry.effects.extend(expression::builtins());
 }

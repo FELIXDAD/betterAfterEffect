@@ -22,6 +22,7 @@
 pub mod library;
 pub mod pixels;
 pub mod runner;
+mod shm;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -52,6 +53,7 @@ pub use runner::{RunnerClient, RunnerCommand, runner_main};
 pub const IN_PROCESS_ENV: &str = "BAE_PLUGIN_IN_PROCESS";
 /// A dedicated runner executable (no arguments) instead of `bae plugin runner`.
 pub const RUNNER_ENV: &str = "BAE_PLUGIN_RUNNER";
+const RUNNER_CHILD_ENV: &str = "BAE_PLUGIN_RUNNER_CHILD";
 
 /// How the host runs native plugins.
 #[derive(Clone, Debug, Default)]
@@ -435,23 +437,6 @@ impl NativePlugin {
         out
     }
 
-    fn render(
-        &self,
-        frame: &FrameRequest,
-        input: &[u8],
-        output: &mut [u8],
-    ) -> Result<RenderOut, CallError> {
-        if self.is_disabled() {
-            return Err(CallError::Disabled);
-        }
-        let out = match &self.backend {
-            Backend::InProcess(lib) => lib.render(frame, input, output),
-            Backend::OutOfProcess(c) => c.render(frame, input, output),
-        };
-        self.logs();
-        out
-    }
-
     /// Reports a failed call: notices, and disabling after a panic or
     /// repeated crashes.
     fn fail(&self, effect: &str, error: CallError) {
@@ -499,6 +484,11 @@ pub fn load_plugin(
     notices: &Notices,
 ) -> Result<Arc<NativePlugin>, Vec<Diagnostic>> {
     let err = |m: String| vec![Diagnostic::error(MANIFEST_FILE, m)];
+    if std::env::var_os(RUNNER_CHILD_ENV).is_some() {
+        return Err(err(
+            "a plugin runner cannot load nested native plugins".into()
+        ));
+    }
     let id = manifest.plugin.id.as_str();
     let native = manifest
         .native
@@ -740,8 +730,46 @@ pub struct NativeEffect {
     info: EffectInfo,
     format: BaePixelFormat,
     plugin: Arc<NativePlugin>,
-    /// Reused CPU buffers (input, output).
-    scratch: Mutex<(AlignedBuf, AlignedBuf)>,
+    scratch: Mutex<Vec<FrameScratch>>,
+    queries: Mutex<QueryCache>,
+}
+
+#[derive(Default)]
+struct QueryCache {
+    bounds: Option<(FrameRequest, PreRenderOut)>,
+    roi: Option<(FrameRequest, PreRenderOut)>,
+}
+
+impl QueryCache {
+    fn get(&self, frame: &FrameRequest, bounds: bool) -> Option<PreRenderOut> {
+        let entry = if bounds { &self.bounds } else { &self.roi };
+        if let Some((previous, out)) = entry
+            && previous == frame
+        {
+            return Some(*out);
+        }
+        if bounds {
+            return None;
+        }
+        // A request covering the entire possible output needs the checkout
+        // already obtained when asking for full bounds. A crop gets its own ROI.
+        let (previous, out) = self.bounds.as_ref()?;
+        if rect(frame.request).intersect(&rect(out.max_result)) != rect(out.max_result) {
+            return None;
+        }
+        let full = FrameRequest {
+            request: previous.request,
+            ..frame.clone()
+        };
+        (full == *previous).then_some(*out)
+    }
+}
+
+#[derive(Default)]
+struct FrameScratch {
+    input: AlignedBuf,
+    output: AlignedBuf,
+    upload: Vec<u8>,
 }
 
 impl std::fmt::Debug for NativeEffect {
@@ -764,7 +792,8 @@ impl NativeEffect {
             info,
             format,
             plugin: plugin.clone(),
-            scratch: Mutex::new((AlignedBuf::default(), AlignedBuf::default())),
+            scratch: Mutex::default(),
+            queries: Mutex::default(),
         })
     }
 
@@ -977,77 +1006,92 @@ impl NativeEffect {
             .map_err(|e| failed(format!("input readback: {e}")))?;
 
         let frame = self.frame(params, s, request, input_rect);
-        // Reuse the effect's buffers unless another thread renders it right now.
-        let mut shared = self.scratch.try_lock();
-        let mut own = (AlignedBuf::default(), AlignedBuf::default());
-        let (inbuf, outbuf) = match shared.as_deref_mut() {
-            Some((i, o)) => (i, o),
-            None => (&mut own.0, &mut own.1),
-        };
-        inbuf.resize(pixels::image_len(self.format, input_rect));
-        outbuf.resize(pixels::image_len(self.format, request));
-        pixels::from_working(
-            &data.data,
-            data.bytes_per_row as usize,
-            working,
-            input.alpha,
-            [tw, th],
-            self.format,
-            inbuf.as_mut_slice(),
-            pixels::row_bytes(self.format, tw),
-        );
-        let out_rect = match self
-            .plugin
-            .render(&frame, inbuf.as_slice(), outbuf.as_mut_slice())?
-        {
-            RenderOut::Identity => return Ok(input.clone()),
-            RenderOut::Rendered(r) => rect(r).intersect(&request),
-        };
-        let (w, h) = (out_rect.width().max(1), out_rect.height().max(1));
-        let stride = pixels::row_bytes(self.format, request.width());
-        let offset = if out_rect.is_empty() {
-            0
-        } else {
-            (out_rect.y0 - request.y0) as usize * stride
-                + (out_rect.x0 - request.x0) as usize * pixels::bytes_per_pixel(self.format)
-        };
-        let bytes = if out_rect.is_empty() {
-            // Nothing produced: one transparent texel.
-            vec![0u8; working.block_copy_size(None).unwrap_or(8) as usize]
-        } else {
-            pixels::to_working(
-                &outbuf.as_slice()[offset..],
-                stride,
-                self.format,
-                [w, h],
-                working,
-            )
-        };
-        let px = |v: i32| (f64::from(v) * s).round() as i32;
-        let origin = if out_rect.is_empty() {
-            BaeRect::new(request.x0, request.y0, request.x0 + 1, request.y0 + 1)
-        } else {
-            out_rect
-        };
-        let mut image = ctx
-            .allocate(
-                IRect::new(px(origin.x0), px(origin.y0), px(origin.x1), px(origin.y1)),
-                s,
-            )
-            .map_err(|e| failed(e.to_string()))?;
-        let region = TextureRegion {
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        };
-        transfer::upload_texture(&gpu, &image.texture, region, &bytes)
-            .map_err(|e| failed(format!("output upload: {e}")))?;
-        image.alpha = ImageAlpha::Premultiplied;
-        Ok(image)
+        let mut scratch = self.scratch.lock().pop().unwrap_or_default();
+        let result = (|| {
+            let FrameScratch {
+                input: input_buf,
+                output: output_buf,
+                upload,
+            } = &mut scratch;
+            let fill = |dst: &mut [u8]| {
+                pixels::from_working(
+                    &data.data,
+                    data.bytes_per_row as usize,
+                    working,
+                    input.alpha,
+                    [tw, th],
+                    self.format,
+                    dst,
+                    pixels::row_bytes(self.format, tw),
+                );
+            };
+            let mut convert = |out, src: &[u8]| {
+                let RenderOut::Rendered(r) = out else {
+                    return None;
+                };
+                let out_rect = rect(r).intersect(&request);
+                if out_rect.is_empty() {
+                    upload.clear();
+                    upload.resize(working.block_copy_size(None).unwrap() as usize, 0);
+                } else {
+                    let stride = pixels::row_bytes(self.format, request.width());
+                    let offset = (out_rect.y0 - request.y0) as usize * stride
+                        + (out_rect.x0 - request.x0) as usize
+                            * pixels::bytes_per_pixel(self.format);
+                    pixels::to_working(
+                        &src[offset..],
+                        stride,
+                        self.format,
+                        [out_rect.width(), out_rect.height()],
+                        working,
+                        upload,
+                    );
+                }
+                Some(out_rect)
+            };
+            let out_rect = match &self.plugin.backend {
+                Backend::OutOfProcess(client) => client.render(&frame, fill, convert)?,
+                Backend::InProcess(lib) => {
+                    input_buf.resize(pixels::image_len(self.format, input_rect));
+                    output_buf.resize(pixels::image_len(self.format, request));
+                    fill(input_buf.as_mut_slice());
+                    let out = lib.render(&frame, input_buf.as_slice(), output_buf.as_mut_slice());
+                    self.plugin.logs();
+                    convert(out?, output_buf.as_slice())
+                }
+            };
+            let Some(out_rect) = out_rect else {
+                return Ok(input.clone());
+            };
+            let (w, h) = (out_rect.width().max(1), out_rect.height().max(1));
+            let px = |v: i32| (f64::from(v) * s).round() as i32;
+            let origin = if out_rect.is_empty() {
+                BaeRect::new(request.x0, request.y0, request.x0 + 1, request.y0 + 1)
+            } else {
+                out_rect
+            };
+            let mut image = ctx
+                .allocate(
+                    IRect::new(px(origin.x0), px(origin.y0), px(origin.x1), px(origin.y1)),
+                    s,
+                )
+                .map_err(|e| failed(e.to_string()))?;
+            let region = TextureRegion {
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+            };
+            transfer::upload_texture(&gpu, &image.texture, region, upload)
+                .map_err(|e| failed(format!("output upload: {e}")))?;
+            image.alpha = ImageAlpha::Premultiplied;
+            Ok(image)
+        })();
+        self.scratch.lock().push(scratch);
+        result
     }
 
     fn query(
@@ -1061,8 +1105,24 @@ impl NativeEffect {
         }
         let to = |r: IRect| BaeRect::new(r.x0, r.y0, r.x1, r.y1);
         let frame = self.frame(params, 1.0 / params.scale.max(1e-9), to(request), to(input));
+        let bounds = request == UNBOUNDED;
+        let cacheable = self.info.flags & BAE_EFFECT_FLAG_NON_DETERMINISTIC == 0;
+        if cacheable && let Some(out) = self.queries.lock().get(&frame, bounds) {
+            return Some(out);
+        }
         match self.plugin.pre_render(&frame) {
-            Ok(out) => Some(out),
+            Ok(out) => {
+                if cacheable {
+                    let mut queries = self.queries.lock();
+                    let slot = if bounds {
+                        &mut queries.bounds
+                    } else {
+                        &mut queries.roi
+                    };
+                    *slot = Some((frame, out));
+                }
+                Some(out)
+            }
             Err(e) => {
                 self.plugin.fail(&self.info.id, e);
                 None
@@ -1094,14 +1154,24 @@ impl Effect for NativeEffect {
     }
 
     fn input_roi(&self, params: &EffectParams<'_>, output_roi: IRect) -> IRect {
-        match self.query(params, output_roi, UNBOUNDED) {
+        self.required_input(params, output_roi, UNBOUNDED)
+    }
+
+    fn required_input(
+        &self,
+        params: &EffectParams<'_>,
+        output_roi: IRect,
+        available: IRect,
+    ) -> IRect {
+        let region = match self.query(params, output_roi, available) {
             Some(PreRenderOut {
                 input: Some(r),
                 flags,
                 ..
             }) if flags & BAE_PRERENDER_IDENTITY == 0 => IRect::new(r[0], r[1], r[2], r[3]),
             _ => output_roi,
-        }
+        };
+        region.intersect(&available)
     }
 
     fn render(
@@ -1167,4 +1237,53 @@ pub fn effects_of(
 /// The API version a host presents to a plugin requiring `api`.
 pub fn presented_api(api: ApiVersion) -> Option<ApiVersion> {
     HOST_API.check(api).ok()
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+
+    #[test]
+    fn a_full_checkout_can_serve_the_same_frame_but_not_a_crop_or_new_time() {
+        let size = [0, 0, 24, 12];
+        let full = [BAE_COORD_MIN, BAE_COORD_MIN, BAE_COORD_MAX, BAE_COORD_MAX];
+        let mut frame = FrameRequest {
+            effect: 0,
+            format: BAE_PIXEL_FORMAT_RGBA_U8_PREMUL,
+            time: 0,
+            time_step: 1,
+            frame_rate: [24, 1],
+            downsample: [1, 1],
+            quality: BAE_QUALITY_HIGH,
+            flags: 0,
+            color_space: BAE_COLOR_SPACE_SRGB,
+            shutter: [0.0; 2],
+            layer_bounds: size,
+            render_id: 1,
+            layer_duration: 24,
+            params: vec![],
+            request: full,
+            input: size,
+        };
+        let out = PreRenderOut {
+            flags: 0,
+            result: size,
+            max_result: size,
+            input: Some(size),
+        };
+        let cache = QueryCache {
+            bounds: Some((frame.clone(), out)),
+            roi: None,
+        };
+        frame.request = size;
+        assert_eq!(cache.get(&frame, false), Some(out));
+        frame.input = full;
+        assert_eq!(cache.get(&frame, false), None);
+        frame.input = size;
+        frame.request[2] /= 2;
+        assert_eq!(cache.get(&frame, false), None);
+        frame.request = size;
+        frame.time += 1;
+        assert_eq!(cache.get(&frame, false), None);
+    }
 }

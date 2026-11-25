@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use bae_app::Registry;
-use bae_model::effect::param_attr;
+use bae_model::effect::{PointDefaultSpace, param_attr};
 use bae_model::{
     AttrSpec, CommandError, CommandRegistry, DynCommand, EffectDef, Keyframe, Op, PrimPath,
     PrimType, Stage, Time, Transaction, Value,
@@ -152,25 +152,12 @@ impl bae_model::Command for ApplyEffect {
 pub fn instance_default(
     stage: &Stage,
     layer: &PrimPath,
-    def: &EffectDef,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    let measured = matches!(
-        param.match_name.as_deref(),
-        Some("ADBE Radial Blur-0002" | "ADBE Tile-0001" | "ADBE Radial Shadow-0003")
-    ) || (def.plugin.is_none()
-        && (def.category == "Distort"
-            || matches!(
-                def.match_name.as_str(),
-                "VISINF Grain Duplication" | "VISINF Grain Removal"
-            )));
-    let unit = if param.flags.relative_default {
-        [1.0, 1.0]
-    } else if measured {
-        [1.0 / 640.0, 1.0 / 360.0]
-    } else {
+    let space = param.flags.point_default_space();
+    if space == PointDefaultSpace::Pixels {
         return param.default.clone();
-    };
+    }
     let size = || -> Option<[f64; 2]> {
         let source_size = stage
             .prim(layer)
@@ -184,11 +171,10 @@ pub fn instance_default(
             Some([f64::from(comp.width), f64::from(comp.height)])
         })
     };
-    let scale = |x: f64, y: f64, s: [f64; 2]| [x * s[0] * unit[0], y * s[1] * unit[1]];
     match (&param.default, size()) {
-        (Some(Value::Vec2([x, y])), Some(s)) => Some(Value::Vec2(scale(*x, *y, s))),
-        (Some(Value::Vec3([x, y, z])), Some(s)) if param.flags.relative_default => {
-            let [x, y] = scale(*x, *y, s);
+        (Some(Value::Vec2(xy)), Some(s)) => Some(Value::Vec2(space.layer_pixels(*xy, s))),
+        (Some(Value::Vec3([x, y, z])), Some(s)) if space == PointDefaultSpace::LayerFraction => {
+            let [x, y] = space.layer_pixels([*x, *y], s);
             Some(Value::Vec3([x, y, *z]))
         }
         _ => param.default.clone(),
@@ -230,7 +216,7 @@ fn add_instance(
         if param.kind.value_type().is_none() {
             continue;
         }
-        if let Some(value) = instance_default(tx.stage(), layer, def, param) {
+        if let Some(value) = instance_default(tx.stage(), layer, param) {
             set(tx, &path, &param_attr(param.id), value)?;
         }
     }
@@ -423,7 +409,7 @@ impl bae_model::Command for ResetEffects {
             let def = find_def(&self.defs, &match_name)
                 .ok_or_else(|| fail(format!("unknown effect `{match_name}`")))?;
             for param in &def.params {
-                let Some(default) = instance_default(tx.stage(), &layer, &def, param) else {
+                let Some(default) = instance_default(tx.stage(), &layer, param) else {
                     continue;
                 };
                 let attr = param_attr(param.id);

@@ -11,6 +11,9 @@ use serde_json::json;
 use crate::session::SharedSession;
 use crate::{CompositionViewer, ProjectPanel, TimelinePanel};
 
+mod playback_4k;
+mod playback_worker;
+
 struct Harness {
     stage: Stage,
     reg: CommandRegistry,
@@ -469,7 +472,7 @@ fn panels_render_a_project() {
 #[test]
 fn every_english_ui_string_has_chinese() {
     // The language is process-global, so check the table instead of switching it.
-    let zh = crate::i18n::ZH;
+    let zh = crate::i18n::all();
     for (_, en) in crate::actions::ACTIONS {
         assert!(zh.iter().any(|(e, _)| e == en), "missing zh for {en}");
     }
@@ -837,12 +840,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.layer.arrange.front",
         "motion.animation.ease",
         "menu.edit.copy",
-        "menu.layer.transform.fit_to_comp",
+        "menu.layer.time.time_reverse_layer",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
-    let handled: std::collections::HashSet<String> = ["motion.layer.fit_to_comp".to_owned()].into();
+    let handled: std::collections::HashSet<String> =
+        ["motion.layer.time_reverse_layer".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -870,7 +874,7 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Fit to Comp once handled.
+    // A selected layer: layer commands too; Time-Reverse Layer once handled.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -883,7 +887,7 @@ fn menu_items_grey_and_check_like_ae() {
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(6, "menu.layer.transform.fit_to_comp");
+    with_fit.insert(6, "menu.layer.time.time_reverse_layer");
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();
@@ -921,7 +925,7 @@ impl Panel for NoopPanel {
 /// Every menu title (items and submenus) has a Chinese name.
 #[test]
 fn every_menu_title_has_chinese() {
-    bae_ui::i18n::register(crate::i18n::ZH);
+    bae_ui::i18n::register(&crate::i18n::all());
     bae_ui::i18n::register(crate::catalog::MENU_ZH);
     let mut missing = std::collections::BTreeSet::new();
     let mut check = |t: &str| {
@@ -1278,7 +1282,7 @@ fn accessibility_labels_have_chinese() {
         "Degrees",
         "Project Items",
     ];
-    let zh = crate::i18n::ZH;
+    let zh = crate::i18n::all();
     let missing: Vec<_> = labels
         .iter()
         .filter(|l| !zh.iter().any(|(en, _)| en == *l) && !bae_ui::i18n::has_translation(l))
@@ -1432,7 +1436,7 @@ fn dialog_strings_have_chinese() {
     let missing: Vec<_> = crate::dialogs::strings()
         .into_iter()
         .filter(|s| {
-            !bae_ui::i18n::has_translation(s) && !crate::i18n::ZH.iter().any(|(en, _)| en == s)
+            !bae_ui::i18n::has_translation(s) && !crate::i18n::all().iter().any(|(en, _)| en == s)
         })
         .collect();
     assert!(missing.is_empty(), "no Chinese for {missing:?}");
@@ -1763,6 +1767,74 @@ fn import_fixture(tag: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("sample.wav");
+    std::fs::write(&file, b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\x40").unwrap();
+    h.run("item.import", json!({"files":[{"path":file,"name":"sample.wav",
+        "attrs":{"has_audio":{"type":"bool","value":true},"duration":{"type":"time","value":88200}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "sample.wav")
+        .unwrap();
+    let mut tracks = Vec::new();
+    for (kind, muted) in [("audio", false), ("footage", false), ("footage", true)] {
+        let path = h.run(
+            "layer.create",
+            json!({"kind":kind,"comp":comp,"source":asset}),
+        )["path"]
+            .clone();
+        tracks.push(path.clone());
+        h.run(
+            "attr.set",
+            json!({"path":path,"attr":"audio_enabled","value":{"type":"bool","value":!muted}}),
+        );
+        h.run(
+            "attr.set_animated",
+            json!({"path":path,"attr":"audio:levels","animated":true,"time":0}),
+        );
+        h.run("attr.set_at",json!({"path":path,"attr":"audio:levels","time":0,"value":{"type":"vec2","value":[0.0,-6.0206]}}));
+    }
+    let mut mix = bae_media::mix::AudioMix::from_stage(&h.stage, &comp);
+    let mut block = [[0.0; 2]; 2];
+    mix.render(0, 8_000, &mut block).unwrap();
+    assert!(
+        (block[0][0] - 1.0).abs() < 1e-5 && (block[0][1] - 0.5).abs() < 1e-5,
+        "{block:?}"
+    );
+    assert_eq!(block[1], [0.0; 2]);
+
+    // Distinguish the two enabled sources, then toggle the switches independently.
+    h.run(
+        "attr.set_at",
+        json!({"path":tracks[1],"attr":"audio:levels","time":0,
+        "value":Value::Vec2([-6.0206,-12.0412])}),
+    );
+    let mut switch = |layer: usize, attr: &str, on: bool, expected: f32| {
+        h.run(
+            "attr.set",
+            json!({"path":tracks[layer],"attr":attr,"value":Value::Bool(on)}),
+        );
+        bae_media::mix::AudioMix::from_stage(&h.stage, &comp)
+            .render(0, 8000, &mut block)
+            .unwrap();
+        assert!(
+            (block[0][0] - expected).abs() < 1e-5,
+            "{attr}={on}: {block:?}"
+        );
+    };
+    switch(2, "solo", true, 0.75); // a muted solo does not suppress the mix
+    switch(0, "solo", true, 0.5);
+    switch(0, "enabled", false, 0.5); // eye does not mute sound
+    switch(0, "audio_enabled", false, 0.25); // last audible solo muted
+    switch(0, "audio_enabled", true, 0.5);
+}
+
+#[test]
 fn import_probes_files_sequences_and_folders() {
     let dir = import_fixture("probe");
     let defaults = crate::import::ImportDefaults::default();
@@ -1813,6 +1885,55 @@ impl bae_ui::files::FilePicker for Picker {
         } else {
             answers.remove(0)
         }
+    }
+}
+
+#[test]
+fn double_l_reveals_the_imported_audio_layer_waveform() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tone.wav");
+    // One mono 16-bit PCM sample at 8 kHz.
+    std::fs::write(&file,b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\xff\x3f").unwrap();
+    let probed = crate::import::probe(std::slice::from_ref(&file), &Default::default());
+    h.run("item.import", json!({"files":probed.files}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "tone.wav")
+        .unwrap();
+    let layer = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp":comp,"kind":"footage","source":asset}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        bae_media::audio::layer_file(&h.stage, &layer)
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        file.canonicalize().unwrap()
+    );
+    h.session().lock().selected_layers = vec![layer.clone()];
+    let mut panel = TimelinePanel::default();
+    for expected in ["audio:levels", "audio:waveform"] {
+        h.action(
+            &mut panel,
+            Invocation::with_params(
+                crate::actions::ids::REVEAL,
+                json!({"what":"audio:levels","add":false}),
+            ),
+        );
+        assert_eq!(
+            h.session().lock().reveal.get(&layer),
+            Some(&crate::session::Reveal::Attrs(vec![expected.into()]))
+        );
     }
 }
 
@@ -2011,7 +2132,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.layer.center_in_view".into()]
+            vec!["motion.layer.time_reverse_layer".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2045,7 +2166,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.layer.center_in_view")
+            .filter(|(_, a, _)| a == "motion.layer.time_reverse_layer")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2053,7 +2174,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Home").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+R").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -2062,6 +2183,60 @@ fn ae_shortcuts_follow_other_modules_handlers() {
             .any(|(_, a, p)| a == "motion.reveal" && p["what"] == "modified"),
         "variants of a working command wait for the catalog"
     );
+}
+
+/// Layer ▸ Transform: Fit to Comp fills the comp with the layer's content, Fit to
+/// Comp Width keeps the aspect, Flip negates the scale, Center In View puts the
+/// anchor point in the middle of the comp; each is one undo step.
+#[test]
+fn layer_transform_menu_commands() {
+    use crate::actions::ids;
+    use bae_anim::glam::{DVec2, DVec3};
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    let run = |h: &mut Harness, tl: &mut TimelinePanel, layer: &PrimPath, id: &str| {
+        h.session().lock().selected_layers = vec![layer.clone()];
+        let r = h.action(tl, Invocation::new(id));
+        h.apply(r);
+    };
+    // The layer's content box in the comp (min x, min y, max x, max y), its transform.
+    let world = |h: &Harness, layer: &PrimPath| {
+        let c = bae_anim::Evaluator::new()
+            .evaluate_comp(&h.stage, &comp, Time::ZERO)
+            .unwrap();
+        let l = c.layers.iter().find(|l| &l.path == layer).unwrap();
+        let (a, b) = crate::render::layer_bounds(l).unwrap();
+        let p = |v: DVec2| l.world_matrix.transform_point3(DVec3::new(v.x, v.y, 0.0));
+        let (a, b) = (p(a), p(b));
+        let r = |v: f64| (v * 1000.0).round() / 1000.0;
+        (
+            [
+                r(a.x.min(b.x)),
+                r(a.y.min(b.y)),
+                r(a.x.max(b.x)),
+                r(a.y.max(b.y)),
+            ],
+            l.transform,
+        )
+    };
+    run(&mut h, &mut tl, &shape, ids::FIT_TO_COMP);
+    assert_eq!(world(&h, &shape).0, [0.0, 0.0, 640.0, 360.0]);
+    h.stage.undo(&h.author).unwrap();
+    run(&mut h, &mut tl, &shape, ids::FIT_TO_COMP_WIDTH);
+    let (bounds, t) = world(&h, &shape);
+    assert_eq!((bounds[0], bounds[2]), (0.0, 640.0));
+    assert!((t.scale.x - t.scale.y).abs() < 1e-9, "keeps the aspect");
+    run(&mut h, &mut tl, &solid, ids::FLIP_HORIZONTAL);
+    assert_eq!(world(&h, &solid).1.scale.x, -100.0);
+    h.run(
+        "attr.set_at",
+        json!({"path": solid, "attr": "transform:position", "time": 0,
+               "value": {"type": "vec3", "value": [10.0, 20.0, 0.0]}}),
+    );
+    run(&mut h, &mut tl, &solid, ids::CENTER_IN_VIEW);
+    let p = world(&h, &solid).1.position;
+    assert_eq!((p.x, p.y), (320.0, 180.0));
 }
 
 /// Layer ▸ Switches, 3D Layer, Quality, Edit ▸ Label: each is one undo step on
@@ -2352,4 +2527,65 @@ fn window_menu_titles_name_the_active_comp() {
     let name = bae_motion::query::comp_info(&h.stage, &comp).unwrap().name;
     assert_eq!(label("Composition"), Some(format!("Composition: {name}")));
     assert_eq!(label("Footage"), Some("Footage: (none)".to_owned()));
+}
+
+/// Layer ▸ Transform ▸ Opacity… / Rotation…: the value dialog shows the first
+/// selected layer's value and OK sets it on every selected layer in one step.
+#[test]
+fn transform_value_dialogs_set_every_selected_layer() {
+    let mut h = Harness::new();
+    let (_comp, solid, shape) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let open = |attr: &str| {
+        Invocation::with_params(
+            crate::actions::ids::TRANSFORM_DIALOG,
+            json!({ "attr": attr }),
+        )
+    };
+    h.session().lock().selected_layers = vec![solid.clone(), shape.clone()];
+    h.action(&mut viewer, open("opacity"));
+    assert!(h.dialogs().is_open(), "Opacity… opened no dialog");
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    let edits = r.invocations[0].params["edits"].as_array().unwrap().clone();
+    assert_eq!(edits.len(), 2);
+    assert!(edits.iter().all(|e| e["attr"] == "transform:opacity"));
+    // Orientation is for 3D layers only.
+    h.action(&mut viewer, open("orientation"));
+    assert!(!h.dialogs().is_open());
+}
+
+/// The Paint and Brushes panels edit the next stroke's settings; Clone Options
+/// show with the Clone Stamp, Erase with the Eraser.
+#[test]
+fn paint_and_brushes_panels_show_for_each_paint_tool() {
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    h.session().lock().open_comp(&comp);
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    for tool in [
+        crate::tools::Tool::Brush,
+        crate::tools::Tool::CloneStamp,
+        crate::tools::Tool::Eraser,
+    ] {
+        tools.lock().set(tool);
+        h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
+        h.frame(
+            "brushes",
+            &mut crate::paint_panels::BrushesPanel,
+            Vec::new(),
+        );
+    }
+    let p = tools.lock().options.paint.clone();
+    assert_eq!(
+        (p.opacity, p.diameter, p.duration.as_str()),
+        (100.0, 21.0, "constant")
+    );
 }

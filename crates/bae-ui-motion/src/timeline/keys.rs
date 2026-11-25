@@ -251,6 +251,7 @@ impl TimelinePanel {
         info: &CompInfo,
         axis: &TimeAxis,
         rows: &[Row],
+        paths: &[PrimPath],
         now: Time,
         pointer_x: Option<f32>,
         shift: bool,
@@ -287,14 +288,13 @@ impl TimelinePanel {
                     .collect::<Vec<_>>()
             };
             targets.extend(marker_times(&info.path));
-            let mut layers: Vec<&PrimPath> = Vec::new();
             for row in rows {
-                if !layers.contains(&&row.layer) {
-                    layers.push(&row.layer);
-                    let t = query::layer_timing(stage, &row.layer);
+                if matches!(row.kind, RowKind::Layer) {
+                    let layer = &paths[row.layer_index];
+                    let t = query::layer_timing(stage, layer);
                     targets.push(t.in_point);
                     targets.push(t.out_point);
-                    targets.extend(marker_times(&row.layer));
+                    targets.extend(marker_times(layer));
                 }
                 if let RowKind::Prop { path, attr, .. } = &row.kind
                     && let Some(spec) = query::attr_spec(stage, path, attr)

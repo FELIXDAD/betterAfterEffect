@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>开发进度看板 · betterAfterEffects</title>
+<style>
+:root{color-scheme:dark;--bg:#101213;--panel:#171a1b;--line:#303536;--text:#f2f4ef;--mute:#abb3b0;--lime:#c2f478;--blue:#8bbeff;--todo:#818b87}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 "Inter",-apple-system,"PingFang SC",sans-serif}
+header{height:65px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 4vw}.brand{font-weight:720;letter-spacing:-.6px}.mark{display:inline-grid;place-items:center;background:var(--lime);color:#18220f;border-radius:6px;padding:1px 7px;margin-right:10px;font:900 20px/1.5 monospace}.live{color:var(--mute);font-size:.87rem}.online{color:var(--lime)}
+main{max-width:1440px;margin:auto;padding:34px 4vw 80px}.intro{display:flex;align-items:baseline;gap:14px}.version,code,.num,time,.pct{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}.version{font-size:.85rem;border:1px solid #46513e;color:var(--lime);padding:3px 8px;border-radius:5px}
+h1{font-size:clamp(1.8rem,3.4vw,3rem);letter-spacing:-2px;margin:0}h2{font-size:1.35rem;margin:0}h3{font-size:1rem;margin:0}.summary{margin:24px 0 18px;display:grid;grid-template-columns:2fr repeat(5,1fr);border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}.stat{padding:18px 24px;border-right:1px solid var(--line)}.stat:last-child{border:0}.label,small,time,code,.muted{color:var(--mute)}.label,small,time,code{font-size:.84rem}.num{font-size:clamp(1.8rem,3vw,2.7rem);line-height:1.3;letter-spacing:-2px}.track{display:flex;gap:2px;height:6px;margin-top:8px;border-radius:2px;overflow:hidden}.track i{display:block}.done{color:var(--lime)}.doing{color:var(--blue)}.todo{color:var(--todo)}.track .done{background:var(--lime)}.ready{color:#e5ba76}.track .ready{background:#e5ba76}.track .doing{background:var(--blue)}.track .todo{background:var(--todo)}
+nav{display:flex;gap:20px;border-bottom:1px solid var(--line);margin-bottom:24px;overflow:auto}button,input{font:inherit}nav button{border:0;border-bottom:2px solid transparent;padding:14px 0;background:none;color:var(--mute);white-space:nowrap;cursor:pointer}nav button[aria-current=true]{color:var(--lime);border-color:var(--lime)}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:14px 0}input{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:8px 12px;color:inherit;width:min(260px,48%)}[hidden]{display:none!important}
+article{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:14px;overflow:hidden}article h3{background:#1f2323;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;justify-content:space-between;gap:10px}.pct{color:var(--lime);font-size:.87rem}.row{display:grid;grid-template-columns:minmax(240px,2.5fr) minmax(75px,.65fr) minmax(105px,1fr) minmax(84px,1fr) minmax(120px,.95fr);align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid var(--line);font-size:.92rem}.column-labels{color:var(--mute);font-size:.8rem}.row:last-child{border:0}.row>*,.event{overflow-wrap:anywhere}.row code{display:block;font-size:.78rem}.state{font-size:.86rem}.row a{color:var(--blue);font: .85rem monospace;margin-right:6px}.event{padding:13px 16px;border-bottom:1px solid var(--line)}.event p{margin:4px 0}.event time{float:right}.event:last-child{border:0}
+@media(max-width:800px){.column-labels{display:none}.summary{grid-template-columns:repeat(3,1fr)}.stat:first-child{grid-column:1/-1;border:0;border-bottom:1px solid var(--line)}.stat{padding:12px}.row{grid-template-columns:1fr auto;gap:5px 12px}.row time{grid-column:1/-1}.row .prs{text-align:right}main{padding-top:22px}nav{gap:16px}.event time{float:none;display:block}}
+</style>
+<header><div class="brand"><span class="mark" aria-hidden="true">b/</span>betterAfterEffects</div><div id="live" class="live" role="status">正在连接</div></header>
+<main><div class="intro"><h1>开发进度看板</h1><span class="version" id="version" hidden></span></div><div id="summary" class="summary"></div>
+<nav aria-label="看板视图"></nav><div class="toolbar"><h2 id="heading">里程碑</h2><input type="search" id="query" aria-label="搜索名称或 ID" placeholder="搜索名称或 ID"></div><section id="content"></section></main>
+<script>
+const $=id=>document.getElementById(id);
+const tabs=['里程碑','效果矩阵','Agent','实时动态','AE 交互对齐'], statuses={done:'完成',doing:'进行中',todo:'未开始'}, fxStatuses={...statuses,done:'已实现',todo:'未做'};
+let tab=0, data, byId;
+function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function stamp(s){return s?esc(new Date(s).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})):'—';}
+function percent(n,total){return Math.round(100*n/(total||1));}
+function navigate(i){tab=i;$('query').value='';render();}
+tabs.forEach((name,i)=>{const b=document.createElement('button');b.textContent=name;b.onclick=()=>navigate(i);document.querySelector('nav').append(b);});
+function itemActivity(x){
+ if(!x.pr_counts)return '';
+ const c=x.pr_counts,a=x.last_activity;
+ const last=a?(a.source==='commit'?'提交者 ':'汇报者 ')+esc(a.agent||'未知')+' · '+stamp(a.time):'暂无活动';
+ return '<small class="item-activity">已合并 '+c.done+' / 等待合并 '+c.ready+' / 草稿 '+c.doing+'<br>'+last+'</small>';
+}
+function groups(rows,fx){
+ const q=$('query').value.trim().toLowerCase(), map=new Map();
+ for(const x of rows){if(!map.has(x.module))map.set(x.module,[]);map.get(x.module).push(x);}
+ let html='';
+ for(const [name,group] of map){
+  const visible=group.filter(x=>[x.id,x.name,x.module,x.agent,x.tag].join(' ').toLowerCase().includes(q));
+  if(!visible.length)continue;
+  const done=group.filter(x=>x.status==='done').length;
+  html+='<article><h3>'+esc(name)+'<span class="pct">'+done+' / '+group.length+' · '+percent(done,group.length)+'%</span></h3>';
+  html+='<div class="row column-labels"><span>名称 / ID</span><span>状态</span><span>'+(fx?'评估标签':'负责 Agent')+'</span><span>关联 PR</span><span>更新时间</span></div>';
+  for(const x of visible){const links=x.prs.map(n=>'<a href="https://github.com/FELIXDAD/betterAfterEffects/pull/'+n+'">#'+n+'</a>').join('');
+   html+='<div class="row"><span>'+esc(x.name)+'<code>'+esc(x.id)+'</code>'+itemActivity(x)+'</span><span class="state '+x.status+'">'+(x.status==='done'?'✓ ':'● ')+(x.kind==='milestone'?{done:'完成',ready:'待合并',doing:'开发中',todo:'未开始'}:fx?fxStatuses:statuses)[x.status]+'</span><span class="muted">'+esc(fx?x.tag:x.agent||'待认领')+'</span><span class="prs">'+(links||'<small>—</small>')+'</span><time>'+stamp(x.updated)+'</time></div>';
+  }html+='</article>';
+ }return html||'<p class="muted">没有匹配项</p>';
+}
+function eventRow(a,agent){
+ if(a.pr)return '<div class="event"><time>'+stamp(a.updated)+'</time><a class="doing" href="https://github.com/FELIXDAD/betterAfterEffects/pull/'+a.pr+'">#'+a.pr+'</a> · '+(a.status==='MERGED'?'已合并':'已开启')+'<p>'+esc(a.note)+'</p></div>';
+ const x=byId.get(a.item),active=data.items.filter(i=>i.agent===a.agent&&i.status==='doing');
+ const desc=agent?(active.length?'进行中 · '+active.map(i=>i.name).join('、'):'当前没有进行中的能力'):(x?.name||a.item)+' · '+statuses[a.status];
+ return '<div class="event"><time>'+stamp(a.updated)+'</time><strong>'+esc(a.agent)+'</strong><p>'+esc(desc)+'</p>'+(a.note?'<small>'+esc(a.note)+'</small>':'')+'</div>';
+}
+function parityView(){
+ const issueLink=n=>'<a class="doing" href="https://github.com/FELIXDAD/betterAfterEffects/issues/'+n+'">#'+n+'</a>';
+ function progress(id,label,merged){
+  const x=byId.get(id), fix=Array.isArray(merged);
+  const links=(fix?merged:x.prs).map(n=>'<a class="doing" href="https://github.com/FELIXDAD/betterAfterEffects/pull/'+n+'">#'+n+'</a>').join(' ');
+  const state=fix?((x.repair_status||x.status)==='done'?'已解决':'待修'):statuses[x.status];
+  return '<div>'+label+' · <span class="'+x.status+'">'+state+'</span> <code>'+esc(id)+'</code> '+esc(x.agent)+' '+(links||(fix?' · PR 暂无':''))+'</div>';
+ }
+ const sections=new Map();
+ for(const issue of data.parity){
+  for(const t of issue.tasks){
+   const module=byId.get(t.fix).module;
+   if(!sections.has(module)) sections.set(module,[]);
+   sections.get(module).push('<div class="event">'+issueLink(issue.number)+' · <strong>'+esc(t.name)+'</strong> <small>'+(issue.state==='closed'?'Issue 已关闭':'Issue 开放')+'</small><p class="muted">'+esc(t.detail)+'</p>'+progress(t.fix,'修复',t.merged)+progress(t.verify,'实机验收')+'</div>');
+  }
+ }
+ return Array.from(sections,([module,rows])=>'<article><h3>'+esc(module)+'</h3>'+rows.join('')+'</article>').join('');
+}
+function render(){
+ if(!data)return;
+ $('version').hidden=!data.milestone;
+ $('version').textContent=data.milestone?'v'+data.milestone:'';
+ const milestoneStates={done:"完成",ready:"待合并",doing:"开发中",todo:"未开始"};
+ const miles=data.items.filter(x=>x.kind==='milestone'),n=miles.length;
+ const counts=Object.keys(milestoneStates).map(s=>miles.filter(x=>x.status===s).length);
+ const bar=Object.keys(milestoneStates).map((s,i)=>'<i class="'+s+'" style="flex:'+counts[i]+'"></i>').join('');
+ $('summary').innerHTML='<div class="stat"><div class="label">里程碑完成度</div><div class="num done">'+percent(counts[0],n)+'%</div><div class="track">'+bar+'</div></div>'+Object.keys(milestoneStates).map((s,i)=>'<div class="stat"><div class="label"><span class="'+s+'">●</span> '+milestoneStates[s]+'</div><div class="num">'+counts[i]+'</div></div>').join('');
+ $('summary').insertAdjacentHTML('beforeend','<div class="stat"><div class="label">合并队列</div><div class="num">'+data.merge_queue+'</div></div>');
+ document.querySelectorAll('nav button').forEach((b,i)=>b.setAttribute('aria-current',i===tab));
+ $('heading').textContent=tabs[tab];$('query').hidden=tab>1;
+ if(tab===4)$('content').innerHTML=parityView();
+ if(tab===0)$('content').innerHTML=groups(miles,false);
+ if(tab===1)$('content').innerHTML=groups(data.items.filter(x=>x.kind==='effect'),true);
+ if(tab===2||tab===3){const records=tab===2?data.agents:data.activity;
+ $('content').innerHTML=records.length?'<article>'+records.map(a=>eventRow(a,tab===2)).join('')+'</article>' :'<p class="muted">尚未收到汇报</p>';
+ if(tab===2){const tools=data.items.filter(x=>x.kind==='tool');if(tools.length)$('content').innerHTML+='<h2>看板交付</h2>'+groups(tools,false);}
+ }
+}
+$('query').oninput=render;
+const events=new EventSource('/api/events');
+let revision=0;
+async function refresh(){
+ const current=++revision;
+ try{const r=await fetch('/api/state');if(!r.ok)throw Error();const state=await r.json();if(current!==revision)return;
+ data=state;byId=new Map(data.items.map(x=>[x.id,x]));render();$('live').textContent='● 实时同步';$('live').className='live online';}
+ catch{if(current===revision){$('live').textContent='读取失败，正在重试';setTimeout(refresh,3000);}}
+}
+// Re-evaluate the two-hour window even while GitHub and all workers are idle.
+setInterval(()=>{if(!document.hidden)refresh();},60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
+events.onmessage=refresh;events.onerror=()=>{$('live').textContent='正在重连';$('live').className='live';};
+</script></html>
