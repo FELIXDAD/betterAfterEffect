@@ -368,6 +368,7 @@ pub(crate) fn execute(
     let draw_calls = ctx.draw_calls;
     let passes = ctx.passes;
     gpu.queue().submit([encoder.finish()]);
+    ctx.pipelines.end_frame();
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;
