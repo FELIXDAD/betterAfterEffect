@@ -1497,6 +1497,91 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     true
 }
 
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Variants of motion actions and commands (`actions::variants`, #140): the
+    // Keyboard Shortcuts window, Edit > Undo and History name each one.
+    ("Back 10 Frames", "后退 10 帧"),
+    ("Forward 10 Frames", "前进 10 帧"),
+    ("New Solid", "新建纯色"),
+    ("New Adjustment Layer", "新建调整图层"),
+    ("New Null Object", "新建空对象"),
+    ("New Text Layer", "新建文本图层"),
+    ("New Camera", "新建摄像机"),
+    ("New Light", "新建灯光"),
+    ("New Shape Layer", "新建形状图层"),
+    ("New Rectangle", "新建矩形"),
+    ("New Ellipse", "新建椭圆"),
+    // Layer menu actions and their variants (Keyboard Shortcuts, Undo).
+    ("Layer Switch", "图层开关"),
+    ("Unlock All Layers", "解锁所有图层"),
+    ("Show All Video", "显示所有视频"),
+    ("Hide Other Video", "隐藏其他视频"),
+    ("Quality", "品质"),
+    ("Best Quality", "最佳品质"),
+    ("Draft Quality", "草图品质"),
+    ("Wireframe Quality", "线框品质"),
+    ("Show Position", "显示位置"),
+    ("Add Position to Shown Properties", "将位置添加到显示的属性"),
+    ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),
+    ("Show Scale", "显示缩放"),
+    ("Add Scale to Shown Properties", "将缩放添加到显示的属性"),
+    ("Scale: Add or Remove Keyframe", "缩放：添加或移除关键帧"),
+    ("Show Rotation", "显示旋转"),
+    ("Add Rotation to Shown Properties", "将旋转添加到显示的属性"),
+    ("Rotation: Add or Remove Keyframe", "旋转：添加或移除关键帧"),
+    ("Show Opacity", "显示不透明度"),
+    (
+        "Add Opacity to Shown Properties",
+        "将不透明度添加到显示的属性",
+    ),
+    (
+        "Opacity: Add or Remove Keyframe",
+        "不透明度：添加或移除关键帧",
+    ),
+    ("Show Anchor Point", "显示锚点"),
+    (
+        "Add Anchor Point to Shown Properties",
+        "将锚点添加到显示的属性",
+    ),
+    (
+        "Anchor Point: Add or Remove Keyframe",
+        "锚点：添加或移除关键帧",
+    ),
+    // Edit / layer commands
+    ("Duplicate", "重复"),
+    ("Split Layer", "拆分图层"),
+    ("Select All", "全选"),
+    ("Deselect All", "全部取消选择"),
+    ("Copy", "复制"),
+    ("Paste", "粘贴"),
+    // Layer > Arrange: AE 26 and the usual Chinese UI wording (docs/glossary.md).
+    ("Bring Layer Forward", "前移一层"),
+    ("Send Layer Backward", "后移一层"),
+    ("Bring Layer to Front", "置于顶层"),
+    ("Send Layer to Back", "置于底层"),
+    ("Trim Layer In Point", "将入点修剪到当前时间"),
+    ("Trim Layer Out Point", "将出点修剪到当前时间"),
+    ("Move In Point to Current Time", "将入点移到当前时间"),
+    ("Move Out Point to Current Time", "将出点移到当前时间"),
+    ("Set Work Area Start", "将工作区域开头设置为当前时间"),
+    ("Set Work Area End", "将工作区域结尾设置为当前时间"),
+    ("Trim Comp to Work Area", "将合成修剪至工作区域"),
+    // Layer > Transform (AE 26's Chinese menu).
+    ("Flip Horizontal", "水平翻转"),
+    ("Flip Vertical", "垂直翻转"),
+    ("Center In View", "视点居中"),
+    ("Fit to Comp", "适合复合"),
+    ("Fit to Comp Width", "适合复合宽度"),
+    ("Fit to Comp Height", "适合复合高度"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
