@@ -31,6 +31,8 @@ pub(crate) enum Binding {
     Texture3d,
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
+    ReadBuffer,
+    ReadWriteBuffer,
 }
 
 /// A compute pipeline and its bind group layout.
@@ -80,10 +82,12 @@ pub(crate) fn format_key(format: wgpu::TextureFormat) -> u64 {
 }
 
 /// A resource bound to a kernel binding.
+#[derive(Clone, Copy)]
 pub(crate) enum Resource<'a> {
     /// Ring uniform (the dynamic offset is passed at dispatch).
     Uniform,
     View(&'a wgpu::TextureView),
+    Buffer(&'a wgpu::Buffer),
 }
 
 /// Uniform ring: one buffer, slots handed out round-robin and written with
@@ -118,6 +122,7 @@ pub(crate) struct Runtime {
     /// ones that failed there.
     pending: Mutex<FxHashMap<KernelKey, Option<String>>>,
     this: Weak<Runtime>,
+    scratch: Mutex<FxHashMap<&'static str, wgpu::Buffer>>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -191,7 +196,29 @@ impl Runtime {
             kernels: Mutex::new(FxHashMap::default()),
             pending: Mutex::new(FxHashMap::default()),
             this,
+            scratch: Mutex::new(FxHashMap::default()),
         }
+    }
+
+    /// The grow-only storage buffer `name` of at least `size` bytes, shared by
+    /// every user on this device. Only for passes that fill it on the GPU (or
+    /// with `clear_buffer`) in the command buffer that reads it: commands on
+    /// one queue run in order, so sharing is safe. Never write it from the CPU.
+    pub fn scratch(&self, name: &'static str, size: u64) -> wgpu::Buffer {
+        let mut buffers = self.scratch.lock();
+        if let Some(buffer) = buffers.get(name)
+            && buffer.size() >= size
+        {
+            return buffer.clone();
+        }
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(name),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        buffers.insert(name, buffer.clone());
+        buffer
     }
 
     /// Writes `bytes` into a ring slot; returns its dynamic offset.
@@ -285,6 +312,13 @@ impl Runtime {
                         },
                         multisampled: false,
                     },
+                    Binding::ReadBuffer | Binding::ReadWriteBuffer => wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: matches!(kind, Binding::ReadBuffer),
+                        },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     Binding::Storage(format) => wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
                         format,
@@ -347,6 +381,7 @@ impl Runtime {
                             size: NonZeroU64::new(u64::from(size)),
                         })
                     }
+                    (_, Resource::Buffer(b)) => b.as_entire_binding(),
                     (_, Resource::View(v)) => wgpu::BindingResource::TextureView(v),
                     (_, Resource::Uniform) => wgpu::BindingResource::TextureView(&self.placeholder),
                 },

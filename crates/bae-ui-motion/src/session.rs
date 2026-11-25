@@ -26,6 +26,20 @@ pub enum Reveal {
     Props(Vec<(PrimPath, String)>),
 }
 
+/// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
+/// it stands for one (not Contents, Transform …).
+pub fn group_prim(id: &str) -> Option<PrimPath> {
+    for suffix in ["#animator", "#selector"] {
+        if let Some(p) = id.strip_suffix(suffix) {
+            return PrimPath::new(p).ok();
+        }
+    }
+    let (_, rest) = id.split_once('#')?;
+    (rest.starts_with('/') && !rest.contains('#'))
+        .then(|| PrimPath::new(rest).ok())
+        .flatten()
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
@@ -87,6 +101,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
+    /// mask, effect or text animator; [`group_prim`] gives the prim).
+    pub selected_groups: Vec<String>,
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
@@ -99,6 +116,13 @@ pub struct Session {
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
+    pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    retry_audio_after: Option<Instant>,
+    opening_audio: bool,
+    audio_clock: bool,
+    last_scrub: Option<Time>,
+    mix_revision: Option<(PrimPath, u64)>,
+    mix_has_audio: bool,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -117,6 +141,9 @@ pub struct Session {
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
     /// copy wins over [`Session::clipboard`].
     pub layer_clipboard: Vec<bae_motion::CopiedLayer>,
+    /// Layer contents on the clipboard (Copy with groups selected); the last copy
+    /// wins over the other clipboards.
+    pub content_clipboard: Vec<bae_motion::CopiedContent>,
     pending: Vec<(Pending, u32)>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
@@ -146,6 +173,57 @@ impl Default for SharedSession {
 impl SharedSession {
     pub fn lock(&self) -> MutexGuard<'_, Session> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Called on a background thread. Device negotiation may block in the OS.
+    pub(crate) fn open_audio(&self) -> Result<(), String> {
+        let device = bae_media::playback::AudioOutput::open();
+        let mut s = self.lock();
+        s.opening_audio = false;
+        match device {
+            Ok(output) => {
+                let previous = s.output.replace(output);
+                s.mix_revision = None;
+                s.retry_audio_after = None;
+                drop(s);
+                drop(previous);
+                Ok(())
+            }
+            Err(error) => {
+                s.retry_audio_after = Some(Instant::now() + std::time::Duration::from_secs(2));
+                Err(error)
+            }
+        }
+    }
+
+    /// A user can connect a device after starting the application.
+    pub(crate) fn retry_audio(&self) {
+        let mut s = self.lock();
+        let needed = s.retry_audio_after.map_or_else(
+            || {
+                s.output
+                    .as_ref()
+                    .is_some_and(bae_media::playback::AudioOutput::device_lost)
+            },
+            |at| Instant::now() >= at,
+        );
+        if !needed || s.opening_audio {
+            return;
+        }
+        s.opening_audio = true;
+        drop(s);
+        let session = self.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("bae-audio-reopen".into())
+            .spawn(move || {
+                if let Err(error) = session.open_audio() {
+                    tracing::warn!(%error, "Audio output unavailable");
+                }
+            })
+        {
+            self.lock().opening_audio = false;
+            tracing::warn!(%error, "Could not start the audio device worker");
+        }
     }
 }
 
@@ -290,6 +368,7 @@ impl Session {
             .is_some_and(|c| query::comp_info(stage, c).is_none())
         {
             self.active_comp = self.open_comps.last().cloned();
+            self.stop();
         }
         // AE: a locked layer cannot be selected, so locking one deselects it.
         self.selected_layers
@@ -329,8 +408,94 @@ impl Session {
         });
     }
 
+    /// Refresh the producer's snapshot once per composition edit. Timeline seeks
+    /// reuse the same producer, snapshot and open decoders.
+    fn prepare_mix(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) -> bool {
+        let Some(output) = &self.output else {
+            return false;
+        };
+        let revision = cx
+            .resources
+            .get::<Arc<bae_ui::history::HistoryLog>>()
+            .map_or(0, |h| h.last_seq());
+        if self
+            .mix_revision
+            .as_ref()
+            .is_some_and(|(comp, seq)| comp == &info.path && *seq == revision)
+        {
+            return false;
+        }
+        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path);
+        self.mix_has_audio = !mix.is_empty();
+        output.prepare(mix);
+        self.mix_revision = Some((info.path.clone(), revision));
+        true
+    }
+
+    fn sound(&self, at: Time, range: TimeRange, repeat: bool) -> bool {
+        if self.mix_has_audio
+            && let Some(output) = &self.output
+        {
+            output.seek(at, range, repeat);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        self.prepare_mix(cx, info);
+        self.play(info);
+        let pb = self.playback.as_ref().unwrap();
+        self.audio_clock = self.sound(pb.from, pb.range, self.loop_playback);
+    }
+
+    pub(crate) fn scrub_to(
+        &mut self,
+        cx: &bae_ui::PanelContext<'_>,
+        info: &CompInfo,
+        time: Time,
+        sound: bool,
+    ) {
+        if self.is_playing() || !sound {
+            self.stop();
+        }
+        self.set_time(info, time);
+        let at = self.time(&info.path);
+        if sound && self.last_scrub != Some(at) {
+            self.prepare_mix(cx, info);
+            let end = (at + Time::from_seconds(0.08)).min(info.duration);
+            if self.sound(at, TimeRange::new(at, end), false) {
+                self.last_scrub = Some(at);
+            }
+        }
+    }
+
     pub fn stop(&mut self) {
+        if (self.audio_clock || self.last_scrub.is_some())
+            && let Some(output) = &self.output
+        {
+            output.stop();
+        }
         self.playback = None;
+        self.last_scrub = None;
+        self.audio_clock = false;
+    }
+
+    pub(crate) fn update_preview(
+        &mut self,
+        cx: &bae_ui::PanelContext<'_>,
+        info: &CompInfo,
+    ) -> bool {
+        if self.prepare_mix(cx, info) && self.is_playing() {
+            // Pick up a late device or a live layer edit at the current CTI.
+            let from = self.time(&info.path);
+            let pb = self.playback.as_mut().unwrap();
+            pb.from = from;
+            pb.started = Instant::now();
+            let range = pb.range;
+            self.audio_clock = self.sound(from, range, self.loop_playback);
+        }
+        self.tick(info)
     }
 
     /// Advance playback to the wall-clock time. Returns whether it is still playing
@@ -342,14 +507,26 @@ impl Session {
         if pb.comp != info.path {
             return true;
         }
-        let elapsed = Time::from_seconds(pb.started.elapsed().as_secs_f64());
+        let elapsed = if self.audio_clock {
+            let output = self.output.as_ref().unwrap();
+            output.set_loop(self.loop_playback);
+            if output.finished() {
+                let at = pb.from + output.elapsed();
+                self.stop();
+                self.set_time(info, at.min(pb.range.end - info.frame_duration()));
+                return false;
+            }
+            output.elapsed()
+        } else {
+            Time::from_seconds(pb.started.elapsed().as_secs_f64())
+        };
         let span = pb.range.duration();
         let mut t = pb.from + elapsed;
         if t >= pb.range.end {
             if self.loop_playback && span.0 > 0 {
                 t = pb.range.start + Time((t - pb.range.start).0.rem_euclid(span.0));
             } else {
-                self.playback = None;
+                self.stop();
                 self.set_time(info, pb.range.end - info.frame_duration());
                 return false;
             }
