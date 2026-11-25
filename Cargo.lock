@@ -547,6 +547,7 @@ dependencies = [
  "bae-plugin",
  "bae-prefs",
  "bae-render",
+ "bae-script",
  "bae-text",
  "bae-ui",
  "bae-ui-motion",
@@ -833,6 +834,7 @@ dependencies = [
  "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
+ "bae-script",
  "cc",
  "clap",
  "half",
@@ -892,6 +894,20 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "bae-script"
+version = "0.0.2"
+dependencies = [
+ "bae-app",
+ "bae-model",
+ "bae-motion",
+ "rquickjs",
+ "schemars",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -967,6 +983,7 @@ dependencies = [
  "bae-platform",
  "bae-prefs",
  "bae-render",
+ "bae-script",
  "bae-ui",
  "bae-vector",
  "egui",

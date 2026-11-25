@@ -1,0 +1,25 @@
+[package]
+name = "bae-script"
+description = "BAE scripting: After Effects-style scripts (app.project, layers, properties) on QuickJS, every change through bae-model commands"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# No GPU, window or platform dependencies (ARCHITECTURE §2 rule 2): scripts run in
+# the app, in `bae --headless` and through MCP alike.
+[dependencies]
+bae-app.workspace = true
+bae-model.workspace = true
+bae-motion.workspace = true
+# The same QuickJS the expression engine (bae-anim) links: one JS engine in the binary.
+rquickjs.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
