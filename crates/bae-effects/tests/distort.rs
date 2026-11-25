@@ -300,3 +300,31 @@ fn split_can_open_each_side_independently() {
         assert_eq!(img.get(32, 18)[3], lower);
     }
 }
+
+#[test]
+fn blobbylize_keeps_the_layer_alpha_inside_its_edges() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(48, 48);
+    let square = |x: i32, y: i32| (12..36).contains(&x) && (12..36).contains(&y);
+    let input = Pixels::new(rect, |x, y| {
+        if square(x, y) {
+            [0.8, 0.6, 0.2, 1.]
+        } else {
+            [0.; 4]
+        }
+    });
+    // Default Softness 20 sampled alpha 5 px outside every edge.
+    let out = run(
+        &gpu,
+        F32,
+        builtin("CC Blobbylize"),
+        vec![],
+        &input,
+        rect,
+        1.,
+    );
+    for (x, y) in [(14, 24), (33, 24), (24, 14), (24, 33)] {
+        assert!(out.get(x, y)[3] > 0.99, "({x}, {y}): {:?}", out.get(x, y));
+    }
+    assert_eq!(out.get(4, 4)[3], 0.);
+}

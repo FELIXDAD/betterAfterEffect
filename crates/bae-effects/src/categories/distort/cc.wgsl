@@ -40,7 +40,12 @@ fn blob(p: vec2f) -> vec4f {
     var light_xy = vec2f(sin(angle),-cos(angle));
     if value(10u)==2.0 { light_xy = (point(12u)-p)/max(1.0,0.25*length(vec2f(u.layer.zw-u.layer.xy))); }
     let light = normalize(vec3f(light_xy, value(11u)*0.01 + 0.00001));
-    let c = src(p+normal.xy*radius);
+    // Coverage keeps the blob layer's own alpha in place: sampling alpha at the
+    // refracted point read transparency inside every edge and eroded the layer.
+    // Refraction moves only the colour, and by at most 2 px.
+    let base = src(p);
+    let refracted = src(p+normal.xy*min(radius,2.0));
+    let c = vec4f(mix(base.rgb,refracted.rgb,saturate(refracted.a)),base.a);
     if value(22u)==2.0 {
         return output(surface_lights(p,normal,c.rgb,value(16u)*0.01,value(17u)*0.01,value(18u)*0.01,value(19u),value(20u)*0.01),c.a*coverage);
     }
