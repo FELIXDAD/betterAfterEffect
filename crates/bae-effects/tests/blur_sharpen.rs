@@ -229,4 +229,35 @@ fn channel_blur_matches_independent_gaussians_with_partial_coverage() {
         );
         assert_close(&part, &out, tile, 0.0001, "channel tile");
     }
+
+    // A reduced-density source can start between native-grid coordinates. An
+    // untouched colour ramp must keep its phase when another channel blurs.
+    let source = Pixels::new(IRect::from_size(16, 12), |x, _| {
+        [x as f32 / 16., 0.3, 0., 1.]
+    });
+    let mut image = source.upload(&gpu, F32);
+    image.rect = IRect::new(-5, 3, 27, 27);
+    image.pixel_scale = 2.;
+    let roi = IRect::new(0, 8, 20, 22);
+    let inst = instance("ADBE Channel Blur", vec![(2, Value::Float(8.))]);
+    let p = EffectParams {
+        layer_bounds: image.rect,
+        float: true,
+        ..EffectParams::new(&inst)
+    };
+    let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+    let out = builtin("ADBE Channel Blur")
+        .render(&mut target, &p, &image, roi)
+        .unwrap();
+    target.finish().unwrap();
+    let want = Pixels::new(roi, |x, _| {
+        [((x as f32 + 5.5) * 0.5 - 0.5) / 16., 0.3, 0., 1.]
+    });
+    assert_close(
+        &Pixels::download(&gpu, &out),
+        &want,
+        roi,
+        0.0001,
+        "footage grid phase",
+    );
 }

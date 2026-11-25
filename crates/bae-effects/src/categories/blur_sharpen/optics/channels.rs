@@ -14,7 +14,7 @@ use bae_gpu::wgpu;
 use bae_render::{GpuImage, IRect, RenderError};
 
 const WEIGHTS: usize = 19; // The Gaussian planner keeps level sigma below six texels.
-const BYTES: u32 = (256 + WEIGHTS * 16) as u32;
+const BYTES: u32 = (272 + WEIGHTS * 16) as u32;
 const SOURCE: &str = include_str!("channels.wgsl");
 
 fn pipeline(
@@ -106,7 +106,13 @@ pub(super) fn render(
     let repeat = v.b(5);
     let factors = sigma.map(blur::level_factor);
     let mut source = input.clone();
-    source.rect = image_grid::pixel_rect(input.rect, 1. / input.pixel_scale);
+    // Keep the phase of a reduced footage texture even when its world origin
+    // falls between two native-grid coordinates.
+    let origin = [input.rect.x0, input.rect.y0].map(|x| f64::from(x) / input.pixel_scale);
+    let shift = origin.map(|x| x.round() - x);
+    let [x, y] = origin.map(|x| x.round() as i32);
+    let [width, height] = input.texel_size();
+    source.rect = IRect::new(x, y, x + width as i32, y + height as i32);
     source.pixel_scale = 1.;
     let mut levels = vec![source];
     while (1 << (levels.len() - 1)) < *factors.iter().max().unwrap() {
@@ -127,19 +133,20 @@ pub(super) fn render(
         let xy = axes.map(|axis| if axis { factor } else { 1 });
         let s = blur::level_sigma(sigma[c], factor);
         let r = blur::radius(s);
-        let tile = |start: i32, end: i32, f: i32| {
+        let tile = |start: i32, end: i32, f: i32, shift: f64| {
             let k = native / f64::from(f);
-            if k == 1. {
+            let offset = shift / f64::from(f);
+            if k == 1. && offset == 0. {
                 (start, end)
             } else {
                 (
-                    ((f64::from(start) + 0.5) * k - 0.5).floor() as i32,
-                    ((f64::from(end) - 0.5) * k - 0.5).floor() as i32 + 2,
+                    ((f64::from(start) + 0.5) * k + offset - 0.5).floor() as i32,
+                    ((f64::from(end) - 0.5) * k + offset - 0.5).floor() as i32 + 2,
                 )
             }
         };
-        let (x0, x1) = tile(roi.x0, roi.x1, xy[0]);
-        let (y0, y1) = tile(roi.y0, roi.y1, xy[1]);
+        let (x0, x1) = tile(roi.x0, roi.x1, xy[0], shift[0]);
+        let (y0, y1) = tile(roi.y0, roi.y1, xy[1], shift[1]);
         let rect = IRect::new(x0, y0, x1, y1);
         let at = c * 48;
         uniforms
@@ -169,9 +176,10 @@ pub(super) fn render(
         .f32(240, native as f32)
         .u32(244, u32::from(same_level))
         .i32(248, halo)
-        .i32(252, if axes[0] { largest_radius } else { 0 });
+        .i32(252, if axes[0] { largest_radius } else { 0 })
+        .f32s(256, &shift.map(|x| x as f32));
     for (i, w) in weights.iter().enumerate() {
-        uniforms.f32s(256 + i * 16, w);
+        uniforms.f32s(272 + i * 16, w);
     }
     let offset = gpu::push_uniform(&gpu::runtime(target.gpu()), &uniforms);
     let pair =
@@ -182,7 +190,7 @@ pub(super) fn render(
     let [hc, ha] = pair(target, [vsize[0], vsize[1] + 2 * halo as u32])?;
     dispatch(target, "horizontal", offset, &textures, &[&hc, &ha])?;
     let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
-    if same_level && factors[0] == 1 && native == 1. {
+    if same_level && factors[0] == 1 && native == 1. && shift == [0., 0.] {
         dispatch(target, "vertical_native", offset, &[&hc, &ha], &[&out])?;
         return Ok(out);
     }

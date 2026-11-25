@@ -17,6 +17,7 @@ struct Params {
     same_level: u32,
     halo: i32,
     horizontal_radius: i32,
+    source_shift: vec2f,
     weights: array<vec4f,19>,
 }
 @group(0) @binding(0) var<uniform> u: Params;
@@ -135,7 +136,7 @@ fn result(p:vec2f,ch:u32)->vec2f {
 @compute @workgroup_size(8,8)
 fn resolve(@builtin(global_invocation_id) invocation:vec3u) {
     if any(invocation.xy>=textureDimensions(color_out)){return;}
-    let p=(vec2f(u.roi.xy)+vec2f(invocation.xy)+0.5)*u.native_scale;
+    let p=(vec2f(u.roi.xy)+vec2f(invocation.xy)+0.5)*u.native_scale + u.source_shift;
     let red = result(p, 0u);
     let green = result(p, 1u);
     let blue = result(p, 2u);
