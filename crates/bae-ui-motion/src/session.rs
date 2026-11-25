@@ -7,9 +7,9 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use bae_model::{PrimPath, Stage, Time, TimeRange, Value};
+use bae_model::{FrameRate, PrimPath, Stage, Time, TimeRange, Value};
 use bae_motion::KeyRef;
 use bae_motion::query::{self, CompInfo};
 
@@ -31,9 +31,44 @@ pub enum Reveal {
 pub struct Playback {
     pub comp: PrimPath,
     started: Instant,
-    from: Time,
+    frame: i64,
+    rate: FrameRate,
+    ordinal: u64,
+    revision: Option<u64>,
     /// Range played (the work area); playback loops or stops at its end.
     pub range: TimeRange,
+}
+
+impl Playback {
+    fn ordinal_at(&self, now: Instant) -> u64 {
+        let nanos = now.saturating_duration_since(self.started).as_nanos();
+        (nanos * u128::from(self.rate.num) / (1_000_000_000 * u128::from(self.rate.den))) as u64
+    }
+
+    fn frame_range(&self) -> (i64, i64) {
+        let first = self.rate.time_to_frame(self.range.start);
+        let last = self
+            .rate
+            .time_to_frame(Time(self.range.end.0 - 1))
+            .max(first);
+        (first, last)
+    }
+
+    fn deadline(&self) -> Instant {
+        let nanos = ((u128::from(self.ordinal) + 1) * 1_000_000_000 * u128::from(self.rate.den))
+            .div_ceil(u128::from(self.rate.num));
+        self.started + Duration::from_nanos(nanos as u64)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PlaybackStats {
+    pub fps: f64,
+    pub dropped: u64,
+    drawn: Option<Time>,
+    next_source: u64,
+    sample: Option<Instant>,
+    frames: u32,
 }
 
 /// A value being dragged in a panel, previewed by the viewer before the command runs.
@@ -106,6 +141,7 @@ pub struct Session {
     last_scrub: Option<Time>,
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
+    pub(crate) playback_stats: PlaybackStats,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -225,26 +261,39 @@ impl Session {
 
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
-        let at = self.update_time(info, t);
-        if let Some(pb) = &mut self.playback
-            && pb.comp == info.path
-        {
-            if pb.range.contains(at) {
-                pb.from = at;
-                pb.started = Instant::now();
-            } else {
-                self.stop();
+        let last = info.duration - info.frame_duration();
+        let t = info
+            .frame_rate
+            .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
+        self.times.insert(info.path.clone(), t);
+        let playing = self
+            .playback
+            .as_ref()
+            .filter(|pb| pb.comp == info.path)
+            .map(|pb| pb.range);
+        match playing {
+            Some(range) if range.contains(t) => {
+                self.restart_clock(t);
+                if self.audio_clock {
+                    self.audio_clock = self.sound(t, range, self.loop_playback);
+                }
             }
+            Some(_) => self.stop(),
+            None => {}
         }
     }
 
-    fn update_time(&mut self, info: &CompInfo, t: Time) -> Time {
-        let last = info.duration - info.frame_duration();
-        let at = info
-            .frame_rate
-            .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
-        self.times.insert(info.path.clone(), at);
-        at
+    /// Restart the frame clock at `t`: playback continues from there.
+    fn restart_clock(&mut self, t: Time) {
+        if let Some(pb) = &mut self.playback {
+            pb.frame = pb.rate.time_to_frame(t);
+            pb.started = Instant::now();
+            pb.ordinal = 0;
+            self.playback_stats = PlaybackStats {
+                sample: Some(pb.started),
+                ..Default::default()
+            };
+        }
     }
 
     /// Make `comp` the active comp (opening a timeline tab for it).
@@ -394,13 +443,22 @@ impl Session {
         } else {
             range.start
         };
-        self.times.insert(info.path.clone(), from);
+        let started = Instant::now();
+        self.times
+            .insert(info.path.clone(), info.frame_rate.snap(from));
         self.playback = Some(Playback {
             comp: info.path.clone(),
-            started: Instant::now(),
-            from,
+            started,
+            frame: info.frame_rate.time_to_frame(from),
+            rate: info.frame_rate,
+            ordinal: 0,
+            revision: None,
             range,
         });
+        self.playback_stats = PlaybackStats {
+            sample: Some(started),
+            ..Default::default()
+        };
     }
 
     /// Refresh the producer's snapshot once per composition edit. Timeline seeks
@@ -441,7 +499,8 @@ impl Session {
         self.prepare_mix(cx, info);
         self.play(info);
         let pb = self.playback.as_ref().unwrap();
-        self.audio_clock = self.sound(pb.from, pb.range, self.loop_playback);
+        let at = pb.rate.frame_to_time(pb.frame);
+        self.audio_clock = self.sound(at, pb.range, self.loop_playback);
     }
 
     pub(crate) fn scrub_to(
@@ -476,65 +535,118 @@ impl Session {
         self.audio_clock = false;
     }
 
-    pub(crate) fn update_preview(
-        &mut self,
-        cx: &bae_ui::PanelContext<'_>,
-        info: &CompInfo,
-    ) -> bool {
-        if self.prepare_mix(cx, info) && self.is_playing() {
-            // Pick up a late device or a live layer edit at the current CTI.
-            let from = self.time(&info.path);
-            let pb = self.playback.as_mut().unwrap();
-            pb.from = from;
-            pb.started = Instant::now();
-            let range = pb.range;
+    /// Keep the audio mix current (once per composition edit). While playing,
+    /// a new mix restarts the device and the clock at the current frame: a late
+    /// device or a live layer edit. The shell ticks the clock.
+    pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        if self.prepare_mix(cx, info)
+            && let Some(pb) = &self.playback
+        {
+            let (from, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
+            self.restart_clock(from);
             self.audio_clock = self.sound(from, range, self.loop_playback);
         }
-        self.tick(info)
     }
 
-    /// Advance playback to the wall-clock time. Returns whether it is still playing
-    /// (the caller then requests a repaint).
-    pub fn tick(&mut self, info: &CompInfo) -> bool {
-        if self
-            .playback
-            .as_ref()
-            .is_some_and(|p| p.comp == info.path && p.range != info.work_area)
-        {
-            self.play(info);
-        }
-        let Some(pb) = self.playback.clone() else {
-            return false;
+    /// Edits to the work area or frame rate take effect without restarting the
+    /// UI clock on unrelated project changes.
+    pub fn sync_playback(&mut self, stage: &Stage) {
+        let Some(pb) = self.playback.as_mut() else {
+            return;
         };
-        if pb.comp != info.path {
-            return true;
+        if pb.revision == Some(stage.revision()) {
+            return;
         }
-        let elapsed = if self.audio_clock {
-            let output = self.output.as_ref().unwrap();
+        pb.revision = Some(stage.revision());
+        let Some(info) = query::comp_info(stage, &pb.comp) else {
+            self.stop();
+            return;
+        };
+        if pb.range != info.work_area || pb.rate != info.frame_rate {
+            self.play(&info);
+            if let Some(pb) = self.playback.as_mut() {
+                pb.revision = Some(stage.revision());
+                let (at, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
+                if self.audio_clock {
+                    self.audio_clock = self.sound(at, range, self.loop_playback);
+                }
+            }
+        }
+    }
+
+    pub fn playback_deadline(&self) -> Option<Instant> {
+        self.playback.as_ref().map(Playback::deadline)
+    }
+
+    /// Advance once before building the workspace. Ordinals count scheduled
+    /// frames across loops, even when the event loop wakes several frames late.
+    /// While the device plays the mix it is the clock: the wall clock start is
+    /// re-anchored to its elapsed time, so deadlines follow the audio too.
+    pub fn tick(&mut self, now: Instant) {
+        let Some(pb) = self.playback.as_mut() else {
+            return;
+        };
+        let mut finished = false;
+        if let Some(output) = self.output.as_ref().filter(|_| self.audio_clock) {
             output.set_loop(self.loop_playback);
-            if output.finished() {
-                let at = pb.from + output.elapsed();
-                self.stop();
-                self.set_time(info, at.min(pb.range.end - info.frame_duration()));
-                return false;
-            }
-            output.elapsed()
+            finished = output.finished();
+            let elapsed = Duration::from_secs_f64(output.elapsed().as_seconds().max(0.));
+            pb.started = now.checked_sub(elapsed).unwrap_or(now);
+        }
+        let ordinal = pb.ordinal_at(now).max(pb.ordinal);
+        let stats = &mut self.playback_stats;
+        stats.drawn = None;
+        if ordinal == pb.ordinal && !finished {
+            return;
+        }
+        let (start, last) = pb.frame_range();
+        let delta = ordinal - pb.ordinal;
+        let until_end = (last - pb.frame + 1) as u64;
+        let previous_ordinal = pb.ordinal;
+        pb.ordinal = ordinal;
+        // The device stops by itself at the end of a range it does not loop.
+        let ended = finished || (!self.loop_playback && delta >= until_end);
+        pb.frame = if ended {
+            last
         } else {
-            Time::from_seconds(pb.started.elapsed().as_secs_f64())
+            start + (pb.frame - start + delta as i64).rem_euclid(last - start + 1)
         };
-        let span = pb.range.duration();
-        let mut t = pb.from + elapsed;
-        if t >= pb.range.end {
-            if self.loop_playback && span.0 > 0 {
-                t = pb.range.start + Time((t - pb.range.start).0.rem_euclid(span.0));
-            } else {
-                self.stop();
-                self.set_time(info, pb.range.end - info.frame_duration());
-                return false;
+        self.times
+            .insert(pb.comp.clone(), pb.rate.frame_to_time(pb.frame));
+        if ended {
+            stats.dropped += (previous_ordinal + until_end).saturating_sub(stats.next_source);
+            self.stop();
+        }
+    }
+
+    /// Called by the viewer for the actual texture used in this UI pass.
+    pub(crate) fn drew_preview(&mut self, actual: Time) {
+        self.playback_stats.drawn = Some(actual);
+    }
+
+    /// Count only frames submitted to the native presentation surface.
+    pub fn frame_presented(&mut self, now: Instant) {
+        let Some(pb) = &self.playback else { return };
+        let stats = &mut self.playback_stats;
+        if let Some(time) = stats.drawn.take() {
+            let (first, last) = pb.frame_range();
+            let behind = (pb.frame - pb.rate.time_to_frame(time)).rem_euclid(last - first + 1);
+            // A late frame still counts when it reaches the surface. A gap is
+            // final only after a newer source frame has actually been shown.
+            if let Some(source) = pb.ordinal.checked_sub(behind as u64)
+                && source >= stats.next_source
+            {
+                stats.dropped += source - stats.next_source;
+                stats.next_source = source + 1;
+                stats.frames += 1;
             }
         }
-        self.update_time(info, t);
-        true
+        let elapsed = now.duration_since(*stats.sample.get_or_insert(now));
+        if elapsed >= Duration::from_millis(500) {
+            stats.fps = f64::from(stats.frames) / elapsed.as_secs_f64();
+            stats.frames = 0;
+            stats.sample = Some(now);
+        }
     }
 }
 
@@ -571,19 +683,41 @@ mod tests {
     }
 
     #[test]
-    fn playback_starts_in_work_area() {
-        let mut s = Session::default();
+    fn presentation_counts_distinct_frames_across_lateness_loops_and_seeks() {
         let mut i = info();
-        i.work_area = TimeRange::new(Time::from_seconds(1.0), Time::from_seconds(2.0));
+        i.frame_rate = FrameRate::FPS_59_94;
+        let time = |f| i.frame_rate.frame_to_time(f);
+        i.work_area = TimeRange::new(Time::ZERO, time(3));
+        let mut s = Session {
+            loop_playback: true,
+            ..Default::default()
+        };
         s.play(&i);
-        assert!(s.is_playing());
-        assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
-        assert!(s.tick(&i));
-        let seek = i.frame_rate.frame_to_time(42);
-        s.set_time(&i, seek);
-        assert_eq!(s.playback.as_ref().unwrap().from, seek);
-        s.set_time(&i, Time::ZERO);
+        let start = s.playback.as_ref().unwrap().started;
+        let next = s.playback_deadline().unwrap();
+        s.tick(next - Duration::from_nanos(1));
+        assert_eq!(s.time(&i.path), time(0));
+        s.tick(next);
+        // The first texture arrives after its deadline, then is presented twice.
+        for _ in 0..2 {
+            s.drew_preview(time(0));
+            s.frame_presented(next);
+        }
+        assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (1, 0));
+        s.tick(start + Duration::from_millis(51));
+        assert_eq!(s.time(&i.path), time(0));
+        s.drew_preview(time(0));
+        s.frame_presented(start + Duration::from_millis(51));
+        assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (2, 2));
+        s.set_time(&i, time(1));
+        let seek = s.playback.as_ref().unwrap().started;
+        s.drew_preview(time(1));
+        s.frame_presented(seek);
+        assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (1, 0));
+        s.loop_playback = false;
+        s.tick(seek + Duration::from_secs(1));
         assert!(!s.is_playing());
-        assert!(!s.tick(&i));
+        assert_eq!(s.time(&i.path), time(2));
+        assert_eq!(s.playback_stats.dropped, 1);
     }
 }

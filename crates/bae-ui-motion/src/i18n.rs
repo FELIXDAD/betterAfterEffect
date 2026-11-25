@@ -13,6 +13,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Delete Keyframes", "删除关键帧"),
     ("Move Keyframes", "移动关键帧"),
     ("Paste Keyframes", "粘贴关键帧"),
+    ("Dropped frames", "丢帧"),
     ("New Layer", "新建图层"),
     ("Delete Layers", "删除图层"),
     ("Reorder Layers", "排列图层"),

@@ -954,6 +954,15 @@ impl Shell {
             textures_delta: output.textures_delta,
             pixels_per_point: output.pixels_per_point,
         };
+        let session = self.app.resource::<bae_ui_motion::SharedSession>();
+        if self.smoke.is_none() {
+            let playing = session.is_some_and(|s| s.lock().is_playing());
+            view.surface.set_present_mode(if playing {
+                PresentModePreference::LowLatency
+            } else {
+                PresentModePreference::Vsync
+            });
+        }
         let (width, height) = view.surface.size();
         let background = view.egui_ctx.global_style().visuals.panel_fill;
 
@@ -972,6 +981,9 @@ impl Shell {
                 view.window.pre_present_notify();
                 let suboptimal = frame.is_suboptimal();
                 frame.present();
+                if let Some(session) = session {
+                    session.lock().frame_presented(Instant::now());
+                }
                 if suboptimal {
                     view.surface.handle_suboptimal();
                 }
@@ -1453,6 +1465,17 @@ impl ApplicationHandler<UserEvent> for Shell {
         }
         if let Some(at) = autosave_at {
             deadline = Some(deadline.map_or(at, |d| d.min(at)));
+        }
+        if let Some(at) = self
+            .app
+            .resource::<bae_ui_motion::SharedSession>()
+            .and_then(|s| s.lock().playback_deadline())
+        {
+            if at <= now {
+                self.request_redraw();
+            } else {
+                deadline = Some(deadline.map_or(at, |d| d.min(at)));
+            }
         }
         if let Some(at) = self.repaint_at {
             if at <= now {
