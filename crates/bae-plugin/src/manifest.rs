@@ -1116,12 +1116,8 @@ impl Validator {
         if p.name.trim().is_empty() {
             self.err("name must not be empty");
         }
-        if p.api.major != ApiVersion::CURRENT.major || p.api.minor > ApiVersion::CURRENT.minor {
-            self.err(format!(
-                "plugin API {} is not supported by this host (API {})",
-                p.api,
-                ApiVersion::CURRENT
-            ));
+        if let Err(e) = bae_plugin_sdk::HostApiSupport::SDK_DEFAULT.check(p.api) {
+            self.err(format!("api = \"{}\": {e}", p.api));
         }
         for platform in &p.platforms {
             if !id::PLATFORM_KEYS.contains(&platform.as_str()) {
@@ -1379,7 +1375,7 @@ impl Validator {
         }
         match t {
             ParamType::String | ParamType::Asset => self.err(format!(
-                "{t} params are reserved; the plugin API 0.1 document model has no {t} parameter values yet"
+                "{t} params are reserved; the plugin API 1.0 document model has no {t} parameter values yet"
             )),
             // A disabled path can preserve imported mask references as metadata.
             ParamType::Path if p.has_flag(ParamFlag::Disabled) => {}
@@ -1577,7 +1573,7 @@ impl Validator {
                     }
                     if t.scale != 1.0 {
                         self.err(format!(
-                            "texture `{}`: scale is reserved; plugin API 0.1 supports only scale = 1.0",
+                            "texture `{}`: scale is reserved; plugin API 1.0 supports only scale = 1.0",
                             t.name
                         ));
                     }

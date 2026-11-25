@@ -161,7 +161,14 @@ fn official_examples_load_through_the_host() {
     let mut regs = EffectRegistries::default();
     let mut host = PluginHost::new();
     let (loaded, problems) = host.load_dirs(&[PluginDir::new(examples, Scope::Bundled)], &mut regs);
-    assert!(problems.is_empty(), "{problems:#?}");
+    // The native Rust example is a source checkout: its library is built by
+    // `tests/native.rs`, not here, and an unbuilt native plugin fails to load.
+    assert_eq!(problems.len(), 1, "{problems:#?}");
+    assert!(problems[0].0.ends_with("duotone-rs"), "{problems:#?}");
+    assert!(
+        problems[0].1[0].message.contains("has not been built"),
+        "{problems:#?}"
+    );
     assert_eq!(
         loaded,
         [
