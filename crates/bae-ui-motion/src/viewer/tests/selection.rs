@@ -269,3 +269,23 @@ fn the_viewer_edits_the_selected_layer_under_others() {
         std::slice::from_ref(&top)
     );
 }
+
+/// The bar's Toggle Mask and Shape Path Visibility off: mask paths are not
+/// shown, so their vertices cannot be picked.
+#[test]
+fn hidden_mask_paths_have_no_vertices_to_pick() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "mask.create",
+        json!({"layer": a, "kind": "rect", "position": [100.0, 50.0], "size": [100.0, 50.0]}),
+    );
+    h.select(&[&a]);
+    h.tools().lock().set(Tool::Selection);
+    h.session().lock().view_options.paths = false;
+    h.click(370.0, 155.0, Modifiers::NONE);
+    assert!(h.viewer.select.vertices.indices.is_empty());
+    h.session().lock().view_options.paths = true;
+    h.click(370.0, 155.0, Modifiers::NONE);
+    assert_eq!(h.viewer.select.vertices.indices, [0]);
+}

@@ -35,6 +35,9 @@ pub(crate) struct ViewOptions {
     pub safe: bool,
     /// View ▸ Show Layer Controls (Cmd/Ctrl+Shift+H): boxes, handles, paths.
     pub layer_controls: bool,
+    /// The bar's Toggle Mask and Shape Path Visibility: mask and shape paths
+    /// are drawn (and their vertices can be picked).
+    pub paths: bool,
 }
 
 impl Default for ViewOptions {
@@ -49,6 +52,7 @@ impl Default for ViewOptions {
             proportional: false,
             safe: false,
             layer_controls: true,
+            paths: true,
         }
     }
 }

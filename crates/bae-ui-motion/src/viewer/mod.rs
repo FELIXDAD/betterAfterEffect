@@ -885,7 +885,9 @@ impl Panel for CompositionViewer {
             );
         }
 
-        overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        if opts.paths {
+            overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        }
 
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).

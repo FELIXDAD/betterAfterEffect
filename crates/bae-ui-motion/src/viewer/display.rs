@@ -144,6 +144,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Adjust Exposure", "调整曝光度"),
     ("Reset Exposure", "重置曝光度"),
     ("Region of Interest", "目标区域"),
+    (
+        "Toggle Mask and Shape Path Visibility",
+        "切换蒙版和形状路径可见性",
+    ),
     ("Choose grid and guide options", "选择网格和参考线选项"),
     ("Proportional Grid", "对称网格"),
     ("Rulers", "标尺"),

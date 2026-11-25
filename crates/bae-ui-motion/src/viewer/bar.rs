@@ -127,6 +127,19 @@ pub(super) fn bottom_bar(
             }
         }
     });
+    // Toggle Mask and Shape Path Visibility.
+    if room(ui, 24.0)
+        && icons::button(ui, Icon::MaskVisibility, 20.0, opts.paths)
+            .labeled_toggle(
+                egui::WidgetType::Checkbox,
+                tr("Toggle Mask and Shape Path Visibility"),
+                opts.paths,
+            )
+            .on_hover_text(tr("Toggle Mask and Shape Path Visibility"))
+            .clicked()
+    {
+        opts.paths = !opts.paths;
+    }
     session.lock().view_options = opts;
     if room(ui, 48.0) {
         // Region of Interest (Alt/Option-click: draw a new one).

@@ -174,7 +174,8 @@ pub(super) fn frame(
         )
     });
     let selected = session.lock().selected_layers.clone();
-    let paths: Vec<EditablePath> = if tool == Tool::Selection {
+    // The bar's Toggle Mask and Shape Path Visibility off: no paths to edit.
+    let paths: Vec<EditablePath> = if tool == Tool::Selection && session.lock().view_options.paths {
         overlay::editable_paths(stage, comp, &selected, None)
     } else {
         Vec::new()
