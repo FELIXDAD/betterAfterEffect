@@ -8,6 +8,7 @@
 
 pub(crate) mod browser;
 pub(crate) mod controls;
+mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -180,6 +181,17 @@ pub(crate) fn apply(cx: &mut PanelContext<'_>, layers: &[PrimPath], match_name: 
     if layers.is_empty() {
         return;
     }
+    // AE selects the applied effect (its point controls show in the viewer).
+    let before = layers
+        .iter()
+        .flat_map(|l| bae_motion::effect::effects_of(cx.stage, l))
+        .collect();
+    common::session(cx.resources)
+        .lock()
+        .expect(crate::session::Pending::NewEffects {
+            layers: layers.to_vec(),
+            before,
+        });
     cx.invoke_with(
         "effect.apply",
         json!({"layers": layers, "match_name": match_name}),

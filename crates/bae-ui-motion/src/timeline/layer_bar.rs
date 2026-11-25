@@ -294,6 +294,9 @@ impl TimelinePanel {
         if resp.clicked() {
             select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
+        if resp.double_clicked() {
+            crate::layer_panel::open(cx, session, layer);
+        }
         // Right-click: the layer context menu (as on the layer name).
         let mut menu_out = None;
         crate::common::context_menu(&resp, &mut |ui| {
