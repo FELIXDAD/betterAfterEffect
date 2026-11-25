@@ -48,12 +48,12 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
         tool_action(&h, ids::SHORTCUT, json!({"slot": slot}));
         assert_eq!(view(&h), v);
     }
-    // Esc in the Composition panel: the previous view; an open menu takes it
-    // first.
+    // Esc, whichever panel has focus (AE): the previous view; an open menu
+    // takes it first.
     assert!(
         crate::tools::bindings()
             .iter()
-            .any(|b| b.action == ids::LAST && b.when.as_deref() == Some("composition"))
+            .any(|b| b.action == ids::LAST && b.when.is_none())
     );
     h.right_click(100.0, 100.0);
     assert!(h.labeled("Composition Settings...").is_some());
@@ -77,4 +77,46 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     tool_action(&h, ids::SWITCH, json!({"view": "top"}));
     tool_action(&h, ids::SHORTCUT, json!({"slot": "a"}));
     assert_eq!(view(&h), View3d::Custom(2));
+}
+
+/// Cameras and lights show in the 3D views other than their own camera's.
+#[test]
+fn cameras_and_lights_draw_in_the_3d_views() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    let light = path(&h.run("layer.create", json!({"comp": h.comp, "kind": "light"}))["path"]);
+    h.select(&[&camera, &light]);
+    for view in ["active_camera", "top", "custom_1"] {
+        tool_action(
+            &h,
+            crate::viewer::view3d::ids::SWITCH,
+            json!({"view": view}),
+        );
+        h.frame(Vec::new(), Modifiers::NONE);
+    }
+    // The camera looked through in Active Camera is the one skipped.
+    let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+    assert_eq!(comp.camera.map(|i| &comp.layers[i].path), Some(&camera));
+}
+
+/// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
+#[test]
+fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    h.run(
+        "attr.set",
+        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [10.0, 20.0, -300.0]}}),
+    );
+    let r = tool_action(&h, crate::viewer::view3d::ids::RESET, json!({}));
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let zoom = match h.value(&camera, "camera:zoom") {
+        Some(Value::Float(z)) => z,
+        other => panic!("{other:?}"),
+    };
+    assert!(close3(
+        h.v3(&camera, "transform:position"),
+        [320.0, 180.0, -zoom]
+    ));
 }

@@ -551,6 +551,7 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
   get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
+  get marker() { return new MarkerProperty(this.__c, this.__l); },
   get text() { return new __TextGroup(this.__c, this.__l); },
   sourceRectAtTime: function (t, includeExtents) {
     var r = __h.sourceRect(this.__c, this.__l, t === undefined ? __now : t, !!includeExtents);
@@ -605,8 +606,54 @@ Layer.prototype = {
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
+// ---- markers (AE: thisLayer.marker, thisComp.marker, MarkerKey) ----
+function MarkerProperty(c, l) { this.__c = c; this.__l = l; this.__m = null; }
+MarkerProperty.prototype = {
+  get __keys() {
+    if (this.__m === null) {
+      this.__m = __h.markers(this.__c, this.__l).map(function (m, i) { return new MarkerKey(m, i + 1); });
+    }
+    return this.__m;
+  },
+  get numKeys() { return this.__keys.length; },
+  // key(index) or key(comment), as AE.
+  key: function (k) {
+    var ks = this.__keys;
+    if (typeof k === "string") {
+      for (var i = 0; i < ks.length; i++) if (ks[i].comment === k) return ks[i];
+      throw new Error("Marker key " + JSON.stringify(k) + " does not exist");
+    }
+    if (k < 1 || k > ks.length) throw new Error("Key index " + k + " out of range");
+    return ks[k - 1];
+  },
+  nearestKey: function (t) {
+    var ks = this.__keys, best = -1, bd = Infinity;
+    for (var i = 0; i < ks.length; i++) {
+      var d = Math.abs(ks[i].time - t);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) throw new Error("property has no keyframes");
+    return ks[best];
+  },
+};
+function MarkerKey(m, index) {
+  this.time = m.time;
+  this.index = index;
+  this.duration = m.duration;
+  this.comment = m.comment;
+  this.value = m.comment;
+  this.chapter = m.chapter;
+  this.url = m.url;
+  this.frameTarget = m.frameTarget;
+  this.eventCuePoint = false;
+  this.cuePointName = m.cuePointName;
+  this.parameters = {};
+  this.protectedRegion = m.protectedRegion;
+}
+
 function Comp(c) { this.__c = c; this.__i = null; }
 Comp.prototype = {
+  get marker() { return new MarkerProperty(this.__c, -1); },
   get __info() { return this.__i || (this.__i = __h.compInfo(this.__c)); },
   get name() { return this.__info.name; },
   get width() { return this.__info.width; },
