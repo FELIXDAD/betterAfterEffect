@@ -952,6 +952,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::DESELECT_ALL => {
             s.selected_layers.clear();
             s.selected_keys.clear();
+            s.selected_props.clear();
         }
         ids::REVEAL => {
             let what = inv
