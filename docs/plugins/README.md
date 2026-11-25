@@ -10,7 +10,7 @@ BAE 的效果、导入导出器、命令、面板都可以由插件提供。内�
 |---|---|---|---|---|
 | **声明式 GPU 插件**（首选） | 清单 + WGSL 着色器 + 参数表，不含本地代码 | 大部分效果、生成器、转场 | 与内置效果同一条执行路径 | **可用**：加载、校验、在 GPU 上执行、运行时卸载 |
 | 原生插件 | 动态库（`.dylib` / `.dll`），通过稳定的 C ABI（`sdk/c/bae_plugin.h`）接入 | CPU 算法、已有的 C/C++ 代码、编解码、导入导出、原生 GPU 互操作 | 进程内直接调用 | 头文件和 ABI 规则已定（ABI 0.1，不稳定版）；宿主加载原生代码在后续版本 |
-| 脚本插件 | JavaScript 模块（QuickJS），对象模型参照 AE 脚本 | 自动化、批处理、命令、简单面板 | 不进入逐帧渲染 | 清单可校验；运行时在后续版本 |
+| 脚本 / 脚本插件 | JavaScript（QuickJS，和表达式同一个引擎），对象模型参照 AE 脚本 | 自动化、批处理、命令、简单面板 | 不进入逐帧渲染 | **AE 风格脚本可用**：文件 ▸ 脚本、MCP `script.run`（见[脚本](scripting.md)）；清单里的脚本命令（`[[command]]`、`[[automation]]`）可校验，加载在后续版本 |
 
 不确定用哪种时：能写成"每个输出像素读几个输入像素、做一些数学"的效果，都用声明式。
 
@@ -22,6 +22,7 @@ BAE 的效果、导入导出器、命令、面板都可以由插件提供。内�
 | [清单参考](manifest.md) | `bae-plugin.toml` 的全部键：插件信息、效果、参数类型、ROI、多个 pass、权限、依赖、本地化 |
 | [WGSL 参考](wgsl.md) | 声明式效果的着色器约定：坐标系、宿主生成的前导代码、`params`、辅助函数、像素式与计算式、诊断信息 |
 | [原生插件（C ABI）](native-c.md) | 入口函数、版本协商、套件、效果 vtable 与 AE 命令的对应、ABI 规则、纯 C 示例 |
+| [脚本](scripting.md) | 运行 AE 风格脚本（文件 ▸ 脚本、脚本文件夹、MCP `script.run`）、支持的 AE 脚本 API、撤销与错误、和 AE 的差别 |
 | [打包、安装与版本](publishing.md) | 插件目录、`.baeplugin` 包、版本选择、卸载与"缺失插件"占位、兼容性承诺 |
 
 ## 示例
@@ -32,6 +33,7 @@ BAE 的效果、导入导出器、命令、面板都可以由插件提供。内�
 | [`plugins/examples/vignette`](../../plugins/examples/vignette) | 声明式，像素式 | 点、弹出菜单、颜色参数；线性光混合 |
 | [`plugins/examples/box-blur`](../../plugins/examples/box-blur) | 声明式，计算式 | 两个 pass + 中间纹理；ROI 扩展 |
 | [`plugins/examples/align-to-grid`](../../plugins/examples/align-to-grid) | 脚本 | 命令（菜单、快捷键、MCP 工具）+ 自动化脚本 |
+| [`plugins/examples/scripts`](../../plugins/examples/scripts) | 脚本（`.jsx`） | 下三分之一字幕、弹跳关键帧、批量重命名、对齐网格 |
 | [`sdk/c/examples/invert`](../../sdk/c/examples/invert) | 原生（纯 C） | 不用任何 SDK 直接实现 C ABI |
 
 所有示例都有自动测试：`cargo test -p bae-plugin` 用宿主代码加载每个示例并在 GPU 上和 CPU 参考结果对比；`sdk/c/tests/check.sh` 编译纯 C 示例并用迷你宿主跑通 ABI 调用流程。

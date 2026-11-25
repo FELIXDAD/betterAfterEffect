@@ -69,6 +69,7 @@ bae-ui = { path = "crates/bae-ui" }
 bae-color = { path = "crates/bae-color" }
 bae-plugin = { path = "crates/bae-plugin" }
 bae-plugin-sdk = { path = "crates/bae-plugin-sdk" }
+bae-script = { path = "crates/bae-script" }
 bae-package = { path = "crates/bae-package" }
 bae-motion = { path = "crates/bae-motion" }
 bae-vector = { path = "crates/bae-vector" }

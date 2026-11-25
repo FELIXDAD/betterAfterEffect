@@ -55,7 +55,8 @@
 - [x] 应用接入：`PluginModule` + 启动时 `load_installed`（`AppDirs::plugin_dirs()` + `BAE_PLUGIN_PATH`），插件效果发布到 `bae_app::Registry<EffectDef>` / `Registry<dyn bae_render::Effect>`；`bae plugin check|list [--json]`
 - [ ] 渲染耗时对照基准（声明式 vs 同功能内置效果 < 2%，等 04 的执行器和 07 的内置效果）
 - [ ] 原生插件加载（libloading）+ Rust SDK
-- [ ] 脚本插件
+- [x] 脚本：AE 风格脚本 API 子集（`crates/bae-script`，QuickJS 与表达式共用）；文件 ▸ 脚本（运行脚本文件、安装脚本文件、脚本文件夹列表）；命令 `script.run`（MCP 工具，同一套命令）；一次运行 = 一个撤销步骤；文档 `docs/plugins/scripting.md`，示例 `plugins/examples/scripts/`
+- [ ] 脚本插件：清单里的 `[[command]]` / `[[automation]]` 通过 `bae-script` 注册成命令（ES 模块 + `import from "bae"`）
 - [ ] 其余示例插件
 
 ### 0.0.1 记录
