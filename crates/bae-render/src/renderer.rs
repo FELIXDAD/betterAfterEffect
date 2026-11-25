@@ -142,7 +142,7 @@ impl SourceResolver for Resolver<'_> {
         let Some(file) = &footage.file else {
             return Ok(None);
         };
-        match self.footage.get(file) {
+        match self.footage.get(file, footage.sequence) {
             Ok(source) => Ok(Some(source)),
             Err(message) => {
                 self.warnings.push(message);
