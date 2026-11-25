@@ -56,6 +56,20 @@ pub use toolbar::Toolbar;
 pub use workbench::{Workbench, WorkbenchContext, WorkbenchState};
 pub use workspace::WorkspacePreset;
 
+static KEYPAD_ENTER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the last Enter pressed was the numeric keypad's. egui reports both as
+/// `Key::Enter`; AE tells them apart (keypad Enter ends editing an expression).
+/// The shell records it from the window's key events.
+pub fn keypad_enter() -> bool {
+    KEYPAD_ENTER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Record which Enter key went down (the shell; tests).
+pub fn set_keypad_enter(keypad: bool) {
+    KEYPAD_ENTER.store(keypad, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Registers the shell's own actions and, after every module has built, a
 /// placeholder for each panel a workspace layout uses but no module registered.
 #[derive(Debug, Default)]
