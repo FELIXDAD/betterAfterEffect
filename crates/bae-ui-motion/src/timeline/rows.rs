@@ -13,29 +13,13 @@ pub(super) fn switch_name(icon: Icon) -> &'static str {
         Icon::Shy => "Shy",
         Icon::Collapse => "Collapse Transformations",
         Icon::Quality => "Quality and Sampling",
+        Icon::Fx => "Effects",
         Icon::FrameBlend => "Frame Blending",
         Icon::MotionBlur => "Motion Blur",
         Icon::Adjustment => "Adjustment Layer",
         Icon::Cube => "3D Layer",
         _ => "Switch",
     }
-}
-
-/// A layer switch; `layer` is the accessibility context ("Layer “Solid 1”").
-pub(super) fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id, layer: &str) -> bool {
-    let resp = ui.interact(rect, id, Sense::click()).labeled_toggle(
-        egui::WidgetType::Checkbox,
-        &bae_ui::a11y::context(&[layer, tr(switch_name(icon))]),
-        on,
-    );
-    widgets::paint_switch(
-        ui.painter(),
-        rect.shrink2(vec2(1.0, 2.0)),
-        on,
-        icon,
-        resp.hovered(),
-    );
-    resp.clicked()
 }
 
 impl TimelinePanel {
@@ -50,6 +34,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
+        switch_input: switches::SwitchInput,
         layers: &super::TimelineLayers,
         parent_items: &[&str],
         key_rects: &mut Vec<(Rect, KeyRef)>,
@@ -75,10 +60,13 @@ impl TimelinePanel {
                     .any(|(p, a)| p == path && a == attr),
                 _ => false,
             };
-            let bg = match row.kind {
+            let bg = match &row.kind {
                 RowKind::Layer if layer_selected => color::ROW_SELECTED,
                 RowKind::Layer => color::ROW,
                 RowKind::Prop { .. } if prop_selected => color::ROW_SELECTED,
+                RowKind::Group { id, .. } if session.lock().selected_groups.contains(id) => {
+                    color::ROW_SELECTED
+                }
                 _ => color::PANEL,
             };
             p.rect_filled(outline, 0.0, bg);
@@ -111,6 +99,7 @@ impl TimelinePanel {
                         vec2(SW, ROW_H),
                     )
                 };
+                let locked = query::is_locked(stage, layer);
                 for (i, attr, icon) in [
                     (0, "enabled", Icon::Eye),
                     (1, "audio_enabled", Icon::Speaker),
@@ -124,9 +113,19 @@ impl TimelinePanel {
                         continue;
                     }
                     let on = bool_attr(stage, layer, attr);
-                    if switch(ui, av(i), on, icon, rid(attr), &layer_ctx) {
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
-                    }
+                    self.switch_cell(
+                        ui,
+                        switch_input,
+                        cx,
+                        av(i),
+                        rid(attr),
+                        layer,
+                        &layer_ctx,
+                        attr,
+                        icon,
+                        on,
+                        locked,
+                    );
                 }
                 let p = ui.painter();
                 icons::swatch(
@@ -213,7 +212,6 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    let locked = query::is_locked(stage, layer);
                     if resp.double_clicked() && !locked {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
@@ -244,38 +242,29 @@ impl TimelinePanel {
                             vec2(SW, ROW_H),
                         )
                     };
-                    // Shy: no box, AE's figure peeking over the bar, or ducked behind it
-                    // when the layer is shy.
-                    let shy = bool_attr(stage, layer, "shy");
-                    let resp = ui
-                        .interact(sw(0), rid("shy"), Sense::click())
-                        .labeled_toggle(
-                            egui::WidgetType::Checkbox,
-                            &bae_ui::a11y::context(&[&layer_ctx, tr("Shy")]),
-                            shy,
+                    let mut cell = |rect: Rect, attr, icon, on| {
+                        self.switch_cell(
+                            ui,
+                            switch_input,
+                            cx,
+                            rect,
+                            rid(attr),
+                            layer,
+                            &layer_ctx,
+                            attr,
+                            icon,
+                            on,
+                            locked,
                         );
-                    icons::paint(
-                        ui.painter(),
-                        Rect::from_center_size(sw(0).center(), vec2(13.0, 13.0)),
-                        if shy { Icon::ShyOn } else { Icon::Shy },
-                        if resp.hovered() {
-                            color::TEXT_STRONG
-                        } else {
-                            color::ICON
-                        },
-                    );
-                    if resp.clicked() {
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "shy", "value": {"type": "bool", "value": !shy}}));
-                    }
+                    };
                     for (i, attr, icon) in [
+                        (0, "shy", Icon::Shy),
                         (1, "collapse_transformation", Icon::Collapse),
                         (5, "motion_blur", Icon::MotionBlur),
                         (6, "adjustment_layer", Icon::Adjustment),
+                        (7, "three_d", Icon::Cube),
                     ] {
-                        let on = bool_attr(stage, layer, attr);
-                        if switch(ui, sw(i), on, icon, rid(attr), &layer_ctx) {
-                            cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
-                        }
+                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr));
                     }
                     // Effect switch (fx): only on layers with effects, like AE.
                     if !bae_motion::effect::effects_of(stage, layer).is_empty() {
@@ -284,25 +273,13 @@ impl TimelinePanel {
                             .and_then(|v| query::static_value(&v, "effects_enabled"))
                             .and_then(|v| v.as_bool())
                             .unwrap_or(true);
-                        if switch(ui, sw(3), on, Icon::Fx, rid("effects_enabled"), &layer_ctx) {
-                            cx.invoke_with(
-                                "layer.set_attr",
-                                json!({"layers": [layer], "attr": "effects_enabled", "value": {"type": "bool", "value": !on}}),
-                            );
-                        }
+                        cell(sw(3), "effects_enabled", Icon::Fx, on);
                     }
                     let draft = stage
                         .prim(layer)
                         .and_then(|v| query::static_value(&v, "quality"))
                         .is_some_and(|v| v.as_str() == Some("draft"));
-                    if switch(ui, sw(2), !draft, Icon::Quality, rid("quality"), &layer_ctx) {
-                        let to = if draft { "best" } else { "draft" };
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "quality", "value": {"type": "enum", "value": to}}));
-                    }
-                    let three_d = bool_attr(stage, layer, "three_d");
-                    if switch(ui, sw(7), three_d, Icon::Cube, rid("three_d"), &layer_ctx) {
-                        cx.invoke_with("attr.set", json!({"path": layer, "attr": "three_d", "value": {"type": "bool", "value": !three_d}}));
-                    }
+                    cell(sw(2), "quality", Icon::Quality, !draft);
                 }
                 // Modes: Mode, T, Track Matte.
                 if cols.panes.modes {
@@ -401,22 +378,51 @@ impl TimelinePanel {
                     },
                     color::ICON,
                 );
-                let resp = ui
-                    .interact(
-                        Rect::from_min_max(
-                            pos2(x, rect.top()),
-                            pos2(l + cols.switches, rect.bottom()),
-                        ),
-                        rid("group"),
-                        Sense::click(),
-                    )
+                // AE: only the arrow expands; the name selects the row (Shift or
+                // Cmd/Ctrl adds), for Copy, Paste, Duplicate and Delete.
+                let twirl = ui
+                    .interact(tw.expand(3.0), rid("group"), Sense::click())
                     .labeled_toggle(
                         egui::WidgetType::CollapsingHeader,
                         &bae_ui::a11y::context(&[&layer_ctx, tr(label)]),
                         *open,
                     );
-                if resp.clicked() {
+                if twirl.clicked() {
                     self.toggle(id);
+                }
+                let selected = session.lock().selected_groups.contains(id);
+                let name = ui
+                    .interact(
+                        Rect::from_min_max(
+                            pos2(x + 12.0, rect.top()),
+                            pos2(l + cols.switches, rect.bottom()),
+                        ),
+                        rid("group_name"),
+                        Sense::click(),
+                    )
+                    .labeled_toggle(
+                        egui::WidgetType::SelectableLabel,
+                        &bae_ui::a11y::context(&[&layer_ctx, tr(label), tr("Select")]),
+                        selected,
+                    );
+                #[cfg(test)]
+                self.last_groups
+                    .push((id.clone(), tw.center(), pos2(x + 30.0, cy)));
+                if name.clicked() && query::locked_layer_of(stage, layer).is_none() {
+                    let mods = ui.input(|i| i.modifiers);
+                    let mut s = session.lock();
+                    if mods.shift || mods.command {
+                        if let Some(i) = s.selected_groups.iter().position(|g| g == id) {
+                            s.selected_groups.remove(i);
+                        } else {
+                            s.selected_groups.push(id.clone());
+                        }
+                    } else {
+                        s.selected_groups = vec![id.clone()];
+                        s.selected_props.clear();
+                        s.selected_keys.clear();
+                    }
+                    s.selected_layers = vec![layer.clone()];
                 }
                 ui.painter().text(
                     pos2(x + 14.0, cy),
@@ -682,6 +688,7 @@ impl TimelinePanel {
                 }
             } else {
                 s.selected_props = vec![id_pair.clone()];
+                s.selected_groups.clear();
                 s.selected_keys = keys;
                 s.selected_layers = vec![row.layer.clone()];
             }
@@ -691,8 +698,8 @@ impl TimelinePanel {
             .lock()
             .scrub
             .as_ref()
-            .filter(|s| s.path == *path && s.attr == attr)
-            .map(|s| s.value.clone())
+            .and_then(|s| s.value_for(path, attr))
+            .cloned()
             .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
         if attr == "text:path" {
             // Path Options > Path: a popup of the layer's masks, even when unset.
