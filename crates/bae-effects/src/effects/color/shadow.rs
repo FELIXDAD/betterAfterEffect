@@ -1,10 +1,13 @@
+use super::temporal_stats::Smoothing;
 use crate::blur::{self, Edge};
 use crate::catalog::DefBuilder;
 use crate::gpu::UniformWriter;
 use crate::params::Params;
 use crate::target::{EffectTarget, TargetEffect};
 use bae_model::{EffectDef, ParamKind};
-use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
+use bae_render::{
+    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError, effect::LayerDependency,
+};
 
 pub(super) const UNIFORM_BYTES: usize = 80;
 
@@ -82,7 +85,7 @@ impl ShadowHighlight {
             b = slider(b, id, name, zh, default, min, max, unit);
         }
         b.push(15, "More Options", "更多选项", ParamKind::GroupEnd, None);
-        let (mut def, zh) = slider(
+        let (def, zh) = slider(
             b,
             16,
             "Blend With Original",
@@ -93,12 +96,6 @@ impl ShadowHighlight {
             "percent",
         )
         .build();
-        // These two controls require pre-effect pixels at neighbouring times.
-        for p in &mut def.params {
-            if matches!(p.id, 4 | 5) {
-                p.flags.disabled = true;
-            }
-        }
         (Self(def), zh)
     }
 }
@@ -120,6 +117,14 @@ impl Effect for ShadowHighlight {
         let sigma = v.f(8).max(v.f(10)) * 0.4 * p.scale;
         blur::plan_gaussian(IRect::EMPTY, [sigma; 2], Edge::Repeat, roi).read
     }
+    fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<LayerDependency> {
+        let v = Params::new(&self.0, p);
+        if !v.b(1) || v.f(16) >= 100. {
+            return Vec::new();
+        }
+        Smoothing::new(p, v.f(4), v.b(5)).dependencies()
+    }
+
     fn render(
         &self,
         ctx: &mut EncodeContext<'_>,
@@ -178,11 +183,20 @@ impl TargetEffect for ShadowHighlight {
             u.f32(32 + i * 4, (v.f(id) / 100.) as f32);
         }
         let stats = if histogram {
-            let bins = target.allocate(IRect::from_size(64, 256), 1.)?;
-            let stats = target.allocate(IRect::from_size(1, 1), 1.)?;
-            super::dispatch(target, "histogram", &u, &[&input], &bins, [128, 128])?;
-            super::dispatch(target, "percentiles", &u, &[&bins], &stats, [8, 8])?;
-            stats
+            let stats = statistics(target, &u, &input)?;
+            if v.b(1) && v.f(4) > 0. {
+                Smoothing::new(p, v.f(4), v.b(5)).blend(
+                    target,
+                    &input,
+                    stats,
+                    |target, frame| {
+                        let frame = crate::common::premultiplied(target, frame)?;
+                        statistics(target, &u, &frame)
+                    },
+                )?
+            } else {
+                stats
+            }
         } else {
             input.clone()
         };
@@ -196,4 +210,16 @@ impl TargetEffect for ShadowHighlight {
         )?;
         Ok(out)
     }
+}
+
+fn statistics(
+    target: &mut dyn EffectTarget,
+    u: &UniformWriter,
+    input: &GpuImage,
+) -> Result<GpuImage, RenderError> {
+    let bins = target.allocate(IRect::from_size(64, 256), 1.)?;
+    let stats = target.allocate(IRect::from_size(1, 1), 1.)?;
+    super::dispatch(target, "histogram", u, &[input], &bins, [128, 128])?;
+    super::dispatch(target, "percentiles", u, &[&bins], &stats, [8, 8])?;
+    Ok(stats)
 }

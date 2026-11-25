@@ -143,6 +143,13 @@ fn builtin_defs_follow_the_ae_26_reference() {
         "ADBE Compound Blur",
         "ADBE Texturize",
         "ADBE Fill",
+        "ADBE Echo",
+        "ADBE Posterize Time",
+        "ADBE Time Displacement",
+        "ADBE AutoLevels",
+        "ADBE AutoContrast",
+        "ADBE AutoColor",
+        "ADBE ShadowHighlight",
     ];
     let refs = [
         include_str!("../../../docs/reference/ae/effects/expression-controls.json"),
@@ -154,6 +161,7 @@ fn builtin_defs_follow_the_ae_26_reference() {
         include_str!("../../../docs/reference/ae/effects/blur-and-sharpen.json"),
         include_str!("../../../docs/reference/ae/effects/stylize.json"),
         include_str!("../../../docs/reference/ae/effects/generate.json"),
+        include_str!("../../../docs/reference/ae/effects/time.json"),
     ];
     let mut count = 0;
     for text in refs {
@@ -189,6 +197,9 @@ fn builtin_defs_follow_the_ae_26_reference() {
                     Some(bae_model::Value::Color(v)) => check_vector(v),
                     Some(bae_model::Value::Vec2(v)) => check_vector(v),
                     Some(bae_model::Value::Vec3(v)) => check_vector(v),
+                    None if matches!(p.kind, ParamKind::GroupStart | ParamKind::GroupEnd) => {
+                        assert!(value.is_null());
+                    }
                     None => {
                         assert!(matches!(p.kind, ParamKind::Layer | ParamKind::Path));
                         assert!(matches!(value.as_i64(), Some(0 | 1)));
@@ -218,5 +229,5 @@ fn builtin_defs_follow_the_ae_26_reference() {
             count += 1;
         }
     }
-    assert_eq!(count, 22);
+    assert_eq!(count, 29);
 }
