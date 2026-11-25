@@ -10,6 +10,7 @@
 //! [`Transform::opacity`] keeps AE's percent.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bae_model::{BezierPath, FrameRate, LayerKind, PrimPath, PrimType, TextDocument, Time, Value};
 use glam::{DMat4, DVec3};
@@ -100,11 +101,11 @@ pub struct EvaluatedLayer {
     pub masks: Vec<EvaluatedMask>,
     pub effects: Vec<EvaluatedEffect>,
     /// Shape layer contents (groups, paths, fills, operators …), in order.
-    pub contents: Vec<EvaluatedPrim>,
+    pub contents: Arc<[EvaluatedPrim]>,
     /// Text layers: the source text at this time (`text:source`).
     pub text: Option<Box<TextDocument>>,
     /// Text layers: animators with their selectors (`animators` folder), evaluated.
-    pub text_animators: Vec<EvaluatedPrim>,
+    pub text_animators: Arc<[EvaluatedPrim]>,
     /// Text layers on a path (AE: Text > Path Options with a mask chosen).
     pub text_path: Option<TextPathOptions>,
     pub camera: Option<CameraState>,
@@ -268,8 +269,9 @@ impl EvaluatedEffect {
 pub struct EvaluatedPrim {
     pub path: PrimPath,
     pub prim_type: Option<PrimType>,
-    pub attrs: BTreeMap<String, Value>,
-    pub children: Vec<EvaluatedPrim>,
+    /// Shared between frames when nothing in the prim animates.
+    pub attrs: Arc<BTreeMap<String, Value>>,
+    pub children: Arc<[EvaluatedPrim]>,
 }
 
 impl EvaluatedPrim {
