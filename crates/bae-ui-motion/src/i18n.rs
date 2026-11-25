@@ -595,6 +595,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Custom", "自定义"),
     // The viewer's resolution menu.
     ("Auto", "自动"),
+    ("Active Camera", "活动摄像机"),
+    ("3D View Popup", "3D 视图弹出式菜单"),
+    ("Switch to 3D View", "切换到三维视图"),
     ("Save Preset", "保存预设"),
     ("Delete Preset", "删除预设"),
     ("Width:", "宽度:"),
