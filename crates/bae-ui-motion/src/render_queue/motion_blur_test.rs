@@ -29,7 +29,7 @@ fn export_alpha(gpu: &Arc<GpuContext>, stage: &Stage, comp: &PrimPath, frame: i6
     }
     run_worker(
         &queue,
-        &StageSnapshot::take(stage).unwrap(),
+        &crate::preview_snapshot::PreviewSnapshot::take(stage),
         gpu.clone(),
         &[],
         None,
@@ -67,7 +67,9 @@ fn motion_blur_preview_and_export() {
             .get(&resources)
             .evaluate_comp(stage, &comp, rate.frame_to_time(frame))
             .unwrap();
-        preview.frame(&resources, stage, &ec, 1, None).unwrap();
+        preview
+            .frame(&resources, stage, &ec, 1, None, false)
+            .unwrap();
         let published = registry.get(preview.viewport()).unwrap();
         let pixels = bae_gpu::transfer::read_texture(&gpu, published.view.texture()).unwrap();
         alpha(&pixels.data)
