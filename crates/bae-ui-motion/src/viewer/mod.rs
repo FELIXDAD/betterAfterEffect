@@ -16,7 +16,7 @@ use serde_json::json;
 
 use crate::common::{self, EvalCache};
 use crate::gpu_preview::GpuPreview;
-use crate::project::ItemDrag;
+use crate::project::{DropPlacement, ItemDrag};
 use crate::render::{self, Affine, View};
 use crate::session::{Scrub, SharedSession};
 use crate::tools::cursor::{self, Hover};
@@ -692,10 +692,21 @@ impl Panel for CompositionViewer {
             select_tool::center_anchors(cx, &session, &info, &comp);
         }
 
-        let image = self
-            .gpu
-            .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
+        let frame_nr = ui.ctx().cumulative_frame_nr();
+        let measure = session
+            .lock()
+            .timing_column_frame
+            .is_some_and(|shown| frame_nr.saturating_sub(shown) <= 1);
+        let image = self.gpu.as_mut().and_then(|g| {
+            g.frame(
+                cx.resources,
+                cx.stage,
+                &comp,
+                resolution,
+                view_camera,
+                measure,
+            )
+        });
         self.on_gpu = image.is_some();
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
@@ -996,7 +1007,11 @@ impl Panel for CompositionViewer {
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
-            add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
+            item.add_as_layer(
+                cx,
+                &session,
+                DropPlacement::Viewer(pointer.map(|p| view.to_comp(p))),
+            );
         }
         // An effect dropped on a layer (Effects & Presets) is applied to it.
         if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
@@ -1090,45 +1105,6 @@ pub(crate) fn set_resolution(
             );
         }
     }
-}
-
-/// Add a project item to the active comp (drag and drop).
-pub(crate) fn add_item_as_layer(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    item: &PrimPath,
-    at: Option<DVec2>,
-) {
-    let stage = cx.stage;
-    let Some(active) = session.lock().active_comp.clone() else {
-        return;
-    };
-    let kind = if query::comp_info(stage, item).is_some() {
-        if item == &active {
-            return;
-        }
-        LayerKind::PreComp
-    } else {
-        match stage
-            .prim(item)
-            .and_then(|v| query::static_value(&v, "kind"))
-        {
-            Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
-            _ if stage.prim(item).is_some_and(|v| {
-                v.value("has_audio").and_then(Value::as_bool) == Some(true)
-                    && v.value("has_video").and_then(Value::as_bool) == Some(false)
-            }) =>
-            {
-                LayerKind::Audio
-            }
-            _ => LayerKind::Footage,
-        }
-    };
-    let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
-    if let Some(p) = at {
-        extra["position"] = json!([p.x, p.y]);
-    }
-    common::new_layer(cx, session, kind, extra);
 }
 
 fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {
