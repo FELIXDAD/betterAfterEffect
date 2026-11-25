@@ -33,7 +33,7 @@ pub(crate) fn builtin() -> Builtin {
         (
             Arc::new(ApplyLut {
                 def,
-                cache: Mutex::default(),
+                cache: LutCache::default(),
             }),
             zh,
         ),
@@ -46,8 +46,11 @@ pub(crate) fn builtin() -> Builtin {
 #[derive(Debug)]
 struct ApplyLut {
     def: EffectDef,
-    cache: Mutex<VecDeque<Arc<Prepared>>>,
+    cache: LutCache,
 }
+
+#[derive(Debug, Default)]
+pub(super) struct LutCache(Mutex<VecDeque<Arc<Prepared>>>);
 
 #[derive(Debug)]
 struct Prepared {
@@ -187,13 +190,27 @@ impl TargetEffect for ApplyLut {
         let Some(Value::Bytes(data)) = p.value(1) else {
             return Ok(input.clone());
         };
-        if data.is_empty() || roi.is_empty() {
+        self.cache.apply(target, p, input, roi, data, 1.)
+    }
+}
+
+impl LutCache {
+    pub(super) fn apply(
+        &self,
+        target: &mut dyn EffectTarget,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+        data: &[u8],
+        intensity: f32,
+    ) -> Result<GpuImage, RenderError> {
+        if data.is_empty() || roi.is_empty() || intensity == 0. {
             return Ok(input.clone());
         }
         let lut = {
-            let mut cache = self.cache.lock();
+            let mut cache = self.0.lock();
             if let Some(entry) = cache.iter().find(|l| {
-                &l.device == target.gpu().device() && l.format == target.format() && l.data == *data
+                &l.device == target.gpu().device() && l.format == target.format() && l.data == data
             }) {
                 entry.clone()
             } else {
@@ -214,7 +231,8 @@ impl TargetEffect for ApplyLut {
         w.i32s(32, &[roi.x0, roi.y0])
             .u32(40, roi.width())
             .u32(44, roi.height())
-            .u32(48, u32::from(p.float));
+            .u32(48, u32::from(p.float))
+            .f32(52, intensity);
         w.bytes[64..].copy_from_slice(&lut.values);
         let mut resources = vec![
             Resource::Uniform,

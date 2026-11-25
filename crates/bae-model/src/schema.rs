@@ -420,6 +420,9 @@ pub static SCHEMAS: &[PrimSchema] = &[
             ),
             boolean("preserve_frame_rate", false),
             boolean("preserve_resolution", false),
+            boolean("hide_shy_layers", false)
+                .doc("Timeline: hide layers whose Shy switch is on (AE Hide Shy Layers)."),
+            boolean("draft_3d", false).doc("AE Draft 3D: fast 3D previews."),
             int("label", 15),
         ],
     },

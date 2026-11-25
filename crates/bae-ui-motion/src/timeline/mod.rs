@@ -16,6 +16,7 @@ mod keys;
 mod layer_bar;
 mod markers;
 mod menus;
+mod modes;
 mod rows;
 mod waveform;
 
@@ -51,6 +52,8 @@ pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, s
 pub(crate) use menus::{
     catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
 };
+#[cfg(test)]
+pub(crate) use modes::{Panes, flip_matte};
 
 /// Row height and switch cell width: AE 26's (17 and about 15 points).
 const ROW_H: f32 = 17.0;
@@ -75,24 +78,48 @@ struct Cols {
     index: f32,
     name: f32,
     switches: f32,
+    /// The Modes column (Mode, T, Track Matte).
+    modes: f32,
     parent: f32,
     end: f32,
+    /// The column groups shown (those of F4 / Shift+F4 that fit).
+    panes: modes::Panes,
 }
 
+/// Narrowest time graph: a narrower panel hides Modes (as F4 first does), then
+/// Parent & Link.
+const MIN_GRAPH: f32 = 200.0;
+
 impl Cols {
-    fn new(width: f32) -> Cols {
+    fn new(mut panes: modes::Panes, width: f32) -> Cols {
+        for _ in 0..2 {
+            let c = Cols::layout(panes);
+            if width - c.end >= MIN_GRAPH {
+                return c;
+            }
+            if panes.switches && panes.modes {
+                panes.modes = false;
+            } else {
+                panes.parent = false;
+            }
+        }
+        Cols::layout(panes)
+    }
+
+    fn layout(panes: modes::Panes) -> Cols {
         // Positions measured on AE 26's Timeline (points from the panel's left).
         let av = 5.0;
         let twirl = av + 4.0 * SW + 4.0;
         let label = twirl + 15.0;
         let index = label + 18.0;
         let name = index + 28.0;
-        let name_w = 138.0_f32.max(width * 0.0);
-        let switches = name + name_w;
+        let switches = name + 138.0;
+        let shown = |on: bool, w: f32| if on { w } else { 0.0 };
         // AE's eight switches: Shy, Collapse, Quality, fx, Frame Blending, Motion
         // Blur, Adjustment Layer, 3D Layer.
-        let parent = switches + 8.0 * SW + 14.0;
-        let end = parent + 120.0;
+        let modes = switches + shown(panes.switches, 8.0 * SW + 14.0);
+        let parent = modes + shown(panes.modes, modes::MODES_W);
+        let end = parent + shown(panes.parent, 120.0);
         Cols {
             av,
             twirl,
@@ -100,8 +127,10 @@ impl Cols {
             index,
             name,
             switches,
+            modes,
             parent,
             end,
+            panes,
         }
     }
 }
@@ -181,6 +210,11 @@ enum Drag {
     Reorder {
         layers: Vec<PrimPath>,
     },
+    /// The Track Matte pick whip of a layer.
+    MatteWhip {
+        layer: PrimPath,
+        origin: Pos2,
+    },
     /// A comp or layer marker.
     Marker {
         origin: f32,
@@ -222,6 +256,8 @@ pub struct TimelinePanel {
     graph: GraphEditor,
     /// This frame shows the Graph Editor.
     graph_mode: bool,
+    /// Switches / Modes / Parent & Link columns shown (F4, Shift+F4).
+    panes: modes::Panes,
     /// Where a keyframe drag puts the keyframes this frame.
     key_plan: Option<keys::KeyPlan>,
     /// Modifiers held when the primary button last went down (AE decides drag
@@ -237,6 +273,10 @@ pub struct TimelinePanel {
     /// Where the last frame drew the layer-bar keyframes, for tests.
     #[cfg(test)]
     pub(crate) last_keys: Vec<(KeyRef, Pos2)>,
+    /// Each layer row's T box and Track Matte pick whip, for tests.
+    #[cfg(test)]
+    /// Per layer: T switch, pick whip, Alpha / Luma toggle (Invert is 17 px right).
+    pub(crate) last_modes: Vec<(PrimPath, Rect, Pos2, Pos2)>,
     /// Where the last frame drew the markers (glyph centres), for tests.
     #[cfg(test)]
     pub(crate) last_markers: Vec<(PrimPath, Pos2)>,
@@ -388,7 +428,11 @@ impl TimelinePanel {
 
     fn rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
+        let hide_shy = bool_attr(stage, comp, "hide_shy_layers");
         for layer in query::comp_layers(stage, comp) {
+            if hide_shy && bool_attr(stage, &layer, "shy") {
+                continue;
+            }
             out.push(Row {
                 kind: RowKind::Layer,
                 layer: layer.clone(),
@@ -507,6 +551,11 @@ impl TimelinePanel {
     pub(crate) fn graph_editor(&mut self) -> &mut GraphEditor {
         &mut self.graph
     }
+
+    #[cfg(test)]
+    pub(crate) fn panes(&self) -> Panes {
+        self.panes
+    }
 }
 
 impl Panel for TimelinePanel {
@@ -519,7 +568,9 @@ impl Panel for TimelinePanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(json!({"zoom": self.zoom}))
+        Some(
+            json!({"zoom": self.zoom, "switches": self.panes.switches, "modes": self.panes.modes, "parent": self.panes.parent}),
+        )
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -535,6 +586,14 @@ impl Panel for TimelinePanel {
                     };
                     self.zoom_step(by, &info, now);
                 }
+                true
+            }
+            "motion.timeline.toggle_switches_modes" => {
+                self.panes.toggle_switches_modes();
+                true
+            }
+            "motion.timeline.toggle_parent_column" => {
+                self.panes.parent = !self.panes.parent;
                 true
             }
             _ => actions::handle(action, cx, &session),
@@ -568,7 +627,7 @@ impl Panel for TimelinePanel {
         }
         let now = session.lock().time(&info.path);
         self.graph_mode = session.lock().graph_editor;
-        let cols = Cols::new(full.width());
+        let cols = Cols::new(self.panes, full.width());
         let graph_left = full.left() + cols.end + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
         let axis = self.axis(&info, graph_left, graph_w);
@@ -576,6 +635,7 @@ impl Panel for TimelinePanel {
         {
             self.last_axis = Some(axis);
             self.last_keys.clear();
+            self.last_modes.clear();
             self.last_markers.clear();
             self.last_expr.clear();
             self.last_lang.clear();

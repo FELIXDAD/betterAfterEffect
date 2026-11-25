@@ -115,6 +115,10 @@ pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     // AE's Chinese UI keeps these: RotoBezier, Roto 笔刷工具.
     "RotoBezier",
     "Roto",
+    // AE's 3D view shortcuts: 切换到三维视图 A / B / C.
+    "视图 A",
+    "视图 B",
+    "视图 C",
 ];
 
 #[test]
