@@ -65,6 +65,7 @@
 - [抠像](../../crates/bae-effects/tests/ae/categories/keying.md#工作流进度)
 - [遮罩](../../crates/bae-effects/tests/ae/categories/matte.md#工作流进度)
 - [杂色和颗粒](../../crates/bae-effects/tests/ae/categories/noise-grain.md#工作流进度)
+  - 杂色完成湍流杂色、匹配颗粒、移除颗粒、杂色 Alpha 和 HLS 两种模式。旧版中间值使用现有中间值内核。
 - [透视](../../crates/bae-effects/tests/ae/categories/perspective.md#工作流进度)
 - [风格化](../../crates/bae-effects/tests/ae/categories/stylize.md#工作流进度)
 - [过渡](../../crates/bae-effects/tests/ae/categories/transition.md#工作流进度)

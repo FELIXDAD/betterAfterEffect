@@ -319,6 +319,6 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "完全",
             "关闭",
         ],
-        _ => return None,
+        _ => return crate::effects::grain::definitions::options(match_name, param_id),
     })
 }
