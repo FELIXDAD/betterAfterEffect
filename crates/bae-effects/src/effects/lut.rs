@@ -180,10 +180,6 @@ impl Effect for ApplyLut {
     }
 }
 impl TargetEffect for ApplyLut {
-    fn space_pixels(&self) -> bool {
-        true
-    }
-
     fn encode(
         &self,
         target: &mut dyn EffectTarget,

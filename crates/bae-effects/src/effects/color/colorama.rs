@@ -48,10 +48,6 @@ impl Effect for Colorama {
 }
 
 impl TargetEffect for Colorama {
-    fn space_pixels(&self) -> bool {
-        true
-    }
-
     fn encode(
         &self,
         target: &mut dyn EffectTarget,

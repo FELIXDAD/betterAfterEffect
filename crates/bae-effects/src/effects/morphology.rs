@@ -93,7 +93,7 @@ pub(crate) fn simple_choker() -> Builtin {
     )
 }
 
-pub(super) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     image_grid::kernel(rt, format, LABEL, SOURCE, UNIFORM_SIZE)?;
     Ok(())
 }
@@ -276,10 +276,6 @@ impl Effect for Morphology {
 }
 
 impl TargetEffect for Morphology {
-    fn space_pixels(&self) -> bool {
-        true
-    }
-
     fn encode(
         &self,
         target: &mut dyn EffectTarget,

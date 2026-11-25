@@ -193,23 +193,47 @@ impl TargetEffect for GaussianBlur {
         output_roi: IRect,
     ) -> Result<GpuImage, RenderError> {
         let (sigma, edge) = self.setup(params);
-        let bounds = grown(
-            input.rect,
-            [blur::radius(sigma[0]), blur::radius(sigma[1])],
-            edge,
-        );
-        let out = output_roi.intersect(&bounds);
-        // σ < 1/3 has no taps besides the centre (AE leaves the layer as is).
-        let taps = [blur::radius(sigma[0]), blur::radius(sigma[1])];
-        if taps == [0, 0] || out.is_empty() {
+        let grid = super::image_grid::grid_scale(params, input);
+        let texel = input.pixel_scale;
+        let sigma = sigma.map(|s| s * grid / texel);
+        let taps = sigma.map(blur::radius);
+        if taps == [0, 0] || output_roi.is_empty() {
             return Ok(input.clone());
         }
-        let input = crate::common::premultiplied(target, input)?;
-        let mut plan = blur::plan_gaussian(input.rect, sigma, edge, out);
+        // The convolution indexes source texels. Keep the sampling phase of a
+        // cropped input when its layer origin falls between grid coordinates.
+        let origin = [input.rect.x0, input.rect.y0];
+        let [x, y] = origin.map(|v| (f64::from(v) / texel).floor() as i32);
+        let [w, h] = input.texel_size();
+        let mut source = input.clone();
+        source.rect = IRect::new(x, y, x + w as i32, y + h as i32);
+        source.pixel_scale = 1.;
+        let tx = |v: i32| f64::from(x) + (f64::from(v) * grid - f64::from(origin[0])) / texel;
+        let ty = |v: i32| f64::from(y) + (f64::from(v) * grid - f64::from(origin[1])) / texel;
+        let roi = IRect::new(
+            tx(output_roi.x0).floor() as i32,
+            ty(output_roi.y0).floor() as i32,
+            tx(output_roi.x1).ceil() as i32,
+            ty(output_roi.y1).ceil() as i32,
+        );
+        let out = roi.intersect(&grown(source.rect, taps, edge));
+        if out.is_empty() {
+            return Ok(input.clone());
+        }
+        let source = crate::common::premultiplied(target, &source)?;
+        let mut plan = blur::plan_gaussian(source.rect, sigma, edge, out);
         if !self.legacy && !params.linear {
             plan = plan.in_linear_light(LINEAR_LIGHT_GAMMA);
         }
-        plan.encode(target, &input)
+        let mut image = plan.encode(target, &source)?;
+        let px = |v: i32| origin[0] + (f64::from(v - x) * texel).round() as i32;
+        let py = |v: i32| origin[1] + (f64::from(v - y) * texel).round() as i32;
+        image.rect = IRect::new(px(out.x0), py(out.y0), px(out.x1), py(out.y1));
+        if edge == Edge::Repeat {
+            image.rect = image.rect.intersect(&input.rect);
+        }
+        image.pixel_scale = texel;
+        Ok(image)
     }
 }
 
@@ -224,15 +248,15 @@ impl BoxBlur {
     /// Fast Box Blur (`ADBE Box Blur2`; AE 26 defaults: 3 iterations, Repeat
     /// Edge Pixels on).
     pub fn new() -> Self {
-        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen", 3, true)
+        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen")
     }
 
-    /// Box Blur (`ADBE Box Blur`, obsolete matchName, default 1 iteration).
+    /// Box Blur (`ADBE Box Blur`, obsolete matchName).
     pub fn legacy() -> Self {
-        Self::build("ADBE Box Blur", "Box Blur", "Obsolete", 1, false)
+        Self::build("ADBE Box Blur", "Box Blur", "Obsolete")
     }
 
-    fn build(match_name: &str, name: &str, category: &str, iterations: i64, repeat: bool) -> Self {
+    fn build(match_name: &str, name: &str, category: &str) -> Self {
         let (def, names_zh) = DefBuilder::new(match_name, name, category)
             .slider(
                 1,
@@ -244,9 +268,9 @@ impl BoxBlur {
                 1,
                 "pixels",
             )
-            .int(2, "Iterations", "迭代", iterations, [1, 50])
+            .int(2, "Iterations", "迭代", 3, [1, 50])
             .popup(3, "Blur Dimensions", "模糊方向", 1, &DIMENSIONS)
-            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", repeat)
+            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", true)
             .build();
         Self { def, names_zh }
     }
