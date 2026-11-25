@@ -21,6 +21,7 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
 #[cfg(target_os = "macos")]
@@ -569,6 +570,36 @@ pub(crate) fn ime_compose(h: &mut Ui, preedit: &[&str], commit: &str) {
         }),
     );
     send(h, Event::Ime(egui::ImeEvent::Commit(commit.to_owned())));
+    settle(h);
+}
+
+/// Press the primary button, drag across six frames and release.
+pub(crate) fn drag(h: &mut Ui, from: Pos2, to: Pos2, modifiers: Modifiers) {
+    send(h, Event::PointerMoved(from));
+    send(h, Event::ModifiersChanged(modifiers));
+    send(
+        h,
+        Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers,
+        },
+    );
+    for i in 1..=6 {
+        let t = i as f32 / 6.0;
+        send(h, Event::PointerMoved(from + (to - from) * t));
+    }
+    send(
+        h,
+        Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers,
+        },
+    );
+    send(h, Event::ModifiersChanged(Modifiers::NONE));
     settle(h);
 }
 

@@ -185,7 +185,7 @@ impl TimelinePanel {
                 {
                     self.toggle(layer.as_str());
                 }
-                // Name (click selects, double-click renames, drag reorders).
+                // Double-click opens a precomp or renames an ordinary layer.
                 let name_rect = Rect::from_min_max(
                     pos2(l + cols.x(Column::Name) + 2.0, rect.top()),
                     pos2(l + cols.right(Column::Name) - 2.0, rect.bottom()),
@@ -236,7 +236,7 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    if resp.double_clicked() && !locked {
+                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) && !locked {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
                     if resp.drag_started() && !locked {

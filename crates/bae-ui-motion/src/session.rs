@@ -159,6 +159,7 @@ pub struct Session {
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
     pub selected_keys: Vec<KeyRef>,
@@ -338,6 +339,7 @@ impl Session {
     /// Make `comp` the active comp (opening a timeline tab for it).
     pub fn open_comp(&mut self, comp: &PrimPath) {
         if self.active_comp.as_ref() != Some(comp) {
+            self.mini_flow = None;
             self.selected_layers.clear();
             self.selected_keys.clear();
             self.selected_props.clear();
@@ -353,6 +355,7 @@ impl Session {
     pub fn close_comp(&mut self, comp: &PrimPath) {
         self.open_comps.retain(|c| c != comp);
         if self.active_comp.as_ref() == Some(comp) {
+            self.mini_flow = None;
             self.active_comp = self.open_comps.last().cloned();
             self.selected_layers.clear();
             self.selected_keys.clear();

@@ -18,6 +18,7 @@ mod layer_bar;
 mod markers;
 mod menus;
 mod modes;
+pub(crate) mod navigation;
 mod rows;
 mod switches;
 #[cfg(test)]
@@ -41,7 +42,7 @@ use serde_json::json;
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::graph::GraphEditor;
-use crate::project::ItemDrag;
+use crate::project::{DropPlacement, ItemDrag};
 use crate::props::{self, Node};
 use crate::session::{Reveal, Session, SharedSession};
 
@@ -721,12 +722,19 @@ impl TimelinePanel {
             crate::common::context_menu(&bg, &mut |ui| {
                 crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
-            // Dropped project items.
-            if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {
-                crate::viewer::add_item_as_layer(cx, &session, &item.0, None);
-            }
         }
 
+        // Row widgets accept other drag types. Capture the project item before a
+        // row consumes the released payload; the stack position comes from row layout.
+        let project_drop = ui
+            .ctx()
+            .pointer_interact_pos()
+            .filter(|_| ui.rect_contains_pointer(body))
+            .and_then(|pos| {
+                egui::DragAndDrop::payload::<ItemDrag>(ui.ctx()).map(|item| (item, pos))
+            });
+        let mut drop_slot = None;
+        let mut last_row_bottom = body.top();
         let mut key_rects: Vec<(Rect, KeyRef)> = Vec::new();
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
@@ -746,6 +754,19 @@ impl TimelinePanel {
                     let row = &rows[i];
                     let (rect, _) =
                         ui.allocate_exact_size(vec2(full.width(), ROW_H), Sense::hover());
+                    if let Some((_, pointer)) = &project_drop {
+                        last_row_bottom = rect.bottom();
+                        if drop_slot.is_none() && pointer.y <= rect.bottom() {
+                            let number = row.layer_index + 1;
+                            let before =
+                                matches!(row.kind, RowKind::Layer) && pointer.y < rect.center().y;
+                            drop_slot = Some(if before {
+                                (number - 1, rect.top())
+                            } else {
+                                (number, rect.bottom())
+                            });
+                        }
+                    }
                     self.row_ui(
                         &mut outline,
                         ui,
@@ -772,6 +793,21 @@ impl TimelinePanel {
                     }
                 }
             });
+
+        if let Some((item, pointer)) = project_drop {
+            let (index, y) = drop_slot.unwrap_or((comp_layers.len(), last_row_bottom));
+            ui.painter().with_clip_rect(body).hline(
+                body.x_range(),
+                y,
+                Stroke::new(2.0, color::ACCENT),
+            );
+            if ui.input(|i| i.pointer.primary_released()) {
+                let start = graph_body
+                    .contains(pointer)
+                    .then(|| info.snap_visible_time(axis.t(pointer.x)));
+                item.add_as_layer(cx, &session, DropPlacement::Timeline { index, start });
+            }
+        }
 
         self.finish_switch_drag(switch_input, cx);
 
@@ -808,6 +844,7 @@ impl TimelinePanel {
         p.vline(x, cti_body.y_range(), Stroke::new(1.0, color::ACCENT));
 
         self.footer(ui, foot, &info, &axis, now, graph_left);
+        navigation::show(ui, stage, &session);
         self.columns.scrollbar(ui, foot, cols);
 
         // Keyframe dialogs (modal; Enter and Esc are theirs).
