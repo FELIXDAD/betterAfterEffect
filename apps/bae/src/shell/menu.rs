@@ -240,6 +240,32 @@ impl AppMenu {
         self.undo_state = state;
     }
 
+    /// Takes the menu bar off before another one replaces it (a language change).
+    pub fn detach(&self, window: &winit::window::Window) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = window;
+            self.menu.remove_for_nsapp();
+        }
+        #[cfg(windows)]
+        {
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = window.window_handle()
+                && let RawWindowHandle::Win32(win32) = handle.as_raw()
+            {
+                // SAFETY: `hwnd` is the live window this menu was attached to, on
+                // the thread that owns it.
+                if let Err(error) = unsafe { self.menu.remove_for_hwnd(win32.hwnd.get()) } {
+                    tracing::warn!("cannot remove the native menu: {error}");
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = window;
+        }
+    }
+
     /// Attaches the menu bar: the global NSApp menu on macOS, the window's menu
     /// on Windows.
     pub fn attach(&self, window: &winit::window::Window) {
