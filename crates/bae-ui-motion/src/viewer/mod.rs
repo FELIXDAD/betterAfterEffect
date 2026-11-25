@@ -40,6 +40,7 @@ pub(crate) mod transform;
 mod type_tool;
 pub(crate) mod view3d;
 
+pub(crate) use overlay::{mask_color, path_shapes};
 pub(crate) use transform::nudge_layers;
 
 const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];

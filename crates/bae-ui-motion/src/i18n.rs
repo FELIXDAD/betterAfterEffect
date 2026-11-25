@@ -670,6 +670,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Custom", "自定义"),
     // The viewer's resolution menu.
     ("Auto", "自动"),
+    ("View:", "视图:"),
+    (
+        "Double-click a layer in the Timeline to open it here.",
+        "在时间轴里双击图层，在这里打开它。",
+    ),
     ("Active Camera", "活动摄像机"),
     ("3D View Popup", "3D 视图弹出式菜单"),
     ("Switch to 3D View", "切换到三维视图"),
