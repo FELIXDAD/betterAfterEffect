@@ -52,7 +52,7 @@ use crate::frame::{CpuFrame, PixelFormat};
 use crate::meta::{AlphaMode, ColorPrimaries, MatrixCoefficients};
 use crate::source::MediaError;
 
-fn writer_error(writer: &AVAssetWriter, what: &str) -> MediaError {
+pub(super) fn writer_error(writer: &AVAssetWriter, what: &str) -> MediaError {
     // SAFETY: error query.
     let detail = unsafe { writer.error() }
         .map(|e| e.localizedDescription().to_string())
@@ -69,11 +69,13 @@ fn ns(s: &CFString) -> &NSString {
     unsafe { &*std::ptr::from_ref(s).cast::<NSString>() }
 }
 
-fn any<T: AsRef<AnyObject> + ?Sized>(obj: &T) -> &AnyObject {
+pub(super) fn any<T: AsRef<AnyObject> + ?Sized>(obj: &T) -> &AnyObject {
     obj.as_ref()
 }
 
-fn dict(entries: &[(&NSString, &AnyObject)]) -> Retained<NSDictionary<NSString, AnyObject>> {
+pub(super) fn dict(
+    entries: &[(&NSString, &AnyObject)],
+) -> Retained<NSDictionary<NSString, AnyObject>> {
     let keys: Vec<&NSString> = entries.iter().map(|(k, _)| *k).collect();
     let values: Vec<&AnyObject> = entries.iter().map(|(_, v)| *v).collect();
     NSDictionary::from_slices(&keys, &values)
@@ -119,6 +121,7 @@ pub struct AvWriterEncoder {
     settings: EncodeSettings,
     writer: Retained<AVAssetWriter>,
     input: Retained<AVAssetWriterInput>,
+    audio: Option<super::audio_input::AudioInput>,
     adaptor: Retained<AVAssetWriterInputPixelBufferAdaptor>,
     pixel_format: PixelFormat,
     frame_alpha: AlphaMode,
@@ -194,6 +197,11 @@ impl AvWriterEncoder {
                 return Err(writer_error(&writer, "cannot add the video input"));
             }
             writer.addInput(&input);
+            let audio = settings
+                .audio
+                .as_ref()
+                .map(|a| super::audio_input::AudioInput::add(&writer, a))
+                .transpose()?;
 
             let format = NSNumber::new_u32(cv_format);
             let width = NSNumber::new_u32(settings.width);
@@ -220,6 +228,7 @@ impl AvWriterEncoder {
                 adaptor,
                 pixel_format,
                 frame_alpha,
+                audio,
                 frames: 0,
             })
         }
@@ -259,10 +268,10 @@ impl AvWriterEncoder {
         }
     }
 
-    fn wait_ready(&self) -> Result<(), MediaError> {
+    fn wait_ready(&self, input: &AVAssetWriterInput) -> Result<(), MediaError> {
         // SAFETY: status queries on a writing session.
         unsafe {
-            while !self.input.isReadyForMoreMediaData() {
+            while !input.isReadyForMoreMediaData() {
                 if self.writer.status() == AVAssetWriterStatus::Failed {
                     return Err(writer_error(&self.writer, "encoding failed"));
                 }
@@ -427,7 +436,7 @@ impl Encoder for AvWriterEncoder {
         }
         let converted = convert_frame_cow(frame, self.pixel_format, self.frame_alpha);
         let buffer = self.pixel_buffer(&converted)?;
-        self.wait_ready()?;
+        self.wait_ready(&self.input)?;
         let rate = self.settings.frame_rate;
         // SAFETY: building a time and appending a pool buffer to a writing session.
         let appended = unsafe {
@@ -450,10 +459,29 @@ impl Encoder for AvWriterEncoder {
         Some((self.pixel_format, self.frame_alpha))
     }
 
+    fn push_audio(&mut self, pcm: &crate::AudioBuffer) -> Result<(), MediaError> {
+        let Some(audio) = &self.audio else {
+            return Err(MediaError::Unsupported("no audio stream".into()));
+        };
+        self.settings
+            .audio
+            .as_ref()
+            .expect("configured audio")
+            .validate_input(pcm)?;
+        self.wait_ready(&audio.input)?;
+        self.audio
+            .as_mut()
+            .expect("configured audio")
+            .append(&self.writer, pcm)
+    }
+
     fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {
         // SAFETY: closing a writing session.
         unsafe {
             self.input.markAsFinished();
+            if let Some(audio) = &self.audio {
+                audio.input.markAsFinished();
+            }
             #[allow(deprecated)]
             let finished = self.writer.finishWriting();
             if !finished || self.writer.status() != AVAssetWriterStatus::Completed {
