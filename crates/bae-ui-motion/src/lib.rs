@@ -23,6 +23,7 @@
 
 pub mod actions;
 pub mod ae_panels;
+mod ae_shells;
 pub mod catalog;
 mod common;
 mod context_menu;
@@ -35,6 +36,7 @@ mod gpu_preview;
 mod graph;
 mod i18n;
 pub mod import;
+mod layer_panel;
 pub mod menus;
 mod panels;
 mod prefs;
@@ -47,6 +49,7 @@ pub mod session;
 mod timeline;
 pub mod tools;
 mod viewer;
+mod workspaces;
 
 use bae_app::{AppBuilder, AppModule};
 use bae_ui::{ActionHandler, ActionInfo, KeymapBindings, MenuItemSpec, PanelKind};
@@ -79,6 +82,7 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(tools::ZH);
         bae_ui::i18n::register(catalog::menu_zh());
         bae_ui::i18n::register(ae_panels::ZH);
+        bae_ui::i18n::register(ae_shells::ZH);
         effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
@@ -103,7 +107,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 8] = [
+        let panels: [(&str, PanelKind); 9] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -142,6 +146,12 @@ impl AppModule for MotionUiModule {
                 "render_queue",
                 PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
             ),
+            (
+                "layer",
+                PanelKind::new("Layer", |spawn| {
+                    Box::new(layer_panel::LayerPanel::new(spawn.state))
+                }),
+            ),
         ];
         kinds.batch(|tx| {
             for (id, kind) in panels.into_iter().chain(ae_panels::panels()) {
@@ -149,6 +159,8 @@ impl AppModule for MotionUiModule {
                 let _ = tx.replace(owner.clone(), id, std::sync::Arc::new(kind));
             }
         });
+        // AE's other Window-menu panels: outlines until a module implements them.
+        ae_shells::register(app);
         let actions = app.registry::<ActionInfo>();
         actions.batch(|tx| {
             for (id, title) in actions::ACTIONS.iter().chain(effects::ACTIONS) {
@@ -168,6 +180,14 @@ impl AppModule for MotionUiModule {
             }
         });
         let shared_tools = app.resource::<SharedTools>().cloned().unwrap_or_default();
+        // Window ▸ Tools (Cmd/Ctrl+1): the toolbar in a panel, same current tool.
+        let panel_tools = shared_tools.clone();
+        let tools_panel = PanelKind::new("Tools", move |_| {
+            Box::new(ae_shells::ToolsPanel::new(panel_tools.clone()))
+        });
+        app.registry::<PanelKind>().batch(|tx| {
+            let _ = tx.replace(owner.clone(), "tools", std::sync::Arc::new(tools_panel));
+        });
         let toolbar: std::sync::Arc<dyn bae_ui::Toolbar> =
             std::sync::Arc::new(tools::toolbar::AeToolbar::new(shared_tools));
         let _ = app.register_arc::<dyn bae_ui::Toolbar>(bae_ui::presets::AE_KEYMAP, toolbar);
@@ -213,6 +233,13 @@ impl AppModule for MotionUiModule {
     }
 
     fn finish(&self, app: &mut AppBuilder) {
+        // AE's predefined workspaces (a module may have registered one already).
+        let presets = app.registry::<bae_ui::WorkspacePreset>();
+        for (id, preset) in workspaces::presets() {
+            if !presets.snapshot().contains(id) {
+                let _ = app.register(id, preset);
+            }
+        }
         // AE's shortcuts for the AE commands other modules handle (registered in
         // their `build`): bound now that every handler is known.
         let handled = bae_ui::menu::handled_actions(

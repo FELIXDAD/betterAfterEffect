@@ -534,7 +534,7 @@ pub enum ParamType {
     String,
     /// An asset reference (reserved).
     Asset,
-    /// Opaque bytes (native only).
+    /// Opaque bytes for native effects or UI-only metadata in WGSL effects.
     Arbitrary,
     /// A mask reference (native only).
     Path,
@@ -1379,6 +1379,8 @@ impl Validator {
             )),
             // A disabled path can preserve imported mask references as metadata.
             ParamType::Path if p.has_flag(ParamFlag::Disabled) => {}
+            // UI-only arbitrary data has no shader uniform.
+            ParamType::Arbitrary if p.has_flag(ParamFlag::UiOnly) => {}
             ParamType::Arbitrary | ParamType::Path if wgsl => {
                 self.err(format!("{t} params are only available to native effects"))
             }

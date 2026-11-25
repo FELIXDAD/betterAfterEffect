@@ -880,6 +880,7 @@ impl Shell {
             )
             .with_open_panels(&open);
             menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
+            menu.set_workspace_title(workspace.active_workspace_title());
         }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,

@@ -229,6 +229,20 @@ fn validation_errors() {
 }
 
 #[test]
+fn wgsl_arbitrary_parameters_must_be_ui_only() {
+    let histogram = r#"
+[[effect.param]]
+id = 2
+key = "histogram"
+type = "arbitrary"
+name = "Histogram"
+"#;
+    assert_error(&effect_with(histogram), "only available to native effects");
+    let declared = effect_with(&format!("{histogram}flags = [\"ui-only\"]"));
+    assert!(errors(&declared).is_empty());
+}
+
+#[test]
 fn groups_map_to_group_start_and_end() {
     let toml = effect_with(
         "[[effect.param]]\nid = 1\nkey = \"g\"\ntype = \"group\"\nname = \"G\"\nend_id = 4\n\
