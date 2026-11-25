@@ -102,6 +102,8 @@ pub struct RenderGraph {
     /// An effect reads another time of the comp: the frame depends on more than
     /// its own evaluated comp (not frame-cached).
     pub time_dependent: bool,
+    /// A layer source was still warming up and is missing (not frame-cached).
+    pub incomplete: bool,
     /// The top-level layer each node was planned for, by node index (`None`:
     /// the comp itself). Per-layer render times add up their nodes.
     pub owners: Vec<Option<PrimPath>>,
@@ -363,6 +365,13 @@ pub struct EffectNode {
     pub layers: Vec<(LayerDependency, NodeId)>,
     /// Mask coverage images it reads ([`Effect::mask_dependencies`]).
     pub masks: Vec<(MaskSelect, NodeId)>,
+    /// Raw mask paths and historical parameters, for effects that read them.
+    pub(crate) samples: Option<Box<EffectSamples>>,
+}
+
+pub(crate) struct EffectSamples {
+    pub paths: Vec<RenderMask>,
+    pub history: Vec<(Time, RenderEffect)>,
 }
 
 /// The frame context of an effect call, stored per effect node (everything in
@@ -373,6 +382,8 @@ pub struct EffectFrame {
     pub time: Time,
     /// Comp time.
     pub comp_time: Time,
+    /// Comp time when the layer first becomes active.
+    pub layer_in: Time,
     /// Comp-time seconds per layer-time second.
     pub layer_time_scale: f64,
     /// Resolution scale.
@@ -399,6 +410,7 @@ impl EffectFrame {
         EffectParams {
             time: self.time,
             comp_time: self.comp_time,
+            layer_in: self.layer_in,
             layer_time_scale: self.layer_time_scale,
             scale: self.scale,
             layer_bounds: self.layer_bounds,
@@ -455,6 +467,24 @@ impl SourceResolver for NoSources {
 pub trait CompFrames {
     /// `comp` evaluated at comp time `time` (`None`: not available).
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError>;
+
+    /// Evaluated parameters of one effect at a comp time.
+    fn effect_at(
+        &mut self,
+        comp: &PrimPath,
+        layer: &PrimPath,
+        effect: &PrimPath,
+        time: Time,
+    ) -> Result<Option<RenderEffect>, RenderError> {
+        Ok(self.comp_at(comp, time)?.and_then(|comp| {
+            comp.layers
+                .into_iter()
+                .find(|l| l.path == *layer)?
+                .effects
+                .into_iter()
+                .find(|fx| fx.path == *effect)
+        }))
+    }
 }
 
 /// Builds the graph for `comp` under `request`.
@@ -502,6 +532,7 @@ pub fn build_with(
         frames,
         resolving: Vec::new(),
         time_dependent: false,
+        incomplete: false,
         owner: None,
         owners: Vec::new(),
     };
@@ -512,6 +543,7 @@ pub fn build_with(
         output,
         warnings: builder.warnings,
         time_dependent: builder.time_dependent,
+        incomplete: builder.incomplete,
         owners: builder.owners,
     })
 }
@@ -544,6 +576,7 @@ struct Builder<'a, 'f> {
     /// Layers whose effects are being planned (cycle detection of layer inputs).
     resolving: Vec<PrimPath>,
     time_dependent: bool,
+    incomplete: bool,
     /// The top-level layer being planned (owner of the nodes pushed now).
     owner: Option<PrimPath>,
     owners: Vec<Option<PrimPath>>,
@@ -807,6 +840,7 @@ impl Builder<'_, '_> {
             time: layer.time,
             comp_time: comp.time,
             layer_time_scale: layer.time_scale,
+            layer_in: layer.in_point,
             scale: 1.0 / scale,
             layer_bounds: content_rect.round_out(),
             frame_rate: comp.frame_rate,
@@ -1457,6 +1491,7 @@ impl Builder<'_, '_> {
             time: layer.time,
             comp_time: comp.time,
             layer_time_scale: layer.time_scale,
+            layer_in: layer.in_point,
             scale: 1.0 / scale,
             layer_bounds: comp_px.round_out(),
             frame_rate: comp.frame_rate,
@@ -1620,6 +1655,40 @@ impl Builder<'_, '_> {
                 masks.push((select, node));
             }
         }
+        let paths: Vec<_> = match effect.path_dependencies(&params) {
+            Some(MaskSelect::All) => layer.masks.clone(),
+            Some(MaskSelect::One(path)) => layer
+                .masks
+                .iter()
+                .filter(|mask| mask.path == path)
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        for mask in &paths {
+            mask.hash_into(&mut h);
+        }
+        let mut history = Vec::new();
+        for time in effect.parameter_sample_times(&params) {
+            let sample = if time == comp.time {
+                Some(instance.clone())
+            } else {
+                self.time_dependent = true;
+                match self.frames.as_mut() {
+                    Some(frames) => {
+                        frames.effect_at(&comp.path, &layer.path, &instance.path, time)?
+                    }
+                    None => None,
+                }
+            };
+            if let Some(sample) = sample {
+                time.hash(&mut h);
+                sample.hash_into(&mut h);
+                history.push((time, sample));
+            }
+        }
+        let samples = (!paths.is_empty() || !history.is_empty())
+            .then(|| Box::new(EffectSamples { paths, history }));
         Ok(self.push(Node {
             kind: NodeKind::Effect(EffectNode {
                 layer: layer.path.clone(),
@@ -1629,6 +1698,7 @@ impl Builder<'_, '_> {
                 input,
                 layers,
                 masks,
+                samples,
             }),
             rect,
             pixel_scale: scale,
@@ -1748,6 +1818,7 @@ impl Builder<'_, '_> {
                 time: layer.time,
                 comp_time: comp.time,
                 layer_time_scale: layer.time_scale,
+                layer_in: layer.in_point,
                 scale: 1.0 / scale,
                 layer_bounds: content_rect.round_out(),
                 frame_rate: comp.frame_rate,
@@ -1885,6 +1956,11 @@ impl Builder<'_, '_> {
             }
             LayerContent::Custom(custom) => match self.sources.custom(custom) {
                 Ok(source) => Some(Content::Source(source, time)),
+                // Drawn again when it is ready (the frame is not kept).
+                Err(error) if error.is_warming_up() => {
+                    self.incomplete = true;
+                    None
+                }
                 Err(error) => {
                     self.warn(format!("{}: {error}", layer.path));
                     None

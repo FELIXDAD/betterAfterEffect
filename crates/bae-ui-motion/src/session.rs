@@ -26,6 +26,20 @@ pub enum Reveal {
     Props(Vec<(PrimPath, String)>),
 }
 
+/// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
+/// it stands for one (not Contents, Transform …).
+pub fn group_prim(id: &str) -> Option<PrimPath> {
+    for suffix in ["#animator", "#selector"] {
+        if let Some(p) = id.strip_suffix(suffix) {
+            return PrimPath::new(p).ok();
+        }
+    }
+    let (_, rest) = id.split_once('#')?;
+    (rest.starts_with('/') && !rest.contains('#'))
+        .then(|| PrimPath::new(rest).ok())
+        .flatten()
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
@@ -42,6 +56,24 @@ pub struct Scrub {
     pub path: PrimPath,
     pub attr: String,
     pub value: Value,
+    /// The same property on the other selected layers (or selected across
+    /// layers), changing with it: path and its value.
+    pub peers: Vec<(PrimPath, Value)>,
+}
+
+impl Scrub {
+    /// Every prim the drag changes, with its value.
+    pub fn targets(&self) -> impl Iterator<Item = (&PrimPath, &Value)> {
+        std::iter::once((&self.path, &self.value)).chain(self.peers.iter().map(|(p, v)| (p, v)))
+    }
+
+    /// The previewed value of `attr` of `path`, if the drag changes it.
+    pub fn value_for(&self, path: &PrimPath, attr: &str) -> Option<&Value> {
+        if self.attr != attr {
+            return None;
+        }
+        self.targets().find(|(p, _)| *p == path).map(|(_, v)| v)
+    }
 }
 
 /// Copied keyframes (one attribute at a time, like AE's paste target).
@@ -87,6 +119,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
+    /// mask, effect or text animator; [`group_prim`] gives the prim).
+    pub selected_groups: Vec<String>,
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
@@ -112,6 +147,8 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// View ▸ rulers, guides, grid and safe areas (the viewer's options).
+    pub(crate) view_options: crate::viewer::guides::ViewOptions,
     /// Each comp's 3D views (View ▸ Switch 3D View).
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
@@ -124,14 +161,21 @@ pub struct Session {
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
     /// copy wins over [`Session::clipboard`].
     pub layer_clipboard: Vec<bae_motion::CopiedLayer>,
+    /// Layer contents on the clipboard (Copy with groups selected); the last copy
+    /// wins over the other clipboards.
+    pub content_clipboard: Vec<bae_motion::CopiedContent>,
     pending: Vec<(Pending, u32)>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// When L was last pressed to reveal the audio waveform on a second press.
+    pub(crate) last_l: Option<Instant>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The footage item the Footage panel shows.
+    pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
