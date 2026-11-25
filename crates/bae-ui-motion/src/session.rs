@@ -207,6 +207,27 @@ impl SharedSession {
     }
 }
 
+impl bae_gpu::WarmUp for SharedSession {
+    fn name(&self) -> &str {
+        "audio output"
+    }
+
+    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        {
+            let mut s = self.lock();
+            if s.opening_audio
+                || s.output
+                    .as_ref()
+                    .is_some_and(|output| !output.device_lost())
+            {
+                return Ok(());
+            }
+            s.opening_audio = true;
+        }
+        self.open_audio()
+    }
+}
+
 /// Frames to wait for a pending item before giving up (the command failed).
 const PENDING_FRAMES: u32 = 30;
 
