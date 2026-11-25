@@ -1,5 +1,7 @@
 use crate::Registry;
-use crate::effects::simulation::{Kind, builtin, prewarm};
+mod particles;
+pub(crate) use particles::Engine;
+use particles::{Kind, builtin, prewarm};
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.prewarm.push(prewarm);

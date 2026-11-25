@@ -62,7 +62,7 @@ fn main() {
     let directory = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let reference: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     let names = ["names.tsv", "options.tsv"].map(|file| {
-        let path = format!("src/effects/simulation/{file}");
+        let path = format!("src/categories/simulation/particles/{file}");
         println!("cargo:rerun-if-changed={path}");
         fs::read_to_string(path).unwrap()
     });
