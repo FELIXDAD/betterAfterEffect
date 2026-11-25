@@ -106,6 +106,22 @@ macro_rules! tr {
 
 /// Shell strings. Keep in sync with docs/glossary.md.
 const ZH: &[(&str, &str)] = &[
+    // Numpad keys in shortcuts (AE: 数字小键盘).
+    ("Num *", "数字小键盘 *"),
+    ("Num /", "数字小键盘 /"),
+    ("Num +", "数字小键盘 +"),
+    ("Num -", "数字小键盘 -"),
+    ("Num .", "数字小键盘 ."),
+    ("Num 0", "数字小键盘 0"),
+    ("Num 1", "数字小键盘 1"),
+    ("Num 2", "数字小键盘 2"),
+    ("Num 3", "数字小键盘 3"),
+    ("Num 4", "数字小键盘 4"),
+    ("Num 5", "数字小键盘 5"),
+    ("Num 6", "数字小键盘 6"),
+    ("Num 7", "数字小键盘 7"),
+    ("Num 8", "数字小键盘 8"),
+    ("Num 9", "数字小键盘 9"),
     // Dock and panel menu
     ("Close Panel", "关闭面板"),
     ("Undock Panel", "浮动面板"),
