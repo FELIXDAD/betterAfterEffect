@@ -14,6 +14,7 @@
 // builds everywhere: the AE shortcut sweep runs on both CI platforms.
 #[cfg(test)]
 mod acceptance;
+mod action_log;
 mod agent_feed;
 mod autosave;
 mod document;

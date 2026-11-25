@@ -1024,3 +1024,58 @@ fn menu_items_show_the_chord_ae_shows() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+/// The key table as JSON for test tools (`tools/qa/`): every AE default-shortcut
+/// command with its BAE action, both platforms' chords in BAE notation, scope,
+/// owner and status.
+fn render_shortcuts_json() -> String {
+    let rows: Vec<Value> = KEYS
+        .iter()
+        .map(|k| {
+            let bindable = |mac: bool| -> Vec<String> {
+                k.chords(mac)
+                    .into_iter()
+                    .filter(|c| bae_ui::Chord::parse(c).is_ok())
+                    .collect()
+            };
+            serde_json::json!({
+                "context": k.context,
+                "command": k.command,
+                "action": k.action,
+                "params": params(k.params),
+                "windows": bindable(false),
+                "mac": bindable(true),
+                "scope": k.scope(),
+                "owner": owner_name(k.owner),
+                "status": format!("{:?}", k.status),
+                "works": k.status.works(),
+                "native": k.flags & NATIVE != 0,
+                "bound_elsewhere": k.flags & BOUND_ELSEWHERE != 0,
+                "shadowed": k.flags & SHADOWED != 0,
+                "own_panel": in_own_panel(k),
+            })
+        })
+        .collect();
+    // One row per line: small, and diffs show which commands changed.
+    let mut s = String::from(
+        "{\"generated_by\": \"crates/bae-ui-motion/src/catalog (BAE_SHORTCUTS_JSON=<file> cargo test -p bae-ui-motion shortcuts_json)\",\n\"rows\": [\n",
+    );
+    for (i, r) in rows.iter().enumerate() {
+        s.push_str(&r.to_string());
+        s.push_str(if i + 1 < rows.len() { ",\n" } else { "\n" });
+    }
+    s.push_str("]}\n");
+    s
+}
+
+/// The test tools' key table, written where `BAE_SHORTCUTS_JSON` says (the sweep
+/// scripts generate it when they start; it is not kept in the repository).
+#[test]
+fn shortcuts_json() {
+    let json = render_shortcuts_json();
+    let parsed: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["rows"].as_array().unwrap().len(), KEYS.len());
+    if let Some(path) = std::env::var_os("BAE_SHORTCUTS_JSON") {
+        std::fs::write(path, &json).unwrap();
+    }
+}
