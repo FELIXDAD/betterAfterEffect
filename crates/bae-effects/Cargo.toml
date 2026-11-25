@@ -25,6 +25,7 @@ toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+bae-render = { workspace = true, features = ["media"] }
 bae-anim.workspace = true
 bae-motion.workspace = true
 half.workspace = true
