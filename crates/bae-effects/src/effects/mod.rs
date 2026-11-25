@@ -5,6 +5,7 @@
 pub mod blur;
 pub(crate) mod controls;
 mod image_grid;
+pub(crate) mod keying;
 mod layer_input;
 pub(crate) mod lut;
 pub(crate) mod morphology;

@@ -64,7 +64,7 @@ impl Shader {
             .u32(172, u32::from(v.p.float))
             .f32(176, v.p.scale as f32)
             .f32(180, v.p.time.as_seconds() as f32)
-            .f32(184, (1.0/v.p.time_step.as_seconds()) as f32);
+            .f32(184, (1.0 / v.p.time_step.as_seconds()) as f32);
         for p in &v.def.params {
             let i = p.id as usize;
             if i >= SLOTS {

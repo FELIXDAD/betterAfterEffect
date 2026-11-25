@@ -247,7 +247,7 @@ pub(crate) const fn layer_stage_id(layer_id: u32) -> u32 {
 /// in the same one-based order as the corresponding parameter definition.
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     Some(match (match_name, param_id) {
-        (_, 0x10001 | 0x10003) => &["源", "蒙版", "效果和蒙版"],
+        (_, 0x10001..=0x1ffff) => &["源", "蒙版", "效果和蒙版"],
         ("ADBE Echo", 5) => &[
             "相加",
             "最大值",
@@ -290,6 +290,6 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "完全",
             "关闭",
         ],
-        _ => return None,
+        _ => return crate::effects::keying::definitions::options(match_name, param_id),
     })
 }

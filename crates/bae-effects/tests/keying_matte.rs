@@ -181,3 +181,45 @@ fn cell_pattern_tiling_and_contrast() {
         }
     }
 }
+
+#[test]
+fn screen_colour_removes_green_and_preserves_red() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(2, 3, 16, 9);
+    let input = Pixels::new(rect, |x, _| {
+        if x < 8 {
+            [0., 1., 0., 1.]
+        } else {
+            [0.5, 0., 0., 0.5]
+        }
+    });
+    let out = run(
+        &gpu,
+        Rgba32Float,
+        builtin("Keylight 906"),
+        vec![(4, color([0., 1., 0., 1.]))],
+        &input,
+        rect,
+        1.,
+    );
+    assert_eq!(out.get(4, 4), [0.; 4]);
+    assert_eq!(out.get(12, 4), [0.5, 0., 0., 0.5]);
+}
+
+#[test]
+fn keying_gpu_paths_accept_partial_layer_regions() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(2, 3, 16, 9);
+    let input = Pixels::new(rect, |_, _| [0.2, 0.3, 0.1, 1.]);
+    let roi = IRect::new(4, 4, 12, 8);
+    for name in [
+        "ADBE KeyCleaner",
+        "ADBE RefineMatte2",
+        "ADBE RefineRBMatte",
+        "ADBE Unmult",
+        "ADBE Extract",
+    ] {
+        let out = run(&gpu, Rgba16Float, builtin(name), vec![], &input, roi, 1.);
+        assert!(out.get(6, 5).iter().all(|n| n.is_finite()), "{name}");
+    }
+}
