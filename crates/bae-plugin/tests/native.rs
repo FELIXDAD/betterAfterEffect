@@ -398,6 +398,22 @@ fn rust_example_renders_out_of_process() {
     }
     let pid = runner.pid().expect("runner running");
     assert_ne!(pid, std::process::id());
+    // Grow on the next frame, then reuse the same segment for a smaller one.
+    for rect in [[0, 0, 64, 12], [0, 0, 4, 2]] {
+        let input = image(rect, source);
+        let mut output = vec![0; input.len()];
+        let params = vec![
+            ParamWire::Color(dark),
+            ParamWire::Color(light),
+            ParamWire::Float(0.0),
+        ];
+        let out = runner
+            .render(&frame(0, params, rect), &input, &mut output)
+            .unwrap();
+        assert_eq!(out, RenderOut::Rendered(rect));
+        assert!(close(pixel(&output, rect, 2, 1), source(2, 1), 1e-5));
+        assert_eq!(runner.pid(), Some(pid));
+    }
     host.unload("com.example.duotone-rs", &mut reg).unwrap();
     drop(native);
 }
