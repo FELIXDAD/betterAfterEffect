@@ -1,5 +1,5 @@
 struct Sampled {
-    images: array<FxImage,4>,
+    images: array<FxImage,5>,
     roi: vec4i,
     layer: vec4i,
     presence: u32,
@@ -17,7 +17,8 @@ struct Sampled {
 @group(0) @binding(2) var map_a: texture_2d<f32>;
 @group(0) @binding(3) var map_b: texture_2d<f32>;
 @group(0) @binding(4) var map_c: texture_2d<f32>;
-@group(0) @binding(5) var out_tex: texture_storage_2d<WORKING_FORMAT, write>;
+@group(0) @binding(5) var map_d: texture_2d<f32>;
+@group(0) @binding(6) var out_tex: texture_storage_2d<WORKING_FORMAT, write>;
 fn value(id: u32) -> f32 { return u.values[id].x; }
 fn enabled(id: u32) -> bool { return value(id) != 0.0; }
 fn has(i:u32) -> bool { return (u.presence & (1u << i)) != 0u; }

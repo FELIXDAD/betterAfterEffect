@@ -48,13 +48,13 @@ pub(crate) fn builtin() -> Builtin {
 struct ApplyLut {
     def: EffectDef,
     cache: LutCache,
-    ocio: Option<super::ocio::Operation>,
+    ocio: Option<crate::categories::color::ocio::Operation>,
 }
 
 #[derive(Debug, Default)]
 pub(super) struct LutCache(Mutex<VecDeque<Arc<Prepared>>>);
 
-type Processor = (super::ocio::Operation, [i64; 4]);
+type Processor = (crate::categories::color::ocio::Operation, [i64; 4]);
 
 pub(super) enum LutSource<'a> {
     File(&'a [u8]),
@@ -176,7 +176,10 @@ impl Prepared {
     }
 }
 
-pub(super) fn ocio_effect(def: EffectDef, op: super::ocio::Operation) -> Arc<dyn TargetEffect> {
+pub(crate) fn ocio_effect(
+    def: EffectDef,
+    op: crate::categories::color::ocio::Operation,
+) -> Arc<dyn TargetEffect> {
     Arc::new(ApplyLut {
         def,
         cache: LutCache::default(),
