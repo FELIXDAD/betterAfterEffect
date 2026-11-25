@@ -1,7 +1,4 @@
 # Levels (ADBE Easy Levels2): docs/spec/ae/_parts/effects--fx-a.md AE-FX-038.
-# Parameter 2 (Histogram, arbitrary data, UI only) is not declared: declarative
-# effects have no arbitrary-data parameters. Its project value is preserved as
-# an unknown parameter.
 schema_version = 1
 
 [plugin]
@@ -33,12 +30,19 @@ default = 1
 choices = ["RGB", "Red", "Green", "Blue", "Alpha"]
 
 [[effect.param]]
+id = 2
+key = "histogram"
+type = "arbitrary"
+name = "Histogram"
+flags = ["ui-only"]
+
+[[effect.param]]
 id = 3
 key = "input_black"
 type = "float"
 name = "Input Black"
 default = 0.0
-range = [-100.0, 100.0]
+range = [-10000.0, 10000.0]
 slider = [0.0, 1.0]
 precision = 3
 
@@ -48,7 +52,7 @@ key = "input_white"
 type = "float"
 name = "Input White"
 default = 1.0
-range = [-100.0, 100.0]
+range = [-10000.0, 10000.0]
 slider = [0.0, 1.0]
 precision = 3
 
@@ -58,8 +62,8 @@ key = "gamma"
 type = "float"
 name = "Gamma"
 default = 1.0
-range = [0.01, 100.0]
-slider = [0.1, 10.0]
+range = [0.0, 5.0]
+slider = [0.1, 5.0]
 precision = 2
 
 [[effect.param]]
@@ -68,7 +72,7 @@ key = "output_black"
 type = "float"
 name = "Output Black"
 default = 0.0
-range = [-100.0, 100.0]
+range = [-10000.0, 10000.0]
 slider = [0.0, 1.0]
 precision = 3
 
@@ -78,7 +82,7 @@ key = "output_white"
 type = "float"
 name = "Output White"
 default = 1.0
-range = [-100.0, 100.0]
+range = [-10000.0, 10000.0]
 slider = [0.0, 1.0]
 precision = 3
 
