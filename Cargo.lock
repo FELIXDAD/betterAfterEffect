@@ -945,6 +945,7 @@ name = "bae-vector"
 version = "0.0.1"
 dependencies = [
  "bae-anim",
+ "bae-effects",
  "bae-gpu",
  "bae-model",
  "bae-render",
