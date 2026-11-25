@@ -308,6 +308,8 @@ pub(crate) struct CompiledEffect {
     pub(crate) match_name: String,
     pub(crate) enabled: bool,
     pub(crate) params: Vec<(String, Prop)>,
+    /// Child prims (the Paint effect's strokes).
+    pub(crate) children: Vec<CompiledPrim>,
 }
 
 #[derive(Debug)]
@@ -691,6 +693,11 @@ fn compile_layer(
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true),
                 params,
+                children: stage
+                    .children(&ep)
+                    .into_iter()
+                    .filter_map(|cp| compile_generic(stage, &cp, 0))
+                    .collect(),
                 path: ep,
             })
         })
@@ -1280,6 +1287,7 @@ fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
             .iter()
             .map(|(id, p)| (id.clone(), p.sample(cx)))
             .collect(),
+        children: e.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }
 
