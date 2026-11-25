@@ -237,6 +237,7 @@ impl Gui {
         let prefs = self.prefs.clone();
         if prefs.generation() != self.prefs_generation {
             self.prefs_generation = prefs.generation();
+            crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
             bae_ui::settings::apply(&prefs.current());
             self.doc.set_undo_limit(prefs.current().levels_of_undo());
         }

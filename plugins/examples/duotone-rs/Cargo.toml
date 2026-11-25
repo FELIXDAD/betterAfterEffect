@@ -1,0 +1,24 @@
+# A native BAE effect written in Rust with bae-plugin-sdk (see README.md).
+# Standalone on purpose (its own [workspace]): a plugin is built on its own and
+# only depends on the SDK, never on the host.
+[package]
+name = "duotone-rs"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bae-plugin-sdk = { path = "../../../crates/bae-plugin-sdk" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind" # the SDK turns panics into BAE_ERR_PANIC (rule R8)
+
+[workspace]
