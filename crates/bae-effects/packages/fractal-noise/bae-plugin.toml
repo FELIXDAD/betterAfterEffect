@@ -17,7 +17,7 @@ implementation = "wgsl"
 ae_match_names = ["ADBE Fractal Noise"]
 keywords = ["fractal", "noise"]
 shader = "shaders/fractal_noise.wgsl"
-includes = ["shaders/blend.wgsl"]
+includes = ["shaders/blend.wgsl","shaders/fractal.wgsl"]
 
 [[effect.param]]
 id = 1
@@ -244,3 +244,206 @@ type = "popup"
 name = "Blending Mode"
 default = 2
 choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Luminosity"]
+
+[[effect]]
+id = "turbulent-noise"
+name = "Turbulent Noise"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE AIF Perlin Noise 3D"]
+shader = "shaders/turbulent_noise.wgsl"
+includes = ["shaders/blend.wgsl","shaders/fractal.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "fractal_type"
+type = "popup"
+name = "Fractal Type"
+default = 1
+choices = ["Basic", "(-", "Turbulent Smooth", "Turbulent Basic", "Turbulent Sharp", "(-", "Dynamic", "Dynamic Progressive", "Dynamic Twist", "(-", "Maximum", "Smeary", "Swirly", "Rocky", "Cloudy", "Terrain", "Subscale", "Small Bumps", "Strings", "Threads"]
+
+[[effect.param]]
+id = 2
+key = "noise_type"
+type = "popup"
+name = "Noise Type"
+default = 3
+choices = ["Block", "Linear", "Soft Linear", "Spline"]
+
+[[effect.param]]
+id = 3
+key = "invert"
+type = "checkbox"
+name = "Invert"
+default = false
+
+[[effect.param]]
+id = 4
+key = "contrast"
+type = "float"
+name = "Contrast"
+default = 100
+range = [0, 10000]
+
+[[effect.param]]
+id = 5
+key = "brightness"
+type = "float"
+name = "Brightness"
+default = 0
+range = [-10000, 10000]
+
+[[effect.param]]
+id = 6
+key = "overflow"
+type = "popup"
+name = "Overflow"
+default = 4
+choices = ["Clip", "Soft Clamp", "Wrap Back", "Allow HDR Results"]
+
+[[effect.param]]
+id = 7
+key = "transform"
+type = "group"
+name = "Transform"
+end_id = 14
+
+[[effect.param]]
+id = 8
+key = "rotation"
+type = "angle"
+name = "Rotation"
+group = "transform"
+default = 0
+
+[[effect.param]]
+id = 9
+key = "uniform_scaling"
+type = "checkbox"
+name = "Uniform Scaling"
+group = "transform"
+default = true
+
+[[effect.param]]
+id = 10
+key = "scale"
+type = "float"
+name = "Scale"
+group = "transform"
+default = 100
+range = [1, 10000]
+
+[[effect.param]]
+id = 11
+key = "scale_width"
+type = "float"
+name = "Scale Width"
+group = "transform"
+default = 100
+range = [1, 10000]
+
+[[effect.param]]
+id = 12
+key = "scale_height"
+type = "float"
+name = "Scale Height"
+group = "transform"
+default = 100
+range = [1, 10000]
+
+[[effect.param]]
+id = 13
+key = "offset_turbulence"
+type = "point"
+name = "Offset Turbulence"
+group = "transform"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 27
+key = "perspective_offset"
+type = "checkbox"
+name = "Perspective Offset"
+group = "transform"
+default = false
+
+[[effect.param]]
+id = 15
+key = "complexity"
+type = "float"
+name = "Complexity"
+default = 6
+range = [1, 20]
+
+[[effect.param]]
+id = 16
+key = "sub_settings"
+type = "group"
+name = "Sub Settings"
+end_id = 19
+
+[[effect.param]]
+id = 17
+key = "sub_influence"
+type = "float"
+name = "Sub Influence (%)"
+group = "sub_settings"
+default = 70
+range = [1.5e-05, 10000]
+
+[[effect.param]]
+id = 18
+key = "sub_scaling"
+type = "float"
+name = "Sub Scaling"
+group = "sub_settings"
+default = 56
+range = [10, 10000]
+
+[[effect.param]]
+id = 20
+key = "evolution"
+type = "angle"
+name = "Evolution"
+default = 0
+
+[[effect.param]]
+id = 21
+key = "evolution_options"
+type = "group"
+name = "Evolution Options"
+end_id = 24
+
+[[effect.param]]
+id = 22
+key = "turbulence_factor"
+type = "float"
+name = "Turbulence Factor"
+group = "evolution_options"
+default = 1.5
+range = [1, 4]
+
+[[effect.param]]
+id = 23
+key = "random_seed"
+type = "int"
+name = "Random Seed"
+group = "evolution_options"
+default = 0
+range = [0, 100000]
+
+[[effect.param]]
+id = 25
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 26
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 2
+choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darker", "Lighter", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Luminosity"]

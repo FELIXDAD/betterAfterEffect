@@ -48,6 +48,62 @@ pub const TEXT_EDIT_ACTIONS: &[&str] = &[
     "motion.select_all",
 ];
 
+/// The modifiers of the key press that fired a native key equivalent (`None`
+/// when the menu was used with the mouse). AppKit fires a key equivalent on extra
+/// modifiers too (the ⌃8 item on ⌃⌥8, issue #281): the shell then hands the press
+/// to the UI, whose keymap runs the command bound to the chord pressed.
+#[cfg(target_os = "macos")]
+pub fn key_equivalent_modifiers() -> Option<egui::Modifiers> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    const KEY_DOWN: usize = 10; // NSEventTypeKeyDown
+    // NSEventModifierFlagShift, Control, Option, Command.
+    let (shift, ctrl, alt, cmd) = (1 << 17, 1 << 18, 1 << 19, 1 << 20);
+    // SAFETY: muda calls the menu event handler on the main thread, from the
+    // item's action; these are plain NSApplication / NSEvent getters.
+    let flags: usize = unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let event: *mut AnyObject = msg_send![app, currentEvent];
+        if event.is_null() {
+            return None;
+        }
+        let kind: usize = msg_send![event, type];
+        if kind != KEY_DOWN {
+            return None;
+        }
+        msg_send![event, modifierFlags]
+    };
+    Some(egui::Modifiers {
+        alt: flags & alt != 0,
+        ctrl: flags & ctrl != 0,
+        shift: flags & shift != 0,
+        mac_cmd: flags & cmd != 0,
+        command: flags & cmd != 0,
+    })
+}
+
+/// Windows menus match accelerators exactly.
+#[cfg(not(target_os = "macos"))]
+pub fn key_equivalent_modifiers() -> Option<egui::Modifiers> {
+    None
+}
+
+/// The key press to hand to the UI instead of running the item: its key
+/// equivalent (`chord`) fired on a press with other modifiers (`keys`).
+pub fn key_press_for_ui(
+    chord: Option<Chord>,
+    keys: Option<egui::Modifiers>,
+) -> Option<egui::Event> {
+    let (chord, mods) = (chord?, keys?);
+    (!chord.matches_modifiers(mods)).then_some(egui::Event::Key {
+        key: chord.key,
+        physical_key: Some(chord.key),
+        pressed: true,
+        repeat: false,
+        modifiers: mods,
+    })
+}
+
 /// BAE's own entries, beyond AE's menus: the History and Agent panels (a group
 /// after AE's panels in Window) and the Agent workspace (sorted among AE's
 /// workspaces in Window ▸ Workspace).
@@ -181,6 +237,12 @@ impl AppMenu {
         self.contributed.get(id).map(|c| c.spec.invocation())
     }
 
+    /// The shortcut shown on a contributed item (its native key equivalent).
+    pub fn contributed_chord(&self, menu_id: &str) -> Option<Chord> {
+        let id = menu_id.strip_prefix(CONTRIBUTED)?;
+        self.contributed.get(id).and_then(|c| c.chord)
+    }
+
     /// Updates the items: enabled state, check marks, and the shortcut the
     /// active keymap binds to the same invocation (display; on macOS the menu
     /// also handles the key, which then does not reach the UI, so it runs once).
@@ -238,6 +300,32 @@ impl AppMenu {
             }
         }
         self.undo_state = state;
+    }
+
+    /// Takes the menu bar off before another one replaces it (a language change).
+    pub fn detach(&self, window: &winit::window::Window) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = window;
+            self.menu.remove_for_nsapp();
+        }
+        #[cfg(windows)]
+        {
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = window.window_handle()
+                && let RawWindowHandle::Win32(win32) = handle.as_raw()
+            {
+                // SAFETY: `hwnd` is the live window this menu was attached to, on
+                // the thread that owns it.
+                if let Err(error) = unsafe { self.menu.remove_for_hwnd(win32.hwnd.get()) } {
+                    tracing::warn!("cannot remove the native menu: {error}");
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = window;
+        }
     }
 
     /// Attaches the menu bar: the global NSApp menu on macOS, the window's menu
@@ -639,6 +727,30 @@ mod tests {
                 "{t}"
             );
         }
+    }
+
+    /// ⌃⌥8 fires the ⌃8 item (Add Marker) on macOS: the press goes to the UI,
+    /// whose keymap runs Add Marker with Dialog. The exact chord, a mouse click
+    /// and items without a shortcut run the item.
+    #[test]
+    fn a_key_equivalent_with_other_modifiers_goes_to_the_ui() {
+        let ctrl_8 = Chord::parse("Ctrl+8").ok();
+        let mods = |ctrl, alt| egui::Modifiers {
+            ctrl,
+            alt,
+            ..Default::default()
+        };
+        let press = key_press_for_ui(ctrl_8, Some(mods(true, true)));
+        assert!(matches!(
+            press,
+            Some(egui::Event::Key { key: egui::Key::Num8, pressed: true, modifiers, .. })
+                if modifiers == mods(true, true)
+        ));
+        if cfg!(target_os = "macos") {
+            assert!(key_press_for_ui(ctrl_8, Some(mods(true, false))).is_none());
+        }
+        assert!(key_press_for_ui(ctrl_8, None).is_none());
+        assert!(key_press_for_ui(None, Some(mods(true, true))).is_none());
     }
 
     #[test]

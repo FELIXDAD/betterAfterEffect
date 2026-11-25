@@ -247,7 +247,7 @@ pub(crate) const fn layer_stage_id(layer_id: u32) -> u32 {
 /// in the same one-based order as the corresponding parameter definition.
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     Some(match (match_name, param_id) {
-        (_, 0x10001 | 0x10003) => &["源", "蒙版", "效果和蒙版"],
+        (_, 0x10001..=0x1ffff) => &["源", "蒙版", "效果和蒙版"],
         ("ADBE Echo", 5) => &[
             "相加",
             "最大值",
@@ -257,6 +257,25 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "从前至后组合",
             "混合",
         ],
+        ("ADBE Difference", 5) => &[
+            "原始",
+            "目标",
+            "混合",
+            "最大值",
+            "完全打开",
+            "(-",
+            "结果亮度",
+            "结果最大值",
+            "(-",
+            "Alpha 差值",
+            "仅 Alpha 差值",
+        ],
+        ("ADBE Timewarp", 1) => &["全帧", "帧混合", "像素运动"],
+        ("ADBE Timewarp", 2) => &["速度", "源帧"],
+        ("ADBE Timewarp", 14) => &["正常", "极端"],
+        ("ADBE Timewarp", 25) => &["手动", "自动"],
+        ("ADBE Timewarp", 30) => &["明亮度", "反转明亮度", "Alpha", "反转 Alpha"],
+        ("ADBE Timewarp", 32) => &["正常", "遮罩", "前景", "背景"],
         ("ADBE Gradient Wipe", 4) => &["拼贴渐变", "中心渐变", "伸缩渐变以适合"],
         ("ADBE Displacement Map", 2 | 4) => &[
             "红色",
@@ -290,6 +309,6 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "完全",
             "关闭",
         ],
-        _ => return None,
+        _ => return crate::effects::grain::definitions::options(match_name, param_id),
     })
 }

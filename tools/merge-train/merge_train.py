@@ -605,7 +605,8 @@ def fail_pr(pr, reason, details=(), worktrees=None):
     addr, on = owner_address(agent, wt)
     if addr:
         send(addr, subject, msg, priority="high", on=on)
-    if leader:
+    # With an owner found, the owner fixes it; the leader hears only about orphaned PRs.
+    if leader and (not addr or CFG.get("notify", {}).get("bounce_leader", True)):
         send(leader, subject, msg + ("\n负责 agent：%s" % (addr or "（Orca 里没找到这个分支）")))
 
 
@@ -918,7 +919,8 @@ def do_merge(pr, st):
     st.get("prs", {}).pop(str(num), None)
     wt, _agent = find_owner(pr["headRefName"], orca_worktrees())
     leader = leader_for(pr, wt)
-    if leader:
+    # The board already lists merges; a message per merge only wakes the leader.
+    if leader and CFG.get("notify", {}).get("merged", True):
         line = "已合并 #%d %s → %s %s" % (num, pr["title"], CFG["base"], new)
         send(leader, line[:120], line + "\n" + pr["url"])
     return True
