@@ -1773,3 +1773,38 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     tool_action(&h, ids::SHORTCUT, json!({"slot": "a"}));
     assert_eq!(view(&h), View3d::Custom(2));
 }
+
+#[test]
+fn three_d_axis_arrows_move_along_one_axis_and_rings_rotate() {
+    let mut h = H::new();
+    let l = h.solid([100.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "attr.set",
+        json!({"path": l, "attr": "three_d", "value": {"type": "bool", "value": true}}),
+    );
+    h.select(&[&l]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    // Arrows and rings are 70 points long at the anchor (z = 0: 1:1).
+    let r = 70.0 / f64::from(h.viewer.last_view.unwrap().scale);
+    // The X arrow: only X changes, wherever the pointer goes.
+    let x = 320.0 + r / 2.0;
+    let done = h.drag((x, 180.0), (x + 50.0, 210.0), Modifiers::NONE);
+    h.apply(&done);
+    let p = h.v3(&l, "transform:position");
+    assert!(
+        (p[0] - 370.0).abs() < 0.5 && p[1] == 180.0 && p[2] == 0.0,
+        "{p:?}"
+    );
+    // The Rotation tool's Z ring: a clockwise drag of 30° turns Orientation Z
+    // (the tool's default Set option).
+    h.tools().lock().set(Tool::Rotation);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let at = |deg: f64| {
+        let a = deg.to_radians();
+        (370.0 + r * a.cos(), 180.0 + r * a.sin())
+    };
+    let done = h.drag(at(45.0), at(75.0), Modifiers::NONE);
+    h.apply(&done);
+    let o = h.v3(&l, "transform:orientation");
+    assert!((o[2] - 30.0).abs() < 1.0 && o[0].abs() < 1e-6, "{o:?}");
+}

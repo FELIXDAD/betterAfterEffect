@@ -25,6 +25,7 @@ use crate::tools::{Tool, ViewRequest};
 mod bar;
 pub(crate) mod errors;
 mod free_transform;
+mod gizmo3d;
 mod menu;
 mod motion_path;
 mod overlay;
