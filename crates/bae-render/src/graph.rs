@@ -161,7 +161,7 @@ pub enum NodeKind {
     /// Pixels from a [`LayerSource`] (footage, shapes, text, generators).
     Source(SourceNode),
     /// An effect applied to its input.
-    Effect(EffectNode),
+    Effect(Box<EffectNode>),
     /// A layer's masks combined into one coverage image (layer space).
     Mask(MaskNode),
     /// An adjustment layer's result mixed into its backdrop.
@@ -1548,7 +1548,7 @@ impl Builder<'_, '_> {
             }
         }
         Ok(self.push(Node {
-            kind: NodeKind::Effect(EffectNode {
+            kind: NodeKind::Effect(Box::new(EffectNode {
                 layer: layer.path.clone(),
                 effect,
                 instance,
@@ -1559,7 +1559,7 @@ impl Builder<'_, '_> {
                 input,
                 layers,
                 masks,
-            }),
+            })),
             rect,
             pixel_scale: scale,
             key: h.finish(),

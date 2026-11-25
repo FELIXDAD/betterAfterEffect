@@ -9,7 +9,7 @@ const LABEL: &str = "bae.effects.particles";
 pub(crate) struct Engine {
     advance: [wgpu::ComputePipeline; 4],
     draw: [wgpu::RenderPipeline; 5],
-    scratch: Option<wgpu::Buffer>,
+    scratch: wgpu::Buffer,
 }
 
 fn buffer_entry(binding: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
@@ -225,7 +225,13 @@ impl Engine {
         Ok(Self {
             advance,
             draw,
-            scratch: None,
+            scratch: storage(
+                device,
+                (device.limits().max_storage_buffer_binding_size / SPRITE_BYTES)
+                    .min(u64::from(device.limits().max_compute_workgroups_per_dimension) * 128)
+                    .min(65_536)
+                    * SPRITE_BYTES,
+            ),
         })
     }
 }
@@ -274,9 +280,6 @@ pub(super) fn render(
             Kind::Snow => p.f(31) as u32,
             _ => 0,
         };
-    let max = (rt.device.limits().max_storage_buffer_binding_size / SPRITE_BYTES)
-        .min(u64::from(rt.device.limits().max_compute_workgroups_per_dimension) * 128)
-        .min(65536) as u32;
     let advance = match kind {
         Kind::World | Kind::Systems => 0,
         Kind::Rain | Kind::Snow | Kind::Bubbles => 1,
@@ -330,19 +333,8 @@ pub(super) fn render(
         target.allocate_format(roi, input.pixel_scale, wgpu::TextureFormat::Rgba16Float)?;
     // Split large image grids at the device storage-binding limit. The source
     // index is global, so fragments at the bottom of a 4K layer are retained.
-    let capacity = batches
-        .iter()
-        .map(|b| b.count)
-        .max()
-        .unwrap_or(0)
-        .clamp(1, max);
-    let size = u64::from(capacity) * SPRITE_BYTES;
-    let scratch = engine
-        .scratch
-        .get_or_insert_with(|| storage(&rt.device, size));
-    if scratch.size() < size {
-        *scratch = storage(&rt.device, size);
-    }
+    let scratch = &engine.scratch;
+    let max = (scratch.size() / SPRITE_BYTES) as u32;
     let mut entries = vec![config.clone(), buffer_entry(3, scratch), viewport.clone()];
     entries.extend_from_slice(&textures);
     let compute_bind = group(&rt.device, &advance.get_bind_group_layout(0), &entries);
@@ -416,6 +408,6 @@ mod tests {
         crate::prewarm(&gpu, wgpu::TextureFormat::Rgba16Float).unwrap();
         let particles = rt.particles.lock();
         let engine = particles.as_ref().expect("registered particle warm-up");
-        assert!(engine.scratch.is_none());
+        assert!(engine.scratch.size() >= 50_000 * SPRITE_BYTES);
     }
 }

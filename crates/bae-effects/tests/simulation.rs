@@ -11,7 +11,14 @@ fn particle_world_seek_reproduces_pixels_and_cropped_tiles() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(128, 96);
     let input = test_image(rect).upload(&gpu, TextureFormat::Rgba16Float);
-    let inst = instance("CC Particle World", vec![(4, Value::Float(5.))]);
+    let inst = instance(
+        "CC Particle World",
+        vec![
+            (4, Value::Float(5.)),
+            (3, Value::Float(0.08)),
+            (66, Value::Int(4)),
+        ],
+    );
     let mut target = Standalone::new(gpu.clone(), TextureFormat::Rgba16Float);
     let mut render = |frame, roi| {
         let mut p = EffectParams::new(&inst);
