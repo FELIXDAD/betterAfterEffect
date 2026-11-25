@@ -36,7 +36,7 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 155，◐ 8，☐ 169，⏸ 208，Ⓐ 30
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 156，◐ 8，☐ 169，⏸ 207，Ⓐ 30
 - 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 157 条。
 - 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 148 条，macOS 148 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
@@ -452,7 +452,7 @@
 | Keyframe Assistant ▸ Create Keyframes from Data | 11075586 | `motion.anim.create_keyframes_from_data` |  |  |  | B | ⏸ |
 | Keyframe Assistant ▸ Null Controllers for Positional Points | 11075587 | `motion.anim.null_controllers_for_positional_points` |  |  |  | B | ⏸ |
 | Keyframe Assistant ▸ Convert Expression to Keyframes | 11075588 | `motion.anim.convert_expression_to_keyframes` |  |  |  | C | ⏸ |
-| Keyframe Assistant ▸ Convert Audio to Keyframes | 11075589 | `motion.anim.convert_audio_to_keyframes` |  |  |  | B | ⏸ |
+| Keyframe Assistant ▸ Convert Audio to Keyframes | 11075589 | `motion.anim.convert_audio_to_keyframes` |  |  |  | B | ✅ |
 | Keyframe Assistant ▸ Sequence Layers... | 11075590 | `motion.anim.sequence_layers` |  |  |  | E | ⏸ |
 | Keyframe Assistant ▸ Exponential Scale | 11075591 | `motion.anim.exponential_scale` |  |  |  | B | ⏸ |
 | Keyframe Assistant ▸ Time-Reverse Keyframes | 11075592 | `motion.reverse_keys` |  |  |  | B | ✅ |

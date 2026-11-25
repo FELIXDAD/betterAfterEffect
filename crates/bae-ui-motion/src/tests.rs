@@ -1804,6 +1804,76 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
 }
 
 #[test]
+fn audio_assistant_creates_three_frame_sampled_sliders_in_one_undo() {
+    let mut h = Harness::new();
+    let mut builder = AppBuilder::new();
+    builder.add_module(bae_effects::EffectsModule);
+    let defs = builder
+        .build()
+        .get_registry::<bae_model::EffectDef>()
+        .unwrap();
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    let comp: PrimPath = serde_json::from_value(
+        h.run(
+            "comp.create",
+            json!({"width":32,"height":32,"duration":Time::ONE_SECOND}),
+        )["path"]
+            .clone(),
+    )
+    .unwrap();
+    h.session().lock().open_comp(&comp);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("amplitude.wav");
+    let mut bytes = Vec::from(*b"RIFF");
+    bytes.extend((36 + 32000u32).to_le_bytes());
+    bytes.extend(b"WAVEfmt \x10\0\0\0\x01\0\x02\0\x40\x1f\0\0\x00\x7d\0\0\x04\0\x10\0data");
+    bytes.extend(32000u32.to_le_bytes());
+    for _ in 0..8000 {
+        bytes.extend(8192i16.to_le_bytes());
+        bytes.extend((-16384i16).to_le_bytes());
+    }
+    std::fs::write(&file, bytes).unwrap();
+    h.run("item.import",json!({"files":[{"path":file,"name":"amplitude.wav","attrs":{"has_audio":{"type":"bool","value":true}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())[0]
+        .clone();
+    h.run(
+        "layer.create",
+        json!({"comp":comp,"source":asset,"kind":"audio"}),
+    );
+    let mut timeline = TimelinePanel::default();
+    h.action(
+        &mut timeline,
+        Invocation::new("motion.anim.convert_audio_to_keyframes"),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let result = loop {
+        let req = h.dialog_frame(vec![]);
+        if let Some(inv) = req.invocations.into_iter().next() {
+            break inv;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "analysis did not finish"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(3));
+    };
+    let path: PrimPath =
+        serde_json::from_value(h.run(&result.id, result.params)["path"].clone()).unwrap();
+    let sliders = bae_motion::effect::effects_of(&h.stage, &path);
+    assert_eq!(sliders.len(), 3);
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    for (effect, expected) in sliders.iter().zip([25.0, 50.0, 37.5]) {
+        let attr = query::attr_spec(&h.stage, effect, &bae_model::effect::param_attr(1)).unwrap();
+        assert_eq!(attr.keyframes.len(), info.frame_count() as usize);
+        assert_eq!(attr.keyframes[&Time::ZERO].value, Value::Float(expected));
+    }
+    h.stage.undo(&h.author).unwrap();
+    assert!(h.stage.prim(&path).is_none());
+}
+
+#[test]
 fn import_probes_files_sequences_and_folders() {
     let dir = import_fixture("probe");
     let defaults = crate::import::ImportDefaults::default();

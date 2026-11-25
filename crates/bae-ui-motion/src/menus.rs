@@ -186,6 +186,7 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "Layer" if path.get(1) == Some(&"New") => Comp,
         "Layer" | "Effect" => Layers,
         "Animation" => match item.action {
+            "motion.anim.convert_audio_to_keyframes" => Comp,
             a if a.starts_with("motion.anim.recent_animation_preset")
                 || a == "motion.anim.browse_presets"
                 || a == "motion.anim.apply_animation_preset" =>

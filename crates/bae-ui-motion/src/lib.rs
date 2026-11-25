@@ -22,6 +22,7 @@
 //! without one (tests, headless hosts).
 
 pub mod actions;
+mod audio_analysis;
 pub mod catalog;
 mod common;
 mod context_menu;
