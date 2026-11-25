@@ -546,6 +546,10 @@ pub struct PasteKeysParams {
     /// Keyframe time (flicks) of the first pasted keyframe.
     pub time: Time,
     pub keys: Vec<CopiedKey>,
+    /// Edit > Paste Reversed Keyframes: the last copied keyframe first, each
+    /// keyframe's incoming and outgoing sides swapped.
+    #[serde(default)]
+    pub reversed: bool,
 }
 
 impl Command for PasteKeys {
@@ -565,8 +569,13 @@ impl Command for PasteKeys {
             .unwrap_or_default();
         let mut out = KeysOutput::default();
         let mut added: BTreeMap<Time, Keyframe> = BTreeMap::new();
-        for c in p.keys {
+        let span = p.keys.iter().map(|c| c.offset).max().unwrap_or(Time::ZERO);
+        for mut c in p.keys {
             check_value(tx, &p.path, &p.attr, &c.keyframe.value)?;
+            if p.reversed {
+                c.offset = span - c.offset;
+                swap_sides(&mut c.keyframe);
+            }
             let t = p.time.saturating_add(c.offset);
             added.insert(t, c.keyframe);
             out.keys

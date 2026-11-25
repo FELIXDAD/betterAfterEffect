@@ -298,7 +298,10 @@ fn param_row(
         .filter(|s| s.path == *effect && s.attr == attr)
         .map(|s| s.value.clone())
         .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
-        .or_else(|| param.default.clone());
+        .or_else(|| {
+            let layer = super::layer_of(effect)?;
+            bae_motion::effect::instance_default(stage, &layer, def, param)
+        });
     let key = format!("{effect}#{}", param.id);
     let twirl = matches!(param.kind, ParamKind::Slider { .. } | ParamKind::Angle);
     let mut edit = Edit::None;

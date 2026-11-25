@@ -1,6 +1,6 @@
 # BAE continuous integration, fast tier (docs/spec/ci.md).
 #
-# Every pull request push, on macOS arm64 and Windows x64: fmt (once), clippy on the
+# Every pull request push, on Windows x64 (macOS only in the full tier): fmt (once), clippy on the
 # whole workspace, and the tests of the crates the PR changes plus everything that depends
 # on them (tools/ci/affected.py, from `cargo metadata`), without bae's acceptance suite.
 # Root manifests, the lockfile, the
@@ -64,9 +64,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS arm64
-            os: macos-latest
-            target: aarch64-apple-darwin
+          # macOS runs only in the full tier (ci.yml): hosted macOS runners are scarce and
+          # the per-push queue blocked every merge (2026-11-24). Mac-side agents test
+          # locally on macOS before pushing.
           - name: Windows x64
             os: windows-latest
             target: x86_64-pc-windows-msvc

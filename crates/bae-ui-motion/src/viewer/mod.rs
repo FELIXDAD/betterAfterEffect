@@ -38,6 +38,7 @@ mod shape_tool;
 mod tests;
 mod transform;
 mod type_tool;
+pub(crate) mod view3d;
 
 pub(crate) use transform::nudge_layers;
 
@@ -94,6 +95,11 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    /// Something in the viewer uses Esc (a drag, text, Free Transform, a
+    /// menu): Esc goes to it instead of switching to the last 3D view.
+    esc_taken: bool,
+    /// Esc to give back to the viewer's widgets this frame.
+    escape: bool,
 }
 
 impl CompositionViewer {
@@ -122,6 +128,7 @@ impl CompositionViewer {
                 origin,
                 scale,
                 point,
+                camera: None,
             },
             scale * ppp,
         )
@@ -342,6 +349,13 @@ impl Panel for CompositionViewer {
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
+        if action.id == view3d::ids::LAST && self.esc_taken {
+            self.escape = true;
+            return true;
+        }
+        if view3d::handle(action, cx) {
+            return true;
+        }
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
         if self.shape.is_some() || self.pen.busy() || self.select.busy() {
@@ -401,6 +415,17 @@ impl Panel for CompositionViewer {
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
+        if std::mem::take(&mut self.escape) {
+            ui.input_mut(|i| {
+                i.events.push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            });
+        }
 
         if let Some(up) = self.pending_zoom.take() {
             self.step_zoom(up, area, &info, ppp);
@@ -500,6 +525,21 @@ impl Panel for CompositionViewer {
         }
         let scrub = session.lock().scrub.clone();
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        // The 3D view: 3D layers are seen through its camera.
+        let size = DVec2::new(f64::from(info.width), f64::from(info.height));
+        let view_camera = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .and_then(|v| v.camera(size));
+        let view = View {
+            camera: Some((
+                view_camera.unwrap_or_else(|| view3d::active_camera(&comp, size)),
+                size,
+            )),
+            ..view
+        };
+        self.last_view = Some(view);
         // Text being edited is drawn by the text field, not the layer.
         if let Some(edited) = self.type_tool.edited_layer()
             && let Some(l) = comp.layers.iter_mut().find(|l| &l.path == edited)
@@ -555,8 +595,24 @@ impl Panel for CompositionViewer {
         let image = self
             .gpu
             .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution));
+            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
         self.on_gpu = image.is_some();
+        // The Info panel: the pointer in comp pixels and, while the panel shows
+        // it, the color under it (one texel read back from the GPU frame).
+        if let Some(h) = resp.hover_pos() {
+            let p = view.to_comp(h);
+            let mut s = session.lock();
+            s.info.pos = Some([p.x, p.y]);
+            let shown = ui
+                .ctx()
+                .cumulative_frame_nr()
+                .saturating_sub(s.info.shown_at)
+                < 3;
+            if shown && let Some(g) = self.gpu.as_mut() {
+                // Outside the rendered frame the comp is transparent (AE: A 0).
+                s.info.color = Some(g.pixel([p.x, p.y]).unwrap_or([0; 4]));
+            }
+        }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
         if let Some(img) = image {
             let r = img.rect;
@@ -643,7 +699,9 @@ impl Panel for CompositionViewer {
                 }
             }
             let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-            let ap = view.to_screen(DVec2::new(a.x, a.y));
+            let Some(ap) = view.project(a, render::is_3d(l)) else {
+                continue;
+            };
             painter.circle_stroke(ap, 4.0, Stroke::new(1.0, c));
             painter.line_segment(
                 [ap - vec2(7.0, 0.0), ap + vec2(7.0, 0.0)],
@@ -841,6 +899,12 @@ impl Panel for CompositionViewer {
 
         self.banner.ui(ui, cx, &session, area);
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+        self.esc_taken = self.shape.is_some()
+            || self.pen.busy()
+            || self.select.busy()
+            || self.select.free.is_some()
+            || ui.ctx().text_edit_focused()
+            || egui::Popup::is_any_open(ui.ctx());
     }
 }
 

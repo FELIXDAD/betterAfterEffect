@@ -103,6 +103,10 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// Each comp's 3D views (View ▸ Switch 3D View).
+    pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
+    /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
+    pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
@@ -115,6 +119,8 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// What the viewer reports to the Info panel.
+    pub info: crate::ae_panels::info::Readout,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
