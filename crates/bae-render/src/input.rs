@@ -435,6 +435,7 @@ impl LayerContent {
                 f.file.hash(h);
                 f.source_time.hash(h);
                 f.sequence.hash(h);
+                f.blend.hash(h);
             }
             LayerContent::Comp(c) => c.hash_content(h),
             LayerContent::Custom(c) => {
@@ -461,6 +462,20 @@ pub struct FootageRef {
     /// Image sequences: the frame rate of the sequence (its numbered files are
     /// frames from `file` on); `None` opens `file` alone (a still or a movie).
     pub sequence: Option<FrameRate>,
+    /// Frame blending, when the comp and layer switches are on.
+    pub blend: Option<FrameBlend>,
+}
+
+/// Frame blending of a footage layer (AE-CMP-065): the source frames one comp
+/// frame covers are mixed with AE's Frame Mix weights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FrameBlend {
+    /// The source time one comp frame spans (playback speed × frame duration).
+    pub span: Time,
+    /// Pixel Motion (optical flow) was asked for. It renders as Frame Mix with a
+    /// warning for now; a flow pass would replace the mix with a warp of the two
+    /// nearest frames (the same flow as the Pixel Motion Blur effect).
+    pub pixel_motion: bool,
 }
 
 /// Content drawn by a [`crate::source::SourceProvider`].
@@ -665,6 +680,7 @@ mod tests {
                 size: None,
                 source_time: Time::ZERO,
                 sequence: None,
+                blend: None,
             }),
         ));
         let deps = comp.dependencies();

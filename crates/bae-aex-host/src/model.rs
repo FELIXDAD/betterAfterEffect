@@ -245,6 +245,7 @@ pub fn param_def(p: &ParamDescriptor) -> ModelParam {
     let ui = &p.ui;
     let custom_ui = ui.topic || ui.control || matches!(p.kind, ParamKind::NoData);
     let flags = ModelFlags {
+        reference_point_default: false,
         hidden: ui.invisible,
         disabled: ui.disabled,
         supervise: f.supervise || matches!(p.kind, ParamKind::Button { .. }),

@@ -1657,10 +1657,11 @@ ships no extra executable; `BAE_PLUGIN_RUNNER` names a dedicated runner (the
   responses). Suite calls that need host state
   (`checkout_input`, `checkout_param`, `bae.command`) become synchronous RPCs back to the
   host; per-pixel helpers (`parallel_for`, `alloc_cpu_image`) run inside the runner.
-- Frames: CPU images live in a shared memory file mapped by both processes (v1: a
-  temporary file with `memmap2`), allocated by the host, page-aligned, rows 64-byte
-  aligned, grown on demand and reused across frames. The runner hands slot memory to the
-  plugin directly.
+- Frames: betterAfterEffects allocates a shared segment for both processes. On Unix the
+  host unlinks the POSIX shared memory name immediately and passes the descriptor over
+  the runner's stdin socket. On Windows the runner opens a named pagefile-backed
+  section. The host grows the segment on demand and reuses it across frames. The
+  runner passes its mapped pixels to the plugin with 64-byte aligned rows.
 - Host side: `OutOfProcessEffect` implements `bae_render::Effect` and forwards; the render graph
   cannot tell the difference except for cost.
 
