@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use bae_app::{Registry, Resources};
 use bae_gpu::GpuContext;
-use bae_model::{FrameRate, PrimPath, Stage, Sublayer, SublayerId, Time};
+use bae_model::{FrameRate, PrimPath, Stage, Time};
 use bae_motion::query::CompInfo;
 use bae_render::{
     AnimEvaluator, ExportAlpha, ExportFormat, ExportJob, ExportSettings, RenderError,
@@ -438,37 +438,6 @@ pub(crate) struct Job {
     cancel: Arc<AtomicBool>,
 }
 
-/// The project as of now, for the worker thread (sublayer snapshots, strongest
-/// first).
-pub(crate) struct StageSnapshot(Vec<(SublayerId, Vec<u8>)>);
-
-impl StageSnapshot {
-    pub(crate) fn take(stage: &Stage) -> Result<Self, String> {
-        stage
-            .layer_stack()
-            .iter()
-            .map(|id| {
-                let sublayer = stage
-                    .sublayer(id)
-                    .ok_or_else(|| format!("sublayer {id:?} missing"))?;
-                let bytes = sublayer.export_snapshot().map_err(|e| e.to_string())?;
-                Ok((id.clone(), bytes))
-            })
-            .collect::<Result<_, String>>()
-            .map(StageSnapshot)
-    }
-
-    pub(crate) fn restore(&self) -> Result<Stage, String> {
-        let sublayers = self
-            .0
-            .iter()
-            .map(|(id, bytes)| Sublayer::from_snapshot(id.clone(), bytes))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        Stage::from_sublayers(sublayers).map_err(|e| e.to_string())
-    }
-}
-
 /// Renders one item; `progress` gets the frames done so far.
 /// The export settings of a job's output module.
 fn export_settings(job: &Job, output: PathBuf) -> ExportSettings {
@@ -649,13 +618,7 @@ pub fn start(
     if !queue.lock().begin() {
         return Ok(());
     }
-    let snapshot = match StageSnapshot::take(stage) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            queue.lock().running = false;
-            return Err(error);
-        }
-    };
+    let snapshot = crate::preview_snapshot::PreviewSnapshot::take(stage);
     let queue = queue.clone();
     std::thread::Builder::new()
         .name("bae-render-queue".into())
@@ -675,7 +638,7 @@ fn provider_list(registry: &Registry<dyn SourceProvider>) -> Vec<Arc<dyn SourceP
 /// The worker: renders queued items until none is left.
 pub(crate) fn run_worker(
     queue: &SharedRenderQueue,
-    snapshot: &StageSnapshot,
+    snapshot: &crate::preview_snapshot::PreviewSnapshot,
     gpu: Arc<GpuContext>,
     providers: &[Arc<dyn SourceProvider>],
     effects: Option<&Registry<dyn bae_render::Effect>>,
@@ -1928,7 +1891,7 @@ mod tests {
             .cancel
             .store(true, Ordering::Relaxed);
 
-        let snapshot = StageSnapshot::take(&stage).unwrap();
+        let snapshot = crate::preview_snapshot::PreviewSnapshot::take(&stage);
         run_worker(&queue, &snapshot, gpu, &[], None);
 
         let q = queue.lock();
