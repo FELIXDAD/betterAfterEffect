@@ -707,6 +707,21 @@ fn own<'a>(prim: &'a str, layer: &'a crate::eval::CompiledLayer) -> &'a str {
     }
 }
 
+fn control_param_name(match_name: &str, name: &str) -> bool {
+    let aliases = match match_name {
+        "ADBE Slider Control" => ["Slider", "滑块"],
+        "ADBE Point Control" => ["Point", "点"],
+        "ADBE Point3D Control" => ["3D Point", "3D 点"],
+        "ADBE Angle Control" => ["Angle", "角度"],
+        "ADBE Checkbox Control" => ["Checkbox", "复选框"],
+        "ADBE Color Control" => ["Color", "颜色"],
+        "ADBE Layer Control" => ["Layer", "图层"],
+        "ADBE Dropdown Control" => ["Menu", "菜单"],
+        _ => return false,
+    };
+    aliases.contains(&name)
+}
+
 fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
     let h = Object::new(ctx.clone())?;
 
@@ -961,7 +976,14 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                         .find(|e| e.name == name)
                         .or_else(|| effects.iter().find(|e| e.match_name == name))
                 };
-                Ok::<_, rquickjs::Error>(found.map(|e| e.path.to_string()))
+                let Some(e) = found else {
+                    return Ok::<_, rquickjs::Error>(None);
+                };
+                let info = Object::new(ctx.clone())?;
+                info.set("path", e.path.as_str())?;
+                info.set("active", e.enabled)?;
+                info.set("layerControl", e.match_name == "ADBE Layer Control")?;
+                Ok(Some(info))
             },
         )?,
     )?;
@@ -987,15 +1009,59 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                         .as_string()
                         .and_then(|s| s.to_string().ok())
                         .unwrap_or_default();
-                    // AE parameter matchName ("ADBE Slider Control-0001") or the ID itself.
-                    s.rsplit('-').next().unwrap_or(&s).to_owned()
+                    // The model stores parameter IDs only. Recognize the expression
+                    // control names, and keep existing matchName and ID lookups.
+                    if control_param_name(&e.match_name, &s) {
+                        "0001".into()
+                    } else {
+                        s.rsplit('-').next().unwrap_or(&s).to_owned()
+                    }
                 };
+                if e.match_name == "ADBE Layer Control" && id == "0001" {
+                    return Ok::<_, rquickjs::Error>(Some("param:0001".to_owned()));
+                }
                 Ok::<_, rquickjs::Error>(
                     e.params
                         .iter()
                         .find(|(i, _)| *i == id)
                         .map(|(i, _)| format!("param:{i}")),
                 )
+            },
+        )?,
+    )?;
+
+    h.set(
+        "effectLayer",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, t: f64| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                note_dependency(c as usize, li);
+                let Some(prop) = layer.find_prop(&prim, &attr) else {
+                    return Ok::<_, rquickjs::Error>(li as i32);
+                };
+                let ct = Time::from_seconds(t);
+                let cx = Cx {
+                    comp: c as usize,
+                    layer: li,
+                    ct,
+                    lt: layer.timing.layer_time(ct),
+                    js: Some(&ctx),
+                };
+                let value = prop.sample(&cx);
+                let index = match &value {
+                    Value::PrimRef(path) => {
+                        comp.layers.iter().position(|layer| layer.path == *path)
+                    }
+                    // Older imports may store the original AE layer index.
+                    Value::Int(index) => usize::try_from(index.saturating_sub(1))
+                        .ok()
+                        .filter(|i| *i < comp.layers.len()),
+                    _ => None,
+                };
+                Ok(index.map_or(-1, |i| i as i32))
             },
         )?,
     )?;

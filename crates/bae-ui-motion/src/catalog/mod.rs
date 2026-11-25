@@ -55,6 +55,43 @@ pub fn menu_zh() -> &'static [(&'static str, &'static str)] {
     blob::tables().zh
 }
 
+/// One AE effect of the Effect menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AeEffect {
+    /// AE category (English, one of [`effect_categories`]).
+    pub category: &'static str,
+    /// AE matchName (the effect's document identity).
+    pub match_name: &'static str,
+    /// English name.
+    pub name: &'static str,
+    /// Name in AE's Chinese UI.
+    pub name_zh: &'static str,
+}
+
+/// AE 26's effects by category (299; the Effect menu lists them, greying the
+/// ones no effect module implements).
+pub fn ae_effects() -> &'static [AeEffect] {
+    blob::tables().effects
+}
+
+/// The source of [`ae_effects`] (`effects.tsv`, tests only).
+#[cfg(test)]
+pub fn source_effects() -> Vec<AeEffect> {
+    include_str!("effects.tsv")
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+        .map(|l| {
+            let f: Vec<&'static str> = l.split('\t').collect();
+            AeEffect {
+                category: f[0],
+                match_name: f[1],
+                name: f[2],
+                name_zh: f[3],
+            }
+        })
+        .collect()
+}
+
 /// The menu tables: the source tables in tests (so a test run that rewrites
 /// `catalog.bin` and the docs reads the new tables), `catalog.bin` in the app.
 fn source_menus() -> (&'static [(&'static str, &'static [Node])], &'static [Node]) {

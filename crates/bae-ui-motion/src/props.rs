@@ -183,10 +183,17 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
     let three_d = common::is_3d(stage, layer);
     let mut out = Vec::new();
     if kind == "text" {
+        let mut children = vec![prop(stage, layer, "text:source", three_d)];
+        for (i, a) in bae_motion::text_animators::animators_of(stage, layer)
+            .iter()
+            .enumerate()
+        {
+            children.push(animator_node(stage, a, i + 1));
+        }
         out.push(Node::Group {
             id: format!("{layer}#text"),
             label: tr("Text").to_owned(),
-            children: vec![prop(stage, layer, "text:source", three_d)],
+            children,
         });
     }
     if let Ok(contents) = layer.child(query::CONTENTS)
@@ -241,6 +248,77 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
     out
 }
 
+/// Animator properties in AE's order.
+const ANIMATOR_ATTRS: [&str; 12] = [
+    "animator:anchor_point",
+    "animator:position",
+    "animator:scale",
+    "animator:skew",
+    "animator:rotation",
+    "animator:opacity",
+    "animator:fill_color",
+    "animator:stroke_color",
+    "animator:stroke_width",
+    "animator:tracking",
+    "animator:line_spacing",
+    "animator:blur",
+];
+
+/// "Animator N" (AE: 动画制作工具 N): its Range Selectors, then the properties it
+/// was given. The group id ends in `#animator` (the Timeline's Add menu reads it).
+fn animator_node(stage: &Stage, animator: &PrimPath, n: usize) -> Node {
+    use bae_motion::text_animators::selectors_of;
+    let mut children: Vec<Node> = selectors_of(stage, animator)
+        .iter()
+        .enumerate()
+        .map(|(j, sel)| Node::Group {
+            id: format!("{sel}#selector"),
+            label: format!("{} {}", tr("Range Selector"), j + 1),
+            children: vec![
+                prop(stage, sel, "start", false),
+                prop(stage, sel, "end", false),
+                prop(stage, sel, "offset", false),
+                Node::Group {
+                    id: format!("{sel}#advanced"),
+                    label: tr("Advanced").to_owned(),
+                    children: [
+                        "units",
+                        "based_on",
+                        "mode",
+                        "amount",
+                        "shape",
+                        "smoothness",
+                        "ease_high",
+                        "ease_low",
+                        "randomize_order",
+                        "random_seed",
+                    ]
+                    .iter()
+                    .map(|a| prop(stage, sel, a, false))
+                    .collect(),
+                },
+            ],
+        })
+        .collect();
+    children.extend(
+        ANIMATOR_ATTRS
+            .iter()
+            .filter(|a| query::attr_spec(stage, animator, a).is_some())
+            .map(|a| prop(stage, animator, a, false)),
+    );
+    let name = stage
+        .prim(animator)
+        .and_then(|v| query::static_value(&v, "name"))
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| format!("{} {n}", tr("Animator")));
+    Node::Group {
+        id: format!("{animator}#animator"),
+        label: name,
+        children,
+    }
+}
+
 /// One group per effect with its parameters (`param:NNNN`).
 pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
     let Ok(folder) = layer.child("effects") else {
@@ -260,6 +338,9 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
                 .filter(|n| n.starts_with("param:"))
                 .collect();
             params.sort_unstable();
+            let match_name = query::static_value(&v, "match_name")
+                .and_then(|m| m.as_str().map(str::to_owned))
+                .unwrap_or_default();
             Some(Node::Group {
                 id: format!("{layer}#{e}"),
                 label: group_label(stage, &e),
@@ -268,7 +349,11 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
                     .map(|a| Node::Prop {
                         path: e.clone(),
                         attr: a.to_owned(),
-                        label: format!("{} {}", tr("Param"), a.trim_start_matches("param:")),
+                        label: bae_model::effect::param_id(a)
+                            .and_then(|id| crate::effects::param_label_of(&match_name, id))
+                            .unwrap_or_else(|| {
+                                format!("{} {}", tr("Param"), a.trim_start_matches("param:"))
+                            }),
                     })
                     .collect(),
             })

@@ -434,7 +434,7 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         shutter_angle: int(c::SHUTTER_ANGLE, 180.0),
         shutter_phase: int(c::SHUTTER_PHASE, -90.0),
         samples: int(c::MOTION_BLUR_SAMPLES, 16.0).max(1.0) as u32,
-        adaptive_limit: MotionBlur::default().adaptive_limit,
+        adaptive_limit: int(c::MOTION_BLUR_ADAPTIVE_LIMIT, 128.0).clamp(16.0, 256.0) as u32,
     };
 
     let paths = comp_layers(stage, path);

@@ -257,23 +257,26 @@ fn two_shapes_expanded(h: &mut Ui) -> Vec<String> {
     names
 }
 
-/// Opens Keyboard Shortcuts and returns the accessible texts with a panel scope
-/// (`id · <panel>`).
+/// Opens Keyboard Shortcuts and returns the panel scopes of its command tree
+/// (the groups under Panels, AE's names: 时间轴面板 / Timeline Panel).
 fn shortcut_scopes(h: &mut Ui) -> Vec<String> {
     h.state_mut()
         .invoke(Invocation::new(ids::KEYBOARD_SHORTCUTS));
     settle(h);
-    let mut scopes: Vec<String> = a11y_texts(h)
-        .into_iter()
-        .chain(painted_texts(h))
-        .filter_map(|t| {
-            let (id, scope) = t.split_once(" · ")?;
-            // Rows of the dialog: `<command id> · <panel>`.
-            let is_id = id.contains('.')
-                && id
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_');
-            is_id.then(|| scope.to_owned())
+    // Close Application (open at first, like AE) to see the Panels groups.
+    let application = h
+        .query_all_by_role(Role::Button)
+        .find(|n| n.accesskit_node().label().as_deref() == Some(bae_ui::tr("Application")))
+        .map(|n| n.rect())
+        .expect("the Application group");
+    click_at(h, application.center());
+    settle(h);
+    let panels = bae_ui::tr("Panels");
+    let mut scopes: Vec<String> = h
+        .query_all_by_role(Role::Button)
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|l| {
+            l != panels && !l.contains(" · ") && (l.ends_with("面板") || l.ends_with(" Panel"))
         })
         .collect();
     scopes.sort();
@@ -408,8 +411,8 @@ fn chinese_ui_names_new_items_in_chinese() {
 
     let scopes = shortcut_scopes(&mut h);
     println!("zh shortcut scopes: {scopes:?}");
-    assert!(scopes.iter().any(|s| s == "合成"), "{scopes:?}");
-    assert!(scopes.iter().any(|s| s == "时间轴"), "{scopes:?}");
+    assert!(scopes.iter().any(|s| s == "合成面板"), "{scopes:?}");
+    assert!(scopes.iter().any(|s| s == "时间轴面板"), "{scopes:?}");
     assert!(
         scopes.iter().all(|s| s.chars().any(is_cjk)),
         "untranslated scopes: {scopes:?}"
@@ -538,8 +541,11 @@ fn english_ui_names_new_items_in_english() {
     check(&h, "render queue", &mut problems);
     let scopes = shortcut_scopes(&mut h);
     println!("en shortcut scopes: {scopes:?}");
-    assert!(scopes.iter().any(|s| s == "Composition"), "{scopes:?}");
-    assert!(scopes.iter().any(|s| s == "Timeline"), "{scopes:?}");
+    assert!(
+        scopes.iter().any(|s| s == "Composition Panel"),
+        "{scopes:?}"
+    );
+    assert!(scopes.iter().any(|s| s == "Timeline Panel"), "{scopes:?}");
     let texts = a11y_texts(&h);
     assert!(texts.iter().any(|t| t == "Close Window"), "{texts:?}");
     check(&h, "keyboard shortcuts", &mut problems);

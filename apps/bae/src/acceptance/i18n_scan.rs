@@ -78,6 +78,12 @@ pub(super) const ALLOWED: &[&str] = &[
     "Gl",
     "GL",
     "WebGPU",
+    // Keyboard Shortcuts: AE's zh_CN keeps the keyboard layout codes ("键盘布局 - en")
+    // and the key cap legends of its keyboard ("⌥ Opt", "Num Lock").
+    "en",
+    "Opt",
+    "Num",
+    "Lock",
     // Key legends (shortcuts are shown as on the keyboard).
     "Ctrl",
     "Shift",

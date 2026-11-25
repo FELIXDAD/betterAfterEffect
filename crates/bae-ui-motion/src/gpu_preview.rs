@@ -150,15 +150,24 @@ impl GpuPreview {
         if self.last != Some(key) {
             let request = RenderRequest {
                 resolution: match resolution {
+                    0 | 1 => Resolution::Full,
                     2 => Resolution::Half,
                     3 => Resolution::Third,
                     4 => Resolution::Quarter,
-                    _ => Resolution::Full,
+                    n => Resolution::Custom(n),
                 },
                 purpose: RenderPurpose::Preview,
                 ..RenderRequest::full()
             };
-            let frame = match self.renderer.render_frame(&rc, &request) {
+            // Effects reading other frames evaluate them like this one.
+            let mut frames = bae_render::eval::EvaluatorFrames {
+                stage,
+                evaluator: &mut self.anim,
+            };
+            let frame = match self
+                .renderer
+                .render_frame_with(&rc, &request, Some(&mut frames))
+            {
                 Ok(f) => f,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));

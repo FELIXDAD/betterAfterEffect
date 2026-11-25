@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 103，◐ 8，☐ 212，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 132 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 121 条，macOS 123 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 155，◐ 8，☐ 169，⏸ 208，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 156 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 147 条，macOS 147 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -301,7 +301,7 @@
 | Switches ▸ Audio | 8847370 | `motion.layer.switch` | `{"switch":"audio_enabled"}` |  |  | B | ✅ |
 | Switches ▸ Video | 8847371 | `motion.layer.switch` | `{"switch":"enabled"}` | Ctrl+Alt+Shift+V | Cmd+Opt+Shift+V | B | ✅ |
 | Switches ▸ Solo | 8847372 | `motion.layer.switch` | `{"switch":"solo"}` |  |  | B | ✅ |
-| Switches ▸ Effect | 8847373 | `motion.layer.switch` | `{"switch":"effects_enabled"}` |  |  | B | ⏸ |
+| Switches ▸ Effect | 8847373 | `motion.layer.switch` | `{"switch":"effects_enabled"}` |  |  | B | ✅ |
 | Switches ▸ Collapse | 8847374 | `motion.layer.switch` | `{"switch":"collapse_transformation"}` |  |  | B | ✅ |
 | Switches ▸ Motion Blur | 8847375 | `motion.layer.switch` | `{"switch":"motion_blur"}` |  |  | B | ✅ |
 | Switches ▸ Adjustment Layer | 8847376 | `motion.layer.switch` | `{"switch":"adjustment_layer"}` |  |  | B | ✅ |
@@ -337,46 +337,46 @@
 | Markers ▸ Lock Markers | 23265283 | `motion.layer.lock_markers` |  |  |  | C | ☐ |
 | Markers ▸ Delete All Markers | 23265284 | `motion.layer.delete_all_markers` |  |  |  | C | ✅ |
 | Preserve Transparency | 393236 | `motion.layer.switch` | `{"switch":"preserve_transparency"}` |  |  | B | ☐ |
-| Blending Mode ▸ Normal | 16318465 | `motion.layer.blending_mode` | `{"mode":"normal"}` |  |  | B | ☐ |
-| Blending Mode ▸ Dissolve | 16318466 | `motion.layer.blending_mode` | `{"mode":"dissolve"}` |  |  | B | ☐ |
-| Blending Mode ▸ Dancing Dissolve | 16318467 | `motion.layer.blending_mode` | `{"mode":"dancing_dissolve"}` |  |  | B | ☐ |
-| Blending Mode ▸ Darken | 16318469 | `motion.layer.blending_mode` | `{"mode":"darken"}` |  |  | B | ☐ |
-| Blending Mode ▸ Multiply | 16318470 | `motion.layer.blending_mode` | `{"mode":"multiply"}` |  |  | B | ☐ |
-| Blending Mode ▸ Color Burn | 16318471 | `motion.layer.blending_mode` | `{"mode":"color_burn"}` |  |  | B | ☐ |
-| Blending Mode ▸ Classic Color Burn | 16318472 | `motion.layer.blending_mode` | `{"mode":"classic_color_burn"}` |  |  | B | ☐ |
-| Blending Mode ▸ Linear Burn | 16318473 | `motion.layer.blending_mode` | `{"mode":"linear_burn"}` |  |  | B | ☐ |
-| Blending Mode ▸ Darker Color | 16318474 | `motion.layer.blending_mode` | `{"mode":"darker_color"}` |  |  | B | ☐ |
-| Blending Mode ▸ Add | 16318476 | `motion.layer.blending_mode` | `{"mode":"add"}` |  |  | B | ☐ |
-| Blending Mode ▸ Lighten | 16318477 | `motion.layer.blending_mode` | `{"mode":"lighten"}` |  |  | B | ☐ |
-| Blending Mode ▸ Screen | 16318478 | `motion.layer.blending_mode` | `{"mode":"screen"}` |  |  | B | ☐ |
-| Blending Mode ▸ Color Dodge | 16318479 | `motion.layer.blending_mode` | `{"mode":"color_dodge"}` |  |  | B | ☐ |
-| Blending Mode ▸ Classic Color Dodge | 16318480 | `motion.layer.blending_mode` | `{"mode":"classic_color_dodge"}` |  |  | B | ☐ |
-| Blending Mode ▸ Linear Dodge | 16318481 | `motion.layer.blending_mode` | `{"mode":"linear_dodge"}` |  |  | B | ☐ |
-| Blending Mode ▸ Lighter Color | 16318482 | `motion.layer.blending_mode` | `{"mode":"lighter_color"}` |  |  | B | ☐ |
-| Blending Mode ▸ Overlay | 16318484 | `motion.layer.blending_mode` | `{"mode":"overlay"}` |  |  | B | ☐ |
-| Blending Mode ▸ Soft Light | 16318485 | `motion.layer.blending_mode` | `{"mode":"soft_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Hard Light | 16318486 | `motion.layer.blending_mode` | `{"mode":"hard_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Linear Light | 16318487 | `motion.layer.blending_mode` | `{"mode":"linear_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Vivid Light | 16318488 | `motion.layer.blending_mode` | `{"mode":"vivid_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Pin Light | 16318489 | `motion.layer.blending_mode` | `{"mode":"pin_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Hard Mix | 16318490 | `motion.layer.blending_mode` | `{"mode":"hard_mix"}` |  |  | B | ☐ |
-| Blending Mode ▸ Difference | 16318492 | `motion.layer.blending_mode` | `{"mode":"difference"}` |  |  | B | ☐ |
-| Blending Mode ▸ Classic Difference | 16318493 | `motion.layer.blending_mode` | `{"mode":"classic_difference"}` |  |  | B | ☐ |
-| Blending Mode ▸ Exclusion | 16318494 | `motion.layer.blending_mode` | `{"mode":"exclusion"}` |  |  | B | ☐ |
-| Blending Mode ▸ Subtract | 16318495 | `motion.layer.blending_mode` | `{"mode":"subtract"}` |  |  | B | ☐ |
-| Blending Mode ▸ Divide | 16318496 | `motion.layer.blending_mode` | `{"mode":"divide"}` |  |  | B | ☐ |
-| Blending Mode ▸ Hue | 16318498 | `motion.layer.blending_mode` | `{"mode":"hue"}` |  |  | B | ☐ |
-| Blending Mode ▸ Saturation | 16318499 | `motion.layer.blending_mode` | `{"mode":"saturation"}` |  |  | B | ☐ |
-| Blending Mode ▸ Color | 16318500 | `motion.layer.blending_mode` | `{"mode":"color"}` |  |  | B | ☐ |
-| Blending Mode ▸ Luminosity | 16318501 | `motion.layer.blending_mode` | `{"mode":"luminosity"}` |  |  | B | ☐ |
-| Blending Mode ▸ Stencil Alpha | 16318503 | `motion.layer.blending_mode` | `{"mode":"stencil_alpha"}` |  |  | B | ☐ |
-| Blending Mode ▸ Stencil Luma | 16318504 | `motion.layer.blending_mode` | `{"mode":"stencil_luma"}` |  |  | B | ☐ |
-| Blending Mode ▸ Silhouette Alpha | 16318505 | `motion.layer.blending_mode` | `{"mode":"silhouette_alpha"}` |  |  | B | ☐ |
-| Blending Mode ▸ Silhouette Luma | 16318506 | `motion.layer.blending_mode` | `{"mode":"silhouette_luma"}` |  |  | B | ☐ |
-| Blending Mode ▸ Alpha Add | 16318508 | `motion.layer.blending_mode` | `{"mode":"alpha_add"}` |  |  | B | ☐ |
-| Blending Mode ▸ Luminescent Premul | 16318509 | `motion.layer.blending_mode` | `{"mode":"luminescent_premul"}` |  |  | B | ☐ |
-| Next Blending Mode | 393238 | `motion.layer.blending_mode_step` | `{"step":1}` | Shift+= | Shift+= | B | ☐ |
-| Previous Blending Mode | 393239 | `motion.layer.blending_mode_step` | `{"step":-1}` | Shift+- | Shift+- | B | ☐ |
+| Blending Mode ▸ Normal | 16318465 | `motion.layer.blending_mode` | `{"mode":"normal"}` |  |  | B | ✅ |
+| Blending Mode ▸ Dissolve | 16318466 | `motion.layer.blending_mode` | `{"mode":"dissolve"}` |  |  | B | ✅ |
+| Blending Mode ▸ Dancing Dissolve | 16318467 | `motion.layer.blending_mode` | `{"mode":"dancing_dissolve"}` |  |  | B | ✅ |
+| Blending Mode ▸ Darken | 16318469 | `motion.layer.blending_mode` | `{"mode":"darken"}` |  |  | B | ✅ |
+| Blending Mode ▸ Multiply | 16318470 | `motion.layer.blending_mode` | `{"mode":"multiply"}` |  |  | B | ✅ |
+| Blending Mode ▸ Color Burn | 16318471 | `motion.layer.blending_mode` | `{"mode":"color_burn"}` |  |  | B | ✅ |
+| Blending Mode ▸ Classic Color Burn | 16318472 | `motion.layer.blending_mode` | `{"mode":"classic_color_burn"}` |  |  | B | ✅ |
+| Blending Mode ▸ Linear Burn | 16318473 | `motion.layer.blending_mode` | `{"mode":"linear_burn"}` |  |  | B | ✅ |
+| Blending Mode ▸ Darker Color | 16318474 | `motion.layer.blending_mode` | `{"mode":"darker_color"}` |  |  | B | ✅ |
+| Blending Mode ▸ Add | 16318476 | `motion.layer.blending_mode` | `{"mode":"add"}` |  |  | B | ✅ |
+| Blending Mode ▸ Lighten | 16318477 | `motion.layer.blending_mode` | `{"mode":"lighten"}` |  |  | B | ✅ |
+| Blending Mode ▸ Screen | 16318478 | `motion.layer.blending_mode` | `{"mode":"screen"}` |  |  | B | ✅ |
+| Blending Mode ▸ Color Dodge | 16318479 | `motion.layer.blending_mode` | `{"mode":"color_dodge"}` |  |  | B | ✅ |
+| Blending Mode ▸ Classic Color Dodge | 16318480 | `motion.layer.blending_mode` | `{"mode":"classic_color_dodge"}` |  |  | B | ✅ |
+| Blending Mode ▸ Linear Dodge | 16318481 | `motion.layer.blending_mode` | `{"mode":"linear_dodge"}` |  |  | B | ✅ |
+| Blending Mode ▸ Lighter Color | 16318482 | `motion.layer.blending_mode` | `{"mode":"lighter_color"}` |  |  | B | ✅ |
+| Blending Mode ▸ Overlay | 16318484 | `motion.layer.blending_mode` | `{"mode":"overlay"}` |  |  | B | ✅ |
+| Blending Mode ▸ Soft Light | 16318485 | `motion.layer.blending_mode` | `{"mode":"soft_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Hard Light | 16318486 | `motion.layer.blending_mode` | `{"mode":"hard_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Linear Light | 16318487 | `motion.layer.blending_mode` | `{"mode":"linear_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Vivid Light | 16318488 | `motion.layer.blending_mode` | `{"mode":"vivid_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Pin Light | 16318489 | `motion.layer.blending_mode` | `{"mode":"pin_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Hard Mix | 16318490 | `motion.layer.blending_mode` | `{"mode":"hard_mix"}` |  |  | B | ✅ |
+| Blending Mode ▸ Difference | 16318492 | `motion.layer.blending_mode` | `{"mode":"difference"}` |  |  | B | ✅ |
+| Blending Mode ▸ Classic Difference | 16318493 | `motion.layer.blending_mode` | `{"mode":"classic_difference"}` |  |  | B | ✅ |
+| Blending Mode ▸ Exclusion | 16318494 | `motion.layer.blending_mode` | `{"mode":"exclusion"}` |  |  | B | ✅ |
+| Blending Mode ▸ Subtract | 16318495 | `motion.layer.blending_mode` | `{"mode":"subtract"}` |  |  | B | ✅ |
+| Blending Mode ▸ Divide | 16318496 | `motion.layer.blending_mode` | `{"mode":"divide"}` |  |  | B | ✅ |
+| Blending Mode ▸ Hue | 16318498 | `motion.layer.blending_mode` | `{"mode":"hue"}` |  |  | B | ✅ |
+| Blending Mode ▸ Saturation | 16318499 | `motion.layer.blending_mode` | `{"mode":"saturation"}` |  |  | B | ✅ |
+| Blending Mode ▸ Color | 16318500 | `motion.layer.blending_mode` | `{"mode":"color"}` |  |  | B | ✅ |
+| Blending Mode ▸ Luminosity | 16318501 | `motion.layer.blending_mode` | `{"mode":"luminosity"}` |  |  | B | ✅ |
+| Blending Mode ▸ Stencil Alpha | 16318503 | `motion.layer.blending_mode` | `{"mode":"stencil_alpha"}` |  |  | B | ✅ |
+| Blending Mode ▸ Stencil Luma | 16318504 | `motion.layer.blending_mode` | `{"mode":"stencil_luma"}` |  |  | B | ✅ |
+| Blending Mode ▸ Silhouette Alpha | 16318505 | `motion.layer.blending_mode` | `{"mode":"silhouette_alpha"}` |  |  | B | ✅ |
+| Blending Mode ▸ Silhouette Luma | 16318506 | `motion.layer.blending_mode` | `{"mode":"silhouette_luma"}` |  |  | B | ✅ |
+| Blending Mode ▸ Alpha Add | 16318508 | `motion.layer.blending_mode` | `{"mode":"alpha_add"}` |  |  | B | ✅ |
+| Blending Mode ▸ Luminescent Premul | 16318509 | `motion.layer.blending_mode` | `{"mode":"luminescent_premul"}` |  |  | B | ✅ |
+| Next Blending Mode | 393238 | `motion.layer.blending_mode_step` | `{"step":1}` | Shift+= | Shift+= | B | ✅ |
+| Previous Blending Mode | 393239 | `motion.layer.blending_mode_step` | `{"step":-1}` | Shift+- | Shift+- | B | ✅ |
 | Track Matte ▸ No Track Matte | 16384001 | `motion.layer.track_matte` | `{"matte":"none"}` |  |  | B | ☐ |
 | Track Matte ▸ Alpha Matte | 16384003 | `motion.layer.track_matte` | `{"matte":"alpha"}` |  |  | B | ☐ |
 | Track Matte ▸ Alpha Inverted Matte | 16384004 | `motion.layer.track_matte` | `{"matte":"alpha_inverted"}` |  |  | B | ☐ |
@@ -430,8 +430,8 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | Effect Controls | 458753 | `window.panel` | `{"id":"effect_controls","toggle":true}` | F3 / Ctrl+Shift+T | F3 / Cmd+Shift+T | B | ✅ |
-| Last Effect | 458754 | `motion.effect.last_effect` |  | Ctrl+Alt+Shift+E | Cmd+Opt+Shift+E | B | ☐ |
-| Remove All | 458755 | `motion.effect.remove_all` |  | Ctrl+Shift+E | Cmd+Shift+E | B | ☐ |
+| Last Effect | 458754 | `motion.effect.last_effect` |  | Ctrl+Alt+Shift+E | Cmd+Opt+Shift+E | B | ✅ |
+| Remove All | 458755 | `motion.effect.remove_all` |  | Ctrl+Shift+E | Cmd+Shift+E | B | ✅ |
 | Manage Effects... | 458757 | `motion.effect.manage_effects` |  |  |  | E | ⏸ |
 | 效果分类（3D Channel、Audio、Blur & Sharpen、Boris FX Mocha、Channel、Cinema 4D、Color Correction、Distort、Expression Controls、Generate、Immersive Video、Keying、Matte、Noise & Grain、Obsolete、Perspective、Simulation、Stylize、Text、Time、Transition、Utility） ▸ 各效果 | | `motion.effect.apply` | `{"match_name":"…"}` | | | B | ☐ |
 
@@ -465,13 +465,13 @@
 | Add Property to Essential Graphics | 851980 | `motion.anim.add_property_to_essential_graphics` |  |  |  | E | ⏸ |
 | Animate Text ▸ Enable Per-character 3D | 1179649 | `motion.anim.enable_per_character_3d` |  |  |  | A | ⏸ |
 | Animate Text ▸ Anchor Point | 1179651 | `motion.anim.animate_text` | `{"property":"anchor_point"}` |  |  | A | ⏸ |
-| Animate Text ▸ Position | 1179652 | `motion.anim.animate_text` | `{"property":"position"}` |  |  | A | ⏸ |
-| Animate Text ▸ Scale | 1179653 | `motion.anim.animate_text` | `{"property":"scale"}` |  |  | A | ⏸ |
+| Animate Text ▸ Position | 1179652 | `motion.anim.animate_text` | `{"property":"position"}` |  |  | A | ✅ |
+| Animate Text ▸ Scale | 1179653 | `motion.anim.animate_text` | `{"property":"scale"}` |  |  | A | ✅ |
 | Animate Text ▸ Skew | 1179654 | `motion.anim.animate_text` | `{"property":"skew"}` |  |  | A | ⏸ |
-| Animate Text ▸ Rotation | 1179655 | `motion.anim.animate_text` | `{"property":"rotation"}` |  |  | A | ⏸ |
-| Animate Text ▸ Opacity | 1179656 | `motion.anim.animate_text` | `{"property":"opacity"}` |  |  | A | ⏸ |
+| Animate Text ▸ Rotation | 1179655 | `motion.anim.animate_text` | `{"property":"rotation"}` |  |  | A | ✅ |
+| Animate Text ▸ Opacity | 1179656 | `motion.anim.animate_text` | `{"property":"opacity"}` |  |  | A | ✅ |
 | Animate Text ▸ All Transform Properties | 1179657 | `motion.anim.animate_text` | `{"property":"all_transform"}` |  |  | A | ⏸ |
-| Animate Text ▸ Fill Color ▸ RGB | 1310721 | `motion.anim.animate_text` | `{"property":"fill_rgb"}` |  |  | A | ⏸ |
+| Animate Text ▸ Fill Color ▸ RGB | 1310721 | `motion.anim.animate_text` | `{"property":"fill_rgb"}` |  |  | A | ✅ |
 | Animate Text ▸ Fill Color ▸ Hue | 1310722 | `motion.anim.animate_text` | `{"property":"fill_hue"}` |  |  | A | ⏸ |
 | Animate Text ▸ Fill Color ▸ Saturation | 1310723 | `motion.anim.animate_text` | `{"property":"fill_saturation"}` |  |  | A | ⏸ |
 | Animate Text ▸ Fill Color ▸ Brightness | 1310724 | `motion.anim.animate_text` | `{"property":"fill_brightness"}` |  |  | A | ⏸ |
@@ -482,16 +482,16 @@
 | Animate Text ▸ Stroke Color ▸ Brightness | 1376260 | `motion.anim.animate_text` | `{"property":"stroke_brightness"}` |  |  | A | ⏸ |
 | Animate Text ▸ Stroke Color ▸ Opacity | 1376261 | `motion.anim.animate_text` | `{"property":"stroke_opacity"}` |  |  | A | ⏸ |
 | Animate Text ▸ Stroke Width | 1179661 | `motion.anim.animate_text` | `{"property":"stroke_width"}` |  |  | A | ⏸ |
-| Animate Text ▸ Tracking | 1179663 | `motion.anim.animate_text` | `{"property":"tracking"}` |  |  | A | ⏸ |
+| Animate Text ▸ Tracking | 1179663 | `motion.anim.animate_text` | `{"property":"tracking"}` |  |  | A | ✅ |
 | Animate Text ▸ Line Anchor | 1179664 | `motion.anim.animate_text` | `{"property":"line_anchor"}` |  |  | A | ⏸ |
 | Animate Text ▸ Line Spacing | 1179665 | `motion.anim.animate_text` | `{"property":"line_spacing"}` |  |  | A | ⏸ |
 | Animate Text ▸ Character Offset | 1179667 | `motion.anim.animate_text` | `{"property":"character_offset"}` |  |  | A | ⏸ |
 | Animate Text ▸ Character Value | 1179668 | `motion.anim.animate_text` | `{"property":"character_value"}` |  |  | A | ⏸ |
 | Animate Text ▸ Blur | 1179670 | `motion.anim.animate_text` | `{"property":"blur"}` |  |  | A | ⏸ |
-| Add Text Selector ▸ Range | 1245185 | `motion.anim.add_text_selector` | `{"selector":"range"}` |  |  | A | ⏸ |
+| Add Text Selector ▸ Range | 1245185 | `motion.anim.add_text_selector` | `{"selector":"range"}` |  |  | A | ✅ |
 | Add Text Selector ▸ Wiggly | 1245186 | `motion.anim.add_text_selector` | `{"selector":"wiggly"}` |  |  | A | ⏸ |
 | Add Text Selector ▸ Expression | 1245187 | `motion.anim.add_text_selector` | `{"selector":"expression"}` |  |  | A | ⏸ |
-| Remove All Text Animators | 851984 | `motion.anim.remove_all_text_animators` |  |  |  | A | ⏸ |
+| Remove All Text Animators | 851984 | `motion.anim.remove_all_text_animators` |  |  |  | A | ✅ |
 | Add Expression | 851986 | `motion.anim.add_expression` |  | Alt+Shift+= | Opt+Shift+= | C | ☐ |
 | Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ☐ |
 | Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
@@ -616,7 +616,7 @@
 | Smoother | 524309 | `window.panel` | `{"id":"smoother","toggle":true}` |  |  | E | ⏸ |
 | Libraries | 524310 | `window.panel` | `{"id":"libraries","toggle":true}` |  |  | B | Ⓐ |
 | Wiggler | 524311 | `window.panel` | `{"id":"wiggler","toggle":true}` |  |  | E | ⏸ |
-| Effects & Presets | 524312 | `window.panel` | `{"id":"effects","toggle":true}` | Ctrl+5 | Cmd+5 | E | ☐ |
+| Effects & Presets | 524312 | `window.panel` | `{"id":"effects","toggle":true}` | Ctrl+5 | Cmd+5 | E | ✅ |
 | Paragraph | 524313 | `window.panel` | `{"id":"paragraph","toggle":true}` | Ctrl+7 | Cmd+7 | E | ☐ |
 | Brushes | 524314 | `window.panel` | `{"id":"brushes","toggle":true}` | Ctrl+9 | Cmd+9 | E | ⏸ |
 | Paint | 524315 | `window.panel` | `{"id":"paint","toggle":true}` | Ctrl+8 | Cmd+8 | E | ⏸ |
@@ -836,26 +836,26 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `CompGotoMarker0` | `motion.timeline.go_to_comp_marker` | `{"number":0}` | 0 | 0 | timeline | C | ☐ |
-| `CompGotoMarker1` | `motion.timeline.go_to_comp_marker` | `{"number":1}` | 1 | 1 | timeline | C | ☐ |
-| `CompGotoMarker2` | `motion.timeline.go_to_comp_marker` | `{"number":2}` | 2 | 2 | timeline | C | ☐ |
-| `CompGotoMarker3` | `motion.timeline.go_to_comp_marker` | `{"number":3}` | 3 | 3 | timeline | C | ☐ |
-| `CompGotoMarker4` | `motion.timeline.go_to_comp_marker` | `{"number":4}` | 4 | 4 | timeline | C | ☐ |
-| `CompGotoMarker5` | `motion.timeline.go_to_comp_marker` | `{"number":5}` | 5 | 5 | timeline | C | ☐ |
-| `CompGotoMarker6` | `motion.timeline.go_to_comp_marker` | `{"number":6}` | 6 | 6 | timeline | C | ☐ |
-| `CompGotoMarker7` | `motion.timeline.go_to_comp_marker` | `{"number":7}` | 7 | 7 | timeline | C | ☐ |
-| `CompGotoMarker8` | `motion.timeline.go_to_comp_marker` | `{"number":8}` | 8 | 8 | timeline | C | ☐ |
-| `CompGotoMarker9` | `motion.timeline.go_to_comp_marker` | `{"number":9}` | 9 | 9 | timeline | C | ☐ |
-| `CompMarker0` | `motion.timeline.set_comp_marker` | `{"number":0}` | Shift+0 | Shift+0 | timeline | C | ☐ |
-| `CompMarker1` | `motion.timeline.set_comp_marker` | `{"number":1}` | Shift+1 | Shift+1 | timeline | C | ☐ |
-| `CompMarker2` | `motion.timeline.set_comp_marker` | `{"number":2}` | Shift+2 | Shift+2 | timeline | C | ☐ |
-| `CompMarker3` | `motion.timeline.set_comp_marker` | `{"number":3}` | Shift+3 | Shift+3 | timeline | C | ☐ |
-| `CompMarker4` | `motion.timeline.set_comp_marker` | `{"number":4}` | Shift+4 | Shift+4 | timeline | C | ☐ |
-| `CompMarker5` | `motion.timeline.set_comp_marker` | `{"number":5}` | Shift+5 | Shift+5 | timeline | C | ☐ |
-| `CompMarker6` | `motion.timeline.set_comp_marker` | `{"number":6}` | Shift+6 | Shift+6 | timeline | C | ☐ |
-| `CompMarker7` | `motion.timeline.set_comp_marker` | `{"number":7}` | Shift+7 | Shift+7 | timeline | C | ☐ |
-| `CompMarker8` | `motion.timeline.set_comp_marker` | `{"number":8}` | Shift+8 | Shift+8 | timeline | C | ☐ |
-| `CompMarker9` | `motion.timeline.set_comp_marker` | `{"number":9}` | Shift+9 | Shift+9 | timeline | C | ☐ |
+| `CompGotoMarker0` | `motion.timeline.go_to_comp_marker` | `{"number":0}` | 0 | 0 | timeline | C | ✅ |
+| `CompGotoMarker1` | `motion.timeline.go_to_comp_marker` | `{"number":1}` | 1 | 1 | timeline | C | ✅ |
+| `CompGotoMarker2` | `motion.timeline.go_to_comp_marker` | `{"number":2}` | 2 | 2 | timeline | C | ✅ |
+| `CompGotoMarker3` | `motion.timeline.go_to_comp_marker` | `{"number":3}` | 3 | 3 | timeline | C | ✅ |
+| `CompGotoMarker4` | `motion.timeline.go_to_comp_marker` | `{"number":4}` | 4 | 4 | timeline | C | ✅ |
+| `CompGotoMarker5` | `motion.timeline.go_to_comp_marker` | `{"number":5}` | 5 | 5 | timeline | C | ✅ |
+| `CompGotoMarker6` | `motion.timeline.go_to_comp_marker` | `{"number":6}` | 6 | 6 | timeline | C | ✅ |
+| `CompGotoMarker7` | `motion.timeline.go_to_comp_marker` | `{"number":7}` | 7 | 7 | timeline | C | ✅ |
+| `CompGotoMarker8` | `motion.timeline.go_to_comp_marker` | `{"number":8}` | 8 | 8 | timeline | C | ✅ |
+| `CompGotoMarker9` | `motion.timeline.go_to_comp_marker` | `{"number":9}` | 9 | 9 | timeline | C | ✅ |
+| `CompMarker0` | `motion.timeline.set_comp_marker` | `{"number":0}` | Shift+0 | Shift+0 | timeline | C | ✅ |
+| `CompMarker1` | `motion.timeline.set_comp_marker` | `{"number":1}` | Shift+1 | Shift+1 | timeline | C | ✅ |
+| `CompMarker2` | `motion.timeline.set_comp_marker` | `{"number":2}` | Shift+2 | Shift+2 | timeline | C | ✅ |
+| `CompMarker3` | `motion.timeline.set_comp_marker` | `{"number":3}` | Shift+3 | Shift+3 | timeline | C | ✅ |
+| `CompMarker4` | `motion.timeline.set_comp_marker` | `{"number":4}` | Shift+4 | Shift+4 | timeline | C | ✅ |
+| `CompMarker5` | `motion.timeline.set_comp_marker` | `{"number":5}` | Shift+5 | Shift+5 | timeline | C | ✅ |
+| `CompMarker6` | `motion.timeline.set_comp_marker` | `{"number":6}` | Shift+6 | Shift+6 | timeline | C | ✅ |
+| `CompMarker7` | `motion.timeline.set_comp_marker` | `{"number":7}` | Shift+7 | Shift+7 | timeline | C | ✅ |
+| `CompMarker8` | `motion.timeline.set_comp_marker` | `{"number":8}` | Shift+8 | Shift+8 | timeline | C | ✅ |
+| `CompMarker9` | `motion.timeline.set_comp_marker` | `{"number":9}` | Shift+9 | Shift+9 | timeline | C | ✅ |
 
 ### `CCompPaintCmd`
 

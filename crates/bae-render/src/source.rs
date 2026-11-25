@@ -14,9 +14,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, wgpu};
-use bae_model::Time;
+use bae_model::{PrimPath, Time};
 use rustc_hash::FxHashMap;
 
+use crate::effect::{LayerDependency, MaskSelect};
 use crate::error::RenderError;
 use crate::geom::IRect;
 use crate::input::CustomContent;
@@ -155,9 +156,38 @@ pub struct EncodeContext<'a> {
     /// Working texture format.
     pub format: wgpu::TextureFormat,
     pub(crate) allocator: &'a mut dyn ImageAllocator,
+    pub(crate) effect_inputs: &'a [(LayerDependency, GpuImage)],
+    pub(crate) effect_masks: &'a [(MaskSelect, GpuImage)],
 }
 
 impl EncodeContext<'_> {
+    /// The first image of `layer` the current effect requested
+    /// ([`crate::Effect::layer_dependencies`]). `None` when the layer has no
+    /// pixels then (outside its in / out points, missing footage).
+    pub fn effect_input(&self, layer: &PrimPath) -> Option<&GpuImage> {
+        self.effect_inputs
+            .iter()
+            .find(|(d, _)| d.layer == *layer)
+            .map(|(_, image)| image)
+    }
+
+    /// The image of exactly `dependency` (layer, time and stage).
+    pub fn effect_layer(&self, dependency: &LayerDependency) -> Option<&GpuImage> {
+        self.effect_inputs
+            .iter()
+            .find(|(d, _)| d == dependency)
+            .map(|(_, image)| image)
+    }
+
+    /// The coverage image (alpha) of `masks` of the effect's layer
+    /// ([`crate::Effect::mask_dependencies`]).
+    pub fn effect_mask(&self, masks: &MaskSelect) -> Option<&GpuImage> {
+        self.effect_masks
+            .iter()
+            .find(|(m, _)| m == masks)
+            .map(|(_, image)| image)
+    }
+
     /// A working-format image covering `rect` (pixels of its space) at
     /// `pixel_scale` pixels per texel, usable as a render attachment and storage
     /// texture. Its contents are undefined (clear

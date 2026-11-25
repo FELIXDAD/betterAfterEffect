@@ -1,0 +1,13 @@
+[effect.black-white]
+name = "黑色和白色"
+keywords = ["黑色和白色"]
+
+[effect.black-white.params]
+reds = "红色"
+yellows = "黄色"
+greens = "绿色"
+cyans = "青色"
+blues = "蓝色"
+magentas = "洋红"
+tint = "淡色:"
+tint_color = "色调颜色"

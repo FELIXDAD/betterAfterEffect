@@ -24,6 +24,7 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 mod free_transform;
+mod menu;
 mod motion_path;
 mod overlay;
 mod path_edit;
@@ -75,6 +76,10 @@ pub struct CompositionViewer {
     select: select_tool::SelectState,
     /// Magnification of the last frame (arrow keys nudge by screen pixels).
     mag: f32,
+    /// Layers under the pointer when the context menu opened (topmost first).
+    menu_layers: Vec<PrimPath>,
+    /// Pixel step the last frame rendered at (1 Full, 2 Half …).
+    render_factor: u32,
     /// Type tool: text being typed or edited.
     type_tool: type_tool::TypeState,
     /// Settings read at the start of each frame.
@@ -224,6 +229,16 @@ fn apply_overrides(
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
+        // A scrubbed effect parameter of this layer (Effect Controls, timeline).
+        if let Some(s) = scrub.filter(|s| s.attr.starts_with("param:"))
+            && crate::effects::layer_of(&s.path).as_ref() == Some(&layer.path)
+            && let Some(e) = layer.effects.iter_mut().find(|e| e.path == s.path)
+        {
+            e.params.insert(
+                s.attr.trim_start_matches("param:").to_owned(),
+                s.value.clone(),
+            );
+        }
         if let Some(s) = scrub.filter(|s| s.path == layer.path) {
             touched = true;
             let v3 = |v: &Value| match v {
@@ -522,7 +537,8 @@ impl Panel for CompositionViewer {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
         }
-        let resolution = session.lock().resolution;
+        let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
+        self.render_factor = resolution;
         let image = self
             .gpu
             .as_mut()
@@ -780,12 +796,82 @@ impl Panel for CompositionViewer {
                 }
             }
         }
+        menu::frame(&mut self.menu_layers, &resp, cx, &session, &comp, &view);
+
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
             add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
         }
+        // An effect dropped on a layer (Effects & Presets) is applied to it.
+        if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
+            && let Some(p) = pointer
+            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, p)
+        {
+            crate::effects::apply(cx, &[layer], &fx.0);
+        }
 
-        bar::bottom_bar(ui, bar, self, &info, time, mag, &session);
+        bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+    }
+}
+
+/// The comp's resolution as a pixel step (Composition Settings > Resolution:
+/// 1 Full, 2 Half, 3 Third, 4 Quarter, more Custom).
+pub(crate) fn comp_resolution(stage: &bae_model::Stage, comp: &PrimPath) -> u32 {
+    match stage
+        .prim(comp)
+        .and_then(|v| query::static_value(&v, "resolution"))
+    {
+        Some(Value::Vec2([h, _])) => (h as u32).max(1),
+        _ => 1,
+    }
+}
+
+/// The pixel step the viewer renders at: the comp's resolution, or on Auto the
+/// coarsest step the magnification hides (50 % → Half, 25 % → Quarter).
+fn render_factor(stage: &bae_model::Stage, comp: &PrimPath, auto: bool, mag: f32) -> u32 {
+    if auto {
+        (1.0 / mag.max(0.01) + 0.01).floor().max(1.0) as u32
+    } else {
+        comp_resolution(stage, comp)
+    }
+}
+
+/// Set the active comp's resolution (View > Resolution, the viewer's menu) and,
+/// with `nested`, of the comps nested in it (AE's "… Recurse" shortcuts); turns
+/// Auto off. One `comp.set_settings` per comp, like Composition Settings.
+pub(crate) fn set_resolution(
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    factor: u32,
+    nested: bool,
+) {
+    let Some(comp) = session.lock().active_comp.clone() else {
+        return;
+    };
+    session.lock().auto_resolution = false;
+    let mut comps = vec![comp];
+    let mut i = 0;
+    while nested && i < comps.len() {
+        for l in query::comp_layers(cx.stage, &comps[i]) {
+            if let Some(Value::PrimRef(src)) = cx
+                .stage
+                .prim(&l)
+                .and_then(|v| query::static_value(&v, "source"))
+                && query::comp_info(cx.stage, &src).is_some()
+                && !comps.contains(&src)
+            {
+                comps.push(src);
+            }
+        }
+        i += 1;
+    }
+    for c in comps {
+        if comp_resolution(cx.stage, &c) != factor {
+            cx.invoke_with(
+                "comp.set_settings",
+                json!({"comp": c, "resolution": [factor, factor]}),
+            );
+        }
     }
 }
 

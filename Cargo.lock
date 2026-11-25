@@ -627,11 +627,13 @@ version = "0.0.1"
 dependencies = [
  "bae-anim",
  "bae-app",
+ "bae-color",
  "bae-gpu",
  "bae-model",
  "bae-motion",
  "bae-plugin",
  "bae-render",
+ "glam",
  "half",
  "parking_lot",
  "png",
@@ -917,6 +919,7 @@ version = "0.0.1"
 dependencies = [
  "bae-anim",
  "bae-app",
+ "bae-effects",
  "bae-gpu",
  "bae-media",
  "bae-model",
