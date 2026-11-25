@@ -157,6 +157,14 @@ impl Node {
         Node::Frame(Frame::new(tabs))
     }
 
+    /// Every frame of the tree, in order.
+    pub(crate) fn collect_frames<'a>(&'a self, out: &mut Vec<&'a Frame>) {
+        match self {
+            Node::Frame(f) => out.push(f),
+            Node::Split { children, .. } => children.iter().for_each(|c| c.collect_frames(out)),
+        }
+    }
+
     fn frames(&self, out: &mut Vec<FrameId>) {
         match self {
             Node::Frame(f) => out.push(f.id),
@@ -496,6 +504,9 @@ pub struct Dock {
     actions: Vec<Action>,
     next_id: u32,
     id: Id,
+    /// Where closed panels were (frame, tab index, the tabs beside them): AE
+    /// puts a reopened panel back in its place.
+    closed: std::collections::HashMap<PanelId, (FrameId, usize, Vec<PanelId>)>,
 }
 
 impl Dock {
@@ -530,6 +541,7 @@ impl Dock {
             actions: Vec::new(),
             next_id: next,
             id: Id::new("bae-dock"),
+            closed: std::collections::HashMap::new(),
         }
     }
 
@@ -609,6 +621,35 @@ impl Dock {
 
     /// Bring a panel to front, or add it to the focused frame if it is closed.
     pub fn open(&mut self, panel: PanelId) {
+        self.open_near(panel, &[]);
+    }
+
+    /// Open (or bring to front) `panel`. A closed panel goes back where it was
+    /// (its frame, else a frame holding a tab that was beside it), else into
+    /// the frame of the first of `near` that is open, else the focused frame.
+    pub fn open_near(&mut self, panel: PanelId, near: &[PanelId]) {
+        if self.frame_of(&panel).is_none() {
+            let (frame, index) = match self.closed.remove(&panel) {
+                Some((frame, index, beside)) => (
+                    self.layout
+                        .root
+                        .find(frame)
+                        .map(|f| f.id)
+                        .or_else(|| beside.iter().find_map(|b| self.layout.root.frame_of(b))),
+                    Some(index),
+                ),
+                None => (None, None),
+            };
+            let frame = frame.or_else(|| near.iter().find_map(|n| self.layout.root.frame_of(n)));
+            if let Some(f) = frame.and_then(|f| self.layout.root.find_mut(f)) {
+                let i = index.unwrap_or(f.tabs.len()).min(f.tabs.len());
+                f.tabs.insert(i, panel);
+                f.active = i;
+                f.collapsed = false;
+                self.focused = Some(f.id);
+                return;
+            }
+        }
         if let Some(fid) = self.frame_of(&panel) {
             if let Some(f) = self.frame_mut(fid)
                 && let Some(i) = f.tabs.iter().position(|t| *t == panel)
@@ -649,6 +690,16 @@ impl Dock {
     }
 
     pub fn close(&mut self, panel: &PanelId) {
+        if let Some(f) = self
+            .layout
+            .root
+            .frame_of(panel)
+            .and_then(|f| self.layout.root.find(f))
+        {
+            let index = f.tabs.iter().position(|t| t == panel).unwrap_or(0);
+            let beside = f.tabs.iter().filter(|t| *t != panel).cloned().collect();
+            self.closed.insert(panel.clone(), (f.id, index, beside));
+        }
         self.layout.root.take_panel(panel);
         for f in &mut self.layout.floating {
             if let Some(i) = f.frame.tabs.iter().position(|t| t == panel) {
@@ -1675,15 +1726,32 @@ fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl Pane
         node.set_author_id(format!("panel:{}", panel.as_str()));
     });
     let scroll_id = child.id().with("overflow-scroll");
-    let scrolling = child
+    // Scrolls along the axes that overflowed (both would give wrapping
+    // contents unlimited width: they would fit, stop scrolling and overflow
+    // again the next frame).
+    // While the panel keeps its size an axis that scrolls keeps scrolling:
+    // contents whose size depends on the scroll bars would otherwise flip.
+    let size = [rect.width().round() as i32, rect.height().round() as i32];
+    let (scrolling, scrolled_at) = child
         .ctx()
-        .data(|d| d.get_temp::<bool>(scroll_id))
-        .unwrap_or(false);
-    let content = if scrolling {
-        let out = egui::ScrollArea::both()
+        .data(|d| d.get_temp::<([bool; 2], [i32; 2])>(scroll_id))
+        .unwrap_or(([false, false], size));
+    let scrolling = if scrolled_at == size {
+        scrolling
+    } else {
+        [false, false]
+    };
+    let content = if scrolling != [false, false] {
+        let out = egui::ScrollArea::new(scrolling)
             .id_salt(scroll_id)
             .auto_shrink([false, false])
-            .show(&mut child, |ui| host.ui(ui, panel));
+            .show(&mut child, |ui| {
+                // A scroll view for screen readers (egui only names the bar).
+                ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                    node.set_role(egui::accesskit::Role::ScrollView);
+                });
+                host.ui(ui, panel)
+            });
         out.content_size
     } else {
         host.ui(&mut child, panel);
@@ -1694,12 +1762,17 @@ fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl Pane
         rect,
         content,
     };
-    let overflows = area.overflows();
-    if overflows != scrolling {
+    let axes = [
+        scrolling[0] || area.content.x > rect.width() + 0.5,
+        scrolling[1] || area.content.y > rect.height() + 0.5,
+    ];
+    if axes != scrolling || scrolled_at != size {
         child
             .ctx()
-            .data_mut(|d| d.insert_temp(scroll_id, overflows));
-        child.ctx().request_repaint();
+            .data_mut(|d| d.insert_temp(scroll_id, (axes, size)));
+        if axes != scrolling {
+            child.ctx().request_repaint();
+        }
     }
     record_panel_area(ui.ctx(), area);
 }
@@ -2106,6 +2179,27 @@ mod tests {
         assert_eq!(dock.frame_of(&"preview".into()), Some(comp));
         assert_eq!(dock.frame(comp).unwrap().tabs.len(), 2);
         assert_eq!(dock.frame_ids().len(), 4);
+    }
+
+    #[test]
+    fn reopened_panels_go_back_where_they_were() {
+        let mut dock = Dock::new(ae_default());
+        let project = dock.frame_of(&"project".into()).unwrap();
+        let focus_elsewhere = dock.frame_of(&"timeline".into()).unwrap();
+        // Effect Controls (2nd tab next to Project) closed, the Timeline focused:
+        // F3 brings it back beside Project, not into the Timeline (AE).
+        dock.close(&"effect_controls".into());
+        dock.focused = Some(focus_elsewhere);
+        dock.open("effect_controls".into());
+        let f = dock.frame(project).unwrap();
+        assert_eq!(f.tabs[f.active], PanelId::from("effect_controls"));
+        assert_eq!(
+            f.tabs.iter().position(|t| t.kind() == "effect_controls"),
+            Some(1)
+        );
+        // A panel never opened goes into the frame of a panel it is placed near.
+        dock.open_near("render_queue".into(), &["timeline".into()]);
+        assert_eq!(dock.frame_of(&"render_queue".into()), Some(focus_elsewhere));
     }
 
     #[test]
