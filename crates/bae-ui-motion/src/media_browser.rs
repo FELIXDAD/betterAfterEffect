@@ -30,6 +30,18 @@ struct State {
     folder: Option<PathBuf>,
 }
 
+/// Registers the panel and its Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "media_browser",
+        bae_ui::PanelKind::new("Media Browser", |spawn| {
+            Box::new(MediaBrowserPanel::from_state(spawn.state))
+        }),
+    );
+}
+
 /// The Media Browser panel.
 #[derive(Default)]
 pub struct MediaBrowserPanel {

@@ -83,6 +83,15 @@ fn chart(stage: &Stage, comp: &PrimPath) -> Vec<Node> {
     out
 }
 
+/// Registers the panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    crate::register_panel(
+        app,
+        "flowchart",
+        bae_ui::PanelKind::new("Flowchart", |_| Box::new(FlowchartPanel::default())),
+    );
+}
+
 /// The Flowchart panel.
 #[derive(Default)]
 pub struct FlowchartPanel {
@@ -196,9 +205,6 @@ impl Panel for FlowchartPanel {
         }
     }
 }
-
-/// Chinese for the panel (AE 26).
-pub(crate) const ZH: &[(&str, &str)] = &[("(none)", "(无)")];
 
 #[cfg(test)]
 mod tests {

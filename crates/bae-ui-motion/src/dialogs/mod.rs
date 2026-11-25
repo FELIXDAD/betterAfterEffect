@@ -306,3 +306,11 @@ impl bae_ui::DialogHost for MotionDialogs {
         }
     }
 }
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+}
