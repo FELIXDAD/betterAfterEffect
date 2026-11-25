@@ -11,7 +11,11 @@ fn playhead_has_priority_after_preview_stops() {
         return;
     };
     let mut h = super::Harness::new();
-    let (path, _, _) = h.comp_with_layers();
+    let (path, _, shape) = h.comp_with_layers();
+    h.run(
+        "attr.set_expression",
+        serde_json::json!({"path":shape, "attr":"transform:rotation", "source":"time*1000"}),
+    );
     let registry = Arc::new(ViewportTextureRegistry::new());
     let mut worker = PlaybackPreview::new(gpu, registry.clone());
     let rate = FrameRate::FPS_60;

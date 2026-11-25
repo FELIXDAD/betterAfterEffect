@@ -349,6 +349,14 @@ impl Drop for PlaybackPreview {
     }
 }
 
+/// Recognizes only the numeric/time subset needed for dependency tracking.
+fn time_arithmetic(source: &str) -> bool {
+    source.split("time").all(|part| {
+        part.bytes()
+            .all(|b| b.is_ascii_digit() || b.is_ascii_whitespace() || b"+-*/%().".contains(&b))
+    })
+}
+
 struct Producer {
     stage: Stage,
     eval: Evaluator,
@@ -372,14 +380,16 @@ impl Producer {
             engine.renderer.sync_effects(&effects.0);
         }
         let stage = scene.snapshot.restore()?;
-        // Expressions can read another comp or sample other times. Until those
-        // reads carry exact sample times, edits conservatively invalidate them.
+        // Pure arithmetic over time has no project reads. General JavaScript
+        // can look up other compositions or sample outside this frame.
         let dynamic = stage.sublayers().any(|l| {
             l.paths().any(|p| {
                 l.spec(p).is_some_and(|s| {
-                    s.attrs
-                        .values()
-                        .any(|a| a.expression.as_ref().is_some_and(|e| e.enabled))
+                    s.attrs.values().any(|a| {
+                        a.expression
+                            .as_ref()
+                            .is_some_and(|e| e.enabled && !time_arithmetic(&e.source))
+                    })
                 })
             })
         }) || stage.attached_projects().next().is_some();
