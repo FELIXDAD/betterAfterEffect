@@ -80,15 +80,27 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
+    changes: StageChanges,
+}
+
+/// Panels observe the same committed edits, undo/redo and project replacements.
+#[derive(Default)]
+pub(crate) struct StageChanges {
     seq: Option<u64>,
+}
+
+impl StageChanges {
+    pub(crate) fn changed(&mut self, resources: &Resources) -> bool {
+        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
+        let previous = std::mem::replace(&mut self.seq, seq);
+        seq.is_none() || seq != previous
+    }
 }
 
 impl EvalCache {
     pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        if seq.is_none() || seq != self.seq {
+        if self.changes.changed(resources) {
             self.eval.clear();
-            self.seq = seq;
         }
         &mut self.eval
     }

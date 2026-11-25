@@ -308,6 +308,27 @@ pub(crate) fn import_multiple(cx: &mut PanelContext<'_>, session: &SharedSession
     }
 }
 
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // File > Import and dropped files (`import`).
+    ("Import File", "导入文件"),
+    ("Import Multiple Files", "导入多个文件"),
+    ("File", "文件"),
+    ("File...", "文件..."),
+    ("Multiple Files...", "多个文件..."),
+    ("Import", "导入"),
+    (
+        "These files could not be imported because their format is not supported:",
+        "以下文件的格式不受支持，无法导入：",
+    ),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

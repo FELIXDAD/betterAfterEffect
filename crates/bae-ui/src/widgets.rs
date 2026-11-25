@@ -8,8 +8,8 @@ use std::ops::RangeInclusive;
 
 use egui::text::LayoutJob;
 use egui::{
-    Align2, Color32, CursorIcon, FontId, Key, Pos2, Rect, Response, Sense, Stroke, TextEdit,
-    TextFormat, Ui, Vec2, Widget, pos2, vec2,
+    Align2, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke,
+    TextEdit, TextFormat, Ui, Vec2, Widget, pos2, vec2,
 };
 
 use crate::a11y::Accessible as _;
@@ -106,6 +106,48 @@ struct HotState {
     focus: bool,
     /// Sub-step drag remainder so slow drags still add up.
     carry: f64,
+    /// Just opened: the first typed character (or paste, Backspace, Delete)
+    /// replaces the whole value, as when AE selects it all.
+    fresh: bool,
+}
+
+/// Hot numbers in drawing order (this pass and the last complete one): Tab moves
+/// between them.
+#[derive(Clone, Default)]
+struct HotOrder {
+    pass: u64,
+    now: Vec<Id>,
+    last: Vec<Id>,
+}
+
+const HOT_ORDER: &str = "bae.hot_order";
+/// The hot number Tab moved to: it opens for editing when drawn.
+const HOT_NEXT: &str = "bae.hot_next";
+
+fn register_hot(ui: &Ui, id: Id) {
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|d| {
+        let o = d.get_temp_mut_or_default::<HotOrder>(Id::new(HOT_ORDER));
+        if o.pass != pass {
+            o.last = std::mem::take(&mut o.now);
+            o.pass = pass;
+        }
+        o.now.push(id);
+    });
+}
+
+fn hot_neighbour(ui: &Ui, id: Id, back: bool) -> Option<Id> {
+    ui.data(|d| {
+        let o = d.get_temp::<HotOrder>(Id::new(HOT_ORDER))?;
+        let list = if o.last.contains(&id) {
+            &o.last
+        } else {
+            &o.now
+        };
+        let i = list.iter().position(|x| *x == id)?;
+        let j = if back { i.checked_sub(1)? } else { i + 1 };
+        list.get(j).copied()
+    })
 }
 
 impl Widget for HotNumber<'_> {
@@ -114,24 +156,112 @@ impl Widget for HotNumber<'_> {
         let mut state: HotState = ui.data(|d| d.get_temp(id)).unwrap_or_default();
         let text = self.format(*self.value);
         let height = ui.spacing().interact_size.y;
+        register_hot(ui, id);
+        // Tabbed into from the previous (or next) value.
+        if ui.data(|d| d.get_temp::<Id>(Id::new(HOT_NEXT))) == Some(id) {
+            ui.data_mut(|d| d.remove::<Id>(Id::new(HOT_NEXT)));
+            state.editing = Some(text.clone());
+            state.focus = true;
+        }
 
         if let Some(mut buf) = state.editing.take() {
+            let edit_id = id.with("edit");
+            let entering = std::mem::take(&mut state.focus);
+            if entering {
+                state.fresh = true;
+            }
+            if state.fresh && ui.memory(|m| m.has_focus(edit_id)) {
+                let (replace, keep) = ui.input(|i| {
+                    let mut replace = false;
+                    let mut keep = i.pointer.any_pressed();
+                    for e in &i.events {
+                        match e {
+                            egui::Event::Text(_) | egui::Event::Paste(_) => replace = true,
+                            egui::Event::Key {
+                                key, pressed: true, ..
+                            } => match key {
+                                Key::Backspace | Key::Delete => replace = true,
+                                Key::ArrowLeft | Key::ArrowRight | Key::Home | Key::End => {
+                                    keep = true;
+                                }
+                                _ => {}
+                            },
+                            _ => {}
+                        }
+                    }
+                    (replace, keep)
+                });
+                if replace && !keep {
+                    buf.clear();
+                }
+                if replace || keep {
+                    state.fresh = false;
+                }
+            }
+            // Keys the field handles before the text edit sees them: Tab /
+            // Shift+Tab move to the next / previous value, Up / Down step it (±1,
+            // Shift ±10, Cmd/Ctrl ±0.1).
+            let (tab, step) = if ui.memory(|m| m.has_focus(edit_id)) {
+                ui.input_mut(|i| {
+                    let tab = if i.consume_key(Modifiers::SHIFT, Key::Tab) {
+                        Some(true)
+                    } else if i.consume_key(Modifiers::NONE, Key::Tab) {
+                        Some(false)
+                    } else {
+                        None
+                    };
+                    let mut step = None;
+                    for (key, sign) in [(Key::ArrowUp, 1.0), (Key::ArrowDown, -1.0)] {
+                        for (m, f) in [
+                            (Modifiers::SHIFT, 10.0),
+                            (Modifiers::COMMAND, 0.1),
+                            (Modifiers::NONE, 1.0),
+                        ] {
+                            if step.is_none() && i.consume_key(m, key) {
+                                step = Some(sign * f);
+                            }
+                        }
+                    }
+                    (tab, step)
+                })
+            } else {
+                (None, None)
+            };
+            let mut stepped = None;
+            if let Some(d) = step {
+                let v = (eval(&buf).unwrap_or(*self.value) + d)
+                    .clamp(*self.range.start(), *self.range.end());
+                buf = self.format(v);
+                stepped = Some(v);
+            }
             let width = self.width.unwrap_or(48.0);
             let edit = TextEdit::singleline(&mut buf)
-                .id(id.with("edit"))
+                .id(edit_id)
                 .font(self.font.clone())
                 .desired_width(width)
                 .margin(vec2(1.0, 0.0))
                 .text_color(color::TEXT_STRONG);
-            let mut resp = ui.add(edit);
-            if std::mem::take(&mut state.focus) {
+            // The open field keeps the number's name (screen readers, tests).
+            let mut resp = ui
+                .add(edit)
+                .labeled(egui::WidgetType::TextEdit, self.label);
+            if entering {
                 resp.request_focus();
+            }
+            if stepped.is_some() {
+                state.fresh = true;
+            }
+            if let Some(v) = stepped
+                && v != *self.value
+            {
+                *self.value = v;
+                resp.mark_changed();
             }
             let enter = ui.input(|i| i.key_pressed(Key::Enter));
             let escape = ui.input(|i| i.key_pressed(Key::Escape));
             if escape {
                 ui.data_mut(|d| d.insert_temp(id, HotState::default()));
-            } else if enter || resp.lost_focus() {
+            } else if enter || tab.is_some() || resp.lost_focus() {
                 if let Some(v) = eval(&buf) {
                     let v = v.clamp(*self.range.start(), *self.range.end());
                     if v != *self.value {
@@ -140,6 +270,12 @@ impl Widget for HotNumber<'_> {
                     }
                 }
                 ui.data_mut(|d| d.insert_temp(id, HotState::default()));
+                if let Some(back) = tab
+                    && let Some(next) = hot_neighbour(ui, id, back)
+                {
+                    ui.data_mut(|d| d.insert_temp(Id::new(HOT_NEXT), next));
+                    ui.ctx().request_repaint();
+                }
             } else {
                 state.editing = Some(buf);
                 ui.data_mut(|d| d.insert_temp(id, state));
@@ -781,5 +917,85 @@ mod tests {
         assert_eq!(timecode(30, 30.0), "0:00:01:00");
         assert_eq!(timecode(30 * 61 + 5, 30.0), "0:01:01:05");
         assert_eq!(timecode(-1, 24.0), "-0:00:00:01");
+    }
+}
+
+#[cfg(test)]
+mod hot_number_tests {
+    use egui::{Event, Key, Modifiers, PointerButton, RawInput, Rect, pos2, vec2};
+
+    use super::HotNumber;
+
+    struct H {
+        ctx: egui::Context,
+        values: [f64; 2],
+        rects: Vec<Rect>,
+    }
+
+    impl H {
+        fn frame(&mut self, events: Vec<Event>) {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let mut rects = Vec::new();
+            let values = &mut self.values;
+            let mut out = self.ctx.run_ui(raw, |ui| {
+                for v in values.iter_mut() {
+                    rects.push(ui.add(HotNumber::new(v).decimals(1)).rect);
+                }
+            });
+            out.textures_delta.clear();
+            self.rects = rects;
+        }
+
+        fn key(&mut self, key: Key, modifiers: Modifiers) {
+            self.frame(vec![Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }]);
+            self.frame(Vec::new());
+        }
+    }
+
+    #[test]
+    fn click_selects_all_tab_moves_arrows_step() {
+        let mut h = H {
+            ctx: egui::Context::default(),
+            values: [3.0, 7.0],
+            rects: Vec::new(),
+        };
+        h.frame(Vec::new());
+        let p = h.rects[0].center();
+        let button = |pressed| Event::PointerButton {
+            pos: p,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![Event::PointerMoved(p), button(true)]);
+        h.frame(vec![button(false)]);
+        h.frame(Vec::new());
+        h.frame(Vec::new());
+        // Everything is selected: typing replaces "3.0".
+        h.frame(vec![Event::Text("5".into())]);
+        h.key(Key::Tab, Modifiers::NONE);
+        assert_eq!(h.values[0], 5.0);
+        // The second value is open; Up adds 1, Shift+Up 10, Cmd+Down −0.1.
+        h.key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(h.values[1], 8.0);
+        h.key(Key::ArrowUp, Modifiers::SHIFT);
+        assert_eq!(h.values[1], 18.0);
+        h.key(Key::ArrowDown, Modifiers::COMMAND);
+        assert!((h.values[1] - 17.9).abs() < 1e-9, "{}", h.values[1]);
+        // Shift+Tab goes back to the first; Escape leaves it unchanged.
+        h.key(Key::Tab, Modifiers::SHIFT);
+        h.frame(vec![Event::Text("9".into())]);
+        h.key(Key::Escape, Modifiers::NONE);
+        assert_eq!(h.values[0], 5.0);
     }
 }
