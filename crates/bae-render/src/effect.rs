@@ -83,8 +83,10 @@ impl ScalarTrack {
         self.knots.last().map_or(0, |last| last.fingerprint)
     }
     pub(crate) fn truncate_from(&mut self, time: Time) {
-        let n = self.knots.partition_point(|k| k.time < time.as_seconds());
-        self.knots.truncate(n);
+        // The expression VM rounds property reads to its subframe grid. When
+        // the edited segment starts between samples, resample its left neighbor.
+        let through = self.knots.partition_point(|k| k.time <= time.as_seconds());
+        self.knots.truncate(through.saturating_sub(1));
     }
     pub(crate) fn len(&self) -> usize {
         self.knots.len()

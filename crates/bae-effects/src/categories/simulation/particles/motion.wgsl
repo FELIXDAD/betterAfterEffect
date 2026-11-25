@@ -142,7 +142,7 @@ fn at_age(id: u32, birth: f32, age: f32, life: f32) -> State {
     let steps = min(1024u, u32(ceil(age/step_size)));
     for (var step = 0u; step < steps; step++) {
         let elapsed = f32(step)*step_size;
-        let dt = min(step_size, age-elapsed);
+        let dt = clamp(age-elapsed, 0., step_size);
         if turbulent {
             let strength = select(f(15),f(19),cfg.kind==WORLD)*cfg.size.x*0.07;
             let field = sin(s.pos.yzx * (8./cfg.size.x) + phase + vec3f(2.*elapsed));
