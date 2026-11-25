@@ -113,12 +113,16 @@ impl Platform {
     }
 
     pub fn video_type(&self, subtype: &GUID) -> windows::core::Result<IMFMediaType> {
+        self.stream_type(&MFMediaType_Video, subtype)
+    }
+
+    pub fn stream_type(&self, major: &GUID, subtype: &GUID) -> windows::core::Result<IMFMediaType> {
         // SAFETY: valid out parameter and MF attribute keys.
         unsafe {
             let mut ty = None;
             (self.media_type)(&mut ty).ok()?;
             let ty = ty.unwrap();
-            ty.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
+            ty.SetGUID(&MF_MT_MAJOR_TYPE, major)?;
             ty.SetGUID(&MF_MT_SUBTYPE, subtype)?;
             Ok(ty)
         }
