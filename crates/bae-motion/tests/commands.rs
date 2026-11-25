@@ -391,6 +391,19 @@ fn stopwatch_set_at_and_keyframe_assistants() {
         json!({"path": l, "attr": "transform:rotation", "time": 2 * SEC, "keys": copied}),
     );
     assert_eq!(fx.keys(&l, "transform:rotation"), vec![2 * SEC, 3 * SEC]);
+    // Paste Reversed Keyframes: the last copied value first.
+    fx.run(
+        "key.paste",
+        json!({"path": l, "attr": "transform:rotation", "time": 5 * SEC, "keys": copied, "reversed": true}),
+    );
+    let at = |fx: &Fx, t: i64| {
+        query::attr_spec(&fx.stage, &l, "transform:rotation")
+            .and_then(|s| s.keyframes.get(&Time(t)).map(|k| k.value.clone()))
+    };
+    assert_eq!(at(&fx, 5 * SEC), Some(Value::Float(90.0)));
+    assert_eq!(at(&fx, 6 * SEC), Some(Value::Float(10.0)));
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(fx.keys(&l, "transform:rotation"), vec![2 * SEC, 3 * SEC]);
 
     // Delete all: stopwatch off with the last deleted value.
     fx.run("key.delete", json!({"keys": [key(&l, "transform:rotation", 2 * SEC), key(&l, "transform:rotation", 3 * SEC)]}));
@@ -1944,6 +1957,65 @@ fn text_animators_animate_add_selector_and_remove() {
         fx.try_run(
             "text.animate",
             json!({"layers": [solid], "property": "position"})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn set_track_matte_sets_type_source_and_hides_the_matte() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "solid", json!({}));
+    fx.run(
+        "layer.set_track_matte",
+        json!({"layers": [a], "matte": "luma_inverted", "source": b}),
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte_layer"),
+        Some(Value::PrimRef(b.clone()))
+    );
+    assert_eq!(fx.value(&b, "enabled"), Some(Value::Bool(false)));
+    // Type only: the source stays.
+    fx.run(
+        "layer.set_track_matte",
+        json!({"layers": [a], "matte": "alpha"}),
+    );
+    assert_eq!(
+        fx.value(&a, "track_matte_layer"),
+        Some(Value::PrimRef(b.clone()))
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        fx.value(&a, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
+    );
+    // Not itself, not another comp, not an unknown type.
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "alpha", "source": a})
+        )
+        .is_err()
+    );
+    let other = fx.comp();
+    let c = fx.layer(&other, "solid", json!({}));
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "alpha", "source": c})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "layer.set_track_matte",
+            json!({"layers": [a], "matte": "bogus"})
         )
         .is_err()
     );

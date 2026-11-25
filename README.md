@@ -1,4 +1,4 @@
-# betterAfterEffect（BAE）
+# betterAfterEffects（BAE）
 
 一个以 GPU 运算为基础、轻量、跨平台、支持多人协同和 Agent 操作的动画制作应用。目标是让分镜、动效、剪辑在同一个平台、同一个工程里工作，并且能和 After Effects / Illustrator 工程互相转换。
 
