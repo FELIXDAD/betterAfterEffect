@@ -92,7 +92,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 9] = [
+        let panels: [(&str, PanelKind); 11] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -135,6 +135,18 @@ impl AppModule for MotionUiModule {
                 "mask_interpolation",
                 PanelKind::new("Mask Interpolation", |_| {
                     Box::new(assist::mask_interpolation::MaskInterpolationPanel::default())
+                }),
+            ),
+            (
+                "wiggler",
+                PanelKind::new("Wiggler", |_| {
+                    Box::new(assist::wiggler::WigglerPanel::default())
+                }),
+            ),
+            (
+                "smoother",
+                PanelKind::new("Smoother", |_| {
+                    Box::new(assist::smoother::SmootherPanel::default())
                 }),
             ),
         ];
