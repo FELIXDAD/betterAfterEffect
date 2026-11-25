@@ -201,6 +201,8 @@ wgpu v30.0.2
 | notify | 8.2.2 | 关默认，只开 `macos_fsevent` | 09（`bae-sync` 的可选 feature `watch`，共享目录模式的文件监听） | 8.x 最新稳定版（9.0 还是 rc）；macOS 走 FSEvents（objc2-core-services，和已 pin 的 objc2 0.3 同一套），Windows 走 ReadDirectoryChangesW |
 | tungstenite | 0.30.0 | 关默认，只开 `handshake`（不带 TLS） | 09（`bae-sync` 的可选 feature `hub`，连协作服务的 WebSocket 客户端）；10（bae-hub 经 `bae-sync` 的 `HubTransport::accept` 用它做服务端） | 最新；同步 API，放在 `ThreadedTransport` 的后台线程里跑；axum 的 WebSocket 底层也是它。局域网 Hub 暂不需要 TLS |
 
+08 在 Windows 上按需加载系统的 Media Foundation。渲染队列通过 `media_foundation::encoder_available` 查询 H.264 和硬件 HEVC 编码器。导入遇到不可用的 HEVC 解码器时，`MediaError::HevcDecoderUnavailable` 让界面能提示用户检查 HEVC 视频扩展。
+
 ### 插件、打包、哈希
 
 | crate | 版本 | features | 使用方 | 版本原因 |
