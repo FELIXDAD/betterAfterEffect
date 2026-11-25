@@ -624,3 +624,28 @@ fn locked_layers_are_skipped_by_clicks_ranges_select_all_and_delete() {
     }
     assert!(wrong.is_empty(), "locked layer: {wrong:?}");
 }
+
+/// Window ▸ Timeline / Composition / Effect Controls name the comp and the
+/// layer, as in AE ("Timeline: Comp 1").
+#[test]
+fn window_menu_names_the_comp_and_layer() {
+    let h = comp_with_solid();
+    let shown = |panel: &str| {
+        h.state()
+            .menu_items()
+            .into_iter()
+            .find(|i| {
+                i.path.first().map(String::as_str) == Some("Window")
+                    && i.invocation.params.get("id").and_then(|v| v.as_str()) == Some(panel)
+            })
+            .unwrap_or_else(|| panic!("no Window item for {panel}"))
+            .shown
+    };
+    assert_eq!(shown("timeline").as_deref(), Some("Timeline: Comp 1"));
+    assert_eq!(shown("composition").as_deref(), Some("Composition: Comp 1"));
+    assert_eq!(
+        shown("effect_controls").as_deref(),
+        Some("Effect Controls: Dark Gray Solid 1")
+    );
+    assert_eq!(shown("project"), None);
+}

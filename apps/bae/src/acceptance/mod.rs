@@ -328,6 +328,7 @@ impl Gui {
                 id: id.to_owned(),
                 path: spec.path.clone(),
                 title: spec.title.clone(),
+                shown: spec.title_now(&cx),
                 enabled: spec.is_enabled(&cx),
                 chord: self
                     .workspace
@@ -416,6 +417,8 @@ pub(crate) struct MenuItemView {
     pub id: String,
     pub path: Vec<String>,
     pub title: String,
+    /// The title shown now when it follows the project ("Timeline: Comp 1").
+    pub shown: Option<String>,
     pub enabled: bool,
     /// The chord shown next to the item (AE keymap, `Cmd+Y` notation).
     pub chord: Option<String>,

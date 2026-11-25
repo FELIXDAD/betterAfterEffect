@@ -441,6 +441,16 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         }
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
+            let spec = match window_subject(&panel) {
+                // AE: "Timeline: Comp 1", "Effect Controls: Solid 1".
+                Some(subject) => {
+                    let title = item.title;
+                    spec.titled_when(move |cx| {
+                        subject(cx).map(|name| format!("{}: {name}", bae_ui::tr(title)))
+                    })
+                }
+                None => spec,
+            };
             spec.checked_when(move |cx| cx.panel_open(&panel))
         }
         bae_ui::action::ids::SWITCH_WORKSPACE => {
@@ -448,6 +458,25 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             spec.checked_when(move |cx| cx.workspace == workspace)
         }
         _ => spec,
+    }
+}
+
+/// What a Window menu panel item names after its title: the active comp for the
+/// Timeline and Composition panels, the layer for Effect Controls.
+fn window_subject(panel: &str) -> Option<fn(&MenuContext<'_>) -> Option<String>> {
+    match panel {
+        "timeline" | "composition" => Some(|cx| {
+            let session = common::session(cx.resources);
+            common::active_comp(cx.stage, &session).map(|c| c.name)
+        }),
+        "effect_controls" => Some(|cx| {
+            let session = common::session(cx.resources);
+            let layer = session.lock().selected_layers.first().cloned()?;
+            cx.stage
+                .has_prim(&layer)
+                .then(|| bae_motion::query::display_name_of(cx.stage, &layer))
+        }),
+        _ => None,
     }
 }
 

@@ -172,6 +172,8 @@ struct Contributed {
     enabled: bool,
     checked: bool,
     chord: Option<Chord>,
+    /// The dynamic title shown (`None`: the static one).
+    title: Option<String>,
 }
 
 /// The application menu bar.
@@ -276,6 +278,14 @@ impl AppMenu {
                     item.set_checked(checked);
                     c.checked = checked;
                 }
+            }
+            let title = c.spec.title_now(&cx);
+            if title != c.title {
+                let text = title
+                    .clone()
+                    .unwrap_or_else(|| tr(&c.spec.title).to_owned());
+                c.item.set_text(&native_text(&text));
+                c.title = title;
             }
             let chord = shell_chord(keymap, &c.spec.invocation());
             if chord != c.chord {
@@ -419,6 +429,7 @@ fn append_entries(
                         enabled: true,
                         checked: false,
                         chord: None,
+                        title: None,
                     },
                 );
             }

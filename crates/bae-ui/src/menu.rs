@@ -124,6 +124,10 @@ pub type MenuEnabled = dyn Fn(&MenuContext<'_>) -> bool + Send + Sync;
 /// Decides whether a checkable item shows a check mark.
 pub type MenuChecked = dyn Fn(&MenuContext<'_>) -> bool + Send + Sync;
 
+/// The item's title now, already in the UI language (`None`: the static
+/// title), e.g. AE's "Timeline: Comp 1" in the Window menu.
+pub type MenuTitle = dyn Fn(&MenuContext<'_>) -> Option<String> + Send + Sync;
+
 /// Where an entry sits in one level of the menu: entries sort by `(group,
 /// order)`; a separator goes between groups. `sorted`: the entry is placed by its
 /// localized title among the sorted entries of its group (AE's panel list).
@@ -174,6 +178,7 @@ pub struct MenuItemSpec {
     pub handler_needed: bool,
     enabled: Option<Arc<MenuEnabled>>,
     checked: Option<Arc<MenuChecked>>,
+    dynamic_title: Option<Arc<MenuTitle>>,
 }
 
 impl std::fmt::Debug for MenuItemSpec {
@@ -209,6 +214,7 @@ impl MenuItemSpec {
             handler_needed: false,
             enabled: None,
             checked: None,
+            dynamic_title: None,
         }
     }
 
@@ -259,6 +265,21 @@ impl MenuItemSpec {
     ) -> Self {
         self.checked = Some(Arc::new(f));
         self
+    }
+
+    /// A title that follows the project (`f` returns it in the UI language, or
+    /// `None` for the static title).
+    pub fn titled_when(
+        mut self,
+        f: impl Fn(&MenuContext<'_>) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.dynamic_title = Some(Arc::new(f));
+        self
+    }
+
+    /// The title to show now instead of the static one, if any.
+    pub fn title_now(&self, cx: &MenuContext<'_>) -> Option<String> {
+        self.dynamic_title.as_ref().and_then(|f| f(cx))
     }
 
     /// Holds a place without being shown: the submenu of its path exists even
