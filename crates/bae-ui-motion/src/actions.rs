@@ -106,6 +106,11 @@ pub mod ids {
     /// Layer ▸ Switches ▸ Shy, Lock … and Layer ▸ 3D Layer: params `{"switch":
     /// "<attr>"}` (see [`super::SWITCHES`]); toggles the selected layers.
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
+    /// Layer ▸ Track Matte ▸ … (params `{"matte": "alpha", "source": "above"}`).
+    pub const TRACK_MATTE: &str = "motion.layer.track_matte";
+    /// F4 / Shift+F4 (the Timeline handles them).
+    pub const TOGGLE_SWITCHES_MODES: &str = "motion.timeline.toggle_switches_modes";
+    pub const TOGGLE_PARENT_COLUMN: &str = "motion.timeline.toggle_parent_column";
     /// Layer ▸ Blending Mode ▸ … (params `{"mode": "multiply"}`).
     pub const BLENDING_MODE: &str = "motion.layer.blending_mode";
     /// Layer ▸ Next / Previous Blending Mode (AE Shift+= / Shift+-; `{"step": ±1}`).
@@ -133,6 +138,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("motion_blur", "Motion Blur"),
     ("adjustment_layer", "Adjustment Layer"),
     ("three_d", "3D Layer"),
+    ("preserve_transparency", "Preserve Transparency"),
 ];
 
 /// Whether a switch is on for a layer.
@@ -205,6 +211,12 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::PASTE, "Paste"),
     (ids::PASTE_REVERSED, "Paste Reversed Keyframes"),
     (ids::LAYER_SWITCH, "Layer Switch"),
+    (ids::TRACK_MATTE, "Track Matte"),
+    (
+        ids::TOGGLE_SWITCHES_MODES,
+        "Toggle Switches / Modes Columns",
+    ),
+    (ids::TOGGLE_PARENT_COLUMN, "Show / Hide Parent Column"),
     (ids::BLENDING_MODE, "Blending Mode"),
     (ids::BLENDING_MODE_STEP, "Next Blending Mode"),
     (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
@@ -1086,6 +1098,29 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     "layer.set_attr",
                     json!({"layers": ls, "attr": "blend_mode", "value": {"type": "enum", "value": mode}}),
                 );
+            }
+        }
+        ids::TRACK_MATTE if !layers.is_empty() => {
+            // "source": "above" / "below" picks the adjacent layer of each layer.
+            let matte = inv
+                .params
+                .get("matte")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none");
+            let all = query::comp_layers(stage, &info.path);
+            let side = inv.params.get("source").and_then(|v| v.as_str());
+            for l in &layers {
+                let mut p = json!({"layers": [l], "matte": matte});
+                let i = all.iter().position(|x| x == l).unwrap_or(0);
+                let src = match side {
+                    Some("above") => i.checked_sub(1).and_then(|j| all.get(j)),
+                    Some("below") => all.get(i + 1),
+                    _ => None,
+                };
+                if let Some(s) = src {
+                    p["source"] = json!(s);
+                }
+                cx.invoke_with("layer.set_track_matte", p);
             }
         }
         ids::LAYER_SWITCH => {

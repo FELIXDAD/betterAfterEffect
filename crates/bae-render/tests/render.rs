@@ -417,6 +417,7 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
             file: Some(path),
             size: None,
             source_time: Time::ZERO,
+            sequence: None,
         }),
     );
     l.transform = DAffine2::from_translation(DVec2::new(2.0, 1.0));
