@@ -10,7 +10,9 @@ publish.workspace = true
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+roxmltree = "0.21.2"
 glam.workspace = true
+kurbo.workspace = true
 bae-app.workspace = true
 bae-color.workspace = true
 bae-gpu.workspace = true
@@ -25,6 +27,9 @@ serde_json.workspace = true
 smallvec.workspace = true
 toml.workspace = true
 tracing.workspace = true
+
+[build-dependencies]
+serde_json.workspace = true
 
 [dev-dependencies]
 bae-anim.workspace = true
