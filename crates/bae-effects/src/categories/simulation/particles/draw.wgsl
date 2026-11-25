@@ -68,6 +68,7 @@ fn fragment(v: Vary) -> @location(0) vec4f {
     if alpha <= 0. {
         discard;
     }
+    if kind==u32(MERCURY_FIELD){let weight=max(0.,1.-r*r);return vec4f(weight*weight*alpha);}
     let aa = clamp(dot(abs(v.local) / max(.001, r), fwidth(v.local)), .02, .65);
     if kind == u32(TRIANGLE) && v.local.x + v.local.y>0. {
         discard;
@@ -94,6 +95,7 @@ fn fragment(v: Vary) -> @location(0) vec4f {
         if kind == u32(SPHERE) || kind == u32(BUBBLE) {
             let n = vec3f(v.local, sqrt(max(0., 1.-r * r)));
             var light = normalize(vec3f(-.45, -.65, 1.));
+            if cfg.kind == BALL { light=normalize(vec3f(f(10)*.01,-.35,1.)); }
             if cfg.kind == WORLD {
                 light = normalize(vec3f(f(87), -f(88), f(89)) + .00001);
             }
@@ -154,4 +156,25 @@ fn fragment(v: Vary) -> @location(0) vec4f {
     }
     alpha = clamp(alpha * sample_color.a, 0., 1.);
     return vec4f(c.rgb * sample_color.rgb * alpha, alpha);
+}
+
+@compute @workgroup_size(128)
+fn advance_ball(@builtin(global_invocation_id) tid:vec3u) {
+    if tid.x < frame.count { sprites[tid.x] = ball(frame.first_interval.first_id + tid.x); }
+}
+
+@compute @workgroup_size(128)
+fn advance_hair(@builtin(global_invocation_id) tid:vec3u) {
+    if tid.x < frame.count { sprites[tid.x] = hair(frame.first_interval.first_id + tid.x); }
+}
+
+@compute @workgroup_size(128)
+fn advance_mercury(@builtin(global_invocation_id) tid:vec3u) {
+    if tid.x < frame.count { sprites[tid.x] = mercury(birth_at(tid.x), frame.timing.x); }
+}
+
+
+@compute @workgroup_size(128)
+fn advance_playground(@builtin(global_invocation_id) tid:vec3u) {
+    if tid.x < frame.count { sprites[tid.x] = playground(birth_at(tid.x), frame.timing.x); }
 }
