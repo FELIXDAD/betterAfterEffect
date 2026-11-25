@@ -149,6 +149,8 @@ pub(crate) struct Executed {
     pub image: GpuImage,
     pub draw_calls: usize,
     pub passes: usize,
+    /// CPU time encoding each node (by node index), when timed.
+    pub node_times: Vec<std::time::Duration>,
 }
 
 struct PoolAllocator<'a> {
@@ -164,7 +166,9 @@ impl ImageAllocator for PoolAllocator<'_> {
     }
 }
 
-/// Executes `graph` and submits it. Returns the output node's image.
+/// Executes `graph` and submits it. Returns the output node's image (and,
+/// when `timed`, the CPU time of every node).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(
     gpu: &Arc<GpuContext>,
     pipelines: &mut Pipelines,
@@ -173,6 +177,7 @@ pub(crate) fn execute(
     mask_buffers: &mut MaskBuffers,
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
+    timed: bool,
 ) -> Result<Executed, RenderError> {
     let device = gpu.device();
     let total_draws: usize = graph
@@ -246,7 +251,9 @@ pub(crate) fn execute(
     // Every mask of the frame at once, in shared atlases (they have no inputs).
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
 
+    let mut node_times = Vec::with_capacity(if timed { graph.nodes.len() } else { 0 });
     for (index, node) in graph.nodes.iter().enumerate() {
+        let started = timed.then(std::time::Instant::now);
         let image = match &node.kind {
             NodeKind::Composite(c) => {
                 let px = node_pixels(node);
@@ -315,6 +322,10 @@ pub(crate) fn execute(
                     .collect();
                 let mut params = fx.frame.params(&fx.instance);
                 params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
+                if let Some(samples) = &fx.samples {
+                    params.mask_paths = &samples.paths;
+                    params.history = &samples.history;
+                }
                 let mut alloc = PoolAllocator {
                     pool,
                     device,
@@ -356,6 +367,9 @@ pub(crate) fn execute(
                 .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
         outputs[index] = Some(image);
+        if let Some(started) = started {
+            node_times.push(started.elapsed());
+        }
         // Free inputs whose last consumer this was.
         node.kind.for_each_input(|id| {
             let u = &mut uses[id.index()];
@@ -375,6 +389,7 @@ pub(crate) fn execute(
         image,
         draw_calls,
         passes,
+        node_times,
     })
 }
 

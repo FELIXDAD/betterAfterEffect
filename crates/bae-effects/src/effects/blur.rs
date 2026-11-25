@@ -81,19 +81,28 @@ pub struct GaussianBlur {
 impl GaussianBlur {
     /// The current effect (`ADBE Gaussian Blur 2`, AE 26 defaults).
     pub fn new() -> Self {
-        Self::build("ADBE Gaussian Blur 2", "Blur & Sharpen", 25.0, true)
+        Self::build(
+            "ADBE Gaussian Blur 2",
+            "Gaussian Blur",
+            "Blur & Sharpen",
+            25.0,
+            false,
+        )
     }
 
     /// Gaussian Blur (Legacy) (`ADBE Gaussian Blur`), same kernel.
     pub fn legacy() -> Self {
-        let mut fx = Self::build("ADBE Gaussian Blur", "Obsolete", 0.0, false);
-        fx.def.name = "Gaussian Blur (Legacy)".into();
-        fx.legacy = true;
-        fx
+        Self::build(
+            "ADBE Gaussian Blur",
+            "Gaussian Blur (Legacy)",
+            "Obsolete",
+            0.0,
+            true,
+        )
     }
 
-    fn build(match_name: &str, category: &str, blur: f64, repeat: bool) -> Self {
-        let (def, names_zh) = DefBuilder::new(match_name, "Gaussian Blur", category)
+    fn build(match_name: &str, name: &str, category: &str, blur: f64, legacy: bool) -> Self {
+        let mut b = DefBuilder::new(match_name, name, category)
             .slider(
                 1,
                 "Blurriness",
@@ -104,13 +113,15 @@ impl GaussianBlur {
                 1,
                 "pixels",
             )
-            .popup(2, "Blur Dimensions", "模糊方向", 1, &DIMENSIONS)
-            .checkbox(3, "Repeat Edge Pixels", "重复边缘像素", repeat)
-            .build();
+            .popup(2, "Blur Dimensions", "模糊方向", 1, &DIMENSIONS);
+        if !legacy {
+            b = b.checkbox(3, "Repeat Edge Pixels", "重复边缘像素", true);
+        }
+        let (def, names_zh) = b.build();
         Self {
             def,
             names_zh,
-            legacy: false,
+            legacy,
         }
     }
 
@@ -123,7 +134,7 @@ impl GaussianBlur {
             BLURRINESS_TO_SIGMA * blurriness
         } * params.scale;
         let [dx, dy] = dimensions(p.popup(2));
-        let edge = if p.b(3) {
+        let edge = if !self.legacy && p.b(3) {
             Edge::Repeat
         } else {
             Edge::Transparent
@@ -224,15 +235,15 @@ impl BoxBlur {
     /// Fast Box Blur (`ADBE Box Blur2`; AE 26 defaults: 3 iterations, Repeat
     /// Edge Pixels on).
     pub fn new() -> Self {
-        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen", 3, true)
+        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen")
     }
 
-    /// Box Blur (`ADBE Box Blur`, obsolete matchName, default 1 iteration).
+    /// Box Blur (`ADBE Box Blur`, obsolete matchName).
     pub fn legacy() -> Self {
-        Self::build("ADBE Box Blur", "Box Blur", "Obsolete", 1, false)
+        Self::build("ADBE Box Blur", "Box Blur", "Obsolete")
     }
 
-    fn build(match_name: &str, name: &str, category: &str, iterations: i64, repeat: bool) -> Self {
+    fn build(match_name: &str, name: &str, category: &str) -> Self {
         let (def, names_zh) = DefBuilder::new(match_name, name, category)
             .slider(
                 1,
@@ -244,9 +255,9 @@ impl BoxBlur {
                 1,
                 "pixels",
             )
-            .int(2, "Iterations", "迭代", iterations, [1, 50])
+            .int(2, "Iterations", "迭代", 3, [1, 50])
             .popup(3, "Blur Dimensions", "模糊方向", 1, &DIMENSIONS)
-            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", repeat)
+            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", true)
             .build();
         Self { def, names_zh }
     }

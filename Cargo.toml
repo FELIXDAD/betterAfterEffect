@@ -24,7 +24,7 @@ default-members = ["apps/bae"]
 exclude = ["vendor/epaint", "vendor/wgpu-hal"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 rust-version = "1.100"
 license = "Apache-2.0"
@@ -151,6 +151,7 @@ tiff = { version = "0.11.3", default-features = false, features = ["deflate", "j
 zune-jpeg = "0.5.15"
 symphonia = { version = "0.6.1", default-features = false }
 cpal = "0.18.2"
+rtrb = "0.4.1"
 
 # ---- platform bindings ----
 objc2 = "0.6.5"
@@ -182,6 +183,7 @@ memmap2 = "0.9.12"
 # Signal handling (SIGTERM from `docker stop` / systemd) in bae-hub on Unix. Already
 # in the graph through std-adjacent crates; this pin only makes it a direct dep.
 libc = "0.2.191"
+rustix = { version = "1.1.6", features = ["net", "shm"] }
 
 # ---- plugins, packaging, hashing ----
 cbindgen = { version = "0.29.4", default-features = false }
