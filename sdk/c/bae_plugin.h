@@ -87,8 +87,14 @@ extern "C" {
 
 #if defined(__cplusplus)
 #define BAE_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
-#else
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #define BAE_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#else
+/* Pre-C11 compilers (MSVC without /std:c11): a negative array size fails. */
+#define BAE_STATIC_ASSERT_CAT2(a, b) a##b
+#define BAE_STATIC_ASSERT_CAT(a, b) BAE_STATIC_ASSERT_CAT2(a, b)
+#define BAE_STATIC_ASSERT(cond, msg) \
+    typedef char BAE_STATIC_ASSERT_CAT(bae_static_assert_, __LINE__)[(cond) ? 1 : -1]
 #endif
 
 /* ======================================================================= */

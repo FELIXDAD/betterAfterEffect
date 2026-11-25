@@ -76,7 +76,10 @@ fn build_c(src: &Path, out: &Path, defines: &[&str]) -> Option<()> {
     let sdk = repo().join("sdk").join("c");
     let mut cmd = tool.to_command();
     if tool.is_like_msvc() {
+        // C11 for the examples' designated initializers (the header itself
+        // also builds in MSVC's default pre-C11 mode).
         cmd.arg("/nologo")
+            .arg("/std:c11")
             .arg("/LD")
             .arg(format!("/I{}", sdk.display()));
         for d in defines {
