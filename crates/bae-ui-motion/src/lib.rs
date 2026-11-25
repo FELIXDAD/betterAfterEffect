@@ -31,10 +31,12 @@ pub mod dialogs;
 pub mod effects;
 mod expr;
 mod expr_menu;
+mod flowchart;
 mod gpu_preview;
 mod graph;
 mod i18n;
 pub mod import;
+mod media_browser;
 pub mod menus;
 mod panels;
 mod prefs;
@@ -148,6 +150,19 @@ impl AppModule for MotionUiModule {
             }
         });
         let _ = app.register::<KeymapBindings>("motion", actions::bindings());
+        // Window ▸ Media Browser and Flowchart.
+        bae_ui::i18n::register(media_browser::ZH);
+        bae_ui::i18n::register(flowchart::ZH);
+        app.registry::<PanelKind>().batch(|tx| {
+            let browser = PanelKind::new("Media Browser", |spawn| {
+                Box::new(media_browser::MediaBrowserPanel::from_state(spawn.state))
+            });
+            let chart = PanelKind::new("Flowchart", |_| {
+                Box::new(flowchart::FlowchartPanel::default())
+            });
+            let _ = tx.replace(owner.clone(), "media_browser", std::sync::Arc::new(browser));
+            let _ = tx.replace(owner.clone(), "flowchart", std::sync::Arc::new(chart));
+        });
         // Tools: the toolbar of the `ae` keymap, tool shortcuts and their handler.
         let _ = app.register::<KeymapBindings>("motion.tools", tools::keymap_bindings());
         actions.batch(|tx| {
