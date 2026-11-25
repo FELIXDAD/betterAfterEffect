@@ -697,6 +697,18 @@ impl Shell {
         self.autosave.deadline(&prefs)
     }
 
+    /// Plugin problems (a plugin failed to load, crashed or was disabled) in
+    /// the status bar; the latest wins.
+    fn show_plugin_notices(&mut self) {
+        let notice = self
+            .app
+            .resource::<bae_plugin::PluginRuntime>()
+            .and_then(|r| r.take_notices().pop());
+        if let Some(notice) = notice {
+            self.set_notice(ui::plugin_notice(&notice));
+        }
+    }
+
     /// Show `text` in the status bar (empty clears it).
     fn set_notice(&mut self, text: String) {
         if let Some(view) = &mut self.view {
@@ -827,6 +839,7 @@ impl Shell {
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
+        self.show_plugin_notices();
         let Some(view) = self.view.as_mut() else {
             return;
         };
