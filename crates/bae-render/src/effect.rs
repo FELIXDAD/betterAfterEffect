@@ -275,6 +275,9 @@ pub fn registry_id(match_name: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// Implementation-only registry entry for the two-frame Pixel Motion interpolator.
+pub const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
+
 /// Effect implementations by effect ID (match name).
 #[derive(Default)]
 pub struct EffectLibrary {
@@ -303,8 +306,7 @@ impl EffectLibrary {
         self.effects.remove(match_name)
     }
 
-    /// The implementation of `match_name`.
-    /// Sets the frame interpolator (see the field); kept across [`Self::sync`].
+    /// Sets the frame interpolator for a manually built library.
     pub fn set_frame_interpolator(&mut self, effect: Arc<dyn Effect>) {
         self.interpolator = Some(effect);
     }
@@ -314,6 +316,7 @@ impl EffectLibrary {
         self.interpolator.as_ref()
     }
 
+    /// The implementation of `match_name`.
     pub fn get(&self, match_name: &str) -> Option<&Arc<dyn Effect>> {
         self.effects.get(match_name)
     }
@@ -340,9 +343,14 @@ impl EffectLibrary {
         }
         self.synced = Some(generation);
         self.effects.clear();
+        self.interpolator = None;
         for entry in registry.snapshot().iter() {
             let effect = entry.item().clone();
-            self.effects.insert(effect.def().match_name.clone(), effect);
+            if entry.id().as_ref() == FRAME_INTERPOLATOR_ID {
+                self.interpolator = Some(effect);
+            } else {
+                self.effects.insert(effect.def().match_name.clone(), effect);
+            }
         }
         true
     }
