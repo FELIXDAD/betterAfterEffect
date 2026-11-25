@@ -89,7 +89,7 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.window.effects", Some("Cmd+5"), "效果和预设"),
     ("shell.window.preview", Some("Cmd+3"), "预览"),
     ("shell.window.properties", None, "属性"),
-    ("shell.window.info", None, "信息"),
+    ("shell.window.info", Some("Cmd+2"), "信息"),
     ("motion.window.render_queue", Some("Cmd+Alt+0"), "渲染队列"),
 ];
 
@@ -158,10 +158,10 @@ fn menu_enabled_state_follows_the_selection() {
     let mut h = gui();
     // Window items of implemented panels open them: always enabled (checked
     // below), not part of what the selection changes. Panels that are only
-    // placeholders so far (Info) are greyed, like every AE
-    // item whose command does not run yet.
+    // placeholders are greyed, like every AE item whose command does not run
+    // yet (none of the AE items listed here any more).
     let window = |i: &MenuItemView| i.path.first().is_some_and(|p| p == "Window");
-    let placeholder = ["shell.window.info"];
+    let placeholder: [&str; 0] = [];
     let ae_item = |i: &MenuItemView| AE_ITEMS.iter().any(|(id, ..)| *id == i.id);
     for i in h
         .state()
