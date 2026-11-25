@@ -8,7 +8,7 @@
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
-use bae_model::{PrimPath, Time};
+use bae_model::{PrimPath, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::theme::{self, color};
 use bae_ui::{Panel, PanelContext, TabInfo, tr, widgets};
@@ -37,6 +37,9 @@ pub struct LayerPanel {
     pub(crate) show: Show,
     /// Render: the picture includes the effects up to the shown one.
     pub(crate) render: bool,
+    /// Liquify: the mesh being brushed, the pointer's last position (layer
+    /// pixels).
+    liquify: Option<(bae_effects::effects::liquify::Mesh, DVec2)>,
 }
 
 /// Double-clicking a layer (AE): a pre-comp layer opens its composition, any
@@ -144,13 +147,19 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
-        let Ok(comp) = self
+        let Ok(mut comp) = self
             .eval
             .get(cx.resources)
             .evaluate_comp(cx.stage, &info.path, time)
         else {
             return;
         };
+        // A parameter being dragged (Effect Controls, the Liquify brush).
+        if !ui.input(|i| i.pointer.any_down()) && self.liquify.is_none() {
+            session.lock().scrub = None;
+        }
+        let scrub = session.lock().scrub.clone();
+        crate::viewer::apply_scrub(&mut comp, scrub.as_ref());
         let Some(evaluated) = comp.layer(&layer) else {
             return;
         };
@@ -159,7 +168,8 @@ impl Panel for LayerPanel {
             _ => 0,
         };
         if let Some((one, min)) = alone(&comp, &layer, effects) {
-            self.picture(ui, cx, area, &one, min, evaluated);
+            let view = self.picture(ui, cx, area, &one, min, evaluated);
+            self.liquify(ui, cx, &session, area, &view, min, evaluated, time);
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
         time_ruler(ui, &session, &info, ruler, time, in_out);
@@ -196,7 +206,7 @@ impl LayerPanel {
         one: &EvaluatedComp,
         min: DVec2,
         layer: &bae_anim::EvaluatedLayer,
-    ) {
+    ) -> View {
         let ppp = ui.ctx().pixels_per_point();
         let (w, h) = (one.width as f32, one.height as f32);
         let scale = ((area.width() - 24.0) / w)
@@ -257,6 +267,76 @@ impl LayerPanel {
                 ));
             }
         }
+        view
+    }
+
+    /// The Liquify brush: with a Liquify effect in the View popup, dragging
+    /// applies its tool to the Distortion Mesh (previewed live, one undo step).
+    #[allow(clippy::too_many_arguments)]
+    fn liquify(
+        &mut self,
+        ui: &Ui,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        area: Rect,
+        view: &View,
+        min: DVec2,
+        layer: &bae_anim::EvaluatedLayer,
+        time: Time,
+    ) {
+        use bae_effects::effects::liquify::{self as lq, Mesh};
+        let Show::Effect(i) = self.show else {
+            return;
+        };
+        let Some(fx) = layer
+            .effects
+            .get(i)
+            .filter(|e| e.match_name == lq::MATCH_NAME)
+        else {
+            return;
+        };
+        let num = |id: u32, d: f64| fx.param(id).and_then(Value::as_f64).unwrap_or(d);
+        let tool = (num(lq::TOOL, 1.0).round() as usize).saturating_sub(1);
+        let radius = num(lq::BRUSH_SIZE, 64.0) / 2.0;
+        let pressure = num(lq::BRUSH_PRESSURE, 50.0) / 100.0;
+        let resp = ui.interact(area, ui.id().with("liquify"), Sense::click_and_drag());
+        let to_layer = |p: egui::Pos2| view.to_comp(p) + min;
+        if let Some(pos) = resp.hover_pos() {
+            ui.painter_at(area).circle_stroke(
+                pos,
+                (radius as f32 * view.scale).max(1.0),
+                Stroke::new(1.0, Color32::from_gray(220)),
+            );
+        }
+        let attr = format!("param:{:04}", lq::MESH);
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(pos) = ui.input(|i| i.pointer.press_origin())
+        {
+            let mesh = fx.param(lq::MESH).and_then(Mesh::from_value).or_else(|| {
+                let (a, b) = render::layer_bounds(layer)?;
+                Some(Mesh::new(a, b - a))
+            });
+            self.liquify = mesh.map(|m| (m, to_layer(pos)));
+        }
+        let Some((mesh, last)) = &mut self.liquify else {
+            return;
+        };
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let at = to_layer(pos);
+            mesh.brush(tool, at, radius, pressure, at - *last);
+            *last = at;
+            ui.ctx().request_repaint();
+        }
+        let value = mesh.to_value();
+        let done = !ui.input(|i| i.pointer.primary_down());
+        let edit = if done {
+            self.liquify = None;
+            common::Edit::Commit(value)
+        } else {
+            common::Edit::Live(value)
+        };
+        let comp_time = time;
+        common::apply_edit(cx, session, &fx.path, &attr, comp_time, edit);
     }
 
     fn bar(&mut self, ui: &mut Ui, bar: Rect, info: &CompInfo, time: Time, effects: &[String]) {

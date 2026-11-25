@@ -230,6 +230,11 @@ impl CompositionViewer {
 
 /// Apply live edits (timeline scrubs, viewer drags) to an evaluated comp and
 /// recompute world matrices.
+/// Apply a value being dragged in a panel (an effect parameter …) to `comp`.
+pub(crate) fn apply_scrub(comp: &mut EvaluatedComp, scrub: Option<&Scrub>) {
+    apply_overrides(comp, scrub, None);
+}
+
 fn apply_overrides(
     comp: &mut EvaluatedComp,
     scrub: Option<&Scrub>,
