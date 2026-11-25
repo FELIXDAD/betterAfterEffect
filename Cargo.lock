@@ -640,6 +640,7 @@ dependencies = [
  "chrono",
  "glam",
  "half",
+ "kurbo",
  "parking_lot",
  "png",
  "pollster 0.4.0",
