@@ -15,7 +15,7 @@
 - 残影在半透明色块上确定了最大值和最小值使用前后两种合成颜色的逐通道极值。相加使用合成 Alpha，混合逐帧量化后累加。8 / 16 / 32 bpc 的对照均在 1 以内。
 - 时间置换扫描了 24、25、30、48、60 和 120 fps 编号源帧、正负位移、整帧与亚帧时间。灰阶 127 对应零位移，相邻灰阶的偏移为最大位移的 1/128。先从时间减去采样间隔的余数，再把取帧时间舍入到 1/65536 秒。浮点余数和取帧舍入都可能落到整帧边界前。原来峰值 192、最差平均差 135.500 的用例已逐像素一致，第 5 帧与四分之一帧用例覆盖余数行为，60 fps 时间分辨率用例覆盖半帧取样。
 - 自动色阶、自动对比度与自动颜色在 GPU 直方图校正前，对附近帧的黑白点按距离加权。启用对齐中性中间调时，对校正曲线加权。场景检测以 16 × 16 图像采样比较相邻帧，遇到明显切换后停止累计。AE 的权重和场景阈值仍有偏差。
-- 阴影/高光对邻帧的自动数量与裁剪统计加权。同一输入关闭平滑时最大差 74、平均差 38.524，现有单帧自动数量和局部色调近似贡献了较大的偏差。跨帧调色校准见 [#284](https://github.com/FELIXDAD/betterAfterEffect/issues/284)。
+- 阴影/高光对邻帧的自动数量与裁剪统计加权。同一输入关闭平滑时最大差 74、平均差 38.524，现有单帧自动数量和局部色调近似贡献了较大的偏差。跨帧调色校准见 [#284](https://github.com/FELIXDAD/betterAfterEffects/issues/284)。
 - GPU 图测试覆盖抽帧读当前效果之前的堆栈和图层时间伸缩、两个方向的时间置换、残影，以及四种颜色效果的场景切换。
 
 [Adobe 时间效果说明](https://helpx.adobe.com/after-effects/desktop/apply-effects-and-animation-presets/list-of-effects/time-effects.html) · [Adobe 颜色校正说明](https://helpx.adobe.com/after-effects/desktop/adjust-colors/work-with-color-correction-effects/color-correction-effects.html)

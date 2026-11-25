@@ -626,9 +626,9 @@ pub enum ExportFormat {
     Exr,
     /// Stereo 48 kHz PCM WAV.
     Wav,
-    /// H.264 movie (macOS).
+    /// H.264 movie.
     H264,
-    /// HEVC movie (macOS).
+    /// HEVC movie.
     Hevc,
     /// ProRes 422 HQ movie (macOS).
     ProRes,
