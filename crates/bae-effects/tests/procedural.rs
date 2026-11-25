@@ -180,3 +180,34 @@ fn gradient_points_stay_with_layer_across_tiles() {
         assert_eq!(rgba, [value, value, value, 1.]);
     }
 }
+
+#[test]
+fn paint_bucket_connectivity_and_jump_flood_stroke() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(17, 13);
+    let mut src = test_image(rect);
+    for (i, pixel) in src.data.iter_mut().enumerate() {
+        *pixel = if i % 17 == 8 {
+            [1.; 4]
+        } else {
+            [0., 0., 0., 1.]
+        };
+    }
+    for (stroke, last_red) in [(1, 7), (3, 9)] {
+        let got = run(
+            &gpu,
+            F32,
+            builtin("ADBE Paint Bucket"),
+            vec![
+                (2, Value::Vec2([3., 6.])),
+                (8, Value::Int(stroke)),
+                (5, Value::Float(2.)),
+            ],
+            &src,
+            rect,
+            1.,
+        );
+        assert_eq!(got.get(last_red, 6), [1., 0., 0., 1.]);
+        assert_eq!(got.get(12, 6), [0., 0., 0., 1.]);
+    }
+}

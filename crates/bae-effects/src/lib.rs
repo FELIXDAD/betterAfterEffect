@@ -142,6 +142,10 @@ impl Effect for Forward {
         self.0.input_roi(params, output_roi)
     }
 
+    fn parameter_times(&self, params: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_times(params)
+    }
+
     fn layer_dependencies(
         &self,
         params: &EffectParams<'_>,

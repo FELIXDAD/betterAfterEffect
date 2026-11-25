@@ -25,6 +25,8 @@ use crate::source::{EncodeContext, GpuImage};
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
+    /// Prior samples of this instance requested by the effect, in layer time.
+    pub history: &'a [(Time, RenderEffect)],
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
@@ -73,6 +75,7 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            history: &[],
             time: Time::ZERO,
             comp_time: Time::ZERO,
             layer_time_scale: 1.0,
@@ -219,6 +222,11 @@ pub trait Effect: Send + Sync {
     /// Input region needed to produce `output_roi`. Default: the same region.
     fn input_roi(&self, _params: &EffectParams<'_>, output_roi: IRect) -> IRect {
         output_roi
+    }
+
+    /// Layer times at which the effect needs earlier parameter values.
+    fn parameter_times(&self, _params: &EffectParams<'_>) -> Vec<Time> {
+        Vec::new()
     }
 
     /// Other layers this instance reads (scheduled before it). Default: none.

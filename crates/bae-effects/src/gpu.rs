@@ -29,6 +29,8 @@ pub(crate) enum Binding {
     Texture,
     /// An unfiltered 3D lookup texture.
     Texture3d,
+    /// Atomic component labels for GPU flood fill.
+    StorageBuffer,
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
 }
@@ -83,6 +85,7 @@ pub(crate) fn format_key(format: wgpu::TextureFormat) -> u64 {
 pub(crate) enum Resource<'a> {
     /// Ring uniform (the dynamic offset is passed at dispatch).
     Uniform,
+    Buffer(&'a wgpu::Buffer),
     View(&'a wgpu::TextureView),
 }
 
@@ -234,6 +237,11 @@ impl Runtime {
                         },
                         multisampled: false,
                     },
+                    Binding::StorageBuffer => wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     Binding::Storage(format) => wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
                         format,
@@ -296,6 +304,7 @@ impl Runtime {
                             size: NonZeroU64::new(u64::from(size)),
                         })
                     }
+                    (_, Resource::Buffer(buffer)) => buffer.as_entire_binding(),
                     (_, Resource::View(v)) => wgpu::BindingResource::TextureView(v),
                     (_, Resource::Uniform) => wgpu::BindingResource::TextureView(&self.placeholder),
                 },

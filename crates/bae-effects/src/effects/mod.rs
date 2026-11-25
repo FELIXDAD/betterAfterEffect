@@ -4,6 +4,7 @@
 
 pub mod blur;
 pub(crate) mod controls;
+pub(crate) mod generate;
 mod image_grid;
 mod layer_input;
 pub(crate) mod lut;

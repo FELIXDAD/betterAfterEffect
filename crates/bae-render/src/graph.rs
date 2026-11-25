@@ -351,6 +351,8 @@ pub struct EffectNode {
     pub effect: Arc<dyn Effect>,
     /// Evaluated parameters.
     pub instance: RenderEffect,
+    /// Evaluated parameter samples in layer time.
+    pub history: Vec<(Time, RenderEffect)>,
     /// Frame context for [`EffectParams`] (time, scale, bounds, rate, shutter …).
     pub frame: EffectFrame,
     /// Input node.
@@ -1418,6 +1420,25 @@ impl Builder<'_, '_> {
         }
         rect.hash(&mut h);
         let params = frame.params(&instance);
+        let mut history = Vec::new();
+        if let Some(frames) = self.frames.as_mut() {
+            for time in effect.parameter_times(&params) {
+                let delta = (time - frame.time).as_seconds() * frame.layer_time_scale;
+                let at = frame.comp_time + Time::from_seconds(delta);
+                if let Some(sample) = frames.comp_at(&comp.path, at)?
+                    && let Some(source) = sample.layers.iter().find(|l| l.path == layer.path)
+                    && let Some(fx) = source.effects.iter().find(|fx| fx.path == instance.path)
+                {
+                    self.time_dependent = true;
+                    time.hash(&mut h);
+                    for (id, value) in &fx.params {
+                        id.hash(&mut h);
+                        crate::input::hash_value(value, &mut h);
+                    }
+                    history.push((time, fx.clone()));
+                }
+            }
+        }
         let mut layers = Vec::new();
         for dep in effect.layer_dependencies(&params) {
             if let Some(node) = self.layer_input(comp, &dep, scale, depth)? {
@@ -1436,6 +1457,7 @@ impl Builder<'_, '_> {
         }
         Ok(self.push(Node {
             kind: NodeKind::Effect(EffectNode {
+                history,
                 layer: layer.path.clone(),
                 effect,
                 instance,
