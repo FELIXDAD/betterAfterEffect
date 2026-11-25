@@ -486,6 +486,16 @@ pub(crate) fn settle(h: &mut Ui) {
     }
 }
 
+/// Brings `panel` to the front of its frame (as clicking its tab does): Add to
+/// Render Queue opens the Render Queue in front of the Timeline (AE).
+pub(crate) fn to_front(h: &mut Ui, panel: &str) {
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::action::ids::OPEN_PANEL,
+        serde_json::json!({ "id": panel }),
+    ));
+    settle(h);
+}
+
 /// One input event in its own frame, then the dispatch: what the shell does
 /// for an event that arrives on its own (`about_to_wait` after each redraw).
 pub(crate) fn send(h: &mut Ui, event: Event) {
@@ -629,6 +639,12 @@ pub(crate) fn queue_control<'a>(
 
 /// Where the text `text` was painted in the last frame (first match, inside its
 /// clip rect). Finds rows the panels paint themselves (timeline layer names).
+/// The Timeline's name column header: "Source Name" (AE's default) or
+/// "Layer Name" (after clicking it).
+pub(crate) fn timeline_header(h: &Ui) -> Option<Rect> {
+    find_text(h, "Source Name").or_else(|| find_text(h, "Layer Name"))
+}
+
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }

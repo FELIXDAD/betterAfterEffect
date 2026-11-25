@@ -67,7 +67,13 @@ impl Chord {
     /// Whether a key event (logical key, physical key, modifiers) triggers this chord.
     /// The physical key is checked too, so `Shift+[` matches even though the
     /// logical key is `{`, and shortcuts keep working with non-Latin layouts.
+    /// A navigation key is only itself: Windows reports Home / End / Page Up /
+    /// Page Down / arrows / Insert / Delete from the numpad (NumLock off, or
+    /// sent with the numpad scan code) as the numpad digits and point
+    /// physically, and those are other shortcuts (the timeline's Go to Comp
+    /// Marker 1–9, #468).
     pub fn matches(&self, key: Key, physical: Option<Key>, modifiers: Modifiers) -> bool {
+        let physical = physical.filter(|_| !is_navigation(key));
         (key == self.key || physical == Some(self.key)) && self.matches_modifiers(modifiers)
     }
 
@@ -530,6 +536,23 @@ impl KeymapOverrides {
     }
 }
 
+/// Keys the system resolved to a navigation key whatever the physical key.
+fn is_navigation(key: Key) -> bool {
+    use Key::*;
+    matches!(
+        key,
+        Home | End
+            | PageUp
+            | PageDown
+            | ArrowLeft
+            | ArrowRight
+            | ArrowUp
+            | ArrowDown
+            | Insert
+            | Delete
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +605,29 @@ mod tests {
         let json = serde_json::to_string(&b).unwrap();
         assert_eq!(json, r#"{"chord":"Cmd+Shift+Z","action":"edit.redo"}"#);
         assert_eq!(serde_json::from_str::<Binding>(&json).unwrap(), b);
+    }
+
+    #[test]
+    fn navigation_keys_ignore_numpad_scan_codes() {
+        // Home from numpad 7 (NumLock off) is Home, not the "7" shortcut.
+        let home = Chord::parse("Home").unwrap();
+        let seven = Chord::parse("7").unwrap();
+        assert!(home.matches(Key::Home, Some(Key::Num7), Modifiers::NONE));
+        assert!(!seven.matches(Key::Home, Some(Key::Num7), Modifiers::NONE));
+        let km = Keymap::new(
+            "test",
+            vec![
+                Binding::new("7", "timeline.go_to_marker").when("timeline"),
+                Binding::new("Home", "go_start"),
+            ],
+        );
+        let hit = km.match_event(
+            Key::Home,
+            Some(Key::Num7),
+            Modifiers::NONE,
+            Some("timeline"),
+        );
+        assert_eq!(hit.map(|b| b.action.as_str()), Some("go_start"));
     }
 
     #[test]
