@@ -149,6 +149,8 @@ pub(crate) struct Executed {
     pub image: GpuImage,
     pub draw_calls: usize,
     pub passes: usize,
+    /// Something was still warming up and is missing from the image.
+    pub incomplete: bool,
     /// CPU time encoding each node (by node index), when timed.
     pub node_times: Vec<std::time::Duration>,
 }
@@ -251,6 +253,7 @@ pub(crate) fn execute(
     // Every mask of the frame at once, in shared atlases (they have no inputs).
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
 
+    let mut incomplete = false;
     let mut node_times = Vec::with_capacity(if timed { graph.nodes.len() } else { 0 });
     for (index, node) in graph.nodes.iter().enumerate() {
         let started = timed.then(std::time::Instant::now);
@@ -304,7 +307,17 @@ pub(crate) fn execute(
                     effect_inputs: &[],
                     effect_masks: &[],
                 };
-                src.source.render(&mut ectx, &src.request)?
+                match src.source.render(&mut ectx, &src.request) {
+                    Ok(image) => image,
+                    // Not ready yet: nothing this frame (drawn again later).
+                    Err(e) if e.is_warming_up() => {
+                        incomplete = true;
+                        let empty = pool.acquire(device, format, IRect::from_size(1, 1), 1.0)?;
+                        clear(&mut encoder, &empty.view);
+                        empty
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             NodeKind::Effect(fx) => {
                 let input = outputs[fx.input.index()]
@@ -339,7 +352,16 @@ pub(crate) fn execute(
                     effect_inputs: &effect_inputs,
                     effect_masks: &effect_masks,
                 };
-                fx.effect.render(&mut ectx, &params, &input, node.rect)?
+                match fx.effect.render(&mut ectx, &params, &input, node.rect) {
+                    Ok(image) => image,
+                    // Pipeline not compiled yet: the layer without this effect
+                    // this frame (drawn again when it is ready).
+                    Err(e) if e.is_warming_up() => {
+                        incomplete = true;
+                        input
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             NodeKind::Mix(mix) => {
                 let input = |id: crate::graph::NodeId| {
@@ -389,6 +411,7 @@ pub(crate) fn execute(
         image,
         draw_calls,
         passes,
+        incomplete,
         node_times,
     })
 }

@@ -3,7 +3,7 @@
 //! navigators, values and expressions, and the time graph (comp tabs, current time,
 //! ruler, work area, CTI, layer duration bars, keyframes).
 //!
-//! Every edit is a command: switches → `attr.set`, values → `attr.set_at`, stopwatch
+//! Every edit is a command: switches → `layer.set_attr`, values → `attr.set_at`, stopwatch
 //! → `attr.set_animated`, dragging bars → `layer.shift_time` / `layer.trim`, dragging
 //! keyframes → `key.move`, work area → `comp.set_work_area`, reordering →
 //! `layer.reorder`, parenting → `layer.set_parent`. Drags preview locally and run
@@ -18,6 +18,7 @@ mod markers;
 mod menus;
 mod modes;
 mod rows;
+mod switches;
 #[cfg(test)]
 mod tests;
 mod waveform;
@@ -251,6 +252,7 @@ pub struct TimelinePanel {
     /// Start of the visible range when zoomed (comp time).
     scroll: Time,
     drag: Option<Drag>,
+    switch_drag: Option<switches::SwitchDrag>,
     rename: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
@@ -765,6 +767,7 @@ impl Panel for TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
+        let switch_input = ui.input(switches::SwitchInput::read);
         egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
@@ -784,6 +787,7 @@ impl Panel for TimelinePanel {
                         &axis,
                         row,
                         rect,
+                        switch_input,
                         &layers,
                         &parent_items,
                         &mut key_rects,
@@ -797,6 +801,8 @@ impl Panel for TimelinePanel {
                     }
                 }
             });
+
+        self.finish_switch_drag(switch_input, cx);
 
         // Drags that span rows.
         self.finish_drags(

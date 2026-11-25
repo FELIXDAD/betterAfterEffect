@@ -32,6 +32,7 @@ pub(crate) enum Binding {
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
     ReadBuffer,
+    ReadWriteBuffer,
 }
 
 /// A compute pipeline and its bind group layout.
@@ -81,6 +82,7 @@ pub(crate) fn format_key(format: wgpu::TextureFormat) -> u64 {
 }
 
 /// A resource bound to a kernel binding.
+#[derive(Clone, Copy)]
 pub(crate) enum Resource<'a> {
     /// Ring uniform (the dynamic offset is passed at dispatch).
     Uniform,
@@ -116,6 +118,11 @@ pub(crate) struct Runtime {
     ring: UniformRing,
     placeholder: wgpu::TextureView,
     kernels: Mutex<FxHashMap<KernelKey, Arc<Kernel>>>,
+    /// Kernels being compiled in the background for the UI thread, and the
+    /// ones that failed there.
+    pending: Mutex<FxHashMap<KernelKey, Option<String>>>,
+    this: Weak<Runtime>,
+    scratch: Mutex<FxHashMap<&'static str, wgpu::Buffer>>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -141,13 +148,15 @@ pub(crate) fn runtime(gpu: &Arc<GpuContext>) -> Arc<Runtime> {
     {
         return rt.clone();
     }
-    let rt = Arc::new(Runtime::new(gpu.device().clone(), gpu.queue().clone()));
+    let rt = Arc::new_cyclic(|this| {
+        Runtime::new(gpu.device().clone(), gpu.queue().clone(), this.clone())
+    });
     list.push((Arc::downgrade(gpu), rt.clone()));
     rt
 }
 
 impl Runtime {
-    fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+    fn new(device: wgpu::Device, queue: wgpu::Queue, this: Weak<Runtime>) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bae.effects.uniform_ring"),
             size: RING_SIZE,
@@ -185,7 +194,31 @@ impl Runtime {
             },
             placeholder,
             kernels: Mutex::new(FxHashMap::default()),
+            pending: Mutex::new(FxHashMap::default()),
+            this,
+            scratch: Mutex::new(FxHashMap::default()),
         }
+    }
+
+    /// The grow-only storage buffer `name` of at least `size` bytes, shared by
+    /// every user on this device. Only for passes that fill it on the GPU (or
+    /// with `clear_buffer`) in the command buffer that reads it: commands on
+    /// one queue run in order, so sharing is safe. Never write it from the CPU.
+    pub fn scratch(&self, name: &'static str, size: u64) -> wgpu::Buffer {
+        let mut buffers = self.scratch.lock();
+        if let Some(buffer) = buffers.get(name)
+            && buffer.size() >= size
+        {
+            return buffer.clone();
+        }
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(name),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        buffers.insert(name, buffer.clone());
+        buffer
     }
 
     /// Writes `bytes` into a ring slot; returns its dynamic offset.
@@ -202,10 +235,53 @@ impl Runtime {
         if let Some(k) = self.kernels.lock().get(key) {
             return Ok(k.clone());
         }
+        // The UI thread never compiles: the kernel is compiled in the
+        // background right away (ahead of the warm-up's queue) and the frame
+        // is drawn without the effect until it is ready.
+        if bae_render::is_interactive_thread() {
+            return self.compile_in_background(key, source);
+        }
         let src = source()?;
         let kernel = Arc::new(self.build(&src)?);
         self.kernels.lock().insert(key.clone(), kernel.clone());
         Ok(kernel)
+    }
+
+    fn compile_in_background(
+        &self,
+        key: &KernelKey,
+        source: impl FnOnce() -> Result<KernelSource, RenderError>,
+    ) -> Result<Arc<Kernel>, RenderError> {
+        let mut pending = self.pending.lock();
+        match pending.get(key) {
+            Some(Some(failed)) => return Err(RenderError::Other(failed.clone())),
+            Some(None) => return Err(bae_render::warming_up("an effect pipeline")),
+            None => {}
+        }
+        let (Some(rt), Ok(src)) = (self.this.upgrade(), source()) else {
+            return Err(bae_render::warming_up("an effect pipeline"));
+        };
+        pending.insert(key.clone(), None);
+        drop(pending);
+        let key = key.clone();
+        let spawned = std::thread::Builder::new()
+            .name("bae-effects-compile".into())
+            .spawn(move || {
+                match rt.build(&src) {
+                    Ok(kernel) => {
+                        rt.kernels.lock().insert(key.clone(), Arc::new(kernel));
+                        rt.pending.lock().remove(&key);
+                    }
+                    Err(e) => {
+                        rt.pending.lock().insert(key, Some(e.to_string()));
+                    }
+                }
+                bae_gpu::warm_up::request_redraw();
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("effect pipeline compile thread: {e}");
+        }
+        Err(bae_render::warming_up("an effect pipeline"))
     }
 
     fn build(&self, src: &KernelSource) -> Result<Kernel, RenderError> {
@@ -236,8 +312,10 @@ impl Runtime {
                         },
                         multisampled: false,
                     },
-                    Binding::ReadBuffer => wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    Binding::ReadBuffer | Binding::ReadWriteBuffer => wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: matches!(kind, Binding::ReadBuffer),
+                        },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
