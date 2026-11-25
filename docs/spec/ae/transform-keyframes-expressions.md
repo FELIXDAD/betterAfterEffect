@@ -1578,7 +1578,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** Turns on Time Remap and creates its default keyframes.
 - **Exact semantics:** Layer > Time > Enable Time Remapping, Ctrl+Alt+T / Cmd+Opt+T.
-  - Creates two Linear keys: at the layer's source start (layer time 0 → value 0) and at the source end (layer time = sourceDuration → value = sourceDuration), i.e. identity mapping (UNVERIFIED: keys sit at the source start/end, not at trimmed In/Out points; the end key is at the time just after the last frame, so the last key's value equals the duration and shows the last frame by clamping).
+  - Creates two Linear keys: at the layer's source start (layer time 0 → value 0) and at the source end (layer time = sourceDuration → value = sourceDuration), i.e. identity mapping. Measured in AE 26.2.1 by 04 (2 s footage: keys 0→0 and 2→2, linear).
   - While enabled the layer's Out point can be extended beyond the source duration (the last value holds).
   - Disabling deletes the Time Remap keys and returns to `t_source = layerTime`.
   - Time stretch is unavailable/ignored while Time Remapping is enabled? UNVERIFIED: AE allows stretch values but the stretch column is greyed for remapped layers.
@@ -1590,8 +1590,8 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** One-step commands that use Time Remap to hold a frame.
 - **Exact semantics:**
-  - Freeze Frame (Layer > Time > Freeze Frame): enables Time Remap (deleting any existing Time Remap keys) and places a single Hold key at the CTI with value = the source time currently shown; the whole layer shows that frame.
-  - Freeze On Last Frame (在最后一帧上冻结): sets Time Remap keys so the layer plays normally and then holds its last frame, and extends the layer Out point to the comp end (AE help). UNVERIFIED key layout: keys at source start (0) and at the last frame time `(lastFrame)/fps` with Hold out.
+  - Freeze Frame (Layer > Time > Freeze Frame): enables Time Remap (deleting any existing Time Remap keys) and places a single key at the CTI, Hold on both sides, with value = the source time currently shown; the whole layer shows that frame. Stretch and Out point are unchanged (measured in AE 26.2.1 by 04).
+  - Freeze On Last Frame (在最后一帧上冻结): keys at source start (0 → 0, linear) and at `sourceDuration − one comp frame` (value equal, linear in / Hold out); the Out point extends to the comp end. Measured in AE 26.2.1 by 04 (2 s of 10 fps footage in a 30 fps comp: last key 1.9667 s).
 - **Priority:** P1
 - **Owner:** bae-motion (+ bae-anim)
 - **Notes:** zh-CN terms 冻结帧 / 在最后一帧上冻结 from the cn help page (Time stretching and time remapping). UNVERIFIED version: a community answer dates Freeze On Last Frame to AE CC 2017 (14.x); Freeze Frame is older.
