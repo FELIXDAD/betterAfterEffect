@@ -2325,6 +2325,23 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
 }
 
 #[test]
+fn saved_pane_switches_survive_column_layout_upgrade() {
+    use crate::timeline::Column::{Modes, Parent, Switches};
+    let old = json!({"switches": false, "modes": true, "parent": false, "zoom": 0.75});
+    let upgraded = TimelinePanel::from_state(Some(&old));
+    let visibility = |tl: &TimelinePanel| [Switches, Modes, Parent].map(|c| tl.column_visible(c));
+    assert_eq!(visibility(&upgraded), [false, true, false]);
+    let saved = upgraded.save_state().unwrap();
+    assert_eq!(saved["zoom"], 0.75);
+    assert!(saved.get("switches").is_none());
+    let mut mixed = json!({"switches": true, "modes": false, "parent": true, "zoom": 0.75});
+    mixed["columns"] = saved["columns"].clone();
+    let restored = TimelinePanel::from_state(Some(&mixed));
+    assert_eq!(visibility(&restored), visibility(&upgraded));
+    assert_eq!(restored.save_state(), Some(saved));
+}
+
+#[test]
 fn column_menu_shows_the_actual_out_frame_and_header_drag_changes_layout() {
     let mut h = H::new();
     let layer = h.layer.clone();

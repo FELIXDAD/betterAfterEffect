@@ -189,7 +189,7 @@ impl TimelinePanel {
                     pos2(l + cols.x(Column::Name) + 2.0, rect.top()),
                     pos2(l + cols.right(Column::Name) - 2.0, rect.bottom()),
                 );
-                let layer_name = query::display_name_of(stage, layer);
+                let name = query::display_name_of(stage, layer);
                 let source_name = if self.columns.layer_names {
                     None
                 } else {
@@ -202,16 +202,15 @@ impl TimelinePanel {
                         })
                         .map(|p| query::display_name_of(stage, &p))
                 };
-                let name = source_name.unwrap_or_else(|| layer_name.clone());
+                let display_name = source_name.as_deref().unwrap_or(&name);
                 if self.rename.as_ref().is_some_and(|(p, _)| p == layer) {
                     let mut done = None;
                     if let Some((_, buf)) = &mut self.rename {
                         done = common::rename_field(ui, name_rect, buf, rid("rename"));
                     }
                     if let Some(result) = done {
-                        if let Some(new) =
-                            result.filter(|n| !n.trim().is_empty() && *n != layer_name)
-                        {
+                        if let Some(new) = result.filter(|n| !n.trim().is_empty() && *n != name) {
+                            self.columns.layer_names = true;
                             cx.invoke_with("attr.set", json!({"path": layer, "attr": "name", "value": {"type": "string", "value": new}}));
                         }
                         self.rename = None;
@@ -220,7 +219,7 @@ impl TimelinePanel {
                     widgets::clipped_text(
                         ui.painter(),
                         pos2(name_rect.left(), cy),
-                        &name,
+                        display_name,
                         theme::body(),
                         color::TEXT_STRONG,
                         name_rect.width(),
@@ -242,8 +241,7 @@ impl TimelinePanel {
                     }
                     let locked = query::is_locked(stage, layer);
                     if resp.double_clicked() && !locked {
-                        self.columns.layer_names = true;
-                        self.rename = Some((layer.clone(), layer_name.clone()));
+                        self.rename = Some((layer.clone(), name.clone()));
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {

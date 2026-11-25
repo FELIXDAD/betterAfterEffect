@@ -70,6 +70,23 @@ pub(crate) struct Columns {
 }
 
 impl Columns {
+    pub(super) fn load(state: &serde_json::Value) -> Self {
+        if let Some(columns) = state.get("columns") {
+            return serde_json::from_value(columns.clone()).unwrap_or_default();
+        }
+        let mut columns = Self::default();
+        for (key, column) in [
+            ("switches", Column::Switches),
+            ("modes", Column::Modes),
+            ("parent", Column::Parent),
+        ] {
+            if let Some(visible) = state[key].as_bool() {
+                columns.shown.insert(column, visible);
+            }
+        }
+        columns
+    }
+
     pub(crate) fn visible(&self, c: Column) -> bool {
         c == Column::Name
             || self.shown.get(&c).copied().unwrap_or(matches!(

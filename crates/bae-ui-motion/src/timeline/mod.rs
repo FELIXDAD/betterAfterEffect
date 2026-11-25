@@ -481,7 +481,7 @@ impl TimelinePanel {
     pub(crate) fn from_state(state: Option<&serde_json::Value>) -> Self {
         let mut panel = Self::default();
         if let Some(state) = state {
-            panel.columns = serde_json::from_value(state["columns"].clone()).unwrap_or_default();
+            panel.columns = Columns::load(state);
             panel.zoom = state["zoom"].as_f64().unwrap_or_default().clamp(0.0, 1.0) as f32;
         }
         panel
