@@ -45,6 +45,7 @@ mod props;
 mod render;
 pub mod render_queue;
 pub mod scopes;
+pub mod scripts;
 pub mod session;
 mod timeline;
 pub mod tools;
@@ -109,6 +110,8 @@ impl AppModule for MotionUiModule {
 
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_motion::MotionModule);
+        app.add_module(bae_script::ScriptModule);
+        bae_ui::i18n::register(scripts::ZH);
         // Every module registers its own Chinese strings and panels.
         for register in MODULES {
             register(app);
@@ -120,6 +123,23 @@ impl AppModule for MotionUiModule {
         effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
+        }
+        let session = app
+            .resource::<SharedSession>()
+            .expect("motion session")
+            .clone();
+        app.insert_resource::<std::sync::Arc<dyn bae_script::ScriptView>>(std::sync::Arc::new(
+            session.clone(),
+        ));
+        if let Err(error) = std::thread::Builder::new()
+            .name("bae-audio-device".into())
+            .spawn(move || {
+                if let Err(error) = session.open_audio() {
+                    tracing::warn!(%error, "Audio output unavailable");
+                }
+            })
+        {
+            tracing::warn!(%error, "Could not start the audio device worker");
         }
         if app.resource::<SharedTools>().is_none() {
             app.insert_resource(SharedTools::default());
@@ -181,6 +201,21 @@ impl AppModule for MotionUiModule {
         let effect_actions: std::sync::Arc<dyn ActionHandler> =
             std::sync::Arc::new(effects::EffectActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.effects", effect_actions);
+        // File ▸ Scripts: Run Script File…, Install Script File…, installed scripts.
+        let scripts_dir = app
+            .resource::<bae_platform::AppDirs>()
+            .map(|d| d.data.join("Scripts"));
+        let menu = app.registry::<MenuItemSpec>();
+        if let Some(dir) = &scripts_dir {
+            scripts::register_menu(&menu, &owner, dir);
+        }
+        let script_actions: std::sync::Arc<dyn ActionHandler> =
+            std::sync::Arc::new(scripts::ScriptActions {
+                dir: scripts_dir,
+                menu,
+                owner: owner.clone(),
+            });
+        let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.scripts", script_actions);
         let menu = app.registry::<MenuItemSpec>();
         menu.batch(|tx| {
             for (id, item) in menus::items() {

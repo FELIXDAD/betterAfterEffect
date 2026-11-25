@@ -4,6 +4,7 @@ keywords = ["色相", "饱和度", "亮度", "着色", "去色"]
 
 [effect.hue-saturation.params]
 channel_control = "通道控制"
+channel_range = "通道范围"
 master_hue = "主色相"
 master_saturation = "主饱和度"
 master_lightness = "主亮度"
