@@ -384,7 +384,8 @@ impl Builder {
 fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpec {
     let mut spec = MenuItemSpec::new(path, catalog::shown_title(item.title), item.action)
         .workspace(WORKSPACE)
-        .at(levels);
+        .at(levels)
+        .mnemonic(catalog::item_mnemonic(item.ae));
     if !item.params.is_empty() {
         spec = spec.params(serde_json::from_str(item.params).expect("catalog params are JSON"));
     }

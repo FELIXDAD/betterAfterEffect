@@ -520,6 +520,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Zoom In", "放大"),
     ("Zoom Out", "缩小"),
     ("Layer", "图层"),
+    // The Composition panel's layer menu: Select ▸ (the layers under the pointer).
+    ("Select", "选择"),
     ("No composition", "没有合成"),
     (
         "Open a composition from the Project panel, or create one.",
