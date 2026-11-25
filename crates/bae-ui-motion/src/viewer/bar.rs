@@ -82,13 +82,20 @@ pub(super) fn bottom_bar(
         tr("Third"),
         tr("Quarter"),
     ];
-    if factor > 4 {
-        res.push(tr("Custom"));
-    }
+    // AE lists Custom… last; a custom resolution shows as Custom.
+    let steps = super::comp_steps(cx.stage, &info.path);
+    let custom = steps[0] != steps[1] || factor > 4;
+    res.push(if custom {
+        tr("Custom")
+    } else {
+        tr("Custom...")
+    });
     let mut r = if session.lock().auto_resolution {
         0
+    } else if custom {
+        5
     } else {
-        (factor as usize).min(5)
+        factor as usize
     };
     if widgets::dropdown(ui, "res", &mut r, &res, 84.0)
         .on_hover_text(tr("Resolution"))
@@ -96,8 +103,14 @@ pub(super) fn bottom_bar(
     {
         match r {
             0 => session.lock().auto_resolution = true,
-            1..=4 => super::set_resolution(cx, session, r as u32, false),
-            _ => {}
+            1..=4 => super::set_resolution(cx, session, [r as u32; 2], false),
+            _ => crate::dialogs::open(
+                cx.resources,
+                crate::dialogs::Dialog::CustomResolution {
+                    steps,
+                    nested: false,
+                },
+            ),
         }
     }
 

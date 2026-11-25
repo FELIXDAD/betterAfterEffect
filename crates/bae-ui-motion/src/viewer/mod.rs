@@ -38,6 +38,7 @@ mod tests;
 mod transform;
 mod type_tool;
 pub(crate) mod view3d;
+pub(crate) mod view_options;
 
 pub(crate) use transform::nudge_layers;
 
@@ -557,7 +558,9 @@ impl Panel for CompositionViewer {
 
         // Paint.
         let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, Color32::from_gray(35));
+        let controls = session.lock().layer_controls;
+        let pasteboard = session.lock().panel_background.color();
+        painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
         if self.checker {
             checkerboard(&painter, comp_rect.intersect(area));
@@ -683,7 +686,7 @@ impl Panel for CompositionViewer {
             let c = self.prefs.handle_color(theme::label_color(label));
             if let Some(q) = render::bounds_quad(l, &view, &outer) {
                 painter.add(egui::Shape::closed_line(q.to_vec(), Stroke::new(1.0, c)));
-                for i in 0..4 {
+                for i in (0..4).filter(|_| controls.handles) {
                     let mid = q[i] + (q[(i + 1) % 4] - q[i]) / 2.0;
                     for p in [q[i], mid] {
                         painter.rect_stroke(
@@ -710,7 +713,9 @@ impl Panel for CompositionViewer {
             );
         }
 
-        overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        if controls.masks {
+            overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        }
 
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
@@ -911,13 +916,25 @@ fn render_factor(stage: &bae_model::Stage, comp: &PrimPath, auto: bool, mag: f32
     }
 }
 
-/// Set the active comp's resolution (View > Resolution, the viewer's menu) and,
+/// The comp's resolution as pixel steps (horizontal, vertical).
+pub(crate) fn comp_steps(stage: &bae_model::Stage, comp: &PrimPath) -> [u32; 2] {
+    match stage
+        .prim(comp)
+        .and_then(|v| query::static_value(&v, "resolution"))
+    {
+        Some(Value::Vec2([h, v])) => [(h as u32).max(1), (v as u32).max(1)],
+        _ => [1, 1],
+    }
+}
+
+/// Set the active comp's resolution as pixel steps (View > Resolution, the
+/// viewer's menu, Custom Resolution) and,
 /// with `nested`, of the comps nested in it (AE's "… Recurse" shortcuts); turns
 /// Auto off. One `comp.set_settings` per comp, like Composition Settings.
 pub(crate) fn set_resolution(
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
-    factor: u32,
+    steps: [u32; 2],
     nested: bool,
 ) {
     let Some(comp) = session.lock().active_comp.clone() else {
@@ -941,11 +958,8 @@ pub(crate) fn set_resolution(
         i += 1;
     }
     for c in comps {
-        if comp_resolution(cx.stage, &c) != factor {
-            cx.invoke_with(
-                "comp.set_settings",
-                json!({"comp": c, "resolution": [factor, factor]}),
-            );
+        if comp_steps(cx.stage, &c) != steps {
+            cx.invoke_with("comp.set_settings", json!({"comp": c, "resolution": steps}));
         }
     }
 }

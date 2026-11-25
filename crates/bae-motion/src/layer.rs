@@ -118,6 +118,13 @@ pub struct CreateLayerParams {
     /// Preferences > Labels default).
     #[serde(default)]
     pub label: Option<i64>,
+    /// Camera and light layers: position in comp space (default `zoom` in
+    /// front of `position`, or the light's AE place).
+    #[serde(default)]
+    pub position_3d: Option<[f64; 3]>,
+    /// Camera and light layers: point of interest (default `position` at z = 0).
+    #[serde(default)]
+    pub point_of_interest: Option<[f64; 3]>,
 }
 
 impl CreateLayerParams {
@@ -141,6 +148,8 @@ impl CreateLayerParams {
             camera: None,
             light: None,
             label: None,
+            position_3d: None,
+            point_of_interest: None,
         }
     }
 }
@@ -354,12 +363,11 @@ impl Command for CreateLayer {
                         position = [pos[0] + 80.0, pos[1] - 80.0, -2000.0 / 3.0];
                     }
                 }
-                set(
-                    tx,
-                    &path,
-                    "transform:point_of_interest",
-                    Value::Vec3([pos[0], pos[1], 0.0]),
-                )?;
+                if let Some(p3) = p.position_3d {
+                    position = p3;
+                }
+                let poi = p.point_of_interest.unwrap_or([pos[0], pos[1], 0.0]);
+                set(tx, &path, "transform:point_of_interest", Value::Vec3(poi))?;
             }
         }
         if anchor != [0.0, 0.0] {

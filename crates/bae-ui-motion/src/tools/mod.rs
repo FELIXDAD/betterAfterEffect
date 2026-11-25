@@ -521,6 +521,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::FREE_TRANSFORM, "Free Transform Points"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
+        .chain(crate::viewer::view_options::ACTIONS.iter().copied())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -561,9 +562,20 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
                 *title,
             )
         });
+    let custom = crate::viewer::view_options::VARIANTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (
+                crate::viewer::view_options::ids::CUSTOM_RESOLUTION,
+                params,
+                *title,
+            )
+        });
     nudges
         .chain(resolutions)
         .chain(views)
+        .chain(custom)
         .map(|(id, params, title)| {
             (
                 format!("{id}/{params}"),
@@ -965,7 +977,8 @@ impl ActionHandler for ToolActions {
                 .unwrap_or(1);
             let session = crate::common::session(cx.resources);
             let nested = inv.params.get("nested").and_then(|v| v.as_bool()) == Some(true);
-            crate::viewer::set_resolution(cx, &session, factor.max(1) as u32, nested);
+            let f = factor.max(1) as u32;
+            crate::viewer::set_resolution(cx, &session, [f, f], nested);
             return true;
         }
         if inv.id == ids::NUDGE {
@@ -976,6 +989,9 @@ impl ActionHandler for ToolActions {
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
         }
         if crate::viewer::view3d::handle(inv, cx) {
+            return true;
+        }
+        if crate::viewer::view_options::handle(inv, cx) {
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {

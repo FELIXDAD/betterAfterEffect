@@ -76,6 +76,7 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(tools::ZH);
         bae_ui::i18n::register(catalog::menu_zh());
         bae_ui::i18n::register(ae_panels::ZH);
+        bae_ui::i18n::register(viewer::view_options::ZH);
         effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());

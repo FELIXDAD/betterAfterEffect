@@ -44,6 +44,13 @@ pub enum Dialog {
     Precompose(Box<PrecomposeDialog>),
     /// An alert: a message and OK (import errors …).
     Alert { title: String, message: String },
+    /// View ▸ View Options (Cmd/Ctrl+Alt+U).
+    ViewOptions(Box<crate::viewer::view_options::LayerControls>),
+    /// View ▸ Panel Background Color ▸ Select Custom Background Color…
+    BackgroundColor([u8; 3]),
+    /// View ▸ Resolution ▸ Custom…: pixel steps (horizontal, vertical);
+    /// `nested`: also for the comps nested in the active one.
+    CustomResolution { steps: [u32; 2], nested: bool },
 }
 
 /// Open dialog and remembered values.
@@ -182,6 +189,15 @@ pub(crate) fn layer_settings(cx: &PanelContext<'_>, session: &SharedSession, tar
     }
 }
 
+/// Open `dialog` unless one is open already.
+pub(crate) fn open(resources: &Resources, dialog: Dialog) {
+    let dialogs = shared(resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(dialog);
+    }
+}
+
 /// Show an alert (AE's error dialogs): `message` and OK. Waits for the open
 /// dialog to close first when one is open.
 pub(crate) fn alert(cx: &PanelContext<'_>, title: &str, message: String) {
@@ -299,6 +315,13 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
+            Dialog::ViewOptions(v) => crate::viewer::view_options::view_options_ui(ctx, cx, v),
+            Dialog::BackgroundColor(c) => {
+                crate::viewer::view_options::background_color_ui(ctx, cx, *c)
+            }
+            Dialog::CustomResolution { steps, nested } => {
+                crate::viewer::view_options::custom_resolution_ui(ctx, cx, steps, *nested)
+            }
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {
