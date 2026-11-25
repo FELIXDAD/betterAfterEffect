@@ -127,8 +127,18 @@ impl AppModule for MotionUiModule {
             .expect("motion session")
             .clone();
         app.insert_resource::<std::sync::Arc<dyn bae_script::ScriptView>>(std::sync::Arc::new(
-            session,
+            session.clone(),
         ));
+        if let Err(error) = std::thread::Builder::new()
+            .name("bae-audio-device".into())
+            .spawn(move || {
+                if let Err(error) = session.open_audio() {
+                    tracing::warn!(%error, "Audio output unavailable");
+                }
+            })
+        {
+            tracing::warn!(%error, "Could not start the audio device worker");
+        }
         if app.resource::<SharedTools>().is_none() {
             app.insert_resource(SharedTools::default());
         }
