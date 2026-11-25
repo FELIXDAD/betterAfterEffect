@@ -202,3 +202,20 @@ fn alpha_levels_converts_8bit_controls_and_brightness_selects_legacy_mode() {
         assert_close(&got, &expected, rect, 0.00001, old);
     }
 }
+
+#[test]
+fn the_planner_resolves_an_alias_to_its_target_once() {
+    let fx = get("ADBE Brightness & Contrast").unwrap().effect();
+    let old = common::instance("ADBE Brightness & Contrast", vec![(2, Value::Float(45.))]);
+    let (target, mapped) = fx.resolve_alias(&old).expect("alias");
+    assert_eq!(target.def().match_name, "ADBE Brightness & Contrast 2");
+    assert_eq!(mapped.effect, "ADBE Brightness & Contrast 2");
+    assert!(mapped.params.contains(&(3, Value::Bool(true))));
+    assert!(
+        get("ADBE Brightness & Contrast 2")
+            .unwrap()
+            .effect()
+            .resolve_alias(&old)
+            .is_none()
+    );
+}

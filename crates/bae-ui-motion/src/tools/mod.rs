@@ -582,9 +582,10 @@ pub fn bindings() -> Vec<Binding> {
         .chain(NUDGES.iter().map(|(chord, dx, dy, _)| {
             Binding::new(chord, ids::NUDGE).params(nudge_params(*dx, *dy))
         }))
-        // AE binds Esc everywhere; here only in the Composition panel, which
-        // passes it on to whatever there uses Esc (a drag, text, a menu).
-        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST).when("composition")])
+        // Esc is Switch to Last 3D View whichever panel has focus (AE). Text
+        // fields and open menus keep their Esc (the workbench); the viewer
+        // passes it on to a drag or text it is editing.
+        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
         .collect()
 }
 
