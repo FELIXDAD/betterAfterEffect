@@ -192,6 +192,12 @@ fn boundary_order(id: u32) -> u32 {
     }
     return 2u * u.size.x + 2u * p.y + u32(p.x != 0u);
 }
+// One thread walks each contour: bounded so a huge contour (fractal noise
+// near a 50% threshold joins 10^5–10^6 edges) cannot stall the GPU into a
+// driver reset. Longer contours are cut; simplification past its budget leaves
+// the remaining spans unsimplified (their links are still the full path).
+const MAX_PATH: u32 = 32768u;
+const SIMPLIFY_BUDGET: u32 = 524288u;
 // Ramer–Douglas–Peucker works in place on the per-component linked list.
 fn simplify(start: u32, finish: u32, count: u32) {
     if u.tolerance <= 0. || count < 2u {
@@ -201,7 +207,12 @@ fn simplify(start: u32, finish: u32, count: u32) {
     var pending: array<vec3u, 32>;
     var depth = 0u;
     var span = vec3u(start, finish, count);
+    var work = 0u;
     loop {
+        work += span.z;
+        if work > SIMPLIFY_BUDGET {
+            break;
+        }
         let a = position(span.x);
         let delta = position(span.y) - a;
         let denom = max(dot(delta, delta), 1e-12);
@@ -245,6 +256,7 @@ fn trace_path(root: u32) {
     var after = cur;
     var area = 0.;
     var closed = false;
+    var steps = 0u;
     loop {
         let a = position(prev);
         let b = position(cur);
@@ -254,7 +266,8 @@ fn trace_path(root: u32) {
             break;
         }
         let next = other(cur, prev);
-        if next == NONE {
+        steps++ ;
+        if next == NONE || steps >= MAX_PATH {
             break;
         }
         if before(cur, anchor) {
@@ -274,9 +287,11 @@ fn trace_path(root: u32) {
         after = prev;
         prev = cur;
         cur = after;
+        steps = 0u;
         loop {
             let next = other(cur, prev);
-            if next == NONE {
+            steps++ ;
+            if next == NONE || steps >= MAX_PATH {
                 break;
             }
             prev = cur;
@@ -296,6 +311,11 @@ fn trace_path(root: u32) {
             break;
         }
         let next = other(cur, prev);
+        if n >= MAX_PATH {
+            // Cut here: the kept part is an open path.
+            links[cur] = NONE;
+            break;
+        }
         links[cur] = next;
         if next == NONE {
             break;

@@ -106,22 +106,16 @@ pub(super) fn render(
     let size = [field.width(), field.height()];
     let words = 2 * u64::from(size[0]) * u64::from(size[1]);
     let blocks = words.div_ceil(256) as u32;
-    let allocate = |label, words: u64| {
-        rt.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: 4 * words,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        })
-    };
-    let parent = allocate("Vegas component roots", words);
-    let links = allocate("Vegas path links", words);
-    let arcs = allocate("Vegas arc lengths", words);
-    let lengths = allocate("Vegas contour lengths", words);
-    let ranks = allocate(
-        "Vegas contour counts",
-        1 + u64::from(blocks + blocks.div_ceil(256)),
-    );
+    // Reused across frames: `initialize` rewrites parents, links and arcs, and
+    // lengths are read only for the roots `trace` writes. Counts and coverage
+    // accumulate, so they are cleared.
+    let parent = rt.scratch("Vegas component roots", 4 * words);
+    let links = rt.scratch("Vegas path links", 4 * words);
+    let arcs = rt.scratch("Vegas arc lengths", 4 * words);
+    let lengths = rt.scratch("Vegas contour lengths", 4 * words);
+    let rank_bytes = 4 * (1 + u64::from(blocks + blocks.div_ceil(256)));
+    let ranks = rt.scratch("Vegas contour counts", rank_bytes);
+    target.encoder().clear_buffer(&ranks, 0, Some(rank_bytes));
     let output = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
     let field_view = field.create_view(&Default::default());
     let format = target.format();
@@ -203,10 +197,16 @@ pub(super) fn render(
     let max_rows = (rt.device.limits().max_storage_buffer_binding_size
         / (4 * u64::from(roi.width())))
     .min(u64::from(roi.height())) as i32;
+    let coverage = rt.scratch(
+        "Vegas stroke coverage",
+        4 * u64::from(roi.width()) * u64::from(max_rows.max(0) as u32),
+    );
     let mut y = roi.y0;
     while y < roi.y1 {
         let stripe = IRect::new(roi.x0, y, roi.x1, (y + max_rows).min(roi.y1));
-        let coverage = allocate("Vegas stroke coverage", stripe.area());
+        target
+            .encoder()
+            .clear_buffer(&coverage, 0, Some(4 * stripe.area()));
         u.i32s(32, &image_grid::rect4(stripe));
         let offset = gpu::push_uniform(&rt, &u);
         let mut raster_resources = field_resources.to_vec();
