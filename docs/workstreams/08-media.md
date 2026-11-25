@@ -48,7 +48,7 @@
 - [x] 序列帧：`name_0001.png` / `shot.1001.exr` 识别（数字取文件名最后一段，补零位宽固定），缺帧报告，目录扫描分组；`ImageSequenceSource`（序列默认 30 fps，可设）。
 - [x] 图像格式：PNG（8/16 位、调色板、tRNS、cICP/sRGB/gAMA/cHRM/iCCP、像素比）、JPEG（zune-jpeg，ICC、JFIF 像素比）、WebP（image-webp）、OpenEXR（half/float，数据窗口放进显示窗口，色度、时码、像素比）。GPU 上传后用 compute pass 转成 RGBA16F 并处理 alpha（预乘/反预乘/强制不透明）。
 - [x] macOS 视频解码：AVFoundation + VideoToolbox（H.264、HEVC、ProRes），IOSurface 支撑的 CVPixelBuffer → CVMetalTexture → wgpu 纹理（wgpu-hal，零拷贝），再转工作格式；8 位源用 BGRA，10 位以上和带 alpha 的 ProRes 4444 用 64RGBAHalf；帧精确 seek（向前小步顺读，其余重建 reader 并从目标帧内 1/8 帧处开始）；29.97 等非整数帧率逐帧验证。
-- [ ] Windows 视频解码：目前只有占位（`media_foundation`，能通过 `cargo clippy --target x86_64-pc-windows-msvc -p bae-media`），实现放下一个 PR。
+- [x] Windows 视频解码：Media Foundation Source Reader 通过 DXGI 设备管理器在 D3D11 上解码 H.264、HEVC Main / Main 10。跳转复用同一 reader，由容器定位关键帧，再按显示时间戳取目标帧。按显示区域裁掉编码填充，视频帧数取视频轨长度。缺少 HEVC 解码器时，导入提示检查系统的 HEVC 视频扩展。
 - [x] TIFF（静帧和序列）：8 / 16 位整数、32 位浮点，灰度 / RGB，有无 alpha；无压缩、LZW、Deflate、PackBits、JPEG。直接用 `tiff` crate 解码。alpha 方式读 `ExtraSamples`：1 = 预乘，2 或没有这个标签 = 直通，**明确写 0（未指定）= 预乘**——与 AE 2026 实际输出对比发现，AE 的 "TIFF Sequence with Alpha" 写的是预乘像素、标签却是 0，而 `image` 和 `tiff` 都会把这种「未指定」的第 4 个样本丢掉，原来读出来是不透明的；现在遇到这种文件时，先在内存里把这一个标签值改成 1 再解码。用 AE 渲染的文件核对过：alpha 128，颜色是预乘值。
 - [ ] PSD（保留图层）、HEIC
 - [x] 跳帧速度：拖动播放头（连续随机跳帧）不再每次重建 `AVAssetReader`：输出开了 `supportsRandomAccess`，跳帧读单帧时间范围，读完确认范围已读空后用 `resetForReadingTimeRanges` 换位置；往后顺读时切换成开放范围。4K 实测（机器负载较高时 A/B 交替各跑两轮）：拖动 ProRes 422 / 4444 约 8–9 ms/帧（原来 40–54 ms），H.264（GOP 30）约 27 ms/帧（原来约 46 ms，余下主要是从关键帧解码）；顺序解码速度不变。从播放状态跳出的第一次仍要重建（约 40–65 ms）。
@@ -60,7 +60,8 @@
 - [x] macOS 编码（`apple::AvWriterFormat`）：AVAssetWriter 驱动 VideoToolbox，H.264 / HEVC 优先硬件编码，ProRes Proxy / LT / 422 / HQ / 4444 / 4444 XQ；8 位用 32BGRA，ProRes 和 10 位 HEVC 用 64RGBAHalf；ProRes 4444 直通 alpha，HEVC alpha 可选直通 / 预乘；按 H.273 写色彩标签（原色、传递函数、矩阵），像素比、码率、质量、关键帧间隔。解码端识别 HEVC alpha 及其直通 / 预乘。
 - [x] 导出提速：`Encoder::input_format` 声明编码器要的像素格式和 alpha，渲染循环在回读前用 compute pass 转好（`MediaGpu::convert_for_export`；BGRA 用 RGBA8 纹理加通道交换，16 位用 rgba16uint），只回读最终字节，编码器直接借用不再逐像素转换；PNG / EXR 序列由最多 4 个线程并行压缩写盘（有界队列控制 4K 内存）。4K 实测（机器负载高，A/B 交替两轮）：H.264 25 → 47 fps，ProRes 422 HQ 23 → 62–69 fps，ProRes 4444 + alpha 21 → 50–66 fps，EXR half 7.3 → 12.6 fps。
 - [x] 导出提速第二轮（04 的导出流水线 PR 顺带改，2026-11-21）：TIFF 序列编码（`VideoCodec::Tiff`，不压缩 / LZW / Deflate，8 / 16 位，ExtraSamples 标直通或预乘）；PNG 压缩档 `EncodeSettings::png_compression`（none / fastest / fast / balanced / high / zlib 1–9，默认 fast）；序列写出线程默认每个逻辑核一个（原来最多 4 个），`EncodeSettings::threads` 可改，按 512 MiB 帧内存（`SEQUENCE_QUEUE_BYTES`）截断；`Encoder::push_frame_owned`（默认实现转调 `push_frame`，序列编码器不再拷贝整帧，像素转换挪到写出线程）；每个文件先在内存里压缩再一次写盘，`EncodeOutput::stats`（编码 / 写盘时间、字节、线程数）；`export::write_image_file`（单张图写到指定路径）、`export::sequence_input_format`；写盘失败报 `MediaError::Write`（“cannot write …”）。
-- [ ] 编码导出后续：渲染直接写进 IOSurface 支撑的 pixel buffer（省掉回读和拷贝）、时码轨、音频混入、Windows Media Foundation 编码
+- [x] Windows 影片导出：渲染队列和 `bae render` 共用 Media Foundation Sink Writer，输出 8 位 RGB 的 H.264 / HEVC MP4。HEVC 需要系统提供硬件编码器。队列按本机编码器启用格式，ProRes 项提示需要 macOS。
+- [ ] 编码导出后续：渲染直接写进 IOSurface 支撑的 pixel buffer（省掉回读和拷贝）、时码轨、音频混入。
 - [x] 音频接口（`audio`）：`AudioSource`（按采样帧随机读取）、采样与 `Time` 精确换算、`MemoryAudio`、`Waveform`（min/max 峰值、降采样出缩放级别、按时间取可见区间）。
 - [x] 音频文件解码（`FileAudio`，symphonia）：WAV、AIFF、MP4 / QuickTime / M4A（AAC）、MP3、FLAC，按采样帧随机读取（顺读继续解码，跳转时精确 seek）；`audio::probe` 只读文件头列出音频流，影片的 `MediaInfo.audio` 由它填写。symphonia 的 MP4 读取不处理编码器延迟，AAC 会比画面晚约 44 ms（48 kHz 下 2112 个采样）；新增的小型 box 读取器从音频轨的编辑列表或 iTunes 无缝信息（`iTunSMPB`）里取延迟和有效长度并裁掉。测试用代码生成 WAV，macOS 上测试时用系统的 `afconvert` 生成 AAC / FLAC / AIFF；AAC 在 0.5 s 处放一个脉冲，解码后位置仍在 0.5 s。
 - [ ] cpal 播放、音画同步时钟；导出时混入音频
@@ -86,6 +87,23 @@
 - `MediaInfo` 现在报告文件里真实的 YCbCr 矩阵和范围；交付的帧仍是全范围 RGB。
 
 ### 说明与待定
+
+#### Windows 影片进 GPU
+
+RTX 5090 D v2（驱动 616.92）上，两种解码器经过视频处理器输出的 D3D11 纹理均为 `MiscFlags = 0`。wgpu 的 D3D12 后端可以包装 `ID3D12Resource`，但这些系统分配的纹理不能导出 D3D12 所需的 NT 共享句柄。首版把有效画面读回，再上传一次并转成合成用的 RGBA16F。直接共享需要可控制的纹理分配，以及两个 GPU 队列间的同步。[微软的共享句柄要求](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiresource-getsharedhandle)
+
+Windows 11、D3D12、release 实测，单位为毫秒/帧。素材为 29.97 fps、GOP 12、带 B 帧的 48 帧测试图。预热后测 47 帧，每次等待 GPU 完成。单独上传复用一张已解码的 CPU 帧，顺播和跳帧都从源文件取帧，含上传和工作格式转换。跳帧按步长 17 在素材内循环。
+
+| 素材 | 单独上传及转换 | 顺播 | 跳帧 |
+|---|---:|---:|---:|
+| H.264 1920×1080 | 1.30 | 8.75 | 11.95 |
+| H.264 3840×2160 | 3.75 | 16.26 | 28.58 |
+| HEVC Main 1920×1080 | 1.01 | 8.83 | 11.73 |
+| HEVC Main 3840×2160 | 3.85 | 16.53 | 28.12 |
+
+`crates/bae-media/tests/fixtures/generate_mf.py` 用外部 FFmpeg 生成素材。H.264 样片的视频比音频晚半秒开始，也先于音频结束，用于核对视频帧数和跨 GOP 跳转。仓库附有小尺寸样片，可以直接运行 `cargo test -p bae-media`。缺少 Media Foundation 或 D3D11 视频设备的 runner 会跳过相应端到端测试，缺少 HEVC 解码器或编码器时只跳过对应场景。加 `-- --nocapture` 可查看具体原因。复测上表时，用脚本的 `--size` 和 `--out` 生成大图，令 `BAE_MF_BENCH` 指向其中一个 MP4，运行 `cargo test --release -p bae-media --lib benchmark_upload -- --ignored --nocapture`。
+
+#### 其他说明
 
 - `bae-media` 依赖 `bae-model`（只用 `Time` / `FrameRate`），按 02 的要求避免两套时间体系。
 - 媒体帧号一律从素材第一帧起算、从 0 开始；序列 `name_0101.png` 的第 0 帧是 0101。

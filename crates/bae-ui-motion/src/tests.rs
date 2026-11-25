@@ -521,7 +521,7 @@ fn gpu_preview_publishes_the_rendered_comp() {
     // No display handle until the shell registers the texture.
     assert!(
         preview
-            .frame(&h.resources, &h.stage, &evaluated, 1)
+            .frame(&h.resources, &h.stage, &evaluated, 1, None)
             .is_none()
     );
     let published = registry.get(preview.viewport()).expect("published");
@@ -529,7 +529,7 @@ fn gpu_preview_publishes_the_rendered_comp() {
     assert_eq!(published.format, wgpu::TextureFormat::Rgba8Unorm);
     registry.set_display_handle(preview.viewport(), Some(7));
     let img = preview
-        .frame(&h.resources, &h.stage, &evaluated, 1)
+        .frame(&h.resources, &h.stage, &evaluated, 1, None)
         .expect("image");
     assert_eq!(img.handle, 7);
     assert_eq!(
@@ -537,7 +537,7 @@ fn gpu_preview_publishes_the_rendered_comp() {
         (640, 360)
     );
     // Half resolution publishes a half-size texture.
-    preview.frame(&h.resources, &h.stage, &evaluated, 2);
+    preview.frame(&h.resources, &h.stage, &evaluated, 2, None);
     assert_eq!(registry.get(preview.viewport()).unwrap().size, [320, 180]);
     // The pixels: the full-comp red solid shows where the star is not.
     let mut anim = bae_render::AnimEvaluator::new(None);
