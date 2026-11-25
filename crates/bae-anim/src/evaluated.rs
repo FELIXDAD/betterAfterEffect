@@ -63,7 +63,7 @@ impl EvaluatedComp {
 pub struct EvaluatedLayer {
     pub path: PrimPath,
     /// Display name (`name` attribute, falling back to the prim name).
-    pub name: String,
+    pub name: Arc<str>,
     pub kind: LayerKind,
     pub timing: LayerTiming,
     /// The layer time that was evaluated (keyframe time base, see [`crate::time`]).
@@ -94,7 +94,7 @@ pub struct EvaluatedLayer {
     /// 0–1, not inherited from parents.
     pub opacity: f64,
     /// Blend mode token (`bae_model::schema::BLEND_MODES`).
-    pub blend_mode: String,
+    pub blend_mode: Arc<str>,
     pub track_matte: TrackMatte,
     /// Index of the matte layer (the layer above when the attribute is unset).
     pub track_matte_layer: Option<usize>,

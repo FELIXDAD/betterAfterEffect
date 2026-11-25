@@ -255,12 +255,20 @@ fn thousand_shape_layers_per_frame() {
                         spec: Some(spec),
                     })
                 };
-                set(&l, "kind", AttrSpec::with_value(Value::Enum("shape".into())))?;
+                set(
+                    &l,
+                    "kind",
+                    AttrSpec::with_value(Value::Enum("shape".into())),
+                )?;
                 let o = i as f64;
                 set(
                     &l,
                     "transform:position",
-                    AttrSpec::with_value(Value::Vec3([o % 40.0 * 96.0, (o / 40.0).floor() * 86.0, 0.0])),
+                    AttrSpec::with_value(Value::Vec3([
+                        o % 40.0 * 96.0,
+                        (o / 40.0).floor() * 86.0,
+                        0.0,
+                    ])),
                 )?;
                 set(
                     &l,

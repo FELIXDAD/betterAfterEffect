@@ -1100,7 +1100,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 Ok::<_, rquickjs::Error>(
                     comp.layers
                         .iter()
-                        .position(|l| l.name == name)
+                        .position(|l| *l.name == *name)
                         .map_or(-1, |i| i as i32),
                 )
             },
@@ -1115,7 +1115,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             let layer = &comp.layers[li];
             let o = Object::new(ctx.clone())?;
             o.set("path", layer.path.as_str())?;
-            o.set("name", layer.name.as_str())?;
+            o.set("name", &*layer.name)?;
             o.set("inPoint", layer.timing.in_point.as_seconds())?;
             o.set("outPoint", layer.timing.out_point.as_seconds())?;
             o.set("startTime", layer.timing.start_time.as_seconds())?;

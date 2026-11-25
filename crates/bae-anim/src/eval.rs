@@ -372,14 +372,15 @@ pub(crate) struct CompiledLight {
 #[derive(Debug)]
 pub(crate) struct CompiledLayer {
     pub(crate) path: PrimPath,
-    pub(crate) name: String,
+    /// Shared with every frame's evaluated layer (no per-frame copies).
+    pub(crate) name: Arc<str>,
     pub(crate) kind: LayerKind,
     pub(crate) timing: LayerTiming,
     pub(crate) switches: LayerSwitches,
     pub(crate) source: CompiledSource,
     pub(crate) time_remap: Option<Prop>,
     pub(crate) parent: Option<usize>,
-    pub(crate) blend_mode: String,
+    pub(crate) blend_mode: Arc<str>,
     pub(crate) track_matte: TrackMatte,
     pub(crate) track_matte_layer: Option<usize>,
     pub(crate) auto_orient: AutoOrient,
@@ -764,14 +765,16 @@ fn compile_layer(
             .value(l::NAME)
             .and_then(|n| n.as_str())
             .unwrap_or(v.name())
-            .to_owned(),
+            .into(),
         kind,
         timing: layer_timing(v, comp_duration),
         switches,
         source,
         time_remap,
         parent: None,
-        blend_mode: setting_str(v, lt, l::BLEND_MODE).unwrap_or_else(|| "normal".into()),
+        blend_mode: setting_str(v, lt, l::BLEND_MODE)
+            .unwrap_or_else(|| "normal".into())
+            .into(),
         track_matte: TrackMatte::from_token(
             setting_str(v, lt, l::TRACK_MATTE)
                 .as_deref()
