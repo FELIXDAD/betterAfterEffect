@@ -163,20 +163,53 @@ pub fn register_tables() {
     i18n::register(ZH);
 }
 
-/// Registers the shell strings and picks the language from `BAE_LANG`, then
-/// `LC_ALL` / `LC_MESSAGES` / `LANG`.
+/// Registers the shell strings and picks the system language: `BAE_LANG`, then
+/// `LC_ALL` / `LC_MESSAGES` / `LANG`, then the system's preferred language (an
+/// app opened from Finder or the Start menu has no locale variables).
 pub fn init_from_env() {
     register_tables();
-    let locale = std::env::var(LANG_ENV)
-        .ok()
-        .or_else(|| std::env::var("LC_ALL").ok())
-        .or_else(|| std::env::var("LC_MESSAGES").ok())
-        .or_else(|| std::env::var("LANG").ok())
+    let locale = [LANG_ENV, "LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
+        .or_else(system_locale)
         .unwrap_or_default();
     let lang = Lang::from_locale(&locale);
+    i18n::set_system_lang(lang);
+    set(lang);
+}
+
+/// Switches to the language Preferences > Appearance > Language picks
+/// (`system`, `zh-CN`, `en`); the UI follows on the next frame.
+pub fn apply_setting(value: &str) {
+    set(i18n::lang_for_setting(value));
+}
+
+fn set(lang: Lang) {
     i18n::set_lang(lang);
     // New folders, comps, layers and shape contents are named in it (AE).
     bae_motion::names::set_chinese(lang == Lang::Zh);
+}
+
+/// The first of the user's preferred languages (macOS: System Settings >
+/// Language & Region), e.g. `zh-Hans-CN`.
+#[cfg(target_os = "macos")]
+fn system_locale() -> Option<String> {
+    let languages = objc2_foundation::NSLocale::preferredLanguages();
+    languages.firstObject().map(|l| l.to_string())
+}
+
+/// The user's locale name (Windows: Settings > Time & language), e.g. `zh-CN`.
+#[cfg(windows)]
+fn system_locale() -> Option<String> {
+    let mut name = [0u16; 85];
+    // SAFETY: the buffer is LOCALE_NAME_MAX_LENGTH (85) UTF-16 units.
+    let n = unsafe { windows::Win32::Globalization::GetUserDefaultLocaleName(&mut name) };
+    (n > 1).then(|| String::from_utf16_lossy(&name[..n as usize - 1]))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn system_locale() -> Option<String> {
+    None
 }
 
 #[cfg(test)]
