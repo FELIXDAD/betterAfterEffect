@@ -19,9 +19,13 @@ impl Panel for AudioPanel {
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
-        let (peaks, mut master_db) = {
+        let (peaks, monitoring, mut master_db) = {
             let s = session.lock();
-            (s.output.as_ref().map(|o| o.peaks()), s.master_db)
+            (
+                s.output.as_ref().map(|o| o.peaks()),
+                s.monitoring_audio(),
+                s.master_db,
+            )
         };
         let decay = ui.input(|i| i.stable_dt) * 32.0;
         for (channel, level) in self.levels.iter_mut().enumerate() {
@@ -33,7 +37,10 @@ impl Panel for AudioPanel {
         ui.horizontal_top(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(57.0, height), Sense::hover());
             let y = |db: f32| r.bottom() - ((db.clamp(-60.0, 12.0) + 60.0) / 72.0) * r.height();
-            for (i, label) in ["Left output level", "Right output level"].into_iter().enumerate() {
+            for (i, label) in ["Left output level", "Right output level"]
+                .into_iter()
+                .enumerate()
+            {
                 let bar =
                     Rect::from_min_size(r.min + vec2(13.0 * i as f32, 0.0), vec2(10.0, height));
                 ui.painter().rect_filled(bar, 0.0, color::FIELD);
@@ -89,7 +96,7 @@ impl Panel for AudioPanel {
                 }
             });
         });
-        if peaks.is_some() {
+        if monitoring || self.levels.iter().any(|level| *level > -60.0) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(33));
         }

@@ -367,6 +367,15 @@ impl Session {
         self.selected_effects.retain(|e| stage.has_prim(e));
     }
 
+    /// Keep the meters moving through the last audible scrub sample.
+    pub(crate) fn monitoring_audio(&self) -> bool {
+        (self.audio_clock || self.last_scrub.is_some())
+            && self
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.finished())
+    }
+
     pub fn is_playing(&self) -> bool {
         self.playback.is_some()
     }
