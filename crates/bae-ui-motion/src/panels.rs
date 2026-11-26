@@ -101,6 +101,13 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
 }
 
 impl EffectControlsPanel {
+    fn layer(&self, stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
+        self.locked
+            .as_ref()
+            .filter(|p| stage.has_prim(p))
+            .cloned()
+            .or_else(|| selected_layer(stage, session))
+    }
     /// AE's line under the tab: the lock, the layer's label color and
     /// "<comp> • <layer>".
     fn layer_header(&mut self, ui: &mut Ui, stage: &Stage, layer: &PrimPath) {
@@ -126,7 +133,8 @@ impl EffectControlsPanel {
                 .map(|c| query::display_name_of(stage, &c))
                 .unwrap_or_default();
             ui.label(
-                egui::RichText::new(format!("{comp} • {}", self.title)).color(color::TEXT_DIM),
+                egui::RichText::new(format!("{comp} • {}", query::display_name_of(stage, layer)))
+                    .color(color::TEXT_DIM),
             );
         });
         ui.separator();
@@ -304,7 +312,6 @@ fn collect_props(nodes: &[Node], out: &mut Vec<(PrimPath, String, String)>) {
 #[derive(Default)]
 pub struct EffectControlsPanel {
     eval: EvalCache,
-    title: String,
     controls: crate::effects::controls::ControlsState,
     /// The layer the panel is locked to (its lock button, AE): it stays on it
     /// whatever is selected.
@@ -312,17 +319,37 @@ pub struct EffectControlsPanel {
 }
 
 impl Panel for EffectControlsPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        // AE: "Effect Controls <layer>".
-        if self.title.is_empty() {
-            TabInfo::new(tr("Effect Controls"))
-        } else {
-            TabInfo::new(format!("{} {}", tr("Effect Controls"), self.title))
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        match self.layer(cx.stage, &common::session(cx.resources)) {
+            Some(layer) => TabInfo::new(format!(
+                "{}: {}",
+                tr("Effect Controls"),
+                query::display_name_of(cx.stage, &layer)
+            )),
+            None => TabInfo::new(tr("Effect Controls")),
         }
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
+        if action.id == ids::DUPLICATE
+            && let Some(layer) = self.layer(cx.stage, &session)
+        {
+            let before = bae_motion::effect::effects_of(cx.stage, &layer);
+            let mut s = session.lock();
+            let selected: Vec<_> = before
+                .iter()
+                .filter(|p| s.selected_effects.contains(p))
+                .collect();
+            if !selected.is_empty() {
+                cx.invoke_with("effect.duplicate", json!({"effects":selected}));
+                s.expect(crate::session::Pending::NewEffects {
+                    layers: vec![layer],
+                    before,
+                });
+                return true;
+            }
+        }
         actions::handle(action, cx, &session)
     }
 
@@ -348,16 +375,14 @@ impl Panel for EffectControlsPanel {
         if self.locked.as_ref().is_some_and(|l| !stage.has_prim(l)) {
             self.locked = None;
         }
-        // Nothing selected: AE's panel is empty ("Effect Controls (none)").
-        let Some(layer) = self
-            .locked
-            .clone()
-            .or_else(|| selected_layer(stage, &session))
-        else {
-            self.title.clear();
+        let Some(layer) = self.layer(stage, &session) else {
+            common::empty_hint(
+                ui,
+                tr("No layer selected"),
+                tr("Select a layer to see its effects."),
+            );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
         self.layer_header(ui, stage, &layer);
         let now = session.lock().active_time();
         let effects = props::effect_nodes(stage, &layer);
@@ -701,6 +726,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Intensity", "强度"),
     ("No layer selected", "未选择图层"),
     ("No effects applied", "未应用效果"),
+    (
+        "Select a layer to see its effects.",
+        "选择一个图层以查看其效果。",
+    ),
     (
         "Select a layer to see its properties.",
         "选择一个图层以查看其属性。",
