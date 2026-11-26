@@ -685,19 +685,36 @@ impl ExecCtx<'_> {
             if bounds.is_empty() {
                 continue;
             }
+            let variant = if op.motion.is_some() {
+                Variant::Motion
+            } else if op.lighting.is_some() {
+                Variant::Lit
+            } else {
+                Variant::Plain
+            };
+            // Metal can supply the affine image parameters from the vertex
+            // stage rather than fetching the full draw record for each fragment.
+            #[cfg(target_os = "macos")]
+            let variant = if self.gpu.adapter_info().backend == wgpu::Backend::Metal
+                && variant == Variant::Plain
+                && kind == BlendKind::Normal
+                && fl & !(flags::STRAIGHT | flags::CLAMP) == flags::TEXTURE
+                && data.extra[0] == 0
+            {
+                // Batching uses one hardware scissor. Keep each instance's
+                // original region in the unused matte slot.
+                data.matte = [bounds.x0, bounds.y0, bounds.x1, bounds.y1].map(|v| v as f32);
+                Variant::AffineImage
+            } else {
+                variant
+            };
             planned.push(Planned {
                 data,
                 kind,
                 textures,
                 bounds,
                 backdrop,
-                variant: if op.motion.is_some() {
-                    Variant::Motion
-                } else if op.lighting.is_some() {
-                    Variant::Lit
-                } else {
-                    Variant::Plain
-                },
+                variant,
             });
             drawn_any = true;
         }
@@ -802,11 +819,22 @@ impl ExecCtx<'_> {
                     pass.set_pipeline(pipeline);
                     current = Some((p.kind, p.variant));
                 }
-                // Batch a run of plain solids with the same pipeline.
+                // Adjacent affine images can instance the same bound texture
+                // in painter's order, just as solids share the dummy texture.
+                let batchable = p.textures.is_none();
+                #[cfg(target_os = "macos")]
+                let batchable = batchable || p.variant == Variant::AffineImage;
+                let same_textures = |next: &Planned| {
+                    #[cfg(target_os = "macos")]
+                    if p.variant == Variant::AffineImage {
+                        return next.textures == p.textures;
+                    }
+                    next.textures.is_none()
+                };
                 let mut end = i + 1;
-                if p.textures.is_none() && !p.backdrop {
+                if batchable && !p.backdrop {
                     while end < planned.len()
-                        && planned[end].textures.is_none()
+                        && same_textures(&planned[end])
                         && !planned[end].backdrop
                         && planned[end].kind == p.kind
                         && planned[end].variant == p.variant
