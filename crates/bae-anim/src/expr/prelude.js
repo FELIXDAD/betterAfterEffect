@@ -424,6 +424,36 @@ Property.prototype = {
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
   get propertyIndex() { return 1; },
 };
+// ---- property names and groups (AE: thisProperty.name, propertyGroup(n)) ----
+Property.prototype.__chain = function () {
+  if (!this.__ch) this.__ch = __h.propertyChain(this.__c, this.__l, this.__p, this.__a);
+  return this.__ch;
+};
+Object.defineProperty(Property.prototype, "name", { get: function () { return this.__chain().name; } });
+Object.defineProperty(Property.prototype, "active", { get: function () { return true; } });
+Object.defineProperty(Property.prototype, "enabled", { get: function () { return true; } });
+Property.prototype.propertyGroup = function (countUp) {
+  var n = countUp === undefined ? 1 : countUp;
+  var g = this.__chain().groups[n - 1];
+  if (!g) throw new Error("Property group " + n + " is out of range");
+  var c = this.__c, l = this.__l, layer = new Layer(c, l);
+  switch (g.kind) {
+    case "layer": return layer;
+    case "transform": var t = layer.transform; t.name = g.name; return t;
+    case "mask": var m = layer.mask(g.name); m.name = g.name; return m;
+    case "effect": var e = layer.effect(g.name); if (!e.name) e.name = g.name; return e;
+    case "cameraOption": return layer.cameraOption;
+    case "lightOption": return layer.lightOption;
+    case "materialOption": return layer.materialOption;
+    case "shape":
+      if (typeof __ShapeItem === "function") {
+        return new __ShapeItem(c, l, { path: g.path, type: g.type, op: g.op, name: g.name });
+      }
+      return { name: g.name };
+    default: return { name: g.name };
+  }
+};
+
 // ---- shape layer contents (AE: content("Shape 1").content("Path 1").path) ----
 function __content(c, l, parent, which) {
   var info = __h.content(c, l, parent, which);
@@ -651,6 +681,16 @@ Layer.prototype = {
     return { top: r[1], left: r[0], width: r[2], height: r[3] };
   },
   content: function (which) { return __content(this.__c, this.__l, "", which); },
+  get rotationX() { return this.transform.xRotation; },
+  get rotationY() { return this.transform.yRotation; },
+  get rotationZ() { return this.transform.rotation; },
+  get cameraOption() {
+    var g = __optionGroup(this, "Camera Options", __CAMERA_OPTIONS);
+    for (var k in __CAMERA_DEFAULTS) g[k] = __CAMERA_DEFAULTS[k];
+    return g;
+  },
+  get lightOption() { return __optionGroup(this, "Light Options", __LIGHT_OPTIONS); },
+  get materialOption() { return __optionGroup(this, "Material Options", __MATERIAL_OPTIONS); },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
@@ -699,6 +739,56 @@ Layer.prototype = {
   toWorldVec: function (p, t) { return this.__xf(6, p, t); },
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
+
+// ---- camera, light and material options (AE: layer.zoom, cameraOption.zoom …) ----
+var __CAMERA_OPTIONS = {
+  zoom: "camera:zoom", depthOfField: "camera:depth_of_field", focusDistance: "camera:focus_distance",
+  aperture: "camera:aperture", blurLevel: "camera:blur_level",
+};
+// Iris and highlight options are not modelled yet: AE's defaults.
+var __CAMERA_DEFAULTS = {
+  irisShape: 1, irisRotation: 0, irisRoundness: 0, irisAspectRatio: 1, irisDiffractionFringe: 0,
+  highlightGain: 0, highlightThreshold: 255, highlightSaturation: 0,
+};
+var __LIGHT_OPTIONS = {
+  intensity: "light:intensity", color: "light:color", coneAngle: "light:cone_angle",
+  coneFeather: "light:cone_feather", radius: "light:radius", falloffDistance: "light:falloff_distance",
+  shadowDarkness: "light:shadow_darkness", shadowDiffusion: "light:shadow_diffusion",
+  castsShadows: "light:casts_shadows",
+};
+var __MATERIAL_OPTIONS = {
+  castsShadows: "material:casts_shadows", lightTransmission: "material:light_transmission",
+  acceptsShadows: "material:accepts_shadows", acceptsLights: "material:accepts_lights",
+  ambient: "material:ambient", diffuse: "material:diffuse", specular: "material:specular_intensity",
+  specularIntensity: "material:specular_intensity", shininess: "material:specular_shininess",
+  specularShininess: "material:specular_shininess", metal: "material:metal",
+};
+function __optionGroup(layer, name, options) {
+  var g = { name: name };
+  for (var k in options) {
+    (function (attr) {
+      Object.defineProperty(g, k, { get: function () { return __prop(layer.__c, layer.__l, "", attr); } });
+    })(options[k]);
+  }
+  return g;
+}
+// The same on the layer itself (AE: thisComp.layer("Camera 1").zoom).
+(function () {
+  function define(name, get) {
+    if (!(name in Layer.prototype)) Object.defineProperty(Layer.prototype, name, { get: get });
+  }
+  function attrGetter(attr) { return function () { return __prop(this.__c, this.__l, "", attr); }; }
+  [__CAMERA_OPTIONS, __LIGHT_OPTIONS, __MATERIAL_OPTIONS].forEach(function (options) {
+    for (var k in options) if (k !== "castsShadows") define(k, attrGetter(options[k]));
+  });
+  Object.keys(__CAMERA_DEFAULTS).forEach(function (k) {
+    define(k, function () { return __CAMERA_DEFAULTS[k]; });
+  });
+  // A light's own Casts Shadows; any other layer's Material Option.
+  define("castsShadows", function () {
+    return __prop(this.__c, this.__l, "", this.__info.kind === "light" ? "light:casts_shadows" : "material:casts_shadows");
+  });
+})();
 
 // ---- markers (AE: thisLayer.marker, thisComp.marker, MarkerKey) ----
 function MarkerProperty(c, l) { this.__c = c; this.__l = l; this.__m = null; }

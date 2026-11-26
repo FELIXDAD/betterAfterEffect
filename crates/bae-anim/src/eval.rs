@@ -453,6 +453,9 @@ pub(crate) struct CompiledLayer {
     pub(crate) text_path: Option<CompiledTextPath>,
     pub(crate) camera: Option<CompiledCamera>,
     pub(crate) light: Option<CompiledLight>,
+    /// Material Options and the camera / light switches expressions read
+    /// (`castsShadows`, `acceptsLights`, `depthOfField` …).
+    pub(crate) options: Vec<(&'static str, Prop)>,
 }
 
 fn layer_kind(token: &str) -> LayerKind {
@@ -697,6 +700,30 @@ fn compile_layer(
         aperture: p(cam::APERTURE, Value::Float(25.3)),
         blur_level: p(cam::BLUR_LEVEL, Value::Float(100.0)),
     });
+    let mut options: Vec<(&'static str, Prop)> = [
+        ("material:casts_shadows", Value::Bool(false)),
+        ("material:accepts_shadows", Value::Bool(true)),
+        ("material:accepts_lights", Value::Bool(true)),
+        ("material:ambient", Value::Float(100.0)),
+        ("material:diffuse", Value::Float(50.0)),
+        ("material:specular_intensity", Value::Float(50.0)),
+        ("material:specular_shininess", Value::Float(5.0)),
+        ("material:metal", Value::Float(100.0)),
+        ("material:light_transmission", Value::Float(0.0)),
+    ]
+    .into_iter()
+    .map(|(a, d)| (a, p(a, d)))
+    .collect();
+    match kind {
+        LayerKind::Camera => options.push((
+            cam::DEPTH_OF_FIELD,
+            p(cam::DEPTH_OF_FIELD, Value::Bool(false)),
+        )),
+        LayerKind::Light => {
+            options.push((li::CASTS_SHADOWS, p(li::CASTS_SHADOWS, Value::Bool(false))))
+        }
+        _ => {}
+    }
     let light = (kind == LayerKind::Light).then(|| CompiledLight {
         light_type: match setting_str(v, lt, li::TYPE).as_deref() {
             Some("parallel") => LightType::Parallel,
@@ -851,6 +878,7 @@ fn compile_layer(
         text_animators,
         text_path,
         camera,
+        options,
         light,
         path: lpath,
     })
@@ -1812,7 +1840,11 @@ impl CompiledLayer {
                 li::FALLOFF_DISTANCE => self.light.as_ref().map(|c| &c.falloff_distance),
                 li::SHADOW_DARKNESS => self.light.as_ref().map(|c| &c.shadow_darkness),
                 li::SHADOW_DIFFUSION => self.light.as_ref().map(|c| &c.shadow_diffusion),
-                _ => None,
+                _ => self
+                    .options
+                    .iter()
+                    .find(|(n, _)| *n == attr)
+                    .map(|(_, p)| p),
             };
         }
         if let Some(m) = self.masks.iter().find(|m| m.path.as_str() == prim) {

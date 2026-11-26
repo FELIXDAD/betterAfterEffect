@@ -619,6 +619,33 @@ const LOCALS: &[(&str, &str)] = &[
         "thisProperty.normalOnPath.bind(thisProperty)",
     ),
     ("createPath", "thisProperty.createPath.bind(thisProperty)"),
+    ("rotationX", "thisLayer.rotationX"),
+    ("rotationY", "thisLayer.rotationY"),
+    ("rotationZ", "thisLayer.rotationZ"),
+    ("lightTransmission", "thisLayer.lightTransmission"),
+    ("castsShadows", "thisLayer.castsShadows"),
+    ("acceptsShadows", "thisLayer.acceptsShadows"),
+    ("acceptsLights", "thisLayer.acceptsLights"),
+    ("ambient", "thisLayer.ambient"),
+    ("diffuse", "thisLayer.diffuse"),
+    ("specular", "thisLayer.specular"),
+    ("specularIntensity", "thisLayer.specularIntensity"),
+    ("shininess", "thisLayer.shininess"),
+    ("specularShininess", "thisLayer.specularShininess"),
+    ("metal", "thisLayer.metal"),
+    ("cameraOption", "thisLayer.cameraOption"),
+    ("lightOption", "thisLayer.lightOption"),
+    ("materialOption", "thisLayer.materialOption"),
+    ("zoom", "thisLayer.zoom"),
+    ("depthOfField", "thisLayer.depthOfField"),
+    ("focusDistance", "thisLayer.focusDistance"),
+    ("aperture", "thisLayer.aperture"),
+    ("blurLevel", "thisLayer.blurLevel"),
+    ("intensity", "thisLayer.intensity"),
+    ("coneAngle", "thisLayer.coneAngle"),
+    ("coneFeather", "thisLayer.coneFeather"),
+    ("shadowDarkness", "thisLayer.shadowDarkness"),
+    ("shadowDiffusion", "thisLayer.shadowDiffusion"),
     ("anchorPoint", "thisLayer.anchorPoint"),
     ("position", "thisLayer.position"),
     ("scale", "thisLayer.scale"),
@@ -850,6 +877,160 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         Value::FloatList(_) => Value::FloatList(comps),
         other => other.clone(),
     })
+}
+
+/// One property group above a property (AE's `propertyGroup(n)`).
+struct Group {
+    name: String,
+    kind: &'static str,
+    path: String,
+    prim_type: String,
+    op: String,
+}
+
+impl Group {
+    fn named(name: &str, kind: &'static str) -> Group {
+        Group {
+            name: name.to_owned(),
+            kind,
+            path: String::new(),
+            prim_type: String::new(),
+            op: String::new(),
+        }
+    }
+}
+
+/// A property's AE name and its groups up to the layer (`propertyGroup(1)` first).
+fn property_chain(
+    layer: &crate::eval::CompiledLayer,
+    prim: &str,
+    attr: &str,
+) -> (String, Vec<Group>) {
+    let three_d = layer.switches.three_d;
+    let mut groups = Vec::new();
+    let name = if prim == layer.path.as_str() {
+        let group = match attr.split_once(':').map_or("", |(g, _)| g) {
+            "transform" => Some(("Transform", "transform")),
+            "camera" => Some(("Camera Options", "cameraOption")),
+            "light" => Some(("Light Options", "lightOption")),
+            "material" => Some(("Material Options", "materialOption")),
+            "text" => Some(("Text", "text")),
+            _ => None,
+        };
+        if let Some((n, k)) = group {
+            groups.push(Group::named(n, k));
+        }
+        ae_attr_name(attr, three_d)
+    } else if let Some(m) = layer.masks.iter().find(|m| m.path.as_str() == prim) {
+        let mut g = Group::named(&m.name, "mask");
+        g.path = prim.to_owned();
+        groups.push(g);
+        groups.push(Group::named("Masks", "masks"));
+        match attr {
+            "path" => "Mask Path".to_owned(),
+            "feather" => "Mask Feather".to_owned(),
+            "opacity" => "Mask Opacity".to_owned(),
+            "expansion" => "Mask Expansion".to_owned(),
+            other => ae_attr_name(other, three_d),
+        }
+    } else if let Some(e) = layer.effects.iter().find(|e| e.path.as_str() == prim) {
+        let mut g = Group::named(&e.name, "effect");
+        g.path = prim.to_owned();
+        groups.push(g);
+        groups.push(Group::named("Effects", "effects"));
+        attr.to_owned()
+    } else {
+        // Shape contents and text animators: every prim up to the layer; a
+        // group's own transform sits in its "Transform: <group>" group.
+        let all = layer.contents.iter().chain(&layer.text_animators);
+        let find = |p: &str| all.clone().find_map(|c| c.find_prim(p));
+        let mut path = PrimPath::new(prim).ok();
+        if attr.starts_with("transform:") {
+            let gname = find(prim)
+                .map(|g| g.static_str("name").unwrap_or(g.path.name()).to_owned())
+                .unwrap_or_default();
+            groups.push(Group::named(
+                &format!("Transform: {gname}"),
+                "shapeTransform",
+            ));
+        }
+        while let Some(p) = path.filter(|p| p != &layer.path) {
+            if p.name() == "contents" || p.name() == "animators" {
+                let mut g = Group::named(
+                    if p.name() == "contents" {
+                        "Contents"
+                    } else {
+                        "Text Animators"
+                    },
+                    "contents",
+                );
+                g.path = p.to_string();
+                groups.push(g);
+            } else if let Some(item) = find(p.as_str()) {
+                groups.push(Group {
+                    name: item
+                        .static_str("name")
+                        .unwrap_or(item.path.name())
+                        .to_owned(),
+                    kind: "shape",
+                    path: p.to_string(),
+                    prim_type: item
+                        .prim_type
+                        .as_ref()
+                        .map_or("", |t| t.as_str())
+                        .to_owned(),
+                    op: item.static_str("operator").unwrap_or("").to_owned(),
+                });
+            }
+            path = p.parent();
+        }
+        ae_attr_name(attr, three_d)
+    };
+    groups.push(Group::named(&layer.name, "layer"));
+    (name, groups)
+}
+
+/// AE's English name of a property (`thisProperty.name`).
+fn ae_attr_name(attr: &str, three_d: bool) -> String {
+    let known = match attr {
+        "transform:anchor_point" => "Anchor Point",
+        "transform:position" => "Position",
+        "transform:position_x" => "X Position",
+        "transform:position_y" => "Y Position",
+        "transform:position_z" => "Z Position",
+        "transform:scale" => "Scale",
+        "transform:rotation" if three_d => "Z Rotation",
+        "transform:rotation" => "Rotation",
+        "transform:rotation_x" => "X Rotation",
+        "transform:rotation_y" => "Y Rotation",
+        "transform:orientation" => "Orientation",
+        "transform:opacity" => "Opacity",
+        "transform:point_of_interest" => "Point of Interest",
+        "transform:skew" => "Skew",
+        "transform:skew_axis" => "Skew Axis",
+        "time_remap" => "Time Remap",
+        "text:source" => "Source Text",
+        "width" => "Stroke Width",
+        "material:specular_intensity" => "Specular Intensity",
+        "material:specular_shininess" => "Specular Shininess",
+        "material:light_transmission" => "Light Transmission",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_owned();
+    }
+    // `camera:focus_distance` → "Focus Distance", `trim:start` → "Start".
+    let last = attr.rsplit(':').next().unwrap_or(attr);
+    last.split('_')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A path as expressions see it (`points()`, `value` of a path property):
@@ -1166,6 +1347,33 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     out.truncate(2);
                 }
                 out.into_js(&ctx)
+            },
+        )?,
+    )?;
+
+    h.set(
+        "propertyChain",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                let (name, groups) = property_chain(layer, own(&prim, layer), &attr);
+                let o = Object::new(ctx.clone())?;
+                o.set("name", name)?;
+                let list = Array::new(ctx.clone())?;
+                for (i, g) in groups.into_iter().enumerate() {
+                    let e = Object::new(ctx.clone())?;
+                    e.set("name", g.name)?;
+                    e.set("kind", g.kind)?;
+                    e.set("path", g.path)?;
+                    e.set("type", g.prim_type)?;
+                    e.set("op", g.op)?;
+                    list.set(i, e)?;
+                }
+                o.set("groups", list)?;
+                Ok::<_, rquickjs::Error>(o)
             },
         )?,
     )?;
@@ -1497,6 +1705,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             o.set("stretch", layer.timing.stretch)?;
             o.set("parent", layer.parent.map_or(-1, |p| p as i32))?;
             o.set("enabled", layer.switches.enabled)?;
+            o.set("kind", layer.kind.as_str())?;
             let (w, h) = layer.source_size(&comp);
             o.set("width", w)?;
             o.set("height", h)?;
