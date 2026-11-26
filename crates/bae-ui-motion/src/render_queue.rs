@@ -873,7 +873,7 @@ pub struct RenderQueuePanel {
 
 impl Panel for RenderQueuePanel {
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        TabInfo::new(tr("Render Queue"))
+        TabInfo::new(tr("Render Queue")).close_submenu()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {

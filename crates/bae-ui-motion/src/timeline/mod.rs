@@ -56,6 +56,7 @@ pub(crate) use markers::MarkerDialog;
 #[cfg(test)]
 pub(crate) use markers::parse_timecode;
 pub(crate) use menus::keys_with_labels;
+pub(crate) use menus::layer_menu;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
@@ -628,6 +629,27 @@ impl TimelinePanel {
     }
 }
 
+#[derive(Clone, Copy)]
+enum OtherTimelines {
+    All,
+    Left,
+    Right,
+}
+impl OtherTimelines {
+    fn matches(self, index: usize, active: usize) -> bool {
+        match self {
+            Self::All => index != active,
+            Self::Left => index < active,
+            Self::Right => index > active,
+        }
+    }
+}
+const OTHER_TIMELINES: [(OtherTimelines, &str); 3] = [
+    (OtherTimelines::All, "Close Other Timeline Panels"),
+    (OtherTimelines::Left, "Close Timeline Panels to the Left"),
+    (OtherTimelines::Right, "Close Timeline Panels to the Right"),
+];
+
 impl Panel for TimelinePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
@@ -635,6 +657,35 @@ impl Panel for TimelinePanel {
             Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
             None => TabInfo::new(tr("Timeline")),
         }
+        .close_submenu()
+    }
+
+    fn related_tabs_menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) -> bool {
+        let session = common::session(cx.resources);
+        let mut session = session.lock();
+        let active = session
+            .active_comp
+            .as_ref()
+            .and_then(|c| session.open_comps.iter().position(|p| p == c));
+        for (action, label) in OTHER_TIMELINES {
+            let targets: Vec<_> = session
+                .open_comps
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| active.is_some_and(|at| action.matches(*i, at)))
+                .map(|(_, c)| c.clone())
+                .collect();
+            if ui
+                .add_enabled(!targets.is_empty(), egui::Button::new(tr(label)))
+                .clicked()
+            {
+                for target in targets {
+                    session.close_comp(&target);
+                }
+                ui.close();
+            }
+        }
+        true
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
@@ -1135,4 +1186,25 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
             Box::new(TimelinePanel::from_state(spawn.state))
         }),
     );
+}
+
+#[cfg(test)]
+mod close_menu_tests {
+    use super::*;
+    #[test]
+    fn close_other_timeline_choices_keep_the_active_comp() {
+        let zh = [
+            "关闭其他时间轴面板",
+            "关闭左侧的时间轴面板",
+            "关闭右侧的时间轴面板",
+        ];
+        for ((which, name), label) in OTHER_TIMELINES.into_iter().zip(zh) {
+            assert!(ZH.contains(&(name, label)));
+            assert!(!which.matches(0, 0));
+        }
+        assert!(!OtherTimelines::Left.matches(1, 0));
+        assert!(!OtherTimelines::Right.matches(0, 1));
+        assert!(OtherTimelines::Left.matches(0, 1));
+        assert!(OtherTimelines::Right.matches(1, 0));
+    }
 }

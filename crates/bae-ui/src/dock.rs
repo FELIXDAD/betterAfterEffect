@@ -369,6 +369,8 @@ pub struct TabInfo {
     pub locked: Option<bool>,
     /// Viewers (Composition, Layer, Footage, Timeline) always show the close button.
     pub viewer: bool,
+    /// The hamburger offers a Close Other Panels submenu; tab context menus keep the group command.
+    pub close_submenu: bool,
     /// The smallest content area (below the tabs) that shows the panel
     /// completely; the dock gives the panel at least this much when it fits.
     pub min_size: Vec2,
@@ -384,6 +386,11 @@ impl TabInfo {
 
     pub fn label(mut self, c: Color32) -> Self {
         self.label = Some(c);
+        self
+    }
+
+    pub fn close_submenu(mut self) -> Self {
+        self.close_submenu = true;
         self
     }
 
@@ -413,6 +420,11 @@ pub trait PanelHost {
     /// Panel-specific items appended to the ☰ menu.
     fn menu(&mut self, ui: &mut Ui, panel: &PanelId) {
         let _ = (ui, panel);
+    }
+
+    /// Allows a panel with internal document tabs to supply its own related-tab commands.
+    fn related_tabs_menu(&mut self, _ui: &mut Ui, _panel: &PanelId) -> bool {
+        false
     }
 
     fn on_close(&mut self, panel: &PanelId) {
@@ -1214,11 +1226,37 @@ impl Dock {
             if ui.button(tr("Undock Panel")).clicked() {
                 actions.push(Action::Undock(panel.clone(), None));
             }
-            let others = ui.add_enabled(
-                frame.tabs.len() > 1,
-                egui::Button::new(tr("Close Other Panels in Group")),
-            );
-            if others.clicked() {
+            let group_button = |ui: &mut Ui| {
+                ui.add_enabled(
+                    frame.tabs.len() > 1,
+                    egui::Button::new(tr("Close Other Panels in Group")),
+                )
+                .clicked()
+            };
+            if !context && host.tab(&panel).close_submenu {
+                crate::widgets::menu_button(ui, tr("Close Other Panels"), |ui| {
+                    if group_button(ui) {
+                        actions.push(Action::CloseOthers(fid, index));
+                    }
+                    if !host.related_tabs_menu(ui, &panel) {
+                        let similar: Vec<_> = self
+                            .layout
+                            .panel_ids()
+                            .into_iter()
+                            .filter(|id| id != &panel && id.kind() == panel.kind())
+                            .collect();
+                        if ui
+                            .add_enabled(
+                                !similar.is_empty(),
+                                egui::Button::new(tr("Close Other Similar Panels")),
+                            )
+                            .clicked()
+                        {
+                            actions.extend(similar.into_iter().map(Action::Close));
+                        }
+                    }
+                });
+            } else if group_button(ui) {
                 actions.push(Action::CloseOthers(fid, index));
             }
             crate::widgets::menu_button(ui, tr("Panel Group Settings"), |ui| {

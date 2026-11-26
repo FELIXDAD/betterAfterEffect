@@ -3,11 +3,15 @@
 //! their own sources, footage and solids, joined by lines. Double-click a comp
 //! node to open it.
 
-use bae_model::{PrimPath, PrimType, Stage};
+use crate::project::{ItemKind, item_kind};
+use bae_model::{PrimPath, Stage};
+use bae_motion::query;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::common;
 
@@ -16,61 +20,141 @@ const GAP: egui::Vec2 = vec2(60.0, 10.0);
 /// Nested comps deeper than this are not expanded.
 const MAX_DEPTH: usize = 8;
 
-/// A node of the chart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Comp,
+    Footage,
+    Solid,
+    Layer,
+    Effect,
+}
+
 struct Node {
     item: PrimPath,
-    comp: bool,
+    kind: Kind,
     depth: usize,
-    /// Row (top to bottom).
     row: usize,
     parent: Option<usize>,
 }
 
-/// The items `comp`'s layers use, in layer order, without repeats.
-fn sources(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
-    let mut out: Vec<PrimPath> = Vec::new();
-    for layer in bae_motion::query::comp_layers(stage, comp) {
-        let source = stage
-            .prim(&layer)
-            .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned());
-        if let Some(s) = source.filter(|s| stage.has_prim(s))
-            && !out.contains(&s)
-        {
-            out.push(s);
-        }
-    }
-    out
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+enum Direction {
+    #[default]
+    Right,
+    Left,
+    Down,
+    Up,
 }
 
-/// The tree under `comp`, depth first (rows in order).
-fn chart(stage: &Stage, comp: &PrimPath) -> Vec<Node> {
-    fn add(
-        stage: &Stage,
-        item: &PrimPath,
-        depth: usize,
-        parent: Option<usize>,
-        path: &mut Vec<PrimPath>,
-        out: &mut Vec<Node>,
-    ) {
-        let comp = bae_motion::query::comp_info(stage, item).is_some();
-        let index = out.len();
-        out.push(Node {
-            item: item.clone(),
-            comp,
-            depth,
-            row: index,
-            parent,
-        });
-        if comp && depth < MAX_DEPTH && !path.contains(item) {
-            path.push(item.clone());
-            for s in sources(stage, item) {
-                add(stage, &s, depth + 1, Some(index), path, out);
-            }
-            path.pop();
+impl Direction {
+    fn vertical(self) -> bool {
+        matches!(self, Self::Down | Self::Up)
+    }
+    fn reverse(self) -> bool {
+        matches!(self, Self::Left | Self::Up)
+    }
+}
+
+const DIRECTIONS: [(Direction, &str); 4] = [
+    (Direction::Down, "Top to Bottom"),
+    (Direction::Up, "Bottom to Top"),
+    (Direction::Right, "Left to Right"),
+    (Direction::Left, "Right to Left"),
+];
+const JUSTIFY: [&str; 5] = [
+    "Left Justify",
+    "Left Center Justify",
+    "Center Justify",
+    "Right Center Justify",
+    "Right Justify",
+];
+
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+struct Options {
+    footage: bool,
+    solids: bool,
+    layers: bool,
+    effects: bool,
+    direction: Direction,
+    curved: bool,
+    justify: usize,
+}
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            footage: true,
+            solids: true,
+            layers: false,
+            effects: false,
+            direction: Direction::Right,
+            curved: false,
+            justify: 0,
         }
     }
+}
+
+fn push(nodes: &mut Vec<Node>, item: &PrimPath, kind: Kind, parent: Option<usize>) -> usize {
+    let depth = parent.map_or(0, |i| nodes[i].depth + 1);
+    let index = nodes.len();
+    nodes.push(Node {
+        item: item.clone(),
+        kind,
+        depth,
+        row: 0,
+        parent,
+    });
+    index
+}
+
+fn chart(stage: &Stage, root: &PrimPath, options: &Options) -> Vec<Node> {
+    fn add_sources(
+        stage: &Stage,
+        comp: &PrimPath,
+        index: usize,
+        options: &Options,
+        ancestors: &mut Vec<PrimPath>,
+        nodes: &mut Vec<Node>,
+    ) {
+        if ancestors.len() >= MAX_DEPTH || ancestors.contains(comp) {
+            return;
+        }
+        ancestors.push(comp.clone());
+        let mut seen = std::collections::HashSet::new();
+        for layer in query::comp_layers(stage, comp) {
+            let parent = if options.layers {
+                push(nodes, &layer, Kind::Layer, Some(index))
+            } else {
+                index
+            };
+            if options.effects {
+                for effect in bae_motion::effect::effects_of(stage, &layer) {
+                    push(nodes, &effect, Kind::Effect, Some(parent));
+                }
+            }
+            let source = stage
+                .prim(&layer)
+                .and_then(|p| p.value("source").and_then(|v| v.as_prim_ref()).cloned());
+            let Some(source) = source else { continue };
+            if !options.layers && !seen.insert(source.clone()) {
+                continue;
+            }
+            let kind = match item_kind(stage, &source) {
+                Some(ItemKind::Comp) => Kind::Comp,
+                Some(ItemKind::Footage) if options.footage => Kind::Footage,
+                Some(ItemKind::Solid) if options.solids => Kind::Solid,
+                _ => continue,
+            };
+            let child = push(nodes, &source, kind, Some(parent));
+            if kind == Kind::Comp {
+                add_sources(stage, &source, child, options, ancestors, nodes);
+            }
+        }
+        ancestors.pop();
+    }
     let mut out = Vec::new();
-    add(stage, comp, 0, None, &mut Vec::new(), &mut out);
+    let first = push(&mut out, root, Kind::Comp, None);
+    add_sources(stage, root, first, options, &mut Vec::new(), &mut out);
     // Rows: a parent sits on the row of its first child (AE's compact layout).
     let mut row = 0;
     for (i, node) in out.iter_mut().enumerate() {
@@ -85,10 +169,19 @@ fn chart(stage: &Stage, comp: &PrimPath) -> Vec<Node> {
 
 /// Registers the panel (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
     crate::register_panel(
         app,
         "flowchart",
-        bae_ui::PanelKind::new("Flowchart", |_| Box::new(FlowchartPanel::default())),
+        bae_ui::PanelKind::new("Flowchart", |spawn| {
+            Box::new(FlowchartPanel {
+                options: spawn
+                    .state
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default(),
+                ..Default::default()
+            })
+        }),
     );
 }
 
@@ -96,12 +189,145 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 #[derive(Default)]
 pub struct FlowchartPanel {
     offset: egui::Vec2,
+    options: Options,
+    positions: HashMap<(PrimPath, Option<PrimPath>), egui::Vec2>,
+    root: Option<PrimPath>,
+    last_active: Option<PrimPath>,
+    selected: Option<PrimPath>,
+    rename: Option<(PrimPath, String)>,
+}
+
+const ZH: &[(&str, &str)] = &[
+    ("Show Footage", "显示素材"),
+    ("Show Solids", "显示纯色"),
+    ("Show Layers", "显示图层"),
+    ("Show Effects", "显示效果"),
+    ("Flow Direction", "流动方向"),
+    ("Top to Bottom", "自上而下"),
+    ("Bottom to Top", "自下而上"),
+    ("Left to Right", "从左到右"),
+    ("Right to Left", "从右到左"),
+    ("Justification", "对齐方式"),
+    ("Left Justify", "左对齐"),
+    ("Left Center Justify", "左中对齐"),
+    ("Center Justify", "居中对齐"),
+    ("Right Center Justify", "右中对齐"),
+    ("Right Justify", "右对齐"),
+    ("Straight Lines", "直线"),
+    ("Curved Lines", "曲线"),
+    ("Clean Up", "清理"),
+];
+impl FlowchartPanel {
+    fn options_menu(&mut self, ui: &mut Ui, has_chart: bool) {
+        for (shown, label) in [
+            (&mut self.options.footage, "Show Footage"),
+            (&mut self.options.solids, "Show Solids"),
+            (&mut self.options.layers, "Show Layers"),
+            (&mut self.options.effects, "Show Effects"),
+        ] {
+            ui.checkbox(shown, tr(label));
+        }
+        ui.separator();
+        common::submenu(ui, tr("Flow Direction"), &mut |ui| {
+            for (dir, label) in DIRECTIONS {
+                if ui
+                    .radio_value(&mut self.options.direction, dir, tr(label))
+                    .clicked()
+                {
+                    ui.close();
+                }
+            }
+        });
+        common::submenu(ui, tr("Justification"), &mut |ui| {
+            for (i, label) in JUSTIFY.iter().enumerate() {
+                if ui
+                    .radio_value(&mut self.options.justify, i, tr(label))
+                    .clicked()
+                {
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
+        for (value, label) in [(false, "Straight Lines"), (true, "Curved Lines")] {
+            if ui
+                .radio_value(&mut self.options.curved, value, tr(label))
+                .clicked()
+            {
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui
+            .add_enabled(has_chart, egui::Button::new(tr("Clean Up")))
+            .clicked()
+        {
+            self.positions.clear();
+            self.offset = egui::Vec2::ZERO;
+            ui.close();
+        }
+    }
+
+    fn select(&mut self, cx: &PanelContext<'_>, n: &Node) {
+        let session = common::session(cx.resources);
+        let mut s = session.lock();
+        self.selected = Some(n.item.clone());
+        match n.kind {
+            Kind::Comp => {
+                s.open_comp(&n.item);
+                s.selected_items = vec![n.item.clone()];
+            }
+            Kind::Footage | Kind::Solid => s.selected_items = vec![n.item.clone()],
+            Kind::Layer | Kind::Effect => {
+                if let Some(c) = query::owning_comp(cx.stage, &n.item) {
+                    s.open_comp(&c);
+                }
+                let layer = if n.kind == Kind::Layer {
+                    Some(n.item.clone())
+                } else {
+                    query::owning_layer(cx.stage, &n.item)
+                };
+                s.selected_layers = layer.into_iter().collect();
+                s.selected_effects = if n.kind == Kind::Effect {
+                    vec![n.item.clone()]
+                } else {
+                    vec![]
+                };
+            }
+        }
+        self.last_active.clone_from(&s.active_comp);
+    }
+
+    fn icon_menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, n: &Node) {
+        let session = common::session(cx.resources);
+        let rename = match n.kind {
+            Kind::Layer => crate::timeline::layer_menu(ui, cx, &session, &n.item).is_some(),
+            Kind::Effect => {
+                let now = session.lock().active_time();
+                crate::effects::controls::effect_menu(ui, cx, &n.item, now);
+                false
+            }
+            _ => {
+                use crate::context_menu as m;
+                let Some(kind) = item_kind(cx.stage, &n.item) else {
+                    return;
+                };
+                m::show_item(ui, cx, m::PROJECT_ITEM, &[], kind.context_kind()) == Some("Rename")
+            }
+        };
+        if rename {
+            self.rename = Some((n.item.clone(), query::display_name_of(cx.stage, &n.item)));
+        }
+    }
 }
 
 impl Panel for FlowchartPanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Flowchart <comp>".
-        let comp = common::session(cx.resources).lock().active_comp.clone();
+        let comp = self
+            .root
+            .clone()
+            .or_else(|| common::session(cx.resources).lock().active_comp.clone());
         let name = comp.map_or_else(
             || tr("(none)").to_owned(),
             |c| bae_motion::query::display_name_of(cx.stage, &c),
@@ -109,51 +335,142 @@ impl Panel for FlowchartPanel {
         TabInfo::new(format!("{} {name}", tr("Flowchart")))
     }
 
+    fn on_action(&mut self, action: &bae_ui::Invocation, cx: &mut PanelContext<'_>) -> bool {
+        let session = common::session(cx.resources);
+        if let Some(item) = self
+            .selected
+            .as_ref()
+            .filter(|p| item_kind(cx.stage, p).is_some())
+        {
+            if action.id == crate::actions::ids::DELETE {
+                cx.invoke_with("item.delete", serde_json::json!({"paths":[item]}));
+                return true;
+            }
+            if action.id == crate::actions::ids::LAYER_SETTINGS {
+                if let Some(target) =
+                    crate::actions::layer_settings_target(cx.stage, &session, true)
+                {
+                    crate::dialogs::layer_settings(cx, &session, &target);
+                }
+                return true;
+            }
+        }
+        crate::actions::handle(action, cx, &session)
+    }
+
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        self.options_menu(
+            ui,
+            common::session(cx.resources).lock().active_comp.is_some(),
+        );
+    }
+    fn save_state(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(&self.options).ok()
+    }
+
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let full = ui.max_rect();
-        let resp = ui.allocate_rect(full, Sense::click_and_drag());
-        if resp.dragged() {
-            self.offset += resp.drag_delta();
-        }
+        let canvas = ui.allocate_rect(full, Sense::click_and_drag());
         let p = ui.painter_at(full);
         p.rect_filled(full, 0.0, Color32::from_gray(35));
         let session = common::session(cx.resources);
-        let Some(comp) = session.lock().active_comp.clone() else {
+        let active = session.lock().active_comp.clone();
+        if active != self.last_active || self.root.as_ref().is_some_and(|r| !cx.stage.has_prim(r)) {
+            self.root.clone_from(&active);
+            self.last_active = active;
+            self.offset = egui::Vec2::ZERO;
+            self.positions.clear();
+            self.rename = None;
+        }
+        let Some(root) = self.root.clone() else {
             return;
         };
-        let nodes = chart(cx.stage, &comp);
-        let origin = full.min + vec2(16.0, 16.0) + self.offset;
-        let rect_of = |n: &Node| {
-            Rect::from_min_size(
-                origin
-                    + vec2(
-                        n.depth as f32 * (NODE.x + GAP.x),
-                        n.row as f32 * (NODE.y + GAP.y),
-                    ),
-                NODE,
-            )
+        let nodes = chart(cx.stage, &root, &self.options);
+        let max_depth = nodes.iter().map(|n| n.depth).max().unwrap_or(0);
+        let dir = self.options.direction;
+        let sibling = if dir.vertical() {
+            NODE.x + GAP.x
+        } else {
+            NODE.y + GAP.y
         };
-        let line = Stroke::new(1.0, color::TEXT_DIM);
-        for n in &nodes {
+        let mut last_row: Vec<usize> = nodes.iter().map(|n| n.row).collect();
+        for (i, n) in nodes.iter().enumerate().rev() {
             if let Some(parent) = n.parent {
-                let (a, b) = (rect_of(&nodes[parent]), rect_of(n));
-                let from = pos2(a.right(), a.center().y);
-                let to = pos2(b.left(), b.center().y);
-                let mid = (from.x + to.x) / 2.0;
-                p.line_segment([from, pos2(mid, from.y)], line);
-                p.line_segment([pos2(mid, from.y), pos2(mid, to.y)], line);
-                p.line_segment([pos2(mid, to.y), to], line);
+                last_row[parent] = last_row[parent].max(last_row[i]);
             }
         }
-        let font = theme::body();
-        let mut open = None;
-        let pointer = ui.input(|i| i.pointer.hover_pos());
-        for n in &nodes {
-            let r = rect_of(n);
+        let key_of = |n: &Node| (n.item.clone(), n.parent.map(|i| nodes[i].item.clone()));
+        let origin = full.min + vec2(16.0, 16.0) + self.offset;
+        let rects: Vec<_> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let depth = if dir.reverse() {
+                    max_depth - n.depth
+                } else {
+                    n.depth
+                };
+                let across = (n.row as f32
+                    + (last_row[i] - n.row) as f32 * self.options.justify.min(4) as f32 / 4.0)
+                    * sibling;
+                let grid = if dir.vertical() {
+                    vec2(across, depth as f32 * (NODE.y + GAP.y))
+                } else {
+                    vec2(depth as f32 * (NODE.x + GAP.x), across)
+                };
+                Rect::from_min_size(
+                    origin + grid + self.positions.get(&key_of(n)).copied().unwrap_or_default(),
+                    NODE,
+                )
+            })
+            .collect();
+        let line = Stroke::new(1.0, color::TEXT_DIM);
+        for (i, n) in nodes.iter().enumerate() {
+            if let Some(parent) = n.parent {
+                let (a, b) = (rects[parent], rects[i]);
+                let (start, end) = match dir {
+                    Direction::Right => (a.right_center(), b.left_center()),
+                    Direction::Left => (a.left_center(), b.right_center()),
+                    Direction::Down => (a.center_bottom(), b.center_top()),
+                    Direction::Up => (a.center_top(), b.center_bottom()),
+                };
+                let half = (end - start) * 0.5;
+                let delta = if dir.vertical() {
+                    vec2(0.0, half.y)
+                } else {
+                    vec2(half.x, 0.0)
+                };
+                let pts = [start, start + delta, end - delta, end];
+                if self.options.curved {
+                    p.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                        pts,
+                        false,
+                        Color32::TRANSPARENT,
+                        line,
+                    ));
+                } else {
+                    p.add(egui::Shape::line(pts.to_vec(), line));
+                }
+            }
+        }
+        if canvas.dragged() {
+            self.offset += canvas.drag_delta();
+        }
+        common::context_menu(&canvas, &mut |ui| self.options_menu(ui, true));
+        for (i, n) in nodes.iter().enumerate() {
+            let r = rects[i];
             if !full.intersects(r) {
                 continue;
             }
-            let hovered = pointer.is_some_and(|q| r.contains(q));
+            let icon_rect = Rect::from_min_max(r.min, pos2(r.left() + 25.0, r.bottom()));
+            let title_rect = Rect::from_min_max(pos2(icon_rect.right(), r.top()), r.max);
+            let icon_resp = ui.interact(icon_rect, ui.id().with(("flow-icon", i)), Sense::click());
+            let title = ui.interact(
+                title_rect,
+                ui.id().with(("flow-title", i)),
+                Sense::click_and_drag(),
+            );
+            let hovered = icon_resp.hovered() || title.hovered();
             p.rect_filled(
                 r,
                 3.0,
@@ -163,7 +480,7 @@ impl Panel for FlowchartPanel {
                     color::FIELD
                 },
             );
-            if n.depth == 0 {
+            if self.selected.as_ref().unwrap_or(&root) == &n.item {
                 p.rect_stroke(
                     r,
                     3.0,
@@ -171,37 +488,54 @@ impl Panel for FlowchartPanel {
                     egui::StrokeKind::Inside,
                 );
             }
-            let icon = if n.comp {
-                Icon::Composition
-            } else if cx
-                .stage
-                .prim(&n.item)
-                .is_some_and(|v| v.is_a(&PrimType::FOLDER))
-            {
-                Icon::Folder
-            } else {
-                Icon::Footage
+            let icon = match n.kind {
+                Kind::Comp => Icon::Composition,
+                Kind::Effect => Icon::Fx,
+                Kind::Layer => Icon::TextLayer,
+                _ => Icon::Footage,
             };
             icons::paint(
                 &p,
-                Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(14.0, 14.0)),
+                Rect::from_center_size(icon_rect.center(), vec2(14.0, 14.0)),
                 icon,
                 color::ICON,
             );
-            let name = bae_motion::query::display_name_of(cx.stage, &n.item);
-            p.text(
-                pos2(r.left() + 26.0, r.center().y),
-                Align2::LEFT_CENTER,
-                name,
-                font.clone(),
-                color::TEXT,
-            );
-            if hovered && resp.double_clicked() && n.comp {
-                open = Some(n.item.clone());
+            let name = query::display_name_of(cx.stage, &n.item);
+            if let Some((_, text)) = self.rename.as_mut().filter(|(path, _)| path == &n.item) {
+                if let Some(result) =
+                    common::rename_field(ui, title_rect, text, ui.id().with(("rename", i)))
+                {
+                    if let Some(value) = result.filter(|v| !v.trim().is_empty() && v != &name) {
+                        cx.invoke_with("attr.set",serde_json::json!({"path":n.item,"attr":"name","value":{"type":"string","value":value}}));
+                    }
+                    self.rename = None;
+                }
+            } else {
+                p.text(
+                    title_rect.left_center(),
+                    Align2::LEFT_CENTER,
+                    name,
+                    theme::body(),
+                    color::TEXT,
+                );
             }
-        }
-        if let Some(c) = open {
-            session.lock().open_comp(&c);
+            if title.dragged() {
+                *self.positions.entry(key_of(n)).or_default() += title.drag_delta();
+            }
+            if icon_resp.clicked()
+                || icon_resp.secondary_clicked()
+                || title.clicked()
+                || title.secondary_clicked()
+            {
+                self.select(cx, n);
+            }
+            if (title.double_clicked() || icon_resp.double_clicked()) && n.kind == Kind::Comp {
+                self.root = Some(n.item.clone());
+                self.offset = egui::Vec2::ZERO;
+                self.positions.clear();
+            }
+            common::context_menu(&icon_resp, &mut |ui| self.icon_menu(ui, cx, n));
+            common::context_menu(&title, &mut |ui| self.options_menu(ui, true));
         }
     }
 }
@@ -240,14 +574,70 @@ mod tests {
             "layer.create",
             serde_json::json!({"comp": inner, "kind": "solid"}),
         );
-        let nodes = chart(&stage, &outer);
+        let nodes = chart(&stage, &outer, &Options::default());
         assert_eq!(nodes[0].item, outer);
         assert_eq!(nodes[1].item, inner);
         assert_eq!((nodes[1].depth, nodes[1].parent), (1, Some(0)));
         // The solid inside the nested comp, one column further.
         assert_eq!(nodes.len(), 3);
         assert_eq!(nodes[2].depth, 2);
+        let hidden = chart(
+            &stage,
+            &outer,
+            &Options {
+                solids: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(hidden.len(), 2);
+        let layered = chart(
+            &stage,
+            &outer,
+            &Options {
+                layers: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            layered.iter().map(|n| n.kind).collect::<Vec<_>>(),
+            [
+                Kind::Comp,
+                Kind::Layer,
+                Kind::Comp,
+                Kind::Layer,
+                Kind::Solid
+            ]
+        );
         // Compact rows: each first child shares its parent's row.
         assert_eq!(nodes.iter().map(|n| n.row).collect::<Vec<_>>(), [0, 0, 0]);
+    }
+    #[test]
+    fn canvas_menu_localization_and_cleanup_availability() {
+        use bae_ui::i18n;
+        i18n::register(ZH);
+        for active in [false, true] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            let mut panel = FlowchartPanel::default();
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                panel.options_menu(ui, active)
+            });
+            out.textures_delta.clear();
+            let update = out.platform_output.accesskit_update.unwrap();
+            for (en, zh, enabled) in [
+                ("Show Layers", "显示图层", true),
+                ("Curved Lines", "曲线", true),
+                ("Clean Up", "清理", active),
+            ] {
+                assert_eq!(i18n::translation(en), Some(zh));
+                assert!(
+                    update
+                        .nodes
+                        .iter()
+                        .any(|(_, n)| n.label() == Some(tr(en)) && n.is_disabled() != enabled),
+                    "{en}"
+                );
+            }
+        }
     }
 }

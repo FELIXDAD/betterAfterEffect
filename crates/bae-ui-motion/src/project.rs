@@ -93,14 +93,26 @@ struct Row {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ItemKind {
+pub(crate) enum ItemKind {
     Folder,
     Comp,
     Footage,
     Solid,
 }
 
-fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
+impl ItemKind {
+    pub(crate) fn context_kind(self) -> u8 {
+        use crate::context_menu as m;
+        match self {
+            Self::Comp => m::COMP,
+            Self::Folder => m::FOLDER,
+            Self::Solid => m::SOLID,
+            Self::Footage => m::FOOTAGE,
+        }
+    }
+}
+
+pub(crate) fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
     let v = stage.prim(path)?;
     let t = v.prim_type()?;
     if *t == PrimType::FOLDER {
@@ -431,12 +443,7 @@ impl Panel for ProjectPanel {
                             }
                         }
                         use crate::context_menu as m;
-                        let kind = match row.kind {
-                            ItemKind::Comp => m::COMP,
-                            ItemKind::Folder => m::FOLDER,
-                            ItemKind::Solid => m::SOLID,
-                            ItemKind::Footage => m::FOOTAGE,
-                        };
+                        let kind = row.kind.context_kind();
                         let chosen = m::show_item(ui, cx, m::PROJECT_ITEM, &[], kind);
                         if chosen == Some("Rename") {
                             self.rename = Some((row.path.clone(), name.clone()));
