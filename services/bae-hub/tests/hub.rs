@@ -464,15 +464,23 @@ fn max_message_mib_reaches_the_handshake() {
 /// and the client's hellos wait behind it: the hub counts the bytes that keep
 /// arriving as signs of life and does not drop the client. (It used to count
 /// only whole messages.)
+///
+/// The test thread does not pump either client while it makes the edit, while
+/// the session exports it, or while the other client imports it (hundreds of
+/// milliseconds on a loaded machine): the timeout leaves room for that, the
+/// text is made before anyone connects, and the uplink is slow enough that the
+/// upload still lasts several timeouts.
 #[test]
 fn a_slow_upload_is_not_taken_for_a_dead_link() {
+    let timeout = Duration::from_secs(2);
     let data = tempfile::tempdir().unwrap();
     let mut cfg = config(data.path());
-    cfg.peer_timeout = Duration::from_millis(500);
+    cfg.peer_timeout = timeout;
     let hub = start(cfg);
     let addr = hub.local_addr();
-    // 4 MB/s up: a 6 MiB edit takes about 1.5 s, three timeouts.
-    let slow = throttled_proxy(addr, 4_000_000);
+    // 1 MB/s up: a 6 MiB edit takes about 6.3 s, three timeouts.
+    let slow = throttled_proxy(addr, 1_000_000);
+    let text = letters(6 << 20, 4);
     let base = base_snapshots();
     let mut clients = vec![
         Client::join(slow, PROJECT, WRITE, "alice", &base),
@@ -485,18 +493,35 @@ fn a_slow_upload_is_not_taken_for_a_dead_link() {
     pump_until(&mut clients, Duration::from_secs(10), |c| {
         c.iter().all(|c| c.session.is_connected())
     });
-    let want = paste(&mut clients[0], "notes", 6 << 20, 4);
+    let t = Instant::now();
+    let want = set_text(&mut clients[0], "notes", text);
+    let edit = t.elapsed();
     let root = DocKey::sublayer(&SublayerId::root());
-    // `Client::pump` panics if the hub drops alice.
-    let took = pump_until(&mut clients, Duration::from_secs(30), |c| {
-        c[1].stage
+    // `Client::pump` panics if the hub drops either client.
+    let start = Instant::now();
+    let (mut last, mut longest) = (start, Duration::ZERO);
+    loop {
+        for c in &mut clients {
+            c.pump();
+        }
+        let now = Instant::now();
+        longest = longest.max(now - last);
+        last = now;
+        if clients[1]
+            .stage
             .version(&root)
             .is_some_and(|v| v.includes_vv(&want))
-    });
-    assert!(
-        took > Duration::from_millis(500),
-        "the upload was not slow: {took:?}"
+        {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(60), "not delivered");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let took = start.elapsed();
+    eprintln!(
+        "upload took {took:?}; the edit took {edit:?}, the longest round of pumps {longest:?}"
     );
+    assert!(took > timeout, "the upload was not slow: {took:?}");
 }
 
 /// Read-only connections may not send messages over 16 MiB: their edits are

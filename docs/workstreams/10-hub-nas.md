@@ -99,6 +99,7 @@
   - 测试（`tests/hub.rs`）：`max_message_mib_reaches_the_handshake`（Hub 设 1 MiB 时，默认设置的客户端发 2 MiB 被断开、别人收不到，小修改照常；用同样上限的客户端自己就不发）、`a_slow_upload_is_not_taken_for_a_dead_link`（4 MB/s 的代理、6 MiB、超时 0.5 秒）、`read_only_clients_cannot_send_large_messages`（17 MiB 被断开）。去掉对应的修改时都失败。
 - 第二次审查后：
   - 关闭、卸载工程时修改全部写盘。存盘对端原来也受背压限制（每次最多排 1 MiB），最后一次 pump 写不完，大的上传刚结束就关闭时会丢文档。现在它不受背压限制，关闭时 pump 到 `Relay::unsynced` 为空。测试：`stopping_the_hub_saves_every_edit`、`unloading_an_idle_project_saves_every_edit`（24 个 512 KiB 的文档，修改前丢约 20 个）。
+  - `a_slow_upload_is_not_taken_for_a_dead_link` 在负载高的机器上偶尔失败（`pump: Closed`）：测试线程生成 6 MiB 文字、做修改的 0.5 秒以上里两个客户端都没 pump，Hub 按 0.5 秒的超时断开了其中一个。现在文字在连接前生成，超时 2 秒，代理限速 1 MB/s（上传约 6.3 秒，仍然是三个超时）。4 个 `yes > /dev/null` 占满 4 核时：修改前 5 次失败 1 次，修改后 10 次全过（做修改最长 0.25 秒，一轮 pump 最长 0.05 秒）；去掉"按字节算存活"时仍然失败。
 
 ## 请求（其他工作流在这里留言）
 

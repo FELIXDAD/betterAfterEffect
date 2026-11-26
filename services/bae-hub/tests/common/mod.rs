@@ -152,13 +152,23 @@ fn relay_bytes(mut from: TcpStream, mut to: TcpStream, rate: Option<usize>) {
     let _ = to.shutdown(Shutdown::Write);
 }
 
-/// Set `attr` of the title layer to `len` random letters (Loro cannot compress
-/// them much). Returns the version that includes the edit.
-pub fn paste(c: &mut Client, attr: &str, len: usize, seed: u64) -> bae_model::loro::VersionVector {
+/// `len` random letters (Loro cannot compress them much).
+pub fn letters(len: usize, seed: u64) -> String {
     let mut rng = Rng::new(seed);
-    let text: String = (0..len)
+    (0..len)
         .map(|_| char::from(b'a' + rng.below(26) as u8))
-        .collect();
+        .collect()
+}
+
+/// Set `attr` of the title layer to `len` random letters. Returns the version
+/// that includes the edit.
+pub fn paste(c: &mut Client, attr: &str, len: usize, seed: u64) -> bae_model::loro::VersionVector {
+    set_text(c, attr, letters(len, seed))
+}
+
+/// Set `attr` of the title layer to `text`. Returns the version that includes
+/// the edit.
+pub fn set_text(c: &mut Client, attr: &str, text: String) -> bae_model::loro::VersionVector {
     c.stage.set_edit_target(&SublayerId::root()).unwrap();
     let who = c.who.clone();
     c.stage
