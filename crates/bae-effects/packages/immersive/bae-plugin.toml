@@ -400,15 +400,33 @@ category = "Immersive Video"
 implementation = "wgsl"
 ae_match_names = ["Mettle SkyBox Blur"]
 shader = "shaders/vr_blur.wgsl"
-includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl", "shaders/cascade.wgsl"]
 identity_when = "params.blurriness == 0"
 
 [effect.roi]
 whole_input = true
 
+[[effect.texture]]
+name = "a"
+rect = "input"
+
+[[effect.texture]]
+name = "b"
+rect = "input"
+
+[[effect.pass]]
+entry = "vr_blur_fine"
+reads = ["input"]
+writes = "a"
+
+[[effect.pass]]
+entry = "vr_blur_mid"
+reads = ["a"]
+writes = "b"
+
 [[effect.pass]]
 entry = "vr_blur"
-reads = ["input"]
+reads = ["b"]
 writes = "output"
 
 [[effect.param]]
@@ -526,15 +544,33 @@ category = "Immersive Video"
 implementation = "wgsl"
 ae_match_names = ["Mettle SkyBox Glow"]
 shader = "shaders/vr_glow.wgsl"
-includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl", "shaders/cascade.wgsl"]
 identity_when = "params.glow_brightness == 0"
 
 [effect.roi]
 whole_input = true
 
+[[effect.texture]]
+name = "a"
+rect = "input"
+
+[[effect.texture]]
+name = "b"
+rect = "input"
+
+[[effect.pass]]
+entry = "vr_glow_fine"
+reads = ["input"]
+writes = "a"
+
+[[effect.pass]]
+entry = "vr_glow_mid"
+reads = ["a"]
+writes = "b"
+
 [[effect.pass]]
 entry = "vr_glow"
-reads = ["input"]
+reads = ["b", "input"]
 writes = "output"
 
 [[effect.param]]

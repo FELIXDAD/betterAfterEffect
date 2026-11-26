@@ -16,6 +16,7 @@ pub(crate) fn register(registry: &mut Registry) {
                 "shaders/vr_sphere_to_plane.wgsl",
                 "shaders/vr_blur.wgsl",
                 "shaders/neighborhood.wgsl",
+                "shaders/cascade.wgsl",
                 "shaders/vr_de_noise.wgsl",
                 "shaders/vr_glow.wgsl",
                 "shaders/vr_sharpen.wgsl",
