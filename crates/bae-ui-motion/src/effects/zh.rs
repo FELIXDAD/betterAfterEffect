@@ -2,6 +2,13 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Source channels unavailable", "当前帧没有可用的素材通道"),
+    ("Copy source", "复制源通道"),
+    ("No object selected", "尚未选择物体"),
+    (
+        "Enable Selection Mode and click an object in the viewer",
+        "启用选择模式后，在查看器中点击物体",
+    ),
     // Effect Controls / Effects & Presets.
     ("Swap Colors", "交换颜色"),
     ("Missing effect", "缺失效果"),

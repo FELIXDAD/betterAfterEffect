@@ -1,31 +1,50 @@
-//! Native footage channels in display-window coordinates, independent of working color.
-use std::collections::BTreeMap;
-
+//! Original footage samples and the metadata used by source-channel controls.
 use crate::wgpu;
+use std::{collections::BTreeMap, sync::Arc};
 
-/// One array slice. FLOAT and HALF are stored as f32 bits, UINT as unsigned integers.
 #[derive(Clone, Debug)]
 pub struct Channel {
     pub name: String,
     pub unsigned: bool,
 }
 
-/// Channels captured with one decoded frame. The texture array is immutable.
+/// The rank-ordered ID/coverage planes of one Cryptomatte pass.
 #[derive(Debug)]
-pub struct FootageChannels {
-    pub view: wgpu::TextureView,
+pub struct CryptoLayer {
+    pub name: String,
+    pub ranks: Vec<[i32; 4]>,
+    pub manifest: BTreeMap<u32, String>,
+    /// First-ranked contribution at each source pixel, for synchronous viewport picks.
+    pub dominant: Vec<u32>,
+}
+
+#[derive(Debug)]
+pub struct ChannelInfo {
     pub channels: Vec<Channel>,
-    /// EXR cryptomatte/<key>/{name,manifest,...} strings.
-    pub attributes: BTreeMap<String, String>,
+    pub crypto: Vec<CryptoLayer>,
     pub size: [u32; 2],
 }
 
-impl FootageChannels {
-    pub fn byte_size(&self) -> u64 {
-        u64::from(self.size[0]) * u64::from(self.size[1]) * self.channels.len() as u64 * 4
+impl ChannelInfo {
+    pub fn pick(&self, layer: &CryptoLayer, xy: [i32; 2]) -> Option<u32> {
+        let [x, y] = xy.map(|i| i as u32);
+        (x < self.size[0] && y < self.size[1])
+            .then(|| {
+                layer
+                    .dominant
+                    .get(y as usize * self.size[0] as usize + x as usize)
+                    .copied()
+            })
+            .flatten()
+            .filter(|&id| id != 0)
     }
-
-    /// Prefer an exact name, then a qualified name such as ViewLayer.Depth.Z.
+    pub fn pick_bytes(&self) -> u64 {
+        self.crypto
+            .iter()
+            .map(|l| l.dominant.len() as u64 * 4)
+            .sum()
+    }
+    /// Prefer exact names before looking for a dot-qualified suffix.
     pub fn find(&self, names: &[&str]) -> Option<usize> {
         for name in names {
             if let Some(i) = self
@@ -38,16 +57,30 @@ impl FootageChannels {
         }
         for name in names {
             if let Some(i) = self.channels.iter().position(|c| {
-                c.name
-                    .get(..c.name.len().saturating_sub(name.len()))
-                    .is_some_and(|p| p.ends_with('.'))
+                let Some(start) = c.name.len().checked_sub(name.len()) else {
+                    return false;
+                };
+                c.name.get(..start).is_some_and(|s| s.ends_with('.'))
                     && c.name
-                        .get(c.name.len().saturating_sub(name.len())..)
+                        .get(start..)
                         .is_some_and(|s| s.eq_ignore_ascii_case(name))
             }) {
                 return Some(i);
             }
         }
         None
+    }
+}
+
+#[derive(Debug)]
+pub struct FootageChannels {
+    pub view: wgpu::TextureView,
+    pub info: Arc<ChannelInfo>,
+}
+
+impl FootageChannels {
+    pub fn byte_size(&self) -> u64 {
+        let [w, h] = self.info.size;
+        u64::from(w) * u64::from(h) * self.info.channels.len() as u64 * 4 + self.info.pick_bytes()
     }
 }

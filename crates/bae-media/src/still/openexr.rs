@@ -1,7 +1,7 @@
 //! Decode all flat parts together. Channel words bypass the beauty image's half conversion.
 use super::*;
 use bae_gpu::{
-    channels::{Channel, FootageChannels},
+    channels::{Channel, ChannelInfo, FootageChannels},
     transfer, wgpu,
 };
 use exr::prelude::{AttributeValue, FlatSamples, Sample};
@@ -121,6 +121,7 @@ pub(super) fn decode(
     };
     let mut channels = Vec::with_capacity(count);
     let mut attributes = BTreeMap::new();
+    let mut first_ids = BTreeMap::new();
     for (part, layer) in image.layer_data.iter().enumerate() {
         let pos = layer.attributes.layer_position;
         let dx = i64::from(pos.0) - i64::from(display.position.0);
@@ -177,6 +178,13 @@ pub(super) fn decode(
                     Some(part_name) => format!("{part_name}.{}", ch.name),
                     None => ch.name.to_string(),
                 };
+                if let Some((group, component)) = name.rsplit_once('.')
+                    && (component.eq_ignore_ascii_case("r")
+                        || component.eq_ignore_ascii_case("red"))
+                    && let Some(prefix) = group.strip_suffix("00")
+                {
+                    first_ids.insert(prefix.to_owned(), words);
+                }
                 channels.push(Channel {
                     name,
                     unsigned: matches!(ch.sample_data, FlatSamples::U32(_)),
@@ -190,9 +198,11 @@ pub(super) fn decode(
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             }),
-            channels,
-            attributes,
-            size,
+            info: Arc::new(ChannelInfo {
+                crypto: crypto_layers(path, &attributes, &channels, first_ids),
+                channels,
+                size,
+            }),
         })
     });
     Ok((
@@ -207,4 +217,86 @@ pub(super) fn decode(
         },
         channels,
     ))
+}
+
+/// Build each rank table once at decode time, including optional sidecar manifests.
+fn crypto_layers(
+    path: &Path,
+    attributes: &BTreeMap<String, String>,
+    channels: &[Channel],
+    mut first_ids: BTreeMap<String, Vec<u32>>,
+) -> Vec<bae_gpu::channels::CryptoLayer> {
+    let mut result = Vec::new();
+    for (key, name) in attributes {
+        let Some(root) = key.strip_suffix("/name") else {
+            continue;
+        };
+        let Some(prefix) = first_ids
+            .keys()
+            .find(|s| *s == name || s.strip_suffix(name).is_some_and(|q| q.ends_with('.')))
+            .cloned()
+        else {
+            continue;
+        };
+        let mut groups: BTreeMap<u8, [i32; 4]> = BTreeMap::new();
+        for (index, channel) in channels.iter().enumerate() {
+            let Some((pass, component)) = channel.name.rsplit_once('.') else {
+                continue;
+            };
+            let Some(rank) = pass
+                .strip_prefix(&prefix)
+                .filter(|s| s.len() == 2)
+                .and_then(|s| s.parse::<u8>().ok())
+            else {
+                continue;
+            };
+            let lane = match component.to_ascii_lowercase().as_str() {
+                "r" | "red" => 0,
+                "g" | "green" => 1,
+                "b" | "blue" => 2,
+                "a" | "alpha" => 3,
+                _ => continue,
+            };
+            groups.entry(rank).or_insert([-1; 4])[lane] = index as i32;
+        }
+        let ranks = groups
+            .into_values()
+            .filter(|ids| ids[0] >= 0 && ids[1] >= 0)
+            .collect::<Vec<_>>();
+        if ranks.is_empty() {
+            continue;
+        }
+        let sidecar = || {
+            let filename = attributes.get(&format!("{root}/manif_file"))?;
+            let base = path.parent()?.canonicalize().ok()?;
+            let manifest = base.join(filename).canonicalize().ok()?;
+            if !manifest.starts_with(&base) {
+                return None;
+            }
+            std::fs::read_to_string(manifest).ok()
+        };
+        let manifest = attributes
+            .get(&format!("{root}/manifest"))
+            .cloned()
+            .or_else(sidecar)
+            .and_then(|s| serde_json::from_str::<BTreeMap<String, String>>(&s).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(name, hex)| {
+                let mut id = u32::from_str_radix(&hex, 16).ok()?;
+                if matches!((id >> 23) & 255, 0 | 255) {
+                    id ^= 1 << 23;
+                }
+                Some((id, name))
+            })
+            .collect();
+        result.push(bae_gpu::channels::CryptoLayer {
+            name: name.clone(),
+            ranks,
+            manifest,
+            dominant: first_ids.remove(&prefix).unwrap(),
+        });
+    }
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    result
 }

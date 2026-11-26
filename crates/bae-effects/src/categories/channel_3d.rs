@@ -1,6 +1,8 @@
 //! Auxiliary footage effects in source-layer coordinates.
 mod depth;
+mod ids;
 mod kernel;
+pub mod settings;
 
 use crate::{
     Builtin, EffectTarget, Registry, TargetEffect,
@@ -25,6 +27,10 @@ enum Method {
     Focus,
     Matte,
     Fog,
+    IdMatte,
+    Crypto,
+    Routing,
+    Identifier,
 }
 
 struct ChannelEffect {
@@ -34,6 +40,7 @@ struct ChannelEffect {
 
 pub(crate) fn register(r: &mut Registry) {
     r.effects.extend(depth::entries());
+    r.effects.extend(ids::entries());
     r.prewarm.push(prewarm);
 }
 
@@ -137,6 +144,7 @@ impl TargetEffect for ChannelEffect {
                 u.f32(at, params.f(id) as f32);
             }
         }
+        ids::uniforms(self.method, &channels, params, &mut u);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &kernel,
@@ -161,8 +169,8 @@ impl TargetEffect for ChannelEffect {
 
 /// Negative indices below -1 distinguish unsigned integer channels from FLOAT.
 fn plane(channels: &FootageChannels, names: &[&str]) -> i32 {
-    channels.find(names).map_or(-1, |i| {
-        if channels.channels[i].unsigned {
+    channels.info.find(names).map_or(-1, |i| {
+        if channels.info.channels[i].unsigned {
             -(i as i32) - 2
         } else {
             i as i32

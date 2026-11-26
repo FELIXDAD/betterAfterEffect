@@ -34,6 +34,7 @@
 mod blur;
 pub mod catalog;
 mod categories;
+pub use categories::channel_3d::settings as exr_controls;
 mod common;
 pub mod effects;
 mod gpu;

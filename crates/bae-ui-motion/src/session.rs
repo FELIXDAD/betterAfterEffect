@@ -167,6 +167,7 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) channel_frame: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     /// Last UI frame in which a visible timeline requested per-layer CPU timings.
     pub(crate) timing_column_frame: Option<u64>,
     pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
