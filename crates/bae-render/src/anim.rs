@@ -271,6 +271,7 @@ impl AnimEvaluator {
         for (i, l) in rc.layers.iter_mut().enumerate() {
             l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
         }
+        collapse_3d_precomps(ec, &mut rc);
         if depth == 0 {
             self.customs.retain(|_, (_, used)| std::mem::take(used));
         }
@@ -878,6 +879,94 @@ fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
         iris: c.iris,
         projection: crate::camera::Projection::Perspective,
     })
+}
+
+/// Collapsed 3D pre-comps (AE-CMP-424): a 3D pre-comp layer with Collapse
+/// Transformations on and no effects, masks or track matte joins the comp's
+/// 3D scene. Its layers take its place in the stack, placed by its matrix and
+/// faded by its opacity, and are seen by this comp's camera and lit by its
+/// lights (the pre-comp's own cameras and lights are ignored); its 2D layers
+/// lie on its plane.
+fn collapse_3d_precomps(ec: &EvaluatedComp, rc: &mut RenderComp) {
+    let mut i = 0;
+    while i < rc.layers.len() {
+        let collapsed = ec
+            .layers
+            .iter()
+            .find(|l| l.path == rc.layers[i].path)
+            .is_some_and(|l| l.switches.collapse_transformation && l.switches.three_d);
+        let outer = &rc.layers[i];
+        let (Some(m), LayerContent::Comp(nested)) = (outer.matrix_3d, &outer.content) else {
+            i += 1;
+            continue;
+        };
+        if !collapsed
+            || outer.effects.iter().any(|e| e.enabled)
+            || outer.masks.iter().any(|m| m.mode != MaskMode::None)
+            || outer.track_matte.is_some()
+        {
+            i += 1;
+            continue;
+        }
+        let nested = nested.clone();
+        let (opacity, active, visible) = (outer.opacity, outer.active, outer.visible);
+        let inner: Vec<RenderLayer> = nested
+            .layers
+            .iter()
+            .map(|l| {
+                let mut l = l.clone();
+                let world = m * l.matrix_3d.unwrap_or_else(|| embed_2d(&l.transform));
+                l.matrix_3d = Some(world);
+                l.transform = affine_2d(&world);
+                l.motion_samples = l
+                    .motion_samples
+                    .iter()
+                    .map(|s| LayerSample {
+                        transform: affine_2d(
+                            &(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                        ),
+                        matrix_3d: Some(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                    })
+                    .collect();
+                l.opacity *= opacity;
+                l.active &= active;
+                l.visible &= visible;
+                if let Some(t) = &mut l.track_matte {
+                    t.layer += i;
+                }
+                l
+            })
+            .collect();
+        let n = inner.len();
+        // Indices past the pre-comp move by the layers it adds.
+        let shift = |index: &mut usize| {
+            if *index > i {
+                *index = *index + n - 1;
+            }
+        };
+        for l in rc.layers.iter_mut() {
+            if let Some(t) = &mut l.track_matte {
+                shift(&mut t.layer);
+            }
+        }
+        for light in rc.lights.iter_mut() {
+            if let Some(index) = &mut light.scope_below {
+                shift(index);
+            }
+        }
+        rc.layers.splice(i..=i, inner);
+        i += n.max(1);
+    }
+}
+
+/// A 2D layer's transform as a 3D placement on the z = 0 plane.
+fn embed_2d(t: &DAffine2) -> DMat4 {
+    DMat4::from_cols(
+        glam::DVec4::new(t.matrix2.x_axis.x, t.matrix2.x_axis.y, 0.0, 0.0),
+        glam::DVec4::new(t.matrix2.y_axis.x, t.matrix2.y_axis.y, 0.0, 0.0),
+        glam::DVec4::new(0.0, 0.0, 1.0, 0.0),
+        glam::DVec4::new(t.translation.x, t.translation.y, 0.0, 1.0),
+    )
 }
 
 /// The lights of `ec` that light its layers.

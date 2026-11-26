@@ -1128,6 +1128,7 @@ impl Panel for CompositionViewer {
                     |pb| pb.range,
                 );
                 let looping = playback.is_some() && session.lock().loop_playback;
+                let mut shown_now = false;
                 if let Some((image, actual, errors)) = gpu.playback.poll(
                     cx.stage,
                     cx.resources,
@@ -1140,6 +1141,7 @@ impl Panel for CompositionViewer {
                     ui.ctx(),
                 ) {
                     completed = Some(image);
+                    shown_now = actual == time;
                     if actual == time || playback.is_some() {
                         let mut s = session.lock();
                         if playback.is_some() {
@@ -1149,6 +1151,10 @@ impl Panel for CompositionViewer {
                             s.expr_errors = errors.to_vec();
                         }
                     }
+                }
+                // A cold start: the clock waits for playback's first frame.
+                if playback.is_some() {
+                    session.lock().hold_first_frame(shown_now);
                 }
                 // Idle (the current time still for a moment): prepare the first
                 // frames playback would show, so pressing play shows them at
