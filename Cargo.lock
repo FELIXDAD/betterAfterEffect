@@ -995,6 +995,7 @@ version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-app",
+ "bae-color",
  "bae-effects",
  "bae-gpu",
  "bae-interop-psd",
