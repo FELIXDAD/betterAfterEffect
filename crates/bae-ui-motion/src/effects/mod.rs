@@ -9,6 +9,7 @@
 pub(crate) mod browser;
 pub(crate) mod controls;
 mod eq_response;
+mod exr;
 mod lumetri_curve;
 pub mod manager;
 mod warp_grid;
