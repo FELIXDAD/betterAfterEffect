@@ -132,12 +132,12 @@ impl Gpu {
                 .renderer
                 .render_frame_with(&comp, &request, None)
                 .ok()?;
-            let texture = self
+            let target = self
                 .renderer
-                .output_texture(&frame, OutputAlpha::Premultiplied)
+                .output_texture(&frame, OutputAlpha::Premultiplied, None)
                 .ok()?;
             self.registry
-                .publish(self.id, &texture, wgpu::FilterMode::Linear)
+                .publish(self.id, target.view().texture(), wgpu::FilterMode::Linear)
                 .ok()?;
             self.last = Some(key);
         }
