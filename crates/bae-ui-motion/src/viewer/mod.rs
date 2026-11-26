@@ -81,6 +81,8 @@ const ZOOM_STEPS: [f32; 13] = [
 
 /// Zoom to 100 % (/ in the Composition panel).
 pub(crate) const ZOOM_100: &str = "motion.viewer.zoom_100";
+/// View ▸ Fit up to 100% (Alt/Option+/).
+pub(crate) const FIT_UP_TO_100: &str = "motion.viewer.fit_up_to_100";
 
 /// The next zoom step above (`up`) or below `mag`.
 pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
@@ -232,8 +234,11 @@ pub struct CompositionViewer {
     preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
-    /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
+    /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` =
+    /// fitted to the panel.
     zoom: Option<f32>,
+    /// Fitted with AE's Fit (any magnification) rather than Fit up to 100%.
+    fit_all: bool,
     /// Legacy magnification: the part of a wheel notch not yet stepped.
     wheel_rest: f32,
     pan: Vec2,
@@ -384,8 +389,12 @@ impl CompositionViewer {
         let fit = ((area.width() - 24.0) / w)
             .min((area.height() - 24.0) / h)
             .max(0.01);
-        // AE "Fit up to 100%".
-        let fit = fit.min(1.0 / ppp);
+        // AE's Fit, or Fit up to 100% (the default).
+        let fit = if self.fit_all {
+            fit
+        } else {
+            fit.min(1.0 / ppp)
+        };
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let origin = area.center() - vec2(w, h) * scale / 2.0 + self.pan;
         // At native size a fractional texture edge blends adjacent texels.
@@ -824,11 +833,18 @@ impl Panel for CompositionViewer {
             }
             "viewer.fit" => {
                 self.zoom = None;
+                self.fit_all = true;
                 self.pan = Vec2::ZERO;
                 true
             }
             ZOOM_100 => {
                 self.pending_100 = true;
+                true
+            }
+            FIT_UP_TO_100 => {
+                self.zoom = None;
+                self.fit_all = false;
+                self.pan = Vec2::ZERO;
                 true
             }
             _ => crate::actions::handle(action, cx, &session),
@@ -927,6 +943,11 @@ impl Panel for CompositionViewer {
             Some(ViewRequest::Center) => self.pan = Vec2::ZERO,
             Some(ViewRequest::Actual) => {
                 self.zoom = Some(1.0);
+                self.pan = Vec2::ZERO;
+            }
+            Some(ViewRequest::FitUpTo100) => {
+                self.zoom = None;
+                self.fit_all = false;
                 self.pan = Vec2::ZERO;
             }
             None => {}
@@ -1185,7 +1206,7 @@ impl Panel for CompositionViewer {
                 color::TEXT_STRONG,
             );
             self.banner.ui(ui, cx, &session, area);
-            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session, None);
             return;
         }
 
@@ -1839,15 +1860,68 @@ impl Panel for CompositionViewer {
             crate::effects::apply(cx, &[layer], &fx.0);
         }
 
+        // 3D Reference Axes: the world axes as the view's camera sees them.
+        let opts = session.lock().view_options;
+        if opts.axes
+            && opts.layer_controls
+            && comp.layers.iter().any(render::is_3d)
+            && let Some((camera, _)) = view.camera.as_ref()
+        {
+            reference_axes(&ui.painter_at(area), area, &camera.world);
+        }
         self.banner.ui(ui, cx, &session, area);
         self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
-        bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+        let camera = comp.camera.and_then(|i| comp.layers.get(i));
+        let camera = camera.map(|l| l.name.clone());
+        bar::bottom_bar(
+            ui,
+            cx,
+            bar,
+            self,
+            &info,
+            time,
+            mag,
+            &session,
+            camera.as_deref(),
+        );
         self.esc_taken = self.shape.is_some()
             || self.pen.busy()
             || self.select.busy()
             || self.select.free.is_some()
             || ui.ctx().text_edit_focused()
             || egui::Popup::is_any_open(ui.ctx());
+    }
+}
+
+/// The 3D Reference Axes in `area`'s lower-left corner: world X (red), Y
+/// (green) and Z (blue) as seen by a camera with `world` (camera → comp).
+fn reference_axes(painter: &egui::Painter, area: Rect, world: &DMat4) {
+    let origin = pos2(area.left() + 28.0, area.bottom() - 28.0);
+    let to_camera = world.inverse();
+    let axes = [
+        (
+            bae_anim::glam::DVec3::X,
+            "X",
+            Color32::from_rgb(230, 70, 70),
+        ),
+        (
+            bae_anim::glam::DVec3::Y,
+            "Y",
+            Color32::from_rgb(90, 200, 90),
+        ),
+        (
+            bae_anim::glam::DVec3::Z,
+            "Z",
+            Color32::from_rgb(80, 140, 240),
+        ),
+    ];
+    for (axis, name, color) in axes {
+        // Camera space: +x right, +y down (screen), +z away.
+        let d = to_camera.transform_vector3(axis).normalize_or_zero();
+        let tip = origin + vec2(d.x as f32, d.y as f32) * 18.0;
+        painter.line_segment([origin, tip], Stroke::new(1.5, color));
+        let label = origin + vec2(d.x as f32, d.y as f32) * 25.0;
+        painter.text(label, Align2::CENTER_CENTER, name, theme::small(), color);
     }
 }
 
