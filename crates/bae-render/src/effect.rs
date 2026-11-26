@@ -21,6 +21,10 @@ use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Audio analysis and optional mask geometry supplied only for the two Generate effects.
+pub const AUDIO_VISUAL_VALUES: u32 = u32::MAX;
+pub const AUDIO_VISUAL_PATH: u32 = u32::MAX - 1;
+
 /// A parameter lookup can borrow the evaluated values and shadow individual IDs.
 /// A shadow with no value hides that ID from the target effect.
 #[derive(Clone, Copy, Debug)]
@@ -346,7 +350,10 @@ impl LayerDependency {
         Self {
             layer,
             time,
-            stage: LayerStage::BeforeEffect(effect),
+            stage: LayerStage::BeforeEffect {
+                effect,
+                native_motion_blur: true,
+            },
         }
     }
 }
@@ -364,7 +371,12 @@ pub enum LayerStage {
     /// warns.
     EffectsAndMasks,
     /// The prefix of the layer’s effect stack, stopping at this effect prim.
-    BeforeEffect(PrimPath),
+    BeforeEffect {
+        /// Stop before this effect.
+        effect: PrimPath,
+        /// Include native motion blur when drawing nested compositions.
+        native_motion_blur: bool,
+    },
 }
 
 /// Selects masks of an effect's own layer (AE path parameters and All Masks).

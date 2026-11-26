@@ -174,7 +174,7 @@ pub(crate) fn show_item(
             }
             // Filled from the project in AE (Reveal in Composition): greyed.
             Sub(title, []) => {
-                ui.add_enabled(false, egui::Button::new(tr(title)));
+                ui.add_enabled_ui(false, |ui| common::submenu(ui, tr(title), &mut |_| {}));
             }
             Sub(title, list) => common::submenu(ui, tr(title), &mut |ui| {
                 chosen = chosen.or(show_item(ui, cx, list, off, kind));
