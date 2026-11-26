@@ -445,7 +445,13 @@ impl CompositionViewer {
         session: &SharedSession,
         info: &CompInfo,
     ) -> Option<EvaluatedComp> {
-        let time = session.lock().time(&info.path);
+        let time = {
+            let s = session.lock();
+            s.held_viewer_time
+                .as_ref()
+                .filter(|(p, _)| p == &info.path)
+                .map_or_else(|| s.time(&info.path), |(_, t)| *t)
+        };
         live_evaluator(&mut self.eval, cx, session)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
@@ -725,7 +731,16 @@ impl Panel for CompositionViewer {
         };
         // The shell ticks the clock; this keeps the audio mix current.
         session.lock().update_preview(cx, &info);
-        let time = session.lock().time(&info.path);
+        let time = {
+            let mut s = session.lock();
+            if !ui.input(|i| i.pointer.primary_down()) {
+                s.held_viewer_time = None;
+            }
+            s.held_viewer_time
+                .as_ref()
+                .filter(|(p, _)| p == &info.path)
+                .map_or_else(|| s.time(&info.path), |(_, t)| *t)
+        };
         let ppp = ui.ctx().pixels_per_point();
 
         let full = ui.available_rect_before_wrap();

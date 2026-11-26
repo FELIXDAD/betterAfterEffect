@@ -73,6 +73,15 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Calendar date and time in UTC for item metadata shown in panels.
+pub fn utc_label(time: SystemTime) -> String {
+    let t = UtcTime::from_system_time(time);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+        t.year, t.month, t.day, t.hour, t.minute, t.second
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
