@@ -13,6 +13,8 @@ pub struct AeEffect {
     pub name: &'static str,
     /// Name in AE's Chinese UI.
     pub name_zh: &'static str,
+    /// GPU and channel depths published in the After Effects effect list.
+    pub capabilities: u8,
 }
 
 /// Who implements the command behind an entry (the AE-parity agents, see

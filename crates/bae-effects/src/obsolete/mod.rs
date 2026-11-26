@@ -1,7 +1,10 @@
 //! Obsolete AE identities keep their disk parameter schemas and render through the modern effect.
 mod color;
+mod lightning;
+mod matte;
 mod noise_utility;
 mod spatial;
+mod weather;
 
 use super::{Builtin, EffectInfo, Registry};
 use crate::params::Params;
@@ -177,11 +180,16 @@ impl Definition {
 }
 
 pub(super) fn register(r: &mut Registry) {
+    r.prewarm.push(lightning::prewarm);
+    r.prewarm.push(matte::prewarm);
     let mut aliases = Vec::new();
     for target in &r.effects {
         noise_utility::register(target, &mut aliases);
+        lightning::register(target, &mut aliases);
         color::register(target, &mut aliases);
         spatial::register(target, &mut aliases);
+        matte::register(target, &mut aliases);
+        weather::register(target, &mut aliases);
     }
     r.effects.extend(aliases);
 }
