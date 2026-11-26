@@ -372,7 +372,13 @@ pub(crate) fn run(
         Target::Shape(layer) => {
             obj.insert("layer".into(), json!(layer));
             add_paint(obj, bezier, options);
+            let before = crate::session::shape_groups(stage, layer);
             cx.invoke_with("shape.add", params);
+            // AE selects the new group: its box scales it around its anchor.
+            session.lock().expect(Pending::NewGroup {
+                layer: layer.clone(),
+                before,
+            });
             Some(layer.clone())
         }
         Target::NewLayer => {
@@ -408,6 +414,10 @@ pub(crate) fn run(
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
             s.expect(Pending::Layer(path.clone()));
+            s.expect(Pending::NewGroup {
+                layer: path.clone(),
+                before: Vec::new(),
+            });
             s.reserve_name(path.clone(), name);
             Some(path)
         }
