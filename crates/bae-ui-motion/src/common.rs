@@ -47,7 +47,7 @@ pub(crate) fn expression_style(
     let rgb = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
     match resources.get::<Arc<bae_prefs::PrefsStore>>() {
         Some(store) => {
-            let p = store.current();
+            let p = store.display();
             (
                 egui::FontId::monospace(p.int(bae_prefs::keys::EXPR_FONT_SIZE).clamp(6, 72) as f32),
                 rgb(p.color("scripting_expressions.expr_color_default")),
