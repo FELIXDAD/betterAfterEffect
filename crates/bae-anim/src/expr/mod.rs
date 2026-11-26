@@ -682,6 +682,9 @@ const LOCALS: &[(&str, &str)] = &[
     ("transform", "thisLayer.transform"),
     ("marker", "thisLayer.marker"),
     ("text", "thisLayer.text"),
+    ("style", "thisProperty.style"),
+    ("getStyleAt", "thisProperty.getStyleAt.bind(thisProperty)"),
+    ("createStyle", "thisProperty.createStyle.bind(thisProperty)"),
     (
         "sourceRectAtTime",
         "thisLayer.sourceRectAtTime.bind(thisLayer)",
@@ -1196,14 +1199,37 @@ fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
     if let Ok(Some(font)) = c.get::<_, Option<String>>("font") {
         doc.font = font;
     }
+    if let Ok(v) = c.get::<_, String>("justification") {
+        doc.justification = match v.as_str() {
+            "alignLeft" => "left",
+            "alignCenter" => "center",
+            "alignRight" => "right",
+            "justifyLastLeft" => "justify_last_left",
+            "justifyLastCenter" => "justify_last_center",
+            "justifyLastRight" => "justify_last_right",
+            "justifyFull" => "justify_all",
+            _ => doc.justification.as_str(),
+        }
+        .to_owned();
+    }
     if let Some(v) = num("fontSize") {
         doc.font_size = v;
     }
     if let Some(v) = rgb("fillColor") {
-        doc.fill_color = [v[0], v[1], v[2], doc.fill_color[3]];
+        let alpha = num("fillAlpha").unwrap_or(doc.fill_color[3]);
+        doc.fill_color = [
+            v[0],
+            v[1],
+            v[2],
+            if alpha == 0.0 && flag("applyFill") == Some(true) {
+                1.0
+            } else {
+                alpha
+            },
+        ];
     }
     if let Some(v) = rgb("strokeColor") {
-        let a = doc.stroke_color.map_or(1.0, |c| c[3]);
+        let a = num("strokeAlpha").unwrap_or(1.0);
         doc.stroke_color = Some([v[0], v[1], v[2], a]);
     }
     if let Some(v) = num("strokeWidth") {
@@ -1242,7 +1268,20 @@ fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
 /// A text document's style as the expression `TextStyle` reads it.
 fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextDocument) -> rquickjs::Result<Object<'js>> {
     let o = Object::new(ctx.clone())?;
-    o.set("text", doc.text.as_str())?;
+    o.set(
+        "justification",
+        match doc.justification.as_str() {
+            "left" => "alignLeft",
+            "center" => "alignCenter",
+            "right" => "alignRight",
+            "justify_last_left" => "justifyLastLeft",
+            "justify_last_center" => "justifyLastCenter",
+            "justify_last_right" => "justifyLastRight",
+            _ => "justifyFull",
+        },
+    )?;
+    o.set("fillAlpha", doc.fill_color[3])?;
+    o.set("strokeAlpha", doc.stroke_color.map_or(1.0, |c| c[3]))?;
     o.set("font", doc.font.as_str())?;
     o.set("fontSize", doc.font_size)?;
     o.set("fillColor", doc.fill_color[..3].to_vec())?;

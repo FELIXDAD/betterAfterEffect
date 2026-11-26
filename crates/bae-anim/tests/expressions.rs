@@ -768,6 +768,69 @@ fn doc(text: &str) -> Value {
 /// `text.sourceText` reads as a string with the property's methods; `value` on
 /// Source Text is the text; the AE 17.0+ style API reads and sets the style.
 #[test]
+fn source_style_copies_formatting_and_sets_text_explicitly() {
+    let s = stage(|b| {
+        let source = b.layer(MAIN, "Master", "text");
+        let mut spec = AttrSpec::default();
+        for (t, size) in [(0.0, 20.0), (1.0, 64.0)] {
+            let mut d = TextDocument::new("other", "MasterFont", size);
+            d.fill_color = [0.1, 0.2, 0.3, 0.4];
+            spec.keyframes
+                .insert(secs(t), Keyframe::linear(Value::TextDocument(Box::new(d))));
+        }
+        b.spec(&source, "text:source", spec);
+        let l = b.layer(MAIN, "Copy", "text");
+        b.expr(
+            &l,
+            "text:source",
+            doc("target"),
+            r#"thisComp.layer("Master").text.sourceText.style.setJustification("alignCenter")"#,
+        );
+        let l = b.layer(MAIN, "Now", "text");
+        b.expr(
+            &l,
+            "text:source",
+            doc("target"),
+            r#"var s=thisComp.layer("Master").text.sourceText;
+            style.setFont("Current").setFontSize(s.getStyleAt(0,time).fontSize).setText(s)"#,
+        );
+    });
+    let comp = eval(&s, 1.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    let copy = comp.layers[1].text.as_ref().unwrap();
+    assert_eq!(
+        (
+            &*copy.text,
+            &*copy.font,
+            copy.font_size,
+            &*copy.justification
+        ),
+        ("target", "MasterFont", 20.0, "center")
+    );
+    assert_eq!(copy.fill_color, [0.1, 0.2, 0.3, 0.4]);
+    let now = comp.layers[2].text.as_ref().unwrap();
+    assert_eq!(
+        (&*now.text, &*now.font, now.font_size),
+        ("other", "Current", 64.0)
+    );
+}
+
+#[test]
+fn color_expression_conversions_preserve_alpha_and_parse_ae_hex() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "Color", "text");
+        b.expr(&l, "text:source", doc(""), r##"var c=hexToRgb("0xFF008080"),h=rgbToHsl(c),r=hslToRgb(h);
+            [c[0],Math.round(c[2]*255),Math.round(h[3]*255),length(r,c)<0.00001,hexToRgb("#00FF00")[1]].join("|")"##);
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "1|128|128|true|1"
+    );
+}
+
+#[test]
 fn source_text_strings_and_styles() {
     let s = stage(|b| {
         let a = b.layer(MAIN, "A", "text");
