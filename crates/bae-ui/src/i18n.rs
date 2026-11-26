@@ -213,6 +213,8 @@ const ZH: &[(&str, &str)] = &[
     ("Close Project", "关闭项目"),
     ("Save", "保存"),
     ("Save As...", "另存为..."),
+    ("Save a Copy...", "保存副本..."),
+    ("Reveal Project", "显示项目"),
     ("Switch Workspace", "切换工作区"),
     ("Open Panel", "打开面板"),
     ("BAE Help", "BAE 帮助"),

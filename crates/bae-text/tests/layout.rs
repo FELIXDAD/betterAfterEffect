@@ -251,3 +251,30 @@ fn all_caps_keeps_character_indices() {
     assert_eq!(ids(&caps), ids(&upper));
     assert_eq!(caps.chars[2].source, 2..3);
 }
+
+/// `sourceRectAtTime` measures text with the provider's fonts and shapes from
+/// their geometry.
+#[cfg(feature = "render")]
+#[test]
+fn provider_measures_text_and_shapes_for_expressions() {
+    use bae_anim::{EvaluatedPrim, SourceBounds};
+    use bae_model::{PrimPath, PrimType, Value};
+    let provider = bae_text::render::TextProvider::new();
+    let doc = bae_model::TextDocument::new("Hello", "ArialMT", 50.0);
+    let [_, _, w, h] = provider.text(&doc, false).expect("text bounds");
+    assert!(w > 50.0 && h > 20.0, "{w} × {h}");
+    let prim = |path: &str, ty: PrimType, attrs: Vec<(&str, Value)>| EvaluatedPrim {
+        path: PrimPath::new(path).unwrap(),
+        prim_type: Some(ty),
+        attrs: std::sync::Arc::new(attrs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()),
+        children: Vec::new().into(),
+    };
+    let rect = prim(
+        "/r",
+        PrimType::RECT,
+        vec![("size", Value::Vec2([100.0, 50.0]))],
+    );
+    let fill = prim("/f", PrimType::FILL, vec![]);
+    let r = provider.shapes(&[rect, fill], false).expect("shape bounds");
+    assert_eq!(r, [-50.0, -25.0, 100.0, 50.0]);
+}

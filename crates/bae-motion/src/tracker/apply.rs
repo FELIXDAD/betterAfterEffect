@@ -8,7 +8,7 @@ use crate::{
 };
 use bae_anim::{
     Evaluator,
-    glam::{DMat4, DVec2, DVec3},
+    glam::{DMat4, DVec2},
 };
 use bae_app::Registry;
 use bae_model::{
@@ -190,11 +190,48 @@ impl Command for ApplyTrack {
             if (scale || rotation) && (base_axis.length() < 1e-6 || delta.length() < 1e-6) {
                 return Err(fail("track points coincide"));
             }
+            let mut applied = dst.transform;
+            if rotation {
+                let angle = delta.y.atan2(delta.x).to_degrees()
+                    - base_axis.y.atan2(base_axis.x).to_degrees();
+                let change = angle - previous_angle;
+                turns += (change + 180.0).rem_euclid(360.0) - 180.0;
+                previous_angle = angle;
+                applied.rotation.z =
+                    base_transform.rotation.z + if stabilize { -turns } else { turns };
+                writes.push((
+                    dt,
+                    "transform:rotation".into(),
+                    Value::Float(applied.rotation.z),
+                ));
+            }
+            if scale {
+                let ratio = delta.length() / base_axis.length();
+                let v =
+                    base_transform.scale.truncate() * if stabilize { 1.0 / ratio } else { ratio };
+                let v = p.axes.merge(v, dst.transform.scale.truncate());
+                applied.scale = v.extend(dst.transform.scale.z);
+                writes.push((
+                    dt,
+                    "transform:scale".into(),
+                    Value::Vec3(applied.scale.to_array()),
+                ));
+            }
             if position {
                 let (name, value, old) = if stabilize {
+                    // Keep the first attachment fixed in parent space as rotation and scale change.
+                    if applied.scale.x == 0.0 || applied.scale.y == 0.0 {
+                        return Err(fail("cannot stabilize a layer with zero scale"));
+                    }
+                    let base_offset =
+                        (base_xy - base_transform.anchor_point.truncate()).extend(0.0);
+                    let reference_vector =
+                        base_transform.matrix(false).transform_vector3(base_offset);
+                    let inverse = applied.matrix(false).inverse();
+                    let offset = inverse.transform_vector3(reference_vector).truncate();
                     (
                         "transform:anchor_point",
-                        base_transform.anchor_point.truncate() + xy - base_xy,
+                        xy - offset,
                         dst.transform.anchor_point,
                     )
                 } else {
@@ -211,31 +248,6 @@ impl Command for ApplyTrack {
                 } else {
                     writes.push((dt, name.into(), Value::Vec3(v.extend(old.z).to_array())));
                 }
-            }
-            if rotation {
-                let angle = delta.y.atan2(delta.x).to_degrees()
-                    - base_axis.y.atan2(base_axis.x).to_degrees();
-                let change = angle - previous_angle;
-                turns += (change + 180.0).rem_euclid(360.0) - 180.0;
-                previous_angle = angle;
-                writes.push((
-                    dt,
-                    "transform:rotation".into(),
-                    Value::Float(
-                        base_transform.rotation.z + if stabilize { -turns } else { turns },
-                    ),
-                ));
-            }
-            if scale {
-                let ratio = delta.length() / base_axis.length();
-                let v =
-                    base_transform.scale.truncate() * if stabilize { 1.0 / ratio } else { ratio };
-                let v = p.axes.merge(v, dst.transform.scale.truncate());
-                writes.push((
-                    dt,
-                    "transform:scale".into(),
-                    Value::Vec3(DVec3::new(v.x, v.y, dst.transform.scale.z).to_array()),
-                ));
             }
         }
         if writes.is_empty() {

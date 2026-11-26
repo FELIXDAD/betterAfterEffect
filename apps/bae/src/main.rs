@@ -47,6 +47,20 @@ fn main() -> ExitCode {
     startup::run(app_builder().build())
 }
 
+/// The AE scripting prelude's bytecode, otherwise compiled by the first script
+/// or plugin run. `bae-script` stays free of GPU types, so the task lives here.
+struct ScriptPrelude;
+
+impl bae_gpu::WarmUp for ScriptPrelude {
+    fn name(&self) -> &str {
+        "script prelude"
+    }
+
+    fn run(&self, _gpu: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        bae_script::prewarm()
+    }
+}
+
 /// Every module of the app, in order. Tests assemble the same app from it (so they
 /// see the same commands, panels and translation tables).
 fn app_builder() -> AppBuilder {
@@ -78,6 +92,8 @@ fn app_builder() -> AppBuilder {
         tracing::warn!("shape layer source not registered: {error}");
     }
     let text = std::sync::Arc::new(bae_text::render::TextProvider::new());
+    // Expressions' `sourceRectAtTime` measures text and shapes with it.
+    text.measure_expressions();
     if let Err(error) = builder
         .register_arc::<dyn bae_render::SourceProvider>(bae_text::TEXT_PROVIDER, text.clone())
     {
@@ -91,6 +107,11 @@ fn app_builder() -> AppBuilder {
                 as std::sync::Arc<dyn bae_gpu::WarmUp>,
         ),
         ("bae.text.fonts", text),
+        (
+            "bae.anim.expressions",
+            std::sync::Arc::new(ExpressionWarmUp),
+        ),
+        ("bae.script.prelude", std::sync::Arc::new(ScriptPrelude)),
     ] {
         if let Err(error) = builder.register_arc::<dyn bae_gpu::WarmUp>(id, task) {
             tracing::warn!("warm-up task {id} not registered: {error}");
@@ -98,4 +119,24 @@ fn app_builder() -> AppBuilder {
     }
     // Feature modules from other workstreams are added here.
     builder
+}
+
+/// Builds an expression engine (runtime, context, prelude) on the warm-up
+/// thread, so the first expression evaluated does not build one while the
+/// user waits.
+struct ExpressionWarmUp;
+
+impl bae_gpu::WarmUp for ExpressionWarmUp {
+    fn name(&self) -> &str {
+        "expressions"
+    }
+
+    fn priority(&self) -> u8 {
+        20
+    }
+
+    fn run(&self, _gpu: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        bae_anim::prewarm_expressions();
+        Ok(())
+    }
 }

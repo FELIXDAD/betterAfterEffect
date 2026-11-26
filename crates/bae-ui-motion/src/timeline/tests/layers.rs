@@ -274,3 +274,113 @@ fn group_names_select_contents_for_duplicate_copy_paste_and_delete() {
     h.apply(&h.action(&mut tl, Invocation::new(ids::PASTE)));
     assert_eq!(masks(&h, &layer), ["Mask 1"]);
 }
+
+#[test]
+fn empty_outline_space_and_deselect_all_clear_the_selection() {
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (1.0, float(90.0))]);
+    let layer = h.layer.clone();
+    let mut tl = h.bars();
+    let select = |h: &H| {
+        let s = h.session();
+        let mut s = s.lock();
+        s.selected_layers = vec![layer.clone()];
+        s.selected_props = vec![(layer.clone(), ROT.to_owned())];
+    };
+    // A click in the outline below the last row (AE: deselects everything).
+    select(&h);
+    h.click(&mut tl, pos2(40.0, 700.0), Modifiers::NONE);
+    {
+        let s = h.session();
+        let s = s.lock();
+        assert!(s.selected_layers.is_empty() && s.selected_props.is_empty());
+    }
+    // Edit > Deselect All (F2, Cmd/Ctrl+Shift+A) clears properties too.
+    select(&h);
+    h.action(&mut tl, Invocation::new(crate::actions::ids::DESELECT_ALL));
+    let s = h.session();
+    let s = s.lock();
+    assert!(s.selected_layers.is_empty() && s.selected_props.is_empty());
+}
+
+#[test]
+fn e_reveals_the_effects_group_with_its_effects() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    let folder = layer.child("effects").unwrap();
+    h.run(
+        "prim.create",
+        json!({"path": folder, "prim_type": "Folder"}),
+    );
+    let blur = folder.child("Gaussian_Blur").unwrap();
+    h.run("prim.create", json!({"path": blur, "prim_type": "Effect"}));
+    h.run(
+        "attr.set",
+        json!({"path": blur, "attr": "name", "value": {"type": "string", "value": "Gaussian Blur"}}),
+    );
+    let mut tl = h.bars();
+    h.session().lock().reveal.clear();
+    let groups = |h: &mut H, tl: &mut TimelinePanel| {
+        let s = h.session();
+        let s = s.lock();
+        tl.group_rows(&h.stage, &h.comp, &s)
+    };
+    // E: Effects, open, with Gaussian Blur (collapsed) under it.
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::REVEAL, json!({"what": "effects", "add": false})),
+    );
+    assert!(r.invocations.is_empty());
+    let shown = groups(&mut h, &mut tl);
+    assert_eq!(
+        shown,
+        [format!("{layer}#effects"), format!("{layer}#{blur}")]
+    );
+    // E again hides it.
+    h.action(
+        &mut tl,
+        Invocation::with_params(ids::REVEAL, json!({"what": "effects", "add": false})),
+    );
+    assert!(groups(&mut h, &mut tl).is_empty());
+    // E and P keys are bound.
+    let bound = |key: &str| {
+        crate::actions::bindings()
+            .bindings
+            .iter()
+            .any(|b| b.chord == bae_ui::Chord::parse(key).unwrap() && b.action == ids::REVEAL)
+    };
+    assert!(bound("E") && bound("Shift+E"));
+}
+
+/// #599: Rename on the Timeline's empty space renames the comp in the Project
+/// panel (AE 26).
+#[test]
+fn timeline_blank_rename_asks_the_project_panel() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("timeline");
+    let session = h.session();
+    {
+        let mut cx = PanelContext::new(
+            &id,
+            "timeline",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        super::super::rename_comp(&mut cx, &session, &comp);
+    }
+    assert!(
+        requests.open.iter().any(|p| p.kind() == "project"),
+        "{:?}",
+        requests.open
+    );
+    let s = session.lock();
+    assert_eq!(s.selected_items, vec![comp.clone()]);
+    assert_eq!(s.rename_item.as_ref(), Some(&comp));
+    drop(s);
+    let _ = &mut h;
+}

@@ -39,9 +39,10 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
         Some("Cmd+Shift+X"),
         "将合成裁剪到工作区",
     ),
+    // ⌘M and ⌥⌘H belong to macOS (Minimize, Hide Others): AE adds Control.
     (
         "motion.composition.render_queue",
-        Some("Cmd+M"),
+        Some("Ctrl+Cmd+M"),
         "添加到渲染队列",
     ),
     ("motion.layer.new.text", Some("Cmd+Alt+Shift+T"), "文本"),
@@ -75,7 +76,11 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("motion.animation.ease_in", Some("Shift+F9"), "缓入"),
     ("motion.animation.ease_out", Some("Cmd+Shift+F9"), "缓出"),
     ("motion.animation.reverse", None, "时间反向关键帧"),
-    ("motion.animation.hold", Some("Cmd+Alt+H"), "切换定格关键帧"),
+    (
+        "motion.animation.hold",
+        Some("Ctrl+Cmd+Alt+H"),
+        "切换定格关键帧",
+    ),
     ("motion.edit.duplicate", Some("Cmd+D"), "重复"),
     ("motion.edit.split", Some("Cmd+Shift+D"), "拆分图层"),
     // Window (issues #117, #118). AE's Effect Controls item has a dynamic label
@@ -352,7 +357,7 @@ fn english_ui_has_no_chinese() {
     crate::i18n::init_from_env();
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let cjk: Vec<String> = painted_texts(&h)
         .into_iter()
         .filter(|t| t.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)))
@@ -376,15 +381,15 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
     new_comp(&mut h);
     let targets: [(&str, egui::Vec2); 5] = [
         ("Name", egui::vec2(0.0, 420.0)), // Project panel, below the rows
-        ("Layer Name", egui::vec2(700.0, 120.0)), // Timeline graph
+        ("Source Name", egui::vec2(700.0, 120.0)), // Timeline graph
         ("Fit", egui::vec2(300.0, -250.0)), // Composition viewer
         ("Effects & Presets", egui::vec2(0.0, 40.0)), // Effects & Presets panel
         ("Render", egui::vec2(200.0, 0.0)), // Render Queue
     ];
     for (anchor, offset) in targets {
         if anchor == "Render" {
-            // Cmd+M opens the Render Queue (a tab over the Project panel).
-            key(&mut h, Modifiers::COMMAND, Key::M);
+            // Ctrl+Cmd+M opens the Render Queue (a tab over the Project panel).
+            key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         }
         assert!(
             find_text(&h, anchor).is_some(),
@@ -466,7 +471,7 @@ fn text_fields_keep_delete_undo_and_select_all() {
     // Escape leaves the field; with the timeline focused, Delete deletes the
     // selected layer (AE).
     key(&mut h, Modifiers::NONE, Key::Escape);
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(&mut h, pos2(head.left() + 800.0, head.bottom() + 80.0));
     h.state().session().lock().selected_layers = vec![layer.clone()];
     key(&mut h, Modifiers::NONE, Key::Delete);
@@ -507,7 +512,7 @@ fn window_render_queue_item_opens_and_closes_the_panel() {
     assert!(render_queue_open(&h), "Cmd+Alt+0 did not open it");
     // Closing it with items queued keeps the items (runtime queue).
     new_comp(&mut h);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert!(h.state_mut().menu("motion.window.render_queue"));
     settle(&mut h);
     assert!(h.state_mut().menu("motion.window.render_queue"));
@@ -605,7 +610,7 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
         (Modifiers::NONE, Key::Enter),
         (Modifiers::NONE, Key::Delete),
         (Modifiers::COMMAND, Key::S),
-        (Modifiers::COMMAND, Key::M),
+        (Modifiers::COMMAND | Modifiers::CTRL, Key::M),
     ] {
         key(&mut h, m, k);
     }
@@ -850,7 +855,7 @@ fn walk_screens(h: &mut Ui, mut each: impl FnMut(&str, &Ui)) {
     key(h, Modifiers::NONE, Key::P);
     key(h, Modifiers::SHIFT, Key::S);
     each("comp with revealed properties", h);
-    key(h, Modifiers::COMMAND, Key::M);
+    key(h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let id = h.state().render_queue().lock().items()[0].id;
     let tmp = std::env::temp_dir().join("glyphs_[####].png");
     for status in [
