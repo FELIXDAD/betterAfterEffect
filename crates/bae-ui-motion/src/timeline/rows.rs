@@ -941,6 +941,35 @@ impl TimelinePanel {
                 } else {
                     common::Edit::None
                 }
+            } else if let bae_model::Value::Time(t) = value {
+                // Time Remap: the source time as hot timecode, a frame per point.
+                let rate = info.frame_rate;
+                let mut frames = rate.time_to_frame(t) as f64;
+                let display = |f: f64| widgets::timecode(f.round() as i64, rate.as_f64());
+                let parse = |s: &str| super::markers::parse_timecode(info, s).map(|f| f as f64);
+                let resp = child
+                    .push_id(id.with("ed"), |ui| {
+                        ui.add(
+                            widgets::HotNumber::new(&mut frames)
+                                .tint(if expression {
+                                    common::EXPRESSION_VALUE
+                                } else {
+                                    color::ACCENT
+                                })
+                                .speed(1.0)
+                                .text(&display, &parse)
+                                .label(&prop_name),
+                        )
+                    })
+                    .inner;
+                let to = bae_model::Value::Time(rate.frame_to_time(frames.round() as i64));
+                if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                    common::Edit::Commit(to)
+                } else if resp.dragged() && resp.changed() {
+                    common::Edit::Live(to)
+                } else {
+                    common::Edit::None
+                }
             } else {
                 common::value_editor(
                     &mut child,

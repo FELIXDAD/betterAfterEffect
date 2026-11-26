@@ -492,12 +492,24 @@ impl fast::Env for FastEnv<'_, '_, '_> {
         self.sample(Time::from_seconds(self.grid(t)))
     }
 
+    fn bounds(&self) -> (f64, f64) {
+        note_read(|| ExprRead::prim(self.layer.path.clone(), ReadKind::Prim, None));
+        let a = self.layer.timing.in_point.as_seconds();
+        let b = self.layer.timing.out_point.as_seconds();
+        (a.min(b), a.max(b))
+    }
+
     fn keys(&self) -> Vec<(f64, Vec<f64>)> {
         self.note(None);
         self.e.base.curve().map_or_else(Vec::new, |c| {
-            c.keys()
+            let mut keys: Vec<_> = c
+                .keys()
                 .map(|(t, v)| (self.layer.timing.comp_time(t).as_seconds(), components(v)))
-                .collect()
+                .collect();
+            if self.layer.timing.stretch < 0.0 {
+                keys.reverse();
+            }
+            keys
         })
     }
 
@@ -763,6 +775,10 @@ const LOCALS: &[(&str, &str)] = &[
     ("speed", "thisProperty.speed"),
     ("numKeys", "thisProperty.numKeys"),
     ("propertyIndex", "thisProperty.propertyIndex"),
+    (
+        "propertyGroup",
+        "thisProperty.propertyGroup.bind(thisProperty)",
+    ),
     ("valueAtTime", "thisProperty.valueAtTime.bind(thisProperty)"),
     (
         "velocityAtTime",
@@ -987,6 +1003,7 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
 
 /// One property group above a property (AE's `propertyGroup(n)`).
 struct Group {
+    index: usize,
     name: String,
     kind: &'static str,
     path: String,
@@ -997,6 +1014,7 @@ struct Group {
 impl Group {
     fn named(name: &str, kind: &'static str) -> Group {
         Group {
+            index: 0,
             name: name.to_owned(),
             kind,
             path: String::new(),
@@ -1029,6 +1047,12 @@ fn property_chain(
         ae_attr_name(attr, three_d)
     } else if let Some(m) = layer.masks.iter().find(|m| m.path.as_str() == prim) {
         let mut g = Group::named(&m.name, "mask");
+        g.index = layer
+            .masks
+            .iter()
+            .position(|item| item.path == m.path)
+            .unwrap()
+            + 1;
         g.path = prim.to_owned();
         groups.push(g);
         groups.push(Group::named("Masks", "masks"));
@@ -1041,6 +1065,12 @@ fn property_chain(
         }
     } else if let Some(e) = layer.effects.iter().find(|e| e.path.as_str() == prim) {
         let mut g = Group::named(&e.name, "effect");
+        g.index = layer
+            .effects
+            .iter()
+            .position(|item| item.path == e.path)
+            .unwrap()
+            + 1;
         g.path = prim.to_owned();
         groups.push(g);
         groups.push(Group::named("Effects", "effects"));
@@ -1073,7 +1103,14 @@ fn property_chain(
                 g.path = p.to_string();
                 groups.push(g);
             } else if let Some(item) = find(p.as_str()) {
+                let parent = p.parent().and_then(|path| find(path.as_str()));
+                let siblings =
+                    parent.map_or(layer.contents.as_slice(), |group| group.children.as_slice());
                 groups.push(Group {
+                    index: siblings
+                        .iter()
+                        .position(|child| child.path == p)
+                        .map_or(0, |i| i + 1),
                     name: item
                         .static_str("name")
                         .unwrap_or(item.path.name())
@@ -1094,6 +1131,95 @@ fn property_chain(
     };
     groups.push(Group::named(&layer.name, "layer"));
     (name, groups)
+}
+
+/// Named layer groups include AE's hidden transform followers in their numbering.
+fn property_index(layer: &crate::eval::CompiledLayer, prim: &str, attr: &str) -> Option<usize> {
+    if let Some(param) = attr.strip_prefix("param:") {
+        return param.parse().ok();
+    }
+    let (group, field) = attr.split_once(':').unwrap_or(("", attr));
+    let fields: &[&str] = match (prim == layer.path.as_str(), group) {
+        (true, "transform") => &[
+            "anchor_point",
+            "position",
+            "position_x",
+            "position_y",
+            "position_z",
+            "scale",
+            "orientation",
+            "rotation_x",
+            "rotation_y",
+            "rotation",
+            "opacity",
+        ],
+        (true, "camera") => &[
+            "zoom",
+            "depth_of_field",
+            "focus_distance",
+            "aperture",
+            "blur_level",
+        ],
+        (true, "light") => &[
+            "",
+            "",
+            "",
+            "",
+            "intensity",
+            "color",
+            "cone_angle",
+            "cone_feather",
+            "",
+            "radius",
+            "falloff_distance",
+            "casts_shadows",
+            "shadow_darkness",
+            "shadow_diffusion",
+        ],
+        (true, "material") => &[
+            "casts_shadows",
+            "light_transmission",
+            "accepts_shadows",
+            "accepts_lights",
+            "",
+            "",
+            "ambient",
+            "diffuse",
+            "specular_intensity",
+            "specular_shininess",
+            "metal",
+        ],
+        (true, "text") => &["source"],
+        (false, "transform") => &[
+            "anchor_point",
+            "position",
+            "scale",
+            "skew",
+            "skew_axis",
+            "rotation",
+            "opacity",
+        ],
+        _ if layer.masks.iter().any(|m| m.path.as_str() == prim) => {
+            &["path", "feather", "opacity", "expansion"]
+        }
+        _ => {
+            let item = layer
+                .contents
+                .iter()
+                .chain(&layer.text_animators)
+                .find_map(|c| c.find_prim(prim))?;
+            return item
+                .attrs
+                .iter()
+                .filter(|(name, _)| name != "name")
+                .position(|(name, _)| name == attr)
+                .map(|i| i + 1);
+        }
+    };
+    if field == "point_of_interest" {
+        return Some(1);
+    }
+    fields.iter().position(|&name| name == field).map(|i| i + 1)
 }
 
 /// AE's English name of a property (`thisProperty.name`).
@@ -1432,6 +1558,29 @@ fn control_param_name(match_name: &str, name: &str) -> bool {
     aliases.contains(&name)
 }
 
+fn property_value<'js>(
+    ctx: &Ctx<'js>,
+    layer: &crate::eval::CompiledLayer,
+    prim: &str,
+    attr: &str,
+    value: &Value,
+) -> rquickjs::Result<rquickjs::Value<'js>> {
+    match value {
+        Value::Bezier(p) => path_to_js(ctx, p)?.into_js(ctx),
+        Value::TextDocument(doc) => doc.text.as_str().into_js(ctx),
+        _ => {
+            let mut out = components(value);
+            if !layer.switches.three_d
+                && prim == layer.path.as_str()
+                && matches!(attr, tr::POSITION | tr::ANCHOR_POINT | tr::SCALE)
+            {
+                out.truncate(2);
+            }
+            out.into_js(ctx)
+        }
+    }
+}
+
 fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
     let h = Object::new(ctx.clone())?;
 
@@ -1463,22 +1612,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 } else {
                     prop.sample(&cx)
                 };
-                // A path is an object (points, tangents, closed), as AE's.
-                if let Value::Bezier(p) = &v {
-                    return path_to_js(&ctx, p)?.into_js(&ctx);
-                }
-                // Source Text reads as its string (AE).
-                if let Value::TextDocument(doc) = &v {
-                    return doc.text.as_str().into_js(&ctx);
-                }
-                let mut out = components(&v);
-                if !layer.switches.three_d
-                    && own(&prim, layer) == layer.path.as_str()
-                    && matches!(attr.as_str(), tr::POSITION | tr::ANCHOR_POINT | tr::SCALE)
-                {
-                    out.truncate(2);
-                }
-                out.into_js(&ctx)
+                property_value(&ctx, layer, own(&prim, layer), &attr, &v)
             },
         )?,
     )?;
@@ -1494,9 +1628,11 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let (name, groups) = property_chain(layer, own(&prim, layer), &attr);
                 let o = Object::new(ctx.clone())?;
                 o.set("name", name)?;
+                o.set("index", property_index(layer, own(&prim, layer), &attr))?;
                 let list = Array::new(ctx.clone())?;
                 for (i, g) in groups.into_iter().enumerate() {
                     let e = Object::new(ctx.clone())?;
+                    e.set("index", g.index)?;
                     e.set("name", g.name)?;
                     e.set("kind", g.kind)?;
                     e.set("path", g.path)?;
@@ -1545,6 +1681,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     return Ok::<_, rquickjs::Error>(None);
                 };
                 let o = Object::new(ctx.clone())?;
+                o.set(
+                    "index",
+                    items.iter().position(|p| p.path == item.path).unwrap() + 1,
+                )?;
                 o.set("path", item.path.as_str())?;
                 o.set("type", item.prim_type.as_ref().map_or("", |t| t.as_str()))?;
                 o.set("op", item.static_str("operator").unwrap_or(""))?;
@@ -1765,42 +1905,27 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
                 note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, None));
-                let mut out = Vec::new();
-                if let Some(curve) = layer
-                    .find_prop(own(&prim, layer), &attr)
-                    .and_then(|p| p.curve())
-                {
-                    for (t, v) in curve.keys() {
-                        out.push(layer.timing.comp_time(t).as_seconds());
-                        out.extend(components(v));
+                let keys = Array::new(ctx.clone())?;
+                let path = own(&prim, layer);
+                if let Some(curve) = layer.find_prop(path, &attr).and_then(|p| p.curve()) {
+                    let mut samples: Vec<_> = curve
+                        .keys()
+                        .map(|(t, v)| (layer.timing.comp_time(t), v))
+                        .collect();
+                    samples.sort_by_key(|(t, _)| *t);
+                    for (i, (t, v)) in samples.into_iter().enumerate() {
+                        let key = Object::new(ctx.clone())?;
+                        key.set("time", t.as_seconds())?;
+                        let value = property_value(&ctx, layer, path, &attr, v)?;
+                        if let Some(a) = value.as_array().filter(|a| a.len() == 1) {
+                            key.set("value", a.get::<rquickjs::Value<'_>>(0)?)?;
+                        } else {
+                            key.set("value", value)?;
+                        }
+                        keys.set(i, key)?;
                     }
                 }
-                Ok::<_, rquickjs::Error>(out)
-            },
-        )?,
-    )?;
-
-    h.set(
-        "dims",
-        Function::new(
-            ctx.clone(),
-            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
-                let comp = comp_or_throw(&ctx, c)?;
-                let li = layer_or_throw(&ctx, &comp, l)?;
-                let layer = &comp.layers[li];
-                let cx = Cx {
-                    comp: c as usize,
-                    layer: li,
-                    ct: Time::ZERO,
-                    lt: Time::ZERO,
-                    js: None,
-                };
-                Ok::<_, rquickjs::Error>(
-                    layer
-                        .find_prop(own(&prim, layer), &attr)
-                        .map_or(1, |p| components(&p.sample_pre(&cx)).len())
-                        as i32,
-                )
+                Ok::<_, rquickjs::Error>(keys)
             },
         )?,
     )?;
@@ -1944,6 +2069,11 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 note_read(|| ExprRead::attr(e.path.clone(), "enabled", None));
                 let info = Object::new(ctx.clone())?;
                 info.set("path", e.path.as_str())?;
+                info.set(
+                    "index",
+                    effects.iter().position(|item| item.path == e.path).unwrap() + 1,
+                )?;
+                info.set("name", e.name.as_str())?;
                 info.set("active", e.enabled)?;
                 info.set("layerControl", e.match_name == "ADBE Layer Control")?;
                 Ok(Some(info))
@@ -2088,6 +2218,13 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 note_dependency(c as usize, li);
                 let ct = Time::from_seconds(t);
+                if !(2..=3).contains(&p.len()) {
+                    return throw(
+                        &ctx,
+                        "Layer-space transforms require a 2D or 3D point or vector",
+                    );
+                }
+                let three_d = comp.layers[li].switches.three_d;
                 let m = comp.world_at(li, ct, c as usize, Some(&ctx));
                 let v = glam::DVec3::new(
                     p.first().copied().unwrap_or(0.0),
@@ -2098,7 +2235,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     // fromCompToSurface: the comp point seen through the active
                     // camera, where its ray meets the layer's plane (2D layers:
                     // fromComp).
-                    8 if comp.layers[li].switches.three_d => {
+                    8 if three_d => {
                         let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
                         let (cx, cy) = (comp.width as f64 / 2.0, comp.height as f64 / 2.0);
                         let to_world = view.inverse();
@@ -2117,7 +2254,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     8 => m.inverse().transform_point3(v),
                     // toComp of a 3D layer is in the comp's view: through the active
                     // camera (AE 26: matches the default camera's projection exactly).
-                    0 if comp.layers[li].switches.three_d => {
+                    0 if three_d => {
                         let w = m.transform_point3(v);
                         let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
                         let pc = view.transform_point3(w);
@@ -2128,12 +2265,38 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                             glam::DVec3::new(cx + pc.x * zoom / pc.z, cy + pc.y * zoom / pc.z, pc.z)
                         }
                     }
+                    1 if three_d => {
+                        let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
+                        let depth = p.get(2).copied().unwrap_or(zoom);
+                        let camera_point = glam::DVec3::new(
+                            (v.x - f64::from(comp.width) / 2.0) * depth / zoom,
+                            (v.y - f64::from(comp.height) / 2.0) * depth / zoom,
+                            depth,
+                        );
+                        (view * m).inverse().transform_point3(camera_point)
+                    }
+                    2 | 3 if three_d => {
+                        let (view, _) = comp.camera_at(ct, c as usize, Some(&ctx));
+                        let to_view = view * m;
+                        if kind == 2 {
+                            to_view.transform_vector3(v)
+                        } else {
+                            to_view.inverse().transform_vector3(v)
+                        }
+                    }
                     0 | 4 => m.transform_point3(v),
                     1 | 5 => m.inverse().transform_point3(v),
                     2 | 6 => m.transform_vector3(v),
                     _ => m.inverse().transform_vector3(v),
                 };
-                Ok::<_, rquickjs::Error>(r.to_array().to_vec())
+                let dimensions = if kind == 8 {
+                    2
+                } else if three_d {
+                    3
+                } else {
+                    p.len()
+                };
+                Ok::<_, rquickjs::Error>(r.to_array()[..dimensions].to_vec())
             },
         )?,
     )?;
