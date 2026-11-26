@@ -228,6 +228,7 @@ fn registry() -> &'static Registry {
         categories::generate::register(&mut r);
         categories::keying::register(&mut r);
         categories::matte::register(&mut r);
+        categories::layer_styles::register(&mut r);
         categories::noise_grain::register(&mut r);
         categories::perspective::register(&mut r);
         categories::simulation::register(&mut r);

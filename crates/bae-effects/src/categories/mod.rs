@@ -29,6 +29,7 @@ pub(super) mod controls;
 pub(super) mod distort;
 pub(super) mod generate;
 pub(super) mod keying;
+pub(super) mod layer_styles;
 pub(super) mod matte;
 pub(super) mod noise_grain;
 pub(super) mod perspective;
