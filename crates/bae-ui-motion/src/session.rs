@@ -288,6 +288,11 @@ pub struct Session {
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
     /// View ▸ View Options: the layer controls the viewers draw.
     pub(crate) layer_controls: crate::viewer::view_options::LayerControls,
+    /// The region of interest a viewer shows and its comp ([left, top, right,
+    /// bottom], comp pixels), for Composition ▸ Crop Comp to Region of Interest.
+    pub(crate) roi: Option<(PrimPath, [f64; 4])>,
+    /// The comp was cropped to its region of interest: viewers turn it off.
+    pub(crate) roi_cropped: bool,
     /// View ▸ Panel Background Color.
     pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).

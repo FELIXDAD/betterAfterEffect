@@ -103,7 +103,7 @@ use bae_model::{CommandRegistry, DynCommand};
 
 pub use camera::{CameraSettings, LightSettings, SetCameraSettings, SetLightSettings};
 pub use comp::{
-    CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
+    CompOutput, CreateComp, CreateFolder, CropComp, ResizeAnchor, SetCompSettings, SetWorkArea,
     TrimCompToWorkArea,
 };
 pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
@@ -147,6 +147,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(tracker::RecordTrack),
         r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
+        r.register(CropComp),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
