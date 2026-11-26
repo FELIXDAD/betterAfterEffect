@@ -2647,6 +2647,33 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// #465: the Properties tab names the layer selected now, even before the
+/// panel draws again (a collapsed tab), and only "Properties" without one.
+#[test]
+fn properties_tab_follows_the_selection() {
+    let mut h = Harness::new();
+    let (_comp, solid, _shape) = h.comp_with_layers();
+    let panel = crate::panels::PropertiesPanel::default();
+    let title = |h: &Harness| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("properties");
+        let cx = PanelContext::new(
+            &id,
+            "properties",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        panel.tab(&cx).title
+    };
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let name = query::display_name_of(&h.stage, &solid);
+    assert_eq!(title(&h), format!("Properties: {name}"));
+    h.session().lock().selected_layers.clear();
+    assert_eq!(title(&h), "Properties");
+}
+
 /// File ▸ Replace Footage ▸ File… and Reload Footage: the item takes the new
 /// file (and its name, unless it is reloaded); its layers stay.
 #[test]
