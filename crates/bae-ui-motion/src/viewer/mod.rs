@@ -280,6 +280,9 @@ pub struct CompositionViewer {
     mag: f32,
     /// Layers under the pointer when the context menu opened (topmost first).
     menu_layers: Vec<PrimPath>,
+    /// The motion path keyframe the context menu opened on (AE: the keyframe
+    /// menu instead of the layer menu).
+    menu_key: Option<bae_motion::KeyRef>,
     /// Pixel step the last frame rendered at (1 Full, 2 Half …).
     render_factor: u32,
     /// Type tool: text being typed or edited.
@@ -1548,7 +1551,26 @@ impl Panel for CompositionViewer {
                 }
             }
         }
-        menu::frame(&mut self.menu_layers, &resp, cx, &session, &comp, &view);
+        if resp.secondary_clicked() {
+            self.menu_key = resp
+                .interact_pointer_pos()
+                .and_then(|p| self.motion_path.key_at(p));
+            if let Some(k) = &self.menu_key {
+                let mut s = session.lock();
+                if !s.selected_keys.contains(k) {
+                    s.selected_keys = vec![k.clone()];
+                }
+            }
+        }
+        menu::frame(
+            &mut self.menu_layers,
+            self.menu_key.as_ref(),
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+        );
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
