@@ -159,6 +159,13 @@ pub mod ids {
     pub const TIME_REVERSE: &str = "motion.layer.time_reverse_layer";
     pub const FREEZE_FRAME: &str = "motion.layer.freeze_frame";
     pub const FREEZE_LAST: &str = "motion.layer.freeze_on_last_frame";
+    /// File ▸ New ▸ New Folder (Cmd/Ctrl+Alt+Shift+N).
+    pub const NEW_FOLDER: &str = "motion.file.new_folder";
+    /// Layer ▸ Open Layer: the selected layer in the Layer panel.
+    pub const OPEN_LAYER: &str = "motion.layer.open_layer";
+    /// Layer ▸ Open Layer Source (Alt+Enter): a pre-comp's composition, footage
+    /// in the Footage panel.
+    pub const OPEN_LAYER_SOURCE: &str = "motion.layer.open_layer_source";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -303,6 +310,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::TIME_REVERSE, "Time-Reverse Layer"),
     (ids::FREEZE_FRAME, "Freeze Frame"),
     (ids::FREEZE_LAST, "Freeze On Last Frame"),
+    (ids::NEW_FOLDER, "New Folder"),
+    (ids::OPEN_LAYER, "Open Layer"),
+    (ids::OPEN_LAYER_SOURCE, "Open Layer Source"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -828,6 +838,69 @@ fn transform_edits(
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
+/// File ▸ New ▸ New Folder: an “Untitled N” folder in the folder selected in
+/// the Project panel, else at the top level (AE).
+fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
+    use crate::project::{ItemKind, item_kind};
+    let parent = session
+        .lock()
+        .selected_items
+        .first()
+        .cloned()
+        .filter(|p| item_kind(cx.stage, p) == Some(ItemKind::Folder));
+    let root = PrimPath::root();
+    let name = common::numbered(
+        cx.stage,
+        session,
+        parent.as_ref().unwrap_or(&root),
+        "Untitled",
+    );
+    let mut params = json!({ "name": name });
+    if let Some(folder) = &parent {
+        params["parent"] = json!(folder);
+    }
+    cx.invoke_with("folder.create", params);
+    cx.open_panel("project");
+}
+
+/// Layer ▸ Open Layer: the Layer panel (not for cameras and lights). Open
+/// Layer Source: a pre-comp's composition, footage in the Footage panel, a
+/// solid in the Layer panel; nothing for layers without a source (AE).
+fn open_layer(cx: &mut PanelContext<'_>, session: &SharedSession, layer: &PrimPath, source: bool) {
+    use crate::project::{ItemKind, item_kind};
+    if matches!(
+        query::layer_kind(cx.stage, layer).as_deref(),
+        Some("camera" | "light")
+    ) {
+        return;
+    }
+    if source {
+        let Some(src) = cx
+            .stage
+            .prim(layer)
+            .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned())
+        else {
+            return;
+        };
+        match item_kind(cx.stage, &src) {
+            Some(ItemKind::Comp) => {
+                session.lock().open_comp(&src);
+                cx.open_panel("timeline");
+                cx.open_panel("composition");
+                return;
+            }
+            Some(ItemKind::Footage) => {
+                session.lock().footage_view = Some(src);
+                cx.invoke_with(bae_ui::action::ids::OPEN_PANEL, json!({"id": "footage"}));
+                return;
+            }
+            _ => {}
+        }
+    }
+    session.lock().layer_panel = Some(layer.clone());
+    cx.open_panel("layer");
+}
+
 pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &SharedSession) -> bool {
     let stage = cx.stage;
     let id = inv.id.as_str();
@@ -853,6 +926,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     match id {
         ids::NEW_COMP => {
             common::new_comp(cx, session, None);
+            return true;
+        }
+        ids::NEW_FOLDER => {
+            new_folder(cx, session);
+            return true;
+        }
+        ids::OPEN_LAYER | ids::OPEN_LAYER_SOURCE => {
+            let layer = session.lock().selected_layers.first().cloned();
+            if let Some(layer) = layer {
+                open_layer(cx, session, &layer, id == ids::OPEN_LAYER_SOURCE);
+            }
             return true;
         }
         ids::COMP_SETTINGS => {
@@ -967,6 +1051,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        // F4 / Shift+F4 with another panel in front: the Timeline toggles its
+        // columns on its next frame (AE: they work whatever panel is active).
+        ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN => {
+            let id = if id == ids::TOGGLE_SWITCHES_MODES {
+                ids::TOGGLE_SWITCHES_MODES
+            } else {
+                ids::TOGGLE_PARENT_COLUMN
+            };
+            session.lock().timeline_toggles.push(id);
             return true;
         }
         ids::SAVE_PRESET => {
@@ -1973,6 +2068,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Show Effects", "显示效果"),
     ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Find", "查找"),
+    ("Open Layer", "打开图层"),
+    ("Open Layer Source", "打开图层源"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

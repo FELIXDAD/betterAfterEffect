@@ -394,9 +394,9 @@ fn artboard_becomes_a_comp_with_shape_and_text_layers() {
         panic!("no text document")
     };
     assert_eq!(td.text, "Hello\rWorld");
-    assert_eq!(td.font, "MyriadPro-Bold");
-    assert_eq!(td.font_size, 36.0);
-    assert_eq!(td.fill_color, [0.2, 0.2, 0.2, 1.0]);
+    assert_eq!(td.style.font, "MyriadPro-Bold");
+    assert_eq!(td.style.font_size, 36.0);
+    assert_eq!(td.style.fill_color, [0.2, 0.2, 0.2, 1.0]);
     assert_eq!(
         text.value("transform:position").cloned(),
         Some(Value::Vec3([20.0, 280.0, 0.0]))
