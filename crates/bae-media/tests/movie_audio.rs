@@ -8,7 +8,7 @@ use bae_media::{
 };
 
 #[test]
-fn movie_has_decodable_aac_aligned_with_ntsc_frames() {
+fn movie_has_decodable_audio_aligned_with_ntsc_frames() {
     #[cfg(windows)]
     if !bae_media::media_foundation::encoder_available(VideoCodec::H264) {
         eprintln!("SKIP: Media Foundation H.264 encoder unavailable");
@@ -16,14 +16,17 @@ fn movie_has_decodable_aac_aligned_with_ntsc_frames() {
     }
     let dir = tempfile::tempdir().unwrap();
     #[cfg(windows)]
-    let extensions = ["mp4"];
+    let tracks = [("mp4", "aac")];
     #[cfg(target_os = "macos")]
-    let extensions = ["mp4", "mov"];
-    for ext in extensions {
+    let tracks = [("mp4", "aac"), ("mov", "aac"), ("mov", "pcm_s24le")];
+    for (ext, codec) in tracks {
         let path = dir.path().join(format!("audio.{ext}"));
         let rate = FrameRate::FPS_29_97;
         let mut settings = EncodeSettings::new(&path, VideoCodec::H264, 160, 96, rate);
-        settings.audio = Some(AudioEncodeSettings::aac_stereo());
+        settings.audio = Some(AudioEncodeSettings {
+            codec: codec.into(),
+            ..AudioEncodeSettings::aac_stereo()
+        });
         let mut writer = MediaEncoders::builtin().create(&settings).unwrap();
         let frame = CpuFrame {
             width: 160,
@@ -54,6 +57,7 @@ fn movie_has_decodable_aac_aligned_with_ntsc_frames() {
         }
         assert_eq!(writer.finish().unwrap().frames, 30);
         let mut source = FileAudio::open(&path).unwrap();
+        assert_eq!(source.info().codec, codec);
         let pcm = source.read(0, 60_000).unwrap();
         assert_eq!((pcm.sample_rate, pcm.channels), (48000, 2));
         assert!(

@@ -80,6 +80,14 @@ pub(crate) struct PenState {
 }
 
 impl PenState {
+    /// The path a Convert Vertex drag is changing and its previewed value.
+    pub(crate) fn path_preview(&self) -> Option<(PrimPath, bae_model::BezierPath)> {
+        self.convert
+            .as_ref()
+            .filter(|c| c.dragged)
+            .map(|c| (c.path.prim.clone(), c.path.path.clone()))
+    }
+
     /// A Pen vertex or Convert Vertex drag is in progress: keys belong to it.
     pub(crate) fn busy(&self) -> bool {
         self.convert.is_some() || self.drawing.as_ref().is_some_and(|d| d.placing.is_some())
