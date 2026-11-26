@@ -90,6 +90,9 @@ fn require_tracker(stage: &Stage, tracker: &PrimPath) -> Result<(), CommandError
     ensure_unlocked(stage, [tracker])
 }
 
+/// Half the width and height of the rectangle multi-point trackers start on.
+const POINT_SPREAD: [f64; 2] = [32.0, 24.0];
+
 fn sync_points(
     tx: &mut Transaction<'_>,
     tracker: &PrimPath,
@@ -115,14 +118,16 @@ fn sync_points(
         } else if !reset {
             continue;
         }
+        // One point sits on the origin; more points take the corners of a
+        // fixed rectangle around it (1 top left, 2 top right, 3 bottom left,
+        // 4 bottom right), wherever the origin is.
+        let [hx, hy] = POINT_SPREAD;
         let center = match i {
-            0 => origin,
-            1 => [origin[0] + origin[0].abs().clamp(8.0, 64.0), origin[1]],
-            2 => [origin[0], origin[1] + origin[1].abs().clamp(8.0, 64.0)],
-            _ => [
-                origin[0] + origin[0].abs().clamp(8.0, 64.0),
-                origin[1] + origin[1].abs().clamp(8.0, 64.0),
-            ],
+            0 if n <= 1 => origin,
+            0 => [origin[0] - hx, origin[1] - hy],
+            1 => [origin[0] + hx, origin[1] - hy],
+            2 => [origin[0] - hx, origin[1] + hy],
+            _ => [origin[0] + hx, origin[1] + hy],
         };
         for (key, _) in PROPERTIES {
             let val = match key {
@@ -172,6 +177,14 @@ impl Command for CreateTracker {
         };
         set(tx, &path, "name", format!("{label} {i}"))?;
         set(tx, &path, "origin", Value::Vec2(p.center))?;
+        let target = query::owning_comp(tx.stage(), &p.layer)
+            .and_then(|comp| {
+                query::comp_layers(tx.stage(), &comp)
+                    .into_iter()
+                    .find(|l| l != &p.layer && !query::is_locked(tx.stage(), l))
+            })
+            .unwrap_or_else(|| p.layer.clone());
+        set(tx, &path, "target", Value::PrimRef(target))?;
         if p.stabilize {
             set(tx, &path, "track_type", Value::Enum("stabilize".into()))?;
         }
@@ -204,6 +217,15 @@ impl Command for ConfigureTracker {
                 return Err(fail("threshold must be a percentage"));
             }
             set(tx, &p.tracker, &key, val)?;
+        }
+        if matches!(
+            mode(tx.stage(), &p.tracker).as_str(),
+            "parallel" | "perspective"
+        ) && let Some(Value::PrimRef(target)) = setting(tx.stage(), &p.tracker, "target")
+            && let Some(layer) = crate::effect::layer_of_effect(&target)
+        {
+            set(tx, &p.tracker, "target", Value::PrimRef(layer))?;
+            set(tx, &p.tracker, "target_property", String::new())?;
         }
         sync_points(tx, &p.tracker, false)
     }

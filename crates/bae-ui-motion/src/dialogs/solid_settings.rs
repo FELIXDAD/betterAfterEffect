@@ -15,11 +15,11 @@ use bae_ui::color_picker::{self, ColorEdit};
 use bae_ui::dialog::{self, Outcome};
 use bae_ui::theme::color;
 use bae_ui::{PanelContext, tr};
-use egui::{Id, Ui, vec2};
+use egui::{Id, Sense, Ui, vec2};
 use serde_json::json;
 
 use super::SharedDialogs;
-use super::comp_settings::{frame_aspect_text, menu_field};
+use super::comp_settings::{frame_aspect, frame_aspect_text, menu_field};
 use super::fields::{self, PIXEL_ASPECTS};
 use crate::session::SharedSession;
 
@@ -387,8 +387,9 @@ impl SolidSettings {
             ui.set_width(ui.available_width());
             let v = &mut self.values;
             let units = self.units;
-            let ratio = frame_aspect_text(v.width, v.height, 1.0);
+            let (a, b, r) = frame_aspect(v.width, v.height, 1.0);
             let (cw, ch) = comp.map_or((v.width, v.height), |c| (c.0, c.1));
+            let mut lock_rect = None;
             dialog::row(ui, LW, tr("Width:"), |ui| {
                 if let Some(w) = unit_field(ui, v.width, units, cw, tr("Width")) {
                     v.width = w;
@@ -397,12 +398,11 @@ impl SolidSettings {
                     }
                 }
                 ui.add_space(12.0);
-                let mut lock = self.lock_aspect;
-                let label = tr("Lock Aspect Ratio to {ratio}").replace("{ratio}", &ratio);
-                if bae_ui::widgets::checkbox(ui, &mut lock, &label).changed() {
-                    self.lock_aspect = lock;
-                    self.aspect = f64::from(v.width) / f64::from(v.height.max(1));
-                }
+                // The lock is drawn after Height (below) so Tab goes from
+                // Width to Height, as in AE.
+                let (r, _) =
+                    ui.allocate_exact_size(egui::vec2(ui.available_width(), 18.0), Sense::hover());
+                lock_rect = Some(r);
             });
             dialog::row(ui, LW, tr("Height:"), |ui| {
                 if let Some(h) = unit_field(ui, v.height, units, ch, tr("Height")) {
@@ -412,6 +412,24 @@ impl SolidSettings {
                     }
                 }
             });
+            if let Some(rect) = lock_rect {
+                let mut row = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                let mut lock = self.lock_aspect;
+                // AE's Solid Settings words it differently from Composition
+                // Settings in Chinese (将长宽比锁定为 / 锁定长宽比为).
+                let label = tr("Lock Aspect Ratio to {w}:{h} ({ratio})")
+                    .replace("{w}", &a.to_string())
+                    .replace("{h}", &b.to_string())
+                    .replace("{ratio}", &r);
+                if bae_ui::widgets::checkbox(&mut row, &mut lock, &label).changed() {
+                    self.lock_aspect = lock;
+                    self.aspect = f64::from(v.width) / f64::from(v.height.max(1));
+                }
+            }
             dialog::row(ui, LW, tr("Units:"), |ui| {
                 let all: Vec<Units> = Units::ALL
                     .into_iter()
@@ -455,25 +473,19 @@ impl SolidSettings {
             });
             ui.add_space(2.0);
             let dim = |s: String| egui::RichText::new(s).color(color::TEXT_DIM);
+            // AE: a label column ("Width:") and the value ("100.0% of comp").
             if let Some((cw, ch, _)) = comp {
-                let pct =
-                    |a: u32, b: u32| format!("{:.1}", f64::from(a) / f64::from(b.max(1)) * 100.0);
-                dialog::row(ui, LW, "", |ui| {
-                    ui.label(dim(
-                        tr("Width: {pct}% of comp").replace("{pct}", &pct(v.width, cw))
-                    ));
-                });
-                dialog::row(ui, LW, "", |ui| {
-                    ui.label(dim(
-                        tr("Height: {pct}% of comp").replace("{pct}", &pct(v.height, ch))
-                    ));
-                });
+                let pct = |a: u32, b: u32| {
+                    tr("{pct}% of comp").replace(
+                        "{pct}",
+                        &format!("{:.1}", f64::from(a) / f64::from(b.max(1)) * 100.0),
+                    )
+                };
+                dialog::row(ui, LW, tr("Width:"), |ui| ui.label(dim(pct(v.width, cw))));
+                dialog::row(ui, LW, tr("Height:"), |ui| ui.label(dim(pct(v.height, ch))));
             }
-            dialog::row(ui, LW, "", |ui| {
-                ui.label(dim(tr("Frame Aspect Ratio: {ratio}").replace(
-                    "{ratio}",
-                    &frame_aspect_text(v.width, v.height, v.pixel_aspect),
-                )));
+            dialog::row(ui, LW, tr("Frame Aspect Ratio:"), |ui| {
+                ui.label(dim(frame_aspect_text(v.width, v.height, v.pixel_aspect)))
             });
             ui.add_space(2.0);
             ui.add_enabled_ui(comp.is_some(), |ui| {
@@ -649,7 +661,7 @@ pub(crate) const STRINGS: &[&str] = &[
     "Size",
     "Width:",
     "Height:",
-    "Lock Aspect Ratio to {ratio}",
+    "Lock Aspect Ratio to {w}:{h} ({ratio})",
     "Units:",
     "Units",
     "pixels",
@@ -659,9 +671,8 @@ pub(crate) const STRINGS: &[&str] = &[
     "in",
     "mm",
     "Pixel Aspect Ratio:",
-    "Width: {pct}% of comp",
-    "Height: {pct}% of comp",
-    "Frame Aspect Ratio: {ratio}",
+    "{pct}% of comp",
+    "Frame Aspect Ratio:",
     "Make Comp Size",
     "Color",
     "Solid Color",

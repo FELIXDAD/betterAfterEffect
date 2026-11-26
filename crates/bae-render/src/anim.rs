@@ -90,6 +90,13 @@ impl AnimEvaluator {
         self.inner.clear();
     }
 
+    /// Evaluates with uncommitted values (a value drag in a panel):
+    /// [`bae_anim::Evaluator::set_overrides`]. Motion blur samples and effects
+    /// reading other frames see them too.
+    pub fn set_overrides(&mut self, overrides: Vec<bae_anim::AttrOverride>) {
+        self.inner.set_overrides(overrides);
+    }
+
     fn warn(&mut self, message: String) {
         if !self.warnings.contains(&message) {
             self.warnings.push(message);
@@ -159,6 +166,19 @@ impl AnimEvaluator {
                 out.motion_samples = std::mem::take(s).into();
             }
             rc.layers.push(out);
+        }
+        // Layers that cannot show in this frame (outside their in/out points,
+        // hidden, not a parent or an active layer's matte): the frame does not
+        // depend on their content (cache invalidation, `RenderLayer::inert`).
+        let parents: Vec<usize> = ec.layers.iter().filter_map(|l| l.parent).collect();
+        let mattes: Vec<usize> = rc
+            .layers
+            .iter()
+            .filter(|l| l.active)
+            .filter_map(|l| l.track_matte.map(|m| m.layer))
+            .collect();
+        for (i, l) in rc.layers.iter_mut().enumerate() {
+            l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
         }
         if depth == 0 {
             self.customs.retain(|_, (_, used)| std::mem::take(used));
@@ -441,15 +461,20 @@ impl CompEvaluator for AnimEvaluator {
     ) -> Option<Arc<crate::effect::ScalarTrack>> {
         let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
         crate::parameter_track::prepare(slot, attr, frame, |t| {
-            self.inner
-                .evaluate_attribute(stage, path, name, t)
-                .ok()?
-                .as_f64()
+            let (value, reads) = self
+                .inner
+                .evaluate_attribute_traced(stage, path, name, t)
+                .ok()?;
+            Some((value.as_f64()?, reads))
         })
     }
 
     fn invalidate(&mut self, event: &StageEvent) {
         self.inner.invalidate(event);
+    }
+
+    fn set_image_samples(&mut self, samples: Option<Arc<bae_anim::ImageSamples>>) {
+        self.inner.set_image_samples(samples);
     }
 
     fn take_warnings(&mut self) -> Vec<String> {
