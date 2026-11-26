@@ -34,6 +34,8 @@ use crate::session::SharedSession;
 /// The dialog that is open.
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    /// Analysis of the composition work area for the Keyframe Assistant.
+    AudioAnalysis(crate::audio_analysis::Analysis),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
@@ -365,6 +367,7 @@ impl bae_ui::DialogHost for MotionDialogs {
         };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
+            Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
