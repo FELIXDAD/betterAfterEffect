@@ -23,12 +23,17 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+mod camera_tool;
 mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
+mod gizmo3d;
 pub(crate) mod guides;
+mod layout;
+mod look_at;
 mod menu;
 mod motion_path;
+mod motion_sketch;
 mod overlay;
 mod path_edit;
 mod pen_tool;
@@ -72,6 +77,8 @@ pub struct CompositionViewer {
     pending_zoom: Option<bool>,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
+    /// GPU previews of the other views of the layout (by view index).
+    extra_gpu: Vec<Option<GpuPreview>>,
     /// The last frame came from the GPU compositor.
     on_gpu: bool,
     /// Space is held over the viewer (temporary Hand tool): whether the comp was
@@ -84,6 +91,7 @@ pub struct CompositionViewer {
     shape: Option<shape_tool::ShapeDrag>,
     /// Pen tools: the open path being drawn, a Convert Vertex drag.
     pen: pen_tool::PenState,
+    sketch: motion_sketch::SketchState,
     /// Selection, Rotation and Pan Behind tools: transform drags, marquee,
     /// selected mask vertices.
     select: select_tool::SelectState,
@@ -108,6 +116,8 @@ pub struct CompositionViewer {
     esc_taken: bool,
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
+    /// A camera tool drag.
+    camera_drag: Option<camera_tool::CameraDrag>,
 }
 
 impl CompositionViewer {
@@ -402,6 +412,18 @@ impl Panel for CompositionViewer {
         if view3d::handle(action, cx) {
             return true;
         }
+        // With a camera tool, F is Look at Selected Layers (AE's camera tool
+        // shortcut; elsewhere F reveals Mask Feather).
+        if action.id == "motion.reveal"
+            && action.params.get("what").and_then(|v| v.as_str()) == Some("mask_feather")
+            && matches!(
+                crate::tools::shared(cx.resources).lock().current().group(),
+                crate::tools::Group::Orbit | crate::tools::Group::Pan | crate::tools::Group::Dolly
+            )
+        {
+            let look = Invocation::new(look_at::ids::SELECTED);
+            return look_at::handle(&look, cx);
+        }
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
         if self.shape.is_some() || self.pen.busy() || self.select.busy() {
@@ -465,6 +487,16 @@ impl Panel for CompositionViewer {
         let bar_h = 28.0;
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
+        // View layout: the active view is the viewer, the others are drawn below.
+        let (panes, active) = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .map_or((vec![view3d::View3d::Active], 0), |v| {
+                (v.panes(), v.active())
+            });
+        let pane_rects = layout::rects(area, panes.len());
+        let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
         let (rulers, area) = guides::layout(area, opts.rulers);
         let resp = ui
@@ -539,8 +571,11 @@ impl Panel for CompositionViewer {
                 self.pan += pan;
             }
         }
-        if resp.dragged_by(egui::PointerButton::Middle)
-            || resp.dragged_by(egui::PointerButton::Secondary)
+        // With a camera tool these drags pan and dolly the camera.
+        let camera_tool = crate::tools::shared(cx.resources).lock().current();
+        if (resp.dragged_by(egui::PointerButton::Middle)
+            || resp.dragged_by(egui::PointerButton::Secondary))
+            && !camera_tool.is_camera()
         {
             self.pan += resp.drag_delta();
         }
@@ -661,11 +696,29 @@ impl Panel for CompositionViewer {
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
-        let view_camera = session
-            .lock()
-            .views3d
-            .get(&info.path)
-            .and_then(|v| v.camera(size));
+        if camera_tool.is_camera() || self.camera_drag.is_some() {
+            camera_tool::frame(
+                &mut self.camera_drag,
+                &resp,
+                ui,
+                cx,
+                &session,
+                &info.path,
+                &comp,
+                size,
+                &view,
+                camera_tool,
+                time,
+            );
+        }
+        let layer_camera = self.camera_drag.as_ref().and_then(|d| d.layer_camera());
+        let view_camera = layer_camera.or_else(|| {
+            session
+                .lock()
+                .views3d
+                .get(&info.path)
+                .and_then(|v| v.camera(size))
+        });
         let view = View {
             camera: Some((
                 view_camera.unwrap_or_else(|| view3d::active_camera(&comp, size)),
@@ -931,6 +984,17 @@ impl Panel for CompositionViewer {
         );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
+        // Motion Sketch: an armed capture owns the next drag.
+        let sketching = motion_sketch::frame(
+            &mut self.sketch,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &view,
+            &painter,
+        );
         let path = motion_path::frame(
             &mut self.motion_path,
             ui,
@@ -957,7 +1021,7 @@ impl Panel for CompositionViewer {
         );
         let select_cursor = if points.owns {
             points.cursor
-        } else if path.owns || guide_busy {
+        } else if path.owns || sketching || guide_busy {
             path.cursor
         } else {
             points.cursor.or(path.cursor).or(select_tool::frame(
@@ -1022,6 +1086,7 @@ impl Panel for CompositionViewer {
         }
 
         self.banner.ui(ui, cx, &session, area);
+        self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
         self.esc_taken = self.shape.is_some()
             || self.pen.busy()
@@ -1030,6 +1095,19 @@ impl Panel for CompositionViewer {
             || ui.ctx().text_edit_focused()
             || egui::Popup::is_any_open(ui.ctx());
     }
+}
+
+/// View ▸ Look at Selected / All Layers (see [`look_at`]).
+pub(crate) fn look_at(inv: &bae_ui::Invocation, cx: &mut PanelContext<'_>) -> bool {
+    look_at::handle(inv, cx)
+}
+
+pub(crate) fn look_at_actions() -> impl Iterator<Item = (&'static str, &'static str)> {
+    look_at::ACTIONS.iter().copied()
+}
+
+pub(crate) fn look_at_enabled(resources: &bae_app::Resources, all: bool) -> bool {
+    look_at::enabled(resources, all)
 }
 
 fn paint_image(clip: &egui::Painter, view: &View, img: crate::gpu_preview::PreviewImage) {

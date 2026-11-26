@@ -208,6 +208,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
+    ("motion.file.find", "Find"),
     (ids::STEP, "Next Frame"),
     (ids::PREV_KEY, "Go to Previous Keyframe"),
     (ids::NEXT_KEY, "Go to Next Keyframe"),
@@ -1813,6 +1814,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp Height", "适合复合高度"),
     ("Show Effects", "显示效果"),
     ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
+    ("Find", "查找"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

@@ -74,7 +74,7 @@
 | Add Fonts from Adobe... | 131089 | `motion.file.add_fonts_from_adobe` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ New Premiere Sequence... | 12845057 | `motion.file.new_premiere_sequence` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
-| Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ☐ |
+| Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ✅ |
 | Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ☐ |
 | New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ☐ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |

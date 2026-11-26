@@ -234,7 +234,7 @@ const FILE: &[Node] = &[
         ],
     ),
     SEP,
-    it(131093, "Find", "motion.file.find", "", E, Todo),
+    it(131093, "Find", "motion.file.find", "", E, Done),
     SEP,
     it(131095, "Add Footage to Comp", "motion.file.add_footage_to_comp", "", E, Todo),
     it(131096, "New Comp from Selection...", "motion.file.new_comp_from_selection", "", E, Todo),
