@@ -41,6 +41,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    display: crate::source_view_menu::SourceView,
     tracks: crate::tracker::overlay::Overlay,
     eval: EvalCache,
     gpu: Option<GpuPreview>,
@@ -129,6 +130,10 @@ pub(crate) fn alone(
 }
 
 impl Panel for LayerPanel {
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        self.display.menu(ui);
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         let session = common::session(cx.resources);
         match shown_layer(&session) {
@@ -157,7 +162,8 @@ impl Panel for LayerPanel {
         );
         let bar = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
         ui.allocate_rect(full, Sense::hover());
-        ui.painter().rect_filled(area, 0.0, Color32::from_gray(35));
+        ui.painter()
+            .rect_filled(area, 0.0, self.display.background(ui));
         let info = common::active_comp(cx.stage, &session);
         let layer = shown_layer(&session).filter(|l| cx.stage.prim(l).is_some());
         let (Some(info), Some(layer)) = (info, layer) else {
@@ -190,9 +196,16 @@ impl Panel for LayerPanel {
             _ => 0,
         };
         if let Some((one, min)) = alone(&comp, &layer, effects) {
-            let size = vec2(one.width as f32, one.height as f32);
+            let source = cx
+                .stage
+                .prim(&evaluated.path)
+                .and_then(|l| l.value("source").and_then(|v| v.as_prim_ref()).cloned());
+            let aspect = self.display.aspect(cx.stage, source.as_ref());
+            let size = vec2(one.width as f32 * aspect, one.height as f32);
             let panning = self.navigate(ui, cx, area, size);
-            let view = self.picture(ui, cx, area, &one, min, evaluated);
+            let (mut view, _) = self.view(area, size, ui.ctx().pixels_per_point());
+            view.aspect = aspect;
+            self.picture(ui, cx, area, &one, min, evaluated, &view);
             // Space pans whatever the tool (AE); a paint tool paints,
             // otherwise a shown Liquify effect brushes.
             if !panning && !self.paint(ui, cx, area, &view, min, evaluated) {
@@ -214,13 +227,16 @@ impl Panel for LayerPanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({ "render": self.render }))
+        Some(serde_json::json!({ "render": self.render, "display": self.display }))
     }
 }
 
 impl LayerPanel {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
         LayerPanel {
+            display: state
+                .and_then(|v| serde_json::from_value(v["display"].clone()).ok())
+                .unwrap_or_default(),
             render: state
                 .and_then(|s| s.get("render"))
                 .and_then(|v| v.as_bool())
@@ -239,6 +255,7 @@ impl LayerPanel {
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let view = View {
             origin: area.center() - size * scale / 2.0 + self.pan,
+            aspect: 1.0,
             scale,
             point: 6.0,
             camera: None,
@@ -317,6 +334,7 @@ impl LayerPanel {
     }
 
     /// The layer's picture, fitted in `area`, and the masks in Masks view.
+    #[allow(clippy::too_many_arguments)]
     fn picture(
         &mut self,
         ui: &Ui,
@@ -325,11 +343,13 @@ impl LayerPanel {
         one: &EvaluatedComp,
         min: DVec2,
         layer: &bae_anim::EvaluatedLayer,
-    ) -> View {
-        let ppp = ui.ctx().pixels_per_point();
-        let (view, _) = self.view(area, vec2(one.width as f32, one.height as f32), ppp);
-        let frame = render::comp_rect(&view, one.width, one.height);
+        view: &View,
+    ) {
+        let frame = render::comp_rect(view, one.width, one.height);
         let painter = ui.painter_at(area);
+        if self.display.grid {
+            crate::viewer::checkerboard(&painter, frame.intersect(area));
+        }
         if self.gpu.is_none() && !self.gpu_tried {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
@@ -379,13 +399,16 @@ impl LayerPanel {
             ui,
             cx,
             area,
-            &view,
+            view,
             min,
             &layer.path,
             |painter, lens, source, scale| {
                 let to_screen = |v: DVec2| {
                     lens.center()
-                        + egui::vec2((v.x - source.x) as f32, (v.y - source.y) as f32) * scale
+                        + egui::vec2(
+                            (v.x - source.x) as f32 * view.aspect,
+                            (v.y - source.y) as f32,
+                        ) * scale
                 };
                 painter.rect_filled(lens, 0., Color32::from_gray(35));
                 if let Some(img) = image {
@@ -421,11 +444,10 @@ impl LayerPanel {
             for m in &layer.masks {
                 let stroke = Stroke::new(1.0, crate::viewer::mask_color(cx.stage, &m.path));
                 painter.extend(crate::viewer::path_shapes(
-                    &m.shape, &to_panel, &view, stroke,
+                    &m.shape, &to_panel, view, stroke,
                 ));
             }
         }
-        view
     }
 
     /// The paint tools: drag to paint a stroke; Alt/Option-click with the

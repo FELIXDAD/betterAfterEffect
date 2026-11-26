@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "required": ["action"],
+  "properties": {
+    "action": { "enum": ["master", "edit2d", "edit3d", "cube", "output", "properties", "delete"] },
+    "master": { "type": "string" },
+    "edit": { "type": "string" },
+    "width": { "type": "integer", "minimum": 256, "maximum": 8192 },
+    "aspect": { "enum": [1, 2, 3, 4] },
+    "format": { "enum": [1, 2, 3, 4, 5, 6, 7, 8] },
+    "fps": { "type": "number", "exclusiveMinimum": 0 },
+    "duration": { "type": "number", "exclusiveMinimum": 0 },
+    "pan": { "type": "number" },
+    "tilt": { "type": "number" },
+    "twoNode": { "type": "boolean" },
+    "nullControl": { "type": "boolean" },
+    "center": { "type": "boolean" }
+  }
+}

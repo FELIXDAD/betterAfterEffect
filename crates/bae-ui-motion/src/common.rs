@@ -5,10 +5,9 @@ use std::sync::Arc;
 
 use bae_anim::Evaluator;
 use bae_app::Resources;
-use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
+use bae_model::{LayerKind, PrimPath, PrimType, Stage, StageEvent, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
-use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
@@ -47,7 +46,7 @@ pub(crate) fn expression_style(
     let rgb = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
     match resources.get::<Arc<bae_prefs::PrefsStore>>() {
         Some(store) => {
-            let p = store.current();
+            let p = store.display();
             (
                 egui::FontId::monospace(p.int(bae_prefs::keys::EXPR_FONT_SIZE).clamp(6, 72) as f32),
                 rgb(p.color("scripting_expressions.expr_color_default")),
@@ -75,33 +74,48 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
         })
 }
 
-/// An [`Evaluator`] whose compiled comps are dropped whenever the stage changed
-/// (detected through the shell's history log; without one, every frame).
+/// A panel evaluator that invalidates only the compositions touched by an edit.
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
     changes: StageChanges,
 }
 
-/// Panels observe the same committed edits, undo/redo and project replacements.
 #[derive(Default)]
 pub(crate) struct StageChanges {
-    seq: Option<u64>,
+    revision: Option<u64>,
 }
 
 impl StageChanges {
-    pub(crate) fn changed(&mut self, resources: &Resources) -> bool {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        let previous = std::mem::replace(&mut self.seq, seq);
-        seq.is_none() || seq != previous
+    /// Visit new edits once. A missing event means the project was replaced or
+    /// the consumer fell behind the stage's retained history.
+    pub(crate) fn sync(
+        &mut self,
+        stage: &Stage,
+        mut apply: impl FnMut(Option<&StageEvent>),
+    ) -> bool {
+        let revision = stage.revision();
+        if self.revision == Some(revision) {
+            return false;
+        }
+        let previous = self.revision.replace(revision).unwrap_or(revision);
+        if let Some(events) = stage.changes_since(previous) {
+            for event in events {
+                apply(Some(event));
+            }
+        } else {
+            apply(None);
+        }
+        true
     }
 }
 
 impl EvalCache {
-    pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        if self.changes.changed(resources) {
-            self.eval.clear();
-        }
+    pub(crate) fn get(&mut self, stage: &Stage) -> &mut Evaluator {
+        self.changes.sync(stage, |event| match event {
+            Some(event) => self.eval.invalidate(event),
+            None => self.eval.clear(),
+        });
         &mut self.eval
     }
 }
@@ -944,4 +958,35 @@ pub(crate) fn popup_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
 /// `widgets::menu_button(ui, title, add)` (a submenu inside a menu).
 pub(crate) fn submenu(ui: &mut Ui, title: &str, add: &mut dyn FnMut(&mut Ui)) {
     widgets::menu_button(ui, title, |ui| add(ui));
+}
+
+/// Values displayed by the three text panels over the viewer selection.
+pub(crate) struct SelectedStyles<'a> {
+    pub doc: &'a bae_model::TextDocument,
+    pub range: std::ops::Range<usize>,
+}
+
+impl SelectedStyles<'_> {
+    pub fn character<T: PartialEq>(&self, get: impl Fn(&bae_model::TextStyle) -> T) -> Option<T> {
+        let first = get(self.doc.style_at(self.range.start));
+        self.doc
+            .runs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
+
+    pub fn paragraph<T: PartialEq>(
+        &self,
+        get: impl Fn(&bae_model::ParagraphStyle) -> T,
+    ) -> Option<T> {
+        let first = get(self.doc.paragraph_at(self.range.start));
+        self.doc
+            .paragraphs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
 }
