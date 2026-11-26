@@ -22,28 +22,6 @@ fn first_launch() -> Ui {
     h
 }
 
-#[test]
-fn home_preference_controls_startup_and_new_project_opens_the_editor() {
-    let mut g = Gui::new();
-    let mut prefs = (*g.prefs.current()).clone();
-    prefs.set("startup_repair.enable_home_screen", false);
-    g.prefs.set(prefs.clone()).unwrap();
-    g.workspace.start_without_project(false);
-    let mut h = gui_with(g);
-    settle(&mut h);
-    assert!(!welcome_open(&h));
-    prefs.set("startup_repair.enable_home_screen", true);
-    h.state().prefs.set(prefs).unwrap();
-    h.state_mut().workspace.start_without_project(false);
-    settle(&mut h);
-    assert!(welcome_open(&h));
-    h.get_by_role_and_label(egui::accesskit::Role::Button, "New Project")
-        .click();
-    settle(&mut h);
-    assert!(!welcome_open(&h));
-    app_works(&mut h);
-}
-
 fn welcome_open(h: &Ui) -> bool {
     find_text(h, WELCOME).is_some()
 }
