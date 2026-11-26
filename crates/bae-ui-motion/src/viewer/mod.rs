@@ -1139,6 +1139,7 @@ impl Panel for CompositionViewer {
                 && let Some(g) = self.gpu.as_mut()
                 && let Some((texture, rect)) = g.playback.shown_texture()
             {
+                session.lock().channel_frame = g.playback.shown_channels();
                 g.show_cached(texture, rect);
             }
             completed
