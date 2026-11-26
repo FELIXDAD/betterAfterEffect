@@ -1,0 +1,8 @@
+[effect.cc-burn-film]
+name = "CC Burn Film"
+keywords = ["风格化"]
+
+[effect.cc-burn-film.params]
+burn = "Burn"
+center = "Center"
+random_seed = "Random Seed"
