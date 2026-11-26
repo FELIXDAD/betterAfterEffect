@@ -3,7 +3,7 @@
 //! logical points (physical pixels / scale): every widget of a panel must lie
 //! inside the panel, and no panel may need more room than it gets.
 
-use bae_ui::dock::{PanelArea, panel_areas};
+use bae_ui::dock::{Dock, PanelArea, panel_areas};
 use bae_ui_motion::render_queue::ItemStatus;
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, vec2};
@@ -112,15 +112,21 @@ fn layout_problems(h: &Ui) -> Vec<String> {
 /// The tab of a docked panel (its hit area spans the tab bar's height),
 /// when it is shown in the tab bar rather than only in the » menu.
 fn tab(h: &Ui, title: &str) -> Option<Rect> {
-    h.query_all_by_label(bae_ui::tr(title))
+    h.query_all_by_role_and_label(Role::Button, title)
         .map(|n| n.rect())
         .find(|r| (r.height() - bae_ui::theme::metrics::TAB_BAR_H).abs() < 1.0 && r.width() >= 30.0)
 }
 
-fn click_tab(h: &mut Ui, title: &str) {
+fn click_tab(h: &mut Ui, title: &str, panel: &str) {
     let r = tab(h, title).unwrap_or_else(|| panic!("no {title} tab"));
     click_at(h, r.center());
     settle(h);
+    assert!(
+        panel_areas(&h.ctx)
+            .iter()
+            .any(|area| area.panel.as_str() == panel),
+        "{title} did not show panel {panel}"
+    );
 }
 
 /// The default workspace with a comp, a solid and a Render Queue item in
@@ -139,6 +145,27 @@ fn check_default_workspace_at(screen: &str, size: [f32; 2], ppp: f32) -> Vec<Str
         }
     };
     check(&mut h, "empty project", &mut problems);
+    let layout = h
+        .state_mut()
+        .workspace
+        .state()
+        .current
+        .remove("motion")
+        .unwrap();
+    let dock = Dock::from_layout(layout);
+    let project_frame = dock
+        .frame_of(&"project".into())
+        .expect("Project in the default workspace");
+    assert_eq!(
+        dock.frame_of(&"effect_controls".into()),
+        Some(project_frame)
+    );
+    let project = bae_ui::tr("Project");
+    let effects = bae_ui::tr("Effect Controls");
+    assert!(
+        tab(&h, effects).is_some(),
+        "{screen}: no empty Effect Controls tab"
+    );
     comp_with(&mut h, &["motion.layer.new.solid"]);
     check(&mut h, "comp with a solid", &mut problems);
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
@@ -146,7 +173,10 @@ fn check_default_workspace_at(screen: &str, size: [f32; 2], ppp: f32) -> Vec<Str
     check(&mut h, "render queue: queued", &mut problems);
     // Project, Effect Controls and Render Queue share the left column: all
     // three tabs stay in the tab bar (shortened if need be), none only in ».
-    for title in ["Project", "Effect Controls", "Render Queue"] {
+    // Effect Controls names the selected layer even before its tab is activated.
+    let solid = h.state().layers().into_iter().next().expect("solid layer");
+    let effects = format!("{effects} {}", h.state().name(&solid));
+    for title in [project, &effects, bae_ui::tr("Render Queue")] {
         if tab(&h, title).is_none() {
             problems.push(format!("{screen} {size:?}: the {title} tab is hidden"));
         }
@@ -183,9 +213,9 @@ fn check_default_workspace_at(screen: &str, size: [f32; 2], ppp: f32) -> Vec<Str
         h.state().render_queue().lock().item_mut(id).unwrap().status = status;
         check(&mut h, &format!("render queue: {what}"), &mut problems);
     }
-    click_tab(&mut h, "Effect Controls");
+    click_tab(&mut h, &effects, "effect_controls");
     check(&mut h, "effect controls", &mut problems);
-    click_tab(&mut h, "Project");
+    click_tab(&mut h, project, "project");
     check(&mut h, "project", &mut problems);
     // The other built-in workspaces, with the same project.
     for ws in ["review", "agent"] {
