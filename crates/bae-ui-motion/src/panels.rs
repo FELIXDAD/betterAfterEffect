@@ -215,17 +215,35 @@ impl Panel for PropertiesPanel {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
                         let edit_range = range.clone().unwrap_or(0..usize::MAX);
                         let size = selected.character(|s| s.font_size);
-                        let live = session.lock().scrub.as_ref().and_then(|s| s.value_for(&layer, "text:source")).and_then(|v| {
-                            if let Value::TextDocument(doc) = v { Some(doc.style_at(edit_range.start).font_size) } else { None }
+                        let live = session.lock().scrub.as_ref().and_then(|scrub| {
+                            match scrub.value_for(&layer, "text:source")? {
+                                Value::TextDocument(doc) => Some(doc.style_at(edit_range.start).font_size),
+                                _ => None,
+                            }
                         });
-                        let mut v = live.or(size).unwrap_or_default();
-                        let r = ui.add(widgets::HotNumber::new(&mut v).mixed(live.is_none() && size.is_none()).range(0.1..=1296.).decimals(1).suffix(tr("px")).label(tr("Font Size")));
-                        if r.changed() || r.drag_stopped() {
+                        let mut value = live.or(size).unwrap_or_default();
+                        let response = ui.add(
+                            widgets::HotNumber::new(&mut value)
+                                .mixed(live.is_none() && size.is_none())
+                                .range(0.1..=1296.)
+                                .decimals(1)
+                                .suffix(tr("px"))
+                                .label(tr("Font Size")),
+                        );
+                        if response.changed() || response.drag_stopped() {
                             let mut changed = doc.clone();
-                            bae_motion::text::TextStyleChange { font_size:Some(v), ..Default::default() }.apply(&mut changed,edit_range);
+                            let style = bae_motion::text::TextStyleChange {
+                                font_size: Some(value),
+                                ..Default::default()
+                            };
+                            style.apply(&mut changed, edit_range);
                             let value = Value::TextDocument(changed);
-                            let edit = if r.dragged() { common::Edit::Live(value) } else { common::Edit::Commit(value) };
-                            common::apply_edit(cx,&session,&layer,"text:source",now,edit);
+                            let edit = if response.dragged() {
+                                common::Edit::Live(value)
+                            } else {
+                                common::Edit::Commit(value)
+                            };
+                            common::apply_edit(cx, &session, &layer, "text:source", now, edit);
                         }
                     });
                     ui.horizontal(|ui| {
@@ -449,8 +467,8 @@ pub struct PreviewPanel {
 /// Content size the Preview panel needs (transport row with Loop, timecode).
 const PREVIEW_MIN_W: f32 = 210.0;
 const PREVIEW_MIN_H: f32 = 56.0;
-/// Height the Preview options need under the transport row.
-const PREVIEW_OPTIONS_H: f32 = 240.0;
+/// Leave the transport-only layout intact until one option row fits below it.
+const PREVIEW_OPTIONS_H: f32 = 36.0;
 
 impl Panel for PreviewPanel {
     fn save_state(&self) -> Option<serde_json::Value> {

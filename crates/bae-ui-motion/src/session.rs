@@ -158,6 +158,26 @@ pub(crate) struct CachePass {
 }
 
 impl CachePass {
+    fn new(pb: &Playback, options: &PreviewOptions) -> Self {
+        let first = if options.cache_from_current && pb.range.contains(pb.before) {
+            pb.rate.time_to_frame(pb.before)
+        } else {
+            pb.rate.time_to_frame(pb.range.start)
+        };
+        let base = pb.rate.time_to_frame(pb.range.start);
+        let step = i64::from(options.skip) + 1;
+        let first = first - (first - base).rem_euclid(step);
+        let count = pb.rate.time_to_frame(Time(pb.range.end.0 - 1)) - base + 1;
+        let frames = ((count.max(1) - 1) / step + 1) * step;
+        Self {
+            first,
+            next: first,
+            step,
+            base,
+            frames,
+        }
+    }
+
     pub fn frame(&self, cursor: i64) -> i64 {
         self.base + (cursor - self.base).rem_euclid(self.frames)
     }
@@ -352,8 +372,6 @@ pub struct Session {
     last_scrub: Option<Time>,
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
-    /// Loop playback (Preview panel).
-
     /// Preview panel options (range, play from, frame rate, skip …).
     pub preview: PreviewProfiles,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -426,14 +444,8 @@ pub struct Session {
 }
 
 /// The session as an app resource (`Resources::get::<SharedSession>()`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SharedSession(Arc<Mutex<Session>>);
-
-impl Default for SharedSession {
-    fn default() -> Self {
-        SharedSession(Arc::new(Mutex::new(Session::default())))
-    }
-}
 
 impl SharedSession {
     pub fn lock(&self) -> MutexGuard<'_, Session> {
@@ -794,25 +806,48 @@ impl Session {
         options: PreviewOptions,
         info: Option<&CompInfo>,
     ) {
-        let audio_changed = self.preview.profiles[shortcut as usize].audio != options.audio;
-        self.preview.profiles[shortcut as usize] = options;
-        if self
-            .playback
-            .as_ref()
-            .is_some_and(|pb| pb.shortcut == shortcut && pb.caching.is_none())
-            && audio_changed
-            && let Some(info) = info
-        {
-            let pb = self.playback.as_ref().unwrap();
-            let (at, range) = (self.time(&info.path), pb.range);
-            self.restart_clock(at);
-            if !self.preview_options().audio
-                && let Some(output) = &self.output
+        let old = std::mem::replace(
+            &mut self.preview.profiles[shortcut as usize],
+            options.clone(),
+        );
+        let Some(info) = info else { return };
+        let now = self.time(&info.path);
+        let range = self.preview_range(info, now);
+        let Some(pb) = self.playback.as_mut().filter(|pb| pb.shortcut == shortcut) else {
+            return;
+        };
+        let range_changed = old.range != options.range;
+        if range_changed {
+            pb.range = range;
+        }
+        pb.fps = options
+            .fps
+            .unwrap_or_else(|| info.frame_rate.as_f64())
+            .max(1e-3);
+        if pb.caching.is_some() {
+            if !options.video || !options.cache_before {
+                self.finish_cache(info, false);
+            } else if range_changed
+                || old.skip != options.skip
+                || old.resolution != options.resolution
+                || old.cache_from_current != options.cache_from_current
             {
+                pb.caching = Some(CachePass::new(pb, &options));
+            }
+        } else if range_changed || old.audio != options.audio || old.fps != options.fps {
+            let range = pb.range;
+            let at = if range.contains(now) {
+                now
+            } else {
+                range.start
+            };
+            self.update_time(info, at);
+            self.restart_clock(at);
+            let use_audio = self.sound_clocks(info);
+            if !use_audio && let Some(output) = &self.output {
                 output.stop();
             }
-            self.audio_clock =
-                self.sound_clocks(info) && self.sound(at, range, self.preview_options().repeat);
+            self.audio_clock = use_audio && self.sound(at, range, options.repeat);
         }
     }
 
@@ -967,23 +1002,7 @@ impl Session {
             && cx.resources.get::<Arc<bae_gpu::GpuContext>>().is_some()
         {
             let pb = self.playback.as_mut().unwrap();
-            let first = if options.cache_from_current && pb.range.contains(pb.before) {
-                pb.rate.time_to_frame(pb.before)
-            } else {
-                pb.rate.time_to_frame(pb.range.start)
-            };
-            let base = pb.rate.time_to_frame(pb.range.start);
-            let step = i64::from(options.skip) + 1;
-            let first = first - (first - base).rem_euclid(step);
-            let count = pb.rate.time_to_frame(Time(pb.range.end.0 - 1)) - base + 1;
-            let frames = ((count.max(1) - 1) / step + 1) * step;
-            pb.caching = Some(CachePass {
-                first,
-                next: first,
-                step,
-                base,
-                frames,
-            });
+            pb.caching = Some(CachePass::new(pb, &options));
             self.audio_clock = false;
             return;
         }
@@ -1095,6 +1114,11 @@ impl Session {
         };
         if pb.revision == Some(stage.revision()) {
             return;
+        }
+        if pb.revision.is_some()
+            && let Some(pass) = &mut pb.caching
+        {
+            pass.next = pass.first;
         }
         pb.revision = Some(stage.revision());
         let Some(info) = query::comp_info(stage, &pb.comp) else {

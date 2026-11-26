@@ -1236,10 +1236,9 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     Some("panel") => editing,
                     _ => PreviewShortcut::Space,
                 };
-                let video = s.preview_options().video;
                 s.preview(cx, &info);
                 s.preview.selected = editing;
-                if video {
+                if s.preview_options().video && !s.fullscreen_preview() {
                     cx.open_panel("composition");
                 }
             }

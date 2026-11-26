@@ -15,9 +15,10 @@ fn preview_shortcuts_use_their_profiles_and_restore_the_workspace() {
     key(&mut h, Modifiers::NONE, Key::Space);
     let session = h.state().session();
     assert!(session.lock().fullscreen_preview());
-    assert!(find_text(&h, "Effects & Presets").is_none());
+    assert!(find_text(&h, "Full Screen").is_none());
     key(&mut h, Modifiers::NONE, Key::Escape);
     assert!(!session.lock().is_playing());
+    assert!(h.query_by_label("Full Screen").is_some());
     let pad = bae_ui::keymap::NUMPAD
         .iter()
         .find(|(name, ..)| *name == "Pad0")

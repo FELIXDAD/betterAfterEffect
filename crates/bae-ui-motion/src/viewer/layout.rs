@@ -183,7 +183,7 @@ mod preview_tests {
         assert_eq!(preview_pane(&panes, 0, true, || false), 0);
         assert_eq!(preview_pane(&panes, 0, false, || panic!()), 0);
         assert_eq!(preview_pane(&panes[..1], 0, true, || panic!()), 0);
-        assert!(crate::session::PreviewOptions::default().favor_active_camera);
+        assert!(crate::session::PreviewProfiles::default().favor_active_camera);
         assert!(
             crate::panels::ZH.contains(&("Previews Favor Active Camera", "预览支持活动摄像机"))
         );
