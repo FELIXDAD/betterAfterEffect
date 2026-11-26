@@ -856,13 +856,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.layer.arrange.front",
         "motion.animation.ease",
         "menu.edit.copy",
-        "menu.layer.time.time_reverse_layer",
+        "menu.layer.markers.lock_markers",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
     let handled: std::collections::HashSet<String> =
-        ["motion.layer.time_reverse_layer".to_owned()].into();
+        ["motion.layer.lock_markers".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -890,7 +890,7 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Time-Reverse Layer once handled.
+    // A selected layer: layer commands too; Lock Markers once handled.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -903,7 +903,7 @@ fn menu_items_grey_and_check_like_ae() {
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(6, "menu.layer.time.time_reverse_layer");
+    with_fit.insert(6, "menu.layer.markers.lock_markers");
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();
@@ -2273,7 +2273,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.layer.time_reverse_layer".into()]
+            vec!["motion.comp.set_work_area_to_selection".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2307,7 +2307,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.layer.time_reverse_layer")
+            .filter(|(_, a, _)| a == "motion.comp.set_work_area_to_selection")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2315,7 +2315,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Alt+R").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+B").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -2727,6 +2727,50 @@ fn transform_value_dialogs_set_every_selected_layer() {
     // Orientation is for 3D layers only.
     h.action(&mut viewer, open("orientation"));
     assert!(!h.dialogs().is_open());
+}
+
+/// Layer ▸ Time: Time-Reverse Layer, Enable Time Remapping (a toggle with a
+/// check mark) and Freeze Frame run on layers that have time (a pre-comp).
+#[test]
+fn layer_time_menu() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let inner = h.run("comp.create", json!({"name": "Inner"}))["path"].clone();
+    let pre = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "pre_comp", "source": inner}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    // A solid has no time to remap: nothing happens.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::TIME_REVERSE))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().selected_layers = vec![pre.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REVERSE));
+    assert_eq!(r.invocations[0].id, "layer.time_reverse");
+    h.apply(r);
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REMAP));
+    assert_eq!(r.invocations[0].params["enabled"], true);
+    h.apply(r);
+    assert!(crate::actions::switch_on(
+        &h.stage,
+        &pre,
+        "time_remap_enabled"
+    ));
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REMAP));
+    assert_eq!(r.invocations[0].params["enabled"], false, "a toggle");
+    let r = h.action(&mut viewer, Invocation::new(ids::FREEZE_FRAME));
+    assert_eq!(r.invocations[0].id, "layer.freeze_frame");
 }
 
 /// The Paint and Brushes panels edit the next stroke's settings; Clone Options
