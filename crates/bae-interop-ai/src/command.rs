@@ -31,6 +31,7 @@ impl Command for ImportAi {
     type Params = ImportAiParams;
     type Output = ImportReport;
     const ID: &'static str = "ai.import";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Import Illustrator File";
     const DESCRIPTION: &'static str = "Import an Illustrator (.ai), PDF or Illustrator bridge file: one comp per artboard, one editable shape layer per Illustrator layer (groups, compound paths, fills, strokes, gradients), point text as text layers. Returns the created comps and what was approximated.";
 

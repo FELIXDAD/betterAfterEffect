@@ -10,12 +10,14 @@ fn prim(ty: PrimType, params: &[(&str, Value)]) -> EvaluatedPrim {
     EvaluatedPrim {
         prim_type: Some(ty),
         path: PrimPath::new("/probe").unwrap(),
-        attrs: params
-            .iter()
-            .cloned()
-            .map(|(k, v)| (k.to_owned(), v))
-            .collect(),
-        children: vec![],
+        attrs: std::sync::Arc::new(
+            params
+                .iter()
+                .cloned()
+                .map(|(k, v)| (k.to_owned(), v))
+                .collect(),
+        ),
+        children: Vec::new().into(),
     }
 }
 
@@ -28,7 +30,7 @@ fn op(name: &str, params: &[(&str, f64)]) -> EvaluatedPrim {
         )],
     );
     for (k, v) in params {
-        op.attrs.insert(
+        std::sync::Arc::make_mut(&mut op.attrs).insert(
             parameter_attr(&format!("ADBE Vector {k}")),
             Value::Float(*v),
         );
@@ -144,7 +146,7 @@ fn ae_operator_frames() {
         ("Anchor", [4.0, 2.0]),
         ("Scale", [110.0, 80.0]),
     ] {
-        repeat.attrs.insert(
+        std::sync::Arc::make_mut(&mut repeat.attrs).insert(
             parameter_attr(&format!("ADBE Vector Repeater {prop}")),
             Value::Vec2(v),
         );
@@ -235,7 +237,7 @@ fn only_preceding_geometry_is_offset_in_group_coordinates() {
         PrimType::SHAPE_GROUP,
         &[("transform:scale", Value::Vec2([200.0, 100.0]))],
     );
-    group.children = vec![rect(0.0), prim(PrimType::FILL, &[])];
+    group.children = vec![rect(0.0), prim(PrimType::FILL, &[])].into();
     let items = [
         group,
         op("Offset", &[]),
@@ -261,7 +263,7 @@ fn repeater_instances_paints_but_supplies_compound_geometry_to_later_paints() {
             ("Repeater Opacity 2", 75.0),
         ],
     );
-    repeater.attrs.insert(
+    std::sync::Arc::make_mut(&mut repeater.attrs).insert(
         parameter_attr("ADBE Vector Repeater Position"),
         Value::Vec2([60.0, 0.0]),
     );
@@ -294,7 +296,7 @@ fn negative_repeater_scale_reflects_alternate_copies_with_fractional_offset() {
         "Repeater",
         &[("Repeater Copies", 2.0), ("Repeater Offset", 0.5)],
     );
-    repeat.attrs.insert(
+    std::sync::Arc::make_mut(&mut repeat.attrs).insert(
         parameter_attr("ADBE Vector Repeater Scale"),
         Value::Vec2([-50.0, 100.0]),
     );

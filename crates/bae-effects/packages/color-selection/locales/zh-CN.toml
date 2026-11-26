@@ -102,3 +102,17 @@ blacks_black = "黑色"
 [effect.selective-color.choices]
 method = ["相对", "绝对"]
 colors = ["红色", "黄色", "绿色", "青色", "蓝色", "品红色", "白色", "无色", "黑色"]
+
+[effect.video-limiter]
+name = "视频限幅器"
+keywords = ["视频限幅"]
+
+[effect.video-limiter.params]
+clip_level = "剪辑层级"
+compression_before_clipping = "剪切前压缩"
+gamut_warning = "色域警告"
+gamut_warning_color = "色域警告颜色"
+
+[effect.video-limiter.choices]
+clip_level = ["100 IRE（SMPTE 范围）", "103 IRE", "105 IRE（EBU R103 首选）", "109 IRE（SDI 限制）"]
+compression_before_clipping = ["无", "3%", "5%", "10%", "20%"]
