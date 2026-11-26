@@ -271,7 +271,7 @@ pub(super) fn edit(
 fn gradient(ui: &mut Ui, stops: &[f64]) -> Edit {
     let mut points = stops.to_vec();
     let mut edit = Edit::None;
-    ui.menu_button(tr("Edit Gradient"), |ui| {
+    bae_ui::widgets::menu_button(ui, tr("Edit Gradient"), |ui| {
         let mut changed = false;
         let mut dragging = false;
         let mut ended = false;
