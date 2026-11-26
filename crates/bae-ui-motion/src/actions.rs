@@ -47,6 +47,7 @@ pub mod ids {
     /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
+    pub const MINI_FLOW: &str = "motion.comp.composition_mini_flowchart";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
@@ -56,8 +57,18 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
+    pub const AUTO_ORIENT: &str = "motion.layer.auto_orient";
+    pub const GO_TO_TIME: &str = "motion.view.go_to_time";
+    pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > Replace Footage > File... (Cmd/Ctrl+H).
+    pub const REPLACE_FOOTAGE: &str = "motion.file.replace_footage_file";
+    /// File > Reload Footage (Cmd/Ctrl+Alt+L).
+    pub const RELOAD_FOOTAGE: &str = "motion.file.reload_footage";
+    /// File / Layer > Reveal in Explorer (Finder on macOS).
+    pub const REVEAL_IN_EXPLORER: &str = "motion.file.reveal_in_explorer";
     /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
     pub const IMPORT_MULTIPLE: &str = "motion.file.import_multiple_files";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
@@ -65,6 +76,8 @@ pub mod ids {
     pub const TRIM_COMP: &str = "motion.trim_comp";
     /// Queue the active comp in the Render Queue (AE Cmd/Ctrl+M).
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
+    /// Composition > Save Frame As > File... (Cmd/Ctrl+Alt+S).
+    pub const SAVE_FRAME_AS: &str = "motion.comp.save_frame_as_file";
     /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
     pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
     /// Animation > Add Expression (AE Alt+Shift+=): toggles the selected
@@ -137,6 +150,12 @@ pub mod ids {
     /// Layer ▸ Transform ▸ Anchor Point… / Position… / Scale… / Orientation… /
     /// Rotation… / Opacity…: params `{"attr": "position"}` (the value dialog).
     pub const TRANSFORM_DIALOG: &str = "motion.layer.transform_dialog";
+    /// Layer ▸ Time: Enable Time Remapping (Cmd/Ctrl+Alt+T, toggles),
+    /// Time-Reverse Layer (Cmd/Ctrl+Alt+R), Freeze Frame, Freeze On Last Frame.
+    pub const TIME_REMAP: &str = "motion.layer.enable_time_remapping";
+    pub const TIME_REVERSE: &str = "motion.layer.time_reverse_layer";
+    pub const FREEZE_FRAME: &str = "motion.layer.freeze_frame";
+    pub const FREEZE_LAST: &str = "motion.layer.freeze_on_last_frame";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -168,6 +187,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("adjustment_layer", "Adjustment Layer"),
     ("three_d", "3D Layer"),
     ("preserve_transparency", "Preserve Transparency"),
+    ("guide", "Guide Layer"),
 ];
 
 /// Whether a switch is on for a layer.
@@ -199,6 +219,10 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::TIME_STRETCH, "Time Stretch..."),
+    (ids::AUTO_ORIENT, "Auto-Orient..."),
+    (ids::GO_TO_TIME, "Go to Time..."),
+    (ids::PROJECT_SETTINGS, "Project Settings..."),
     (ids::ADD_EXPRESSION, "Add Expression"),
     (ids::ENABLE_EXPRESSIONS, "Enable Expressions"),
     (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
@@ -207,6 +231,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
+    ("motion.file.find", "Find"),
     (ids::STEP, "Next Frame"),
     (ids::PREV_KEY, "Go to Previous Keyframe"),
     (ids::NEXT_KEY, "Go to Next Keyframe"),
@@ -226,18 +251,27 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::REVERSE_KEYS, "Time-Reverse Keyframes"),
     (ids::SELECT_ALL, "Select All"),
     (ids::DESELECT_ALL, "Deselect All"),
+    (
+        "motion.anim.convert_audio_to_keyframes",
+        "Convert Audio to Keyframes",
+    ),
     (ids::REVEAL, "Reveal Animated Properties"),
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
+    (ids::MINI_FLOW, "Composition Mini-Flowchart"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::REPLACE_FOOTAGE, "Replace Footage File"),
+    (ids::RELOAD_FOOTAGE, "Reload Footage"),
+    (ids::REVEAL_IN_EXPLORER, "Reveal in Explorer"),
     (ids::IMPORT_MULTIPLE, "Import Multiple Files"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
+    (ids::SAVE_FRAME_AS, "Save Frame As File"),
     // Edit > Copy / Paste (Cmd+C / Cmd+V): selected keyframes.
     (ids::COPY, "Copy"),
     (ids::CUT, "Cut"),
@@ -260,6 +294,10 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
     (ids::TRANSFORM_DIALOG, "Transform"),
     (ids::RESET_TRANSFORM, "Reset"),
+    (ids::TIME_REMAP, "Enable Time Remapping"),
+    (ids::TIME_REVERSE, "Time-Reverse Layer"),
+    (ids::FREEZE_FRAME, "Freeze Frame"),
+    (ids::FREEZE_LAST, "Freeze On Last Frame"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -454,6 +492,17 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
             format!("{name}: Add or Remove Keyframe"),
         );
     }
+    // E, Shift+E.
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": false }),
+        "Show Effects".to_owned(),
+    );
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": true }),
+        "Add Effects to Shown Properties".to_owned(),
+    );
     v
 }
 
@@ -463,9 +512,10 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
 /// `ae` keymap already binds. Commands other modules handle are bound when the
 /// app starts ([`late_bindings`]).
 pub fn bindings() -> KeymapBindings {
-    let v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
+    let mut v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
         k.status.works()
     }));
+    v.push(Binding::new("Tab", ids::MINI_FLOW).when("timeline"));
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
 }
 
@@ -852,6 +902,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::import::import_file(cx, session);
             return true;
         }
+        ids::REPLACE_FOOTAGE => {
+            crate::import::replace_footage(cx, session);
+            return true;
+        }
+        ids::RELOAD_FOOTAGE => {
+            crate::import::reload_footage(cx, session);
+            return true;
+        }
+        ids::REVEAL_IN_EXPLORER => {
+            crate::import::reveal_footage(cx, session);
+            return true;
+        }
         ids::ADD_EXPRESSION => {
             // AE toggles: the selected properties get their default expression;
             // when all of them have one, the expressions are removed.
@@ -880,6 +942,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 })
                 .collect();
             if !items.is_empty() {
+                if !remove && let Some((p, a)) = props.iter().find(|(p, a)| !has(p, a)) {
+                    session.lock().focus_expression =
+                        Some((p.clone(), a.clone(), std::time::Instant::now()));
+                }
                 cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
             return true;
@@ -897,6 +963,22 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 ids::TOGGLE_PARENT_COLUMN
             };
             session.lock().timeline_toggles.push(id);
+            return true;
+        }
+        ids::TIME_STRETCH => {
+            crate::dialogs::time_stretch(cx, session);
+            return true;
+        }
+        ids::AUTO_ORIENT => {
+            crate::dialogs::auto_orient(cx, session);
+            return true;
+        }
+        ids::GO_TO_TIME => {
+            crate::dialogs::go_to_time(cx, session);
+            return true;
+        }
+        ids::PROJECT_SETTINGS => {
+            crate::dialogs::project_settings(cx);
             return true;
         }
         ids::PRE_COMPOSE => {
@@ -923,6 +1005,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let Some(info) = common::active_comp(stage, session) else {
         return true;
     };
+    if id == "motion.anim.convert_audio_to_keyframes" {
+        crate::audio_analysis::convert(cx, &info);
+        return true;
+    }
     if id == ids::PLAY {
         session.retry_audio();
     }
@@ -988,6 +1074,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
+        ids::MINI_FLOW => {
+            s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
+                stage, &info.path,
+            ));
+            cx.open_panel("timeline");
+        }
         ids::GO_START => s.set_time(&info, Time::ZERO),
         ids::GO_END => s.set_time(&info, info.duration),
         ids::STEP => {
@@ -1030,6 +1122,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::render_queue::shared(cx.resources)
                 .lock()
                 .add(&info, &crate::render_queue::default_output_dir());
+            cx.open_panel("render_queue");
+        }
+        ids::SAVE_FRAME_AS => {
+            let frame = info.frame_rate.time_to_frame(now);
+            crate::render_queue::shared(cx.resources).lock().add_frame(
+                &info,
+                &crate::render_queue::default_output_dir(),
+                frame,
+            );
             cx.open_panel("render_queue");
         }
         ids::TRIM_IN if !layers.is_empty() => {
@@ -1478,6 +1579,41 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
+        ids::TIME_REMAP | ids::TIME_REVERSE | ids::FREEZE_FRAME | ids::FREEZE_LAST => {
+            // Layers with time to remap: footage with a duration and pre-comps.
+            let timed: Vec<PrimPath> = layers
+                .iter()
+                .filter(|l| {
+                    !query::is_locked(stage, l)
+                        && matches!(
+                            query::layer_kind(stage, l).as_deref(),
+                            Some("footage" | "pre_comp" | "audio")
+                        )
+                        && query::source_duration(stage, l).is_some()
+                })
+                .cloned()
+                .collect();
+            if !timed.is_empty() {
+                match id {
+                    ids::TIME_REMAP => {
+                        // AE toggles: off when every layer has it on.
+                        let on = !timed
+                            .iter()
+                            .all(|l| switch_on(stage, l, "time_remap_enabled"));
+                        cx.invoke_with("layer.time_remap", json!({"layers": timed, "enabled": on}));
+                    }
+                    ids::TIME_REVERSE => {
+                        cx.invoke_with("layer.time_reverse", json!({ "layers": timed }));
+                    }
+                    ids::FREEZE_FRAME => {
+                        cx.invoke_with("layer.freeze_frame", json!({"layers": timed, "time": now}));
+                    }
+                    _ => {
+                        cx.invoke_with("layer.freeze_on_last_frame", json!({ "layers": timed }));
+                    }
+                }
+            }
+        }
         ids::TRANSFORM_DIALOG => {
             let kind = inv
                 .params
@@ -1719,6 +1855,16 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Layer ▸ Time and switches (AE 26's Chinese).
+    ("Enable Time Remapping", "启用时间重映射"),
+    ("Time-Reverse Layer", "时间反向图层"),
+    ("Freeze Frame", "冻结帧"),
+    ("Freeze On Last Frame", "在最后一帧上冻结"),
+    ("Guide Layer", "参考图层"),
+    ("Time Stretch...", "时间伸缩..."),
+    ("Auto-Orient...", "自动定向..."),
+    ("Go to Time...", "转到时间..."),
+    ("Project Settings...", "项目设置..."),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
@@ -1794,6 +1940,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp", "适合复合"),
     ("Fit to Comp Width", "适合复合宽度"),
     ("Fit to Comp Height", "适合复合高度"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
+    ("Find", "查找"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

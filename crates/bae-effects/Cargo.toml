@@ -34,6 +34,7 @@ serde_json.workspace = true
 [dev-dependencies]
 bae-anim.workspace = true
 bae-motion.workspace = true
+bae-render = { workspace = true, features = ["media"] }
 half.workspace = true
 png.workspace = true
 tempfile.workspace = true

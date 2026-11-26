@@ -186,6 +186,10 @@ pub struct AssetInfo {
     pub duration: Option<Time>,
     /// Solids: the fill colour.
     pub solid_color: Option<[f64; 4]>,
+    /// The footage has pictures (AE's `hasVideo`).
+    pub has_video: bool,
+    /// The footage has sound (AE's `hasAudio`).
+    pub has_audio: bool,
 }
 
 /// Track matte mode.

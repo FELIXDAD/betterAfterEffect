@@ -18,7 +18,9 @@ mod layer_bar;
 mod markers;
 mod menus;
 mod modes;
+pub(crate) mod navigation;
 mod rows;
+mod search;
 mod switches;
 #[cfg(test)]
 mod tests;
@@ -41,7 +43,7 @@ use serde_json::json;
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::graph::GraphEditor;
-use crate::project::ItemDrag;
+use crate::project::{DropPlacement, ItemDrag};
 use crate::props::{self, Node};
 use crate::session::{Reveal, Session, SharedSession};
 
@@ -61,6 +63,9 @@ pub(crate) use menus::{
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
+
+// Registration contract of the footage optical-flow backend.
+const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
 
 /// Row height and switch cell width: AE 26's (17 and about 15 points).
 const ROW_H: f32 = 17.0;
@@ -191,9 +196,16 @@ pub struct TimelinePanel {
     drag: Option<Drag>,
     switch_drag: Option<switches::SwitchDrag>,
     rename: Option<(PrimPath, String)>,
+    /// The search field's text: filters the outline (search.rs).
+    pub(crate) search: String,
+    /// Edit ▸ Find: focus the search field next frame.
+    focus_search: bool,
     comment_edit: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
-    expr_edit: Option<(PrimPath, String, String)>,
+    /// The expression field being edited: its text, and the stored source it
+    /// started from (a pick whip or the language menu changing the stored
+    /// expression meanwhile replaces the text).
+    expr_edit: Option<(PrimPath, String, String, String)>,
     /// The field being edited: its text and selection (chars), for the pick whip
     /// and the language menu, which take its focus.
     expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
@@ -390,6 +402,24 @@ impl TimelinePanel {
         }
     }
 
+    /// The group rows (ids) the outline shows for `comp`, for tests.
+    #[cfg(test)]
+    pub(crate) fn group_rows(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        s: &Session,
+    ) -> Vec<String> {
+        let layers = self.layer_list(stage, comp);
+        self.rows(stage, &layers, s)
+            .into_iter()
+            .filter_map(|r| match r.kind {
+                RowKind::Group { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn layer_list(&mut self, stage: &Stage, comp: &PrimPath) -> Arc<TimelineLayers> {
         if let Some(layers) = &self.layers
             && layers.revision == stage.revision()
@@ -431,8 +461,21 @@ impl TimelinePanel {
     fn rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
         let hide_shy = bool_attr(stage, &layers.comp, "hide_shy_layers");
+        let needle = self.search.trim().to_lowercase();
         for (layer_index, layer) in layers.paths.iter().enumerate() {
             if hide_shy && bool_attr(stage, layer, "shy") {
+                continue;
+            }
+            // Searching: matching layers, and the matching properties opened.
+            let found = (!needle.is_empty()).then(|| {
+                let name = query::display_name_of(stage, layer).to_lowercase();
+                let props = search::matching(&props::layer_tree(stage, layer), &needle);
+                (name.contains(&needle), props)
+            });
+            if found
+                .as_ref()
+                .is_some_and(|(name, props)| !name && props.is_empty())
+            {
                 continue;
             }
             out.push(Row {
@@ -440,7 +483,36 @@ impl TimelinePanel {
                 layer_index,
                 depth: 0,
             });
+            if let Some((_, nodes)) = found.filter(|(_, props)| !props.is_empty()) {
+                let mut open = HashSet::new();
+                search::group_ids(&nodes, &mut open);
+                flatten_tree(&nodes, layer_index, 1, &open, stage, &mut out);
+                continue;
+            }
             if let Some(r) = s.reveal.get(layer) {
+                // E: the Effects group, open, its effects as twirled (AE shows
+                // them above the revealed transform properties).
+                if let Reveal::Attrs(v) = r
+                    && v.iter().any(|a| a == "effects")
+                    && let Some(Node::Group {
+                        id,
+                        label,
+                        children,
+                    }) = props::layer_tree(stage, layer)
+                        .into_iter()
+                        .find(|n| matches!(n, Node::Group { id, .. } if id.ends_with("#effects")))
+                {
+                    out.push(Row {
+                        kind: RowKind::Group {
+                            id,
+                            label,
+                            open: true,
+                        },
+                        layer_index,
+                        depth: 1,
+                    });
+                    flatten_tree(&children, layer_index, 2, &self.expanded, stage, &mut out);
+                }
                 if matches!(r, Reveal::Attrs(attrs) if attrs.iter().any(|a| a == "audio:waveform"))
                     && bae_media::audio::layer_file(stage, layer).is_some()
                 {
@@ -478,11 +550,14 @@ impl TimelinePanel {
                 out.push(row);
                 continue;
             };
+            let stored = query::attr_spec(stage, path, attr).and_then(|s| s.expression.as_ref());
             let lines = match &self.expr_edit {
-                Some((p, a, buf)) if p == path && a == attr => buf.split('\n').count(),
-                _ => query::attr_spec(stage, path, attr)
-                    .and_then(|s| s.expression.as_ref())
-                    .map_or(1, |e| e.source.split('\n').count()),
+                Some((p, a, buf, base))
+                    if p == path && a == attr && stored.is_some_and(|e| e.source == *base) =>
+                {
+                    buf.split('\n').count()
+                }
+                _ => stored.map_or(1, |e| e.source.split('\n').count()),
             }
             .clamp(1, MAX_EXPR_LINES);
             for line in 0..lines {
@@ -590,6 +665,11 @@ impl Panel for TimelinePanel {
             }
             id @ (actions::ids::TOGGLE_SWITCHES_MODES | actions::ids::TOGGLE_PARENT_COLUMN) => {
                 self.toggle_columns(id);
+                true
+            }
+            // Edit ▸ Find (Ctrl+F): the search field.
+            "motion.file.find" => {
+                self.focus_search = true;
                 true
             }
             _ => actions::handle(action, cx, &session),
@@ -713,8 +793,12 @@ impl TimelinePanel {
                     Sense::click_and_drag(),
                 )
                 .labeled(egui::WidgetType::Other, tr("Time Graph"));
+            // From where the button went down, not where the drag was recognised
+            // (a few points later), or a tight marquee misses keys there (#551).
             if bg.drag_started_by(egui::PointerButton::Primary)
-                && let Some(p) = bg.interact_pointer_pos()
+                && let Some(p) = ui
+                    .input(|i| i.pointer.press_origin())
+                    .or_else(|| bg.interact_pointer_pos())
             {
                 self.drag = Some(Drag::Marquee {
                     origin: p,
@@ -733,18 +817,29 @@ impl TimelinePanel {
             crate::common::context_menu(&bg, &mut |ui| {
                 crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
-            // Dropped project items.
-            if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {
-                crate::viewer::add_item_as_layer(cx, &session, &item.0, None);
-            }
         }
 
+        // Row widgets accept other drag types. Capture the project item before a
+        // row consumes the released payload; the stack position comes from row layout.
+        let project_drop = ui
+            .ctx()
+            .pointer_interact_pos()
+            .filter(|_| ui.rect_contains_pointer(body))
+            .and_then(|pos| {
+                egui::DragAndDrop::payload::<ItemDrag>(ui.ctx()).map(|item| (item, pos))
+            });
+        let mut drop_slot = None;
+        let mut last_row_bottom = body.top();
         let mut key_rects: Vec<(Rect, KeyRef)> = Vec::new();
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
-        let switch_input = ui.input(switches::SwitchInput::read);
-        egui::ScrollArea::vertical()
+        let pixel_motion = cx
+            .resources
+            .get::<crate::gpu_preview::PreviewEffects>()
+            .is_some_and(|effects| effects.0.contains(FRAME_INTERPOLATOR_ID));
+        let switch_input = ui.input(|input| switches::SwitchInput::read(input, pixel_motion));
+        let scrolled = egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
@@ -758,6 +853,19 @@ impl TimelinePanel {
                     let row = &rows[i];
                     let (rect, _) =
                         ui.allocate_exact_size(vec2(full.width(), ROW_H), Sense::hover());
+                    if let Some((_, pointer)) = &project_drop {
+                        last_row_bottom = rect.bottom();
+                        if drop_slot.is_none() && pointer.y <= rect.bottom() {
+                            let number = row.layer_index + 1;
+                            let before =
+                                matches!(row.kind, RowKind::Layer) && pointer.y < rect.center().y;
+                            drop_slot = Some(if before {
+                                (number - 1, rect.top())
+                            } else {
+                                (number, rect.bottom())
+                            });
+                        }
+                    }
                     self.row_ui(
                         &mut outline,
                         ui,
@@ -784,6 +892,44 @@ impl TimelinePanel {
                     }
                 }
             });
+        // Empty outline space below the layers (both modes): a click deselects
+        // everything, a right-click is AE's New menu, as on the empty graph.
+        let rows_bottom =
+            scrolled.inner_rect.top() + rows.len() as f32 * ROW_H - scrolled.state.offset.y;
+        let outline_bg = Rect::from_min_max(
+            pos2(body.left(), rows_bottom.max(body.top())),
+            // The outline only, kept clear of egui's pointer slop (about 5 points)
+            // around the time graph, whose background owns presses near its edge.
+            pos2(body.left() + cols.end - 8.0, body.bottom()),
+        );
+        if outline_bg.height() > 0.0 {
+            let bg = ui.interact(outline_bg, ui.id().with("outline_bg"), Sense::click());
+            if bg.clicked() {
+                let mut s = session.lock();
+                s.selected_keys.clear();
+                s.selected_layers.clear();
+                s.selected_props.clear();
+                s.selected_groups.clear();
+            }
+            crate::common::context_menu(&bg, &mut |ui| {
+                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
+            });
+        }
+
+        if let Some((item, pointer)) = project_drop {
+            let (index, y) = drop_slot.unwrap_or((comp_layers.len(), last_row_bottom));
+            ui.painter().with_clip_rect(body).hline(
+                body.x_range(),
+                y,
+                Stroke::new(2.0, color::ACCENT),
+            );
+            if ui.input(|i| i.pointer.primary_released()) {
+                let start = graph_body
+                    .contains(pointer)
+                    .then(|| info.snap_visible_time(axis.t(pointer.x)));
+                item.add_as_layer(cx, &session, DropPlacement::Timeline { index, start });
+            }
+        }
 
         self.finish_switch_drag(switch_input, cx);
 
@@ -820,6 +966,7 @@ impl TimelinePanel {
         p.vline(x, cti_body.y_range(), Stroke::new(1.0, color::ACCENT));
 
         self.footer(ui, foot, &info, &axis, now, graph_left);
+        navigation::show(ui, stage, &session);
         self.columns.scrollbar(ui, foot, cols);
 
         // Keyframe dialogs (modal; Enter and Esc are theirs).
