@@ -310,6 +310,9 @@ pub struct Session {
     /// Layer contents on the clipboard (Copy with groups selected); the last copy
     /// wins over the other clipboards.
     pub content_clipboard: Vec<bae_motion::CopiedContent>,
+    /// Copy Expression Only on a property: Paste puts it on the selected
+    /// properties (AE).
+    pub(crate) expression_clipboard: Option<String>,
     pending: Vec<(Pending, u32)>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
