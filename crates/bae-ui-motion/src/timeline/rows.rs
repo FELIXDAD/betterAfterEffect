@@ -941,7 +941,10 @@ impl TimelinePanel {
                 _ => &[],
             };
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
-            let edit = if let bae_model::Value::Bool(on) = value {
+            let style_edit = crate::layer_styles::edit(&mut child, id, path, attr, &value);
+            let edit = if let Some(edit) = style_edit {
+                edit
+            } else if let bae_model::Value::Bool(on) = value {
                 // AE's timeline switches On/Off with hot text, not a checkbox.
                 let text = tr(if on { "On" } else { "Off" });
                 if widgets::link(&mut child, text)

@@ -12,6 +12,7 @@ pub(super) static SHADER: Shader = Shader {
         include_str!("../../effects/sampled.wgsl"),
         include_str!("../../shaders/layer_sampling.wgsl"),
         include_str!("../../shaders/generated_blend.wgsl"),
+        include_str!("blend.wgsl"),
         include_str!("edge.wgsl")
     ),
 };
@@ -40,6 +41,19 @@ pub(super) struct Shading {
     pub pillow: bool,
     pub mode: u32,
     pub shadow_mode: u32,
+    pub bevel_style: u32,
+    pub technique: u32,
+    pub width: f32,
+    pub noise: f32,
+    pub jitter: f32,
+    pub knockout: bool,
+}
+
+#[derive(Default)]
+pub(super) struct Paint<'a> {
+    pub backdrop: bool,
+    pub ramp: Option<&'a GpuImage>,
+    pub distance: Option<&'a GpuImage>,
 }
 
 impl Shading {
@@ -57,6 +71,9 @@ impl Shading {
     }
 
     pub fn bounds(&self, r: IRect) -> IRect {
+        if self.kind == Kind::Bevel && self.bevel_style != 2 && !r.is_empty() {
+            return r.inflate((f64::from(self.width) + self.sigma * 3.).ceil() as i32);
+        }
         if r.is_empty() || !matches!(self.kind, Kind::DropShadow | Kind::OuterGlow) {
             return r;
         }
@@ -82,7 +99,11 @@ impl Shading {
             Edge::Transparent,
             self.sample_rect(r),
         );
-        r.union(&plan.read)
+        r.union(&plan.read).inflate(if self.technique > 1 {
+            self.width.ceil() as i32 + 1
+        } else {
+            0
+        })
     }
 
     pub fn encode(
@@ -92,6 +113,7 @@ impl Shading {
         source: &GpuImage,
         composite: &GpuImage,
         roi: IRect,
+        paint: Paint<'_>,
     ) -> Result<GpuImage, RenderError> {
         if roi.is_empty() {
             return Ok(composite.clone());
@@ -101,7 +123,9 @@ impl Shading {
             let sample = self.sample_rect(roi);
             let mut alpha = source.clone();
             if source.pixel_scale != grid || source.alpha == bae_render::ImageAlpha::Opaque {
-                let read = self.read(roi);
+                let read = self
+                    .read(roi)
+                    .intersect(&image_grid::pixel_rect(source.rect, 1. / grid));
                 alpha = SHADER.dispatch(target, params, read, source, [], [5, 0])?;
             }
             // The shared blur works in texels. Restore composition coordinates
@@ -123,8 +147,8 @@ impl Shading {
             params,
             roi,
             source,
-            [Some(&soft), Some(composite)],
-            [self.kind as u32, 0],
+            [Some(&soft), Some(composite), paint.distance, paint.ramp],
+            [self.kind as u32, u32::from(paint.backdrop)],
             |u, header| {
                 // These slots follow the definition's parameters in the shared uniform.
                 u.f32s(header + 200 * 16, &self.color)
@@ -147,7 +171,24 @@ impl Shading {
                             self.mode as f32,
                         ],
                     )
-                    .f32(header + 204 * 16, self.shadow_mode as f32);
+                    .f32s(
+                        header + 204 * 16,
+                        &[
+                            self.shadow_mode as f32,
+                            self.bevel_style as f32,
+                            self.technique as f32,
+                            self.width,
+                        ],
+                    )
+                    .f32s(
+                        header + 205 * 16,
+                        &[
+                            self.noise,
+                            self.jitter,
+                            f32::from(paint.ramp.is_some()),
+                            f32::from(self.knockout),
+                        ],
+                    );
             },
         )
     }
