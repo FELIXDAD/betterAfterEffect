@@ -267,34 +267,6 @@ pub(crate) const PROJECT_ITEM: &[Entry] = &[
     Own("Rename"),
 ];
 
-/// Project panel, right-click on the column headers.
-pub(crate) const PROJECT_HEADER: &[Entry] = &[
-    Off("Hide This"),
-    Off("Rename This..."),
-    Sep,
-    Sub(
-        "Columns",
-        &[
-            Off("Name"),
-            Off("Label"),
-            Off("Type"),
-            Off("Size"),
-            Off("Frame Rate"),
-            Off("Media Start"),
-            Off("Media End"),
-            Off("Media Duration"),
-            Off("In Point"),
-            Off("Out Point"),
-            Off("Duration"),
-            Off("Tape Name"),
-            Off("Comment"),
-            Off("File Path"),
-            Off("Date"),
-            Off("Video Info"),
-        ],
-    ),
-];
-
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[

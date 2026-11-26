@@ -2039,3 +2039,18 @@ fn set_track_matte_sets_type_source_and_hides_the_matte() {
         .is_err()
     );
 }
+
+#[test]
+fn auto_key_starts_a_track_and_preserves_existing_keys() {
+    let mut f = Fx::new();
+    let comp = f.comp();
+    let layer = f.layer(&comp, "solid", json!({}));
+    for (time, value) in [(SEC, 40.0), (2 * SEC, 65.0)] {
+        f.run("attr.set_many", json!({"auto_key": true, "edits": [{
+            "path": layer, "attr": "transform:opacity", "time": time, "value": Value::Float(value)
+        }]}));
+    }
+    let spec = query::attr_spec(&f.stage, &layer, "transform:opacity").unwrap();
+    assert_eq!(spec.keyframes[&Time(SEC)].value, Value::Float(40.0));
+    assert_eq!(spec.keyframes[&Time(2 * SEC)].value, Value::Float(65.0));
+}

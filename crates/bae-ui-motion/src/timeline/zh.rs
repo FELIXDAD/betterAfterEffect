@@ -2,6 +2,12 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Show Cache Indicators", "显示缓存指示器"),
+    ("Rectified Audio Waveforms", "调整的音频波形"),
+    ("Enable Auto-keyframe", "启用自动关键帧"),
+    ("Live Update", "实时更新"),
+    ("Use Keyframe Icons", "使用关键帧图标"),
+    ("Use Keyframe Indices", "使用关键帧索引"),
     // Accessibility labels (timeline switches, keyframes, pick whip, ruler)
     ("Parent Pick Whip", "父级关联器"),
     ("Keyframe", "关键帧"),

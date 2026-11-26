@@ -106,6 +106,7 @@ impl Default for PreviewOptions {
 /// A value being dragged in a panel, previewed by the viewer before the command runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scrub {
+    pub auto_key: bool,
     pub path: PrimPath,
     pub attr: String,
     pub value: Value,
@@ -140,6 +141,7 @@ impl Scrub {
                     &self.attr,
                     query::to_key_time(stage, p, self.time),
                     v.clone(),
+                    self.auto_key,
                 ),
             })
             .collect()
@@ -192,6 +194,9 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    /// Automatically key animatable UI value edits.
+    pub auto_key: bool,
+    pub(crate) held_viewer_time: Option<(PrimPath, Time)>,
     /// Last UI frame in which a visible timeline requested per-layer CPU timings.
     pub(crate) timing_column_frame: Option<u64>,
     pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,

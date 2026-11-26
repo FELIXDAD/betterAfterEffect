@@ -200,6 +200,22 @@ impl Columns {
         ui.painter().rect_filled(thumb, 2.0, color::ICON_DIM);
     }
 
+    pub(super) fn menu(&mut self, ui: &mut Ui) {
+        crate::common::submenu(ui, tr("Columns"), &mut |ui| {
+            for c in Column::ALL {
+                let mut on = self.visible(c);
+                let response = ui.add_enabled(
+                    c != Column::Name,
+                    egui::Checkbox::new(&mut on, tr(c.title())),
+                );
+                if response.changed() {
+                    self.toggle(c);
+                    ui.close();
+                }
+            }
+        });
+    }
+
     pub(super) fn header_controls(&mut self, ui: &Ui, row: Rect, cols: &Cols) {
         let outline = Rect::from_min_max(row.min, pos2(row.left() + cols.end, row.bottom()));
         let header = ui.interact(outline, ui.id().with("timeline_columns"), Sense::click());
@@ -243,19 +259,7 @@ impl Columns {
             }
             ui.add_enabled(false, egui::Button::new(tr("Rename This...")));
             ui.separator();
-            crate::common::submenu(ui, tr("Columns"), &mut |ui| {
-                for c in Column::ALL {
-                    let mut on = self.visible(c);
-                    let response = ui.add_enabled(
-                        c != Column::Name,
-                        egui::Checkbox::new(&mut on, tr(c.title())),
-                    );
-                    if response.changed() {
-                        self.toggle(c);
-                        ui.close();
-                    }
-                }
-            });
+            self.menu(ui);
         });
         for c in Column::ALL.into_iter().filter(|&c| cols.visible(c)) {
             let x = row.left() + cols.right(c);

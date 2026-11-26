@@ -167,7 +167,17 @@ fn menus_match_ae() {
             .collect::<Vec<_>>()
     );
     check("project.blank", PROJECT_BLANK);
-    check("project.header", PROJECT_HEADER);
+    let columns = ae["menus"]["project.header"][3]["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(columns.len(), crate::project::COLUMNS.len());
+    for (reference, col) in columns.iter().zip(crate::project::COLUMNS) {
+        assert_eq!(reference["title"], col.title);
+        assert_eq!(reference["enabled"].as_bool().unwrap_or(true), !col.fixed);
+        assert_eq!(reference["checked"].as_bool().unwrap_or(false), col.visible);
+    }
+    assert!(crate::project::ZH.contains(&("Thumbnail Transparency Grid", "缩览图透明网格")));
+    assert!(crate::project::ZH.contains(&("Columns", "列数")));
     for kind in ["comp", "footage", "folder"] {
         check(&format!("project.item.{kind}"), PROJECT_ITEM);
     }
@@ -190,13 +200,7 @@ fn every_title_has_chinese() {
             }
         }
     }
-    for menu in [
-        VIEWER_BLANK,
-        VIEWER_LAYER,
-        PROJECT_BLANK,
-        PROJECT_ITEM,
-        PROJECT_HEADER,
-    ] {
+    for menu in [VIEWER_BLANK, VIEWER_LAYER, PROJECT_BLANK, PROJECT_ITEM] {
         walk(&lines(menu), &mut missing);
     }
     for c in crate::timeline::Column::ALL {

@@ -357,7 +357,13 @@ impl CompositionViewer {
         session: &SharedSession,
         info: &CompInfo,
     ) -> Option<EvaluatedComp> {
-        let time = session.lock().time(&info.path);
+        let time = {
+            let s = session.lock();
+            s.held_viewer_time
+                .as_ref()
+                .filter(|(p, _)| p == &info.path)
+                .map_or_else(|| s.time(&info.path), |(_, t)| *t)
+        };
         live_evaluator(&mut self.eval, cx, session)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
@@ -496,7 +502,7 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
-fn checkerboard(p: &egui::Painter, r: Rect) {
+pub(crate) fn checkerboard(p: &egui::Painter, r: Rect) {
     p.rect_filled(r, 0.0, Color32::from_gray(200));
     let s = 8.0;
     let mut y = r.top();
@@ -635,7 +641,16 @@ impl Panel for CompositionViewer {
         if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
-        let time = session.lock().time(&info.path);
+        let time = {
+            let mut s = session.lock();
+            if !ui.input(|i| i.pointer.primary_down()) {
+                s.held_viewer_time = None;
+            }
+            s.held_viewer_time
+                .as_ref()
+                .filter(|(p, _)| p == &info.path)
+                .map_or_else(|| s.time(&info.path), |(_, t)| *t)
+        };
         let ppp = ui.ctx().pixels_per_point();
 
         let full = ui.available_rect_before_wrap();

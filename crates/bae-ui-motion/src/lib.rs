@@ -44,6 +44,7 @@ mod layer_panel;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
+mod panel_columns;
 mod panels;
 mod playback;
 mod prefs;
