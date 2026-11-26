@@ -291,6 +291,9 @@ pub struct Session {
     /// Expression): the Timeline focuses its field with the text selected, so
     /// typing replaces it (AE). Dropped after a second if never shown.
     pub(crate) focus_expression: Option<(PrimPath, String, Instant)>,
+    /// A project item to rename in the Project panel (the Timeline's Rename
+    /// on empty space renames its comp there, AE 26).
+    pub(crate) rename_item: Option<PrimPath>,
     /// Frames in the GPU preview cache (the timeline's green bar): comp,
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
