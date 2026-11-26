@@ -79,7 +79,7 @@ impl Cached {
 }
 
 #[derive(Default)]
-pub(super) struct Waveforms {
+pub(crate) struct Waveforms {
     files: HashMap<PathBuf, Cached>,
     worker: Option<Worker>,
 }
@@ -111,13 +111,14 @@ impl Waveforms {
         entry.peaks.as_ref().map_or(&[], |(_, levels)| levels)
     }
 
-    pub(super) fn draw(
+    pub(crate) fn draw(
         &mut self,
         ui: &Ui,
         stage: &Stage,
         layer: &PrimPath,
         axis: &TimeAxis,
         rect: Rect,
+        tint: egui::Color32,
     ) {
         let Some(file) = bae_media::audio::layer_file(stage, layer) else {
             return;
@@ -167,7 +168,7 @@ impl Waveforms {
                         egui::pos2(x - 0.5, mid - hi * height * 0.47),
                         egui::pos2(x + 0.5, mid - lo * height * 0.47 + 1.0),
                     ),
-                    color::TEXT,
+                    tint,
                 );
             }
         }

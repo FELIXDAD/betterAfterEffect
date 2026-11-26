@@ -98,6 +98,33 @@ impl Stage {
         self.revision
     }
 
+    /// Pin this composed stage, including linked projects. Call the returned
+    /// reader on a worker to materialize it without serializing the project on the UI thread.
+    pub fn snapshot_reader(&self) -> Box<dyn FnOnce() -> Result<Self> + Send> {
+        let layers: Vec<_> = self
+            .stack
+            .iter()
+            .map(|id| self.sublayers[id].snapshot_reader())
+            .collect();
+        let linked: Vec<_> = self
+            .externals
+            .iter()
+            .map(|(k, v)| (k.clone(), v.snapshot_reader()))
+            .collect();
+        Box::new(move || {
+            let mut stage = Self::from_sublayers(
+                layers
+                    .into_iter()
+                    .map(|read| read())
+                    .collect::<Result<_>>()?,
+            )?;
+            for (name, read) in linked {
+                stage.externals.insert(name, read()?);
+            }
+            Ok(stage)
+        })
+    }
+
     /// Changes since a previously observed version. A new project or an older
     /// version outside the bounded journal requires rebuilding the consumer.
     /// Tracking starts on the first read, so unopened projects pay no event-copy cost.

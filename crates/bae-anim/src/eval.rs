@@ -1184,7 +1184,7 @@ impl CompiledComp {
                     effects: layer
                         .effects
                         .iter()
-                        .map(|e| sample_effect(e, &cx))
+                        .map(|e| sample_effect(e, &cx, &layer.timing))
                         .collect(),
                     contents: sample_prims(&layer.contents, layer.fixed_contents.as_ref(), &cx),
                     text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
@@ -1552,16 +1552,30 @@ fn sample_mask(m: &CompiledMask, cx: &Cx<'_, '_>) -> EvaluatedMask {
     }
 }
 
-fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
+fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>, timing: &LayerTiming) -> EvaluatedEffect {
+    let mut params: BTreeMap<_, _> = e
+        .params
+        .iter()
+        .map(|(id, p)| (id.clone(), p.sample(cx)))
+        .collect();
+    if e.enabled
+        && e.match_name == "CC Ripple Pulse"
+        && let Some((_, level)) = e
+            .params
+            .iter()
+            .find(|(id, p)| id == "0002" && !matches!(p, Prop::Static(_)))
+    {
+        let span = params.get("0003").and_then(Value::as_f64).unwrap_or(1.0);
+        let profile = crate::effect_history::ripple_profile(cx.lt, span, |t| {
+            level.f64(&cx.at_layer_time(t, timing))
+        });
+        params.insert(crate::effect_history::HISTORY_PARAM.to_string(), profile);
+    }
     EvaluatedEffect {
         path: e.path.clone(),
         match_name: e.match_name.clone(),
         enabled: e.enabled,
-        params: e
-            .params
-            .iter()
-            .map(|(id, p)| (id.clone(), p.sample(cx)))
-            .collect(),
+        params,
         children: e.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }
@@ -1606,6 +1620,8 @@ pub struct Evaluator {
     /// Every comp of the stage (expressions can reach any comp); rebuilt after
     /// structural changes.
     comp_list: Option<Vec<PrimPath>>,
+    /// Layer pixels for `sampleImage`, filled by the renderer that shares it.
+    samples: Option<Arc<crate::ImageSamples>>,
     /// Values shown before they are committed ([`Evaluator::set_overrides`]).
     overrides: Arc<[AttrOverride]>,
 }
@@ -1613,6 +1629,17 @@ pub struct Evaluator {
 impl Evaluator {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Serves `sampleImage` from `samples` (without one it reads transparent
+    /// black). The evaluator clears it whenever the project changes.
+    pub fn set_image_samples(&mut self, samples: Option<Arc<crate::ImageSamples>>) {
+        self.samples = samples;
+    }
+
+    /// The cache set by [`Evaluator::set_image_samples`].
+    pub fn image_samples(&self) -> Option<&Arc<crate::ImageSamples>> {
+        self.samples.as_ref()
     }
 
     /// Evaluates as if these attributes had these specs, without changing the
@@ -1723,7 +1750,10 @@ impl Evaluator {
             .project
             .get_or_insert_with(|| Arc::new(project_info(stage)))
             .clone();
-        (expr::Scope::new(comps).with_project(project), id)
+        let scope = expr::Scope::new(comps)
+            .with_project(project)
+            .with_samples(self.samples.clone());
+        (scope, id)
     }
 
     fn evaluate_with_expressions(
@@ -1906,6 +1936,9 @@ impl Evaluator {
             self.comp_list = None;
         }
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 
     /// Drop every compiled comp.
@@ -1913,6 +1946,9 @@ impl Evaluator {
         self.comps.clear();
         self.comp_list = None;
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 }
 
