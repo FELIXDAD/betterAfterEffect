@@ -33,6 +33,7 @@ mod layout;
 mod look_at;
 mod menu;
 mod motion_path;
+mod motion_sketch;
 mod overlay;
 mod path_edit;
 mod pen_tool;
@@ -90,6 +91,7 @@ pub struct CompositionViewer {
     shape: Option<shape_tool::ShapeDrag>,
     /// Pen tools: the open path being drawn, a Convert Vertex drag.
     pen: pen_tool::PenState,
+    sketch: motion_sketch::SketchState,
     /// Selection, Rotation and Pan Behind tools: transform drags, marquee,
     /// selected mask vertices.
     select: select_tool::SelectState,
@@ -982,6 +984,17 @@ impl Panel for CompositionViewer {
         );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
+        // Motion Sketch: an armed capture owns the next drag.
+        let sketching = motion_sketch::frame(
+            &mut self.sketch,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &view,
+            &painter,
+        );
         let path = motion_path::frame(
             &mut self.motion_path,
             ui,
@@ -1008,7 +1021,7 @@ impl Panel for CompositionViewer {
         );
         let select_cursor = if points.owns {
             points.cursor
-        } else if path.owns || guide_busy {
+        } else if path.owns || sketching || guide_busy {
             path.cursor
         } else {
             points.cursor.or(path.cursor).or(select_tool::frame(

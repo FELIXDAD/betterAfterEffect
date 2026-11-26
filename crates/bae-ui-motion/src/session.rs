@@ -26,6 +26,17 @@ pub enum Reveal {
     Props(Vec<(PrimPath, String)>),
 }
 
+/// Window > Motion Sketch, armed by Start Capture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchArm {
+    pub layer: PrimPath,
+    /// Capture speed, percent of real time.
+    pub speed: f64,
+    /// Smoothing: how far (pixels) the recorded path may stray from the kept
+    /// keyframes.
+    pub smoothing: f64,
+}
+
 /// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
 /// it stands for one (not Contents, Transform …).
 pub fn group_prim(id: &str) -> Option<PrimPath> {
@@ -220,6 +231,9 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// When L was last pressed to reveal the audio waveform on a second press.
     pub(crate) last_l: Option<Instant>,
+    /// Motion Sketch armed (Start Capture): the next drag in the Composition
+    /// panel records this layer's position.
+    pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
     /// The footage item the Footage panel shows.
