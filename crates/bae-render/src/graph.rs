@@ -716,6 +716,7 @@ struct Builder<'a, 'f> {
     /// While planning an adjustment layer's coverage: that layer's effects
     /// apply to the backdrop, not to its own pixels.
     skip_effects_of: Option<PrimPath>,
+    native_motion_blur: bool,
     /// Other frames of the comp (effects reading other times).
     frames: Option<&'f mut dyn CompFrames>,
     /// Layers whose effects are being planned (cycle detection of layer inputs).
@@ -761,6 +762,7 @@ impl<'a, 'f> Builder<'a, 'f> {
             dedup: FxHashMap::default(),
             warnings: Vec::new(),
             skip_effects_of: None,
+            native_motion_blur: true,
             frames,
             resolving: Vec::new(),
             time_dependent: false,
@@ -784,7 +786,10 @@ impl<'a, 'f> Builder<'a, 'f> {
 }
 
 impl Builder<'_, '_> {
-    fn push(&mut self, node: Node) -> NodeId {
+    fn push(&mut self, mut node: Node) -> NodeId {
+        if !self.native_motion_blur {
+            node.key = hash_of(&("without native motion blur", node.key));
+        }
         if let Some(&id) = self.dedup.get(&node.key) {
             return id;
         }
@@ -829,6 +834,18 @@ impl Builder<'_, '_> {
         depth: usize,
         cacheable: bool,
     ) -> Result<NodeId, RenderError> {
+        self.composite_from(comp, 0, rect, scale, depth, cacheable)
+    }
+
+    fn composite_from(
+        &mut self,
+        comp: &RenderComp,
+        first_layer: usize,
+        rect: IRect,
+        scale: f64,
+        depth: usize,
+        cacheable: bool,
+    ) -> Result<NodeId, RenderError> {
         if depth > MAX_DEPTH {
             return Err(RenderError::Cycle {
                 path: comp.path.clone(),
@@ -839,13 +856,16 @@ impl Builder<'_, '_> {
         if !rect.is_empty() {
             // AE draws from the bottom of the stack (highest index) to the top;
             // contiguous 3D layers form groups drawn in depth order.
-            for segment in crate::three_d::segments(&comp.layers) {
+            for segment in crate::three_d::segments(&comp.layers[first_layer..]) {
                 let index = match segment {
-                    Segment::Group(indices) => {
+                    Segment::Group(mut indices) => {
+                        for index in &mut indices {
+                            *index += first_layer;
+                        }
                         self.group_3d(comp, &indices, rect, scale, depth, &mut ops)?;
                         continue;
                     }
-                    Segment::Layer(index) => index,
+                    Segment::Layer(index) => first_layer + index,
                 };
                 let layer = &comp.layers[index];
                 if layer.adjustment {
@@ -884,6 +904,7 @@ impl Builder<'_, '_> {
         }
         let mut h = FxHasher::default();
         "composite".hash(&mut h);
+        first_layer.hash(&mut h);
         if depth == 0 {
             // The frame's own comp is the only root: its key only has to be
             // unique in this graph, so the whole comp is not hashed per frame
@@ -1267,7 +1288,12 @@ impl Builder<'_, '_> {
         apply_matte: bool,
     ) -> Result<Option<LayerOp>, RenderError> {
         let layer = &comp.layers[index];
-        let flat = layer.matrix_3d.is_none() && layer.motion_samples.is_empty();
+        let motion_samples = if self.native_motion_blur {
+            &layer.motion_samples[..]
+        } else {
+            &[]
+        };
+        let flat = layer.matrix_3d.is_none() && motion_samples.is_empty();
         if layer.opacity <= 0.0 || (flat && !is_invertible(&layer.transform)) {
             return Ok(None);
         }
@@ -1279,7 +1305,7 @@ impl Builder<'_, '_> {
             Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
             Content::Comp(c) => c.rect(),
         };
-        let placement = placement(comp, layer, &content_rect, scale);
+        let placement = placement(comp, layer, motion_samples, &content_rect, scale);
         if let Placement::General {
             frame,
             motion: None,
@@ -1530,8 +1556,7 @@ impl Builder<'_, '_> {
                     // Motion blur: the layer, its lights and the eye at every
                     // sample.
                     let samples: Arc<[_]> = match &comp.motion_blur {
-                        Some(mb) if mb.lights.len() == layer.motion_samples.len() => layer
-                            .motion_samples
+                        Some(mb) if mb.lights.len() == motion_samples.len() => motion_samples
                             .iter()
                             .zip(&mb.lights)
                             .enumerate()
@@ -2332,7 +2357,7 @@ impl Builder<'_, '_> {
         let Some(layer) = at.layers.iter().find(|l| l.path == dep.layer) else {
             return Ok(None);
         };
-        if matches!(dep.stage, LayerStage::BeforeEffect(_)) && !layer.active {
+        if matches!(dep.stage, LayerStage::BeforeEffect { .. }) && !layer.active {
             return Ok(None);
         }
         let mut stage = dep.stage.clone();
@@ -2343,7 +2368,17 @@ impl Builder<'_, '_> {
             ));
             stage = LayerStage::Masks;
         }
-        self.layer_image(at, layer, stage, scale, depth)
+        let native = self.native_motion_blur;
+        self.native_motion_blur &= !matches!(
+            stage,
+            LayerStage::BeforeEffect {
+                native_motion_blur: false,
+                ..
+            }
+        );
+        let result = self.layer_image(at, layer, stage, scale, depth);
+        self.native_motion_blur = native;
+        result
     }
 
     /// `layer`'s pixels in its layer space at `stage` (its source, with masks,
@@ -2356,38 +2391,64 @@ impl Builder<'_, '_> {
         scale: f64,
         depth: usize,
     ) -> Result<Option<NodeId>, RenderError> {
-        let Some(content) = self.plan_content(layer, layer.time)? else {
-            return Ok(None);
-        };
-        let content_rect = match &content {
-            Content::Solid { rect, .. } | Content::Fill { rect, .. } => *rect,
-            Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
-            Content::Comp(c) => c.rect(),
+        let backdrop = layer.adjustment && matches!(stage, LayerStage::BeforeEffect { .. });
+        let (content_rect, mut node) = if backdrop {
+            let index = comp
+                .layers
+                .iter()
+                .position(|l| l.path == layer.path)
+                .expect("layer of comp");
+            let rect = comp.rect();
+            (
+                rect,
+                self.composite_from(
+                    comp,
+                    index + 1,
+                    units(&rect, scale),
+                    scale,
+                    depth + 1,
+                    false,
+                )?,
+            )
+        } else {
+            let Some(content) = self.plan_content(layer, layer.time)? else {
+                return Ok(None);
+            };
+            let content_rect = match &content {
+                Content::Solid { rect, .. } | Content::Fill { rect, .. } => *rect,
+                Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
+                Content::Comp(c) => c.rect(),
+            };
+            let roi = units(&content_rect, scale);
+            let node = match content {
+                Content::Solid { color, rect } | Content::Fill { color, rect } => self.push(Node {
+                    kind: NodeKind::Fill(FillNode { color, rect }),
+                    rect: roi,
+                    pixel_scale: scale,
+                    key: hash_of(&(
+                        "fill",
+                        color.map(f32::to_bits),
+                        rect_bits(&rect),
+                        roi,
+                        scale.to_bits(),
+                    )),
+                    cacheable: false,
+                }),
+                Content::Source(source, time) => {
+                    self.effect_source(layer, &source, time, roi, scale)
+                }
+                Content::Mix(source, frames) => {
+                    self.mix(layer, &frames, roi, scale, content_rect, |b, time| {
+                        b.effect_source(layer, &source, time, roi, scale)
+                    })
+                }
+                Content::Comp(nested) => self.composite(&nested, roi, scale, depth + 1, true)?,
+            };
+            (content_rect, node)
         };
         let roi = units(&content_rect, scale);
-        let mut node = match content {
-            Content::Solid { color, rect } | Content::Fill { color, rect } => self.push(Node {
-                kind: NodeKind::Fill(FillNode { color, rect }),
-                rect: roi,
-                pixel_scale: scale,
-                key: hash_of(&(
-                    "fill",
-                    color.map(f32::to_bits),
-                    rect_bits(&rect),
-                    roi,
-                    scale.to_bits(),
-                )),
-                cacheable: false,
-            }),
-            Content::Source(source, time) => self.effect_source(layer, &source, time, roi, scale),
-            Content::Mix(source, frames) => {
-                self.mix(layer, &frames, roi, scale, content_rect, |b, time| {
-                    b.effect_source(layer, &source, time, roi, scale)
-                })
-            }
-            Content::Comp(nested) => self.composite(&nested, roi, scale, depth + 1, true)?,
-        };
-        if stage != LayerStage::Source
+        if !backdrop
+            && stage != LayerStage::Source
             && let Some(stack) = MaskStack::new(&layer.masks)
         {
             let mask = self.mask(layer, &stack, roi, scale, true, content_rect, 1.0 / scale);
@@ -2399,7 +2460,7 @@ impl Builder<'_, '_> {
         }
         let effect_count = match stage {
             LayerStage::EffectsAndMasks => layer.effects.len(),
-            LayerStage::BeforeEffect(path) => layer
+            LayerStage::BeforeEffect { effect: path, .. } => layer
                 .effects
                 .iter()
                 .position(|e| e.path == path)
@@ -2684,14 +2745,19 @@ enum Placement {
 /// The placement of `layer` (content `content`, layer pixels) in `comp` at
 /// resolution `scale`: through the camera for 3D layers, and at every
 /// motion-blur sample unless the layer does not move during the shutter.
-fn placement(comp: &RenderComp, layer: &RenderLayer, content: &Rect, scale: f64) -> Placement {
+fn placement(
+    comp: &RenderComp,
+    layer: &RenderLayer,
+    samples: &[crate::LayerSample],
+    content: &Rect,
+    scale: f64,
+) -> Placement {
     let size = DVec2::new(f64::from(comp.width), f64::from(comp.height));
     if let Some(m) = layer.matrix_3d {
         let frame = Homography(comp.view_camera().plane_homography(&m, size));
-        let motion = (!layer.motion_samples.is_empty())
+        let motion = (!samples.is_empty())
             .then(|| {
-                layer
-                    .motion_samples
+                samples
                     .iter()
                     .enumerate()
                     .map(|(k, s)| {
@@ -2715,8 +2781,8 @@ fn placement(comp: &RenderComp, layer: &RenderLayer, content: &Rect, scale: f64)
             three_d: true,
         };
     }
-    if layer.motion_samples.len() > 1 && !crate::motion::is_static(&layer.motion_samples) {
-        let transforms: Vec<DAffine2> = layer.motion_samples.iter().map(|s| s.transform).collect();
+    if samples.len() > 1 && !crate::motion::is_static(samples) {
+        let transforms: Vec<DAffine2> = samples.iter().map(|s| s.transform).collect();
         let limit = comp.motion_blur.as_ref().map_or(128, |m| m.adaptive_limit);
         let dense = crate::motion::adaptive_samples(&transforms, content, limit, scale);
         return Placement::General {

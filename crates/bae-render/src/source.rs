@@ -44,6 +44,8 @@ pub enum ImageAlpha {
 /// bucketed); only those texels are defined.
 #[derive(Clone, Debug)]
 pub struct GpuImage {
+    /// Content identity of the producing render node, independent of the texture pool.
+    pub(crate) content_key: Option<u64>,
     /// Original channel planes of a decoded footage source.
     pub channels: Option<Arc<bae_gpu::channels::FootageChannels>>,
     /// The texture (needs `TEXTURE_BINDING`).
@@ -78,6 +80,7 @@ impl GpuImage {
     ) -> Self {
         Self {
             texture,
+            content_key: None,
             view,
             rect,
             alpha,
@@ -104,6 +107,23 @@ impl GpuImage {
     /// True when the texture belongs to the renderer's pool.
     pub fn is_pooled(&self) -> bool {
         self.lease.is_some()
+    }
+
+    /// Stable identity for derived surfaces. Untracked external textures have no key.
+    pub fn content_key(&self) -> Option<u64> {
+        use std::hash::BuildHasher;
+        Some(rustc_hash::FxBuildHasher.hash_one((
+            self.content_key?,
+            self.rect,
+            self.pixel_scale.to_bits(),
+            self.alpha,
+        )))
+    }
+
+    /// Identify a derived image by the operation, its input content and all parameters.
+    pub fn with_content_key(mut self, key: u64) -> Self {
+        self.content_key = Some(key);
+        self
     }
 
     /// Texels that hold the image: `rect` divided by `pixel_scale`, rounded up.
@@ -159,11 +179,23 @@ pub struct EncodeContext<'a> {
     /// Working texture format.
     pub format: wgpu::TextureFormat,
     pub(crate) allocator: &'a mut dyn ImageAllocator,
+    pub(crate) intermediates: Option<crate::cache::IntermediateImages<'a>>,
     pub(crate) effect_inputs: &'a [(LayerDependency, GpuImage)],
     pub(crate) effect_masks: &'a [(MaskSelect, GpuImage)],
 }
 
 impl EncodeContext<'_> {
+    /// Reads a derived GPU surface previously encoded for these inputs.
+    pub fn cached_image(&mut self, key: crate::FrameKey) -> Option<GpuImage> {
+        self.intermediates.as_mut()?.get(key)
+    }
+
+    /// Publishes the surface only if this frame is complete and submitted.
+    pub fn remember_image(&mut self, key: crate::FrameKey, image: GpuImage) {
+        if let Some(cache) = &mut self.intermediates {
+            cache.store(key, image);
+        }
+    }
     /// The first image of `layer` the current effect requested
     /// ([`crate::Effect::layer_dependencies`]). `None` when the layer has no
     /// pixels then (outside its in / out points, missing footage).
