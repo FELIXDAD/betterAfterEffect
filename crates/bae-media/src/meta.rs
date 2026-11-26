@@ -551,7 +551,10 @@ impl MediaInfo {
                 }
             }
             if let (Some(tc), Some(rate)) = (self.timecode, video.frame_rate) {
-                attrs.push(("timecode:start_frame", Value::Int(tc.to_frame_number(rate) as i64)));
+                attrs.push((
+                    "timecode:start_frame",
+                    Value::Int(tc.to_frame_number(rate) as i64),
+                ));
                 attrs.push(("timecode:drop_frame", Value::Bool(tc.drop_frame)));
             }
             let alpha = match video.alpha {

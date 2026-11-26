@@ -273,10 +273,16 @@ impl Command for ReplaceFile {
             }
         }
         tx.apply(bae_model::Op::SetValue {
-            path: p.item.clone(), attr: crate::interpret::FILE_FRAME_RATE.into(), value: stored_file_rate,
+            path: p.item.clone(),
+            attr: crate::interpret::FILE_FRAME_RATE.into(),
+            value: stored_file_rate,
         })?;
         if !p.keep_interpretation {
-            tx.apply(bae_model::Op::SetValue { path: p.item.clone(), attr: "premultiply_color".into(), value: None })?;
+            tx.apply(bae_model::Op::SetValue {
+                path: p.item.clone(),
+                attr: "premultiply_color".into(),
+                value: None,
+            })?;
         }
         if !attrs.contains_key("kind") {
             set(tx, &p.item, "kind", Value::Enum("footage".into()))?;

@@ -450,8 +450,13 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
     let mut probed = probe(&[path], &defaults);
     if let Some(file) = probed.files.pop() {
-        let keep = crate::prefs::current(cx.resources).str("import.footage_interpretation_on_replace") == "remember";
-        cx.invoke_with("item.replace_file", json!({ "item": item, "file": file, "keep_interpretation": keep }));
+        let keep = crate::prefs::current(cx.resources)
+            .str("import.footage_interpretation_on_replace")
+            == "remember";
+        cx.invoke_with(
+            "item.replace_file",
+            json!({ "item": item, "file": file, "keep_interpretation": keep }),
+        );
     }
     verify::report(cx, tr("Replace Footage File"), probed);
 }
