@@ -363,8 +363,12 @@ const LAYER: &[AttrDef] = &[
     boolean("light:casts_shadows", false).kinds(&["light"]),
     float("light:shadow_darkness", 100.0).kinds(&["light"]),
     float("light:shadow_diffusion", 0.0).kinds(&["light"]),
-    boolean("material:casts_shadows", false).kinds(VISUAL),
-    boolean("material:accepts_shadows", true).kinds(VISUAL),
+    int("material:casts_shadows", 0)
+        .kinds(VISUAL)
+        .doc("AE's Casts Shadows: 0 Off, 1 On, 2 Only (casts, not drawn)."),
+    int("material:accepts_shadows", 1)
+        .kinds(VISUAL)
+        .doc("AE's Accepts Shadows: 0 Off, 1 On, 2 Only (shows only the shadows on it)."),
     boolean("material:accepts_lights", true).kinds(VISUAL),
     // Material Options reflectance (AE-CMP-441), percent.
     float("material:ambient", 100.0).kinds(VISUAL),

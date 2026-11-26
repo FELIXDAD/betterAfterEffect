@@ -355,7 +355,14 @@ fn shadow(o: u32, p: vec3<f32>, l0: vec4<f32>, l1: vec4<f32>, l4: vec4<f32>, pix
 
 // AE's Classic 3D lighting (AE-CMP-436, light.rs `shade`) of straight colour
 // `c` at input texel `u`, from the lighting record at `o`.
-fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> vec3<f32> {
+struct Shaded {
+    color: vec3<f32>,
+    // The share of the shadow-casting lights' diffuse light the layer's
+    // shadows take away (Accepts Shadows: Only shows just that).
+    shadow: f32,
+}
+
+fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> Shaded {
     let p = lighting[o].xyz * u.x + lighting[o + 1u].xyz * u.y + lighting[o + 2u].xyz;
     let header = lighting[o + 3u];
     let eye = lighting[o + 4u];
@@ -367,6 +374,8 @@ fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> vec3<f32> {
     var amb = vec3<f32>(0.0);
     var diff = vec3<f32>(0.0);
     var spec = vec3<f32>(0.0);
+    var free = 0.0;
+    var kept = 0.0;
     let count = u32(header.w);
     for (var i = 0u; i < count; i++) {
         let b = o + 7u + 5u * i;
@@ -403,13 +412,21 @@ fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> vec3<f32> {
             atten *= step_smooth(l3.x, l3.y, dot(l1.xyz, -to_light));
         }
         var k = l2.rgb * atten;
-        if l4.x > 0.0 { k *= shadow(o, p, l0, l1, l4, pixel); }
+        if l4.x > 0.0 {
+            let full = dot(k * nl, vec3<f32>(0.2126, 0.7152, 0.0722));
+            k *= shadow(o, p, l0, l1, l4, pixel);
+            free += full;
+            kept += dot(k * nl, vec3<f32>(0.2126, 0.7152, 0.0722));
+        }
         diff += k * nl;
         let nh = max(dot(n, normalize(to_light + v)), 1e-8);
         spec += k * select(pow(nh, mat.w), 1.0, mat.w <= 0.0);
     }
     let spec_color = mix(vec3<f32>(1.0), c, lighting[o + 6u].x);
-    return max(c * (mat.x * amb + mat.y * diff) + mat.z * spec_color * spec, vec3<f32>(0.0));
+    var out: Shaded;
+    out.color = max(c * (mat.x * amb + mat.y * diff) + mat.z * spec_color * spec, vec3<f32>(0.0));
+    out.shadow = select(0.0, clamp(1.0 - kept / free, 0.0, 1.0), free > 0.0);
+    return out;
 }
 
 // `d` is draw `di`, loaded once by the caller (motion blur calls this per
@@ -490,10 +507,17 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
         src = vec4<f32>(d.color.rgb * d.color.a, d.color.a);
     }
     if lit && src.a > 0.0 {
-        var c = shade(d.extra.w, u, src.rgb / src.a);
-        if (flags & FLAG_CLAMP) != 0u { c = min(c, vec3<f32>(1.0)); }
-        src = vec4<f32>(c * src.a, src.a);
-        light = c;
+        let shaded = shade(d.extra.w, u, src.rgb / src.a);
+        if lighting[d.extra.w + 6u].w > 0.5 {
+            // Accepts Shadows: Only: just the darkness of the shadows on it.
+            src = vec4<f32>(0.0, 0.0, 0.0, src.a * shaded.shadow);
+            light = vec3<f32>(0.0);
+        } else {
+            var c = shaded.color;
+            if (flags & FLAG_CLAMP) != 0u { c = min(c, vec3<f32>(1.0)); }
+            src = vec4<f32>(c * src.a, src.a);
+            light = c;
+        }
     }
 
     // Layer masks (AE-CMP-038): the combined mask, or one mask's coverage with

@@ -26,7 +26,8 @@
 //! A comp without enabled lights, a 2D layer, Accepts Lights off, or a layer
 //! no light reaches (lights with the Adjustment Layer switch light only the
 //! layers below them): unlit.
-//! Shadows are not rendered yet (casts / accepts shadows are data only).
+//! Shadows: casters in the same 3D group, tested per pixel (`shadow` in
+//! `composite.wgsl`).
 
 use std::sync::Arc;
 
@@ -209,7 +210,9 @@ impl Lighting {
         ]);
         // Casters are counted after packing (missing images are skipped).
         let header = out.len();
-        out.push([mat.metal / 100.0, 0.0, 0.0, 0.0]);
+        // w: Accepts Shadows Only (the layer shows only the shadows on it).
+        let shadows_only = f32::from(u8::from(mat.accepts_shadows == ShadowMode::Only));
+        out.push([mat.metal / 100.0, 0.0, 0.0, shadows_only]);
         for l in self.lights.iter() {
             let kind = match l.kind {
                 LightKind::Ambient | LightKind::Environment => 0.0,

@@ -110,6 +110,8 @@ pub struct EvaluatedLayer {
     pub text_path: Option<TextPathOptions>,
     pub camera: Option<CameraState>,
     pub light: Option<LightState>,
+    /// 3D layers' Material Options.
+    pub material: Option<MaterialState>,
     /// Other layers this layer's expressions read at this time (`thisComp.layer(…)`,
     /// `parent`, `comp(…)`), so caches can invalidate it when they change.
     pub depends_on: Vec<PrimPath>,
@@ -286,6 +288,29 @@ impl EvaluatedPrim {
     pub fn f64(&self, attr: &str) -> Option<f64> {
         self.attrs.get(attr).and_then(Value::as_f64)
     }
+}
+
+/// A 3D layer's Material Options, evaluated (keyframe easing and expressions
+/// apply).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct MaterialState {
+    /// AE's 0 Off, 1 On, 2 Only.
+    pub casts_shadows: u8,
+    /// Percent.
+    pub light_transmission: f64,
+    /// AE's 0 Off, 1 On, 2 Only.
+    pub accepts_shadows: u8,
+    pub accepts_lights: bool,
+    /// Percent.
+    pub ambient: f64,
+    /// Percent.
+    pub diffuse: f64,
+    /// Percent.
+    pub specular_intensity: f64,
+    /// Percent.
+    pub specular_shininess: f64,
+    /// Percent.
+    pub metal: f64,
 }
 
 /// Camera layer state (AE-ANI-009/022).

@@ -808,8 +808,8 @@ fn compile_layer(
         highlight_saturation: p(cam::HIGHLIGHT_SATURATION, Value::Float(0.0)),
     });
     let mut options: Vec<(&'static str, Prop)> = [
-        ("material:casts_shadows", Value::Bool(false)),
-        ("material:accepts_shadows", Value::Bool(true)),
+        ("material:casts_shadows", Value::Int(0)),
+        ("material:accepts_shadows", Value::Int(1)),
         ("material:accepts_lights", Value::Bool(true)),
         ("material:ambient", Value::Float(100.0)),
         ("material:diffuse", Value::Float(50.0)),
@@ -1238,6 +1238,7 @@ impl CompiledComp {
                     }),
                     camera: None,
                     light: None,
+                    material: None,
                     depends_on: Vec::new(),
                 }
             })
@@ -1270,6 +1271,39 @@ impl CompiledComp {
             };
             let wm = out[i].world_matrix;
             let poi = layer.transform.point_of_interest.vec3(&cx);
+            if out[i].switches.three_d {
+                let opt = |attr: &str| {
+                    layer
+                        .options
+                        .iter()
+                        .find(|(n, _)| *n == attr)
+                        .map(|(_, p)| p.sample(&cx))
+                };
+                let percent = |attr: &str, default: f64| {
+                    opt(attr).and_then(|v| v.as_f64()).unwrap_or(default)
+                };
+                // Older projects stored the shadow switches as booleans.
+                let mode = |attr: &str, default: u8| match opt(attr) {
+                    Some(Value::Bool(on)) => u8::from(on),
+                    Some(v) => v
+                        .as_f64()
+                        .map_or(default, |n| n.round().clamp(0.0, 2.0) as u8),
+                    None => default,
+                };
+                out[i].material = Some(crate::evaluated::MaterialState {
+                    casts_shadows: mode("material:casts_shadows", 0),
+                    light_transmission: percent("material:light_transmission", 0.0),
+                    accepts_shadows: mode("material:accepts_shadows", 1),
+                    accepts_lights: opt("material:accepts_lights")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true),
+                    ambient: percent("material:ambient", 100.0),
+                    diffuse: percent("material:diffuse", 50.0),
+                    specular_intensity: percent("material:specular_intensity", 50.0),
+                    specular_shininess: percent("material:specular_shininess", 5.0),
+                    metal: percent("material:metal", 100.0),
+                });
+            }
             if let Some(cm) = &layer.camera {
                 out[i].camera = Some(CameraState {
                     two_node: layer.auto_orient == AutoOrient::Towards,
@@ -2182,6 +2216,7 @@ impl CompiledLayer {
         if let Some(c) = &self.camera {
             all.extend(c.props());
         }
+        all.extend(self.options.iter().map(|(_, p)| p));
         if let Some(t) = &self.text_path {
             all.extend([&t.first_margin, &t.last_margin]);
         }
@@ -2244,6 +2279,21 @@ impl CompiledLayer {
                 .camera
                 .as_ref()
                 .is_some_and(|c| c.props().iter().any(|p| p.has_expression()))
+            || self.light.as_ref().is_some_and(|l| {
+                [
+                    &l.intensity,
+                    &l.color,
+                    &l.cone_angle,
+                    &l.cone_feather,
+                    &l.radius,
+                    &l.falloff_distance,
+                    &l.shadow_darkness,
+                    &l.shadow_diffusion,
+                ]
+                .iter()
+                .any(|p| p.has_expression())
+            })
+            || self.options.iter().any(|(_, p)| p.has_expression())
     }
 
     /// Source size (footage, solid or pre-comp), for `width` / `height` in expressions.

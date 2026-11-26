@@ -886,6 +886,10 @@ impl Builder<'_, '_> {
             }
         }
         attach_shadows(comp, &mut planned);
+        // Casts Shadows: Only: a caster that is not drawn itself.
+        planned.retain(|(index, _)| {
+            comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
+        });
         let drawn = Self::depth_order_3d(comp, planned);
         for (index, op) in drawn {
             let op = self.depth_of_field(comp, index, op, canvas, scale, depth);

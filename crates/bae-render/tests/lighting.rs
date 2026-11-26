@@ -290,12 +290,15 @@ fn evaluator_passes_lights_and_materials() {
     ] {
         b.set(&layer, attr, Value::Float(v)).unwrap();
     }
+    b.expression(&layer, "material:metal", "25").unwrap();
     let stage = b.into_stage();
     let mut eval = AnimEvaluator::new(None);
     let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
     assert_eq!(rc.lights.len(), 1);
     let a = rc.layers.iter().find(|l| l.path == layer).unwrap();
     assert_eq!(a.material.diffuse, 100.0);
+    // The renderer takes the evaluated options: expressions apply.
+    assert_eq!(a.material.metal, 25.0);
     let mut r = Renderer::new(gpu);
     let img = render(&mut r, &rc);
     // AE `pt_near`: straight ahead 255, the corner 148 (Lambert).
@@ -442,4 +445,34 @@ fn shadow_switches() {
     flat.transform = DAffine2::IDENTITY;
     c.layers.insert(1, flat);
     assert_eq!(render(&mut r, &c).px(185, 185), lit);
+}
+
+/// Casts Shadows: Only casts without being drawn; Accepts Shadows: Only shows
+/// just the shadows falling on the layer (AE-CMP-440).
+#[test]
+fn shadow_only_modes() {
+    use bae_render::light::ShadowMode;
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let normal = render(&mut r, &shadow_scene(0.0, 100.0, 0.0));
+    // Where the caster is drawn, and a lit corner of the receiver.
+    let on_caster = normal.px(100, 100);
+    assert!(on_caster[0] > on_caster[1], "caster colour: {on_caster:?}");
+    let corner = normal.px(10, 190);
+    assert_eq!(corner[3], 255);
+    let mut c = shadow_scene(0.0, 100.0, 0.0);
+    c.layers[0].material.casts_shadows = ShadowMode::Only;
+    let only_casts = render(&mut r, &c);
+    assert_ne!(
+        only_casts.px(100, 100),
+        on_caster,
+        "the caster is not drawn"
+    );
+    assert_eq!(only_casts.px(185, 185), [0, 0, 0, 255], "it still casts");
+    let mut c = shadow_scene(0.0, 100.0, 0.0);
+    c.layers[1].material.accepts_shadows = ShadowMode::Only;
+    let only_shadows = render(&mut r, &c);
+    let shadow = only_shadows.px(185, 185);
+    assert!(shadow[3] > 240 && shadow[0] < 8, "the shadow: {shadow:?}");
+    assert!(only_shadows.px(10, 190)[3] < 8, "no receiver where lit");
 }
