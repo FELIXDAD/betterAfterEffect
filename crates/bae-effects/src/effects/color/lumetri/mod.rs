@@ -2,7 +2,10 @@ mod definition;
 mod menus;
 
 use crate::blur::{self, Edge};
-use crate::effects::{image_grid, lut::LutCache};
+use crate::effects::{
+    image_grid,
+    lut::{LutCache, LutSource},
+};
 use crate::gpu::{self, Resource, UniformWriter};
 use crate::{Builtin, EffectTarget, TargetEffect, params::Params, rust_builtin};
 use bae_gpu::wgpu;
@@ -100,7 +103,7 @@ pub fn prepare_lumetri_lut(
             wgpu::TextureFormat::Rgba16Float,
             wgpu::TextureFormat::Rgba32Float,
         ] {
-            LUTS.prepare(gpu, format, &bytes)
+            LUTS.prepare(gpu, format, LutSource::File(&bytes))
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -451,6 +454,37 @@ impl TargetEffect for Lumetri {
             image_grid::layer_rect(p)
         };
         let input_grid = image_grid::pixel_rect(input.rect, 1. / grid);
+        if self.def.match_name == "CS Vignette" {
+            let amount = (-v.f(1) / 100.).clamp(-5., 5.);
+            if amount == 0. {
+                return Ok(input.clone());
+            }
+            let mut u = UniformWriter::with_size(CHROMA_OFFSET + CHROMA_GRID);
+            vignette_curve(&mut u, amount);
+            let center = match p.value(3) {
+                Some(Value::Vec2(xy)) => xy.map(|a| (a * p.scale) as f32),
+                _ => [
+                    (bounds.x0 + bounds.x1) as f32 * 0.5,
+                    (bounds.y0 + bounds.y1) as f32 * 0.5,
+                ],
+            };
+            let dx = (center[0] - 0.5 * (bounds.x0 + bounds.x1) as f32).round() as i32;
+            let dy = (center[1] - 0.5 * (bounds.y0 + bounds.y1) as f32).round() as i32;
+            u.u32(40, u32::from(p.float))
+                .u32(44, 8 | 256)
+                .i32s(
+                    48,
+                    &[
+                        bounds.x0 + dx,
+                        bounds.y0 + dy,
+                        bounds.x1 + dx,
+                        bounds.y1 + dy,
+                    ],
+                )
+                .f32(64, (v.f(5) * 0.01) as f32)
+                .f32s(224, &[amount as f32, (1. - v.f(2) / 120.) as f32, 0., 1.]);
+            return render_pass(target, input, roi, grid, false, u, None);
+        }
         let secondary_read = secondary_roi(v, roi).intersect(&input_grid);
         let read = secondary_read
             .inflate(sharpen_radius(v.f(29)) * i32::from(v.b(23)))
@@ -458,7 +492,7 @@ impl TargetEffect for Lumetri {
         let mut image = input.clone();
         if v.b(3) {
             if let Some(data) = LumetriLut::Input.bytes(p) {
-                image = LUTS.apply(target, p, &image, read, data, 1.)?;
+                image = LUTS.apply(target, p, &image, read, LutSource::File(data), 1.)?;
             }
             if [7, 8, 11, 12, 13, 14, 15, 16]
                 .iter()
@@ -486,7 +520,14 @@ impl TargetEffect for Lumetri {
         if v.b(23)
             && let Some(data) = LumetriLut::Look.bytes(p)
         {
-            image = LUTS.apply(target, p, &image, read, data, (v.f(26) * 0.01) as f32)?;
+            image = LUTS.apply(
+                target,
+                p,
+                &image,
+                read,
+                LutSource::File(data),
+                (v.f(26) * 0.01) as f32,
+            )?;
         }
         let creative = v.b(23)
             && ([28, 29, 30].iter().any(|&id| v.f(id) != 0.)
@@ -515,10 +556,7 @@ impl TargetEffect for Lumetri {
         let mut u = UniformWriter::with_size(GRADING_BYTES);
         let active = if has_curves { curves(v, &mut u) } else { 0 };
         if vignette {
-            let row = (v.f(51) * 2. + 10.).clamp(0., 19.) as usize;
-            let at = SPLIT_OFFSET - 512;
-            u.bytes[at..at + 512]
-                .copy_from_slice(&include_bytes!("vignette.bin")[row * 256..row * 256 + 512]);
+            vignette_curve(&mut u, v.f(51));
         }
         if creative {
             let at = HEADER + CURVE_BYTES;
@@ -625,4 +663,58 @@ impl TargetEffect for Lumetri {
         u.u32(44, flags);
         render_pass(target, &image, roi, grid, false, u, mask.as_ref())
     }
+}
+
+fn vignette_curve(u: &mut UniformWriter, amount: f64) {
+    let row = (amount * 2. + 10.).clamp(0., 19.) as usize;
+    let at = SPLIT_OFFSET - 512;
+    u.bytes[at..at + 512]
+        .copy_from_slice(&include_bytes!("vignette.bin")[row * 256..row * 256 + 512]);
+}
+pub(crate) fn cc_vignette() -> Builtin {
+    let mut b = crate::catalog::DefBuilder::new("CS Vignette", "CC Vignette", "Stylize");
+    b = b.slider(
+        1,
+        "Amount",
+        "Amount",
+        100.0,
+        [-1000.0, 1000.0],
+        [-1000.0, 1000.0],
+        2,
+        "none",
+    );
+    b = b.slider(
+        2,
+        "Angle of View",
+        "Angle of View",
+        45.0,
+        [0.0, 120.0],
+        [0.0, 120.0],
+        2,
+        "none",
+    );
+    b.push(
+        3,
+        "Center",
+        "Center",
+        bae_model::ParamKind::Point,
+        Some(Value::Vec2([320.0, 180.0])),
+    );
+    b = b.slider(
+        5,
+        "Pin Highlights",
+        "Pin Highlights",
+        0.0,
+        [0.0, 100.0],
+        [0.0, 100.0],
+        2,
+        "none",
+    );
+    let (def, labels) = b.reference_points().build();
+    rust_builtin(
+        (Arc::new(Lumetri { def }), labels),
+        "cc-vignette",
+        "CC Vignette",
+        &["晕影", "vignette"],
+    )
 }

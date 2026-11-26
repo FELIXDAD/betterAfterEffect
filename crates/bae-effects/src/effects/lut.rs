@@ -34,6 +34,7 @@ pub(crate) fn builtin() -> Builtin {
             Arc::new(ApplyLut {
                 def,
                 cache: LutCache::default(),
+                ocio: None,
             }),
             zh,
         ),
@@ -47,16 +48,30 @@ pub(crate) fn builtin() -> Builtin {
 struct ApplyLut {
     def: EffectDef,
     cache: LutCache,
+    ocio: Option<crate::categories::color::ocio::Operation>,
 }
 
 #[derive(Debug, Default)]
-pub(super) struct LutCache(Mutex<VecDeque<Arc<Prepared>>>);
+pub(super) struct LutCache(Mutex<VecDeque<CacheEntry>>);
+
+type Processor = (crate::categories::color::ocio::Operation, [i64; 9]);
+
+pub(super) enum LutSource<'a> {
+    File(&'a [u8]),
+    Ocio(&'a [u8], Processor),
+}
 
 #[derive(Debug)]
-pub(super) struct Prepared {
+struct CacheEntry {
     device: wgpu::Device,
     format: wgpu::TextureFormat,
     data: Vec<u8>,
+    processor: Option<Processor>,
+    prepared: Option<Arc<Prepared>>,
+}
+
+#[derive(Debug)]
+pub(super) struct Prepared {
     kernel: Arc<Kernel>,
     values: Vec<u8>,
     views: Vec<wgpu::TextureView>,
@@ -66,11 +81,9 @@ impl Prepared {
     fn new(
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
-        data: &[u8],
+        transform: bae_color::ColorTransform,
     ) -> Result<Self, RenderError> {
-        let snippet = bae_color::lutfile::from_embedded(data)
-            .map_err(|e| RenderError::Other(e.to_string()))?
-            .to_wgsl("lut");
+        let snippet = transform.to_wgsl("lut");
         let values = snippet.params_bytes();
         let key = KernelKey {
             owner: format!("bae.effects/lut/{}", snippet.key).into(),
@@ -155,14 +168,22 @@ impl Prepared {
             views.push(texture.create_view(&Default::default()));
         }
         Ok(Self {
-            device: gpu.device().clone(),
-            format,
-            data: data.into(),
             kernel,
             values,
             views,
         })
     }
+}
+
+pub(crate) fn ocio_effect(
+    def: EffectDef,
+    op: crate::categories::color::ocio::Operation,
+) -> Arc<dyn TargetEffect> {
+    Arc::new(ApplyLut {
+        def,
+        cache: LutCache::default(),
+        ocio: Some(op),
+    })
 }
 
 impl Effect for ApplyLut {
@@ -187,36 +208,69 @@ impl TargetEffect for ApplyLut {
         input: &GpuImage,
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        let Some(Value::Bytes(data)) = p.value(1) else {
-            return Ok(input.clone());
+        let id = self.ocio.map_or(1, |op| op.data_id());
+        let data = match p.value(id) {
+            Some(Value::Bytes(bytes)) => bytes.as_slice(),
+            _ => &[],
         };
-        self.cache.apply(target, p, input, roi, data, 1.)
+        let source = match self.ocio {
+            Some(op) => LutSource::Ocio(data, (op, op.selection(&self.def, p))),
+            None => LutSource::File(data),
+        };
+        self.cache.apply(target, p, input, roi, source, 1.)
     }
 }
 
 impl LutCache {
-    /// Builds the file-dependent pipeline and textures outside the cache lock.
+    /// Build the transform outside the lock. An identity transform needs no GPU pass.
     pub(super) fn prepare(
         &self,
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
-        data: &[u8],
-    ) -> Result<Arc<Prepared>, RenderError> {
-        let matches =
-            |l: &&Arc<Prepared>| &l.device == gpu.device() && l.format == format && l.data == data;
-        if let Some(entry) = self.0.lock().iter().find(matches) {
-            return Ok(entry.clone());
+        source: LutSource<'_>,
+    ) -> Result<Option<Arc<Prepared>>, RenderError> {
+        let (data, processor) = match source {
+            LutSource::File(data) => (data, None),
+            LutSource::Ocio(data, processor) => (data, Some(processor)),
+        };
+        if data.is_empty() && processor.is_none_or(|(op, _)| op.data_id() != 0) {
+            return Ok(None);
         }
-        let prepared = Arc::new(Prepared::new(gpu, format, data)?);
+        let matches = |entry: &&CacheEntry| {
+            &entry.device == gpu.device()
+                && entry.format == format
+                && entry.data == data
+                && entry.processor == processor
+        };
+        if let Some(entry) = self.0.lock().iter().find(matches) {
+            return Ok(entry.prepared.clone());
+        }
+        let transform = match processor {
+            Some((op, selection)) => op.transform(data, selection)?,
+            None => bae_color::lutfile::from_embedded(data)
+                .map_err(|e| RenderError::Other(e.to_string()))?,
+        };
+        let prepared = if transform.is_identity() {
+            None
+        } else {
+            Some(Arc::new(Prepared::new(gpu, format, transform)?))
+        };
+        let candidate = CacheEntry {
+            device: gpu.device().clone(),
+            format,
+            data: data.into(),
+            processor,
+            prepared: prepared.clone(),
+        };
         let mut cache = self.0.lock();
         if let Some(entry) = cache.iter().find(matches) {
-            return Ok(entry.clone());
+            return Ok(entry.prepared.clone());
         }
         // Two project work formats for each of the two Lumetri slots.
         if cache.len() == 4 {
             cache.pop_front();
         }
-        cache.push_back(prepared.clone());
+        cache.push_back(candidate);
         Ok(prepared)
     }
 
@@ -226,13 +280,15 @@ impl LutCache {
         p: &EffectParams<'_>,
         input: &GpuImage,
         roi: IRect,
-        data: &[u8],
+        source: LutSource<'_>,
         intensity: f32,
     ) -> Result<GpuImage, RenderError> {
-        if data.is_empty() || roi.is_empty() || intensity == 0. {
+        if roi.is_empty() || intensity == 0. {
             return Ok(input.clone());
         }
-        let lut = self.prepare(target.gpu(), target.format(), data)?;
+        let Some(lut) = self.prepare(target.gpu(), target.format(), source)? else {
+            return Ok(input.clone());
+        };
         let grid = image_grid::grid_scale(p, input);
         let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let rt = gpu::runtime(target.gpu());
