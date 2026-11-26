@@ -33,7 +33,8 @@ pub(crate) struct ViewOptions {
     pub snap_grid: bool,
     pub proportional: bool,
     pub safe: bool,
-    /// View ▸ Show Layer Controls (Cmd/Ctrl+Shift+H): boxes, handles, paths.
+    /// View ▸ Show Layer Controls (Cmd/Ctrl+Shift+H): off hides every layer
+    /// control View Options shows (handles, masks, motion paths …).
     pub layer_controls: bool,
     /// The bar's Toggle Mask and Shape Path Visibility: mask and shape paths
     /// are drawn (and their vertices can be picked).

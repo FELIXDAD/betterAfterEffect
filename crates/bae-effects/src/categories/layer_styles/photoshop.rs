@@ -145,6 +145,12 @@ impl Photoshop {
             pillow: bevel && p.popup(6) == 2,
             mode: 2,
             shadow_mode: 2,
+            bevel_style: 2,
+            technique: 1,
+            width: 0.,
+            noise: 0.,
+            jitter: 0.,
+            knockout: false,
         }
     }
 }
@@ -178,7 +184,13 @@ impl TargetEffect for Photoshop {
         input: &GpuImage,
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        self.shading(p)
-            .encode(target, Params::new(&self.def, p), input, input, roi)
+        self.shading(p).encode(
+            target,
+            Params::new(&self.def, p),
+            input,
+            input,
+            roi,
+            Default::default(),
+        )
     }
 }

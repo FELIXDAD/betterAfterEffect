@@ -48,6 +48,15 @@ fn tools_follow_the_preferences() {
     let mut h = H::new();
     let mut p = bae_prefs::Preferences::default();
     p.set(bae_prefs::keys::CENTER_SHAPE_ANCHOR, true);
+    p.set("composition.default_position_separate_dimensions", true);
+    p.set(
+        "composition.synthetic_layers_duration_mode",
+        "fixed_duration",
+    );
+    p.set(
+        "composition.synthetic_layers_duration_timecode",
+        "0:00:00:08",
+    );
     p.set("appearance.cycle_mask_colors", false);
     p.set(bae_prefs::keys::PATH_POINT_SIZE, 9);
     h.resources
@@ -63,6 +72,16 @@ fn tools_follow_the_preferences() {
     assert_eq!(one(&r, "shape.add")["center_anchor"], true);
     h.apply(&r);
     let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let prim = h.stage.prim(&layer).unwrap();
+    assert_eq!(
+        query::static_value(&prim, bae_motion::dimensions::COMPONENTS[0]),
+        Some(Value::Float(200.0))
+    );
+    let info = query::comp_info(&h.stage, &h.comp).unwrap();
+    assert_eq!(
+        query::static_value(&prim, "out_point"),
+        Some(Value::Time(info.frame_rate.frame_to_time(8)))
+    );
     assert!(close3(
         h.v3(&layer, "transform:position"),
         [200.0, 100.0, 0.0]

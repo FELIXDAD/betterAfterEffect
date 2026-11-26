@@ -416,6 +416,11 @@ fn run(
             .and_then(|p| ExportFormat::from_path(p))
             .unwrap_or_default(),
     };
+    // QuickTime movies (ProRes, mov-*) are written with AVFoundation: say so
+    // before rendering anything elsewhere.
+    if format.is_quicktime() && !cfg!(target_os = "macos") {
+        anyhow::bail!("{} export needs macOS", format.name());
+    }
     let out_pattern = m.get_one::<PathBuf>("out").cloned().unwrap_or_else(|| {
         PathBuf::from(if sequence && format.is_image() {
             format!("{}_####.{}", comp.name(), format.extension())

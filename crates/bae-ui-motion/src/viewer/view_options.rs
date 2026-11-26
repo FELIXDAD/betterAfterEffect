@@ -167,6 +167,36 @@ impl PanelBackground {
 }
 
 /// The session's view options.
+impl LayerControls {
+    /// Nothing shown (View ▸ Show Layer Controls off); the pixel aspect
+    /// correction is not a layer control and stays.
+    pub(crate) fn hidden(self) -> Self {
+        LayerControls {
+            handles: false,
+            masks: false,
+            mask_feather: false,
+            effect_controls: false,
+            keyframes: false,
+            motion_paths: false,
+            tangents: false,
+            gizmo_3d: false,
+            cameras: Wireframes::Off,
+            lights: Wireframes::Off,
+            pixel_aspect: self.pixel_aspect,
+        }
+    }
+}
+
+/// The layer controls the viewer draws: View Options, all off while View ▸
+/// Show Layer Controls is off.
+pub(crate) fn shown_controls(s: &crate::session::Session) -> LayerControls {
+    if s.view_options.layer_controls {
+        s.layer_controls
+    } else {
+        s.layer_controls.hidden()
+    }
+}
+
 pub(crate) fn layer_controls(resources: &Resources) -> LayerControls {
     common::session(resources).lock().layer_controls
 }

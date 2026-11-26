@@ -152,6 +152,13 @@ impl Group {
 }
 
 impl Tool {
+    pub(crate) fn is_layer_paint(self) -> bool {
+        matches!(
+            self,
+            Self::Brush | Self::CloneStamp | Self::Eraser | Self::RotoBrush | Self::RefineEdge
+        )
+    }
+
     pub fn group(self) -> Group {
         Group::ALL
             .into_iter()
@@ -823,6 +830,11 @@ pub struct ToolOptions {
     pub creates_mask: bool,
     /// Snapping (Selection, Rotation, Pan Behind, shape and pen tools).
     pub snapping: bool,
+    /// Snap to edges extended beyond layer bounds (AE, off by default).
+    pub snap_edges: bool,
+    /// Snap to features inside collapsed compositions and text layers (AE,
+    /// on by default).
+    pub snap_features: bool,
     /// Type and paint tools: open the Character / Paragraph (Paint / Brushes) panels.
     pub auto_open_panels: bool,
     pub axis_mode: AxisMode,
@@ -854,6 +866,8 @@ impl Default for ToolOptions {
             roto_bezier: false,
             creates_mask: false,
             snapping: false,
+            snap_edges: false,
+            snap_features: true,
             auto_open_panels: true,
             axis_mode: AxisMode::Local,
             gizmo: GizmoMode::Position,
@@ -972,12 +986,17 @@ impl ToolState {
         }
     }
 
-    fn apply(&self, shortcut: Shortcut) -> Tool {
+    fn apply(&self, shortcut: Shortcut, toggle_pen: bool) -> Tool {
         match shortcut {
             Shortcut::Tool(t) => t,
             Shortcut::Group { group, cycle } => {
                 if cycle && self.current.group() == group {
-                    self.next_in_group(group, false)
+                    self.next_in_group(group, group == Group::Pen && !toggle_pen)
+                } else if group == Group::Pen
+                    && toggle_pen
+                    && !group.cycle().contains(&self.shown(group))
+                {
+                    Tool::Pen
                 } else {
                     self.shown(group)
                 }
@@ -1005,7 +1024,7 @@ impl ToolState {
     }
 
     /// Run a tool shortcut (`motion.tool.*`). Returns false for other actions.
-    pub fn shortcut(&mut self, action: &str) -> bool {
+    pub fn shortcut(&mut self, action: &str, toggle_pen: bool) -> bool {
         let Some((_, _, _, what)) = SHORTCUTS.iter().find(|(id, ..)| *id == action) else {
             return false;
         };
@@ -1018,7 +1037,7 @@ impl ToolState {
             return true;
         }
         let previous = self.momentary.as_ref().map_or(self.current, |m| m.previous);
-        let tool = self.apply(*what);
+        let tool = self.apply(*what, toggle_pen);
         self.set(tool);
         self.momentary = Some(Momentary {
             action: action.to_owned(),
@@ -1167,7 +1186,10 @@ impl ActionHandler for ToolActions {
             t.free_transform_request = true;
             return true;
         }
-        shared(cx.resources).lock().shortcut(&inv.id)
+        let toggle_pen = !matches!(inv.id.as_str(), ids::PEN | ids::PEN_CYCLE)
+            || crate::prefs::current(cx.resources)
+                .bool("composition.pen_shortcut_toggles_mask_feather");
+        shared(cx.resources).lock().shortcut(&inv.id, toggle_pen)
     }
 }
 
@@ -1256,6 +1278,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Bezier Path", "贝塞尔曲线路径"),
     ("RotoBezier", "RotoBezier"),
     ("Snapping", "对齐"),
+    (
+        "Snap to edges extended beyond layer bounds",
+        "沿扩展到图层边界以外的边缘对齐",
+    ),
+    (
+        "Snap to features inside collapsed compositions and text layers",
+        "对齐并显示折叠合成和文本图层内的特性",
+    ),
     ("Auto-Open Panels", "自动打开面板"),
     ("Local Axis Mode", "本地轴模式"),
     ("World Axis Mode", "世界轴模式"),
