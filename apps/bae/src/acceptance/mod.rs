@@ -21,8 +21,11 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_preferences;
+mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
+mod camera_preferences;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
@@ -35,6 +38,7 @@ mod i18n_retest;
 #[cfg(target_os = "macos")]
 mod i18n_scan;
 mod import_preferences;
+mod layer_creation_preferences;
 #[cfg(target_os = "macos")]
 mod layers;
 #[cfg(target_os = "macos")]
@@ -100,7 +104,7 @@ pub(crate) fn build_app() -> App {
     );
     let _ = builder.register_arc::<dyn bae_render::SourceProvider>(
         bae_text::TEXT_PROVIDER,
-        Arc::new(bae_text::render::TextProvider::new()),
+        bae_text::render::TextProvider::shared(),
     );
     builder.build()
 }
