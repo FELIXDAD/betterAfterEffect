@@ -66,6 +66,7 @@ mod stress;
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod window_workspaces;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
