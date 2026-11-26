@@ -563,3 +563,72 @@ fn depth_of_field_blurs_layers_away_from_the_focus_plane() {
         soft(&tilted, 0..100)
     );
 }
+
+/// A 3D model layer (an OBJ cube) is drawn through the camera: opaque where
+/// the cube is, lit differently per face, nothing around it.
+#[test]
+fn model_layers_draw_through_the_camera() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-model-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cube.obj");
+    let mut obj = String::new();
+    for z in [-1.0, 1.0] {
+        for y in [-1.0, 1.0] {
+            for x in [-1.0, 1.0] {
+                obj += &format!("v {x} {y} {z}\n");
+            }
+        }
+    }
+    // Faces of the cube (1-based corners: x fastest, then y, then z).
+    for f in [
+        "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+    ] {
+        obj += &format!("f {f}\n");
+    }
+    std::fs::write(&file, obj).unwrap();
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+    let mut layer = RenderLayer::new(
+        p("/comps/main/layers/model"),
+        LayerContent::Model(bae_render::ModelRef {
+            asset: p("/assets/cube"),
+            file: Some(file.clone()),
+        }),
+    );
+    let m = DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+        * bae_render::camera::xyz_rotation(DVec3::new(30.0, 40.0, 0.0));
+    layer.matrix_3d = Some(m);
+    comp.layers = vec![layer];
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(100, 100)[3], 255, "the cube");
+    assert_eq!(img.px(2, 2)[3], 0, "around it");
+    // Lit by a light: the faces facing it differ in brightness.
+    use bae_render::light::{Falloff, Light, LightKind};
+    comp.lights = vec![Light {
+        kind: LightKind::Point,
+        world: DMat4::from_translation(DVec3::new(0.0, 0.0, -300.0)),
+        point_of_interest: DVec3::new(100.0, 100.0, 0.0),
+        color: [1.0, 1.0, 1.0],
+        intensity: 100.0,
+        cone_angle: 90.0,
+        cone_feather: 50.0,
+        falloff: Falloff::None,
+        radius: 500.0,
+        falloff_distance: 500.0,
+        casts_shadows: false,
+        shadow_darkness: 100.0,
+        shadow_diffusion: 0.0,
+        scope_below: None,
+    }];
+    let lit = render(&mut r, &comp);
+    let luma: Vec<u32> = [(85, 85), (115, 85), (100, 120)]
+        .into_iter()
+        .map(|(x, y)| lit.px(x, y).iter().take(3).map(|&c| u32::from(c)).sum())
+        .collect();
+    assert!(
+        luma.iter().any(|&l| l != luma[0]),
+        "faces shade differently: {luma:?}"
+    );
+    std::fs::remove_dir_all(dir).ok();
+}

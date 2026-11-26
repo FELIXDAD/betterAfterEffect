@@ -422,6 +422,17 @@ impl AnimEvaluator {
                         pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
                     }),
                 }),
+                "model" => LayerContent::Model(crate::input::ModelRef {
+                    asset: asset.clone(),
+                    file: match stage.prim(asset).map(|view| self.assets.file(&view)) {
+                        Some(Ok(file)) => file,
+                        Some(Err(message)) => {
+                            self.warn(format!("{}: {message}", l.path));
+                            None
+                        }
+                        None => None,
+                    },
+                }),
                 _ => LayerContent::None,
             }),
         }

@@ -200,6 +200,10 @@ impl RenderComp {
                     path: f.asset.clone(),
                     time: f.source_time,
                 }),
+                LayerContent::Model(m) => out.push(Dependency {
+                    path: m.asset.clone(),
+                    time: Time::ZERO,
+                }),
                 LayerContent::Custom(c) if c.prim != layer.path => out.push(Dependency {
                     path: c.prim.clone(),
                     time: layer.time,
@@ -477,6 +481,18 @@ pub enum LayerContent {
     /// Content drawn by a registered [`crate::source::SourceProvider`] (shapes and
     /// text from 05, plugin generators …).
     Custom(CustomContent),
+    /// A 3D model (glTF / GLB / OBJ, [`crate::model`]), drawn through the
+    /// camera with a depth buffer.
+    Model(ModelRef),
+}
+
+/// A 3D model layer's source.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ModelRef {
+    /// The `Asset` prim.
+    pub asset: PrimPath,
+    /// The resolved file (`None` when missing; renders nothing and warns).
+    pub file: Option<PathBuf>,
 }
 
 impl LayerContent {
@@ -488,6 +504,7 @@ impl LayerContent {
             LayerContent::Footage(f) => f.size,
             LayerContent::Comp(c) => Some([c.width, c.height]),
             LayerContent::Custom(c) => c.size,
+            LayerContent::Model(_) => None,
         }
     }
 
@@ -517,6 +534,7 @@ impl LayerContent {
                 c.prim.hash(h);
                 c.hash.hash(h);
             }
+            LayerContent::Model(m) => m.hash(h),
         }
     }
 }

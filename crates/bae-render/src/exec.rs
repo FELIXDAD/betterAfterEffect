@@ -31,6 +31,7 @@ use rustc_hash::FxHashMap;
 pub(crate) mod adjust;
 pub(crate) mod dof;
 mod masks;
+pub(crate) mod mesh;
 mod shadow;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
@@ -456,6 +457,21 @@ pub(crate) fn execute(
                     format,
                     &target,
                     [&images[0], &images[1], &images[2]],
+                );
+                ctx.passes += 1;
+                target
+            }
+            (NodeKind::Mesh(mesh), None) => {
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let pipelines = ctx.pipelines.mesh();
+                ctx.draw_calls += mesh::encode(
+                    &mut pipelines.lock(),
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    format,
+                    mesh,
+                    &target,
                 );
                 ctx.passes += 1;
                 target
