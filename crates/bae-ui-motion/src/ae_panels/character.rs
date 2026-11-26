@@ -701,14 +701,23 @@ pub(crate) fn number(
     let key = id.with("scrub");
     let pending = ui.data(|d| d.get_temp::<f64>(key));
     let mut v = pending.or(model).unwrap_or_default();
+    // AE: “72 px”, “86.4 px”: no trailing zeros, a space before the unit.
+    let display = move |x: f64| trimmed(x, decimals);
+    let parse = |t: &str| bae_ui::widgets::eval(t);
+    let unit = if suffix.is_empty() {
+        String::new()
+    } else {
+        format!(" {suffix}")
+    };
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
                     .mixed(pending.is_none() && model.is_none())
                     .decimals(decimals)
+                    .text(&display, &parse)
                     .speed(0.5)
-                    .suffix(suffix)
+                    .suffix(&unit)
                     .range(range)
                     .label(label),
             )
@@ -723,6 +732,16 @@ pub(crate) fn number(
         return None;
     }
     (resp.changed() && Some(v) != model).then_some(v)
+}
+
+/// `v` with up to `decimals` places and no trailing zeros (“72”, “86.4”).
+pub(crate) fn trimmed(v: f64, decimals: usize) -> String {
+    let s = format!("{v:.decimals$}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_owned()
+    } else {
+        s
+    }
 }
 
 /// The ▾ after a value with AE's presets; `auto` adds "Auto" first (NaN).
@@ -875,6 +894,14 @@ fn combo(ui: &mut Ui, current: &str, width: f32, label: &str) -> egui::Response 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbers_drop_trailing_zeros_like_ae() {
+        assert_eq!(trimmed(72.0, 1), "72");
+        assert_eq!(trimmed(86.4, 1), "86.4");
+        assert_eq!(trimmed(-0.5, 2), "-0.5");
+        assert_eq!(trimmed(100.0, 0), "100");
+    }
 
     #[test]
     fn style_names_come_from_postscript_names() {

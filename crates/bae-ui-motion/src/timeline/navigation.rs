@@ -20,7 +20,7 @@ impl TimelinePanel {
             let now = s.active_time();
             let source_time = if bool_attr(cx.stage, layer, "time_remap_enabled") {
                 self.eval
-                    .get(cx.resources)
+                    .get(cx.stage)
                     .evaluate_attribute(cx.stage, layer, "time_remap", now)
                     .ok()
                     .and_then(|v| v.as_time().or_else(|| v.as_f64().map(Time::from_seconds)))

@@ -26,6 +26,8 @@ mod builtin_scripts;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
+mod export_preferences;
+mod expression_preferences;
 #[cfg(target_os = "macos")]
 mod files_flow;
 #[cfg(target_os = "macos")]
@@ -39,6 +41,7 @@ mod layout;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
+mod preference_controls;
 #[cfg(target_os = "macos")]
 mod release_001;
 #[cfg(target_os = "macos")]
