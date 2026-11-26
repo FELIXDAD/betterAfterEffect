@@ -1086,13 +1086,13 @@ impl Panel for CompositionViewer {
         };
         if hand && resp.drag_started_by(egui::PointerButton::Primary) {
             self.panning = true;
-            // Space started playback when pressed; a Space-drag only pans.
+            // Space started playback when pressed; a Space-drag only pans:
+            // back to the time before Space (the drag may already have
+            // stopped playback above, after it advanced).
             if let Some((false, t0)) = self.space_hold {
                 let mut s = session.lock();
-                if s.is_playing() {
-                    s.stop();
-                    s.set_time(&info, t0);
-                }
+                s.stop();
+                s.set_time(&info, t0);
             }
         }
         if self.panning {
