@@ -49,7 +49,7 @@ pub use project::{
 pub use stage::{DEFAULT_UNDO_LIMIT, Stage, SubscriptionId, Transaction, editable_on_locked_layer};
 pub use sublayer::Sublayer;
 pub use time::{FrameRate, Time, TimeRange};
-pub use value::{BezierPath, FeatherPoint, TextDocument, Value, ValueType};
+pub use value::{BezierPath, FeatherPoint, TextDocument, TextJoin, Typography, Value, ValueType};
 
 /// Re-exported for `bae-sync` (version vectors, export modes).
 pub use loro;

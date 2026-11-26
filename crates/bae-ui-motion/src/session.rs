@@ -321,6 +321,8 @@ pub struct Session {
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,
+    pub(crate) straight_quotes: bool,
+    pub(crate) english_font_names: bool,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's

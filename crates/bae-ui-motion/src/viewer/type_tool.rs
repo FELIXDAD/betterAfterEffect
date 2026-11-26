@@ -209,10 +209,7 @@ impl Editing {
                     params["box_size"] = json!(b);
                 }
                 if let Some(d) = session.lock().text_defaults.clone() {
-                    params["font"] = json!(d.font);
-                    params["font_size"] = json!(d.font_size);
-                    params["fill_color"] = json!(d.fill_color);
-                    params["justification"] = json!(d.justification);
+                    params["defaults"] = json!(d);
                 }
                 cx.invoke_with("text.create", params);
                 if let Ok(path) = folder.child(&query::unique_child_name(stage, &folder, &name)) {
@@ -366,6 +363,34 @@ pub(super) fn frame(
             i.consume_key(egui::Modifiers::COMMAND, Key::Enter),
         )
     });
+    if !session.lock().straight_quotes && ui.memory(|m| m.has_focus(text_id())) {
+        let caret = egui::text_edit::TextEditState::load(ui.ctx(), text_id())
+            .and_then(|s| s.cursor.char_range())
+            .map_or_else(
+                || e.buffer.chars().count(),
+                |range| usize::from(range.primary.index.min(range.secondary.index)),
+            );
+        let mut prior = caret.checked_sub(1).and_then(|i| e.buffer.chars().nth(i));
+        ui.input_mut(|i| {
+            for event in &mut i.events {
+                if let egui::Event::Text(txt) = event {
+                    if txt == "\"" || txt == "'" {
+                        let opening = prior.is_none_or(|c| {
+                            c.is_whitespace() || matches!(c, '(' | '[' | '{' | '—' | '“' | '‘')
+                        });
+                        *txt = match (txt.as_str(), opening) {
+                            ("\"", true) => "“",
+                            ("\"", false) => "”",
+                            (_, true) => "‘",
+                            (_, false) => "’",
+                        }
+                        .into();
+                    }
+                    prior = txt.chars().last().or(prior);
+                }
+            }
+        });
+    }
     let size = (e.font_size as f32 * e.scale(view)).max(4.0);
     let edit = egui::TextEdit::multiline(&mut e.buffer)
         .id(text_id())

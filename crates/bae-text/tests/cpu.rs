@@ -33,6 +33,7 @@ fn source() -> Option<TextSource> {
         faux_italic: true,
         all_caps: false,
         small_caps: false,
+        typography: Default::default(),
         box_size: None,
         box_position: None,
     };

@@ -188,3 +188,31 @@ fn text_follows_a_mask_path() {
             .is_err()
     );
 }
+
+#[test]
+fn new_text_inherits_panel_choices_and_resets_character_separately() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let mut defaults = TextDocument::new("old content", "Arial", 48.0);
+    defaults.typography.hindi_digits = true;
+    defaults.typography.every_line = true;
+    defaults.justification = "right".into();
+    defaults.box_size = Some([400., 300.]);
+    let layer = p(&fx.run(
+        "text.create",
+        json!({"comp":comp,"text":"12","position":[0.,0.],"defaults":defaults}),
+    )["path"]);
+    let doc = fx.doc(&layer);
+    assert!(doc.typography.hindi_digits && doc.typography.every_line);
+    assert_eq!(doc.text, "12");
+    assert!(doc.box_size.is_none());
+    fx.run(
+        "text.set_style",
+        json!({"layers":[layer],"style":{"reset_character":true}}),
+    );
+    let doc = fx.doc(&layer);
+    assert!(!doc.typography.hindi_digits);
+    assert!(doc.typography.every_line);
+    assert_eq!(doc.justification, "right");
+    assert_eq!(doc.text, "12");
+}

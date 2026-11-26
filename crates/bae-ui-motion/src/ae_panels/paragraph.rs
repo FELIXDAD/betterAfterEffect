@@ -4,15 +4,10 @@
 //! the selected text layers (`text.set_style`, one undo step) or, with none
 //! selected, to the settings for new text.
 
-use bae_model::{PrimPath, TextDocument};
-use bae_motion::query;
-use bae_motion::text::{DEFAULT_FONT, DEFAULT_SIZE, SOURCE};
 use bae_ui::icons::{self, Icon};
 use bae_ui::{Panel, PanelContext, tr};
 use egui::{Align2, Rect, Sense, Stroke, Ui, vec2};
 use serde_json::json;
-
-use crate::common;
 
 /// AE's alignment buttons: (token, icon or line glyph, tooltip).
 const ALIGNMENTS: [(&str, Option<Icon>, &str); 7] = [
@@ -35,32 +30,8 @@ pub struct ParagraphPanel;
 
 impl Panel for ParagraphPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let session = common::session(cx.resources);
-        let (layers, time, defaults) = {
-            let s = session.lock();
-            let layers: Vec<PrimPath> = s
-                .selected_layers
-                .iter()
-                .filter(|l| query::layer_kind(cx.stage, l).as_deref() == Some("text"))
-                .cloned()
-                .collect();
-            let time = s
-                .active_comp
-                .as_ref()
-                .map_or(bae_model::Time::ZERO, |c| s.time(c));
-            (layers, time, s.text_defaults.clone())
-        };
-        let doc = layers
-            .first()
-            .and_then(|l| {
-                let t = query::to_key_time(cx.stage, l, time);
-                match query::sample_attr(cx.stage, l, SOURCE, t) {
-                    Some(bae_model::Value::TextDocument(d)) => Some(*d),
-                    _ => None,
-                }
-            })
-            .or(defaults)
-            .unwrap_or_else(|| TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE));
+        let selected = super::text_menu::Selection::read(cx);
+        let doc = &selected.doc;
         let current = if doc.justification == "justify_last_full" {
             "justify_all"
         } else {
@@ -141,33 +112,11 @@ impl Panel for ParagraphPanel {
         if let Some(token) = picked
             && token != current
         {
-            let change = json!({ "justification": token });
-            if layers.is_empty() {
-                let mut d = doc.clone();
-                d.justification = token.to_owned();
-                session.lock().text_defaults = Some(d);
-            } else {
-                cx.invoke_with(
-                    "text.set_style",
-                    json!({ "layers": layers, "time": time, "style": change }),
-                );
-            }
+            selected.apply(cx, json!({"justification":token}));
         }
     }
-
-    fn menu(&mut self, ui: &mut Ui, _cx: &mut PanelContext<'_>) {
-        ui.add_enabled_ui(false, |ui| {
-            for item in [
-                "Roman Hanging Punctuation",
-                "Top-to-Top Leading",
-                "Bottom-to-Bottom Leading",
-                "Adobe Single-line Composer",
-                "Adobe Every-line Composer",
-                "Reset Paragraph",
-            ] {
-                let _ = ui.button(tr(item));
-            }
-        });
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        super::text_menu::show(ui, cx, false);
     }
 }
 

@@ -496,53 +496,56 @@ pub(crate) fn apply_edit(
     t: Time,
     edit: Edit,
 ) {
-    match edit {
-        Edit::None => {}
-        Edit::Live(value) => {
-            let peers = edit_peers(cx.stage, session, path, attr);
-            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
-            session.lock().scrub = Some(Scrub {
-                path: path.clone(),
-                attr: attr.to_owned(),
-                value,
-                peers,
-                time: t,
-                committed: None,
-            });
-        }
-        Edit::Commit(value) => {
-            // A drag moves the others by as much; a typed value sets them all.
-            let dragged = session
-                .lock()
-                .scrub
-                .as_ref()
-                .is_some_and(|s| s.path == *path && s.attr == attr && s.committed.is_none());
-            let peers = edit_peers(cx.stage, session, path, attr);
-            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
-            // Shown as committed until the command has run.
-            session.lock().scrub = Some(Scrub {
-                path: path.clone(),
-                attr: attr.to_owned(),
-                value: value.clone(),
-                peers: peers.clone(),
-                time: t,
-                committed: Some((cx.stage.revision(), std::time::Instant::now())),
-            });
-            let edits: Vec<serde_json::Value> = std::iter::once((path.clone(), value))
-                .chain(peers)
-                .map(|(p, v)| {
-                    let time = query::to_key_time(cx.stage, &p, t);
-                    json!({"path": p, "attr": attr, "time": time, "value": v})
-                })
-                .collect();
-            if let [one] = &edits[..] {
-                cx.invoke_with("attr.set_at", one.clone());
-            } else {
-                // One undo step for all of them.
-                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
-            }
+    let commit = matches!(edit, Edit::Commit(_));
+    let (Edit::Live(value) | Edit::Commit(value)) = edit else {
+        return;
+    };
+    let dragged = !commit
+        || session
+            .lock()
+            .scrub
+            .as_ref()
+            .is_some_and(|s| s.path == *path && s.attr == attr && s.committed.is_none());
+    let peers = edit_peers(cx.stage, session, path, attr);
+    let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
+    apply_selection_edit(
+        cx,
+        session,
+        Scrub {
+            path: path.clone(),
+            attr: attr.into(),
+            value,
+            peers,
+            time: t,
+            committed: None,
+        },
+        commit,
+    );
+}
+
+/// Preview exact attribute values for a selection. A completed gesture sends one undoable edit.
+pub(crate) fn apply_selection_edit(
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    mut scrub: Scrub,
+    commit: bool,
+) {
+    if commit {
+        scrub.committed = Some((cx.stage.revision(), std::time::Instant::now()));
+        let edits: Vec<_> = scrub
+            .targets()
+            .map(|(path, value)| {
+                let time = query::to_key_time(cx.stage, path, scrub.time);
+                json!({"path":path,"attr":scrub.attr,"time":time,"value":value})
+            })
+            .collect();
+        if let [one] = edits.as_slice() {
+            cx.invoke_with("attr.set_at", one.clone());
+        } else {
+            cx.invoke_with("attr.set_many", json!({"edits":edits}));
         }
     }
+    session.lock().scrub = Some(scrub);
 }
 
 /// The same property as `attr` of `path` elsewhere in the selection, which an

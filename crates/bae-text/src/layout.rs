@@ -322,7 +322,11 @@ pub fn document_paint(doc: &TextDocument) -> TextPaint {
         .map(|c| TextStroke {
             color: paint_color(c),
             width: doc.stroke_width,
-            join: LineJoin::Miter,
+            join: match doc.typography.line_join {
+                bae_model::TextJoin::Miter => LineJoin::Miter,
+                bae_model::TextJoin::Bevel => LineJoin::Bevel,
+                bae_model::TextJoin::Round => LineJoin::Round,
+            },
             miter_limit: 4.0,
         });
     TextPaint {
@@ -361,6 +365,10 @@ impl DisplayText {
                 }
                 '\r' | '\n' => push('\n', &mut text),
                 '\u{3}' => push('\u{2028}', &mut text),
+                '0'..='9' if doc.typography.hindi_digits => push(
+                    char::from_u32(0x0660 + c as u32 - '0' as u32).unwrap(),
+                    &mut text,
+                ),
                 _ if doc.all_caps => {
                     for u in c.to_uppercase() {
                         push(u, &mut text);
@@ -399,6 +407,36 @@ impl DisplayText {
     }
 }
 
+fn hanging_advance(display: &DisplayText, cluster: &parley::layout::Cluster<'_, ()>) -> f64 {
+    let hang = |c: char| {
+        matches!(
+            c,
+            ',' | '.'
+                | ':'
+                | ';'
+                | '!'
+                | '?'
+                | '‘'
+                | '’'
+                | '“'
+                | '”'
+                | '«'
+                | '»'
+                | '\''
+                | '"'
+                | '('
+                | ')'
+                | '['
+                | ']'
+        )
+    };
+    if display.text[cluster.text_range()].chars().all(hang) {
+        f64::from(cluster.advance())
+    } else {
+        0.0
+    }
+}
+
 /// Lays out `doc` in layer space.
 pub fn layout_text(fonts: &mut FontSystem, doc: &TextDocument) -> TextLayout {
     shape_text(fonts, doc, false)
@@ -410,7 +448,20 @@ pub(crate) fn shape_text(
     individual_chars: bool,
 ) -> TextLayout {
     let paint = document_paint(doc);
-    let size = doc.font_size.clamp(0.1, 1296.0);
+    let base_size = doc.font_size.clamp(0.1, 1296.0);
+    let script_offset = if doc.typography.superscript {
+        base_size * 0.35
+    } else if doc.typography.subscript {
+        -base_size * 0.2
+    } else {
+        0.0
+    };
+    let size = if script_offset != 0.0 {
+        base_size * 0.6
+    } else {
+        base_size
+    };
+    let baseline_shift = doc.baseline_shift + script_offset;
     let font = fonts.resolve(&doc.font);
     let display = DisplayText::new(doc);
     let doc_len = doc.text.chars().count();
@@ -464,7 +515,10 @@ pub(crate) fn shape_text(
     }
     // A standard ligature (e.g. "fi") cannot carry two different transforms.
     // Preserve required script shaping and the document's small-caps feature.
-    let features = match (individual_chars, doc.small_caps) {
+    let features = match (
+        individual_chars || !doc.typography.ligatures,
+        doc.small_caps,
+    ) {
         (true, true) => Some(r#""liga" 0, "clig" 0, "dlig" 0, "smcp" 1"#),
         (true, false) => Some(r#""liga" 0, "clig" 0, "dlig" 0"#),
         (false, true) => Some(r#""smcp" 1"#),
@@ -493,7 +547,37 @@ pub(crate) fn shape_text(
     } else {
         layout.set_alignment(Alignment::Left, AlignmentOptions::default());
     }
-    layout.break_all_lines(box_width);
+    if doc.typography.no_break {
+        layout.break_all_lines(None);
+    } else {
+        layout.break_all_lines(box_width);
+        if doc.typography.every_line
+            && let Some(width) = box_width
+            && layout.len() > 1
+        {
+            // Keep the same line count while distributing words across lines.
+            let lines = layout.len();
+            let mut low = 0.0;
+            let mut high = width;
+            for _ in 0..8 {
+                let middle = (low + high) * 0.5;
+                layout.break_all_lines(Some(middle));
+                if layout.len() > lines {
+                    low = middle
+                } else {
+                    high = middle
+                }
+            }
+            let mut breaker = layout.break_lines();
+            breaker.state_mut().set_layout_max_advance(width);
+            breaker.state_mut().set_line_max_advance(high);
+            while breaker.break_next().is_some() {
+                breaker.set_prior_line_width(width);
+                breaker.state_mut().set_line_max_advance(high);
+            }
+            breaker.finish();
+        }
+    }
 
     let leading = doc
         .leading
@@ -518,6 +602,8 @@ pub(crate) fn shape_text(
     let mut word = 0usize;
     let mut prev_breaks_word = true;
     let mut baseline = 0.0f64;
+    let mut previous_ascent = 0.;
+    let mut previous_descent = 0.;
     for (line_index, line) in layout.lines().enumerate() {
         let m = line.metrics();
         let ascent = f64::from(m.baseline - m.content_block_min_coord).max(0.0);
@@ -525,8 +611,11 @@ pub(crate) fn shape_text(
         baseline = match (line_index, paragraph) {
             (0, Some(b)) => b.y0 + ascent,
             (0, None) => 0.0,
-            _ => baseline + leading,
+            _ if doc.typography.top_leading => baseline + leading + ascent - previous_ascent,
+            _ => baseline + leading + previous_descent - descent,
         };
+        previous_ascent = ascent;
+        previous_descent = descent;
         if let Some(b) = paragraph
             && line_index > 0
             && baseline + descent > b.y1 + 1e-6
@@ -543,6 +632,22 @@ pub(crate) fn shape_text(
             0.0
         };
         let justified_line = paragraph.is_some() && justification.is_justify();
+        let mut left_hang = 0.;
+        let mut right_hang = 0.;
+        if doc.typography.hanging_punctuation {
+            let mut clusters = line
+                .runs()
+                .flat_map(|r| r.visual_clusters())
+                .filter(|c| !c.is_space_or_nbsp() && !c.is_hard_line_break());
+            if let Some(first) = clusters.next() {
+                left_hang = hanging_advance(&display, &first);
+                right_hang = clusters
+                    .last()
+                    .as_ref()
+                    .map_or(left_hang, |c| hanging_advance(&display, c));
+            }
+        }
+        let width = (width - left_hang - right_hang).max(0.);
         let x = if justified_line {
             paragraph.map_or(0.0, |b| b.x0)
         } else {
@@ -563,7 +668,7 @@ pub(crate) fn shape_text(
         let x_base = if justified_line {
             x
         } else {
-            x - f64::from(m.offset)
+            x - f64::from(m.offset) - left_hang
         };
         let line_chars_start = out.chars.len();
         for item in line.items() {
@@ -622,16 +727,13 @@ pub(crate) fn shape_text(
                         out_run.glyphs.push(PositionedGlyph {
                             id: g.id,
                             x: gx as f32,
-                            y: (baseline + f64::from(g.y - run_baseline) - doc.baseline_shift)
-                                as f32,
+                            y: (baseline + f64::from(g.y - run_baseline) - baseline_shift) as f32,
                             char_index,
                         });
                     }
                 }
-                let origin = Point::new(
-                    origin_x.unwrap_or(x_base + pen),
-                    baseline - doc.baseline_shift,
-                );
+                let origin =
+                    Point::new(origin_x.unwrap_or(x_base + pen), baseline - baseline_shift);
                 out.chars.push(TextChar {
                     source: src,
                     line: line_index,
@@ -697,11 +799,24 @@ mod tests {
             faux_italic: false,
             all_caps: false,
             small_caps: false,
+            typography: Default::default(),
             box_size: None,
             box_position: None,
         }
     }
 
+    #[test]
+    fn hindi_digits_preserve_source_indices_and_join_reaches_stroke() {
+        let mut d = doc("A19");
+        d.typography.hindi_digits = true;
+        d.typography.line_join = bae_model::TextJoin::Round;
+        d.stroke_color = Some([1.; 4]);
+        d.stroke_width = 2.;
+        let display = DisplayText::new(&d);
+        assert_eq!(display.text, "A١٩");
+        assert_eq!(display.source_at(3), 2);
+        assert_eq!(document_paint(&d).stroke.unwrap().join, LineJoin::Round);
+    }
     #[test]
     fn display_text_normalises_breaks_and_caps() {
         let mut d = doc("ab\r\ncd\u{3}eß");

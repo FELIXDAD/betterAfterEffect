@@ -184,6 +184,30 @@ impl FontSystem {
         names
     }
 
+    /// English and Simplified Chinese family labels from the default face's OpenType name table.
+    pub fn family_labels(&mut self, family: &str) -> Option<(String, String)> {
+        let info = self.fcx.collection.family_by_name(family)?;
+        let font = info.default_font()?;
+        let bytes = font.load(Some(&mut self.fcx.source_cache))?;
+        let sf = skrifa::FontRef::from_index(bytes.as_ref(), font.index()).ok()?;
+        let ids = [StringId::TYPOGRAPHIC_FAMILY_NAME, StringId::FAMILY_NAME];
+        let english = ids.iter().find_map(|id| {
+            sf.localized_strings(*id)
+                .english_or_first()
+                .map(|s| s.to_string())
+        })?;
+        let localized = ids
+            .iter()
+            .find_map(|id| {
+                sf.localized_strings(*id).find(|s| {
+                    s.language()
+                        .is_some_and(|l| l.starts_with("zh-Hans") || l == "zh-CN" || l == "zh")
+                })
+            })
+            .map_or_else(|| english.clone(), |s| s.to_string());
+        Some((english, localized))
+    }
+
     /// The faces of one family with their PostScript names (reads the font files).
     pub fn faces(&mut self, family: &str) -> Vec<FontFace> {
         let Some(info) = self.fcx.collection.family_by_name(family) else {

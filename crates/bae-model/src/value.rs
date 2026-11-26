@@ -214,6 +214,28 @@ pub struct FeatherPoint {
 
 /// A text document (AE `TextDocument`), the value of a text layer's source text.
 /// Character-level style runs come later; until then the whole text shares one style.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TextJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct Typography {
+    pub superscript: bool,
+    pub subscript: bool,
+    pub ligatures: bool,
+    pub hindi_digits: bool,
+    pub no_break: bool,
+    pub line_join: TextJoin,
+    pub hanging_punctuation: bool,
+    pub top_leading: bool,
+    pub every_line: bool,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TextDocument {
     pub text: String,
@@ -247,6 +269,8 @@ pub struct TextDocument {
     pub all_caps: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub small_caps: bool,
+    #[serde(default)]
+    pub typography: Typography,
     /// Paragraph (box) text size; `None` = point text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub box_size: Option<[f64; 2]>,
@@ -284,6 +308,7 @@ impl TextDocument {
             faux_italic: false,
             all_caps: false,
             small_caps: false,
+            typography: Typography::default(),
             box_size: None,
             box_position: None,
         }

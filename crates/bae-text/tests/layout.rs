@@ -37,6 +37,7 @@ fn doc(text: &str, font: &str) -> TextDocument {
         faux_italic: false,
         all_caps: false,
         small_caps: false,
+        typography: Default::default(),
         box_size: None,
         box_position: None,
     }

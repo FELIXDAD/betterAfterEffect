@@ -28,6 +28,8 @@ pub struct CreateText;
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateTextParams {
     pub comp: PrimPath,
+    /// Character and Paragraph settings selected for new text.
+    pub defaults: Option<TextDocument>,
     /// The characters (line breaks as `\n`); empty makes an empty text layer
     /// (AE keeps those, named "<empty text layer>").
     pub text: String,
@@ -65,7 +67,10 @@ impl Command for CreateText {
     const DESCRIPTION: &'static str = "Create a point or paragraph text layer with its text, like typing with the Type tool in the Composition panel: point text starts its first baseline at `position`; paragraph text fills a box whose top-left corner is `position`.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayerOutput, CommandError> {
-        let size = p.font_size.unwrap_or(DEFAULT_SIZE);
+        let size = p
+            .font_size
+            .or_else(|| p.defaults.as_ref().map(|d| d.font_size))
+            .unwrap_or(DEFAULT_SIZE);
         if size.is_nan() || size <= 0.0 {
             return Err(fail("font_size must be positive"));
         }
@@ -97,8 +102,16 @@ impl Command for CreateText {
                 point_of_interest: None,
             },
         )?;
-        let mut doc =
-            TextDocument::new(p.text, p.font.unwrap_or_else(|| DEFAULT_FONT.into()), size);
+        let mut doc = p
+            .defaults
+            .unwrap_or_else(|| TextDocument::new("", DEFAULT_FONT, size));
+        doc.text = p.text;
+        doc.font_size = size;
+        doc.box_size = None;
+        doc.box_position = None;
+        if let Some(font) = p.font {
+            doc.font = font;
+        }
         if let Some(c) = p.fill_color {
             doc.fill_color = c;
         }
@@ -226,6 +239,17 @@ pub struct TextStyleChange {
     pub faux_italic: Option<bool>,
     pub all_caps: Option<bool>,
     pub small_caps: Option<bool>,
+    pub superscript: Option<bool>,
+    pub subscript: Option<bool>,
+    pub ligatures: Option<bool>,
+    pub hindi_digits: Option<bool>,
+    pub no_break: Option<bool>,
+    pub hanging_punctuation: Option<bool>,
+    pub top_leading: Option<bool>,
+    pub every_line: Option<bool>,
+    pub line_join: Option<bae_model::TextJoin>,
+    pub reset_character: bool,
+    pub reset_paragraph: bool,
     /// Paragraph alignment (`left`, `center`, `right`, `justify_last_left`, …).
     pub justification: Option<String>,
 }
@@ -233,6 +257,22 @@ pub struct TextStyleChange {
 impl TextStyleChange {
     /// `doc` with the change applied.
     pub fn apply(&self, doc: &mut TextDocument) {
+        if self.reset_character {
+            let old = doc.clone();
+            *doc = TextDocument::new(old.text, DEFAULT_FONT, DEFAULT_SIZE);
+            doc.box_size = old.box_size;
+            doc.box_position = old.box_position;
+            doc.justification = old.justification;
+            doc.typography.hanging_punctuation = old.typography.hanging_punctuation;
+            doc.typography.top_leading = old.typography.top_leading;
+            doc.typography.every_line = old.typography.every_line;
+        }
+        if self.reset_paragraph {
+            doc.justification = "left".into();
+            doc.typography.hanging_punctuation = false;
+            doc.typography.top_leading = false;
+            doc.typography.every_line = false;
+        }
         if let Some(f) = &self.font {
             doc.font = f.clone();
         }
@@ -277,6 +317,45 @@ impl TextStyleChange {
         }
         if let Some(v) = self.small_caps {
             doc.small_caps = v;
+        }
+        if self.superscript == Some(true) {
+            doc.typography.subscript = false;
+        }
+        if self.subscript == Some(true) {
+            doc.typography.superscript = false;
+        }
+        if self.all_caps == Some(true) {
+            doc.small_caps = false
+        }
+        if self.small_caps == Some(true) {
+            doc.all_caps = false
+        }
+        if let Some(v) = self.superscript {
+            doc.typography.superscript = v;
+        }
+        if let Some(v) = self.subscript {
+            doc.typography.subscript = v;
+        }
+        if let Some(v) = self.ligatures {
+            doc.typography.ligatures = v;
+        }
+        if let Some(v) = self.hindi_digits {
+            doc.typography.hindi_digits = v;
+        }
+        if let Some(v) = self.no_break {
+            doc.typography.no_break = v;
+        }
+        if let Some(v) = self.hanging_punctuation {
+            doc.typography.hanging_punctuation = v;
+        }
+        if let Some(v) = self.top_leading {
+            doc.typography.top_leading = v;
+        }
+        if let Some(v) = self.every_line {
+            doc.typography.every_line = v;
+        }
+        if let Some(v) = self.line_join {
+            doc.typography.line_join = v;
         }
         if let Some(j) = &self.justification {
             doc.justification = j.clone();

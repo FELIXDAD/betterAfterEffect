@@ -6,6 +6,7 @@ pub mod align;
 pub mod character;
 pub mod info;
 pub mod paragraph;
+pub(crate) mod text_menu;
 
 use bae_ui::PanelKind;
 
