@@ -65,6 +65,7 @@ mod timeline;
 pub mod tools;
 mod tracker;
 mod viewer;
+mod vr_editor;
 mod workspaces;
 
 use bae_app::{AppBuilder, AppModule};
@@ -103,6 +104,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     progress_metadata::register,
     paint_panels::register,
     path_nulls::register,
+    vr_editor::register,
     assist::register,
     // Chinese strings only.
     actions::register,
