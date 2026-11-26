@@ -100,6 +100,39 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
         .filter(|l| stage.has_prim(l))
 }
 
+impl EffectControlsPanel {
+    /// AE's line under the tab: the lock, the layer's label color and
+    /// "<comp> • <layer>".
+    fn layer_header(&mut self, ui: &mut Ui, stage: &Stage, layer: &PrimPath) {
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            let locked = self.locked.is_some();
+            let lock = icons::button(ui, Icon::Lock, 14.0, locked).labeled_toggle(
+                egui::WidgetType::Checkbox,
+                tr("Lock"),
+                locked,
+            );
+            if lock.clicked() {
+                self.locked = if locked { None } else { Some(layer.clone()) };
+            }
+            let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            icons::swatch(
+                ui.painter(),
+                r.center(),
+                9.0,
+                theme::label_color(actions::label_of(stage, layer).max(0) as usize),
+            );
+            let comp = query::owning_comp(stage, layer)
+                .map(|c| query::display_name_of(stage, &c))
+                .unwrap_or_default();
+            ui.label(
+                egui::RichText::new(format!("{comp} • {}", self.title)).color(color::TEXT_DIM),
+            );
+        });
+        ui.separator();
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
@@ -169,32 +202,30 @@ impl Panel for PropertiesPanel {
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(key, text.clone()));
                     }
-                    let mut d2 = (*doc).clone();
-                    let mut commit = false;
+                    let range=session.lock().text_range(Some(&layer));
+                    let selected=common::SelectedStyles{doc:&doc,range:range.clone().unwrap_or(0..usize::MAX)};
+                    let mut change=json!({});
                     if r.lost_focus() {
                         ui.data_mut(|d| d.remove::<String>(key));
                         if text != doc.text {
-                            d2.set_text(&text);
-                            commit = true;
+                            cx.invoke_with("text.set_text",json!({"layer":layer,"text":text,"time":query::to_key_time(stage,&layer,now)}));
                         }
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        let mut size = d2.style.font_size;
-                        let px = format!(" {}", tr("px")); // 像素 in Chinese (#197)
-                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(&px).range(1.0..=2000.0).label(tr("Font Size")));
-                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                            d2.style.font_size = size;
-                            commit = true;
+                        if let Some(v)=crate::ae_panels::character::number(ui,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size")) {
+                            change["font_size"]=json!(v);
                         }
                     });
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Fill Color")).color(color::TEXT));
-                        let mut c = d2.style.fill_color.map(|v| v as f32);
-                        if ui.color_edit_button_rgba_unmultiplied(&mut c).changed() {
-                            d2.style.fill_color = c.map(f64::from);
-                            commit = true;
+                        let fill=selected.character(|s|s.fill_color);
+                        let mut c=fill.unwrap_or([0.;4]);
+                        let edit=ui.scope(|ui|bae_ui::color_picker::color_button(ui,key.with("fill"),&mut c,egui::vec2(30.,16.),tr("Fill Color"),tr("Fill Color")));
+                        if fill.is_none() {
+                            ui.painter().rect_filled(edit.response.rect.shrink(1.),0.,color::PANEL);
                         }
+                        if let bae_ui::color_picker::ColorEdit::Commit(c)=edit.inner { change["fill_color"]=json!(c); }
                     });
                     // Paragraph alignment.
                     ui.horizontal(|ui| {
@@ -204,22 +235,17 @@ impl Panel for PropertiesPanel {
                             (Icon::TextAlignCenter, "center", "Center Text"),
                             (Icon::TextAlignRight, "right", "Right Align Text"),
                         ] {
-                            let on = d2.paragraph.justification == value;
+                            let on = selected.paragraph(|p|p.justification.clone()).as_deref()==Some(value);
                             let r = icons::button(ui, icon, 20.0, on)
                                 .labeled_toggle(egui::WidgetType::Button, tr(name), on)
                                 .on_hover_text(tr(name));
                             if r.clicked() && !on {
-                                d2.paragraph.justification = value.to_owned();
-                                commit = true;
+                                change["justification"]=json!(value);
                             }
                         }
                     });
-                    if commit {
-                        let key_now = query::to_key_time(stage, &layer, now);
-                        cx.invoke_with(
-                            "attr.set_at",
-                            json!({"path": layer, "attr": "text:source", "time": key_now, "value": Value::TextDocument(Box::new(d2))}),
-                        );
+                    if change.as_object().is_some_and(|o|!o.is_empty()) {
+                        cx.invoke_with("text.set_style",json!({"layers":[layer],"time":now,"range":range,"style":change}));
                     }
                 }
             }
@@ -280,10 +306,14 @@ pub struct EffectControlsPanel {
     eval: EvalCache,
     title: String,
     controls: crate::effects::controls::ControlsState,
+    /// The layer the panel is locked to (its lock button, AE): it stays on it
+    /// whatever is selected.
+    locked: Option<PrimPath>,
 }
 
 impl Panel for EffectControlsPanel {
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
+        // AE: "Effect Controls <layer>".
         if self.title.is_empty() {
             TabInfo::new(tr("Effect Controls"))
         } else {
@@ -296,24 +326,42 @@ impl Panel for EffectControlsPanel {
         actions::handle(action, cx, &session)
     }
 
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        ui.checkbox(
+            &mut self.controls.show_presets,
+            tr("Show Animation Presets"),
+        );
+        if ui.button(tr("Manage Effects...")).clicked() {
+            crate::effects::manager::open(cx);
+            ui.close();
+        }
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({"show_presets":self.controls.show_presets}))
+    }
+
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
-        let Some(layer) = selected_layer(stage, &session) else {
+        if self.locked.as_ref().is_some_and(|l| !stage.has_prim(l)) {
+            self.locked = None;
+        }
+        // Nothing selected: AE's panel is empty ("Effect Controls (none)").
+        let Some(layer) = self
+            .locked
+            .clone()
+            .or_else(|| selected_layer(stage, &session))
+        else {
             self.title.clear();
-            common::empty_hint(
-                ui,
-                tr("No layer selected"),
-                tr("Select a layer to see its properties."),
-            );
             return;
         };
         self.title = query::display_name_of(stage, &layer);
+        self.layer_header(ui, stage, &layer);
         let now = session.lock().active_time();
         let effects = props::effect_nodes(stage, &layer);
         if effects.is_empty() {
-            common::empty_hint(ui, &self.title.clone(), tr("No effects applied"));
             return;
         }
         // Controls from the effect definitions (07's built-ins, plugins).
@@ -693,8 +741,13 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "effect_controls",
-        bae_ui::PanelKind::new("Effect Controls", |_| {
-            Box::new(EffectControlsPanel::default())
+        bae_ui::PanelKind::new("Effect Controls", |spawn| {
+            let mut panel = EffectControlsPanel::default();
+            panel.controls.show_presets = spawn
+                .state
+                .and_then(|v| v["show_presets"].as_bool())
+                .unwrap_or(false);
+            Box::new(panel)
         }),
     );
     crate::register_panel(

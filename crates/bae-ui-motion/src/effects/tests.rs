@@ -51,8 +51,10 @@ impl Fx {
             .output
     }
 
+    /// Runs the model commands of `r` (shell actions such as bringing Effect
+    /// Controls to the front are the workbench's).
     fn exec_all(&mut self, r: PanelRequests) {
-        for inv in r.invocations {
+        for inv in commands(r) {
             self.run(&inv.id, inv.params);
         }
     }
@@ -156,6 +158,14 @@ fn menu_follows_the_effect_registry() {
     assert!(!greyed.1.is_enabled(&cx));
 }
 
+/// The model commands among `r`'s invocations.
+fn commands(r: PanelRequests) -> Vec<Invocation> {
+    r.invocations
+        .into_iter()
+        .filter(|i| i.id != bae_ui::action::ids::OPEN_PANEL)
+        .collect()
+}
+
 #[test]
 fn apply_last_effect_and_remove_all() {
     let mut fx = Fx::new();
@@ -164,7 +174,18 @@ fn apply_last_effect_and_remove_all() {
         APPLY,
         json!({"match_name": "ADBE Tint"}),
     ));
-    assert_eq!(r.invocations.len(), 1, "one undo step");
+    // One undo step; AE also brings Effect Controls to the front.
+    assert!(r.invocations.iter().any(
+        |i| i.id == bae_ui::action::ids::OPEN_PANEL && i.id_param() == Some("effect_controls")
+    ));
+    assert_eq!(
+        r.invocations
+            .iter()
+            .filter(|i| i.id != bae_ui::action::ids::OPEN_PANEL)
+            .count(),
+        1,
+        "one undo step"
+    );
     fx.exec_all(r);
     let r = fx.handle(Invocation::new(LAST_EFFECT));
     fx.exec_all(r);
@@ -445,5 +466,139 @@ fn animation_presets_save_and_apply_effects_with_their_values() {
     assert_eq!(
         bae_motion::query::static_value(&v, "param:1"),
         Some(Value::Float(25.0))
+    );
+}
+
+/// The text and enabled state users get from the actual panel menu.
+fn menu_states(fx: &Fx, panel: &mut dyn Panel) -> Vec<(String, bool, bool)> {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let id = PanelId::new("menu-test");
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(700.0, 900.0))),
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(raw, |ui| {
+        let mut requests = PanelRequests::default();
+        let mut cx = PanelContext::new(
+            &id,
+            "Panel",
+            &fx.stage,
+            &fx.author,
+            &fx.resources,
+            &mut requests,
+        );
+        panel.menu(ui, &mut cx);
+    });
+    output.textures_delta.clear();
+    let mut nodes = output.platform_output.accesskit_update.unwrap().nodes;
+    nodes.sort_by(|(_, a), (_, b)| {
+        let y = |node: &egui::accesskit::Node| node.bounds().map_or(0.0, |r| r.y0);
+        y(a).total_cmp(&y(b))
+    });
+    nodes
+        .into_iter()
+        .filter_map(|(_, n)| {
+            let label = n.label()?;
+            let zh = if label == "Save Animation Preset..." {
+                format!(
+                    "{}...",
+                    bae_ui::i18n::translation("Save Animation Preset").unwrap()
+                )
+            } else {
+                bae_ui::i18n::translation(label).unwrap_or(label).to_owned()
+            };
+            Some((
+                zh,
+                !n.is_disabled(),
+                n.toggled() == Some(egui::accesskit::Toggled::True),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn panel_menus_match_chinese_and_selection() {
+    let _app = {
+        let mut builder = AppBuilder::new();
+        builder.add_module(crate::MotionUiModule);
+        builder.build()
+    };
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    let mut browser = browser::EffectsPanel::default();
+    fx.run("project.set_settings", json!({"bit_depth": "8"}));
+    fx.run(
+        "effect.apply",
+        json!({"layers":[layer],"match_name":"ADBE Gaussian Blur 2"}),
+    );
+    let before = menu_states(&fx, &mut browser);
+    let expected = [
+        ("保存动画预设...", true, false),
+        ("浏览预设...", true, false),
+        ("类别", true, true),
+        (
+            if cfg!(windows) {
+                "资源管理器文件夹"
+            } else {
+                "查找程序文件夹"
+            },
+            true,
+            false,
+        ),
+        ("按字母顺序", true, false),
+        ("显示所有颜色深度的效果", false, true),
+        ("仅显示 GPU 能够实现的效果", true, false),
+        ("显示效果", true, true),
+        ("显示动画预设", true, true),
+        (
+            if cfg!(windows) {
+                "在资源管理器中显示"
+            } else {
+                "在 Finder 中显示"
+            },
+            false,
+            false,
+        ),
+        ("刷新列表", true, false),
+        ("管理效果...", true, false),
+    ];
+    let observed: Vec<_> = before
+        .iter()
+        .map(|(label, enabled, checked)| (label.as_str(), *enabled, *checked))
+        .collect();
+    assert_eq!(observed, expected);
+    fx.run("project.set_settings", json!({"bit_depth": "32"}));
+    assert!(menu_states(&fx, &mut browser).contains(&(
+        "显示所有颜色深度的效果".into(),
+        true,
+        true
+    )));
+    let tools = crate::tools::SharedTools::default();
+    fx.resources.insert(tools.clone());
+    let mut brushes = crate::paint_panels::BrushesPanel::default();
+    let brush = menu_states(&fx, &mut brushes);
+    assert_eq!(brush.len(), 9);
+    assert!(
+        brush
+            .iter()
+            .all(|(name, enabled, checked)| !enabled && *checked == (name == "小缩览图"))
+    );
+    tools.lock().set(crate::tools::Tool::Brush);
+    let brush = menu_states(&fx, &mut brushes);
+    for (label, enabled) in [
+        ("新建画笔...", true),
+        ("重命名画笔...", false),
+        ("删除画笔", false),
+        ("大列表", true),
+        ("重置画笔笔尖...", true),
+    ] {
+        assert!(brush.contains(&(label.into(), enabled, false)), "{label}");
+    }
+    assert!(menu_states(&fx, &mut crate::paint_panels::PaintPanel).is_empty());
+    assert!(
+        menu_states(&fx, &mut crate::EffectControlsPanel::default())
+            .iter()
+            .any(|(label, enabled, _)| label == "显示动画预设" && *enabled)
     );
 }
