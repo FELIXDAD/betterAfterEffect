@@ -31,8 +31,9 @@ fn starting_the_queue_saves_the_changed_project_when_enabled() {
             let mut q = queue.lock();
             let id = q.items().last().unwrap().id;
             let item = q.item_mut(id).unwrap();
-            item.set_format(bae_render::ExportFormat::Png);
-            item.output = tmp
+            let output = &mut item.outputs[0];
+            output.set_format(bae_render::ExportFormat::Png);
+            output.output = tmp
                 .path()
                 .join(format!("frame-{on}.png"))
                 .to_string_lossy()
@@ -40,7 +41,8 @@ fn starting_the_queue_saves_the_changed_project_when_enabled() {
             item.start = 0;
             item.end = 0;
         }
-        h.get_by_label("Render").click();
+        h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+            .click();
         settle(&mut h);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while queue.lock().is_running() {

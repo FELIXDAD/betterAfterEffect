@@ -282,6 +282,7 @@ impl SourceResolver for Resolver<'_> {
             &footage.asset,
             footage.file_revision,
             footage.sequence,
+            footage.alphabetical,
             footage.psd_layer,
         ) {
             Ok(source) => Ok(Some(source)),

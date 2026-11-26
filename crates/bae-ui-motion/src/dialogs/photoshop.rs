@@ -41,6 +41,7 @@ impl PhotoshopDialog {
         comp: Option<PrimPath>,
         folder: Option<String>,
         defaults: ImportDefaults,
+        kind: ImportKind,
     ) -> Self {
         Self {
             path,
@@ -50,7 +51,7 @@ impl PhotoshopDialog {
             defaults,
             replace: None,
             loaded: None,
-            kind: ImportKind::Footage,
+            kind,
             single: false,
             key: None,
             editable: true,

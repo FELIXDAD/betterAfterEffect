@@ -518,6 +518,20 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// Whether a mask or shape path is selected: vertices in the Composition
+/// viewer, or its path property in the Timeline.
+fn path_selected(cx: &PanelContext<'_>) -> bool {
+    let session = crate::common::session(cx.resources);
+    let s = session.lock();
+    s.vertex_path.is_some()
+        || s.selected_props.iter().any(|(p, attr)| {
+            attr == "path"
+                && cx.stage.prim(p).is_some_and(|v| {
+                    v.is_a(&bae_model::PrimType::MASK) || v.is_a(&bae_model::PrimType::PATH)
+                })
+        })
+}
+
 /// `(id, English title)` of the tool actions, for the shortcut editor.
 pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
     SHORTCUTS
@@ -528,6 +542,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
             (crate::viewer::ZOOM_100, "Zoom to 100%"),
+            (crate::viewer::FIT_UP_TO_100, "Fit up to 100%"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::view_options::ACTIONS.iter().copied())
@@ -777,6 +792,8 @@ pub struct PaintOptions {
     pub clone_offset: [f64; 2],
     /// Clone Stamp: source time shift in seconds.
     pub clone_time_shift: f64,
+    /// Clone Stamp, Lock Source Time: the source time in seconds.
+    pub clone_source_time: f64,
     /// Brush tip (Brushes panel): pixels, degrees, percents.
     pub diameter: f64,
     pub angle: f64,
@@ -858,6 +875,7 @@ impl Default for PaintOptions {
             lock_source_time: false,
             clone_offset: [0.0, 0.0],
             clone_time_shift: 0.0,
+            clone_source_time: 0.0,
             diameter: 21.0,
             angle: 0.0,
             roundness: 100.0,
@@ -989,6 +1007,8 @@ pub enum ViewRequest {
     Center,
     /// Double-click Zoom: magnification 100%.
     Actual,
+    /// View ▸ Fit up to 100% (Alt/Option+/).
+    FitUpTo100,
 }
 
 /// A double-click on a shape tool button (AE-SHP-054), applied by the viewer.
@@ -1275,7 +1295,20 @@ impl ActionHandler for ToolActions {
             shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
             return true;
         }
+        if inv.id == crate::viewer::FIT_UP_TO_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::FitUpTo100);
+            return true;
+        }
         if crate::viewer::view_options::handle(inv, cx) {
+            return true;
+        }
+        // Ctrl+T with a mask or shape path selected: Free Transform Points,
+        // else the Type tools (AE).
+        if inv.id == ids::TYPE && path_selected(cx) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            t.set(Tool::Selection);
+            t.free_transform_request = true;
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {

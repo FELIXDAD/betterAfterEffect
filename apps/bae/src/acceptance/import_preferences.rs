@@ -1,10 +1,23 @@
 use super::*;
-use bae_ui::files::{FilePicker, OpenRequest, SharedFilePicker};
+use bae_ui::files::{FilePicker, ImportSelection, OpenRequest, SharedFilePicker};
 
-struct SequencePicker(PathBuf);
-impl FilePicker for SequencePicker {
+struct ImportPicker {
+    first: PathBuf,
+    alphabetical: bool,
+    photoshop_kind: bae_model::psd::ImportKind,
+}
+impl FilePicker for ImportPicker {
     fn open(&self, _: &OpenRequest) -> Vec<PathBuf> {
-        vec![self.0.clone()]
+        vec![self.first.clone()]
+    }
+    fn import(&self, request: &OpenRequest) -> ImportSelection {
+        ImportSelection {
+            paths: self.open(request),
+            sequences: true,
+            alphabetical: self.alphabetical,
+            create_comp: false,
+            photoshop_kind: self.photoshop_kind,
+        }
     }
 }
 
@@ -21,15 +34,20 @@ fn sequence_import_reports_missing_and_unreadable_frames_separately() {
     std::fs::write(&first, PNG).unwrap();
     std::fs::write(dir.path().join("镜头_004.png"), &PNG[..45]).unwrap();
     std::fs::write(dir.path().join("镜头_005.png"), PNG).unwrap();
-    for (report, verify, expected) in [
-        (false, false, None),
-        (true, false, Some("2–3")),
-        (false, true, Some("4")),
+    for (report, verify, alphabetical, expected) in [
+        (false, false, false, None),
+        (true, false, false, Some("2–3")),
+        (false, true, false, Some("4")),
+        (false, true, true, Some("1")),
     ] {
         let mut h = gui();
         h.state_mut()
             .app
-            .insert_resource(SharedFilePicker::new(SequencePicker(first.clone())));
+            .insert_resource(SharedFilePicker::new(ImportPicker {
+                first: first.clone(),
+                alphabetical,
+                photoshop_kind: Default::default(),
+            }));
         let mut prefs = (*h.state().prefs.current()).clone();
         prefs.set("import.report_missing_frames", report);
         prefs.set("import.verify_individual_frames", verify);
@@ -66,6 +84,36 @@ fn sequence_import_reports_missing_and_unreadable_frames_separately() {
 }
 
 #[test]
+fn native_import_kind_reaches_the_layered_photoshop_import() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/bae-interop-psd/tests/fixtures/art.psd");
+    let mut h = gui();
+    h.state_mut()
+        .app
+        .insert_resource(SharedFilePicker::new(ImportPicker {
+            first: path,
+            alphabetical: false,
+            photoshop_kind: bae_model::psd::ImportKind::RetainSize,
+        }));
+    h.state_mut().workspace.focus_panel("project");
+    h.state_mut()
+        .dispatch(Invocation::new("motion.file.import_file"));
+    let selected_kind = bae_ui::tr("Composition - Retain Layer Sizes");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while find_text(&h, selected_kind).is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "selected import kind absent"
+        );
+        frame(&mut h);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    settle(&mut h);
+    assert!(!bae_motion::query::comps(h.state().stage()).is_empty());
+}
+
+#[test]
 fn footage_replacement_reuses_or_resets_interpretation_and_ntsc_display() {
     let dir = tempfile::tempdir().unwrap();
     for stem in ["Plate", "Replacement"] {
@@ -78,7 +126,11 @@ fn footage_replacement_reuses_or_resets_interpretation_and_ntsc_display() {
         let pick = |h: &mut Ui, name: &str| {
             h.state_mut()
                 .app
-                .insert_resource(SharedFilePicker::new(SequencePicker(dir.path().join(name))));
+                .insert_resource(SharedFilePicker::new(ImportPicker {
+                    first: dir.path().join(name),
+                    alphabetical: false,
+                    photoshop_kind: Default::default(),
+                }));
             h.state_mut().workspace.focus_panel("project");
         };
         let mut prefs = (*h.state().prefs.current()).clone();
