@@ -1,16 +1,12 @@
 use crate::{
-    Builtin, EffectTarget, Registry, TargetEffect,
-    catalog::DefBuilder,
-    effects::sampled::{Shader, lights},
+    Builtin, EffectTarget, Registry, TargetEffect, catalog::DefBuilder, effects::sampled::Shader,
     gpu, rust_builtin,
 };
 use crate::{effects::image_grid, params::Params};
 use bae_gpu::wgpu;
 use bae_model::{EffectDef, ParamKind, Time, Value};
 use bae_render::RenderError;
-use bae_render::{
-    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderComp, RenderEffect, RenderLayer,
-};
+use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect};
 use std::sync::Arc;
 
 fn layer(p: Params<'_>, roi: IRect) -> IRect {
@@ -257,12 +253,12 @@ impl Effect for GlueGun {
         layer(Params::new(&self.0, p), roi)
     }
 
-    fn prepare_scene(&self, instance: &mut RenderEffect, comp: &RenderComp, layer: &RenderLayer) {
-        lights::collect(&self.0, instance, comp, layer);
-    }
-
     /// AE Lights: comp lights shade the beads (and key the frame cache).
     fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        self.scene_lights(p)
+    }
+
+    fn scene_lights(&self, p: &EffectParams<'_>) -> bool {
         Params::new(&self.0, p).popup(28) == 2
     }
 

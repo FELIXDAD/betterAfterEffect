@@ -1,6 +1,5 @@
 //! A layer-space compute pass for effects with auxiliary images. Each parameter
 //! occupies its AE disk-ID slot. This keeps the CPU and WGSL layouts identical.
-#[path = "sampled_lights.rs"]
 pub(crate) mod lights;
 use super::{image_grid, layer_input};
 use crate::{
@@ -124,13 +123,7 @@ impl Shader {
                 _ => {}
             }
         }
-        if let Some(Value::FloatList(profile)) = v.p.value(bae_render::effect::HISTORY_PARAM) {
-            let start = SLOTS - bae_render::effect::PROFILE_SAMPLES;
-            for (slot, &sample) in (start..SLOTS).zip(profile) {
-                u.f32(HEADER + slot * 16, sample as f32);
-            }
-        }
-        lights::write(v.p.effect, &mut u, HEADER);
+        lights::write(v.p.scene, &mut u, HEADER);
         extra(&mut u, HEADER);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
@@ -170,6 +163,8 @@ pub(crate) struct Sampled {
     pub inputs: &'static [(u32, bool)],
     pub read: Region,
     pub bounds: Region,
+    /// Its "Using" popup, when it can shade with the comp's lights (AE Lights = 2).
+    pub lights: Option<u32>,
 }
 
 impl Effect for Sampled {
@@ -177,15 +172,12 @@ impl Effect for Sampled {
         &self.def
     }
     fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
-        lights::uses_scene(&self.def, p.effect)
+        self.scene_lights(p)
     }
-    fn prepare_scene(
-        &self,
-        instance: &mut bae_render::RenderEffect,
-        comp: &bae_render::RenderComp,
-        layer: &bae_render::RenderLayer,
-    ) {
-        lights::collect(&self.def, instance, comp, layer);
+    /// "Using: AE Lights": the comp lights shade it (and key its cache).
+    fn scene_lights(&self, p: &EffectParams<'_>) -> bool {
+        self.lights
+            .is_some_and(|id| Params::new(&self.def, p).popup(id) == 2)
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         if roi.is_empty() {

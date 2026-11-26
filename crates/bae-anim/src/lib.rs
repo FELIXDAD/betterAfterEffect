@@ -23,7 +23,6 @@ mod bezier;
 mod bounds;
 mod curve;
 pub mod edit;
-pub mod effect_history;
 mod error;
 mod eval;
 mod evaluated;

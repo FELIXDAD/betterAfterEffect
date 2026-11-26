@@ -203,6 +203,7 @@ fn grow_bounds() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &GROW_BOUNDS,
                 mode: 0,

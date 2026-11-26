@@ -98,6 +98,7 @@ fn cc_glass_wipe() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &GLASS_WIPE,
                 mode: 0,
@@ -145,6 +146,7 @@ fn cc_twister() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &TWISTER,
                 mode: 1,
@@ -228,6 +230,7 @@ fn cc_warpomatic() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &WARPOMATIC,
                 mode: 2,

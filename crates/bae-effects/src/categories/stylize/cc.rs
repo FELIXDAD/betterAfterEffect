@@ -87,6 +87,7 @@ fn cc_hextile() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 0,
@@ -284,6 +285,7 @@ fn cc_plastic() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: Some(26),
                 def,
                 shader: &SHADER,
                 mode: 1,
@@ -318,6 +320,7 @@ fn cc_block_load() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 2,
@@ -394,6 +397,7 @@ fn cc_mr_smoothie() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 3,

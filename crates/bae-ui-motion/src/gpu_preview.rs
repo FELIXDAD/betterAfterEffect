@@ -198,6 +198,28 @@ struct SampledFrames<'a> {
 }
 
 impl bae_render::graph::CompFrames for SampledFrames<'_> {
+    // Control samples and integrals for effects that ask for them
+    // (`Effect::parameter_times`, `integrated_parameters`), as in export.
+    fn animated_controls(&self, effect: &bae_model::PrimPath, ids: &[u32]) -> bool {
+        self.inner.animated_controls(effect, ids)
+    }
+    fn parameters_at(
+        &mut self,
+        effect: &bae_render::RenderEffect,
+        ids: &[u32],
+        frame: &bae_render::graph::EffectFrame,
+        times: &[Time],
+    ) -> Vec<bae_render::effect::ParameterSample> {
+        self.inner.parameters_at(effect, ids, frame, times)
+    }
+    fn scalar_track(
+        &mut self,
+        effect: &bae_model::PrimPath,
+        id: u32,
+        frame: &bae_render::graph::EffectFrame,
+    ) -> Option<Arc<bae_render::effect::ScalarTrack>> {
+        self.inner.scalar_track(effect, id, frame)
+    }
     fn comp_at(
         &mut self,
         path: &bae_model::PrimPath,

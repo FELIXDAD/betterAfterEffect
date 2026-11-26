@@ -60,6 +60,7 @@ fn arithmetic() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 mode: 1,
                 shader: &BLEND,
@@ -133,6 +134,7 @@ fn blend() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 mode: 2,
                 shader: &BLEND,
@@ -248,6 +250,7 @@ fn calculations() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 mode: 3,
                 shader: &BLEND,
@@ -384,6 +387,7 @@ fn channel_combiner() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 mode: 0,
                 shader: &CHANNEL_COMBINER,
@@ -512,6 +516,7 @@ fn compound_arithmetic() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 mode: 4,
                 shader: &BLEND,
@@ -641,6 +646,7 @@ fn set_channels() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 mode: 0,
                 shader: &SET_CHANNELS,
@@ -792,6 +798,7 @@ fn cc_composite() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 mode: 5,
                 shader: &BLEND,
