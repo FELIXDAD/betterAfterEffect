@@ -23,7 +23,7 @@ fn broadcast_colors(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
         let gain = saturate(min(peak - luma, chroma_limit) / chroma);
         safe = luma + (signal - luma) * gain;
     } else {
-        safe = signal * min(peak / (luma + chroma), chroma_limit / chroma);
+        safe = limit_signal(signal, max((luma + chroma) / peak, chroma / chroma_limit), 1.0);
     }
     return vec4<f32>(pow(saturate(safe), vec3<f32>(gamma)) * c.a, c.a);
 }

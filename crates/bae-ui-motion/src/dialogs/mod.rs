@@ -14,6 +14,7 @@ pub mod memory;
 mod precompose;
 mod render_output;
 mod solid_settings;
+mod transform_value;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -27,6 +28,7 @@ pub use comp_settings::{CompSettings, CompSettingsMemory};
 pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
 pub use precompose::{PrecomposeDialog, PrecomposeMemory};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
+pub use transform_value::{Kind as TransformKind, TransformValue};
 
 use crate::session::SharedSession;
 
@@ -44,6 +46,9 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
+    /// keyframe's Edit Value….
+    TransformValue(Box<TransformValue>),
     /// A Render Queue item's Render Settings.
     RenderSettings(Box<render_output::RenderSettings>),
     /// A Render Queue item's Output Module Settings.
@@ -289,6 +294,26 @@ pub(crate) fn new_light(cx: &PanelContext<'_>, session: &SharedSession) {
     }
 }
 
+/// Open the value dialog of `kind` for `layers` at comp time `now`, or for one
+/// keyframe of `key_attr` (`layers`: its layer, `now`: its comp time).
+pub(crate) fn transform_value(
+    cx: &PanelContext<'_>,
+    comp: &PrimPath,
+    layers: &[PrimPath],
+    now: bae_model::Time,
+    kind: TransformKind,
+    key_attr: Option<&str>,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = TransformValue::new(cx.stage, comp, layers, now, kind, key_attr) {
+        d.open = Some(Dialog::TransformValue(Box::new(v)));
+    }
+}
+
 /// File ▸ New Comp from Selection… for `items` (Project panel selection).
 pub(crate) fn comp_from_selection(
     cx: &PanelContext<'_>,
@@ -320,6 +345,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        transform_value::STRINGS,
         render_output::STRINGS,
         comp_from_selection::STRINGS,
     ]
@@ -360,6 +386,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::TransformValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
             Dialog::CompFromSelection(d) => d.ui(ctx, cx, &session),
