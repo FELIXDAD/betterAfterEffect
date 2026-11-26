@@ -298,14 +298,39 @@ pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
             .resources
             .get::<crate::SharedSession>()
             .and_then(|s| s.lock().active_comp.clone());
-        import_into(cx, &paths, None, comp);
+        drop_paths(cx, &paths, None, comp);
     }
 }
 
 /// Import `paths` into `parent` (default the assets folder): one
 /// `item.import`; unreadable files are reported in an alert.
 pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent: Option<PrimPath>) {
-    import_into(cx, paths, parent, None);
+    import_into(
+        cx,
+        paths,
+        parent,
+        None,
+        bae_motion::photoshop::ImportKind::Footage,
+    );
+}
+
+pub(crate) fn drop_paths(
+    cx: &mut PanelContext<'_>,
+    paths: &[PathBuf],
+    parent: Option<PrimPath>,
+    comp: Option<PrimPath>,
+) {
+    use bae_motion::photoshop::ImportKind;
+    let kind = if paths.len() > 1 {
+        match crate::prefs::current(cx.resources).str("import.drag_import_multiple_items_as") {
+            "composition" => ImportKind::Composition,
+            "composition_retain_layer_sizes" => ImportKind::RetainSize,
+            _ => ImportKind::Footage,
+        }
+    } else {
+        ImportKind::Footage
+    };
+    import_into(cx, paths, parent, comp, kind);
 }
 
 fn import_into(
@@ -313,6 +338,7 @@ fn import_into(
     paths: &[PathBuf],
     parent: Option<PrimPath>,
     comp: Option<PrimPath>,
+    kind: bae_motion::photoshop::ImportKind,
 ) {
     if paths.is_empty() {
         return;
@@ -323,16 +349,19 @@ fn import_into(
         crate::dialogs::shared(cx.resources)
             .lock()
             .photoshop_queue
-            .push_back(crate::dialogs::photoshop::PhotoshopDialog::new(
-                path,
-                parent.clone(),
-                comp.clone(),
-                folder,
-                defaults.clone(),
-            ));
+            .push_back(
+                crate::dialogs::photoshop::PhotoshopDialog::new(
+                    path,
+                    parent.clone(),
+                    comp.clone(),
+                    folder,
+                    defaults.clone(),
+                )
+                .with_kind(kind),
+            );
     }
     if !probed.files.is_empty() {
-        let mut params = json!({ "files": probed.files });
+        let mut params = json!({ "files": probed.files, "precompose": kind != bae_motion::photoshop::ImportKind::Footage });
         if let Some(p) = parent {
             params["parent"] = json!(p);
         }

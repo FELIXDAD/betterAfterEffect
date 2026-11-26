@@ -507,7 +507,7 @@ fn precompose_moves_the_selected_layers_in_one_undo_step() {
 }
 
 #[derive(Debug)]
-struct DroppedFile(std::path::PathBuf);
+pub(super) struct DroppedFile(pub(super) std::path::PathBuf);
 
 impl egui::DroppedFile for DroppedFile {
     fn path(&self) -> &std::path::Path {

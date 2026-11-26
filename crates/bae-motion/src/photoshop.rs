@@ -180,6 +180,7 @@ fn footage(
             .run(
                 tx,
                 ImportParams {
+                    precompose: false,
                     parent: Some(parent.clone()),
                     comp: None,
                     files: vec![file],

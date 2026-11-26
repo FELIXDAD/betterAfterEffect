@@ -1,3 +1,9 @@
+const PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
+    0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15, 0, 2,
+    135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
 use super::*;
 use bae_ui::files::{FilePicker, OpenRequest, SharedFilePicker};
 
@@ -10,11 +16,6 @@ impl FilePicker for SequencePicker {
 
 #[test]
 fn sequence_import_reports_missing_and_unreadable_frames_separately() {
-    const PNG: &[u8] = &[
-        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6,
-        0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15,
-        0, 2, 135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
-    ];
     let dir = tempfile::tempdir().unwrap();
     let first = dir.path().join("镜头_001.png");
     std::fs::write(&first, PNG).unwrap();
@@ -61,5 +62,60 @@ fn sequence_import_reports_missing_and_unreadable_frames_separately() {
         } else {
             assert!(!dialog_open(&h));
         }
+    }
+}
+
+#[test]
+fn dropping_multiple_files_uses_the_selected_import_mode() {
+    use bae_motion::query;
+    use egui_kittest::kittest::Queryable as _;
+
+    let dir = tempfile::tempdir().unwrap();
+    let files = ["left.png", "right.png"].map(|name| dir.path().join(name));
+    for file in &files {
+        std::fs::write(file, PNG).unwrap();
+    }
+    for (mode, nested) in [
+        ("footage", false),
+        ("composition", true),
+        ("composition_retain_layer_sizes", true),
+    ] {
+        let mut h = gui();
+        comp_with(&mut h, &[]);
+        let mut prefs = (*h.state().prefs.current()).clone();
+        prefs.set("import.drag_import_multiple_items_as", mode);
+        h.state().prefs.set(prefs).unwrap();
+        let viewer = h
+            .root()
+            .query_all_by_label("Composition")
+            .map(|n| n.rect())
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .unwrap();
+        send(&mut h, Event::PointerMoved(viewer.center()));
+        for file in &files {
+            h.input_mut()
+                .dropped_files
+                .push(std::sync::Arc::new(super::dialogs::DroppedFile(
+                    file.clone(),
+                )));
+        }
+        settle(&mut h);
+        let layers = h.state().layers();
+        let stage = h.state().stage();
+        let footage = if nested {
+            assert_eq!(layers.len(), 1, "{mode}");
+            let comp = query::precomp_source(stage, &layers[0]).expect(mode);
+            query::comp_layers(stage, &comp)
+        } else {
+            layers
+        };
+        let mut names: Vec<_> = footage
+            .iter()
+            .map(|layer| query::display_name_of(stage, layer))
+            .collect();
+        names.sort();
+        assert_eq!(names, ["left.png", "right.png"], "{mode}");
+        key(&mut h, Modifiers::COMMAND, Key::Z);
+        assert!(h.state().layers().is_empty(), "{mode}");
     }
 }

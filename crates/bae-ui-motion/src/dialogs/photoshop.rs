@@ -57,6 +57,11 @@ impl PhotoshopDialog {
             ignore: false,
         }
     }
+    pub(crate) fn with_kind(mut self, kind: ImportKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
     pub(crate) fn replace(&mut self, item: PrimPath, view: &bae_model::PrimView<'_>, reload: bool) {
         self.ignore = view
             .value("psd:ignore_styles")
