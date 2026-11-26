@@ -172,6 +172,8 @@ struct Contributed {
     enabled: bool,
     checked: bool,
     chord: Option<Chord>,
+    /// The state-following title last shown ([`MenuItemSpec::label_when`]).
+    label: Option<String>,
 }
 
 /// The application menu bar.
@@ -285,6 +287,12 @@ impl AppMenu {
                     item.set_checked(checked);
                     c.checked = checked;
                 }
+            }
+            let label = c.spec.label(&cx);
+            if label.is_some() && label != c.label {
+                c.item
+                    .set_text(&native_text(label.as_deref().unwrap_or_default()));
+                c.label = label;
             }
             let chord = shell_chord(keymap, &c.spec.invocation());
             if chord != c.chord {
@@ -484,6 +492,7 @@ fn append_entries(
                         enabled: true,
                         checked: false,
                         chord: None,
+                        label: None,
                     },
                 );
             }

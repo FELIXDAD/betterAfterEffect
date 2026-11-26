@@ -4,7 +4,10 @@ use crate::export::AudioEncodeSettings;
 use crate::{AudioBuffer, MediaError};
 use objc2::rc::Retained;
 use objc2_av_foundation::{AVAssetWriter, AVAssetWriterInput, AVMediaTypeAudio};
-use objc2_avf_audio::{AVEncoderBitRateKey, AVFormatIDKey, AVNumberOfChannelsKey, AVSampleRateKey};
+use objc2_avf_audio::{
+    AVEncoderBitRateKey, AVFormatIDKey, AVLinearPCMBitDepthKey, AVLinearPCMIsBigEndianKey,
+    AVLinearPCMIsFloatKey, AVLinearPCMIsNonInterleaved, AVNumberOfChannelsKey, AVSampleRateKey,
+};
 use objc2_core_audio_types::{
     AudioStreamBasicDescription, kAudioFormatFlagIsFloat, kAudioFormatFlagIsPacked,
     kAudioFormatLinearPCM, kAudioFormatMPEG4AAC,
@@ -62,23 +65,40 @@ impl AudioInput {
             ))?;
             let format =
                 CFRetained::from_raw(NonNull::new(format.cast_mut()).expect("format on success"));
-            let codec = NSNumber::new_u32(kAudioFormatMPEG4AAC);
+            let pcm = settings.codec == "pcm_s24le";
+            let codec = NSNumber::new_u32(if pcm {
+                kAudioFormatLinearPCM
+            } else {
+                kAudioFormatMPEG4AAC
+            });
             let rate = NSNumber::new_u32(settings.sample_rate);
             let count = NSNumber::new_u32(channels);
             let bits = NSNumber::new_u32(192_000);
-            let output = dict(&[
+            let depth = NSNumber::new_u32(24);
+            let no = NSNumber::new_bool(false);
+            let mut properties = vec![
                 (AVFormatIDKey.expect("audio format"), any(&*codec)),
                 (AVSampleRateKey.expect("sample rate"), any(&*rate)),
                 (AVNumberOfChannelsKey.expect("channels"), any(&*count)),
-                (AVEncoderBitRateKey.expect("bit rate"), any(&*bits)),
-            ]);
+            ];
+            if pcm {
+                properties.extend([
+                    (AVLinearPCMBitDepthKey.unwrap(), any(&*depth)),
+                    (AVLinearPCMIsFloatKey.unwrap(), any(&*no)),
+                    (AVLinearPCMIsBigEndianKey.unwrap(), any(&*no)),
+                    (AVLinearPCMIsNonInterleaved.unwrap(), any(&*no)),
+                ]);
+            } else {
+                properties.push((AVEncoderBitRateKey.expect("bit rate"), any(&*bits)));
+            }
+            let output = dict(&properties);
             let input = AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
                 AVMediaTypeAudio.expect("audio"),
                 Some(&output),
             );
             input.setExpectsMediaDataInRealTime(false);
             if !writer.canAddInput(&input) {
-                return Err(writer_error(writer, "cannot add AAC input"));
+                return Err(writer_error(writer, "cannot add movie audio input"));
             }
             writer.addInput(&input);
             Ok(Self {

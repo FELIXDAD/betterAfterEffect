@@ -197,10 +197,15 @@ pub fn collect(stage: &Stage, options: &CollectOptions) -> Inventory {
                             follow.push(target.clone());
                         }
                     }
-                    Value::TextDocument(doc) if !doc.font.is_empty() => {
-                        let users = fonts.entry(doc.font.clone()).or_default();
-                        if !users.contains(view.path()) {
-                            users.push(view.path().clone());
+                    Value::TextDocument(doc) => {
+                        for style in std::iter::once(&doc.style)
+                            .chain(doc.runs.iter().map(|r| &r.style))
+                            .filter(|s| !s.font.is_empty())
+                        {
+                            let users = fonts.entry(style.font.clone()).or_default();
+                            if !users.contains(view.path()) {
+                                users.push(view.path().clone());
+                            }
                         }
                     }
                     _ => {}
