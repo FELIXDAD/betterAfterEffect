@@ -209,6 +209,63 @@ fn lumetri_secondary_curves_change_only_enabled_channels() {
 }
 
 #[test]
+fn lumetri_secondary_curves_sample_before_hue_and_luma_adjustments() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(1, 1);
+    let input = Pixels::new(rect, |_, _| [0.5, 0., 0., 0.5]);
+    let fx = builtin("ADBE Lumetri");
+    let render = |values| run(&gpu, Rgba32Float, fx, values, &input, rect, 1.);
+    let rotation = (106, Value::FloatList(vec![0., 0., 1. / 3.]));
+    let brighter = (108, Value::FloatList(vec![0., 0., 1.]));
+    let adjusted = render(vec![rotation.clone(), brighter.clone()]);
+    // Red is below 0.25 in linear Rec.709 luma. Rotated, brighter green is above 0.75.
+    // A ramp between those thresholds must leave the source red's saturation alone.
+    let luma_sat = (110, Value::FloatList(vec![0., 0.25, 0., 0., 0.75, -1.]));
+    let combined = render(vec![rotation, brighter, luma_sat]);
+    assert!(adjusted.get(0, 0)[1] > 0.6);
+    assert_close(&combined, &adjusted, rect, 0.0001, "secondary input luma");
+}
+
+#[test]
+fn lumetri_add_and_remove_update_the_rendered_key_across_red() {
+    let Some(gpu) = context() else { return };
+    let fx = builtin("ADBE Lumetri");
+    let colors = [[1., 0., 0.2, 1.], [1., 0.5, 0., 1.], [0., 1., 0., 1.]];
+    let rect = IRect::from_size(3, 1);
+    let input = Pixels::new(rect, |x, _| colors[x as usize].map(|v| v as f32));
+    let mut params =
+        std::collections::BTreeMap::from([(74, Value::Bool(true)), (75, Value::Int(3))]);
+    for (id, sample, expected) in [
+        (70, 0, [1., 0., 0.]),
+        (71, 1, [1., 1., 0.]),
+        (72, 1, [1., 0., 0.]),
+        (70, 1, [0., 1., 0.]),
+        (72, 1, [0., 0., 0.]),
+        (71, 0, [1., 0., 0.]),
+    ] {
+        let edits =
+            bae_effects::lumetri_key_edits(id, colors[sample], |id| params.get(&id).cloned());
+        params.extend(edits);
+        let mask = run(
+            &gpu,
+            F32,
+            fx,
+            params.iter().map(|(&id, v)| (id, v.clone())).collect(),
+            &input,
+            rect,
+            1.,
+        );
+        for (x, weight) in expected.into_iter().enumerate() {
+            assert!(
+                (mask.get(x as i32, 0)[0] - weight).abs() < 0.001,
+                "picker {id}, sample {x}: {:?}",
+                mask.get(x as i32, 0)
+            );
+        }
+    }
+}
+
+#[test]
 fn lumetri_mask_refinement_and_sharpen_match_full_frame_on_a_tile() {
     let Some(gpu) = context() else { return };
     let rect = IRect::new(-11, 6, 89, 58);

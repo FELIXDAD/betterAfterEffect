@@ -26,6 +26,7 @@ use bae_ui::Accessible as _;
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
+use crate::panel_columns::{Column, Columns};
 
 /// Formats offered in the panel and by `bae render --format`.
 pub const FORMATS: &[ExportFormat] = &[
@@ -275,6 +276,9 @@ pub struct QueueItem {
     /// The Render column's check box: unchecked items stay in the queue but
     /// are not rendered (AE: Unqueued).
     pub render: bool,
+    pub comment: String,
+    pub notify: bool,
+    pub label: usize,
     /// When its render started (AE's Started column).
     pub started: Option<std::time::SystemTime>,
     cancel: Arc<AtomicBool>,
@@ -421,6 +425,9 @@ impl RenderQueue {
             end,
             status: ItemStatus::Queued,
             render: true,
+            comment: String::new(),
+            notify: false,
+            label: 0,
             started: None,
             cancel: Arc::new(AtomicBool::new(false)),
         });
@@ -957,7 +964,17 @@ pub(crate) fn run_worker(
         };
         completed += 1;
         succeeded &= matches!(status, ItemStatus::Done { .. });
-        queue.lock().set_status(job.id, status);
+        let mut q = queue.lock();
+        if q.items()
+            .iter()
+            .any(|item| item.id == job.id && item.notify)
+            && let Some(ctx) = &q.repaint
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+        }
+        q.set_status(job.id, status);
     }
     let mut q = queue.lock();
     report(RenderEvent::Finished {
@@ -1013,13 +1030,38 @@ fn reveal_label() -> &'static str {
     }
 }
 
+const COLUMNS: &[Column] = &[
+    Column::new("Render", 54.0, true, false),
+    Column::new("Label", 37.0, true, false),
+    Column::new("#", 28.0, true, false),
+    Column::new("Comp Name", 130.0, true, true),
+    Column::new("Status", 104.0, true, false),
+    Column::new("Started", 90.0, true, false),
+    Column::new("Render Time", 82.0, true, false),
+    Column::new("Comment", 132.0, false, false),
+    Column::new("Notify", 56.0, false, false),
+    Column::new("Comp Size", 90.0, false, false),
+    Column::new("Frames", 54.0, false, false),
+    Column::new("Duration", 88.0, false, false),
+    Column::new("Estimated Time", 100.0, false, false),
+];
+
 /// The Render Queue panel.
 #[derive(Debug, Default)]
 pub struct RenderQueuePanel {
+    columns: Columns,
     error: Option<String>,
 }
 
 impl Panel for RenderQueuePanel {
+    fn menu(&mut self, ui: &mut egui::Ui, _cx: &mut PanelContext<'_>) {
+        self.columns.menu(ui, COLUMNS);
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(&self.columns).ok()
+    }
+
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         TabInfo::new(tr("Render Queue"))
     }
@@ -1059,45 +1101,67 @@ impl RenderQueuePanel {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
         ui.separator();
-        let mut q = queue.lock();
-        if q.items.is_empty() {
-            ui.weak(tr(
-                "Add a composition with Composition > Add to Render Queue.",
-            ));
-            return;
-        }
-        let mut remove = None;
-        let mut cancel = None;
-        let mut requeue = None;
         let mut open = None;
-        // No scroll area of its own: the dock scrolls a panel that does not fit
-        // (AE opens the Render Queue in the short Timeline frame).
-        for (i, item) in q.items.iter_mut().enumerate() {
-            let last =
-                bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
-            ui.push_id(item.id, |ui| {
-                item_ui(
-                    ui,
-                    i + 1,
-                    item,
-                    last,
-                    &mut remove,
-                    &mut cancel,
-                    &mut requeue,
-                    &mut open,
-                );
+        let mut q = queue.lock();
+        let panel_width = ui.available_width();
+        egui::ScrollArea::horizontal()
+            .id_salt("queue_columns")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.set_min_width(panel_width);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for col in COLUMNS {
+                        if !self.columns.visible(col) {
+                            continue;
+                        }
+                        let resp = ui.add_sized(
+                            [col.width, 19.0],
+                            egui::Label::new(tr(col.title)).sense(egui::Sense::click()),
+                        );
+                        crate::common::context_menu(&resp, &mut |ui| {
+                            self.columns.header_menu(ui, COLUMNS, col)
+                        });
+                    }
+                });
+                if q.items.is_empty() {
+                    ui.weak(tr(
+                        "Add a composition with Composition > Add to Render Queue.",
+                    ));
+                    return;
+                }
+                let mut remove = None;
+                let mut cancel = None;
+                let mut requeue = None;
+                // No scroll area of its own: the dock scrolls a panel that does not fit
+                // (AE opens the Render Queue in the short Timeline frame).
+                for (i, item) in q.items.iter_mut().enumerate() {
+                    let comp = bae_motion::query::comp_info(cx.stage, &item.comp);
+                    ui.push_id(item.id, |ui| {
+                        item_ui(
+                            ui,
+                            i + 1,
+                            item,
+                            comp.as_ref(),
+                            &self.columns,
+                            &mut remove,
+                            &mut cancel,
+                            &mut requeue,
+                            &mut open,
+                        );
+                    });
+                    ui.separator();
+                }
+                if let Some(id) = remove {
+                    q.remove(id);
+                }
+                if let Some(id) = cancel {
+                    q.cancel(id);
+                }
+                if let Some(id) = requeue {
+                    q.requeue(id);
+                }
             });
-            ui.separator();
-        }
-        if let Some(id) = remove {
-            q.remove(id);
-        }
-        if let Some(id) = cancel {
-            q.cancel(id);
-        }
-        if let Some(id) = requeue {
-            q.requeue(id);
-        }
         if q.running {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
@@ -1117,7 +1181,8 @@ fn item_ui(
     ui: &mut egui::Ui,
     number: usize,
     item: &mut QueueItem,
-    last: Option<i64>,
+    comp: Option<&CompInfo>,
+    columns: &Columns,
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
@@ -1133,39 +1198,134 @@ fn item_ui(
         .replace("{n}", &number.to_string())
         .replace("{comp}", &item.comp_name);
     let name = |what: &str| bae_ui::a11y::context(&[&item_ctx, tr(what)]);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for col in COLUMNS.iter().filter(|col| columns.visible(col)) {
+            ui.allocate_ui_with_layout(
+                egui::vec2(col.width, 20.0),
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    let text = match col.title {
+                        "Render" => {
+                            ui.add_enabled_ui(
+                                !matches!(item.status, ItemStatus::Rendering { .. }),
+                                |ui| {
+                                    let mut render = item.render;
+                                    if bae_ui::widgets::checkbox(ui, &mut render, "")
+                                        .labeled_toggle(
+                                            egui::WidgetType::Checkbox,
+                                            &name("Render"),
+                                            render,
+                                        )
+                                        .changed()
+                                    {
+                                        item.render = render;
+                                    }
+                                },
+                            );
+                            return;
+                        }
+                        "Label" => {
+                            let (r, resp) = ui
+                                .allocate_exact_size(egui::vec2(15.0, 15.0), egui::Sense::click());
+                            bae_ui::icons::swatch(
+                                ui.painter(),
+                                r.center(),
+                                10.0,
+                                bae_ui::theme::label_color(item.label),
+                            );
+                            egui::Popup::menu(&resp).show(|ui| {
+                                for i in 0..bae_ui::theme::LABELS.len() {
+                                    if ui
+                                        .selectable_value(
+                                            &mut item.label,
+                                            i,
+                                            bae_ui::theme::label_name(i),
+                                        )
+                                        .clicked()
+                                    {
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            return;
+                        }
+                        "#" => number.to_string(),
+                        "Comp Name" => item.comp_name.clone(),
+                        "Status" => match &item.status {
+                            ItemStatus::Queued => {
+                                tr(if item.render { "Queued" } else { "Unqueued" }).to_owned()
+                            }
+                            ItemStatus::Rendering { done, total } => {
+                                format!("{} {done}/{total}", tr("Rendering"))
+                            }
+                            ItemStatus::Done { .. } => tr("Done").to_owned(),
+                            ItemStatus::Failed(_) => tr("Failed").to_owned(),
+                            ItemStatus::Stopped { done, total, .. } => {
+                                tr("Stopped ({done}/{total} frames)")
+                                    .replace("{done}", &done.to_string())
+                                    .replace("{total}", &total.to_string())
+                            }
+                        },
+                        "Started" => item
+                            .started
+                            .map(bae_platform::utc_label)
+                            .unwrap_or_default(),
+                        "Render Time" => {
+                            let secs = match item.status {
+                                ItemStatus::Done { seconds, .. } => Some(seconds),
+                                ItemStatus::Rendering { .. } => item
+                                    .started
+                                    .and_then(|t| t.elapsed().ok())
+                                    .map(|t| t.as_secs_f64()),
+                                _ => None,
+                            };
+                            secs.map(|s| format!("{s:.1} s")).unwrap_or_default()
+                        }
+                        "Estimated Time" => match item.status {
+                            ItemStatus::Rendering { done, total } if done > 0 => item
+                                .started
+                                .and_then(|t| t.elapsed().ok())
+                                .map(|t| {
+                                    format!(
+                                        "{:.1} s",
+                                        t.as_secs_f64() * (total - done) as f64 / done as f64
+                                    )
+                                })
+                                .unwrap_or_default(),
+                            _ => String::new(),
+                        },
+                        "Comment" => {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut item.comment)
+                                    .desired_width(col.width),
+                            );
+                            return;
+                        }
+                        "Notify" => {
+                            ui.checkbox(&mut item.notify, "");
+                            return;
+                        }
+                        "Comp Size" => comp
+                            .map(|c| format!("{} × {}", c.width, c.height))
+                            .unwrap_or_default(),
+                        "Frames" => item.frame_count().to_string(),
+                        "Duration" => {
+                            bae_ui::widgets::timecode(item.frame_count() as i64, item.rate.as_f64())
+                        }
+                        _ => unreachable!(),
+                    };
+                    ui.add(egui::Label::new(text).truncate());
+                },
+            );
+        }
+    });
     // Name, status and actions wrap in a narrow panel instead of running
     // off its edge.
     ui.horizontal_wrapped(|ui| {
-        // AE's Render column and the item's number.
-        ui.add_enabled_ui(!matches!(item.status, ItemStatus::Rendering { .. }), |ui| {
-            let mut render = item.render;
-            if bae_ui::widgets::checkbox(ui, &mut render, "")
-                .labeled_toggle(egui::WidgetType::Checkbox, &name("Render"), render)
-                .changed()
-            {
-                item.render = render;
-            }
-        });
-        ui.label(number.to_string());
-        ui.strong(&item.comp_name);
         match &item.status {
-            ItemStatus::Queued if !item.render => {
-                ui.label(tr("Unqueued"));
-            }
-            ItemStatus::Queued => {
-                ui.label(tr("Queued"));
-            }
-            ItemStatus::Rendering { done, total } => {
-                let fraction = if *total == 0 {
-                    0.0
-                } else {
-                    *done as f32 / *total as f32
-                };
-                ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .desired_width(ui.available_width().clamp(60.0, 160.0))
-                        .text(format!("{done} / {total}")),
-                );
+            ItemStatus::Queued | ItemStatus::Failed(_) => {}
+            ItemStatus::Rendering { .. } => {
                 if ui
                     .button(tr("Stop"))
                     .labeled(egui::WidgetType::Button, &name("Stop"))
@@ -1174,12 +1334,7 @@ fn item_ui(
                     *cancel = Some(item.id);
                 }
             }
-            ItemStatus::Done {
-                files,
-                first,
-                seconds,
-            } => {
-                ui.label(format!("{} · {files} · {seconds:.1} s", tr("Done")));
+            ItemStatus::Done { first, .. } => {
                 if ui
                     .button(tr(reveal_label()))
                     .labeled(egui::WidgetType::Button, &name(reveal_label()))
@@ -1188,16 +1343,7 @@ fn item_ui(
                     reveal(first);
                 }
             }
-            ItemStatus::Failed(message) => {
-                ui.colored_label(ui.visuals().error_fg_color, tr("Failed"));
-                ui.colored_label(ui.visuals().error_fg_color, message);
-            }
-            ItemStatus::Stopped { done, total, first } => {
-                ui.label(
-                    tr("Stopped ({done}/{total} frames)")
-                        .replace("{done}", &done.to_string())
-                        .replace("{total}", &total.to_string()),
-                );
+            ItemStatus::Stopped { first, .. } => {
                 if let Some(first) = first
                     && ui
                         .button(tr(reveal_label()))
@@ -1227,18 +1373,8 @@ fn item_ui(
             *remove = Some(item.id);
         }
     });
-    // AE's Render Time column (time so far while rendering).
-    if let Some(started) = item.started {
-        let time = match &item.status {
-            ItemStatus::Done { seconds, .. } => format!("{seconds:.1} s"),
-            _ => started
-                .elapsed()
-                .map_or_else(|_| String::new(), |d| format!("{:.1} s", d.as_secs_f64())),
-        };
-        ui.label(
-            egui::RichText::new(format!("{} {time}", tr("Render Time:")))
-                .color(bae_ui::theme::color::TEXT_DIM),
-        );
+    if let ItemStatus::Failed(message) = &item.status {
+        ui.colored_label(ui.visuals().error_fg_color, message);
     }
     // Render Settings and Log (AE's templates; BAE renders at Best Settings).
     // AE's template links: Render Settings and Output Module open their
@@ -1421,7 +1557,7 @@ fn item_ui(
             // Typed and dragged values stay inside the comp (AE); a range set
             // otherwise (or a comp shortened later) is limited, or refused when
             // entirely outside, at render time.
-            let last = last.unwrap_or(i64::MAX).max(0);
+            let last = comp.map_or(i64::MAX, |c| c.frame_count() - 1).max(0);
             // Start – end wrap in a narrow panel instead of widening it.
             ui.horizontal_wrapped(|ui| {
                 let start = item.start.to_string();
@@ -1486,6 +1622,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Save Frame As File", "帧另存为文件"),
     // AE 26's Render Queue (渲染队列) terms.
     ("Unqueued", "未加入队列"),
+    ("Comp Name", "合成名称"),
+    ("Estimated Time", "估计时间"),
+    ("Started", "已启动"),
+    ("Notify", "通知"),
+    ("Status", "状态"),
     ("Render Time:", "渲染时间:"),
     ("Render Settings", "渲染设置"),
     ("Log", "日志"),
@@ -1592,7 +1733,15 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "render_queue",
-        bae_ui::PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
+        bae_ui::PanelKind::new("Render Queue", |spawn| {
+            Box::new(RenderQueuePanel {
+                columns: spawn
+                    .state
+                    .and_then(|s| serde_json::from_value(s.clone()).ok())
+                    .unwrap_or_default(),
+                ..Default::default()
+            })
+        }),
     );
 }
 
@@ -1641,6 +1790,20 @@ mod tests {
         item.set_format(ExportFormat::Tiff);
         item.channels = Channels::RgbAlpha;
         assert_eq!(om_template(item), Some("TIFF Sequence with Alpha"));
+    }
+
+    #[test]
+    fn status_header_can_hide_and_restore_while_comp_name_stays_visible() {
+        let status = COLUMNS.iter().find(|c| c.title == "Status").unwrap();
+        let name = COLUMNS.iter().find(|c| c.title == "Comp Name").unwrap();
+        let mut columns = Columns::default();
+        columns.toggle(status);
+        assert!(!columns.visible(status));
+        columns.toggle(status);
+        columns.toggle(name);
+        assert!(columns.visible(status) && columns.visible(name));
+        assert!(ZH.contains(&(status.title, "状态")));
+        assert!(crate::project::ZH.contains(&("Rename This...", "重命名此项...")));
     }
 
     #[test]

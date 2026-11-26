@@ -113,7 +113,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
         recreate_dir(&stage)?;
         let app = assemble_macos_bundle(&ws, &binary, &version, &stage)?;
         sign_bundle_ad_hoc(&app)?;
-        // Use a directory containing just BAE.app as the root of the disk image.
+        // The disk image holds BAE.app and a link to /Applications to drag it
+        // onto, as Mac installers do.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/Applications", stage.join("Applications"))
+            .context("failed to link /Applications into the disk image")?;
         let dmg = dist.join(format!("{name}.dmg"));
         util::run(
             Command::new("hdiutil")
