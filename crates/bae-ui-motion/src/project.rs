@@ -5,7 +5,8 @@
 
 use std::collections::HashSet;
 
-use bae_model::{PrimPath, PrimType, Stage, Value};
+use bae_anim::glam::DVec2;
+use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
 use bae_motion::query;
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
@@ -16,10 +17,65 @@ use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::common;
+use crate::session::SharedSession;
 
 /// Drag payload: a project item dragged into a comp.
 #[derive(Clone, Debug)]
 pub(crate) struct ItemDrag(pub PrimPath);
+
+pub(crate) enum DropPlacement {
+    Viewer(Option<DVec2>),
+    Timeline { index: usize, start: Option<Time> },
+}
+
+impl ItemDrag {
+    /// Add a project item to the active comp (drag and drop).
+    pub(crate) fn add_as_layer(
+        &self,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        placement: DropPlacement,
+    ) {
+        let item = &self.0;
+        let stage = cx.stage;
+        let Some(active) = session.lock().active_comp.clone() else {
+            return;
+        };
+        let kind = if query::comp_info(stage, item).is_some() {
+            if query::would_nest_recursively(stage, &active, item) {
+                return;
+            }
+            LayerKind::PreComp
+        } else {
+            match stage
+                .prim(item)
+                .and_then(|v| query::static_value(&v, "kind"))
+            {
+                Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+                _ if stage.prim(item).is_some_and(|v| {
+                    v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                        && v.value("has_video").and_then(Value::as_bool) == Some(false)
+                }) =>
+                {
+                    LayerKind::Audio
+                }
+                _ => LayerKind::Footage,
+            }
+        };
+        let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
+        match placement {
+            DropPlacement::Viewer(Some(p)) => extra["position"] = json!([p.x, p.y]),
+            DropPlacement::Viewer(None) => {}
+            DropPlacement::Timeline { index, start } => {
+                extra["index"] = json!(index);
+                if let Some(start) = start {
+                    extra["start"] = json!(start);
+                }
+            }
+        }
+        common::new_layer(cx, session, kind, extra);
+    }
+}
 
 #[derive(Default)]
 pub struct ProjectPanel {
@@ -247,6 +303,7 @@ impl Panel for ProjectPanel {
         let footer_h = 28.0;
         let list_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(20.0);
         let mut open_comp: Option<PrimPath> = None;
+        let mut open_footage: Option<PrimPath> = None;
         // The Enter that commits a rename must not start a new one.
         let mut rename_finished = false;
         let mut menu_new_comp = false;
@@ -354,6 +411,8 @@ impl Panel for ProjectPanel {
                     if resp.double_clicked() {
                         match row.kind {
                             ItemKind::Comp => open_comp = Some(row.path.clone()),
+                            // AE: footage opens in the Footage panel.
+                            ItemKind::Footage => open_footage = Some(row.path.clone()),
                             ItemKind::Folder if !self.collapsed.remove(&row.path) => {
                                 self.collapsed.insert(row.path.clone());
                             }
@@ -446,6 +505,13 @@ impl Panel for ProjectPanel {
         if !delete.is_empty() {
             cx.invoke_with("item.delete", json!({"paths": delete}));
             session.lock().selected_items.clear();
+        }
+        if let Some(asset) = open_footage {
+            session.lock().footage_view = Some(asset);
+            cx.invoke_with(
+                bae_ui::action::ids::OPEN_PANEL,
+                serde_json::json!({"id": "footage"}),
+            );
         }
         if let Some(c) = open_comp {
             session.lock().open_comp(&c);

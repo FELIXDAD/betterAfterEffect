@@ -81,7 +81,7 @@ fn rapid_repeated_commands() {
     assert!(after_split > 150, "{after_split}");
     key(&mut h, Modifiers::COMMAND, Key::A);
     // The timeline must be focused for Delete to remove layers.
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(
         &mut h,
         egui::pos2(head.left() + 800.0, head.bottom() + 60.0),

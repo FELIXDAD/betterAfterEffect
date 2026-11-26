@@ -68,7 +68,7 @@ impl TimelinePanel {
         self.rows(stage, &layers, s)
             .into_iter()
             .map(|r| match r.kind {
-                RowKind::Layer => query::display_name_of(stage, &r.layer),
+                RowKind::Layer => query::display_name_of(stage, &layers.paths[r.layer_index]),
                 RowKind::Group { label, .. } => format!("  {label}"),
                 RowKind::Prop { attr, .. } => format!("    {attr}"),
                 _ => String::new(),
