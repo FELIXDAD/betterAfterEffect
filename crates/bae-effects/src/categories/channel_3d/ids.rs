@@ -149,7 +149,9 @@ pub(super) fn uniforms(
                 u.u32(256, sel.object.unwrap_or_default())
                     .u32(260, layer.ranks.len() as u32);
                 for (i, rank) in layer.ranks.iter().enumerate() {
-                    u.i32s(272 + i * 16, rank);
+                    let planes =
+                        rank.map(|c| usize::try_from(c).map_or(-1, |c| plane_id(channels, c)));
+                    u.i32s(272 + i * 16, &planes);
                 }
             }
         }

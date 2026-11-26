@@ -95,3 +95,71 @@ fn clicking_a_switch_of_one_selected_layer_sets_all_selected() {
     h.apply(&r);
     assert_eq!(enabled(&h), [false, false, false]);
 }
+
+/// #593: a value drag is evaluated live (children through parenting follow),
+/// commits as one command, and stays shown until that command has run.
+#[test]
+fn value_drags_are_evaluated_live_and_commit_once() {
+    use crate::common::{Edit, EvalCache};
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let parent = h.layer.clone();
+    let child = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    h.run(
+        "attr.set",
+        json!({"path": child, "attr": "parent", "value": {"type": "prim_ref", "value": parent}}),
+    );
+    let mut eval = EvalCache::default();
+    let child_x = |h: &H, eval: &mut EvalCache| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("composition");
+        let cx = PanelContext::new(
+            &id,
+            "composition",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        let ec = crate::viewer::live_evaluator(eval, &cx, &h.session())
+            .evaluate_comp(&h.stage, &comp, Time::ZERO)
+            .unwrap();
+        ec.layer(&child).unwrap().world_matrix.w_axis.x
+    };
+    let before = child_x(&h, &mut eval);
+    let start = match query::attr_spec(&h.stage, &parent, POS).and_then(|s| s.value.clone()) {
+        Some(Value::Vec3(v)) => v,
+        _ => [0.0; 3],
+    };
+    // Dragging: no command, the child already moves with the parent.
+    let to = Value::Vec3([start[0] + 200.0, start[1], start[2]]);
+    let r = h.edit(&parent, POS, Edit::Live(to.clone()));
+    assert!(r.invocations.is_empty(), "no command while dragging");
+    assert!(
+        (child_x(&h, &mut eval) - (before + 200.0)).abs() < 1e-6,
+        "live"
+    );
+    // Release: one command; until it runs, the value stays shown.
+    let r = h.edit(&parent, POS, Edit::Commit(to));
+    assert_eq!(r.invocations.len(), 1);
+    assert!(
+        (child_x(&h, &mut eval) - (before + 200.0)).abs() < 1e-6,
+        "no flash back"
+    );
+    h.apply(&r);
+    h.session().lock().sync(&h.stage);
+    assert!(
+        h.session().lock().scrub.is_none(),
+        "done once the command ran"
+    );
+    assert!(
+        (child_x(&h, &mut eval) - (before + 200.0)).abs() < 1e-6,
+        "committed"
+    );
+    h.undo();
+    h.session().lock().sync(&h.stage);
+    assert!(
+        (child_x(&h, &mut eval) - before).abs() < 1e-6,
+        "one undo step"
+    );
+}

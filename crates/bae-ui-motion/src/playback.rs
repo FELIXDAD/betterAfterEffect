@@ -410,11 +410,20 @@ struct Evaluate {
     stage: Arc<Stage>,
     eval: Evaluator,
     anim: AnimEvaluator,
+    gpu: Arc<GpuContext>,
+    /// Layer pixels for `sampleImage`, and the renderer that reads them back
+    /// (made when an expression first samples).
+    samples: Arc<bae_anim::ImageSamples>,
+    sampler: Option<RenderEngine>,
     dynamic: bool,
 }
 
+/// Rounds of `sampleImage` read-backs per frame (a sampled layer whose own
+/// pixels come from samples needs one more).
+const SAMPLE_ROUNDS: usize = 4;
+
 impl Evaluate {
-    fn new(scene: Arc<Scene>) -> Result<Self, String> {
+    fn new(scene: Arc<Scene>, gpu: Arc<GpuContext>) -> Result<Self, String> {
         let stage = scene.snapshot.restore()?;
         // Pure arithmetic over time has no project reads. General JavaScript
         // can look up other compositions or sample outside this frame.
@@ -429,16 +438,25 @@ impl Evaluate {
                 })
             })
         }) || stage.attached_projects().next().is_some();
+        let samples = Arc::new(bae_anim::ImageSamples::new());
+        let mut eval = Evaluator::new();
+        eval.set_image_samples(Some(samples.clone()));
         Ok(Self {
             dynamic,
             stage: Arc::new(stage),
-            eval: Evaluator::new(),
+            eval,
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            gpu,
+            samples,
+            sampler: None,
             scene,
         })
     }
 
-    fn frame(&mut self, epoch: u64, time: Time) -> Result<Job, String> {
+    fn evaluate(
+        &mut self,
+        time: Time,
+    ) -> Result<(bae_anim::EvaluatedComp, bae_render::RenderComp), String> {
         let comp = self
             .eval
             .evaluate_comp(&self.stage, &self.scene.key.path, time)
@@ -447,6 +465,31 @@ impl Evaluate {
             .anim
             .convert(&self.stage, &comp, 0)
             .map_err(|e| e.to_string())?;
+        Ok((comp, rc))
+    }
+
+    fn frame(&mut self, epoch: u64, time: Time) -> Result<Job, String> {
+        let (mut comp, mut rc) = self.evaluate(time)?;
+        // sampleImage: not an interactive thread, so it waits for the sampled
+        // pixels (as export does) and evaluates again.
+        for _ in 0..SAMPLE_ROUNDS {
+            if !self.samples.has_requests() {
+                break;
+            }
+            let sampler = match &mut self.sampler {
+                Some(s) => s,
+                None => {
+                    let mut engine = RenderEngine::new(self.gpu.clone(), 0);
+                    sync_engine(&mut engine, &self.scene);
+                    self.sampler.insert(engine)
+                }
+            };
+            sampler
+                .read_samples(&self.stage, &rc, &self.samples)
+                .and_then(|()| sampler.renderer.wait_samples(&self.samples))
+                .map_err(|e| e.to_string())?;
+            (comp, rc) = self.evaluate(time)?;
+        }
         Ok(Job {
             epoch,
             scene: self.scene.clone(),
@@ -515,7 +558,7 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                 .as_ref()
                 .is_none_or(|c| !Arc::ptr_eq(&c.scene, &scene))
             {
-                current = Some(Evaluate::new(scene.clone())?);
+                current = Some(Evaluate::new(scene.clone(), gpu.clone())?);
             }
             current.as_mut().unwrap().frame(epoch, time)
         })();

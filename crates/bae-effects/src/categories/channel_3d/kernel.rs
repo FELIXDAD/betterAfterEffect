@@ -30,6 +30,7 @@ pub(super) fn pipeline(
                 (2, Binding::UintTextureArray),
                 (3, Binding::Texture),
                 (4, Binding::Storage(format)),
+                (5, Binding::UintTextureArray),
             ],
         })
     })

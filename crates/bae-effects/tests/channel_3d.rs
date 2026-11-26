@@ -35,7 +35,13 @@ fn multipart_depth_reaches_registered_effects_without_half_quantization() {
     );
     let depth = part(
         "Depth",
-        vec![("Z", FlatSamples::F32(vec![100000., 100001.]))],
+        vec![
+            ("Z", FlatSamples::F32(vec![100000., 100001.])),
+            (
+                "Coverage",
+                FlatSamples::F16(vec![f16::from_f32(0.25), f16::from_f32(0.5)]),
+            ),
+        ],
     );
     Image::from_layers(
         ImageAttributes::with_size((2, 1)),
@@ -61,10 +67,17 @@ fn multipart_depth_reaches_registered_effects_without_half_quantization() {
         },
     )
     .unwrap();
-    assert_eq!(
-        input.channels.as_ref().unwrap().info.find(&["Depth.Z"]),
-        Some(3)
-    );
+    // The beauty pass is the image, not a channel; nothing is uploaded until
+    // an effect asks.
+    let channels = input.channels.clone().unwrap();
+    let names: Vec<_> = channels
+        .info
+        .channels
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(names, ["Depth.Coverage", "Depth.Z"]);
+    assert_eq!(channels.byte_size(), 0);
     for (name, values, expected) in [
         (
             "ADBE AUX CHANNEL EXTRACT",
@@ -86,6 +99,12 @@ fn multipart_depth_reaches_registered_effects_without_half_quantization() {
             vec![],
             [[0.5, 0.5, 0.5, 1.], [0.75, 0.75, 0.75, 1.]],
         ),
+        // A half channel, kept at 16 bits.
+        (
+            "ADBE AUX CHANNEL EXTRACT",
+            vec![(1, Value::Int(5))],
+            [[0.25, 0.25, 0.25, 1.], [0.5, 0.5, 0.5, 1.]],
+        ),
     ] {
         let inst = instance(name, values);
         let out = testing::render_effect(
@@ -98,6 +117,8 @@ fn multipart_depth_reaches_registered_effects_without_half_quantization() {
         .unwrap();
         assert_eq!(Pixels::download(&gpu, &out).data, expected, "{name}");
     }
+    // One float and one half plane of 2×1.
+    assert_eq!(channels.byte_size(), 2 * (4 + 2));
 }
 
 #[test]
@@ -116,6 +137,11 @@ fn ranked_mattes_and_integer_ids_survive_the_import_path() {
     attrs.other.insert(
         Text::from("cryptomatte/1234567/manifest"),
         AttributeValue::Text(Text::from(r#"{"Ball":"3f800000","Cube":"40000000"}"#)),
+    );
+    // A second key naming the same pass must not fail the import.
+    attrs.other.insert(
+        Text::from("cryptomatte/89abcde/name"),
+        AttributeValue::Text(Text::from("CryptoObject")),
     );
     let mut channels = smallvec::smallvec![
         AnyChannel::new("ObjectID", FlatSamples::U32(vec![16777216, 16777217])),

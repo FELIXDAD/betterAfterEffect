@@ -93,14 +93,26 @@ struct Row {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ItemKind {
+pub(crate) enum ItemKind {
     Folder,
     Comp,
     Footage,
     Solid,
 }
 
-fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
+impl ItemKind {
+    pub(crate) fn context_kind(self) -> u8 {
+        use crate::context_menu as m;
+        match self {
+            Self::Comp => m::COMP,
+            Self::Folder => m::FOLDER,
+            Self::Solid => m::SOLID,
+            Self::Footage => m::FOOTAGE,
+        }
+    }
+}
+
+pub(crate) fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
     let v = stage.prim(path)?;
     let t = v.prim_type()?;
     if *t == PrimType::FOLDER {
@@ -249,6 +261,12 @@ impl Panel for ProjectPanel {
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let selected_first = session.lock().selected_items.first().cloned();
+        // Another panel asked to rename an item here (the Timeline's Rename).
+        if let Some(p) = session.lock().rename_item.take()
+            && stage.has_prim(&p)
+        {
+            self.rename = Some((p.clone(), query::display_name_of(stage, &p)));
+        }
         self.info_area(ui, cx, selected_first.as_ref());
 
         ui.horizontal(|ui| {
@@ -430,8 +448,9 @@ impl Panel for ProjectPanel {
                                 s.selected_items = vec![row.path.clone()];
                             }
                         }
-                        let chosen =
-                            crate::context_menu::show(ui, cx, crate::context_menu::PROJECT_ITEM);
+                        use crate::context_menu as m;
+                        let kind = row.kind.context_kind();
+                        let chosen = m::show_item(ui, cx, m::PROJECT_ITEM, &[], kind);
                         if chosen == Some("Rename") {
                             self.rename = Some((row.path.clone(), name.clone()));
                         }
@@ -649,6 +668,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "新建 Maxon Cinema 4D 文件...",
     ),
     ("Reveal Project in Finder", "在 Finder 中显示项目"),
+    ("Reveal Project in Explorer", "在资源管理器中显示项目"),
     ("New Comp from Selection", "基于所选项新建合成"),
     ("Replace with Precomp", "替换为预合成"),
     ("Reveal in Composition", "在合成中显示"),

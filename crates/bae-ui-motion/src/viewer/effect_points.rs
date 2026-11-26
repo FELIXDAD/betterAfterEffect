@@ -136,6 +136,14 @@ pub(crate) fn frame(
     prefs: &ViewerPrefs,
     now: Time,
 ) -> PointsFrame {
+    // View Options ▸ Effect Controls off: no crosshairs, nothing to drag.
+    if !session.lock().layer_controls.effect_controls {
+        state.drag = None;
+        return PointsFrame {
+            owns: false,
+            cursor: None,
+        };
+    }
     if tool == Tool::Selection
         && let Some(hit) = crypto_pick(ui, resp, cx, session, comp, view, now)
     {
