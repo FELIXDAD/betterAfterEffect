@@ -236,7 +236,7 @@ fn adjust_ui_color(c: Color32, a: Appearance, accessible: bool) -> Color32 {
         let shade = if accessible {
             shade
         } else {
-            ((shade - 128.0) * 1.15 + 128.0).clamp(0.0, 255.0)
+            (shade - 128.0) * 0.85 + 128.0
         };
         (shade * f32::from(alpha) / 255.0).round().clamp(0.0, 255.0) as u8
     };
@@ -526,14 +526,14 @@ pub fn apply(ctx: &Context) {
 
 #[cfg(test)]
 #[test]
-fn accessible_palette_has_softer_text_contrast_in_each_theme() {
+fn accessible_palette_has_higher_text_contrast_in_each_theme() {
     for theme in [Appearance::Darkest, Appearance::Dark, Appearance::Light] {
         let difference = |accessible| {
             let text = adjust_ui_color(Color32::from_gray(205), theme, accessible);
             let panel = adjust_ui_color(Color32::from_gray(35), theme, accessible);
             text.r().abs_diff(panel.r())
         };
-        assert!(difference(true) < difference(false));
+        assert!(difference(true) > difference(false), "{theme:?}");
         assert_eq!(
             adjust_ui_color(Color32::RED, theme, true),
             adjust_ui_color(Color32::RED, theme, false)

@@ -314,11 +314,15 @@ impl Gui {
     }
 
     /// A native menu click on the contributed item `registry_id` (e.g.
-    /// `motion.layer.new.solid`): queued like `UserEvent::Menu`. Returns `false`
-    /// (and does nothing) when the item is disabled, as a greyed-out menu item.
+    /// `motion.layer.new.solid`), queued like `UserEvent::Menu`. Disabled items
+    /// and commands blocked by a modal dialog return `false`.
     pub fn menu(&mut self, registry_id: &str) -> bool {
         let item = self.menu_item(registry_id);
-        if !item.enabled {
+        if !item.enabled
+            || !self
+                .workspace
+                .accepts_native_menu(self.app.resources(), &item.invocation)
+        {
             return false;
         }
         self.pending.push(item.invocation);
