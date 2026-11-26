@@ -16,3 +16,4 @@ fn twist(p:vec2f,t:f32)->vec4f {
     if enabled(3u) { c=vec4f(c.rgb*(0.3+0.7*abs(foreshortening)),c.a); }
     return c;
 }
+fn evaluate(p:vec2f)->vec4f { return twist(p,value(2u)); }
