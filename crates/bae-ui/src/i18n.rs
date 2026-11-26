@@ -150,6 +150,8 @@ const ZH: &[(&str, &str)] = &[
     ("Close Panel", "关闭面板"),
     ("Undock Panel", "浮动面板"),
     ("Close Other Panels in Group", "关闭组中的其他面板"),
+    ("Close Other Panels", "关闭其他面板"),
+    ("Close Other Similar Panels", "关闭其他类似面板"),
     ("Panel Group Settings", "面板组设置"),
     ("Close Panel Group", "关闭面板组"),
     ("Undock Panel Group", "浮动面板组"),

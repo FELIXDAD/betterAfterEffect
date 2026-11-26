@@ -466,6 +466,9 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Extensions", "扩展"),
     ("Lumetri Scopes", "Lumetri 范围"),
     ("Review with Frame.io", "使用 Frame.io 进行审核"),
+    // Script file names (AE's Chinese menu shows them as they are).
+    ("Create Nulls From Paths.jsx", "Create Nulls From Paths.jsx"),
+    ("VR Comp Editor.jsx", "VR Comp Editor.jsx"),
     ("Metadata", "元数据"),
     ("Content-Aware Fill", "内容识别填充"),
     ("Motion Sketch", "动态草图"),
