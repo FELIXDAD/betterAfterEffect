@@ -43,6 +43,8 @@
 
 ## 进度
 
+**2026-11-25 · macOS 平台**：M4 实测 4K 千层合成从 47.31 降至 27.98 ms。Metal 普通仿射图层使用后台预热的管线，相同形状共享栅格，连续同纹理图层按绘制顺序合批。60 Hz 播放时钟交付的新帧由 19.62 提至 30.01 fps，分段数据见 [性能记录](../perf.md#apple-m4-上的-4k-千层合成)。
+
 **2026-11-20**
 
 - PR 1 [interface]：`crates/bae-render` 公共接口。渲染输入 `RenderComp`/`RenderLayer`（纯数据，03 合并前用 `MockEvaluator` 按 schema v1 从 Stage 求值）、AE 全部 38 种混合模式 token、轨道遮罩/遮罩模式、`RenderRequest`（分辨率、ROI、位深、RGBA16F/32F、色彩上下文占位）、`LayerSource`/`SourceProvider`（05/08/插件的图层源接口）、`Effect`/`EffectLibrary`（参数定义复用 `bae_model::EffectDef`）、渲染图节点模型与 ROI 协商（合成、纯色、图层源、效果、轨道遮罩；剔除；缓存键）、`FrameCache`（内存预算 LRU + StageEvent 精确失效）、`fixture::SceneBuilder`（用命令搭测试/基准工程）。

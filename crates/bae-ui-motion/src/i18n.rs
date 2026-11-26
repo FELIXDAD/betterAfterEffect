@@ -94,6 +94,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers the common strings (`MotionUiModule::build`).
 pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(crate::expr_menu::assist::ZH);
 }
 
 /// Every module's table, common words first (what was one table): tests check
@@ -115,6 +116,7 @@ pub(crate) fn all() -> Vec<(&'static str, &'static str)> {
         crate::dialogs::ZH,
         crate::import::ZH,
         crate::assist::ZH,
+        crate::expr_menu::assist::ZH,
     ]
     .concat()
 }
