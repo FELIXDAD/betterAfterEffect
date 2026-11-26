@@ -17,6 +17,9 @@ use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::{self, color};
 
+/// Reads typed text as a value ([`HotNumber::text`]).
+type ParseText<'a> = &'a dyn Fn(&str) -> Option<f64>;
+
 /// Hot text: a blue number that changes when dragged and turns into a text
 /// field when clicked, like AE's property values.
 pub struct HotNumber<'a> {
@@ -30,6 +33,10 @@ pub struct HotNumber<'a> {
     /// Accessibility name (the property, e.g. "Position X").
     label: &'a str,
     tint: Color32,
+    mixed: bool,
+    /// Custom text for a value (a timecode …) and the parser of typed text.
+    display: Option<&'a dyn Fn(f64) -> String>,
+    parse: Option<ParseText<'a>>,
 }
 
 impl<'a> HotNumber<'a> {
@@ -44,7 +51,28 @@ impl<'a> HotNumber<'a> {
             font: theme::body(),
             label: "",
             tint: color::ACCENT,
+            mixed: false,
+            display: None,
+            parse: None,
         }
+    }
+
+    /// Leave the field blank until the user chooses a common value.
+    pub fn mixed(mut self, mixed: bool) -> Self {
+        self.mixed = mixed;
+        self
+    }
+
+    /// Show values as `display` gives them (a timecode for a time) and read
+    /// typed text with `parse` instead of as a number.
+    pub fn text(
+        mut self,
+        display: &'a dyn Fn(f64) -> String,
+        parse: &'a dyn Fn(&str) -> Option<f64>,
+    ) -> Self {
+        self.display = Some(display);
+        self.parse = Some(parse);
+        self
     }
 
     /// Color of the number (AE: blue; red when an expression drives it).
@@ -93,7 +121,10 @@ impl<'a> HotNumber<'a> {
     }
 
     fn format(&self, v: f64) -> String {
-        format!("{:.*}", self.decimals, v)
+        match self.display {
+            Some(f) => f(v),
+            None => format!("{:.*}", self.decimals, v),
+        }
     }
 }
 
@@ -111,13 +142,14 @@ struct HotState {
     fresh: bool,
 }
 
-/// Hot numbers in drawing order (this pass and the last complete one): Tab moves
-/// between them.
+/// Hot numbers in drawing order (this pass and the last complete one), with
+/// the layer each is drawn on: Tab moves between those of one layer, so it
+/// stays inside a dialog and never opens a number in a panel behind it.
 #[derive(Clone, Default)]
 struct HotOrder {
     pass: u64,
-    now: Vec<Id>,
-    last: Vec<Id>,
+    now: Vec<(Id, egui::LayerId)>,
+    last: Vec<(Id, egui::LayerId)>,
 }
 
 const HOT_ORDER: &str = "bae.hot_order";
@@ -132,21 +164,23 @@ fn register_hot(ui: &Ui, id: Id) {
             o.last = std::mem::take(&mut o.now);
             o.pass = pass;
         }
-        o.now.push(id);
+        o.now.push((id, ui.layer_id()));
     });
 }
 
 fn hot_neighbour(ui: &Ui, id: Id, back: bool) -> Option<Id> {
     ui.data(|d| {
         let o = d.get_temp::<HotOrder>(Id::new(HOT_ORDER))?;
-        let list = if o.last.contains(&id) {
+        let layer = ui.layer_id();
+        let list = if o.last.iter().any(|x| x.0 == id) {
             &o.last
         } else {
             &o.now
         };
-        let i = list.iter().position(|x| *x == id)?;
+        let same: Vec<Id> = list.iter().filter(|x| x.1 == layer).map(|x| x.0).collect();
+        let i = same.iter().position(|x| *x == id)?;
         let j = if back { i.checked_sub(1)? } else { i + 1 };
-        list.get(j).copied()
+        same.get(j).copied()
     })
 }
 
@@ -154,7 +188,11 @@ impl Widget for HotNumber<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let id = ui.next_auto_id();
         let mut state: HotState = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        let text = self.format(*self.value);
+        let text = if self.mixed {
+            String::new()
+        } else {
+            self.format(*self.value)
+        };
         let height = ui.spacing().interact_size.y;
         register_hot(ui, id);
         // Tabbed into from the previous (or next) value.
@@ -193,6 +231,13 @@ impl Widget for HotNumber<'_> {
                 });
                 if replace && !keep {
                     buf.clear();
+                    // The selection (all of the old text) goes with it.
+                    if let Some(mut st) = TextEdit::load_state(ui.ctx(), edit_id) {
+                        st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(0),
+                        )));
+                        st.store(ui.ctx(), edit_id);
+                    }
                 }
                 if replace || keep {
                     state.fresh = false;
@@ -245,6 +290,14 @@ impl Widget for HotNumber<'_> {
             let mut resp = ui.add(edit).labeled(egui::WidgetType::TextEdit, self.label);
             if entering {
                 resp.request_focus();
+                // Opened by a click or Tab: the whole value shows selected (AE).
+                if let Some(mut st) = TextEdit::load_state(ui.ctx(), edit_id) {
+                    st.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(buf.chars().count()),
+                    )));
+                    st.store(ui.ctx(), edit_id);
+                }
             }
             if stepped.is_some() {
                 state.fresh = true;
@@ -260,9 +313,9 @@ impl Widget for HotNumber<'_> {
             if escape {
                 ui.data_mut(|d| d.insert_temp(id, HotState::default()));
             } else if enter || tab.is_some() || resp.lost_focus() {
-                if let Some(v) = eval(&buf) {
+                if let Some(v) = self.parse.map_or_else(|| eval(&buf), |p| p(&buf)) {
                     let v = v.clamp(*self.range.start(), *self.range.end());
-                    if v != *self.value {
+                    if v != *self.value || self.mixed {
                         *self.value = v;
                         resp.mark_changed();
                     }
@@ -285,7 +338,7 @@ impl Widget for HotNumber<'_> {
         let layout = |tint: Color32| {
             let mut job = LayoutJob::default();
             job.append(&text, 0.0, TextFormat::simple(self.font.clone(), tint));
-            if !self.suffix.is_empty() {
+            if !self.suffix.is_empty() && !self.mixed {
                 job.append(
                     self.suffix,
                     0.0,
@@ -299,7 +352,7 @@ impl Widget for HotNumber<'_> {
             .width
             .unwrap_or(0.0)
             .max(galley.size().x + 3.0)
-            .max(8.0);
+            .max(if self.mixed { 32.0 } else { 8.0 });
         let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
         let spoken = format!("{text}{}", self.suffix);
         resp = resp.labeled_value(egui::WidgetType::DragValue, self.label, &spoken);
@@ -324,7 +377,7 @@ impl Widget for HotNumber<'_> {
             state.carry = raw - applied;
             if applied != 0.0 {
                 let v = (*self.value + applied).clamp(*self.range.start(), *self.range.end());
-                if v != *self.value {
+                if v != *self.value || self.mixed {
                     *self.value = v;
                     resp.mark_changed();
                 }

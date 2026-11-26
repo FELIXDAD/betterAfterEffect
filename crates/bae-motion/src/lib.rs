@@ -34,6 +34,8 @@
 //! | `key.move` | dragging keyframes |
 //! | `key.delete` | deleting keyframes |
 //! | `key.reverse` | Keyframe Assistant > Time-Reverse Keyframes |
+//! | `key.exponential_scale` | Keyframe Assistant > Exponential Scale |
+//! | `layer.sequence` | Keyframe Assistant > Sequence Layers |
 //! | `key.paste` | pasting keyframes |
 //! | `key.edit` | Graph Editor drags (key time / value, Bezier handles, transform box), keyframe dialogs |
 //! | `transform.separate_dimensions` | Animation > Separate Dimensions (Position → X / Y / Z Position) |
@@ -75,6 +77,7 @@ pub mod expressions;
 pub mod import;
 pub mod keys;
 pub mod layer;
+pub mod layer_styles;
 pub mod markers;
 pub mod matte;
 pub mod names;
@@ -108,14 +111,15 @@ pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
 pub use keys::{
-    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
-    PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
-    apply_key_edits, set_default_spatial_linear,
+    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
+    KeysOutput, MoveKeys, PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany,
+    ValueEdit, apply_key_edits, set_default_spatial_linear,
 };
 pub use layer::{
     CopiedLayer, CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS,
-    LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SetLayerAttr, SetParent, ShapePreset,
-    ShiftLayers, SlipLayers, SplitLayers, TrimLayers, copy_layers,
+    LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SequenceLayers, SequenceTransition,
+    SetLayerAttr, SetParent, ShapePreset, ShiftLayers, SlipLayers, SplitLayers, TrimLayers,
+    copy_layers,
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 pub use matte::SetTrackMatte;
@@ -123,7 +127,7 @@ pub use orient::AutoOrient;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
-pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
+pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText, SetTextStyle, TextStyleChange};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
@@ -138,6 +142,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(paint::AddStroke),
         r.register(tracker::CreateTracker),
+        r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
         r.register(tracker::ResetTracker),
@@ -159,11 +164,13 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimLayers),
         r.register(ShiftLayers),
         r.register(SlipLayers),
+        r.register(SequenceLayers),
         r.register(SetTrackMatte),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),
         r.register(SetLayerAttr),
+        r.register(layer_styles::EditStyles),
         r.register(SetAnimated),
         r.register(SetAt),
         r.register(SetMany),
@@ -172,6 +179,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(MoveKeys),
         r.register(DeleteKeys),
         r.register(ReverseKeys),
+        r.register(ExponentialScale),
         r.register(PasteKeys),
         r.register(EditKeys),
         r.register(SeparateDimensions),
@@ -180,6 +188,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(MoveMarkers),
         r.register(DeleteMarkers),
         r.register(AddShape),
+        r.register(AddShapeItem),
         r.register(CreateMask),
         r.register(SetVertices),
         r.register(InsertVertex),

@@ -25,25 +25,10 @@ fn gpu() -> Option<Arc<GpuContext>> {
 }
 
 fn doc(text: &str) -> TextDocument {
-    TextDocument {
-        text: text.to_owned(),
-        font: "PingFangSC-Regular".to_owned(),
-        font_size: 64.0,
-        fill_color: [1.0, 0.0, 0.0, 1.0],
-        stroke_color: None,
-        stroke_width: 0.0,
-        stroke_over_fill: false,
-        justification: "left".to_owned(),
-        tracking: 0.0,
-        leading: None,
-        baseline_shift: 0.0,
-        faux_bold: false,
-        faux_italic: false,
-        all_caps: false,
-        small_caps: false,
-        typography: Default::default(),
-        box_size: None,
-        box_position: None,
+    {
+        let mut doc = TextDocument::new(text, "PingFangSC-Regular", 64.0);
+        doc.style.fill_color = [1., 0., 0., 1.];
+        doc
     }
 }
 
@@ -117,11 +102,11 @@ fn stroke_and_faux_bold_add_ink() {
         return;
     }
     let mut stroked_doc = doc("Hi 中");
-    stroked_doc.stroke_color = Some([1.0, 1.0, 1.0, 1.0]);
-    stroked_doc.stroke_width = 6.0;
+    stroked_doc.style.stroke_color = Some([1.0, 1.0, 1.0, 1.0]);
+    stroked_doc.style.stroke_width = 6.0;
     let stroked = Arc::new(layout_text(&mut fonts, &stroked_doc));
     let mut bold_doc = doc("Hi 中");
-    bold_doc.faux_bold = true;
+    bold_doc.style.faux_bold = true;
     let bold = Arc::new(layout_text(&mut fonts, &bold_doc));
 
     // Render all three over the same region so coverage is comparable.

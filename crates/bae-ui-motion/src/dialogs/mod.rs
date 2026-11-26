@@ -11,6 +11,7 @@ pub(crate) mod fields;
 mod go_to_time;
 mod layer_time;
 mod light_settings;
+mod mask_value;
 pub mod memory;
 mod precompose;
 mod project_settings;
@@ -28,6 +29,7 @@ use bae_ui::PanelContext;
 pub use camera_settings::{CameraSettings, CameraSettingsMemory, CameraValues, FilmUnits};
 pub use comp_settings::{CompSettings, CompSettingsMemory};
 pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
+pub use mask_value::{Kind as MaskKind, MaskValue};
 pub use precompose::{PrecomposeDialog, PrecomposeMemory};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
 pub use transform_value::{Kind as TransformKind, TransformValue};
@@ -39,6 +41,8 @@ use crate::session::SharedSession;
 pub enum Dialog {
     /// Analysis of the composition work area for the Keyframe Assistant.
     AudioAnalysis(crate::audio_analysis::Analysis),
+    /// Display units and slider floor of the Audio panel.
+    AudioOptions(crate::panels::audio::AudioOptionsDialog),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
@@ -58,22 +62,31 @@ pub enum Dialog {
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
+    EffectManager(Box<crate::effects::manager::EffectManager>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
     TransformValue(Box<TransformValue>),
+    /// Layer ▸ Mask ▸ Mask Shape… / Feather… / Opacity… / Expansion….
+    MaskValue(Box<MaskValue>),
     /// A Render Queue item's Render Settings.
     RenderSettings(Box<render_output::RenderSettings>),
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
-    Alert { title: String, message: String },
+    Alert {
+        title: String,
+        message: String,
+    },
     /// View ▸ View Options (Cmd/Ctrl+Alt+U).
     ViewOptions(Box<crate::viewer::view_options::LayerControls>),
     /// View ▸ Panel Background Color ▸ Select Custom Background Color…
     BackgroundColor([u8; 3]),
     /// View ▸ Resolution ▸ Custom…: pixel steps (horizontal, vertical);
     /// `nested`: also for the comps nested in the active one.
-    CustomResolution { steps: [u32; 2], nested: bool },
+    CustomResolution {
+        steps: [u32; 2],
+        nested: bool,
+    },
 }
 
 /// Open dialog and remembered values.
@@ -165,12 +178,13 @@ pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: O
 
 /// Open Composition Settings for an existing comp.
 pub(crate) fn comp_settings(cx: &PanelContext<'_>, comp: &PrimPath) {
-    let Some(settings) = CompSettings::edit(cx.stage, comp) else {
-        return;
-    };
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
-    if d.open.is_none() {
+    if d.open.is_some() {
+        return;
+    }
+    remember(cx.resources, &mut d);
+    if let Some(settings) = CompSettings::edit(cx.stage, comp, &d.comp) {
         d.open = Some(Dialog::CompSettings(Box::new(settings)));
     }
 }
@@ -316,6 +330,17 @@ pub(crate) fn project_settings(cx: &PanelContext<'_>) {
     }
 }
 
+pub(crate) fn audio_options(
+    cx: &PanelContext<'_>,
+    options: crate::panels::audio::AudioOptionsDialog,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::AudioOptions(options));
+    }
+}
+
 /// Open Render Settings for render queue item `item`.
 pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
     let queue = crate::render_queue::shared(cx.resources);
@@ -384,6 +409,24 @@ pub(crate) fn transform_value(
     }
 }
 
+/// Open the mask value dialog of `kind` for `masks` at comp time `now`.
+pub(crate) fn mask_value(
+    cx: &PanelContext<'_>,
+    comp: &PrimPath,
+    masks: &[PrimPath],
+    now: bae_model::Time,
+    kind: MaskKind,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = MaskValue::new(cx.stage, comp, masks, now, kind) {
+        d.open = Some(Dialog::MaskValue(Box::new(v)));
+    }
+}
+
 /// AE's initial New Solid color (tests).
 #[cfg(test)]
 pub(crate) fn solid_settings_default_color() -> [f64; 4] {
@@ -403,6 +446,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         go_to_time::STRINGS,
         project_settings::STRINGS,
         transform_value::STRINGS,
+        mask_value::STRINGS,
         render_output::STRINGS,
     ]
     .concat()
@@ -426,6 +470,7 @@ impl bae_ui::DialogHost for MotionDialogs {
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
+            Dialog::AudioOptions(d) => d.ui(ctx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
@@ -435,7 +480,9 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::AutoOrient(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
+            Dialog::EffectManager(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),
+            Dialog::MaskValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),

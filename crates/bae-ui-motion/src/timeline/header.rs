@@ -557,7 +557,22 @@ impl TimelinePanel {
             if sound {
                 session.retry_audio();
             }
-            session.lock().scrub_to(cx, info, axis.t(pos.x), sound);
+            let mut t = axis.t(pos.x);
+            // Shift: snap to keyframes, markers, in / out points and the work
+            // area (AE).
+            if ui.input(|i| i.modifiers.shift) {
+                let now = session.lock().time(&info.path);
+                // The targets start with the current time: the CTI itself.
+                let targets: Vec<Time> = super::layer_bar::bar_targets(cx.stage, info, now, &[])
+                    .into_iter()
+                    .skip(1)
+                    .collect();
+                let tol = Time((f64::from(super::layer_bar::SNAP_PX) * axis.per_point()) as i64);
+                if let Some(snap) = crate::graph::snap_to(t, &targets, tol) {
+                    t = snap;
+                }
+            }
+            session.lock().scrub_to(cx, info, t, sound);
             self.drag = Some(Drag::Cti);
         }
         if ruler_resp.drag_stopped() {

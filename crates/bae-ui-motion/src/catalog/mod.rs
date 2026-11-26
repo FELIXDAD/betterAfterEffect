@@ -82,6 +82,9 @@ pub fn mac_keys() -> &'static [(&'static str, &'static str, &'static str)] {
 
 /// Menu titles that read the same in Chinese (AE keeps them in English).
 pub const SAME_IN_CHINESE: &[&str] = &[
+    // AE's bundled script panels (file names; Windows only).
+    "Create Nulls From Paths.jsx",
+    "VR Comp Editor.jsx",
     "Adobe Dynamic Link",
     "Maxon Cinema 4D Exporter...",
     "Shift+F10",

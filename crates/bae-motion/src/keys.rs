@@ -111,6 +111,9 @@ pub fn set_default_spatial_linear(on: bool) {
 /// A new keyframe of `attr` (keyframes `spec`): linear in time; spatially linear or
 /// Auto Bezier as the preference says.
 pub(crate) fn new_key(attr: &str, spec: &AttrSpec, value: Value) -> Keyframe {
+    if matches!(value, Value::TextDocument(_)) {
+        return Keyframe::hold(value);
+    }
     let mut k = Keyframe::linear(value);
     if !DEFAULT_SPATIAL_LINEAR.load(Ordering::Relaxed)
         && bae_anim::schema::curve_kind(attr, spec) == bae_anim::CurveKind::Spatial
@@ -538,6 +541,108 @@ impl Command for ReverseKeys {
             refresh_auto(&attr, &mut spec);
             write_attr(tx, &path, &attr, spec)?;
         }
+        Ok(out)
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+pub struct ExponentialScale;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ExponentialScaleParams {
+    /// Two keyframes of one Scale property (either order).
+    pub keys: Vec<KeyRef>,
+}
+
+/// Scale `t` (0 … 1) of the way from `a` to `b` at a constant zoom rate: each
+/// component `a·(b/a)^t`, or linearly where the two have no common sign.
+fn exponential(a: f64, b: f64, t: f64) -> f64 {
+    if a * b > 0.0 {
+        a * (b / a).powf(t)
+    } else {
+        a + (b - a) * t
+    }
+}
+
+fn scale_parts(v: &Value) -> Option<Vec<f64>> {
+    match v {
+        Value::Vec2(v) => Some(v.to_vec()),
+        Value::Vec3(v) => Some(v.to_vec()),
+        Value::Float(f) => Some(vec![*f]),
+        _ => None,
+    }
+}
+
+impl Command for ExponentialScale {
+    type Params = ExponentialScaleParams;
+    type Output = KeysOutput;
+    const ID: &'static str = "key.exponential_scale";
+    const TITLE: &'static str = "Exponential Scale";
+    const DESCRIPTION: &'static str = "Keyframe assistant: replace the change between two Scale keyframes with a keyframe on every comp frame so the scale grows at a constant zoom rate (AE: Animation > Keyframe Assistant > Exponential Scale). Returns the new keyframes.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<KeysOutput, CommandError> {
+        ensure_unlocked(tx.stage(), p.keys.iter().map(|k| &k.path))?;
+        let groups = group(&p.keys);
+        let [((path, attr), times)] = groups.as_slice() else {
+            return Err(fail(
+                "Exponential Scale needs two keyframes of one property",
+            ));
+        };
+        if attr != "transform:scale" || times.len() != 2 {
+            return Err(fail("Exponential Scale needs two Scale keyframes"));
+        }
+        let mut spec = animated_spec(tx, path, attr, times)?;
+        let (t0, t1) = (times[0].min(times[1]), times[0].max(times[1]));
+        let (a, b) = (
+            spec.keyframes[&t0].value.clone(),
+            spec.keyframes[&t1].value.clone(),
+        );
+        let (Some(pa), Some(pb)) = (scale_parts(&a), scale_parts(&b)) else {
+            return Err(fail("Exponential Scale: unexpected Scale values"));
+        };
+        let value_at = |u: f64| -> Value {
+            let parts: Vec<f64> = pa
+                .iter()
+                .zip(&pb)
+                .map(|(x, y)| exponential(*x, *y, u))
+                .collect();
+            match &a {
+                Value::Vec2(_) => Value::Vec2([parts[0], parts[1]]),
+                Value::Vec3(_) => Value::Vec3([parts[0], parts[1], parts[2]]),
+                _ => Value::Float(parts[0]),
+            }
+        };
+        // One key per comp frame between the two (keys live in layer time).
+        let timing = query::key_timing(tx.stage(), path);
+        let frame = query::owning_comp(tx.stage(), path)
+            .and_then(|c| query::comp_info(tx.stage(), &c))
+            .map_or(bae_model::FrameRate::FPS_30, |c| c.frame_rate);
+        let (c0, c1) = (timing.comp_time(t0), timing.comp_time(t1));
+        let (first, last) = (
+            frame.time_to_frame(c0.min(c1)),
+            frame.time_to_frame(c0.max(c1)),
+        );
+        let mut out = KeysOutput::default();
+        if let Some(k) = spec.keyframes.get_mut(&t0) {
+            k.interp_out = Interpolation::Linear;
+        }
+        if let Some(k) = spec.keyframes.get_mut(&t1) {
+            k.interp_in = Interpolation::Linear;
+        }
+        out.keys.push(KeyRef::new(path.clone(), attr.clone(), t0));
+        for f in first + 1..last {
+            let t = timing.layer_time(frame.frame_to_time(f));
+            if t <= t0 || t >= t1 {
+                continue;
+            }
+            let u = (t - t0).0 as f64 / (t1 - t0).0 as f64;
+            spec.keyframes.insert(t, Keyframe::linear(value_at(u)));
+            out.keys.push(KeyRef::new(path.clone(), attr.clone(), t));
+        }
+        out.keys.push(KeyRef::new(path.clone(), attr.clone(), t1));
+        refresh_auto(attr, &mut spec);
+        write_attr(tx, path, attr, spec)?;
         Ok(out)
     }
 }

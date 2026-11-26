@@ -255,114 +255,53 @@ impl Panel for PaintPanel {
     }
 }
 
-#[derive(Default)]
-pub struct BrushesPanel;
+mod brushes;
+pub(crate) use brushes::{BrushLibrary, BrushesPanel};
 
-impl Panel for BrushesPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        TabInfo::new(tr("Brushes"))
-    }
-
-    fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        with_paint(cx, |p, _| {
-            ui.add_space(4.0);
-            // Brush tips: AE's default list, as small thumbnails.
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-                for &(d, hard) in TIPS {
-                    let (rect, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
-                    let on = p.diameter == d && (p.hardness >= 100.0) == hard;
-                    let name = if hard {
-                        format!("{} {} {}", tr("Hard Round"), d, tr("pixels"))
-                    } else {
-                        format!("{} {} {}", tr("Soft Round"), d, tr("pixels"))
-                    };
-                    let resp = resp.on_hover_text(name);
-                    let painter = ui.painter();
-                    painter.rect_filled(
-                        rect,
-                        2.0,
-                        if on {
-                            color::ACCENT
-                        } else {
-                            Color32::from_gray(45)
-                        },
-                    );
-                    let r = (d as f32 / 2.0).clamp(1.0, 9.0);
-                    let c = rect.center() - vec2(0.0, 3.0);
-                    if hard {
-                        painter.circle_filled(c, r, Color32::from_gray(220));
-                    } else {
-                        for k in (1..=4).rev() {
-                            let a = (60 * (5 - k)) as u8;
-                            painter.circle_filled(
-                                c,
-                                r * k as f32 / 4.0,
-                                Color32::from_white_alpha(a),
-                            );
-                        }
-                    }
-                    painter.text(
-                        rect.center_bottom() - vec2(0.0, 1.0),
-                        egui::Align2::CENTER_BOTTOM,
-                        format!("{d}"),
-                        egui::FontId::proportional(8.0),
-                        color::TEXT_DIM,
-                    );
-                    if resp.clicked() {
-                        p.diameter = d;
-                        p.hardness = if hard { 100.0 } else { 0.0 };
-                    }
-                }
-            });
-            ui.add_space(6.0);
-            row(ui, "Diameter:", |ui| {
-                ui.add(
-                    egui::DragValue::new(&mut p.diameter)
-                        .range(1.0..=2500.0)
-                        .suffix(" px"),
-                );
-            });
-            row(ui, "Angle:", |ui| {
-                ui.add(
-                    egui::DragValue::new(&mut p.angle)
-                        .range(-180.0..=180.0)
-                        .suffix("°"),
-                );
-            });
-            row(ui, "Roundness:", |ui| percent(ui, &mut p.roundness));
-            row(ui, "Hardness:", |ui| percent(ui, &mut p.hardness));
-            row(ui, "Spacing:", |ui| {
-                ui.add(
-                    egui::DragValue::new(&mut p.spacing)
-                        .range(1.0..=1000.0)
-                        .suffix("%"),
-                );
-            });
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(tr("Brush Dynamics"))
-                    .font(theme::small())
-                    .color(color::TEXT_STRONG),
-            );
-            let labels: Vec<&str> = DYNAMICS.iter().map(|l| tr(l)).collect();
-            for (k, name) in ["Size:", "Angle:", "Roundness:", "Opacity:", "Flow:"]
-                .into_iter()
-                .enumerate()
-            {
-                row(ui, name, |ui| {
-                    let mut i = usize::from(p.dynamics[k]).min(3);
-                    if widgets::dropdown(ui, format!("dynamics{k}"), &mut i, &labels, 110.0)
-                        .changed()
-                    {
-                        p.dynamics[k] = i as u8;
-                    }
-                });
-                if k == 0 {
-                    row(ui, "Minimum Size:", |ui| percent(ui, &mut p.minimum_size));
-                }
+fn brush_controls(ui: &mut Ui, p: &mut PaintOptions) {
+    row(ui, "Diameter:", |ui| {
+        ui.add(
+            egui::DragValue::new(&mut p.diameter)
+                .range(1.0..=2500.0)
+                .suffix(" px"),
+        );
+    });
+    row(ui, "Angle:", |ui| {
+        ui.add(
+            egui::DragValue::new(&mut p.angle)
+                .range(-180.0..=180.0)
+                .suffix("°"),
+        );
+    });
+    row(ui, "Roundness:", |ui| percent(ui, &mut p.roundness));
+    row(ui, "Hardness:", |ui| percent(ui, &mut p.hardness));
+    row(ui, "Spacing:", |ui| {
+        ui.add(
+            egui::DragValue::new(&mut p.spacing)
+                .range(1.0..=1000.0)
+                .suffix("%"),
+        );
+    });
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new(tr("Brush Dynamics"))
+            .font(theme::small())
+            .color(color::TEXT_STRONG),
+    );
+    let labels: Vec<&str> = DYNAMICS.iter().map(|l| tr(l)).collect();
+    for (k, name) in ["Size:", "Angle:", "Roundness:", "Opacity:", "Flow:"]
+        .into_iter()
+        .enumerate()
+    {
+        row(ui, name, |ui| {
+            let mut i = usize::from(p.dynamics[k]).min(3);
+            if widgets::dropdown(ui, format!("dynamics{k}"), &mut i, &labels, 110.0).changed() {
+                p.dynamics[k] = i as u8;
             }
         });
+        if k == 0 {
+            row(ui, "Minimum Size:", |ui| percent(ui, &mut p.minimum_size));
+        }
     }
 }
 
@@ -378,13 +317,30 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "brushes",
-        bae_ui::PanelKind::new("Brushes", |_| Box::new(BrushesPanel)),
+        bae_ui::PanelKind::new("Brushes", |_| Box::new(BrushesPanel::default())),
     );
 }
 
 /// Chinese of the Paint and Brushes panels (AE's zh_CN dictionary,
 /// Paint_Palette / BrushPal), registered by the module.
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("New Brush...", "新建画笔..."),
+    ("Rename Brush...", "重命名画笔..."),
+    ("Delete Brush", "删除画笔"),
+    ("Text Only", "仅文本"),
+    ("Small Thumbnail", "小缩览图"),
+    ("Large Thumbnail", "大缩览图"),
+    ("Small List", "小列表"),
+    ("Large List", "大列表"),
+    ("Reset Brush Tips...", "重置画笔笔尖..."),
+    (
+        "Replace current brush tips with the default brush tips?",
+        "是否将当前画笔笔尖替换为默认画笔笔尖？",
+    ),
+    ("New Brush Tip Name:", "新建画笔笔尖名称:"),
+    ("Rename Brush Tip:", "重命名画笔笔尖:"),
+    ("Delete the brush?", "是否删除画笔？"),
+    ("Append", "追加"),
     ("Opacity:", "不透明度:"),
     ("Flow:", "流量:"),
     ("Mode:", "模式:"),
@@ -414,6 +370,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Pen Pressure", "笔头压力"),
     ("Pen Tilt", "笔倾斜"),
     ("Stylus Wheel", "笔尖转动"),
+    ("Hard Elliptical", "实边椭圆"),
+    ("Soft Elliptical", "柔边椭圆"),
     ("Hard Round", "尖角"),
     ("Soft Round", "柔角"),
     ("Diameter:", "直径:"),

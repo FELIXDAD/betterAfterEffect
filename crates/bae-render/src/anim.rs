@@ -144,13 +144,7 @@ impl AnimEvaluator {
             shutter: [ec.motion_blur.shutter_angle, ec.motion_blur.shutter_phase],
             layers: Vec::with_capacity(ec.layers.len()),
             camera: active_camera(ec),
-            lights: ec
-                .layers
-                .iter()
-                .enumerate()
-                .filter(|(_, l)| l.switches.enabled && l.active)
-                .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
-                .collect(),
+            lights: comp_lights(ec).to_vec(),
             motion_blur: None,
         };
         let mut samples = match self.motion_samples(stage, ec)? {
@@ -214,6 +208,7 @@ impl AnimEvaluator {
         };
         let mut layers: Vec<Vec<LayerSample>> = vec![Vec::new(); ec.layers.len()];
         let mut cameras = Vec::with_capacity(times.len());
+        let mut lights = Vec::with_capacity(times.len());
         for &t in &times {
             // Transform-only sampling would be cheaper; 03 evaluates whole comps.
             let at = self
@@ -228,6 +223,7 @@ impl AnimEvaluator {
                 return Ok(None);
             }
             cameras.push(active_camera(&at));
+            lights.push(comp_lights(&at));
             for (i, l) in ec.layers.iter().enumerate() {
                 if blurred(l) {
                     let s = &at.layers[i];
@@ -242,6 +238,7 @@ impl AnimEvaluator {
             CompMotionBlur {
                 times,
                 cameras,
+                lights,
                 adaptive_limit: ec.motion_blur.adaptive_limit,
             },
             layers,
@@ -267,9 +264,9 @@ impl AnimEvaluator {
         out.transform = affine_2d(&l.world_matrix);
         out.matrix_3d = matrix_3d(l);
         if out.matrix_3d.is_some()
-            && let Some(view) = stage.prim(&l.path)
+            && let Some(m) = &l.material
         {
-            out.material = material(&view, l.layer_time);
+            out.material = material(m);
         }
         out.opacity = l.opacity.clamp(0.0, 1.0) as f32;
         out.blend_mode = BlendMode::from_token(&l.blend_mode).unwrap_or_else(|| {
@@ -461,10 +458,11 @@ impl CompEvaluator for AnimEvaluator {
     ) -> Option<Arc<crate::effect::ScalarTrack>> {
         let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
         crate::parameter_track::prepare(slot, attr, frame, |t| {
-            self.inner
-                .evaluate_attribute(stage, path, name, t)
-                .ok()?
-                .as_f64()
+            let (value, reads) = self
+                .inner
+                .evaluate_attribute_traced(stage, path, name, t)
+                .ok()?;
+            Some((value.as_f64()?, reads))
         })
     }
 
@@ -574,8 +572,19 @@ fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
         focus_distance: c.focus_distance,
         aperture: c.aperture,
         blur_level: c.blur_level,
+        iris: c.iris,
         projection: crate::camera::Projection::Perspective,
     })
+}
+
+/// The lights of `ec` that light its layers.
+fn comp_lights(ec: &EvaluatedComp) -> Arc<[Light]> {
+    ec.layers
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.switches.enabled && l.active)
+        .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
+        .collect()
 }
 
 fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
@@ -608,31 +617,24 @@ fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
     }
 }
 
-/// Material Options of a 3D layer at layer time `t` (03 does not evaluate
-/// them yet; read from the stage).
-fn material(view: &bae_model::PrimView<'_>, t: Time) -> Material {
-    let flag = |attr: &str, default: bool| {
-        crate::eval::sample(view, attr, t)
-            .and_then(|v| v.as_bool())
-            .unwrap_or(default)
+/// Material Options of a 3D layer, as 03 evaluated them.
+fn material(m: &bae_anim::MaterialState) -> Material {
+    let mode = |v: u8| match v {
+        1 => ShadowMode::On,
+        2 => ShadowMode::Only,
+        _ => ShadowMode::Off,
     };
-    let percent = |attr: &str, default: f32| {
-        crate::eval::sample(view, attr, t)
-            .and_then(|v| v.as_f64())
-            .map_or(default, |v| v.clamp(0.0, 100.0) as f32)
-    };
-    let mode = |on: bool| if on { ShadowMode::On } else { ShadowMode::Off };
-    let d = Material::default();
+    let percent = |v: f64| v.clamp(0.0, 100.0) as f32;
     Material {
-        casts_shadows: mode(flag("material:casts_shadows", false)),
-        light_transmission: percent("material:light_transmission", d.light_transmission),
-        accepts_shadows: mode(flag("material:accepts_shadows", true)),
-        accepts_lights: flag("material:accepts_lights", true),
-        ambient: percent("material:ambient", d.ambient),
-        diffuse: percent("material:diffuse", d.diffuse),
-        specular_intensity: percent("material:specular_intensity", d.specular_intensity),
-        specular_shininess: percent("material:specular_shininess", d.specular_shininess),
-        metal: percent("material:metal", d.metal),
+        casts_shadows: mode(m.casts_shadows),
+        light_transmission: percent(m.light_transmission),
+        accepts_shadows: mode(m.accepts_shadows),
+        accepts_lights: m.accepts_lights,
+        ambient: percent(m.ambient),
+        diffuse: percent(m.diffuse),
+        specular_intensity: percent(m.specular_intensity),
+        specular_shininess: percent(m.specular_shininess),
+        metal: percent(m.metal),
     }
 }
 

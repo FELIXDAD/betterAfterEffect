@@ -126,6 +126,7 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
         "audio:levels" => "Audio Levels",
+        "time_remap" => "Time Remap",
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
         "transform:position_x" => "X Position",
@@ -473,7 +474,7 @@ pub(crate) fn value_editor(
                 ui.data_mut(|d| d.remove::<String>(key));
                 if text != doc.text {
                     let mut d = (**doc).clone();
-                    d.text = text;
+                    d.set_text(&text);
                     out = Edit::Commit(Value::TextDocument(Box::new(d)));
                 }
             }
@@ -496,56 +497,53 @@ pub(crate) fn apply_edit(
     t: Time,
     edit: Edit,
 ) {
-    let commit = matches!(edit, Edit::Commit(_));
-    let (Edit::Live(value) | Edit::Commit(value)) = edit else {
-        return;
-    };
-    let dragged = !commit
-        || session
-            .lock()
-            .scrub
-            .as_ref()
-            .is_some_and(|s| s.path == *path && s.attr == attr && s.committed.is_none());
-    let peers = edit_peers(cx.stage, session, path, attr);
-    let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
-    apply_selection_edit(
-        cx,
-        session,
-        Scrub {
-            path: path.clone(),
-            attr: attr.into(),
-            value,
-            peers,
-            time: t,
-            committed: None,
-        },
-        commit,
-    );
-}
-
-/// Preview exact attribute values for a selection. A completed gesture sends one undoable edit.
-pub(crate) fn apply_selection_edit(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    mut scrub: Scrub,
-    commit: bool,
-) {
-    if commit {
-        scrub.committed = Some((cx.stage.revision(), std::time::Instant::now()));
-        let edits: Vec<_> = scrub
-            .targets()
-            .map(|(path, value)| {
-                let time = query::to_key_time(cx.stage, path, scrub.time);
-                json!({"path":path,"attr":scrub.attr,"time":time,"value":value})
-            })
-            .collect();
-        if let [one] = edits.as_slice() {
-            cx.invoke_with("attr.set_at", one.clone());
-        } else {
-            cx.invoke_with("attr.set_many", json!({"edits":edits}));
+    match edit {
+        Edit::None => {}
+        Edit::Live(value) => {
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
+            session.lock().scrub = Some(Scrub {
+                path: path.clone(),
+                attr: attr.to_owned(),
+                value,
+                peers,
+                time: t,
+                committed: None,
+            });
+        }
+        Edit::Commit(value) => {
+            // A drag moves the others by as much; a typed value sets them all.
+            let dragged = session
+                .lock()
+                .scrub
+                .as_ref()
+                .is_some_and(|s| s.path == *path && s.attr == attr && s.committed.is_none());
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
+            // Shown as committed until the command has run.
+            session.lock().scrub = Some(Scrub {
+                path: path.clone(),
+                attr: attr.to_owned(),
+                value: value.clone(),
+                peers: peers.clone(),
+                time: t,
+                committed: Some((cx.stage.revision(), std::time::Instant::now())),
+            });
+            let edits: Vec<serde_json::Value> = std::iter::once((path.clone(), value))
+                .chain(peers)
+                .map(|(p, v)| {
+                    let time = query::to_key_time(cx.stage, &p, t);
+                    json!({"path": p, "attr": attr, "time": time, "value": v})
+                })
+                .collect();
+            if let [one] = &edits[..] {
+                cx.invoke_with("attr.set_at", one.clone());
+            } else {
+                // One undo step for all of them.
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
         }
     }
-    session.lock().scrub = Some(scrub);
 }
 
 /// The same property as `attr` of `path` elsewhere in the selection, which an
@@ -946,4 +944,35 @@ pub(crate) fn popup_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
 /// `widgets::menu_button(ui, title, add)` (a submenu inside a menu).
 pub(crate) fn submenu(ui: &mut Ui, title: &str, add: &mut dyn FnMut(&mut Ui)) {
     widgets::menu_button(ui, title, |ui| add(ui));
+}
+
+/// Values displayed by the three text panels over the viewer selection.
+pub(crate) struct SelectedStyles<'a> {
+    pub doc: &'a bae_model::TextDocument,
+    pub range: std::ops::Range<usize>,
+}
+
+impl SelectedStyles<'_> {
+    pub fn character<T: PartialEq>(&self, get: impl Fn(&bae_model::TextStyle) -> T) -> Option<T> {
+        let first = get(self.doc.style_at(self.range.start));
+        self.doc
+            .runs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
+
+    pub fn paragraph<T: PartialEq>(
+        &self,
+        get: impl Fn(&bae_model::ParagraphStyle) -> T,
+    ) -> Option<T> {
+        let first = get(self.doc.paragraph_at(self.range.start));
+        self.doc
+            .paragraphs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
 }

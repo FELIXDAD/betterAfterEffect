@@ -106,7 +106,7 @@ fn playback_4k() {
         info.name, info.backend, info.driver, info.driver_info
     );
     let mut timer = GpuTimer::new(&gpu, frames).expect("GPU timestamps required");
-    assert!(timer.supports_encoder_timestamps());
+    let queue_timestamps = timer.supports_encoder_timestamps();
     for (layers, effects) in [(100, false), (1000, false), (100, true)] {
         let (h, path) = scene(layers, effects);
         let registry = Arc::new(ViewportTextureRegistry::new());
@@ -122,7 +122,7 @@ fn playback_4k() {
             let evaluation = start.elapsed();
             assert_eq!(comp.layers.len(), layers);
             assert!(comp.errors.is_empty());
-            let scope = timed.then(|| {
+            let scope = (timed && queue_timestamps).then(|| {
                 let scope = timer.scope("preview queue").unwrap();
                 let mut encoder = gpu.device().create_command_encoder(&Default::default());
                 timer.write_begin(&mut encoder, scope);
@@ -133,9 +133,11 @@ fn playback_4k() {
             preview
                 .frame(&h.resources, &h.stage, &comp, 1, None, false)
                 .expect("published preview");
-            if let Some(scope) = scope {
+            if timed {
                 cpu_ms += (evaluation + encode.elapsed()).as_secs_f64() * 1000.0;
                 eval_ms += evaluation.as_secs_f64() * 1000.0;
+            }
+            if let Some(scope) = scope {
                 let mut encoder = gpu.device().create_command_encoder(&Default::default());
                 timer.write_end(&mut encoder, scope);
                 gpu.queue().submit([encoder.finish()]);
@@ -159,20 +161,21 @@ fn playback_4k() {
         for f in 3 + frames..3 + frames * 2 {
             render(f, true, &mut timer);
         }
-        let mut encoder = gpu.device().create_command_encoder(&Default::default());
-        timer.resolve(&mut encoder);
-        gpu.queue().submit([encoder.finish()]);
         let n = f64::from(frames);
-        let queue_ms = timer
-            .read(&gpu)
-            .unwrap()
-            .iter()
-            .map(|s| s.millis())
-            .sum::<f64>()
-            / n;
+        let queue_ms = if queue_timestamps {
+            let mut encoder = gpu.device().create_command_encoder(&Default::default());
+            timer.resolve(&mut encoder);
+            gpu.queue().submit([encoder.finish()]);
+            let samples = timer.read(&gpu).unwrap();
+            let ms = samples.iter().map(|s| s.millis()).sum::<f64>() / n;
+            format!("{ms:.3}")
+        } else {
+            gpu.wait_idle().unwrap();
+            "unavailable".into()
+        };
         assert_eq!(registry.get(preview.viewport()).unwrap().size, [3840, 2160]);
         println!(
-            "layers={layers} effects={effects} frames={frames} cpu_ms={:.3} eval_ms={:.3} gpu_queue_ms={queue_ms:.3} engine_ms={busy:?} fps={fps:.2}",
+            "layers={layers} effects={effects} frames={frames} cpu_ms={:.3} eval_ms={:.3} gpu_queue_ms={queue_ms} engine_ms={busy:?} fps={fps:.2}",
             cpu_ms / n,
             eval_ms / n
         );

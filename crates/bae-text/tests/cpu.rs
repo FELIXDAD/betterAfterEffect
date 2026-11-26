@@ -17,25 +17,14 @@ fn gpu() -> Option<Arc<GpuContext>> {
 
 fn source() -> Option<TextSource> {
     let mut fonts = FontSystem::new();
-    let doc = TextDocument {
-        text: "Hi 中文".to_owned(),
-        font: "Arial".to_owned(),
-        font_size: 48.0,
-        fill_color: [1.0, 0.0, 0.0, 1.0],
-        stroke_color: Some([1.0, 1.0, 1.0, 1.0]),
-        stroke_width: 4.0,
-        stroke_over_fill: false,
-        justification: "left".to_owned(),
-        tracking: 0.0,
-        leading: None,
-        baseline_shift: 0.0,
-        faux_bold: true,
-        faux_italic: true,
-        all_caps: false,
-        small_caps: false,
-        typography: Default::default(),
-        box_size: None,
-        box_position: None,
+    let doc = {
+        let mut doc = TextDocument::new("Hi 中文", "Arial", 48.0);
+        doc.style.fill_color = [1., 0., 0., 1.];
+        doc.style.stroke_color = Some([1.; 4]);
+        doc.style.stroke_width = 4.;
+        doc.style.faux_bold = true;
+        doc.style.faux_italic = true;
+        doc
     };
     let layout = layout_text(&mut fonts, &doc);
     if layout.is_empty() {
@@ -115,8 +104,8 @@ fn cpu_text_matches_vello_on_hardware_adapters() {
 fn character_opacity_composites_fill_and_stroke_together() {
     let Some(gpu) = gpu() else { return };
     let mut doc = TextDocument::new("H", "ArialMT", 48.0);
-    doc.stroke_color = Some([1., 0., 0., 1.]);
-    doc.stroke_width = 5.;
+    doc.style.stroke_color = Some([1., 0., 0., 1.]);
+    doc.style.stroke_width = 5.;
     let mut layout = layout_text(&mut FontSystem::new(), &doc);
     let group = bae_anim::EvaluatedPrim {
         path: bae_model::PrimPath::new("/animator").unwrap(),

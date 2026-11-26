@@ -28,8 +28,6 @@ pub struct CreateText;
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateTextParams {
     pub comp: PrimPath,
-    /// Character and Paragraph settings selected for new text.
-    pub defaults: Option<TextDocument>,
     /// The characters (line breaks as `\n`); empty makes an empty text layer
     /// (AE keeps those, named "<empty text layer>").
     pub text: String,
@@ -57,6 +55,13 @@ pub struct CreateTextParams {
     /// Position in the layer stack, 0 = top (default 0).
     #[serde(default)]
     pub index: Option<usize>,
+    /// The Character panel's settings for new text (AE); `font`, `font_size`
+    /// and `fill_color` override them.
+    #[serde(default)]
+    pub style: Option<bae_model::TextStyle>,
+    /// The Paragraph panel's settings for new text; `justification` overrides.
+    #[serde(default)]
+    pub paragraph: Option<bae_model::ParagraphStyle>,
 }
 
 impl Command for CreateText {
@@ -69,7 +74,7 @@ impl Command for CreateText {
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayerOutput, CommandError> {
         let size = p
             .font_size
-            .or_else(|| p.defaults.as_ref().map(|d| d.font_size))
+            .or(p.style.as_ref().map(|s| s.font_size))
             .unwrap_or(DEFAULT_SIZE);
         if size.is_nan() || size <= 0.0 {
             return Err(fail("font_size must be positive"));
@@ -102,21 +107,22 @@ impl Command for CreateText {
                 point_of_interest: None,
             },
         )?;
-        let mut doc = p
-            .defaults
-            .unwrap_or_else(|| TextDocument::new("", DEFAULT_FONT, size));
-        doc.text = p.text;
-        doc.font_size = size;
-        doc.box_size = None;
-        doc.box_position = None;
+        let mut doc = TextDocument::new(p.text, DEFAULT_FONT, size);
+        if let Some(style) = p.style {
+            doc.style = style;
+            doc.style.font_size = size;
+        }
+        if let Some(paragraph) = p.paragraph {
+            doc.paragraph = paragraph;
+        }
         if let Some(font) = p.font {
-            doc.font = font;
+            doc.style.font = font;
         }
         if let Some(c) = p.fill_color {
-            doc.fill_color = c;
+            doc.style.fill_color = c;
         }
         if let Some(j) = p.justification {
-            doc.justification = j;
+            doc.paragraph.justification = j;
         }
         // Paragraph text (AE 26, R1): the layer sits at the box's center and the
         // box is offset by half its size.
@@ -146,12 +152,21 @@ impl Command for CreateText {
 
 pub struct SetText;
 
+/// One replacement captured by the viewer in character coordinates.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TextReplacement {
+    pub range: std::ops::Range<usize>,
+    pub text: String,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SetTextParams {
     /// The text layer.
     pub layer: PrimPath,
     /// The new characters (line breaks as `\n`).
     pub text: String,
+    #[serde(default)]
+    pub edits: Vec<TextReplacement>,
     /// Keyframe time in flicks (layer time) when Source Text is animated.
     #[serde(default)]
     pub time: Option<Time>,
@@ -197,10 +212,24 @@ impl Command for SetText {
             Some(Value::TextDocument(d)) => *d,
             _ => TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE),
         };
-        if doc.text == p.text {
+        let original = doc.clone();
+        if p.edits.is_empty() {
+            doc.set_text(&p.text);
+        } else {
+            for edit in p.edits {
+                doc.replace_range(edit.range, &edit.text);
+            }
+            // The edits were made on what the editor showed (an expression's
+            // result can differ from the stored text): keep the typing as a
+            // whole-text change instead of dropping it.
+            if doc.text != p.text {
+                doc = original.clone();
+                doc.set_text(&p.text);
+            }
+        }
+        if doc == original {
             return Ok(SetTextOutput { changed: false });
         }
-        doc.text = p.text;
         SetAt.run(
             tx,
             SetAtParams {
@@ -239,127 +268,134 @@ pub struct TextStyleChange {
     pub faux_italic: Option<bool>,
     pub all_caps: Option<bool>,
     pub small_caps: Option<bool>,
-    pub superscript: Option<bool>,
-    pub subscript: Option<bool>,
+    pub baseline_option: Option<bae_model::BaselineOption>,
     pub ligatures: Option<bool>,
     pub hindi_digits: Option<bool>,
     pub no_break: Option<bool>,
+    pub line_join: Option<bae_model::TextJoin>,
+    /// Character panel menu ▸ Reset Character: the selected characters take
+    /// the default character settings (first, before the other fields).
+    #[serde(default)]
+    pub reset_character: bool,
+    /// Paragraph panel menu ▸ Reset Paragraph.
+    #[serde(default)]
+    pub reset_paragraph: bool,
     pub hanging_punctuation: Option<bool>,
     pub top_leading: Option<bool>,
     pub every_line: Option<bool>,
-    pub line_join: Option<bae_model::TextJoin>,
-    pub reset_character: bool,
-    pub reset_paragraph: bool,
+    pub left_indent: Option<f64>,
+    pub right_indent: Option<f64>,
+    pub first_line_indent: Option<f64>,
+    pub space_before: Option<f64>,
+    pub space_after: Option<f64>,
     /// Paragraph alignment (`left`, `center`, `right`, `justify_last_left`, …).
     pub justification: Option<String>,
 }
 
 impl TextStyleChange {
     /// `doc` with the change applied.
-    pub fn apply(&self, doc: &mut TextDocument) {
-        if self.reset_character {
-            let old = doc.clone();
-            *doc = TextDocument::new(old.text, DEFAULT_FONT, DEFAULT_SIZE);
-            doc.box_size = old.box_size;
-            doc.box_position = old.box_position;
-            doc.justification = old.justification;
-            doc.typography.hanging_punctuation = old.typography.hanging_punctuation;
-            doc.typography.top_leading = old.typography.top_leading;
-            doc.typography.every_line = old.typography.every_line;
-        }
-        if self.reset_paragraph {
-            doc.justification = "left".into();
-            doc.typography.hanging_punctuation = false;
-            doc.typography.top_leading = false;
-            doc.typography.every_line = false;
-        }
-        if let Some(f) = &self.font {
-            doc.font = f.clone();
-        }
-        if let Some(v) = self.font_size {
-            doc.font_size = v.clamp(0.1, 1296.0);
-        }
-        if let Some(v) = self.leading {
-            doc.leading = Some(v.max(0.0));
-        }
-        if self.auto_leading == Some(true) {
-            doc.leading = None;
-        }
-        if let Some(v) = self.tracking {
-            doc.tracking = v;
-        }
-        if let Some(v) = self.baseline_shift {
-            doc.baseline_shift = v;
-        }
-        if let Some(c) = self.fill_color {
-            doc.fill_color = c;
-        }
-        if let Some(c) = self.stroke_color {
-            doc.stroke_color = Some(c);
-        }
-        if self.stroke == Some(false) {
-            doc.stroke_color = None;
-        }
-        if let Some(v) = self.stroke_width {
-            doc.stroke_width = v.max(0.0);
-        }
-        if let Some(v) = self.stroke_over_fill {
-            doc.stroke_over_fill = v;
-        }
-        if let Some(v) = self.faux_bold {
-            doc.faux_bold = v;
-        }
-        if let Some(v) = self.faux_italic {
-            doc.faux_italic = v;
-        }
-        if let Some(v) = self.all_caps {
-            doc.all_caps = v;
-        }
-        if let Some(v) = self.small_caps {
-            doc.small_caps = v;
-        }
-        if self.superscript == Some(true) {
-            doc.typography.subscript = false;
-        }
-        if self.subscript == Some(true) {
-            doc.typography.superscript = false;
-        }
-        if self.all_caps == Some(true) {
-            doc.small_caps = false
-        }
-        if self.small_caps == Some(true) {
-            doc.all_caps = false
-        }
-        if let Some(v) = self.superscript {
-            doc.typography.superscript = v;
-        }
-        if let Some(v) = self.subscript {
-            doc.typography.subscript = v;
-        }
-        if let Some(v) = self.ligatures {
-            doc.typography.ligatures = v;
-        }
-        if let Some(v) = self.hindi_digits {
-            doc.typography.hindi_digits = v;
-        }
-        if let Some(v) = self.no_break {
-            doc.typography.no_break = v;
-        }
-        if let Some(v) = self.hanging_punctuation {
-            doc.typography.hanging_punctuation = v;
-        }
-        if let Some(v) = self.top_leading {
-            doc.typography.top_leading = v;
-        }
-        if let Some(v) = self.every_line {
-            doc.typography.every_line = v;
-        }
-        if let Some(v) = self.line_join {
-            doc.typography.line_join = v;
-        }
-        if let Some(j) = &self.justification {
-            doc.justification = j.clone();
-        }
+    pub fn apply(&self, doc: &mut TextDocument, range: std::ops::Range<usize>) {
+        let defaults = TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE);
+        doc.edit_styles(range.clone(), |doc| {
+            if self.reset_character {
+                doc.clone_from(&defaults.style);
+            }
+            if let Some(f) = &self.font {
+                doc.font = f.clone();
+            }
+            if let Some(v) = self.font_size {
+                doc.font_size = v.clamp(0.1, 1296.0);
+            }
+            if let Some(v) = self.leading {
+                doc.leading = Some(v.max(0.0));
+            }
+            if self.auto_leading == Some(true) {
+                doc.leading = None;
+            }
+            if let Some(v) = self.tracking {
+                doc.tracking = v;
+            }
+            if let Some(v) = self.baseline_shift {
+                doc.baseline_shift = v;
+            }
+            if let Some(c) = self.fill_color {
+                doc.fill_color = c;
+            }
+            if let Some(c) = self.stroke_color {
+                doc.stroke_color = Some(c);
+            }
+            if self.stroke == Some(false) {
+                doc.stroke_color = None;
+            }
+            if let Some(v) = self.stroke_width {
+                doc.stroke_width = v.max(0.0);
+            }
+            if let Some(v) = self.stroke_over_fill {
+                doc.stroke_over_fill = v;
+            }
+            if let Some(v) = self.faux_bold {
+                doc.faux_bold = v;
+            }
+            if let Some(v) = self.faux_italic {
+                doc.faux_italic = v;
+            }
+            // All Caps and Small Caps exclude each other (AE).
+            if let Some(v) = self.all_caps {
+                doc.all_caps = v;
+                doc.small_caps &= !v;
+            }
+            if let Some(v) = self.small_caps {
+                doc.small_caps = v;
+                doc.all_caps &= !v;
+            }
+            if let Some(value) = self.baseline_option {
+                doc.baseline_option = value;
+            }
+            if let Some(v) = self.ligatures {
+                doc.ligatures = v;
+            }
+            if let Some(v) = self.hindi_digits {
+                doc.hindi_digits = v;
+            }
+            if let Some(v) = self.no_break {
+                doc.no_break = v;
+            }
+            if let Some(v) = self.line_join {
+                doc.line_join = v;
+            }
+        });
+        doc.edit_paragraphs(range, |p| {
+            if self.reset_paragraph {
+                *p = bae_model::ParagraphStyle::default();
+            }
+            if let Some(v) = self.hanging_punctuation {
+                p.hanging_punctuation = v;
+            }
+            if let Some(v) = self.top_leading {
+                p.top_leading = v;
+            }
+            if let Some(v) = self.every_line {
+                p.every_line = v;
+            }
+            if let Some(v) = &self.justification {
+                p.justification.clone_from(v);
+            }
+            if let Some(v) = self.left_indent {
+                p.left_indent = v;
+            }
+            if let Some(v) = self.right_indent {
+                p.right_indent = v;
+            }
+            if let Some(v) = self.first_line_indent {
+                p.first_line_indent = v;
+            }
+            if let Some(v) = self.space_before {
+                p.space_before = v;
+            }
+            if let Some(v) = self.space_after {
+                p.space_after = v;
+            }
+        });
     }
 }
 
@@ -373,6 +409,8 @@ pub struct SetTextStyleParams {
     #[serde(default)]
     pub time: Option<Time>,
     pub style: TextStyleChange,
+    /// Selected character interval; omitted applies to every character and paragraph.
+    pub range: Option<std::ops::Range<usize>>,
 }
 
 impl Command for SetTextStyle {
@@ -408,7 +446,8 @@ impl Command for SetTextStyle {
                 _ => TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE),
             };
             let before = doc.clone();
-            p.style.apply(&mut doc);
+            p.style
+                .apply(&mut doc, p.range.clone().unwrap_or(0..usize::MAX));
             if doc == before {
                 continue;
             }
@@ -433,22 +472,25 @@ mod style_tests {
     #[test]
     fn style_changes_touch_only_what_they_name() {
         let mut doc = TextDocument::new("Hi", "ArialMT", 72.0);
-        doc.leading = Some(80.0);
+        doc.style.leading = Some(80.0);
         let change: TextStyleChange = serde_json::from_value(serde_json::json!({
             "font_size": 120.0, "auto_leading": true, "stroke_color": [1.0, 0.0, 0.0, 1.0],
             "stroke_width": 3.0, "faux_bold": true, "justification": "center"
         }))
         .unwrap();
-        change.apply(&mut doc);
-        assert_eq!(doc.font_size, 120.0);
-        assert_eq!(doc.leading, None, "Auto leading");
-        assert_eq!(doc.stroke_color, Some([1.0, 0.0, 0.0, 1.0]));
-        assert!(doc.faux_bold && !doc.faux_italic);
-        assert_eq!(doc.justification, "center");
-        assert_eq!((doc.font.as_str(), doc.text.as_str()), ("ArialMT", "Hi"));
+        change.apply(&mut doc, 0..usize::MAX);
+        assert_eq!(doc.style.font_size, 120.0);
+        assert_eq!(doc.style.leading, None, "Auto leading");
+        assert_eq!(doc.style.stroke_color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert!(doc.style.faux_bold && !doc.style.faux_italic);
+        assert_eq!(doc.paragraph.justification, "center");
+        assert_eq!(
+            (doc.style.font.as_str(), doc.text.as_str()),
+            ("ArialMT", "Hi")
+        );
         let none: TextStyleChange =
             serde_json::from_value(serde_json::json!({"stroke": false})).unwrap();
-        none.apply(&mut doc);
-        assert_eq!(doc.stroke_color, None);
+        none.apply(&mut doc, 0..usize::MAX);
+        assert_eq!(doc.style.stroke_color, None);
     }
 }

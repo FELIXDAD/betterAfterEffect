@@ -584,6 +584,8 @@ pub struct ShapeSource {
     bounds: IRect,
     hash: u64,
     memo: RenderMemo,
+    #[cfg(target_os = "macos")]
+    shared: Option<Arc<SharedDrawing>>,
 }
 
 /// Layer sources by content hash. When it fills up it drops only the entries
@@ -676,6 +678,8 @@ impl ShapeSource {
             hash: scene.content_hash(),
             scene,
             memo: RenderMemo::default(),
+            #[cfg(target_os = "macos")]
+            shared: None,
         }
     }
 
@@ -693,7 +697,14 @@ impl ShapeSource {
     ) -> Result<GpuImage, RenderError> {
         let roi = roi.intersect(&self.bounds);
         self.memo.get_or_render(gpu, roi, scale, || {
-            VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.scene.as_ref())
+            let draw = || VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, &*self.scene);
+            // The per-layer memo above still holds this layer's own scale and
+            // ROI when another instance of the drawing asks for a different one.
+            #[cfg(target_os = "macos")]
+            if let Some(shared) = &self.shared {
+                return shared.memo.get_or_render(gpu, roi, scale, draw);
+            }
+            draw()
         })
     }
 
@@ -735,12 +746,57 @@ impl LayerSource for ShapeSource {
     }
 }
 
+/// Equal display lists can share a raster even when the project paths differ.
+/// The provider's index has only weak references, so it cannot pin textures.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct SharedDrawing {
+    scene: Arc<VectorScene>,
+    memo: RenderMemo,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Default)]
+struct SharedDrawings {
+    by_hash: FxHashMap<u64, Weak<SharedDrawing>>,
+    next_sweep: usize,
+}
+
+#[cfg(target_os = "macos")]
+impl SharedDrawings {
+    fn share(&mut self, mut source: ShapeSource) -> ShapeSource {
+        let shared = self
+            .by_hash
+            .get(&source.hash)
+            .and_then(Weak::upgrade)
+            .filter(|drawing| drawing.scene == source.scene);
+        let shared = shared.unwrap_or_else(|| {
+            if self.by_hash.len() >= self.next_sweep {
+                self.by_hash
+                    .retain(|_, drawing| drawing.strong_count() != 0);
+                self.next_sweep = (2 * self.by_hash.len()).max(CACHE_ENTRIES);
+            }
+            let drawing = Arc::new(SharedDrawing {
+                scene: source.scene.clone(),
+                memo: RenderMemo::default(),
+            });
+            self.by_hash.insert(source.hash, Arc::downgrade(&drawing));
+            drawing
+        });
+        source.scene = shared.scene.clone();
+        source.shared = Some(shared);
+        source
+    }
+}
+
 /// Creates [`ShapeSource`]s for [`crate::SHAPE_PROVIDER`] content. Sources are
 /// cached by `CustomContent::hash` (a small cache: one entry per visible shape
 /// layer and frame is typical).
 #[derive(Debug, Default)]
 pub struct ShapeProvider {
     cache: Mutex<SourceCache<ShapeSource>>,
+    #[cfg(target_os = "macos")]
+    drawings: Mutex<SharedDrawings>,
     warnings: Mutex<Vec<String>>,
 }
 
@@ -790,7 +846,10 @@ impl SourceProvider for ShapeProvider {
         if let Some(hit) = self.cache.lock().get(content.hash) {
             return Ok(hit);
         }
-        let source = Arc::new(ShapeSource::new(self.scene_of(content)?));
+        let source = ShapeSource::new(self.scene_of(content)?);
+        #[cfg(target_os = "macos")]
+        let source = self.drawings.lock().share(source);
+        let source = Arc::new(source);
         self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
     }

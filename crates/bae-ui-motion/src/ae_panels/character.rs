@@ -3,12 +3,12 @@
 //! to black / white), size, leading, kerning, tracking, stroke width and order,
 //! vertical / horizontal scale, baseline shift, tsume, the six style buttons,
 //! Ligatures and Hindi Digits. Changes go to the selected text layers
-//! (`text.set_style`, one undo step per change; drags preview live and commit on release); with
+//! (`text.set_style`, one undo step per change; drags commit on release); with
 //! no text layer selected they are the settings new text gets, as in AE.
 
 use bae_model::{PrimPath, Stage, TextDocument, Value};
 use bae_motion::query;
-use bae_motion::text::SOURCE;
+use bae_motion::text::{DEFAULT_FONT, DEFAULT_SIZE, SOURCE};
 use bae_ui::color_picker::{self, ColorEdit};
 use bae_ui::icons::{self, Icon};
 use bae_ui::widgets::HotNumber;
@@ -18,71 +18,35 @@ use serde_json::{Value as Json, json};
 
 use crate::common;
 
-struct Family {
-    name: String,
-    english: String,
-    localized: String,
-    default_face: String,
-    faces: Vec<bae_text::FontFace>,
-}
-impl Family {
-    fn label(&self, english: bool) -> &str {
-        if english {
-            &self.english
-        } else {
-            &self.localized
-        }
+/// The installed fonts, scanned once in the background ([`prewarm`]) so the
+/// panel never waits for the scan.
+static FONTS: std::sync::OnceLock<std::sync::Mutex<bae_text::FontSystem>> =
+    std::sync::OnceLock::new();
+
+/// Starts scanning the installed fonts on a background thread (at startup,
+/// before the Character panel first needs them).
+pub(crate) fn prewarm() {
+    if FONTS.get().is_some() {
+        return;
     }
-}
-struct Catalog {
-    families: Vec<Family>,
-    by_face: std::collections::HashMap<String, (usize, usize)>,
-}
-static FONTS: std::sync::OnceLock<Catalog> = std::sync::OnceLock::new();
-pub(crate) struct FontWarmUp;
-impl bae_gpu::WarmUp for FontWarmUp {
-    fn name(&self) -> &str {
-        "Character panel fonts"
-    }
-    fn priority(&self) -> u8 {
-        85
-    }
-    fn run(&self, _: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
-        FONTS.get_or_init(|| {
-            let mut f = bae_text::FontSystem::new();
-            let mut families = Vec::new();
-            let mut by_face = std::collections::HashMap::new();
-            for name in f.families() {
-                let faces = f.faces(&name);
-                if faces.is_empty() {
-                    continue;
-                }
-                let (english, localized) = f
-                    .family_labels(&name)
-                    .unwrap_or_else(|| (name.clone(), name.clone()));
-                let default_face = match f.resolve(&name) {
-                    bae_text::FontMatch::Found(face) => face.postscript_name,
-                    _ => faces[0].postscript_name.clone(),
-                };
-                let fi = families.len();
-                for (index, face) in faces.iter().enumerate() {
-                    by_face.insert(face.postscript_name.to_lowercase(), (fi, index));
-                    if face.postscript_name == default_face {
-                        by_face.insert(name.to_lowercase(), (fi, index));
-                    }
-                }
-                families.push(Family {
-                    name,
-                    english,
-                    localized,
-                    default_face,
-                    faces,
-                });
-            }
-            Catalog { families, by_face }
+    let _ = std::thread::Builder::new()
+        .name("bae-font-scan".into())
+        .spawn(|| {
+            FONTS.get_or_init(|| std::sync::Mutex::new(bae_text::FontSystem::new()));
         });
-        Ok(())
-    }
+}
+
+/// `f` on the installed fonts, or `None` while they are still being scanned.
+fn with_fonts<R>(f: impl FnOnce(&mut bae_text::FontSystem) -> R) -> Option<R> {
+    let fonts = FONTS.get()?;
+    let mut fonts = fonts.lock().unwrap_or_else(|e| e.into_inner());
+    Some(f(&mut fonts))
+}
+
+/// Use the warmed font collection for a pointer hit without waiting for a font scan.
+pub(crate) fn hit_layout(doc: &TextDocument) -> Option<bae_text::TextLayout> {
+    let mut fonts = FONTS.get()?.try_lock().ok()?;
+    Some(bae_text::layout_text(&mut fonts, doc))
 }
 
 /// AE's size and leading presets (px).
@@ -104,12 +68,13 @@ enum Swatch {
 /// The Character panel.
 #[derive(Default)]
 pub struct CharacterPanel {
+    families: Option<Vec<String>>,
     picking: Option<Swatch>,
 }
 
 /// The style the panel shows: the first selected text layer's at the current
 /// time, else the settings for new text.
-pub(super) fn current_doc(
+fn current_doc(
     stage: &Stage,
     layers: &[PrimPath],
     comp_time: bae_model::Time,
@@ -148,21 +113,38 @@ fn style_name(face: &bae_text::FontFace) -> String {
 
 impl Panel for CharacterPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let selected = super::text_menu::Selection::read(cx);
-        let doc = &selected.doc;
+        let session = common::session(cx.resources);
+        let (layers, time, defaults) = {
+            let s = session.lock();
+            let layers: Vec<PrimPath> = s
+                .selected_layers
+                .iter()
+                .filter(|l| query::layer_kind(cx.stage, l).as_deref() == Some("text"))
+                .cloned()
+                .collect();
+            let time = s
+                .active_comp
+                .as_ref()
+                .map_or(bae_model::Time::ZERO, |c| s.time(c));
+            (layers, time, s.text_defaults.clone())
+        };
+        let doc = current_doc(cx.stage, &layers, time)
+            .or(defaults)
+            .unwrap_or_else(|| TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE));
+        let range = session.lock().text_range(layers.first());
+        let selected = common::SelectedStyles {
+            doc: &doc,
+            range: range.clone().unwrap_or(0..usize::MAX),
+        };
+        let font = selected.character(|s| s.font.clone()).unwrap_or_default();
         let mut change = json!({});
-        let mut number_drag = None;
+        let mut gesture = Gesture::None;
         let id = ui.id().with("character");
-        let catalog = FONTS.get();
-        let active = catalog.and_then(|c| {
-            let &(family, face) = c.by_face.get(&doc.font.to_lowercase())?;
-            let family = &c.families[family];
-            Some((family, &family.faces[face]))
-        });
-        let english = common::session(cx.resources).lock().english_font_names
-            || bae_ui::i18n::lang() == bae_ui::i18n::Lang::En;
-        let family = active.map_or(doc.font.as_str(), |(f, _)| f.label(english));
-        let face_style = active.map_or_else(String::new, |(_, face)| style_name(face));
+        let (family, face_style) = with_fonts(|f| match f.resolve(&font) {
+            bae_text::FontMatch::Found(face) => (face.family.clone(), style_name(&face)),
+            bae_text::FontMatch::Missing => (font.clone(), String::new()),
+        })
+        .unwrap_or_else(|| (font.clone(), String::new()));
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         ui.add_space(4.0);
 
@@ -170,23 +152,25 @@ impl Panel for CharacterPanel {
         let top = ui.cursor().min;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            let resp = combo(ui, family, 122.0, tr("Set the font family"));
-            let families = catalog.map_or(&[][..], |c| c.families.as_slice());
+            let resp = combo(ui, &family, 122.0, tr("Set the font family"));
+            if self.families.is_none() {
+                self.families = with_fonts(|f| f.families());
+            }
+            let families = self.families.clone().unwrap_or_default();
             egui::Popup::menu(&resp).id(id.with("family")).show(|ui| {
                 egui::ScrollArea::vertical().max_height(320.0).show_rows(
                     ui,
                     20.0,
                     families.len(),
                     |ui, range| {
-                        for f in &families[range] {
-                            if ui
-                                .selectable_label(
-                                    active.is_some_and(|(a, _)| a.name == f.name),
-                                    f.label(english),
-                                )
-                                .clicked()
-                            {
-                                change["font"] = json!(f.default_face);
+                        for name in &families[range] {
+                            if ui.selectable_label(*name == family, name).clicked() {
+                                let ps = with_fonts(|f| match f.resolve(name) {
+                                    bae_text::FontMatch::Found(face) => face.postscript_name,
+                                    bae_text::FontMatch::Missing => name.clone(),
+                                })
+                                .unwrap_or_else(|| name.clone());
+                                change["font"] = json!(ps);
                             }
                         }
                     },
@@ -199,9 +183,9 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             let resp = combo(ui, &face_style, 122.0, tr("Set the font style"));
-            let faces = active.map_or(&[][..], |(f, _)| f.faces.as_slice());
+            let faces = with_fonts(|f| f.faces(&family)).unwrap_or_default();
             egui::Popup::menu(&resp).id(id.with("style")).show(|ui| {
-                for face in faces {
+                for face in &faces {
                     let name = style_name(face);
                     if ui.selectable_label(name == face_style, &name).clicked() {
                         change["font"] = json!(face.postscript_name);
@@ -241,7 +225,7 @@ impl Panel for CharacterPanel {
         });
         // Fill (front, top left) and stroke (back, bottom right) swatches.
         let swatches = Rect::from_min_size(top + vec2(170.0, 0.0), vec2(44.0, 44.0));
-        if let Some(edit) = self.swatches_ui(ui, id, swatches, doc) {
+        if let Some(edit) = self.swatches_ui(ui, id, swatches, &selected) {
             for (k, v) in edit.as_object().into_iter().flatten() {
                 change[k] = v.clone();
             }
@@ -253,16 +237,16 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             field_icon(ui, Icon::TextSize, tr("Set the font size"));
-            if let Some((v, dragging)) = number(
+            if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("size"),
-                doc.font_size,
+                selected.character(|s| s.font_size),
                 tr("px"),
                 0.1..=1296.0,
                 1,
                 tr("Set the font size"),
             ) {
-                number_drag = Some(dragging);
                 change["font_size"] = json!(v);
             }
             if let Some(v) = presets(ui, id.with("size_presets"), &SIZES, tr("px"), None) {
@@ -270,22 +254,36 @@ impl Panel for CharacterPanel {
             }
             ui.add_space(8.0);
             glyph_icon(ui, "A\u{2195}", tr("Set the leading"));
-            match doc.leading {
-                Some(l) => {
-                    if let Some((v, dragging)) = number(
+            match selected.character(|s| s.leading) {
+                Some(Some(l)) => {
+                    if let Some(v) = number(
                         ui,
+                        &mut gesture,
                         id.with("leading"),
-                        l,
+                        Some(l),
                         tr("px"),
                         0.0..=5000.0,
                         1,
                         tr("Set the leading"),
                     ) {
-                        number_drag = Some(dragging);
                         change["leading"] = json!(v);
                     }
                 }
                 None => {
+                    if let Some(v) = number(
+                        ui,
+                        &mut gesture,
+                        id.with("leading"),
+                        None,
+                        tr("px"),
+                        0.0..=5000.0,
+                        1,
+                        tr("Set the leading"),
+                    ) {
+                        change["leading"] = json!(v);
+                    }
+                }
+                Some(None) => {
                     ui.label(egui::RichText::new(tr("Auto")).color(bae_ui::theme::color::ACCENT));
                 }
             }
@@ -321,16 +319,16 @@ impl Panel for CharacterPanel {
                 Icon::TextTracking,
                 tr("Set the tracking for the selected characters"),
             );
-            if let Some((v, dragging)) = number(
+            if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("tracking"),
-                doc.tracking,
+                selected.character(|s| s.tracking),
                 "",
                 -1000.0..=10000.0,
                 0,
                 tr("Set the tracking for the selected characters"),
             ) {
-                number_drag = Some(dragging);
                 change["tracking"] = json!(v);
             }
             if let Some(v) = presets(ui, id.with("tracking_presets"), &TRACKING, "", None) {
@@ -341,20 +339,22 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             field_icon(ui, Icon::TextStroke, tr("Set the stroke width"));
-            if let Some((v, dragging)) = number(
+            if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("stroke_width"),
-                doc.stroke_width,
+                selected.character(|s| s.stroke_width),
                 tr("px"),
                 0.0..=1000.0,
                 1,
                 tr("Set the stroke width"),
             ) {
-                number_drag = Some(dragging);
                 change["stroke_width"] = json!(v);
             }
             ui.add_space(8.0);
-            let order = if doc.stroke_over_fill {
+            let order = if selected.character(|s| s.stroke_over_fill).is_none() {
+                ""
+            } else if selected.character(|s| s.stroke_over_fill) == Some(true) {
                 tr("Stroke Over Fill")
             } else {
                 tr("Fill Over Stroke")
@@ -364,13 +364,19 @@ impl Panel for CharacterPanel {
                 .id(id.with("stroke_order"))
                 .show(|ui| {
                     if ui
-                        .selectable_label(!doc.stroke_over_fill, tr("Fill Over Stroke"))
+                        .selectable_label(
+                            selected.character(|s| s.stroke_over_fill) == Some(false),
+                            tr("Fill Over Stroke"),
+                        )
                         .clicked()
                     {
                         change["stroke_over_fill"] = json!(false);
                     }
                     if ui
-                        .selectable_label(doc.stroke_over_fill, tr("Stroke Over Fill"))
+                        .selectable_label(
+                            selected.character(|s| s.stroke_over_fill) == Some(true),
+                            tr("Stroke Over Fill"),
+                        )
                         .clicked()
                     {
                         change["stroke_over_fill"] = json!(true);
@@ -396,16 +402,16 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             field_icon(ui, Icon::TextBaselineShift, tr("Set the baseline shift"));
-            if let Some((v, dragging)) = number(
+            if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("baseline"),
-                doc.baseline_shift,
+                selected.character(|s| s.baseline_shift),
                 tr("px"),
                 -5000.0..=5000.0,
                 1,
                 tr("Set the baseline shift"),
             ) {
-                number_drag = Some(dragging);
                 change["baseline_shift"] = json!(v);
             }
             ui.add_space(30.0);
@@ -424,7 +430,7 @@ impl Panel for CharacterPanel {
             for (key, on, icon, text, tip, enabled) in [
                 (
                     "faux_bold",
-                    doc.faux_bold,
+                    selected.character(|s| s.faux_bold).unwrap_or(false),
                     Some(Icon::TextBold),
                     "",
                     "Faux Bold",
@@ -432,16 +438,23 @@ impl Panel for CharacterPanel {
                 ),
                 (
                     "faux_italic",
-                    doc.faux_italic,
+                    selected.character(|s| s.faux_italic).unwrap_or(false),
                     Some(Icon::TextItalic),
                     "",
                     "Faux Italic",
                     true,
                 ),
-                ("all_caps", doc.all_caps, None, "TT", "All Caps", true),
+                (
+                    "all_caps",
+                    selected.character(|s| s.all_caps).unwrap_or(false),
+                    None,
+                    "TT",
+                    "All Caps",
+                    true,
+                ),
                 (
                     "small_caps",
-                    doc.small_caps,
+                    selected.character(|s| s.small_caps).unwrap_or(false),
                     Some(Icon::SmallCaps),
                     "",
                     "Small Caps",
@@ -449,7 +462,8 @@ impl Panel for CharacterPanel {
                 ),
                 (
                     "superscript",
-                    doc.typography.superscript,
+                    selected.character(|s| s.baseline_option)
+                        == Some(bae_model::BaselineOption::Superscript),
                     Some(Icon::TextSuperscript),
                     "",
                     "Superscript",
@@ -457,7 +471,8 @@ impl Panel for CharacterPanel {
                 ),
                 (
                     "subscript",
-                    doc.typography.subscript,
+                    selected.character(|s| s.baseline_option)
+                        == Some(bae_model::BaselineOption::Subscript),
                     Some(Icon::TextSubscript),
                     "",
                     "Subscript",
@@ -465,7 +480,11 @@ impl Panel for CharacterPanel {
                 ),
             ] {
                 if style_button(ui, on, icon, text, tr(tip), enabled).clicked() {
-                    change[key] = json!(!on);
+                    if matches!(key, "subscript" | "superscript") {
+                        change["baseline_option"] = json!(if on { "normal" } else { key });
+                    } else {
+                        change[key] = json!(!on);
+                    }
                     // AE: All Caps and Small Caps exclude each other.
                     if key == "all_caps" && !on {
                         change["small_caps"] = json!(false);
@@ -478,26 +497,26 @@ impl Panel for CharacterPanel {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            for (key, title, current) in [
-                ("ligatures", "Ligatures", doc.typography.ligatures),
-                ("hindi_digits", "Hindi Digits", doc.typography.hindi_digits),
-            ] {
-                let mut on = current;
-                if bae_ui::widgets::checkbox(ui, &mut on, tr(title)).changed() {
-                    change[key] = json!(on)
-                }
-                ui.add_space(24.);
+            let mut ligatures = selected.character(|s| s.ligatures).unwrap_or(false);
+            if bae_ui::widgets::checkbox(ui, &mut ligatures, tr("Ligatures")).changed() {
+                change["ligatures"] = json!(ligatures);
+            }
+            ui.add_space(24.0);
+            let mut hindi = selected.character(|s| s.hindi_digits).unwrap_or(false);
+            if bae_ui::widgets::checkbox(ui, &mut hindi, tr("Hindi Digits")).changed() {
+                change["hindi_digits"] = json!(hindi);
             }
         });
 
-        if change.as_object().is_some_and(|m| !m.is_empty()) {
-            if let Some(dragging) = number_drag {
-                selected.scrub(cx, change, dragging);
-            } else {
-                selected.apply(cx, change);
-            }
+        super::text_menu::Selection {
+            layers,
+            time,
+            range,
+            doc,
         }
+        .send(cx, change, gesture);
     }
+
     fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         super::text_menu::show(ui, cx, true);
     }
@@ -506,7 +525,14 @@ impl Panel for CharacterPanel {
 impl CharacterPanel {
     /// AE's fill and stroke swatches with the swap arrow; the Color Picker opens
     /// on a click. Returns the change it made.
-    fn swatches_ui(&mut self, ui: &Ui, id: Id, r: Rect, doc: &TextDocument) -> Option<Json> {
+    fn swatches_ui(
+        &mut self,
+        ui: &Ui,
+        id: Id,
+        r: Rect,
+        selected: &common::SelectedStyles<'_>,
+    ) -> Option<Json> {
+        let doc = selected.doc.style_at(selected.range.start);
         let fill_r = Rect::from_min_size(r.min, vec2(28.0, 28.0));
         let stroke_r = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
         let swap_r = Rect::from_min_size(r.min + vec2(32.0, 0.0), vec2(12.0, 12.0));
@@ -532,7 +558,22 @@ impl CharacterPanel {
                 );
             }
         }
-        p.rect_filled(fill_r, 0.0, c(doc.fill_color));
+        if selected.character(|s| s.stroke_color).is_none() {
+            p.rect_filled(stroke_r, 0.0, bae_ui::theme::color::PANEL);
+            p.rect_stroke(
+                stroke_r,
+                0.,
+                Stroke::new(1., bae_ui::theme::color::DIVIDER),
+                egui::StrokeKind::Inside,
+            );
+        }
+        p.rect_filled(
+            fill_r,
+            0.0,
+            selected
+                .character(|s| s.fill_color)
+                .map_or(bae_ui::theme::color::PANEL, c),
+        );
         p.rect_stroke(
             fill_r,
             0.0,
@@ -598,22 +639,39 @@ impl CharacterPanel {
     }
 }
 
-/// A hot number whose dragged value commits on release; a typed one at once.
-fn number(
+/// How a panel number was edited this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Gesture {
+    #[default]
+    None,
+    /// Being dragged: previewed on the layers, no command yet.
+    Live,
+    /// A drag ended (with or without a change).
+    Ended,
+}
+
+/// A hot number: while dragged its value is previewed (`Gesture::Live`), it
+/// commits on release only when it changed (no empty undo step); a typed one
+/// commits at once.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn number(
     ui: &mut Ui,
+    gesture: &mut Gesture,
     id: Id,
-    model: f64,
+    model: Option<f64>,
     suffix: &str,
     range: std::ops::RangeInclusive<f64>,
     decimals: usize,
     label: &str,
-) -> Option<(f64, bool)> {
+) -> Option<f64> {
     let key = id.with("scrub");
-    let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
+    let pending = ui.data(|d| d.get_temp::<f64>(key));
+    let mut v = pending.or(model).unwrap_or_default();
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
+                    .mixed(pending.is_none() && model.is_none())
                     .decimals(decimals)
                     .speed(0.5)
                     .suffix(suffix)
@@ -624,13 +682,18 @@ fn number(
         .inner;
     if resp.drag_stopped() {
         ui.data_mut(|d| d.remove::<f64>(key));
-        return Some((v, false));
+        *gesture = Gesture::Ended;
+        return (Some(v) != model).then_some(v);
     }
     if resp.dragged() {
         ui.data_mut(|d| d.insert_temp(key, v));
-        return Some((v, true));
+        if pending != Some(v) {
+            *gesture = Gesture::Live;
+            return Some(v);
+        }
+        return None;
     }
-    (resp.changed() && v != model).then_some((v, false))
+    (resp.changed() && Some(v) != model).then_some(v)
 }
 
 /// The ▾ after a value with AE's presets; `auto` adds "Auto" first (NaN).
