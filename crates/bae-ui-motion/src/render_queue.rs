@@ -28,13 +28,19 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
 /// Formats offered in the panel and by `bae render --format`.
-pub const FORMATS: [ExportFormat; 8] = [
+pub const FORMATS: &[ExportFormat] = &[
     ExportFormat::Wav,
     ExportFormat::Png,
     ExportFormat::Tiff,
     ExportFormat::Exr,
     ExportFormat::H264,
     ExportFormat::Hevc,
+    #[cfg(target_os = "macos")]
+    ExportFormat::QuickTimeH264,
+    #[cfg(target_os = "macos")]
+    ExportFormat::QuickTimeHevc,
+    #[cfg(target_os = "macos")]
+    ExportFormat::ProRes422,
     ExportFormat::ProRes,
     ExportFormat::ProRes4444,
 ];
@@ -165,10 +171,16 @@ pub enum Channels {
 /// Whether `format` can carry an alpha channel.
 pub fn supports_alpha(format: ExportFormat) -> bool {
     match format {
-        ExportFormat::Hevc => bae_media::VideoCodec::Hevc.supports_alpha(),
+        ExportFormat::QuickTimeHevc | ExportFormat::Hevc => {
+            bae_media::VideoCodec::Hevc.supports_alpha()
+        }
         _ => !matches!(
             format,
-            ExportFormat::Wav | ExportFormat::H264 | ExportFormat::ProRes
+            ExportFormat::Wav
+                | ExportFormat::H264
+                | ExportFormat::QuickTimeH264
+                | ExportFormat::ProRes422
+                | ExportFormat::ProRes
         ),
     }
 }
@@ -190,7 +202,13 @@ pub const DEFAULT_BIT_RATE_MBPS: f64 = 40.0;
 
 /// Whether `format` has a target bit rate option.
 pub fn has_bit_rate(format: ExportFormat) -> bool {
-    matches!(format, ExportFormat::H264 | ExportFormat::Hevc)
+    matches!(
+        format,
+        ExportFormat::H264
+            | ExportFormat::Hevc
+            | ExportFormat::QuickTimeH264
+            | ExportFormat::QuickTimeHevc
+    )
 }
 
 /// State of a queued item.
@@ -246,6 +264,8 @@ pub struct QueueItem {
     pub channels: Channels,
     /// H.264 / HEVC target bit rate in Mbps.
     pub bit_rate_mbps: f64,
+    /// QuickTime PCM audio, or AAC when unchecked.
+    pub pcm_audio: bool,
     /// First and last frame (comp frames, inclusive).
     pub start: i64,
     /// Last frame (inclusive).
@@ -324,16 +344,24 @@ impl RenderQueue {
         self.running
     }
 
-    /// Queues `comp` with AE's defaults: PNG sequence, the work area, a folder
+    /// Queues `comp` over its work area, using H.264 on macOS and PNG elsewhere, in a folder
     /// named after the comp under `output_dir`. Returns the item id.
     pub fn add(&mut self, comp: &CompInfo, output_dir: &Path) -> u64 {
+        let format = if cfg!(target_os = "macos") {
+            ExportFormat::H264
+        } else {
+            ExportFormat::Png
+        };
+        self.add_with_format(comp, output_dir, format)
+    }
+
+    fn add_with_format(&mut self, comp: &CompInfo, output_dir: &Path, format: ExportFormat) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        let format = ExportFormat::Png;
         let name = sanitize(&comp.name);
         let output = output_dir
             .join(&name)
-            .join(format!("{name}_[####].{}", format.extension()));
+            .join(default_file_name(&name, format));
         let rate = comp.frame_rate;
         let start = rate.time_to_frame(comp.work_area.start);
         // The work area's end is exclusive.
@@ -347,6 +375,7 @@ impl RenderQueue {
             output: output.to_string_lossy().into_owned(),
             channels: default_channels(format),
             bit_rate_mbps: DEFAULT_BIT_RATE_MBPS,
+            pcm_audio: true,
             start,
             end,
             status: ItemStatus::Queued,
@@ -360,7 +389,7 @@ impl RenderQueue {
     /// Composition ▸ Save Frame As ▸ File… (Cmd/Ctrl+Alt+S): `comp`'s frame
     /// `frame` as one still, named like AE's ("Comp 1 (0;00;01;00).png").
     pub fn add_frame(&mut self, comp: &CompInfo, output_dir: &Path, frame: i64) -> u64 {
-        let id = self.add(comp, output_dir);
+        let id = self.add_with_format(comp, output_dir, ExportFormat::Png);
         let base = comp.frame_rate.as_f64().round().max(1.0) as i64;
         let f = frame.max(0);
         let (secs, ff) = (f / base, f % base);
@@ -483,6 +512,7 @@ impl RenderQueue {
             output: PathBuf::from(&item.output),
             channels: item.channels,
             bit_rate_mbps: item.bit_rate_mbps,
+            pcm_audio: item.pcm_audio,
             start: item.start,
             end: item.end,
             cancel: item.cancel.clone(),
@@ -566,6 +596,7 @@ pub(crate) struct Job {
     output: PathBuf,
     channels: Channels,
     bit_rate_mbps: f64,
+    pcm_audio: bool,
     start: i64,
     end: i64,
     cancel: Arc<AtomicBool>,
@@ -575,6 +606,7 @@ pub(crate) struct Job {
 /// The export settings of a job's output module.
 fn export_settings(job: &Job, output: PathBuf) -> ExportSettings {
     let mut settings = ExportSettings::new(job.format, output);
+    settings.pcm_audio = job.pcm_audio && job.format.is_quicktime();
     settings.alpha = match job.channels {
         Channels::RgbAlpha if supports_alpha(job.format) => ExportAlpha::Straight,
         _ => ExportAlpha::Background,
@@ -729,7 +761,7 @@ fn output_path(output: &Path, format: ExportFormat, comp: &str) -> Result<PathBu
 fn extension_follows_format(output: &str, format: ExportFormat) -> Option<&'static str> {
     let ext = Path::new(output.trim()).extension()?;
     let typed = ExportFormat::parse(&ext.to_string_lossy().to_ascii_lowercase())?;
-    (typed != format).then(|| format.extension())
+    (typed.extension() != format.extension()).then(|| format.extension())
 }
 
 /// Starts rendering the queued items on a background thread, one after
@@ -1041,8 +1073,8 @@ fn item_ui(
                 }
             }
             ItemStatus::Failed(message) => {
-                ui.colored_label(ui.visuals().error_fg_color, tr("Failed"))
-                    .on_hover_text(message);
+                ui.colored_label(ui.visuals().error_fg_color, tr("Failed"));
+                ui.colored_label(ui.visuals().error_fg_color, message);
             }
             ItemStatus::Stopped { done, total, first } => {
                 ui.label(
@@ -1079,9 +1111,6 @@ fn item_ui(
             *remove = Some(item.id);
         }
     });
-    if let ItemStatus::Failed(message) = &item.status {
-        ui.colored_label(ui.visuals().error_fg_color, message);
-    }
     // AE's Render Time column (time so far while rendering).
     if let Some(started) = item.started {
         let time = match &item.status {
@@ -1167,7 +1196,7 @@ fn item_ui(
                 .truncate()
                 .selected_text(tr(format_label(format)))
                 .show_ui(ui, |ui| {
-                    for f in FORMATS {
+                    for &f in FORMATS {
                         let available = format_available(f);
                         let r = ui.add_enabled(
                             available,
@@ -1317,6 +1346,9 @@ pub(crate) fn format_label(format: ExportFormat) -> &'static str {
         ExportFormat::Exr => "OpenEXR Sequence",
         ExportFormat::H264 => "H.264",
         ExportFormat::Hevc => "HEVC",
+        ExportFormat::QuickTimeH264 => "QuickTime (H.264)",
+        ExportFormat::QuickTimeHevc => "QuickTime (HEVC)",
+        ExportFormat::ProRes422 => "QuickTime (Apple ProRes 422)",
         ExportFormat::ProRes => "QuickTime (Apple ProRes 422 HQ)",
         ExportFormat::ProRes4444 => "QuickTime (Apple ProRes 4444)",
     }
@@ -1333,6 +1365,8 @@ pub(crate) fn channels_label(channels: Channels) -> &'static str {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Video Codec", "视频编码器"),
+    ("24-bit PCM", "24 位 PCM"),
     ("Save Frame As File", "帧另存为文件"),
     // AE 26's Render Queue (渲染队列) terms.
     ("Unqueued", "未加入队列"),
@@ -1516,11 +1550,19 @@ mod tests {
         let b = q.add(&comp_info("/comps/other", "Other"), dir);
         let item = &q.items()[0];
         assert_eq!((item.start, item.end, item.frame_count()), (3, 8, 6));
-        assert_eq!(item.format, ExportFormat::Png);
-        assert_eq!(
-            PathBuf::from(&item.output),
-            dir.join("Main_ v2/Main_ v2_[####].png")
-        );
+        if cfg!(target_os = "macos") {
+            assert_eq!(item.format, ExportFormat::H264);
+            assert_eq!(
+                PathBuf::from(&item.output),
+                dir.join("Main_ v2/Main_ v2.mp4")
+            );
+        } else {
+            assert_eq!(item.format, ExportFormat::Png);
+            assert_eq!(
+                PathBuf::from(&item.output),
+                dir.join("Main_ v2/Main_ v2_[####].png")
+            );
+        }
         q.item_mut(a).unwrap().set_format(ExportFormat::Tiff);
         assert!(q.items()[0].output.ends_with("_[####].tif"));
         assert_eq!(q.queued(), 2);
@@ -1634,7 +1676,7 @@ mod tests {
         let (stage, comp) = project();
         let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
         let mut q = RenderQueue::default();
-        let id = q.add(&info, dir.path());
+        let id = q.add_with_format(&info, dir.path(), ExportFormat::Png);
         q.item_mut(id).unwrap().output = dir
             .path()
             .join("stop/f_####.png")
@@ -1682,7 +1724,7 @@ mod tests {
         let queue = SharedRenderQueue::default();
         let id = {
             let mut q = queue.lock();
-            let id = q.add(&info, dir.path());
+            let id = q.add_with_format(&info, dir.path(), ExportFormat::Png);
             q.item_mut(id).unwrap().output = dir.path().join("f_####.png").to_string_lossy().into();
             id
         };
@@ -1759,7 +1801,7 @@ mod tests {
         let mut q = RenderQueue::default();
         let outputs = ["a_[####].png", "b_####.png", "still.png"];
         for name in outputs {
-            let id = q.add(&info, dir.path());
+            let id = q.add_with_format(&info, dir.path(), ExportFormat::Png);
             let item = q.item_mut(id).unwrap();
             item.output = dir.path().join(name).to_string_lossy().into_owned();
             (item.start, item.end) = (5, 5);
@@ -1906,7 +1948,7 @@ mod tests {
 
     #[test]
     fn movie_formats_channels_and_names() {
-        for f in FORMATS {
+        for &f in FORMATS {
             #[cfg(windows)]
             if matches!(f, ExportFormat::H264 | ExportFormat::Hevc) {
                 continue;
@@ -1964,6 +2006,7 @@ mod tests {
             output: PathBuf::from("/r/x"),
             channels,
             bit_rate_mbps: 12.5,
+            pcm_audio: true,
             start: 0,
             end: 0,
             cancel: Arc::default(),
@@ -2003,6 +2046,12 @@ mod tests {
         let formats: Vec<_> = [
             ExportFormat::H264,
             ExportFormat::ProRes4444,
+            #[cfg(target_os = "macos")]
+            ExportFormat::ProRes422,
+            #[cfg(target_os = "macos")]
+            ExportFormat::QuickTimeH264,
+            #[cfg(target_os = "macos")]
+            ExportFormat::QuickTimeHevc,
             ExportFormat::Hevc,
         ]
         .into_iter()
@@ -2013,7 +2062,7 @@ mod tests {
             return;
         }
         for &format in &formats {
-            let id = q.add(&info, dir.path());
+            let id = q.add_with_format(&info, dir.path(), ExportFormat::Png);
             let item = q.item_mut(id).unwrap();
             item.set_format(format);
             item.output = dir
@@ -2058,7 +2107,7 @@ mod tests {
         let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
         let mut q = RenderQueue::default();
         for (name, channels) in [("rgb", None), ("alpha", Some(Channels::RgbAlpha))] {
-            let id = q.add(&info, dir.path());
+            let id = q.add_with_format(&info, dir.path(), ExportFormat::Png);
             let item = q.item_mut(id).unwrap();
             assert_eq!(
                 (item.format, item.channels),
@@ -2150,10 +2199,10 @@ mod tests {
         let queue = SharedRenderQueue::default();
         let (png, tiff, stopped, bad) = {
             let mut q = queue.lock();
-            let png = q.add(&info, dir.path());
-            let tiff = q.add(&info, dir.path());
-            let stopped = q.add(&info, dir.path());
-            let bad = q.add(&info, dir.path());
+            let png = q.add_with_format(&info, dir.path(), ExportFormat::Png);
+            let tiff = q.add_with_format(&info, dir.path(), ExportFormat::Png);
+            let stopped = q.add_with_format(&info, dir.path(), ExportFormat::Png);
+            let bad = q.add_with_format(&info, dir.path(), ExportFormat::Png);
             q.item_mut(png).unwrap().output =
                 dir.path().join("png/f_[####].png").to_string_lossy().into();
             let t = q.item_mut(tiff).unwrap();

@@ -111,6 +111,14 @@ pub mod camera {
     pub const FOCUS_DISTANCE: &str = "camera:focus_distance";
     pub const APERTURE: &str = "camera:aperture";
     pub const BLUR_LEVEL: &str = "camera:blur_level";
+    pub const IRIS_SHAPE: &str = "camera:iris_shape";
+    pub const IRIS_ROTATION: &str = "camera:iris_rotation";
+    pub const IRIS_ROUNDNESS: &str = "camera:iris_roundness";
+    pub const IRIS_ASPECT_RATIO: &str = "camera:iris_aspect_ratio";
+    pub const IRIS_DIFFRACTION_FRINGE: &str = "camera:iris_diffraction_fringe";
+    pub const HIGHLIGHT_GAIN: &str = "camera:highlight_gain";
+    pub const HIGHLIGHT_THRESHOLD: &str = "camera:highlight_threshold";
+    pub const HIGHLIGHT_SATURATION: &str = "camera:highlight_saturation";
 }
 
 /// Light layer options.

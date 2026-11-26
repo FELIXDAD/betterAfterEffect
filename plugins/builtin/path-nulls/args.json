@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": ["mode", "paths"],
+  "properties": {
+    "mode": { "enum": ["controllers", "followers", "trace"] },
+    "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true }
+  }
+}

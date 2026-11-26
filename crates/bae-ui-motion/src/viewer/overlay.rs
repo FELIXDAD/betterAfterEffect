@@ -58,6 +58,45 @@ pub(crate) fn mask_color(stage: &Stage, mask: &PrimPath) -> Color32 {
     Color32::from_rgb(u(c[0]), u(c[1]), u(c[2]))
 }
 
+/// Show a mask or shape path being edited in the evaluated comp, so the
+/// picture follows the drag (#593): the mask's shape, or the Path item's
+/// `path` in the layer's contents (copied on write: contents are shared).
+pub(crate) fn apply_path_preview(comp: &mut EvaluatedComp, prim: &PrimPath, path: &BezierPath) {
+    fn holds(items: &[bae_anim::EvaluatedPrim], prim: &PrimPath) -> bool {
+        items
+            .iter()
+            .any(|i| i.path == *prim || holds(&i.children, prim))
+    }
+    fn patch(
+        items: &mut std::sync::Arc<[bae_anim::EvaluatedPrim]>,
+        prim: &PrimPath,
+        path: &BezierPath,
+    ) -> bool {
+        let Some(i) = items
+            .iter()
+            .position(|item| item.path == *prim || holds(&item.children, prim))
+        else {
+            return false;
+        };
+        let item = &mut std::sync::Arc::make_mut(items)[i];
+        if item.path != *prim {
+            return patch(&mut item.children, prim, path);
+        }
+        std::sync::Arc::make_mut(&mut item.attrs)
+            .insert("path".into(), Value::Bezier(path.clone()));
+        true
+    }
+    for layer in &mut comp.layers {
+        if let Some(m) = layer.masks.iter_mut().find(|m| m.path == *prim) {
+            m.shape = path.clone();
+            return;
+        }
+        if patch(&mut layer.contents, prim, path) {
+            return;
+        }
+    }
+}
+
 /// Mask outlines of the selected layers.
 pub(super) fn masks(
     painter: &Painter,

@@ -42,13 +42,16 @@ mod i18n;
 pub mod import;
 mod layer_panel;
 mod live_preview;
+mod masks;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
 mod panels;
+mod path_nulls;
 mod playback;
 mod prefs;
 mod presets;
+pub use presets::register_preset_index;
 mod preview_snapshot;
 pub mod progress_metadata;
 mod project;
@@ -99,6 +102,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     footage_panel::register,
     progress_metadata::register,
     paint_panels::register,
+    path_nulls::register,
     assist::register,
     // Chinese strings only.
     actions::register,
