@@ -66,6 +66,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 **丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发。断线重连时调用 `SyncSession::reset()`。
 
+**传输出错**：`pump` 收消息时遇到传输错误，先把本轮出错前已经收到的数据导入，再返回错误（导入不需要连接；对方已经认为这些数据送到了，不导入就会丢修改，例如客户端发完最后几条修改马上断开）。导入的事件照常通过 `Stage::subscribe` 发出，只是 `PumpOutcome` 随错误一起丢掉。`Relay` 有连接出错时多转一轮，让这些数据在同一次 `pump` 里转给其他连接。
+
 ### 2.5 别人新建的工程层
 
 工程层的层叠顺序在 `project.json` 里，不在 CRDT 里，所以协作者新建的工程层不会自动出现在本地层叠中。会话收到本地没有的文档时只报告（`unknown_docs`），由应用决定插到层叠的什么位置。应用把它加进 Stage 后（`Stage::insert_sublayer`），会话下一次 `pump` 会因为"出现新文档"发 `Hello`，远端随即把内容补过来。
@@ -88,6 +90,9 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - `HubTransport::connect(url, token, timeout)`：`url` 形如 `ws://nas.local:7341/projects/<工程>`，路径和查询参数怎么选工程由 Hub（10）决定；`token` 作为 `Authorization: Bearer <token>` 发送，Hub 拒绝时返回 `SyncError::Hub("... 401 ...")`。暂时只支持 `ws://`（局域网），`wss://` 报错。
 - 一条协议消息就是一个 WebSocket **二进制帧**；文本帧、ping/pong 忽略（pong 自动回复）；解码失败或未知类型的帧跳过；收到 close 帧或连接断开返回 `SyncError::Closed`。
 - 握手后套接字是非阻塞的，`send` 写不完的部分留在缓冲区，在之后的 `recv` 里继续发。应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。
+- **大小上限**（`HubLimits`，两端一致；`connect_with` / `accept_with` / `set_limits` 可改）：
+  - `max_message`：单条协议消息的上限，默认 256 MiB。消息不分片，所以它同时是单帧上限（tungstenite 默认单帧 16 MiB，超过 16 MiB 的工程层快照会被对方拒收、断线、重连后再发同一条，一直卡住）。发送超过上限的消息时 `send` 直接报错，不发出去。
+  - `max_backlog`：对方不读时，在"再放一条最大消息"之外最多积压的字节数，默认 16 MiB。超过后 `send` 报错（"peer is not reading"），`Relay` 随即断开这个连接，内存不会一直涨。
 - 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去）。
 - `HubTransport::accept(tcp_stream, token)` 是服务端一侧，给测试和简单工具用：`tests/hub.rs` 里用 `Relay` + `accept` 写了一个几十行的阻塞式参考 Hub。
 - 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。

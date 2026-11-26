@@ -258,3 +258,84 @@ fn clients_reconnect_after_the_hub_restarts() {
         fingerprint(&late.stage) == fingerprint(&clients[0].stage)
     });
 }
+
+/// A raw client/server pair on loopback, without a relay.
+fn raw_pair(server_limits: bae_sync::HubLimits) -> (HubTransport, HubTransport) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        HubTransport::accept_with(stream, None, server_limits).unwrap()
+    });
+    let client = HubTransport::connect(
+        &format!("ws://{addr}/projects/film"),
+        None,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    (client, server.join().unwrap())
+}
+
+#[test]
+fn messages_larger_than_one_default_frame_get_through() {
+    use bae_sync::{DocKey, HubLimits, Message, Transport};
+    // tungstenite refuses frames over 16 MiB by default, and a message is one frame.
+    let (mut client, mut server) = raw_pair(HubLimits::default());
+    let data: Vec<u8> = (0..20u32 << 20).map(|i| (i % 251) as u8).collect();
+    let sent = Message::Snapshot {
+        doc: DocKey::sublayer(&SublayerId::root()),
+        version: Default::default(),
+        data: data.clone(),
+    };
+    client.send(sent).unwrap();
+    let mut got = None;
+    wait_until("the large snapshot", Duration::from_secs(20), || {
+        client.recv().unwrap(); // drives the rest of the send
+        got = server.recv().unwrap();
+        got.is_some()
+    });
+    match got.unwrap() {
+        Message::Snapshot { data: d, .. } => assert!(d == data),
+        other => panic!("unexpected {other:?}"),
+    }
+
+    // Over the limit: refused when sending, not silently dropped by the peer.
+    client.set_limits(HubLimits {
+        max_message: 1 << 20,
+        ..HubLimits::default()
+    });
+    assert_eq!(client.limits().max_message, 1 << 20);
+    let too_big = Message::Updates {
+        doc: DocKey::sublayer(&SublayerId::root()),
+        version: Default::default(),
+        data: vec![0; 2 << 20],
+    };
+    assert!(client.send(too_big).is_err());
+}
+
+#[test]
+fn a_peer_that_stops_reading_is_cut_off() {
+    use bae_sync::{DocKey, HubLimits, Message, Transport};
+    let limits = HubLimits {
+        max_message: 1 << 20,
+        max_backlog: 1 << 20,
+    };
+    // The client never reads; the server keeps sending.
+    let (_client, mut server) = raw_pair(limits);
+    let chunk = Message::Updates {
+        doc: DocKey::sublayer(&SublayerId::root()),
+        version: Default::default(),
+        data: vec![7; 256 << 10],
+    };
+    let mut failed = None;
+    for i in 0..1024 {
+        if let Err(e) = server.send(chunk.clone()) {
+            failed = Some((i, e));
+            break;
+        }
+    }
+    // Socket buffers take a few MiB; the queue on top of them is capped.
+    let (i, e) = failed.expect("256 MiB queued for a peer that does not read");
+    assert!(i >= 4, "failed after only {i} messages: {e}");
+    assert!(e.to_string().contains("not reading"), "{e}");
+}

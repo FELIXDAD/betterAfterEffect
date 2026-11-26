@@ -17,6 +17,35 @@ use crate::error::SyncError;
 use crate::protocol::Message;
 use crate::transport::Transport;
 
+/// Size limits of a hub connection, the same in both directions.
+///
+/// tungstenite's defaults (16 MiB per frame, unlimited write queue) do not fit
+/// the protocol: messages are sent as single unfragmented frames, so a sublayer
+/// snapshot over 16 MiB was refused by the other side, the link dropped and the
+/// same message was sent again after every reconnect; and a peer that never
+/// reads made the other side queue without bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HubLimits {
+    /// Largest encoded protocol message either side sends or accepts (also the
+    /// frame limit, since a message is one frame). A whole sublayer snapshot
+    /// must fit: a larger one fails to send instead of being refused remotely.
+    pub max_message: usize,
+    /// Bytes that may wait for a peer that is not reading, on top of room for
+    /// one more message of up to `max_message`. Past that, `send` fails and the
+    /// connection is dropped (a relay drops it at once) instead of growing
+    /// without bound.
+    pub max_backlog: usize,
+}
+
+impl Default for HubLimits {
+    fn default() -> Self {
+        HubLimits {
+            max_message: 256 << 20,
+            max_backlog: 16 << 20,
+        }
+    }
+}
+
 /// One WebSocket connection carrying the sync protocol, client or server side.
 pub struct HubTransport {
     ws: WebSocket<TcpStream>,
@@ -40,6 +69,16 @@ impl HubTransport {
     /// `Authorization: Bearer <token>`. Blocks for at most about `timeout` per
     /// step (connect, handshake).
     pub fn connect(url: &str, token: Option<&str>, timeout: Duration) -> Result<Self, SyncError> {
+        Self::connect_with(url, token, timeout, HubLimits::default())
+    }
+
+    /// [`connect`](Self::connect) with explicit size limits.
+    pub fn connect_with(
+        url: &str,
+        token: Option<&str>,
+        timeout: Duration,
+        limits: HubLimits,
+    ) -> Result<Self, SyncError> {
         let mut request = url.into_client_request().map_err(hub_err)?;
         match request.uri().scheme_str() {
             Some("ws") => {}
@@ -77,13 +116,22 @@ impl HubTransport {
             }
             other => hub_err(other),
         })?;
-        Self::ready(ws)
+        Self::ready(ws, limits)
     }
 
     /// Server side of an accepted TCP connection (tests and simple tools; the
     /// production hub is `services/bae-hub`). With `token`, clients must send
     /// `Authorization: Bearer <token>`, others get HTTP 401.
     pub fn accept(stream: TcpStream, token: Option<&str>) -> Result<Self, SyncError> {
+        Self::accept_with(stream, token, HubLimits::default())
+    }
+
+    /// [`accept`](Self::accept) with explicit size limits.
+    pub fn accept_with(
+        stream: TcpStream,
+        token: Option<&str>,
+        limits: HubLimits,
+    ) -> Result<Self, SyncError> {
         stream.set_nonblocking(false).map_err(hub_err)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -107,15 +155,43 @@ impl HubTransport {
             }
         };
         let ws = tungstenite::accept_hdr(stream, check).map_err(hub_err)?;
-        Self::ready(ws)
+        Self::ready(ws, limits)
     }
 
-    fn ready(ws: WebSocket<TcpStream>) -> Result<Self, SyncError> {
+    fn ready(ws: WebSocket<TcpStream>, limits: HubLimits) -> Result<Self, SyncError> {
         let s = ws.get_ref();
         s.set_read_timeout(None).map_err(hub_err)?;
         s.set_write_timeout(None).map_err(hub_err)?;
         s.set_nonblocking(true).map_err(hub_err)?;
-        Ok(HubTransport { ws })
+        let mut transport = HubTransport { ws };
+        transport.set_limits(limits);
+        Ok(transport)
+    }
+
+    /// Change the size limits of an open connection.
+    pub fn set_limits(&mut self, limits: HubLimits) {
+        let max_message = limits.max_message.max(1);
+        self.ws.set_config(|c| {
+            c.max_message_size = Some(max_message);
+            c.max_frame_size = Some(max_message);
+            c.max_write_buffer_size = c
+                .write_buffer_size
+                .saturating_add(max_message)
+                .saturating_add(limits.max_backlog.max(1));
+        });
+    }
+
+    /// The connection's size limits.
+    pub fn limits(&self) -> HubLimits {
+        let c = self.ws.get_config();
+        let max_message = c.max_message_size.unwrap_or(usize::MAX);
+        HubLimits {
+            max_message,
+            max_backlog: c
+                .max_write_buffer_size
+                .saturating_sub(c.write_buffer_size)
+                .saturating_sub(max_message),
+        }
     }
 }
 
@@ -126,6 +202,9 @@ fn would_block(e: &WsError) -> bool {
 fn link_err(e: WsError) -> SyncError {
     match e {
         WsError::ConnectionClosed | WsError::AlreadyClosed => SyncError::Closed,
+        WsError::WriteBufferFull(_) => {
+            SyncError::Hub("peer is not reading: send queue is full".into())
+        }
         WsError::Io(io)
             if matches!(
                 io.kind(),
@@ -143,7 +222,18 @@ fn link_err(e: WsError) -> SyncError {
 
 impl Transport for HubTransport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
-        match self.ws.send(WsMessage::Binary(msg.encode().into())) {
+        let bytes = msg.encode();
+        // tungstenite only checks the size of incoming messages; the peer would
+        // drop the link over an oversized one, so fail here with a clear reason.
+        if let Some(max) = self.ws.get_config().max_message_size
+            && bytes.len() > max
+        {
+            return Err(SyncError::Hub(format!(
+                "message of {} bytes is over the {max}-byte limit of the hub link",
+                bytes.len()
+            )));
+        }
+        match self.ws.send(WsMessage::Binary(bytes.into())) {
             // Queued; the rest goes out on later flushes.
             Err(e) if would_block(&e) => Ok(()),
             r => r.map_err(link_err),

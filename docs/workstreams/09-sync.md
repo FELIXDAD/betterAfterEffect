@@ -71,6 +71,8 @@ bae-hub 已经直接建立在 `Relay` + `HubTransport::accept` 上（PR #47）�
 
 请求（按重要程度）：
 
+> 2026-11-26 zjzcoder（C 多人协作）：1–3 已在 `collab/sync-hub-requests` 处理，Hub 的 `PeerLink` 绕行已去掉；4 还没做（Hub 的存盘连接加 `min_send_interval` 后，卸载 / 退出前要能强制写出，否则最后的修改可能没写盘）。
+
 1. **`SyncSession::pump_at` 在传输出错时丢掉本轮已收到的数据（会丢修改）。**
    - 现象：`transport.recv()?` 直接返回错误，本轮已经放进 `incoming` 的 `Updates` 没有导入。客户端发完最后几条修改马上断开时，Hub 收到了修改和关闭帧，但修改没有导入；而客户端的会话已经认为 Hub 有了这些修改。只有这个客户端以后重连，才会补发。
    - 复现：`services/bae-hub/tests/hub.rs` 的 `idle_projects_are_unloaded_and_reloaded`，去掉 `src/link.rs` 里的绕行就会超时。

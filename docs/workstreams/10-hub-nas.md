@@ -84,6 +84,10 @@
   - 写缓冲上限
   - 按连接设置 `SessionConfig`
 
+### 2026-11-26（zjzcoder，C 多人协作）
+
+- 上面前三条已在 09 侧解决（`collab/sync-hub-requests`）：会话出错前先导入；`HubLimits` 默认单条消息 256 MiB、对方不读时最多积压 16 MiB 后断开。`PeerLink` 的"晚一次报错"绕行已去掉，`idle_projects_are_unloaded_and_reloaded` 照常通过。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 09 collab/sync（2026-11-20）
