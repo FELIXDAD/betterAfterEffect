@@ -378,6 +378,7 @@ impl AnimEvaluator {
                     if e.match_name == crate::paint::PAINT_EFFECT {
                         let strokes = crate::paint::strokes(&e.children, l.layer_time);
                         params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
+                        params.extend(crate::paint::source_params(&strokes));
                     }
                     RenderEffect {
                         path: e.path.clone(),

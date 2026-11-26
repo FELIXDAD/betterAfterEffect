@@ -192,6 +192,9 @@ impl<T> FrameCache<T> {
         if let Some(old) = self.entries.remove(&key) {
             self.stats.bytes -= old.bytes;
         }
+        if history {
+            self.trim_history(&key.comp);
+        }
         self.evict_to(self.stats.budget - bytes);
         self.stats.bytes += bytes;
         self.entries.insert(
@@ -205,6 +208,30 @@ impl<T> FrameCache<T> {
                 last_used: self.clock,
             },
         );
+    }
+
+    /// A feedback effect's earlier surfaces: only the newest are worth keeping
+    /// (the next frame reads the previous one, a step back the one before), so
+    /// a playing feedback effect does not push every other entry out of the
+    /// cache with a full-resolution surface per frame.
+    fn trim_history(&mut self, comp: &PrimPath) {
+        const KEEP: usize = 1;
+        let mut older: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|(k, e)| e.history && k.comp == *comp)
+            .map(|(k, e)| (e.last_used, k.clone()))
+            .collect();
+        if older.len() <= KEEP {
+            return;
+        }
+        older.sort_unstable_by_key(|(used, _)| std::cmp::Reverse(*used));
+        for (_, key) in older.drain(KEEP..) {
+            if let Some(e) = self.entries.remove(&key) {
+                self.stats.bytes -= e.bytes;
+                self.stats.evicted += 1;
+            }
+        }
     }
 
     fn evict_to(&mut self, limit: u64) {
@@ -440,6 +467,23 @@ mod tests {
         }]));
         assert_eq!(n, 4);
         assert_eq!(cache.stats().entries, 0);
+    }
+
+    #[test]
+    fn a_feedback_effect_keeps_only_its_newest_surfaces() {
+        let mut cache = FrameCache::<u32>::new(1000);
+        let at = |flicks| FrameKey {
+            comp: p("/comps/main/layers/a/effects/blend"),
+            time: Time::from_flicks(flicks),
+            request: 0,
+        };
+        for t in 0..5 {
+            cache.insert_surface(at(t), t as u32, 10, Vec::new(), 0, true);
+        }
+        // The newest and the one before it: 2 of 5.
+        assert_eq!(cache.stats().entries, 2);
+        assert!(cache.contains(&at(4)) && cache.contains(&at(3)));
+        assert_eq!(cache.stats().bytes, 20);
     }
 
     #[test]

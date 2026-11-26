@@ -534,6 +534,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
         .chain([
             (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::FAST_PREVIEWS, "Fast Previews"),
             (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
             (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
             (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
@@ -577,6 +578,12 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
             let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
             (crate::viewer::display::SHOW_CHANNEL, params, *title)
         });
+    let fast = crate::viewer::display::FAST_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::FAST_PREVIEWS, params, *title)
+        });
     let views = crate::viewer::view3d::SHORTCUT_NAMES
         .iter()
         .map(|(slot, title)| {
@@ -601,6 +608,7 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         .chain(views)
         .chain(custom)
         .chain(channels)
+        .chain(fast)
         .map(|(id, params, title)| (id, params, title.to_owned()))
         .chain(crate::viewer::display::snapshot_names())
         .map(|(id, params, title)| {
@@ -769,6 +777,8 @@ pub struct PaintOptions {
     pub clone_offset: [f64; 2],
     /// Clone Stamp: source time shift in seconds.
     pub clone_time_shift: f64,
+    /// Clone Stamp, Lock Source Time: the source time in seconds.
+    pub clone_source_time: f64,
     /// Brush tip (Brushes panel): pixels, degrees, percents.
     pub diameter: f64,
     pub angle: f64,
@@ -850,6 +860,7 @@ impl Default for PaintOptions {
             lock_source_time: false,
             clone_offset: [0.0, 0.0],
             clone_time_shift: 0.0,
+            clone_source_time: 0.0,
             diameter: 21.0,
             angle: 0.0,
             roundness: 100.0,

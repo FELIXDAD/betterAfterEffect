@@ -233,6 +233,7 @@ impl Workspace {
             settings: bae_ui::settings::SettingsDialog::default()
                 .with_installed_ram(bae_platform::memory::total_bytes())
                 .with_host_buttons(&[
+                    "appearance.reset_coachmarks",
                     REVEAL_PREFERENCES,
                     MEMORY_DETAILS,
                     GPU_INFORMATION,
@@ -256,7 +257,15 @@ impl Workspace {
     /// Buttons of the Preferences window the shell runs ([`REVEAL_PREFERENCES`],
     /// `choose:<key>`).
     pub fn take_settings_requests(&mut self) -> Vec<String> {
-        self.settings.take_requests()
+        let mut requests = self.settings.take_requests();
+        requests.retain(|id| {
+            if id == "appearance.reset_coachmarks" {
+                self.workbench.reset_coachmarks();
+                return false;
+            }
+            true
+        });
+        requests
     }
 
     /// Answers a Choose Folder… button.
