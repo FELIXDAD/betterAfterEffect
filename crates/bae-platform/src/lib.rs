@@ -19,6 +19,7 @@ pub mod console;
 pub mod crash;
 pub mod dirs;
 pub mod logging;
+pub mod memory;
 pub mod settings;
 pub mod single_instance;
 mod time;

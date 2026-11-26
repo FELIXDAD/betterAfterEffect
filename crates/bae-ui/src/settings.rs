@@ -298,6 +298,7 @@ pub type Request = String;
 /// The Preferences window.
 #[derive(Default)]
 pub struct SettingsDialog {
+    installed_ram: Option<u64>,
     open: bool,
     page: usize,
     draft: Preferences,
@@ -328,6 +329,11 @@ impl SettingsDialog {
     /// is drawn disabled.
     pub fn with_host_buttons(mut self, ids: &[&str]) -> Self {
         self.host_buttons = ids.iter().map(|s| (*s).to_owned()).collect();
+        self
+    }
+
+    pub fn with_installed_ram(mut self, bytes: Option<u64>) -> Self {
+        self.installed_ram = bytes;
         self
     }
 
@@ -533,6 +539,11 @@ impl SettingsDialog {
             Item::Info(label, value) => {
                 ui.horizontal(|ui| {
                     if !label.is_empty() {
+                        let label = if *value == "<InstalledRAM - ReservedRAM> GB" {
+                            "RAM Available for BAE:"
+                        } else {
+                            label
+                        };
                         ui.label(tr(label));
                     }
                     if *label == "Sample Rate:" && self.page() == "audio" {
@@ -544,8 +555,26 @@ impl SettingsDialog {
                         ui.label(RichText::new(rate).color(color::TEXT_DIM));
                         return;
                     }
-                    // `<…>` values come from the machine (installed RAM, …).
-                    let shown = if value.contains('<') { "—" } else { value };
+                    let bytes = match *value {
+                        "<InstalledRAM> GB" => self.installed_ram,
+                        "<InstalledRAM - ReservedRAM> GB" => self.installed_ram.map(|n| {
+                            n.saturating_sub(
+                                (self.draft.int("memory_cpu.ram_reserved_for_other_apps_gb")
+                                    as u64)
+                                    << 30,
+                            )
+                        }),
+                        _ => None,
+                    };
+                    let formatted;
+                    let shown: &str = if let Some(n) = bytes {
+                        formatted = format!("{:.1} GB", n as f64 / (1_u64 << 30) as f64);
+                        &formatted
+                    } else if value.contains('<') {
+                        "—"
+                    } else {
+                        value
+                    };
                     if !shown.is_empty() {
                         ui.label(RichText::new(shown).color(color::TEXT_DIM));
                     }
