@@ -1175,7 +1175,7 @@ const WINDOW: &[Node] = &[
     s(it(524328, "Footage", "window.panel", r#"{"id":"footage","toggle":true}"#, E, Later)),
     s(it(524329, "Project", "window.panel", r#"{"id":"project","toggle":true}"#, B, Done)),
     SEP,
-    it(524331, "(script panel)", "motion.window.script_panel", "", B, Dynamic),
+    win(it(524331, "Create Nulls From Paths.jsx", "window.panel", r#"{"id":"create_nulls_from_paths","toggle":true}"#, B, Done)),
     it(524338, "(script panel)", "motion.window.script_panel", "", B, Dynamic),
 ];
 

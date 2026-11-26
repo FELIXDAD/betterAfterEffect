@@ -82,6 +82,7 @@ pub fn mac_keys() -> &'static [(&'static str, &'static str, &'static str)] {
 
 /// Menu titles that read the same in Chinese (AE keeps them in English).
 pub const SAME_IN_CHINESE: &[&str] = &[
+    "Create Nulls From Paths.jsx",
     "Adobe Dynamic Link",
     "Maxon Cinema 4D Exporter...",
     "Shift+F10",

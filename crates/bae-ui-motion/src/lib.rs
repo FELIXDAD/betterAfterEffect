@@ -46,6 +46,7 @@ mod media_browser;
 pub mod menus;
 mod paint_panels;
 mod panels;
+mod path_nulls;
 mod playback;
 mod prefs;
 mod presets;
@@ -99,6 +100,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     footage_panel::register,
     progress_metadata::register,
     paint_panels::register,
+    path_nulls::register,
     assist::register,
     // Chinese strings only.
     actions::register,

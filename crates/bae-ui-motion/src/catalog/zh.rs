@@ -69,6 +69,7 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Run Script File...", "运行脚本文件..."),
     ("Install Script File...", "安装脚本文件..."),
     ("Install ScriptUI Panel...", "安装 ScriptUI 面板..."),
+    ("Create Nulls From Paths.jsx", "Create Nulls From Paths.jsx"),
     ("Recent Script Files", "最近的脚本文件"),
     ("Create Proxy", "创建代理"),
     ("Still...", "静止图像..."),
