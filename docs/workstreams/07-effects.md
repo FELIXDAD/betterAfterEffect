@@ -60,6 +60,7 @@
 - 应用界面（G，#271）：效果菜单按 AE 目录列出 299 个效果（可用 / 置灰实时读效果注册表）、效果控件按参数定义画控件、效果和预设面板（搜索、分类、双击 / 拖放应用）、时间轴 fx 开关列。下拉中文选项走 `EffectInfo.param_options_zh`（包的 `choices` 表；Rust 效果的 `options_zh` 查表在 `rust_options_zh()` 接入）。
 
 - [模糊和锐化](../../crates/bae-effects/tests/ae/categories/blur-sharpen.md#工作流进度)
+  - 摄像机镜头模糊预先计算颜色和散焦半径。大半径镜头模糊和保边模糊在半分辨率运行，通道模糊将四通道的横向、纵向高斯卷积各合为一次。
   - 镜头模糊支持深度图、光圈及高光。双向和智能模糊共用保边滤波，通道模糊复用高斯，两个 CC 径向效果与十字模糊复用现有径向和定向内核。CC Vector Blur 可使用图层生成方向场。
 - [通道](../../crates/bae-effects/tests/ae/categories/channel.md#工作流进度)
 - [颜色校正](../../crates/bae-effects/tests/ae/categories/color.md#工作流进度)
