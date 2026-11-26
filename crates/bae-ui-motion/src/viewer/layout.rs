@@ -128,6 +128,16 @@ impl CompositionViewer {
             }
             let outer = render::Affine::new(bae_anim::glam::DMat4::IDENTITY);
             for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+                if self.prefs.show_precomp_bounds {
+                    super::overlay::precomp_bounds(
+                        &painter,
+                        l,
+                        &view,
+                        &outer,
+                        false,
+                        theme::label_color(8),
+                    );
+                }
                 if let Some(q) = render::bounds_quad(l, &view, &outer) {
                     painter.add(Shape::closed_line(
                         q.to_vec(),

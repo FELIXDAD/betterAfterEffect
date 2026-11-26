@@ -194,6 +194,7 @@ pub struct Workspace {
     /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
     prefs: Arc<bae_prefs::PrefsStore>,
     settings: bae_ui::settings::SettingsDialog,
+    audio_page_visible: bool,
 }
 
 impl Workspace {
@@ -202,8 +203,15 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        bae_ui_motion::tools::configure_camera_keys(app, &prefs);
         if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
             let apply = move |p: &bae_prefs::Preferences| {
+                session.configure_output(
+                    p.str("audio.audio_default_output"),
+                    p.str("audio.audio_latency_ms")
+                        .parse()
+                        .expect("validated latency"),
+                );
                 session.lock().set_audio_mapping(
                     p.str("audio.audio_map_left") == "channel_2",
                     p.str("audio.audio_map_right") == "channel_1",
@@ -222,6 +230,7 @@ impl Workspace {
             workbench,
             fullscreen_before_preview: None,
             show_about: false,
+            audio_page_visible: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
                 .with_installed_ram(bae_platform::memory::total_bytes())
@@ -345,11 +354,26 @@ impl Workspace {
         }
         let mut fullscreen = false;
         if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
+            let audio_page = self.settings.is_open() && self.settings.page() == "audio";
+            if audio_page && !self.audio_page_visible {
+                session.refresh_output_devices();
+            }
+            self.audio_page_visible = audio_page;
             let mut s = session.lock();
             s.sync_playback(doc.stage());
             s.tick(std::time::Instant::now());
-            if self.settings.is_open() && self.settings.page() == "audio" {
-                self.settings.set_audio_output(s.audio_output_info());
+            if audio_page {
+                let devices = s.output_devices();
+                self.settings.set_audio_output(
+                    s.audio_output_info(),
+                    s.audio_buffer_ms(),
+                    &devices.default_name,
+                    devices.outputs.clone(),
+                );
+                if s.audio_device_pending() {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(50));
+                }
             }
             if s.fullscreen_preview()
                 && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
@@ -554,7 +578,8 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
         ui.separator();
     }
     if !status.gpu.is_empty() {
-        ui.label(small(status.gpu.clone()));
+        let adapter = ui.label(small(status.gpu.clone()));
+        bae_ui::a11y::value_source(&adapter, bae_ui::a11y::GPU_STATUS);
         ui.separator();
     }
     ui.label(small(

@@ -80,6 +80,7 @@ fn validate(p: &Pref, v: &Value) -> Option<Value> {
         Kind::Color => Value::from(parse_color(v.as_str()?).map(format_color)?),
         Kind::Timecode => Value::from(parse_timecode(v.as_str()?).map(|_| v.as_str())??),
         Kind::Text | Kind::Path => Value::from(v.as_str()?),
+        Kind::AudioOutput => Value::from(v.as_str().filter(|id| !id.is_empty())?),
     })
 }
 
