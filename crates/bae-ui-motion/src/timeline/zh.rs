@@ -2,6 +2,9 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Close Other Timeline Panels", "关闭其他时间轴面板"),
+    ("Close Timeline Panels to the Left", "关闭左侧的时间轴面板"),
+    ("Close Timeline Panels to the Right", "关闭右侧的时间轴面板"),
     // Accessibility labels (timeline switches, keyframes, pick whip, ruler)
     ("Parent Pick Whip", "父级关联器"),
     ("Keyframe", "关键帧"),
@@ -252,6 +255,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Go to Previous Keyframe", "转到上一个关键帧"),
     ("Waveform", "波形"),
     ("Audio Levels", "音频电平"),
+    ("Time Remap", "时间重映射"),
     ("Reveal Audio Levels", "显示音频电平"),
     (
         "Add Audio Levels to Revealed Properties",

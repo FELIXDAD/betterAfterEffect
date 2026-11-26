@@ -69,7 +69,7 @@ fn point_and_paragraph_text_in_one_step() {
     assert_eq!(query::display_name_of(&fx.stage, &layer), "Hello");
     let d = fx.doc(&layer);
     assert_eq!(d.text, "Hello\nWorld");
-    assert_eq!(d.font_size, bae_motion::text::DEFAULT_SIZE);
+    assert_eq!(d.style.font_size, bae_motion::text::DEFAULT_SIZE);
     assert_eq!(d.box_size, None);
     assert_eq!(
         fx.v3(&layer, "transform:position"),
@@ -99,8 +99,8 @@ fn point_and_paragraph_text_in_one_step() {
         fx.v3(&layer, "transform:position"),
         Some(Value::Vec3([150.0, 100.0, 0.0]))
     );
-    assert_eq!(d.font_size, 24.0);
-    assert_eq!(d.fill_color, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(d.style.font_size, 24.0);
+    assert_eq!(d.style.fill_color, [1.0, 0.0, 0.0, 1.0]);
     // Empty text makes an empty text layer (AE keeps those).
     let out = fx.run(
         "text.create",
@@ -125,7 +125,7 @@ fn set_text_keeps_the_style_and_keys_animated_text() {
     let out = fx.run("text.set_text", json!({"layer": layer, "text": "Two"}));
     assert_eq!(out["changed"], true);
     let d = fx.doc(&layer);
-    assert_eq!((d.text.as_str(), d.font_size), ("Two", 30.0));
+    assert_eq!((d.text.as_str(), d.style.font_size), ("Two", 30.0));
     // Unchanged text is a no-op.
     assert_eq!(
         fx.run("text.set_text", json!({"layer": layer, "text": "Two"}))["changed"],

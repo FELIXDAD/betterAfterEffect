@@ -326,7 +326,7 @@ impl bae_model::Command for RemoveEffects {
 }
 
 /// Deletes `paths` in every sublayer that has a spec for them.
-fn delete_all(tx: &mut Transaction<'_>, paths: &[PrimPath]) -> Result<(), CommandError> {
+pub(crate) fn delete_all(tx: &mut Transaction<'_>, paths: &[PrimPath]) -> Result<(), CommandError> {
     for path in paths {
         let stack: Vec<_> = tx.stage().layer_stack().to_vec();
         for id in stack {

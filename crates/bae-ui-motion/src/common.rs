@@ -140,6 +140,7 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
         "audio:levels" => "Audio Levels",
+        "time_remap" => "Time Remap",
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
         "transform:position_x" => "X Position",
@@ -487,7 +488,7 @@ pub(crate) fn value_editor(
                 ui.data_mut(|d| d.remove::<String>(key));
                 if text != doc.text {
                     let mut d = (**doc).clone();
-                    d.text = text;
+                    d.set_text(&text);
                     out = Edit::Commit(Value::TextDocument(Box::new(d)));
                 }
             }

@@ -155,20 +155,7 @@ fn header(
                 json!({"effects": [moved.0], "index": index}),
             );
         }
-        title.context_menu(|ui| {
-            if ui.button(tr("Reset")).clicked() {
-                reset(cx, effect, now);
-                ui.close();
-            }
-            if ui.button(tr("Duplicate")).clicked() {
-                cx.invoke_with("effect.duplicate", json!({"effects": [effect]}));
-                ui.close();
-            }
-            if ui.button(tr("Remove Effect")).clicked() {
-                cx.invoke_with("effect.remove", json!({"effects": [effect]}));
-                ui.close();
-            }
-        });
+        title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let about = ui.add(egui::Label::new(tr("About...")).sense(Sense::click()));
             egui::Popup::menu(&about).show(|ui| {
@@ -225,6 +212,13 @@ fn params(
     def: &EffectDef,
     now: Time,
 ) {
+    if def.match_name == "ADBE Deflicker" && ui.button(tr("Set Frame")).clicked() {
+        let local = query::to_key_time(cx.stage, effect, now);
+        cx.invoke_with(
+            "attr.set_at",
+            json!({"path":effect,"attr":param_attr(9001),"time":local,"value":Value::Time(local)}),
+        );
+    }
     let mut depth = 1usize;
     // Depth at which a closed group hides its contents.
     let mut hidden_from: Option<usize> = None;
@@ -778,4 +772,20 @@ fn hot_number(
         return Num::Commit(v);
     }
     Num::None
+}
+
+/// Context actions shared by the effect header and the flowchart effect icon.
+pub(crate) fn effect_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, effect: &PrimPath, now: Time) {
+    if ui.button(tr("Reset")).clicked() {
+        reset(cx, effect, now);
+        ui.close();
+    }
+    if ui.button(tr("Duplicate")).clicked() {
+        cx.invoke_with("effect.duplicate", json!({"effects": [effect]}));
+        ui.close();
+    }
+    if ui.button(tr("Remove Effect")).clicked() {
+        cx.invoke_with("effect.remove", json!({"effects": [effect]}));
+        ui.close();
+    }
 }

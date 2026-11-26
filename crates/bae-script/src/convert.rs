@@ -28,13 +28,13 @@ pub fn to_js(v: &Value) -> Json {
         }),
         Value::TextDocument(d) => json!({
             "text": d.text,
-            "font": d.font,
-            "fontSize": d.font_size,
-            "fillColor": &d.fill_color[..3],
-            "strokeColor": d.stroke_color.map(|c| [c[0], c[1], c[2]]),
-            "strokeWidth": d.stroke_width,
+            "font": d.style.font,
+            "fontSize": d.style.font_size,
+            "fillColor": &d.style.fill_color[..3],
+            "strokeColor": d.style.stroke_color.map(|c| [c[0], c[1], c[2]]),
+            "strokeWidth": d.style.stroke_width,
             "applyFill": true,
-            "applyStroke": d.stroke_color.is_some(),
+            "applyStroke": d.style.stroke_color.is_some(),
         }),
         Value::Bytes(_) => Json::Null,
     }
@@ -117,29 +117,34 @@ pub fn from_js(template: Option<&Value>, js: &Json) -> Result<Value, String> {
         Some(Value::TextDocument(doc)) => {
             let mut doc = doc.clone();
             match js {
-                Json::String(s) => doc.text = s.clone(),
+                Json::String(s) => doc.set_text(s),
                 Json::Object(o) => {
                     if let Some(t) = o.get("text").and_then(Json::as_str) {
-                        doc.text = t.to_owned();
+                        doc.set_text(t);
                     }
-                    if let Some(f) = o.get("font").and_then(Json::as_str) {
-                        doc.font = f.to_owned();
-                    }
-                    if let Some(s) = o.get("fontSize").and_then(Json::as_f64) {
-                        doc.font_size = s;
-                    }
-                    if let Some([r, g, b, ..]) = o.get("fillColor").and_then(numbers).as_deref() {
-                        doc.fill_color = [*r, *g, *b, doc.fill_color[3]];
-                    }
-                    if let Some([r, g, b, ..]) = o.get("strokeColor").and_then(numbers).as_deref() {
-                        doc.stroke_color = Some([*r, *g, *b, 1.0]);
-                    }
-                    if let Some(w) = o.get("strokeWidth").and_then(Json::as_f64) {
-                        doc.stroke_width = w;
-                    }
-                    if o.get("applyStroke") == Some(&Json::Bool(false)) {
-                        doc.stroke_color = None;
-                    }
+                    doc.edit_styles(0..usize::MAX, |style| {
+                        if let Some(f) = o.get("font").and_then(Json::as_str) {
+                            style.font = f.to_owned();
+                        }
+                        if let Some(s) = o.get("fontSize").and_then(Json::as_f64) {
+                            style.font_size = s;
+                        }
+                        if let Some([r, g, b, ..]) = o.get("fillColor").and_then(numbers).as_deref()
+                        {
+                            style.fill_color = [*r, *g, *b, style.fill_color[3]];
+                        }
+                        if let Some([r, g, b, ..]) =
+                            o.get("strokeColor").and_then(numbers).as_deref()
+                        {
+                            style.stroke_color = Some([*r, *g, *b, 1.0]);
+                        }
+                        if let Some(w) = o.get("strokeWidth").and_then(Json::as_f64) {
+                            style.stroke_width = w;
+                        }
+                        if o.get("applyStroke") == Some(&Json::Bool(false)) {
+                            style.stroke_color = None;
+                        }
+                    });
                 }
                 _ => return Err(expected("a string or a TextDocument", js)),
             }

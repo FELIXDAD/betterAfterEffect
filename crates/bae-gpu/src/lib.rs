@@ -23,6 +23,7 @@
 //! `wgpu` is re-exported so dependants use exactly the pinned version.
 
 pub mod caps;
+pub mod channels;
 mod context;
 mod module;
 pub mod native;
