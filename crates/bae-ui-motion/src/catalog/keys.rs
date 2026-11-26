@@ -467,7 +467,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "ImportFootage", "Ctrl+I", "motion.file.import_file", "", E, Done, 0),
     k("CSwitchboard", "ImportMultiple", "Ctrl+Alt+I", "motion.file.import_multiple_files", "", E, Done, 0),
     k("CSwitchboard", "IncrementAndSave", "Ctrl+Alt+Shift+S", "file.increment_and_save", "", B, Done, 0),
-    k("CSwitchboard", "InterpretFootage", "Ctrl+Alt+G", "motion.file.interpret_footage_main", "", E, Todo, 0),
+    k("CSwitchboard", "InterpretFootage", "Ctrl+Alt+G", "motion.file.interpret_footage_main", "", E, Done, 0),
     k("CSwitchboard", "KeyframeInterpDialog", "Ctrl+Alt+K", "motion.anim.keyframe_interpolation", "", C, Done, 0),
     k("CSwitchboard", "KeyframeVelocityDialog", "Ctrl+Shift+K", "motion.anim.keyframe_velocity", "", C, Done, 0),
     k("CSwitchboard", "LastEffect", "Ctrl+Alt+Shift+E", "motion.effect.last_effect", "", B, Done, 0),

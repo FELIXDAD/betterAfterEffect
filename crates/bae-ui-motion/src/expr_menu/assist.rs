@@ -309,7 +309,7 @@ pub(crate) fn show(
                     m.set_focus_lock_filter(
                         id,
                         egui::EventFilter {
-                            tab: !hits.is_empty(),
+                            tab: rows.is_some() || !hits.is_empty(),
                             escape: true,
                             horizontal_arrows: true,
                             vertical_arrows: true,
