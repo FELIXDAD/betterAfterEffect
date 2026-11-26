@@ -196,6 +196,66 @@ fn pointer(events: &mut Vec<Event>, pos: Pos2, pressed: Option<bool>) {
 }
 
 #[test]
+fn preview_observes_edits_without_a_shell_history_log() {
+    let mut h = Harness::new();
+    let mut changes = crate::common::StageChanges::default();
+    assert!(changes.sync(&h.stage, |_| panic!("new evaluator already has no plans")));
+    assert!(!changes.sync(&h.stage, |_| panic!("steady frame invalidated")));
+    let comp = h.run("comp.create", json!({"name": "Main"}));
+    let mut edits = Vec::new();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    h.stage.undo(&h.author).unwrap();
+    h.stage.redo(&h.author).unwrap();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    assert_eq!(
+        edits,
+        [
+            bae_model::EventOrigin::Local,
+            bae_model::EventOrigin::Undo,
+            bae_model::EventOrigin::Redo
+        ]
+    );
+    // An inactive panel can miss the entire retained history.
+    for i in 0..65 {
+        h.run(
+            "attr.set",
+            json!({"path":comp["path"],"attr":"name","value":Value::String(i.to_string())}),
+        );
+    }
+    let mut missed = false;
+    changes.sync(&h.stage, |event| missed = event.is_none());
+    assert!(missed);
+    let mut reset = false;
+    changes.sync(&Stage::new(), |event| reset = event.is_none());
+    assert!(reset);
+}
+
+#[test]
+fn preview_follows_a_solid_color_change() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    let mut cache = crate::common::EvalCache::default();
+    let color = |h: &Harness, cache: &mut crate::common::EvalCache| {
+        let ec = cache
+            .get(&h.stage)
+            .evaluate_comp(&h.stage, &comp, Time::ZERO)
+            .unwrap();
+        let layer = ec.layers.iter().find(|l| l.path == solid).unwrap();
+        match &layer.source {
+            bae_anim::LayerSource::Asset { info, .. } => info.solid_color,
+            _ => None,
+        }
+    };
+    assert_eq!(color(&h, &mut cache), Some([1.0, 0.0, 0.0, 1.0]));
+    // Solid Settings writes only the solid item, not the layer or comp.
+    h.run(
+        "solid.set_settings",
+        json!({"target": solid, "color": [0.0, 0.0, 1.0, 1.0]}),
+    );
+    assert_eq!(color(&h, &mut cache), Some([0.0, 0.0, 1.0, 1.0]));
+}
+
+#[test]
 fn module_registers_panels_shortcuts_and_commands() {
     let mut b = AppBuilder::new();
     b.add_module(bae_ui::UiModule)
