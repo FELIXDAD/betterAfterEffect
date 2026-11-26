@@ -57,6 +57,7 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const INTERPRET_FOOTAGE: &str = "motion.file.interpret_footage_main";
     pub const MANAGE_EFFECTS: &str = "motion.effect.manage_effects";
     pub const BROWSE_PRESETS: &str = "motion.anim.browse_presets";
     pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
@@ -274,6 +275,7 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::INTERPRET_FOOTAGE, "Interpret Footage: Main..."),
     (ids::MANAGE_EFFECTS, "Manage Effects..."),
     (ids::BROWSE_PRESETS, "Browse Presets..."),
     (ids::SAVE_PRESET, "Save Animation Preset..."),
@@ -1323,6 +1325,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::import::import_multiple(cx, session);
             return true;
         }
+        ids::INTERPRET_FOOTAGE => {
+            crate::dialogs::interpret_footage(cx, session);
+            return true;
+        }
         ids::MANAGE_EFFECTS => {
             crate::effects::manager::open(cx);
             return true;
@@ -1547,19 +1553,19 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::TRIM_COMP => {
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
-        ids::ADD_TO_RENDER_QUEUE => {
-            crate::render_queue::shared(cx.resources)
-                .lock()
-                .add(&info, &crate::render_queue::default_output_dir());
-            cx.open_panel("render_queue");
-        }
-        ids::SAVE_FRAME_AS => {
-            let frame = info.frame_rate.time_to_frame(now);
-            crate::render_queue::shared(cx.resources).lock().add_frame(
-                &info,
-                &crate::render_queue::default_output_dir(),
-                frame,
+        ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
+            let queue = crate::render_queue::shared(cx.resources);
+            let dir = crate::render_queue::default_output_dir();
+            let mut queue = queue.lock();
+            if id == ids::SAVE_FRAME_AS {
+                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
+            } else {
+                queue.add(&info, &dir);
+            }
+            queue.assign_output(
+                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
             );
+            drop(queue);
             cx.open_panel("render_queue");
         }
         ids::SELECT_NEXT_LAYER | ids::SELECT_PREV_LAYER => {
@@ -2606,6 +2612,7 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Interpret Footage: Main...", "解释素材：主要..."),
     ("Manage Effects...", "管理效果..."),
     ("Browse Presets...", "浏览预设..."),
     ("Save Animation Preset...", "保存动画预设..."),
