@@ -69,6 +69,7 @@
 //! (id = command id), from which the application builds its command registry.
 
 pub mod camera;
+pub mod cleanup;
 pub mod comp;
 pub mod comp_from_items;
 pub mod content;
@@ -154,6 +155,9 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
         r.register(CropComp),
+        r.register(cleanup::RemoveUnusedFootage),
+        r.register(cleanup::ConsolidateFootage),
+        r.register(cleanup::ReduceProject),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),

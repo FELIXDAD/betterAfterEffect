@@ -78,9 +78,9 @@
 | Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ✅ |
 | New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ✅ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
-| Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ⏸ |
-| Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ⏸ |
-| Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ⏸ |
+| Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ✅ |
+| Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ✅ |
+| Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ✅ |
 | Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ⏸ |
 | Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ⏸ |
 | Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ⏸ |

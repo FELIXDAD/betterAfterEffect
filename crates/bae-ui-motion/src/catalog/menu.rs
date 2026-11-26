@@ -244,9 +244,9 @@ const FILE: &[Node] = &[
         &[
             it(22806529, "Collect Files...", "motion.file.collect_files", "", B, Later),
             SEP,
-            it(22806531, "Consolidate All Footage", "motion.file.consolidate_all_footage", "", B, Later),
-            it(22806532, "Remove Unused Footage", "motion.file.remove_unused_footage", "", B, Later),
-            it(22806533, "Reduce Project", "motion.file.reduce_project", "", B, Later),
+            it(22806531, "Consolidate All Footage", "motion.file.consolidate_all_footage", "", B, Done),
+            it(22806532, "Remove Unused Footage", "motion.file.remove_unused_footage", "", B, Done),
+            it(22806533, "Reduce Project", "motion.file.reduce_project", "", B, Done),
             SEP,
             it(22806535, "Find Missing Effects", "motion.file.find_missing_effects", "", E, Later),
             it(22806536, "Find Missing Fonts", "motion.file.find_missing_fonts", "", E, Later),
