@@ -926,7 +926,7 @@ fn transform_edits(
 /// Handle a motion action. Returns `false` for ids it does not know.
 /// File ▸ New ▸ New Folder: an “Untitled N” folder in the folder selected in
 /// the Project panel, else at the top level (AE).
-fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
+pub(crate) fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
     use crate::project::{ItemKind, item_kind};
     let parent = session
         .lock()
@@ -941,7 +941,8 @@ fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
         parent.as_ref().unwrap_or(&root),
         "Untitled",
     );
-    let mut params = json!({ "name": name });
+    let prefs = crate::prefs::current(cx.resources);
+    let mut params = json!({ "name": name, "label": prefs.int("labels.label_default_folder") });
     if let Some(folder) = &parent {
         params["parent"] = json!(folder);
     }
