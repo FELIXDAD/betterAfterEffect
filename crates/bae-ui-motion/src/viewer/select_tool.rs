@@ -284,7 +284,9 @@ pub(super) fn frame(
         && let Some(pos) = hover
     {
         // AE: double-clicking a text layer edits its text (Type tool); a shape
-        // layer, its path under the pointer (or its first) in Free Transform.
+        // layer, its path under the pointer (or its first) in Free Transform;
+        // a pre-comp opens its composition; any other layer opens in the
+        // Layer panel.
         let under: Vec<PrimPath> = layers_at(stage, comp, view, pos).collect();
         if let Some(layer) = under
             .iter()
@@ -314,7 +316,8 @@ pub(super) fn frame(
                         state.path_drag = None;
                     }
                 }
-                _ => {}
+                Some(_) => crate::layer_panel::open(cx, session, layer),
+                None => {}
             }
         }
     }
