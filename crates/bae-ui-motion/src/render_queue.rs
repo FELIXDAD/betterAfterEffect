@@ -89,8 +89,8 @@ const OM_TEMPLATES: [(&str, Option<OmSettings>); 12] = [
             DEFAULT_BIT_RATE_MBPS,
         )),
     ),
-    ("Lossless", None),
-    ("Lossless with Alpha", None),
+    ("Lossless", Some((ExportFormat::Png, Channels::Rgb, DEFAULT_BIT_RATE_MBPS))),
+    ("Lossless with Alpha", Some((ExportFormat::Png, Channels::RgbAlpha, DEFAULT_BIT_RATE_MBPS))),
     ("Multi-Machine Sequence", None),
     ("Photoshop", None),
     (
@@ -212,6 +212,43 @@ pub fn has_bit_rate(format: ExportFormat) -> bool {
     )
 }
 
+/// The resolution selected in Render Settings or a render template.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum QueueResolution {
+    Current,
+    #[default]
+    Full,
+    Half,
+    Third,
+    Quarter,
+}
+
+impl QueueResolution {
+    pub(crate) const ALL: [Self; 5] =
+        [Self::Current, Self::Full, Self::Half, Self::Third, Self::Quarter];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Current => "Current Settings",
+            Self::Full => "Full",
+            Self::Half => "Half",
+            Self::Third => "Third",
+            Self::Quarter => "Quarter",
+        }
+    }
+
+    pub(crate) fn resolve(self, current: u32) -> bae_render::Resolution {
+        use bae_render::Resolution;
+        match self {
+            Self::Current => Resolution::Custom(current),
+            Self::Full => Resolution::Full,
+            Self::Half => Resolution::Half,
+            Self::Third => Resolution::Third,
+            Self::Quarter => Resolution::Quarter,
+        }
+    }
+}
+
 /// State of a queued item.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ItemStatus {
@@ -271,6 +308,8 @@ pub struct QueueItem {
     pub start: i64,
     /// Last frame (inclusive).
     pub end: i64,
+    /// The rendered size, independent of the output module.
+    pub(crate) resolution: QueueResolution,
     /// Current state.
     pub status: ItemStatus,
     /// The Render column's check box: unchecked items stay in the queue but
@@ -424,6 +463,7 @@ impl RenderQueue {
             pcm_audio: true,
             start,
             end,
+            resolution: QueueResolution::Full,
             status: ItemStatus::Queued,
             render: true,
             comment: String::new(),
@@ -566,6 +606,7 @@ impl RenderQueue {
             render_threads: self.render_threads,
             start: item.start,
             end: item.end,
+            resolution: item.resolution,
             cancel: item.cancel.clone(),
         })
     }
@@ -652,6 +693,7 @@ pub(crate) struct Job {
     render_threads: Option<usize>,
     start: i64,
     end: i64,
+    resolution: QueueResolution,
     cancel: Arc<AtomicBool>,
 }
 
@@ -762,6 +804,7 @@ pub(crate) fn render_job(
     });
     let mut settings = export_settings(job, output);
     let request = RenderRequest {
+        resolution: job.resolution.resolve(crate::viewer::comp_resolution(stage, &job.comp)),
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
     };
@@ -2276,6 +2319,7 @@ mod tests {
             channels,
             bit_rate_mbps: 12.5,
             pcm_audio: true,
+            resolution: QueueResolution::Full,
             start: 0,
             end: 0,
             sequence_files_per_folder: None,

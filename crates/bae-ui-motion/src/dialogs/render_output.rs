@@ -10,10 +10,10 @@ use bae_model::{PrimPath, Stage};
 use bae_motion::query::{self, CompInfo};
 use bae_render::ExportFormat;
 use bae_ui::dialog::{self, Outcome};
-use bae_ui::{PanelContext, tr};
+use bae_ui::{Accessible as _, PanelContext, tr};
 use egui::{Id, Ui};
 
-use crate::render_queue::{self, Channels, FORMATS, SharedRenderQueue};
+use crate::render_queue::{self, Channels, FORMATS, QueueResolution, SharedRenderQueue};
 
 /// Render Settings ▸ Time Span.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +42,7 @@ pub struct RenderSettings {
     comp: PrimPath,
     title: String,
     span: Span,
+    resolution: QueueResolution,
     start: f64,
     end: f64,
 }
@@ -64,6 +65,7 @@ impl RenderSettings {
             item,
             comp: it.comp.clone(),
             title: it.comp_name.clone(),
+            resolution: it.resolution,
             span,
             start: it.start as f64,
             end: it.end as f64,
@@ -75,8 +77,9 @@ impl RenderSettings {
             return false;
         };
         let id = Id::new("bae-ui-motion.render-settings");
+        let comp_factor = crate::viewer::comp_resolution(cx.stage, &self.comp);
         let shown = dialog::window(ctx, id, tr("Render Settings"), |ui| {
-            self.body(ui, id, &info)
+            self.body(ui, id, &info, comp_factor)
         });
         match shown {
             Some(Outcome::Ok) => {
@@ -85,6 +88,7 @@ impl RenderSettings {
                 if let Some(it) = queue.lock().item_mut(self.item) {
                     it.start = start;
                     it.end = end;
+                    it.resolution = self.resolution;
                 }
                 false
             }
@@ -107,14 +111,24 @@ impl RenderSettings {
         }
     }
 
-    fn body(&mut self, ui: &mut Ui, id: Id, info: &CompInfo) -> Outcome {
+    fn body(&mut self, ui: &mut Ui, id: Id, info: &CompInfo, comp_factor: u32) -> Outcome {
         ui.set_width(520.0);
         ui.label(egui::RichText::new(format!("{} “{}”", tr("Composition"), self.title)).strong());
         ui.indent(id.with("comp"), |ui| {
             fixed(ui, "Quality:", "Best");
-            fixed(ui, "Resolution:", "Full");
+            dialog::row(ui, LW, tr("Resolution:"), |ui| {
+                let names = QueueResolution::ALL.map(|r| tr(r.label()));
+                let mut selected = self.resolution as usize;
+                if bae_ui::widgets::dropdown(ui, "rq-resolution", &mut selected, &names, 170.0)
+                    .labeled_value(egui::WidgetType::ComboBox, tr("Resolution:"), names[selected])
+                    .changed()
+                {
+                    self.resolution = QueueResolution::ALL[selected];
+                }
+            });
+            let [w, h] = self.resolution.resolve(comp_factor).scaled_size(info.width, info.height);
             dialog::row(ui, LW, "", |ui| {
-                ui.label(format!("{} {} × {}", tr("Size:"), info.width, info.height));
+                ui.label(format!("{} {w} × {h}", tr("Size:")));
             });
             fixed(ui, "Disk Cache:", "Read Only");
             fixed(ui, "Proxy Use:", "Use No Proxies");
@@ -354,6 +368,9 @@ impl OutputModule {
                     self.pcm_audio = i == 0;
                 }
             });
+        } else if self.format.is_image() {
+            fixed(ui, "Audio Output", "Off");
+            ui.label(tr("Image sequences do not contain audio."));
         } else {
             fixed(ui, "Audio Output", "Audio Output Auto");
         }
