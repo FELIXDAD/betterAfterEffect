@@ -41,13 +41,17 @@ mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
+mod live_preview;
+mod masks;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
 mod panels;
+mod path_nulls;
 mod playback;
 mod prefs;
 mod presets;
+pub use presets::register_preset_index;
 mod preview_snapshot;
 pub mod progress_metadata;
 mod project;
@@ -74,7 +78,7 @@ pub use render_queue::{RenderQueuePanel, SharedRenderQueue};
 pub use session::{Session, SharedSession};
 pub use timeline::TimelinePanel;
 pub use tools::{SharedTools, Tool};
-pub use viewer::CompositionViewer;
+pub use viewer::{CompositionViewer, request_smart_zoom};
 
 /// What each module registers itself: its Chinese strings (`ZH`) and panels.
 /// A new module adds its `register` here, nothing else (new panels at the end
@@ -98,6 +102,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     footage_panel::register,
     progress_metadata::register,
     paint_panels::register,
+    path_nulls::register,
     assist::register,
     // Chinese strings only.
     actions::register,
