@@ -75,44 +75,40 @@ pub(super) fn render(
     let bottom = map(2, true);
     let surface = map(10, false);
     let sky = map(70, false);
-    let mut lighting;
-    let scene_params;
-    let params = if v.popup(38) == 3
-        && let Some(scene) = v.p.scene
-        && let Some(light) = scene.layer_light
-    {
-        lighting = v.p.effect.clone();
-        lighting
-            .params
-            .retain(|(id, _)| !matches!(id, 30 | 32 | 34 | 36 | 38));
-        let local = scene
-            .placement
-            .inverse()
-            .transform_point2(light.position().truncate());
-        let width = f64::from(v.p.layer_bounds.width().max(1));
-        let [r, g, b] = light.color.map(f64::from);
-        use bae_model::Value;
-        lighting.params.extend([
-            (30, Value::Float(f64::from(light.intensity) * 0.01)),
-            (32, Value::Color([r, g, b, 1.])),
-            (34, Value::Vec2(local.to_array())),
-            (36, Value::Float(light.position().z.abs() / width)),
-            (38, Value::Int(1)),
-        ]);
-        scene_params = bae_render::EffectParams {
-            effect: &lighting,
-            ..*v.p
-        };
-        Params::new(v.def, &scene_params)
-    } else {
-        v
-    };
-    CAUSTICS.dispatch(
+    // Use Comp Light: the light's values replace the manual light slots in
+    // the uniforms (no copy of the effect instance every frame).
+    let light = (v.popup(38) == 3)
+        .then_some(v.p.scene)
+        .flatten()
+        .and_then(|scene| Some((scene, scene.layer_light?)));
+    let scale = v.p.scale;
+    let width = f64::from(v.p.layer_bounds.width().max(1));
+    CAUSTICS.dispatch_at(
+        "main",
         target,
-        params,
+        v,
         roi,
         input,
         [bottom.as_ref(), surface.as_ref(), sky.as_ref()],
         [0, 0],
+        |u, header| {
+            let Some((scene, light)) = light else {
+                return;
+            };
+            let local = scene
+                .placement
+                .inverse()
+                .transform_point2(light.position().truncate());
+            let at = |id: usize| header + id * 16;
+            let [r, g, b] = light.color;
+            u.f32(at(30), light.intensity * 0.01)
+                .f32s(at(32), &[r, g, b, 1.])
+                .f32s(
+                    at(34),
+                    &[(local.x * scale) as f32, (local.y * scale) as f32],
+                )
+                .f32(at(36), (light.position().z.abs() / width) as f32)
+                .f32(at(38), 1.);
+        },
     )
 }
