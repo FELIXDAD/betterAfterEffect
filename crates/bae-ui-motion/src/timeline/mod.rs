@@ -243,6 +243,10 @@ pub struct TimelinePanel {
     /// Where the last frame drew the layer bars, for tests.
     #[cfg(test)]
     pub(crate) last_bars: Vec<(PrimPath, Rect)>,
+    /// The bottom-left pane buttons (Layer Switches, Transfer Controls,
+    /// In/Out/Duration/Stretch, Render Time), for tests.
+    #[cfg(test)]
+    pub(crate) last_panes: [Option<Rect>; 4],
     /// Group rows: id, twirl arrow, name.
     #[cfg(test)]
     pub(crate) last_groups: Vec<(String, Pos2, Pos2)>,
