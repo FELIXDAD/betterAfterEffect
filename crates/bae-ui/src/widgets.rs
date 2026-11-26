@@ -17,6 +17,9 @@ use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::{self, color};
 
+/// Reads typed text as a value ([`HotNumber::text`]).
+type ParseText<'a> = &'a dyn Fn(&str) -> Option<f64>;
+
 /// Hot text: a blue number that changes when dragged and turns into a text
 /// field when clicked, like AE's property values.
 pub struct HotNumber<'a> {
@@ -30,6 +33,9 @@ pub struct HotNumber<'a> {
     /// Accessibility name (the property, e.g. "Position X").
     label: &'a str,
     tint: Color32,
+    /// Custom text for a value (a timecode …) and the parser of typed text.
+    display: Option<&'a dyn Fn(f64) -> String>,
+    parse: Option<ParseText<'a>>,
 }
 
 impl<'a> HotNumber<'a> {
@@ -44,7 +50,21 @@ impl<'a> HotNumber<'a> {
             font: theme::body(),
             label: "",
             tint: color::ACCENT,
+            display: None,
+            parse: None,
         }
+    }
+
+    /// Show values as `display` gives them (a timecode for a time) and read
+    /// typed text with `parse` instead of as a number.
+    pub fn text(
+        mut self,
+        display: &'a dyn Fn(f64) -> String,
+        parse: &'a dyn Fn(&str) -> Option<f64>,
+    ) -> Self {
+        self.display = Some(display);
+        self.parse = Some(parse);
+        self
     }
 
     /// Color of the number (AE: blue; red when an expression drives it).
@@ -93,7 +113,10 @@ impl<'a> HotNumber<'a> {
     }
 
     fn format(&self, v: f64) -> String {
-        format!("{:.*}", self.decimals, v)
+        match self.display {
+            Some(f) => f(v),
+            None => format!("{:.*}", self.decimals, v),
+        }
     }
 }
 
@@ -278,7 +301,7 @@ impl Widget for HotNumber<'_> {
             if escape {
                 ui.data_mut(|d| d.insert_temp(id, HotState::default()));
             } else if enter || tab.is_some() || resp.lost_focus() {
-                if let Some(v) = eval(&buf) {
+                if let Some(v) = self.parse.map_or_else(|| eval(&buf), |p| p(&buf)) {
                     let v = v.clamp(*self.range.start(), *self.range.end());
                     if v != *self.value {
                         *self.value = v;

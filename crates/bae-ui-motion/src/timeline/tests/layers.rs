@@ -384,3 +384,174 @@ fn timeline_blank_rename_asks_the_project_panel() {
     drop(s);
     let _ = &mut h;
 }
+
+/// The Chinese of an English UI string, from the tables the app registers.
+fn zh_of(en: &str) -> String {
+    crate::i18n::all()
+        .into_iter()
+        .chain(crate::catalog::menu_zh().iter().copied())
+        .find(|(e, _)| *e == en)
+        .map(|(_, z)| z.to_owned())
+        .unwrap_or_else(|| panic!("no Chinese for {en:?}"))
+}
+
+/// #596: a property name's right-click menu matches AE 26 zh_CN (Anchor Point
+/// and Position, no keyframes): titles, separators and greying. Add Property
+/// to Essential Graphics is enabled in AE; the panel is not built yet.
+#[test]
+fn property_name_menu_matches_ae() {
+    let h = H::new();
+    let ae: [(Option<&str>, bool); 15] = [
+        (Some("编辑值..."), true),
+        (Some("编辑属性..."), false),
+        (Some("单独尺寸"), true),
+        (None, true),
+        (Some("添加关键帧"), true),
+        (Some("移除所有关键帧"), false),
+        (Some("上一关键帧"), false),
+        (Some("下一关键帧"), false),
+        (None, true),
+        (Some("重置"), true),
+        (Some("编辑表达式"), true),
+        (Some("仅复制表达式"), true),
+        (Some("在效果控件中显示"), false),
+        (Some("关键帧辅助"), true),
+        (Some("向基本图形添加属性"), true),
+    ];
+    for attr in ["transform:anchor_point", POS] {
+        let ours =
+            crate::timeline::menus::property_menu_entries(&h.stage, &h.layer, attr, Time::ZERO);
+        assert_eq!(ours.len(), ae.len(), "{attr}");
+        for ((title, enabled), (ae_title, ae_enabled)) in ours.iter().zip(ae) {
+            assert_eq!(title.map(zh_of).as_deref(), ae_title, "{attr}");
+            if ae_title != Some("向基本图形添加属性") {
+                assert_eq!(*enabled, ae_enabled, "{attr}: {ae_title:?}");
+            }
+        }
+    }
+}
+
+/// #596: a right-click on a property's value shows the property name's menu;
+/// one on the Parent & Link column pops the parent list, the layer itself
+/// greyed (AE 26, #591 batches 14/15).
+#[test]
+fn value_and_parent_column_right_click_menus() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let first = h.layer.clone();
+    let second = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    let mut tl = TimelinePanel::default();
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.graph_editor = false;
+        s.reveal.insert(
+            first.clone(),
+            crate::session::Reveal::Attrs(vec![POS.into()]),
+        );
+    }
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let find = |h: &H, text: &str| {
+        h.painted_text
+            .as_ref()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(s, _)| s == text)
+            .map(|(_, r)| r.center())
+    };
+    let right_click = |h: &mut H, tl: &mut TimelinePanel, p: Pos2| {
+        let right = |down| Event::PointerButton {
+            pos: p,
+            button: PointerButton::Secondary,
+            pressed: down,
+            modifiers: Modifiers::NONE,
+        };
+        h.frame(
+            tl,
+            vec![Event::PointerMoved(p), right(true)],
+            Modifiers::NONE,
+        );
+        h.frame(tl, vec![right(false)], Modifiers::NONE);
+        h.frame(tl, Vec::new(), Modifiers::NONE);
+    };
+    // Position's value text (the solid sits at the comp centre).
+    let value = h
+        .painted_text
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|(s, _)| s.starts_with("320"))
+        .map(|(_, r)| r.center())
+        .expect("position value");
+    let edit_value = bae_ui::tr("Edit Value...");
+    assert!(find(&h, edit_value).is_none());
+    right_click(&mut h, &mut tl, value);
+    assert!(find(&h, edit_value).is_some(), "property menu on the value");
+    h.frame(&mut tl, vec![press(egui::Key::Escape)], Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+
+    // The solid (layer 2 after the null) under its own Parent & Link "None".
+    let none = bae_ui::tr("None");
+    let nones: Vec<Pos2> = h
+        .painted_text
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|(s, _)| s == none)
+        .map(|(_, r)| r.center())
+        .collect();
+    assert_eq!(nones.len(), 2, "one dropdown per layer");
+    let solid_row = *nones.iter().max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+    right_click(&mut h, &mut tl, solid_row);
+    let solid_name = query::display_name_of(&h.stage, &first);
+    let null_name = query::display_name_of(&h.stage, &second);
+    let own = find(&h, &format!("2. {solid_name}")).expect("own entry");
+    // Greyed: picking the layer itself does nothing.
+    h.click(&mut tl, own, Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let parent = |h: &H| {
+        h.stage
+            .prim(&first)
+            .and_then(|p| p.value("parent").and_then(|v| v.as_prim_ref().cloned()))
+    };
+    assert_eq!(parent(&h), None);
+    if find(&h, &format!("1. {null_name}")).is_none() {
+        right_click(&mut h, &mut tl, solid_row);
+    }
+    let other = find(&h, &format!("1. {null_name}")).expect("other layer entry");
+    let r = h.click(&mut tl, other, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(parent(&h), Some(second));
+}
+
+/// #596: the Graph Editor's empty-space menu matches AE 26 zh_CN.
+#[test]
+fn graph_area_menu_matches_ae() {
+    let ae = [
+        Some("自动缩放高度以适合视图"),
+        Some("显示选择的属性"),
+        None,
+        Some("显示动画属性"),
+        Some("显示图表编辑器集"),
+        Some("自动选择图表类型"),
+        Some("编辑值图表"),
+        None,
+        Some("编辑速度图表"),
+        Some("显示参考图表"),
+        Some("对齐"),
+        Some("显示音频波形"),
+        Some("显示图层的入点/出点"),
+        None,
+        Some("显示图层标记"),
+        Some("显示图表工具技巧"),
+        Some("显示表达式编辑器"),
+    ];
+    let ours: Vec<Option<String>> = crate::graph::AREA_MENU
+        .iter()
+        .map(|t| t.map(zh_of))
+        .collect();
+    assert_eq!(ours, ae.map(|t| t.map(str::to_owned)));
+}

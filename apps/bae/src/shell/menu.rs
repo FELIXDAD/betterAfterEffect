@@ -117,6 +117,13 @@ pub fn extra_items() -> Vec<(&'static str, MenuItemSpec)> {
             .checked_when(move |cx| cx.panel_open(&open))
     };
     vec![
+        #[cfg(target_os = "macos")]
+        (
+            "shell.app.settings",
+            MenuItemSpec::new(&[APP_MENU], "Settings...", bae_ui::settings::ACTION)
+                .group(1)
+                .order(-1),
+        ),
         ("shell.window.history", panel("history", "History", 1)),
         (
             "shell.window.agent_activity",
@@ -172,6 +179,8 @@ struct Contributed {
     enabled: bool,
     checked: bool,
     chord: Option<Chord>,
+    /// The state-following title last shown ([`MenuItemSpec::label_when`]).
+    label: Option<String>,
 }
 
 /// The application menu bar.
@@ -209,6 +218,11 @@ impl AppMenu {
             }
             let sub = Submenu::new(menu_text(tr(title), menu_mnemonic(title)), true);
             append_entries(&sub, entries, &mut items)?;
+            #[cfg(target_os = "macos")]
+            if title == "View" {
+                sub.append(&PredefinedMenuItem::separator())?;
+                sub.append(&PredefinedMenuItem::fullscreen(Some(tr("Full Screen"))))?;
+            }
             menu.append(&sub)?;
         }
         let find = |action: &str| {
@@ -280,6 +294,12 @@ impl AppMenu {
                     item.set_checked(checked);
                     c.checked = checked;
                 }
+            }
+            let label = c.spec.label(&cx);
+            if label.is_some() && label != c.label {
+                c.item
+                    .set_text(&native_text(label.as_deref().unwrap_or_default()));
+                c.label = label;
             }
             let chord = shell_chord(keymap, &c.spec.invocation());
             if chord != c.chord {
@@ -479,6 +499,7 @@ fn append_entries(
                         enabled: true,
                         checked: false,
                         chord: None,
+                        label: None,
                     },
                 );
             }
