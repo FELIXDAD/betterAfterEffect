@@ -48,6 +48,7 @@ mod masks;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
+mod panel_columns;
 mod panels;
 mod path_nulls;
 mod playback;

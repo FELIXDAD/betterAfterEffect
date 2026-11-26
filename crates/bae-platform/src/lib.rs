@@ -24,6 +24,7 @@ pub mod memory;
 pub mod settings;
 pub mod single_instance;
 mod time;
+pub use time::utc_label;
 
 pub use cli::{CliSubcommand, GlobalOptions, Invocation};
 pub use dirs::{AppDirs, PluginDir, PluginScope};
