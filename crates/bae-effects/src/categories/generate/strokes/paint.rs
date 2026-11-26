@@ -19,6 +19,9 @@ pub(super) const CLONE: u32 = 6;
 /// Style: the dab restores [`Paint::restore`] (Eraser: Paint Only, Last
 /// Stroke Only).
 pub(super) const RESTORE: u32 = 7;
+/// Style: the Clone Stamp reading another layer or time, [`Paint::restore`],
+/// at [`Paint::offset`].
+pub(super) const CLONE_FROM: u32 = 8;
 
 pub(super) struct Paint {
     pub marks: Vec<Mark>,

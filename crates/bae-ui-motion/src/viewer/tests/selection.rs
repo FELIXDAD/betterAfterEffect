@@ -160,17 +160,14 @@ fn arrow_keys_nudge_by_screen_pixels() {
     let mut h = H::new();
     let a = h.solid([200.0, 100.0], [320.0, 180.0]);
     h.select(&[&a]);
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 1, "dy": 0}));
-    h.apply(&r);
+    h.nudge(1.0, 0.0);
     assert!(close3(h.v3(&a, "transform:position"), [321.0, 180.0, 0.0]));
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 0, "dy": -10}));
-    h.apply(&r);
+    h.nudge(0.0, -10.0);
     assert!(close3(h.v3(&a, "transform:position"), [321.0, 170.0, 0.0]));
     // At 200 % one screen pixel is half a comp pixel.
     h.viewer.zoom = Some(2.0);
     h.frame(Vec::new(), Modifiers::NONE);
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": -1, "dy": 0}));
-    h.apply(&r);
+    h.nudge(-1.0, 0.0);
     assert!(close3(h.v3(&a, "transform:position"), [320.5, 170.0, 0.0]));
     // From another panel the tool handler does the same at the viewer's
     // magnification.
@@ -223,8 +220,7 @@ fn selection_tool_edits_mask_vertices() {
         "layer not moved"
     );
     // Arrow keys move the selected vertex, Delete removes it.
-    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 0, "dy": 1}));
-    h.apply(&r);
+    h.nudge(0.0, 1.0);
     assert!(near(h.bezier(&mask).vertices[0], [170.0, 36.0]));
     let r = h.action_with(crate::actions::ids::DELETE, json!({}));
     one(&r, "path.set_vertices");
