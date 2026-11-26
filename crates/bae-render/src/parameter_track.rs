@@ -1,5 +1,6 @@
 use crate::{effect::ScalarTrack, graph::EffectFrame};
-use bae_model::{AttrSpec, Interpolation, PrimPath, Stage, Time};
+use bae_anim::{ExprRead, ReadKind};
+use bae_model::{AttrSpec, Interpolation, PrimPath, Stage, StageEvent, Time};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
@@ -9,13 +10,37 @@ pub(crate) struct TrackCache {
     entries: FxHashMap<(PrimPath, String), CachedTrack>,
 }
 
-#[derive(Debug)]
-struct CachedTrack {
-    // Arbitrary JavaScript can read another composition or a different time.
-    // Only a property-local expression can reuse samples after a document edit.
+#[derive(Debug, Default)]
+pub(crate) struct CachedTrack {
+    // A property-local expression sees only its own value at the sample time:
+    // a key edit keeps the samples before the first changed key.
     local_input: Option<AttrSpec>,
+    /// Any other expression: what its samples read (each prim and kind once,
+    /// with the first sample that read it). An edit keeps the samples before
+    /// the first one whose reads it touches.
+    reads: FxHashMap<(PrimPath, ReadKind), usize>,
     grid: Option<(Time, Time, f64)>,
     samples: Arc<ScalarTrack>,
+}
+
+impl CachedTrack {
+    /// The first sample an edit in `events` may change (`None`: none).
+    fn first_touched(&self, events: &[&StageEvent]) -> Option<usize> {
+        self.reads
+            .iter()
+            .filter(|((prim, kind), _)| {
+                let read = ExprRead {
+                    prim: prim.clone(),
+                    kind: kind.clone(),
+                    time: None,
+                };
+                events
+                    .iter()
+                    .any(|event| event.changes.iter().any(|c| read.touched_by(c)))
+            })
+            .map(|(_, &first)| first)
+            .min()
+    }
 }
 
 impl TrackCache {
@@ -26,14 +51,31 @@ impl TrackCache {
         name: &str,
         attr: &AttrSpec,
         frame: &EffectFrame,
-    ) -> &mut Arc<ScalarTrack> {
+    ) -> &mut CachedTrack {
         if self.revision != Some(stage.revision()) {
+            // The edits since the last frame (`None`: another project, or more
+            // than the stage journal keeps).
+            let events: Option<Vec<&StageEvent>> = self
+                .revision
+                .and_then(|revision| stage.changes_since(revision))
+                .map(Iterator::collect);
             self.entries.retain(|(path, name), entry| {
                 let Some(current) = stage.prim(path).and_then(|prim| prim.attr(name)) else {
                     return false;
                 };
                 let Some(previous) = &mut entry.local_input else {
-                    return false;
+                    let Some(events) = &events else {
+                        return false;
+                    };
+                    return match entry.first_touched(events) {
+                        None => true,
+                        Some(0) => false,
+                        Some(first) => {
+                            Arc::make_mut(&mut entry.samples).truncate_to(first);
+                            entry.reads.retain(|_, read_from| *read_from < first);
+                            true
+                        }
+                    };
                 };
                 if current != previous {
                     if !has_expression(current) || previous.expression != current.expression {
@@ -64,8 +106,13 @@ impl TrackCache {
                         .expression
                         .as_ref()
                         .is_some_and(|e| property_local(&e.source));
+                // Its own attribute (keys, the expression itself) from the start.
+                let reads = [((path.clone(), ReadKind::Attr(name.to_owned())), 0)]
+                    .into_iter()
+                    .collect();
                 CachedTrack {
                     local_input: local.then(|| attr.clone()),
+                    reads,
                     grid: None,
                     samples: Arc::default(),
                 }
@@ -78,10 +125,11 @@ impl TrackCache {
             );
             if entry.grid != Some(grid) {
                 entry.samples = Arc::default();
+                entry.reads.retain(|_, read_from| *read_from == 0);
                 entry.grid = Some(grid);
             }
         }
-        &mut entry.samples
+        entry
     }
 }
 
@@ -127,18 +175,26 @@ fn property_local(source: &str) -> bool {
 /// Linear and held intervals keep their exact slopes. Ease segments are flattened
 /// on an authored-key grid, independent of frame order. Expressions extend a
 /// frame-aligned prefix once and reuse it on backward seeks.
+/// `expression` returns a sample and what it read
+/// ([`bae_anim::Evaluator::evaluate_attribute_traced`]).
 pub(crate) fn prepare(
-    track: &mut Arc<ScalarTrack>,
+    cached: &mut CachedTrack,
     attr: &AttrSpec,
     frame: &EffectFrame,
-    mut expression: impl FnMut(Time) -> Option<f64>,
+    mut expression: impl FnMut(Time) -> Option<(f64, Vec<ExprRead>)>,
 ) -> Option<Arc<ScalarTrack>> {
+    let track = &mut cached.samples;
     if has_expression(attr) {
         let step = frame.time_step.as_seconds() / frame.layer_time_scale.abs().max(0.000001);
         let last = (frame.time.as_seconds().max(0.) / step).ceil() as usize;
         for i in track.len()..=last {
             let time = Time::from_seconds(i as f64 * step);
-            let value = expression(frame.comp_at(time))?;
+            let (value, reads) = expression(frame.comp_at(time))?;
+            if cached.local_input.is_none() {
+                for read in reads {
+                    cached.reads.entry((read.prim, read.kind)).or_insert(i);
+                }
+            }
             Arc::make_mut(track).push(time, value, value);
         }
         return Some(track.clone());
@@ -244,9 +300,10 @@ mod tests {
             let mut calls = 0;
             let track = prepare(slot, attr, frame, |time| {
                 calls += 1;
-                eval.evaluate_attribute(stage, &layer, name, time)
-                    .ok()?
-                    .as_f64()
+                let (value, reads) = eval
+                    .evaluate_attribute_traced(stage, &layer, name, time)
+                    .ok()?;
+                Some((value.as_f64()?, reads))
             })
             .unwrap();
             (track.at(frame.time.as_seconds()), calls)
@@ -293,6 +350,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(run(&stage, &frame), ((64., 640.), 301));
+        // The expression read the comp, not the layer: a layer edit keeps every sample.
+        commands
+            .execute(
+                &mut stage,
+                &author,
+                "attr.set",
+                json!({"path":layer,"attr":"transform:opacity","value":Value::Float(50.)}),
+            )
+            .unwrap();
+        assert_eq!(run(&stage, &frame), ((64., 640.), 0));
         set(&mut stage, "time");
         let ((value, area), calls) = run(&stage, &frame);
         assert_eq!((value, calls), (10., 301));

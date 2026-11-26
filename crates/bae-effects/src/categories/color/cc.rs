@@ -193,9 +193,8 @@ impl TargetEffect for ColorLink {
         if roi.is_empty() || v.f(4) == 0. {
             return Ok(input.clone());
         }
-        let map = layer_input::dependency(p, 1, true)
-            .and_then(|d| target.effect_layer(&d).cloned())
-            .or_else(|| (p.layer_bounds.is_empty() && p.value(1).is_none()).then(|| input.clone()));
+        let map =
+            layer_input::dependency(p, 1, true).and_then(|d| target.effect_layer(&d).cloned());
         let Some(map) = map else {
             return Ok(input.clone());
         };

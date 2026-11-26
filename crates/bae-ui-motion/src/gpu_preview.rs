@@ -75,6 +75,27 @@ impl RenderEngine {
         }
     }
 
+    /// Draws the layers `samples` asks for (`sampleImage`) and starts reading
+    /// them back without waiting ([`Renderer::poll_samples`] stores them).
+    /// Samples are read at full resolution, whatever the preview's.
+    pub(super) fn read_samples(
+        &mut self,
+        stage: &Stage,
+        rc: &bae_render::RenderComp,
+        samples: &bae_anim::ImageSamples,
+    ) -> Result<(), bae_render::RenderError> {
+        let request = RenderRequest {
+            purpose: RenderPurpose::Preview,
+            ..RenderRequest::full()
+        };
+        let mut frames = bae_render::eval::EvaluatorFrames {
+            stage,
+            evaluator: &mut self.anim,
+        };
+        self.renderer
+            .read_samples(samples, rc, &request, Some(&mut frames))
+    }
+
     /// The frame converted to an 8-bit target (`reuse` when it has the
     /// frame's size) and the frame's rect, `None` when the frame is incomplete
     /// (something still warming up: not shown, and `reuse` comes back
@@ -185,6 +206,11 @@ pub(crate) struct GpuPreview {
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
     pub preparing: bool,
+    /// Layer pixels for `sampleImage`, shared with the evaluator that evaluates
+    /// the comps this preview shows.
+    samples: Arc<bae_anim::ImageSamples>,
+    /// The last frame held the previous image back for missing samples.
+    waiting: bool,
 }
 
 impl GpuPreview {
@@ -198,7 +224,9 @@ impl GpuPreview {
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
         let id = registry.create("motion composition viewer");
-        let engine = RenderEngine::new(gpu.clone(), 512 << 20);
+        let mut engine = RenderEngine::new(gpu.clone(), 512 << 20);
+        let samples = Arc::new(bae_anim::ImageSamples::new());
+        bae_render::CompEvaluator::set_image_samples(&mut engine.anim, Some(samples.clone()));
         let playback = super::playback::PlaybackPreview::new(gpu.clone(), registry.clone());
         GpuPreview {
             gpu,
@@ -219,7 +247,21 @@ impl GpuPreview {
             target_shown: false,
             cached: None,
             preparing: false,
+            samples,
+            waiting: false,
         }
+    }
+
+    /// The `sampleImage` cache: give it to the evaluator of the comps passed to
+    /// [`GpuPreview::frame`] ([`bae_anim::Evaluator::set_image_samples`]).
+    pub fn samples(&self) -> &Arc<bae_anim::ImageSamples> {
+        &self.samples
+    }
+
+    /// The last [`GpuPreview::frame`] kept the previous image while `sampleImage`
+    /// values were read back: repaint (evaluate again) soon.
+    pub fn waiting_for_samples(&self) -> bool {
+        self.waiting
     }
 
     /// Whether this preview still uses the app's current GPU context (the shell
@@ -272,6 +314,13 @@ impl GpuPreview {
         }
         self.sync_sources(resources);
         self.sync_effects(resources);
+        // A value drag in a panel: motion blur samples and effects reading other
+        // frames evaluate the uncommitted value too (#593).
+        let overrides = resources
+            .get::<crate::session::SharedSession>()
+            .and_then(|s| s.lock().scrub.as_ref().map(|s| s.overrides(stage)))
+            .unwrap_or_default();
+        self.engine.anim.set_overrides(overrides);
         if self.changes.changed(resources) {
             self.engine.anim.clear_compiled();
             self.last = None;
@@ -290,6 +339,22 @@ impl GpuPreview {
                 let blur = std::sync::Arc::make_mut(blur);
                 blur.cameras.fill(Some(camera));
             }
+        }
+        // sampleImage: the layers expressions sampled are drawn and read back
+        // without waiting. A frame evaluated before its samples arrived is not
+        // shown: the previous image stays up and the viewer evaluates again.
+        if self.samples.has_requests()
+            && let Err(e) = self.engine.read_samples(stage, &rc, &self.samples)
+        {
+            tracing_warn(&format!("preview: sampleImage: {e}"));
+        }
+        let arrived = self.engine.renderer.poll_samples(&self.samples);
+        self.waiting = arrived || self.samples.is_waiting();
+        if self.waiting && self.rect.is_some() {
+            return Some(PreviewImage {
+                handle: self.registry.display_handle(self.id)?,
+                rect: self.rect?,
+            });
         }
         let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         let view = (self.display, self.roi);
@@ -377,6 +442,21 @@ impl GpuPreview {
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,
         })
+    }
+
+    /// The frame the viewer shows and a key that changes with it (Lumetri
+    /// Scopes): a cached frame of the background renderer, else the rendered
+    /// one.
+    pub fn output(&self) -> Option<(wgpu::Texture, u64)> {
+        use std::hash::{Hash, Hasher};
+        if let Some((t, _)) = &self.cached {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            t.hash(&mut h);
+            return Some((t.clone(), h.finish()));
+        }
+        let (hash, time, resolution) = self.last?;
+        let key = hash ^ (time.flicks() as u64).rotate_left(17) ^ u64::from(resolution);
+        Some((self.target.as_ref()?.view().texture().clone(), key))
     }
 
     /// The viewer shows `texture` (a frame of the background renderer or
