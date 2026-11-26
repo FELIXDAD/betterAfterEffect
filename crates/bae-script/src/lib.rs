@@ -26,6 +26,8 @@
 mod convert;
 mod engine;
 mod host;
+mod interactive;
+pub use interactive::{ScriptWindow, ScriptWindows};
 
 pub use engine::{CompiledModule, prepare_module, prewarm};
 
@@ -159,7 +161,21 @@ fn run_program(
     program: engine::Program<'_>,
     access: ProjectAccess,
 ) -> ScriptReport {
-    let mut state = host::RunState {
+    let mut state = new_state(tx, env, name, access);
+    match engine::execute(&mut state, program) {
+        Ok(result) => state.report.result = result,
+        Err(error) => state.report.error = Some(error),
+    }
+    state.report
+}
+
+fn new_state<'a, 'e, 't>(
+    tx: &'a mut Transaction<'t>,
+    env: &'a ScriptEnv<'e>,
+    name: &str,
+    access: ProjectAccess,
+) -> host::RunState<'a, 'e, 't> {
+    host::RunState {
         tx,
         env,
         access,
@@ -172,12 +188,7 @@ fn run_program(
             name: name.to_owned(),
             ..ScriptReport::default()
         },
-    };
-    match engine::execute(&mut state, program) {
-        Ok(result) => state.report.result = result,
-        Err(error) => state.report.error = Some(error),
     }
-    state.report
 }
 
 /// Runs `source` as one undo step by `author`, labelled with the first
@@ -251,7 +262,16 @@ impl ScriptConsole {
 pub struct RunScriptParams {
     /// JavaScript source using the After Effects scripting object model (app.project,
     /// items, layers, property(), setValue, setValueAtTime, layers.addSolid/addText/addNull …).
+    #[serde(default)]
     pub source: String,
+    /// Run with ScriptUI windows and synchronous user dialogs.
+    #[serde(default)]
+    pub interactive: bool,
+    /// Dockable ScriptUI panel that owns the run.
+    pub panel: Option<String>,
+    /// Resume a waiting ScriptUI window with a control event.
+    pub window: Option<u64>,
+    pub event: Option<serde_json::Value>,
     /// Script name for messages, e.g. the file name.
     #[serde(default)]
     pub name: Option<String>,
@@ -270,6 +290,7 @@ pub struct RunScriptParams {
 /// error and its line, the completion value) is the command's output; a script
 /// error does not fail the command, so changes made before it are kept.
 pub struct RunScript {
+    windows: Option<ScriptWindows>,
     commands: ScriptRegistry,
     defs: Arc<Registry<EffectDef>>,
     console: ScriptConsole,
@@ -285,6 +306,7 @@ impl RunScript {
     /// `script.run` with the standard commands only ([`standard_commands`]).
     pub fn standalone(defs: Arc<Registry<EffectDef>>) -> Self {
         RunScript {
+            windows: None,
             commands: ScriptRegistry::Standalone(standard_commands(defs.clone())),
             defs,
             console: ScriptConsole::default(),
@@ -351,7 +373,25 @@ impl bae_model::Command for RunScript {
             time_limit: None,
         };
         let name = p.name.unwrap_or_else(|| "script".to_owned());
-        let report = run_in(tx, &env, &name, &p.source);
+        let report = if let Some(windows) = self
+            .windows
+            .as_ref()
+            .filter(|_| p.interactive || p.window.is_some())
+        {
+            let mut state = new_state(tx, &env, &name, ProjectAccess::Write);
+            let result = if let Some(id) = p.window {
+                windows.resume(&mut state, id, p.event.unwrap_or_default())
+            } else {
+                windows.start(&mut state, p.source, p.panel)
+            };
+            match result {
+                Ok(v) => state.report.result = v,
+                Err(e) => state.report.error = Some(e),
+            }
+            state.report
+        } else {
+            run_in(tx, &env, &name, &p.source)
+        };
         self.console.put(report.clone());
         Ok(report)
     }
@@ -386,6 +426,7 @@ impl AppModule for ScriptModule {
         // its parameter schema (the MCP tool definition).
         let mut r = CommandRegistry::with_builtins();
         let run = RunScript {
+            windows: app.resource::<ScriptWindows>().cloned(),
             commands: ScriptRegistry::Application(Arc::downgrade(&commands)),
             defs,
             console,

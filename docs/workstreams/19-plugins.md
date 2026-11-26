@@ -51,6 +51,7 @@
 - betterAfterEffects 的原生插件子进程直接进入渲染协议。Windows 用分页文件支持的内存映射，Unix 在创建共享内存后立即删除名字，通过描述符交给子进程。后续帧复用这段内存，容量不足时重新分配。
 - betterAfterEffects 原生渲染直接读写共享内存，复用上传缓冲。宿主按行转换像素，并复用输入范围一致的预渲染查询。声明可并发的效果可在两个 runner 中同时处理帧。
 - betterAfterEffects 脚本插件安装时编译，调用时使用应用命令注册表并检查文件权限。脚本支持读写合成播放头、读取表达式结果和使用属性类型与混合模式枚举。SDK 示例包含只读合成摘要和选中图层淡入。
+- JSX 的 ScriptUI 对话框可以等待用户输入并继续执行，停靠面板能保留回调的局部变量。「窗口」列出 Scripts/ScriptUI Panels 目录下的面板；两个应用验收覆盖弹窗按钮和面板连续点击。
 - [x] 设计规格 `docs/spec/plugin-architecture.md`（v0.1，已对齐合并后的 `bae_render::Effect` 和 `bae_model::EffectDef`）
 - [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
 - [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）
