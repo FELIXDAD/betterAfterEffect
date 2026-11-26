@@ -3,47 +3,6 @@
 use super::*;
 
 #[test]
-fn alt_camera_navigation_draws_the_chosen_pivot_indicator() {
-    use bae_ui::theme::color;
-    for (on, mode) in [
-        (false, "indicator"),
-        (true, "none"),
-        (true, "indicator"),
-        (true, "directional_indicator"),
-    ] {
-        let mut h = H::new();
-        h.layer("camera");
-        let mut prefs = bae_prefs::Preferences::default();
-        prefs.set("3d.override_alt_for_camera_navigation", on);
-        prefs.set("3d.camera_point_of_interest", mode);
-        h.resources
-            .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
-        h.tools().lock().set(Tool::Selection);
-        h.frame(Vec::new(), Modifiers::NONE);
-        h.drag_to((300.0, 180.0), (330.0, 190.0), Modifiers::ALT);
-        assert_eq!(h.viewer.camera_drag.is_some(), on);
-        let ring = h.shapes.iter().any(|s| {
-            matches!(&s.shape,
-                egui::Shape::Circle(c) if c.radius == 5.0 && c.stroke.color == color::ACCENT
-            )
-        });
-        assert_eq!(ring, on && mode != "none", "{mode}");
-        let arrow = h.shapes.iter().any(|s| {
-            matches!(&s.shape,
-                egui::Shape::LineSegment { points, stroke } if stroke.color == color::ACCENT
-                    && (points[0].distance(points[1]) - 17.0).abs() < 0.01
-            )
-        });
-        assert_eq!(arrow, on && mode == "directional_indicator", "{mode}");
-        if on {
-            let request = h.release((330.0, 190.0), Modifiers::ALT);
-            assert_eq!(request.invocations[0].id, "attr.set_many");
-            assert_eq!(h.tools().current(), Tool::Selection);
-        }
-    }
-}
-
-#[test]
 fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     use crate::viewer::view3d::{View3d, ids};
     use bae_render::camera::OrthoView;

@@ -158,10 +158,9 @@ impl CameraDrag {
     }
 
     /// Follow the pointer at `pos`.
-    fn update(&mut self, pos: Pos2, view: &View, size: DVec2, reverse_dolly: bool) {
+    fn update(&mut self, pos: Pos2, view: &View, size: DVec2) {
         let d: Vec2 = pos - self.origin;
         let (dx, dy) = (f64::from(d.x), f64::from(d.y));
-        let dolly = if reverse_dolly { -(dx + dy) } else { dx + dy };
         let view_of = |t: &Target| match t {
             Target::View(v) => *v,
             Target::Layer { .. } => View3d::Active,
@@ -208,7 +207,7 @@ impl CameraDrag {
                 }
             }
             (Mode::Dolly | Mode::DollyPoi, ViewCamera::Ortho { centre, scale }) => {
-                let s = scale * (DOLLY_SPEED * dolly).exp();
+                let s = scale * (DOLLY_SPEED * (dx + dy)).exp();
                 ViewCamera::Ortho {
                     centre: pivot - (pivot - centre) * scale / s,
                     scale: s,
@@ -224,7 +223,7 @@ impl CameraDrag {
             ) => {
                 let to = pivot - position;
                 let distance = to.length();
-                let mut step = distance * (1.0 - (-DOLLY_SPEED * dolly).exp());
+                let mut step = distance * (1.0 - (-DOLLY_SPEED * (dx + dy)).exp());
                 if mode == Mode::DollyPoi {
                     // Not past the point of interest.
                     step = step.min(distance - 1.0);
@@ -246,33 +245,6 @@ impl CameraDrag {
     /// The camera layer's camera while it is dragged (the viewer shows it).
     pub fn layer_camera(&self) -> Option<Camera> {
         matches!(self.target, Target::Layer { .. }).then(|| self.now.camera(View3d::Active))
-    }
-
-    pub(super) fn paint_point(
-        &self,
-        painter: &egui::Painter,
-        view: &View,
-        mode: super::prefs::CameraPoint,
-        pointer: Option<Pos2>,
-    ) {
-        use super::prefs::CameraPoint;
-        if mode == CameraPoint::Hidden {
-            return;
-        }
-        let Some(pivot) = view.project(self.pivot, true) else {
-            return;
-        };
-        let ink = egui::Stroke::new(1.5, bae_ui::theme::color::ACCENT);
-        painter.circle_stroke(pivot, 5.0, egui::Stroke::new(3.0, egui::Color32::BLACK));
-        painter.circle_stroke(pivot, 5.0, ink);
-        if mode == CameraPoint::Directional
-            && let Some(pos) = pointer
-        {
-            let direction = pos - self.origin;
-            if direction.length_sq() > 1.0 {
-                painter.arrow(pivot, direction.normalized() * 17.0, ink);
-            }
-        }
     }
 
     /// The camera layer's `attr.set_many` edits.
@@ -335,39 +307,8 @@ pub(super) fn frame(
     view: &View,
     tool: Tool,
     time: Time,
-    wheel_notches: f32,
-    reverse_drag: bool,
 ) {
-    if wheel_notches != 0.0
-        && drag.is_none()
-        && let Some(pos) = resp.hover_pos()
-    {
-        let mut s = session.lock();
-        let views = s.views3d.entry(comp_path.clone()).or_default();
-        if let Some(mut wheel) = CameraDrag::new(
-            Tool::DollyCursor,
-            PointerButton::Secondary,
-            views,
-            comp,
-            size,
-            view,
-            pos,
-        ) {
-            // One eighth-octave step, also continuous on high-resolution wheels.
-            let distance = (std::f64::consts::LN_2 / (8.0 * DOLLY_SPEED)) as f32 * wheel_notches;
-            wheel.update(pos + egui::vec2(0.0, distance), view, size, false);
-            match wheel.target {
-                Target::View(v) => views.set_camera(v, wheel.now),
-                Target::Layer { .. } => {
-                    let edits = wheel.commit(cx.stage, time);
-                    if !edits.is_empty() {
-                        cx.invoke_with("attr.set_many", json!({ "edits": edits }));
-                    }
-                }
-            }
-        }
-    }
-    if drag.is_none() && tool.is_camera() {
+    if drag.is_none() {
         for button in [
             PointerButton::Primary,
             PointerButton::Middle,
@@ -386,7 +327,7 @@ pub(super) fn frame(
         return;
     };
     if let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) {
-        d.update(pos, view, size, reverse_drag);
+        d.update(pos, view, size);
     }
     if let Target::View(v) = d.target {
         session

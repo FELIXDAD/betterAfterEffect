@@ -861,8 +861,6 @@ pub struct ExportSettings {
     pub bits: Option<u8>,
     /// Encoder threads for image sequences; `None`: one per core.
     pub threads: Option<usize>,
-    /// Maximum number of GPU frames awaiting readback.
-    pub frames_in_flight: usize,
     /// Alpha.
     pub alpha: ExportAlpha,
     /// Movies: average bit rate in bits per second (AE's H.264 "target
@@ -881,7 +879,6 @@ impl ExportSettings {
             compression: None,
             bits: None,
             threads: None,
-            frames_in_flight: READBACK_DEPTH,
             alpha: ExportAlpha::default(),
             bit_rate: None,
             pcm_audio: format.is_quicktime(),
@@ -1651,11 +1648,10 @@ pub fn export_frames(
             && has_frame_run(&job.settings.path)
             && job.times.first().is_some_and(|(frame, _)| frame.is_some()));
     let float_work = renderer.work_format(job.request) == wgpu::TextureFormat::Rgba32Float;
-    let depth = job.settings.frames_in_flight.clamp(1, READBACK_DEPTH);
     let mut run = Run {
-        readback: ExportReadback::new(renderer.gpu().clone(), depth),
+        readback: ExportReadback::new(renderer.gpu().clone(), READBACK_DEPTH),
         sink: None,
-        pending: VecDeque::with_capacity(depth + 1),
+        pending: VecDeque::with_capacity(READBACK_DEPTH + 1),
         stats: ExportStats::default(),
         frames: Vec::with_capacity(job.times.len()),
         on_frame,
@@ -1742,11 +1738,7 @@ pub fn export_frames(
                 draw_calls: rendered.stats.draw_calls,
             });
             drop(rendered);
-            if depth == 1 {
-                run.wait_one()?;
-            } else {
-                run.collect_ready()?;
-            }
+            run.collect_ready()?;
         }
         // Frames already rendered (in flight on the GPU) are written too.
         while run.wait_one()? {}

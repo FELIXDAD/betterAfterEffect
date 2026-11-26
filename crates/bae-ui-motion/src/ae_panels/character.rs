@@ -152,7 +152,6 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             let resp = combo(ui, &family, 122.0, tr("Set the font family"));
-            bae_ui::a11y::value_source(&resp, bae_ui::a11y::VERBATIM_VALUE);
             if self.families.is_none() {
                 self.families = with_fonts(|f| f.families());
             }
@@ -164,9 +163,7 @@ impl Panel for CharacterPanel {
                     families.len(),
                     |ui, range| {
                         for name in &families[range] {
-                            let response = ui.selectable_label(*name == family, name);
-                            bae_ui::a11y::value_source(&response, bae_ui::a11y::VERBATIM_VALUE);
-                            if response.clicked() {
+                            if ui.selectable_label(*name == family, name).clicked() {
                                 let ps = with_fonts(|f| match f.resolve(name) {
                                     bae_text::FontMatch::Found(face) => face.postscript_name,
                                     bae_text::FontMatch::Missing => name.clone(),
@@ -185,14 +182,11 @@ impl Panel for CharacterPanel {
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             let resp = combo(ui, &face_style, 122.0, tr("Set the font style"));
-            bae_ui::a11y::value_source(&resp, bae_ui::a11y::VERBATIM_VALUE);
             let faces = with_fonts(|f| f.faces(&family)).unwrap_or_default();
             egui::Popup::menu(&resp).id(id.with("style")).show(|ui| {
                 for face in &faces {
                     let name = style_name(face);
-                    let response = ui.selectable_label(name == face_style, &name);
-                    bae_ui::a11y::value_source(&response, bae_ui::a11y::VERBATIM_VALUE);
-                    if response.clicked() {
+                    if ui.selectable_label(name == face_style, &name).clicked() {
                         change["font"] = json!(face.postscript_name);
                     }
                 }

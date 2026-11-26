@@ -668,7 +668,7 @@ const SETTINGS_PAGES: &[&str] = &[
 
 fn new_ui_in_one_language(zh: bool) {
     crate::i18n::init_from_env();
-    let mut h = super::i18n_retest::gui_with_status();
+    let (mut h, extra_ok) = super::i18n_retest::gui_with_status();
     comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
     let solid = h.state().layers()[1].clone();
     let mut problems = Vec::new();
@@ -681,7 +681,7 @@ fn new_ui_in_one_language(zh: bool) {
             "settings scripting_expressions" => Some("px"),
             _ => None,
         };
-        for p in super::i18n_retest::wrong_language(h, zh, expected_zh_label) {
+        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok, expected_zh_label) {
             problems.push(format!("{step}: {p}"));
         }
     };
