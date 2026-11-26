@@ -820,7 +820,7 @@ impl Session {
         {
             return false;
         }
-        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path);
+        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path).with_cache(cx.resources.get::<Arc<bae_media::conform::ConformedAudio>>().cloned());
         self.mix_has_audio = !mix.is_empty();
         output.prepare(mix);
         self.mix_revision = Some((info.path.clone(), revision));

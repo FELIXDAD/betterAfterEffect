@@ -50,6 +50,7 @@ pub mod apple;
 pub mod audio;
 mod audio_fx;
 mod cache;
+pub mod conform;
 pub mod export;
 mod frame;
 mod gpu;

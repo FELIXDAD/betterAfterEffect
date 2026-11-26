@@ -310,6 +310,7 @@ pub type Request = String;
 #[derive(Default)]
 pub struct SettingsDialog {
     installed_ram: Option<u64>,
+    media_cache_root: Option<std::path::PathBuf>,
     open: bool,
     confirm_reset: bool,
     display_changed: bool,
@@ -329,6 +330,11 @@ impl SettingsDialog {
     /// is drawn disabled.
     pub fn with_host_buttons(mut self, ids: &[&str]) -> Self {
         self.host_buttons = ids.iter().map(|s| (*s).to_owned()).collect();
+        self
+    }
+
+    pub fn with_media_cache_root(mut self, root: Option<std::path::PathBuf>) -> Self {
+        self.media_cache_root = root;
         self
     }
 
@@ -812,7 +818,11 @@ impl SettingsDialog {
             }
             Kind::Path => {
                 let path = draft.str(p.key);
-                let path = if path.is_empty() { "—" } else { path };
+                let default;
+                let path = if path.is_empty() && matches!(p.key, "disk.media_cache_database_folder" | "disk.media_cache_folder") && let Some(root) = &self.media_cache_root {
+                    default = root.to_string_lossy();
+                    &default
+                } else if path.is_empty() { "—" } else { path };
                 ui.label(RichText::new(path).color(color::TEXT_DIM))
                     .on_hover_text(label);
             }

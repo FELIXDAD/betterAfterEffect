@@ -299,6 +299,13 @@ fn import_into(
     }
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
     let probed = probe(paths, &defaults);
+    if let Some(cache) = cx.resources.get::<Arc<bae_media::conform::ConformedAudio>>() {
+        for file in &probed.files {
+            if file.attrs.get("has_audio").and_then(bae_model::Value::as_bool) == Some(true) {
+                cache.prepare(Path::new(&file.path));
+            }
+        }
+    }
     if !probed.files.is_empty() {
         let mut params = json!({ "files": probed.files });
         if let Some(p) = parent {
