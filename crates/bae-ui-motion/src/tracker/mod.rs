@@ -1,6 +1,7 @@
 //! Motion source selection, tracker controls and non-blocking analysis progress.
 mod dialogs;
 mod gpu;
+mod menu;
 pub(crate) mod overlay;
 #[cfg(test)]
 #[path = "tests/analysis.rs"]
@@ -29,6 +30,8 @@ struct State {
     job: Option<worker::Job>,
     live: Vec<Frame>,
     message: String,
+    display: menu::DisplayOptions,
+    choose_source: Option<menu::SourceDialog>,
 }
 type Shared = Arc<Mutex<State>>;
 fn shared(resources: &Resources) -> Shared {
@@ -51,6 +54,7 @@ pub(crate) fn register(app: &mut AppBuilder) {
         PanelKind::new("Tracker", |_| Box::new(TrackerPanel)),
     );
     bae_ui::i18n::register(dialogs::ZH);
+    bae_ui::i18n::register(menu::ZH);
 }
 fn configure(cx: &mut PanelContext<'_>, tracker: &PrimPath, values: BTreeMap<String, Value>) {
     cx.invoke_with(
@@ -121,6 +125,14 @@ fn source_layers(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
         .collect()
 }
 pub(crate) fn create(cx: &mut PanelContext<'_>, layer: &PrimPath, stabilize: bool) {
+    create_for(cx, layer, stabilize, None);
+}
+fn create_for(
+    cx: &mut PanelContext<'_>,
+    layer: &PrimPath,
+    stabilize: bool,
+    target: Option<(PrimPath, String)>,
+) {
     let session = common::session(cx.resources);
     let Some(comp) = query::owning_comp(cx.stage, layer) else {
         return;
@@ -134,9 +146,9 @@ pub(crate) fn create(cx: &mut PanelContext<'_>, layer: &PrimPath, stabilize: boo
     };
     cx.invoke_with(
         "tracker.create",
-        json!({"layer":layer,"center":((min+max)*0.5).to_array(),"stabilize":stabilize}),
+        json!({"layer":layer,"center":((min+max)*0.5).to_array(),"stabilize":stabilize,"property_target":target}),
     );
-    let folder = layer.child("trackers").expect("folder");
+    let folder = layer.child(model::FOLDER).expect("folder");
     let pending = (1..).find_map(|i| {
         let p = folder.child(&format!("tracker_{i}")).ok()?;
         (!cx.stage.has_prim(&p)).then_some(p)
@@ -151,6 +163,9 @@ pub(crate) fn create(cx: &mut PanelContext<'_>, layer: &PrimPath, stabilize: boo
     cx.open_panel("tracker");
 }
 impl Panel for TrackerPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        menu::show(ui, cx);
+    }
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         let info = common::active_comp(cx.stage, &session);
@@ -358,7 +373,9 @@ impl Panel for TrackerPanel {
 struct Host;
 impl bae_ui::DialogHost for Host {
     fn is_open(&self, r: &Resources) -> bool {
-        shared(r).lock().unwrap().dialog.is_some()
+        let state = shared(r);
+        let s = state.lock().unwrap();
+        s.dialog.is_some() || s.choose_source.is_some()
     }
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
         let shared = shared(cx.resources);
@@ -404,6 +421,13 @@ impl bae_ui::DialogHost for Host {
                     s.job = Some(job);
                 }
             }
+        }
+        if let Some(mut source) = s.choose_source.take() {
+            drop(s);
+            if source.show(ctx, cx) {
+                shared.lock().unwrap().choose_source = Some(source);
+            }
+            return;
         }
         if let Some((track, mut dialog)) = s.dialog.take()
             && cx.stage.has_prim(&track)

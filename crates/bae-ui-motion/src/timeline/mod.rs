@@ -749,6 +749,15 @@ impl TimelinePanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
+        if let Some(track) = session.lock().reveal_tracker.take()
+            && let Some(layer) = query::owning_layer(stage, &track)
+        {
+            self.expanded.extend([
+                layer.to_string(),
+                format!("{layer}#trackers"),
+                track.to_string(),
+            ]);
+        }
         let renaming_before = self.rename.is_some();
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, color::PANEL);
