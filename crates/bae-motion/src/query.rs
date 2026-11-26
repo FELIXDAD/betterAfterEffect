@@ -40,9 +40,20 @@ pub struct CompInfo {
 }
 
 impl CompInfo {
+    /// The nearest frame at which the playhead can rest inside this composition.
+    pub fn playhead_time(&self, time: Time) -> Time {
+        let last = (self.duration - self.frame_duration()).max(Time::ZERO);
+        self.frame_rate.snap(time.clamp(Time::ZERO, last))
+    }
+
     /// Number of frames in the comp.
     pub fn frame_count(&self) -> i64 {
         self.frame_rate.time_to_frame(self.duration).max(1)
+    }
+
+    /// Snap a playhead or insertion point to a visible frame in this composition.
+    pub fn snap_visible_time(&self, time: Time) -> Time {
+        self.playhead_time(time)
     }
 
     /// Duration of one frame.
@@ -155,6 +166,41 @@ pub fn comp_layers(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
         .into_iter()
         .filter(|p| is_layer(stage, p))
         .collect()
+}
+
+/// The composition opened by double-clicking this pre-comp layer.
+pub fn precomp_source(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let view = stage.prim(layer)?;
+    if view.value("kind")?.as_str()? != "pre_comp" {
+        return None;
+    }
+    let source = view.value("source")?.as_prim_ref()?;
+    stage
+        .prim(source)?
+        .is_a(&PrimType::COMP)
+        .then(|| source.clone())
+}
+
+/// The composition source of each pre-comp layer, in layer order.
+pub fn child_comps<'a>(stage: &'a Stage, comp: &PrimPath) -> impl Iterator<Item = PrimPath> + 'a {
+    comp_layers(stage, comp)
+        .into_iter()
+        .filter_map(|layer| precomp_source(stage, &layer))
+}
+
+/// Whether using `source` inside `parent` would close a composition cycle.
+pub fn would_nest_recursively(stage: &Stage, parent: &PrimPath, source: &PrimPath) -> bool {
+    let mut stack = vec![source.clone()];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(comp) = stack.pop() {
+        if &comp == parent {
+            return true;
+        }
+        if visited.insert(comp.clone()) {
+            stack.extend(child_comps(stage, &comp));
+        }
+    }
+    false
 }
 
 /// Whether `path` is a `Layer` prim.

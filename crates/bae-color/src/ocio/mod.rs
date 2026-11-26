@@ -6,7 +6,7 @@
 //! ColorSpace, Builtin (see [`builtin`]) and Allocation (a no-op). Colour
 //! spaces, display colour spaces, roles, aliases, view transforms (scene ↔
 //! display references), displays / views / shared views and file rules
-//! (glob patterns) are understood. Not yet: looks, named transforms, context
+//! (glob patterns) and individual looks are understood. Not yet: named transforms, context
 //! variables, FixedFunction / Grading / ExposureContrast transforms, and the
 //! ACES output transforms (they report [`ColorError::Unsupported`]).
 
@@ -131,6 +131,7 @@ pub struct Config {
     pub active_views: Vec<String>,
     /// File rules.
     pub file_rules: Vec<FileRule>,
+    looks: Vec<(String, String, Option<Node>, Option<Node>)>,
     dir: Option<PathBuf>,
     search_path: Vec<String>,
     lut_cache: Mutex<HashMap<(PathBuf, u8), ColorTransform>>,
@@ -302,10 +303,54 @@ impl Config {
             active_displays: str_list(doc.get("active_displays")),
             active_views: str_list(doc.get("active_views")),
             file_rules,
+            looks: doc
+                .get("looks")
+                .and_then(Node::as_seq)
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(|n| {
+                    Some((
+                        s(n.get("name"))?,
+                        s(n.get("process_space"))?,
+                        n.get("transform").cloned(),
+                        n.get("inverse_transform").cloned(),
+                    ))
+                })
+                .collect(),
             dir: None,
             search_path: str_list(doc.get("search_path")),
             lut_cache: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Named looks in config order.
+    pub fn look_names(&self) -> impl Iterator<Item = &str> {
+        self.looks.iter().map(|l| l.0.as_str())
+    }
+
+    /// Convert to the look's process space, apply its grade, then convert to the output.
+    pub fn look_transform(
+        &self,
+        src: &str,
+        name: &str,
+        dst: &str,
+    ) -> Result<ColorTransform, ColorError> {
+        let (_, space, forward, inverse) = self
+            .looks
+            .iter()
+            .find(|l| l.0 == name)
+            .ok_or_else(|| perr("look", name))?;
+        let op = if let Some(n) = forward {
+            self.build(n, false)?
+        } else if let Some(n) = inverse {
+            self.build(n, true)?
+        } else {
+            ColorTransform::identity()
+        };
+        Ok(self
+            .processor(src, space)?
+            .then(&op)
+            .then(&self.processor(space, dst)?))
     }
 
     /// Sets the directory LUT paths resolve against.

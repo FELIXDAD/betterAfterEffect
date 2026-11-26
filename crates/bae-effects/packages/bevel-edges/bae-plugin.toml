@@ -1,0 +1,49 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "bevel-edges"
+name = "Bevel Edges"
+category = "Perspective"
+implementation = "wgsl"
+ae_match_names = ["ADBE Bevel Edges"]
+shader = "shaders/bevel_edges.wgsl"
+
+[[effect.param]]
+id = 1
+key = "edge_thickness"
+type = "float"
+name = "Edge Thickness"
+default = 0.099991
+range = [0, 0.5]
+
+[[effect.param]]
+id = 2
+key = "light_angle"
+type = "angle"
+name = "Light Angle"
+default = -60
+
+[[effect.param]]
+id = 3
+key = "light_color"
+type = "color"
+name = "Light Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 4
+key = "light_intensity"
+type = "float"
+name = "Light Intensity"
+default = 0.399994
+range = [0, 1]
+
