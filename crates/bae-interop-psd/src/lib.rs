@@ -245,16 +245,13 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
                 };
                 // Photoshop stores its transparent RGB composite matted against
                 // white at every depth; 32-bit keeps values above 1.
-                let [r, g, b] = if layer.is_none()
-                    && header.color_mode == ColorMode::Rgb
-                    && a > 0.
-                    && a < 1.
-                {
-                    let top = if depth == 32 { f32::MAX } else { 1. };
-                    rgb.map(|v| ((v - (1. - a)) / a).clamp(0., top))
-                } else {
-                    rgb
-                };
+                let [r, g, b] =
+                    if layer.is_none() && header.color_mode == ColorMode::Rgb && a > 0. && a < 1. {
+                        let top = if depth == 32 { f32::MAX } else { 1. };
+                        rgb.map(|v| ((v - (1. - a)) / a).clamp(0., top))
+                    } else {
+                        rgb
+                    };
                 rgba[dest] = [r, g, b, a];
             }
         }

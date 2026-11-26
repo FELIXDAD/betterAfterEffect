@@ -228,8 +228,8 @@ impl Workspace {
         self.settings.open(page, &current);
     }
 
-    /// The Preferences window (acceptance tests, macOS run).
-    #[cfg(all(test, target_os = "macos"))]
+    /// The Preferences window for application acceptance tests.
+    #[cfg(test)]
     pub fn settings_dialog(&mut self) -> &mut bae_ui::settings::SettingsDialog {
         &mut self.settings
     }
@@ -313,6 +313,24 @@ impl Workspace {
         doc: &Document,
         resources: &Resources,
     ) -> Vec<Invocation> {
+        // egui uses these timings for hover tips on both enabled and disabled controls.
+        let show_tips = self.prefs.current().bool("appearance.show_tool_tips");
+        let interaction = &ui.ctx().global_style().interaction;
+        if show_tips == interaction.tooltip_delay.is_infinite() {
+            let defaults = egui::style::Interaction::default();
+            ui.ctx().global_style_mut(|style| {
+                style.interaction.tooltip_delay = if show_tips {
+                    defaults.tooltip_delay
+                } else {
+                    f32::INFINITY
+                };
+                style.interaction.tooltip_grace_time = if show_tips {
+                    defaults.tooltip_grace_time
+                } else {
+                    0.0
+                };
+            });
+        }
         if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
             let mut s = session.lock();
             s.sync_playback(doc.stage());
@@ -444,6 +462,22 @@ impl Workspace {
     /// The effective keymap of the active workspace (menu shortcuts).
     pub fn keymap(&self) -> &bae_ui::Keymap {
         self.workbench.keymap()
+    }
+
+    /// Remember the workspace independently of project edits and undo.
+    pub fn remember_project_workspace(&self, doc: &mut Document) {
+        doc.set_manifest_field("workspace", Some(self.active_workspace().into()));
+    }
+
+    pub fn restore_project_workspace(&mut self, doc: &Document) {
+        if !self
+            .prefs
+            .current()
+            .bool("project.preserve_current_workspace_on_open")
+            && let Some(id) = doc.manifest_field("workspace").and_then(|v| v.as_str())
+        {
+            self.workbench.switch_workspace(id);
+        }
     }
 
     /// Id of the active workspace.

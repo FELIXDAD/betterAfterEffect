@@ -17,6 +17,8 @@ pub(crate) struct ViewerPrefs {
     pub label_handles: bool,
     pub contrasting_masks: bool,
     pub center_shape_anchor: bool,
+    pub checker_size: f32,
+    pub checker_colors: [Color32; 2],
 }
 
 impl Default for ViewerPrefs {
@@ -33,6 +35,15 @@ impl ViewerPrefs {
             contrasting_masks: p.bool("appearance.cycle_mask_colors")
                 && p.bool("appearance.use_contrasting_color_for_mask_path"),
             center_shape_anchor: p.bool(keys::CENTER_SHAPE_ANCHOR),
+            checker_size: match p.str("grids_guides.transparency_grid_size") {
+                "small" => 4.0,
+                "large" => 16.0,
+                _ => 8.0,
+            },
+            checker_colors: [keys::TRANSPARENCY_FIRST, keys::TRANSPARENCY_SECOND].map(|key| {
+                let [r, g, b] = p.color(key);
+                Color32::from_rgb(r, g, b)
+            }),
         }
     }
 

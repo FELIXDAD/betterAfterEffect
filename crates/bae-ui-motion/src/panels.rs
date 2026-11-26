@@ -315,19 +315,15 @@ impl Panel for EffectControlsPanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         let layer = self
             .locked
-            .as_ref()
+            .clone()
             .filter(|l| cx.stage.has_prim(l))
-            .cloned()
             .or_else(|| selected_layer(cx.stage, &common::session(cx.resources)));
         match layer {
-            Some(layer) => crate::prefs::related_tab(
+            Some(l) => common::related_tab(
                 cx,
-                format!(
-                    "{} {}",
-                    tr("Effect Controls"),
-                    query::display_name_of(cx.stage, &layer)
-                ),
-                &layer,
+                "Effect Controls",
+                &l,
+                &query::display_name_of(cx.stage, &l),
             ),
             None => TabInfo::new(tr("Effect Controls")),
         }

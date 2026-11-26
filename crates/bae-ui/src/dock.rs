@@ -1427,16 +1427,19 @@ impl Dock {
             let baseline_off = if is_open { geom::BASELINE } else { 15.0 } - compact * 0.5;
             let galley = painter.layout_no_wrap(tr(&info.title).to_owned(), font.clone(), tc);
             let top = y + baseline_off - theme::baseline_offset(&galley);
-            let mut text_x = header.left() + 13.0;
+            let mut title_x = header.left() + 13.0;
             if let Some(label) = info.label {
-                let r = Rect::from_center_size(
-                    pos2(text_x + geom::SWATCH * 0.5, header.center().y),
-                    Vec2::splat(geom::SWATCH),
+                painter.rect_filled(
+                    Rect::from_center_size(
+                        pos2(title_x + geom::SWATCH / 2.0, header.center().y),
+                        Vec2::splat(geom::SWATCH),
+                    ),
+                    0.0,
+                    label,
                 );
-                painter.rect_filled(r, 0.0, label);
-                text_x += geom::SWATCH + geom::SWATCH_GAP;
+                title_x += geom::SWATCH + geom::SWATCH_GAP;
             }
-            painter.galley(pos2(text_x, top), galley, tc);
+            painter.galley(pos2(title_x, top), galley, tc);
             if is_open {
                 let mr = Rect::from_center_size(
                     pos2(

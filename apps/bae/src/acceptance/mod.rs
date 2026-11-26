@@ -22,6 +22,7 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
 mod appearance_colors;
+mod appearance_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
 mod comp_navigation;
@@ -44,11 +45,11 @@ mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
 mod preference_controls;
+mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
 #[cfg(target_os = "macos")]
 mod render_queue;
-#[cfg(target_os = "macos")]
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;
@@ -264,7 +265,12 @@ impl Gui {
         };
         match inv.id.as_str() {
             ids::QUIT => {
-                if crate::view_state::confirm_quit(&self.app, &mut self.doc, &mut self.dialogs) {
+                if crate::view_state::confirm_quit(
+                    &self.app,
+                    &mut self.doc,
+                    &self.workspace,
+                    &mut self.dialogs,
+                ) {
                     self.quit = true;
                 }
             }
@@ -277,6 +283,7 @@ impl Gui {
                 crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.doc,
+                    &mut self.workspace,
                     &mut self.dialogs,
                     &inv,
                 );

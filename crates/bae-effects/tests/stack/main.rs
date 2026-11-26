@@ -129,6 +129,95 @@ fn close(got: [u8; 4], want: [f64; 4], tol: u8, what: &str) {
     assert!(ok, "{what}: got {got:?}, want {want:?}");
 }
 
+fn check_audio_display(
+    name: &str,
+    signal_sample: impl Fn(u32) -> i16,
+    configure: impl FnOnce(&mut Fx, &PrimPath),
+    x: u32,
+) {
+    let mut fx = Fx::new();
+    if fx.renderer.is_none() {
+        return;
+    }
+    let comp = fx.comp();
+    let solid = fx.solid(&comp, [0.1; 3], [64, 32]);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("signal.wav");
+    let mut bytes = Vec::from(*b"RIFF");
+    bytes.extend(16036u32.to_le_bytes());
+    bytes.extend(b"WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data");
+    bytes.extend(16000u32.to_le_bytes());
+    for i in 0..8000 {
+        let sample = if i < 2000 { 0 } else { signal_sample(i) };
+        bytes.extend(sample.to_le_bytes());
+    }
+    std::fs::write(&file, bytes).unwrap();
+    fx.run("item.import",json!({"files":[{"path":file,"name":"signal.wav","attrs":{"has_audio":{"type":"bool","value":true}}}]}));
+    let asset = fx
+        .stage
+        .children(&p("/assets"))
+        .into_iter()
+        .find(|p| bae_motion::query::display_name_of(&fx.stage, p) == "signal.wav")
+        .unwrap();
+    let layer = fx.run(
+        "layer.create",
+        json!({"kind":"audio","comp":comp,"source":asset}),
+    )["path"]
+        .clone();
+    // The viewer prepares the file as soon as its layer is present.
+    let mut preview = AnimEvaluator::new(None);
+    let (ready, wake) = std::sync::mpsc::channel();
+    preview.prepare_preview_audio(move || {
+        let _ = ready.send(());
+    });
+    preview.evaluate(&fx.stage, &comp, Time::ZERO).unwrap();
+    wake.recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    let effect = fx.apply(&solid, name);
+    fx.param(&effect, 1, json!({"type":"prim_ref","value":layer}));
+    fx.param(&effect, 2, json!({"type":"vec2","value":[4.0,16.0]}));
+    fx.param(&effect, 3, json!({"type":"vec2","value":[60.0,16.0]}));
+    configure(&mut fx, &effect);
+
+    let y = 8;
+    let early = fx.pixel_at(&comp, x, y, Time::from_seconds(0.1)).unwrap();
+    let signal = fx.pixel_at(&comp, x, y, Time::from_seconds(0.5)).unwrap();
+    assert_eq!(early[3], 0, "{early:?}");
+    assert!(signal[3] > 128, "{signal:?}");
+    fx.eval = preview;
+    fx.eval.clear_compiled();
+    assert_eq!(
+        fx.pixel_at(&comp, x, y, Time::from_seconds(0.5)).unwrap(),
+        signal
+    );
+    assert!(!fx.eval.audio_preparation_pending());
+}
+
+#[test]
+fn audio_waveform_reads_the_selected_layer_and_changes_pixels() {
+    check_audio_display(
+        "ADBE AudWave",
+        |_| 16384,
+        |fx, effect| fx.param(effect, 6, json!({"type":"float","value":16.0})),
+        32,
+    );
+}
+
+#[test]
+fn audio_spectrum_reads_the_selected_layer_and_changes_pixels() {
+    check_audio_display(
+        "ADBE AudSpect",
+        |i| (26000.0 * (std::f32::consts::TAU * 440.0 * i as f32 / 8000.0).sin()) as i16,
+        |fx, effect| {
+            fx.param(effect, 6, json!({"type":"float","value":100.0}));
+            fx.param(effect, 7, json!({"type":"float","value":900.0}));
+            fx.param(effect, 8, json!({"type":"int","value":8}));
+            fx.param(effect, 9, json!({"type":"float","value":16.0}));
+        },
+        28,
+    );
+}
+
 const LEVELS: &str = "ADBE Easy Levels2";
 const EXPOSURE: &str = "ADBE Exposure2";
 

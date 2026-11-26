@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use bae_app::Resources;
-use bae_model::{LayerKind, PrimPath, Time};
+use bae_model::{LayerKind, Time};
 use bae_prefs::{Preferences, PrefsStore};
 
 /// The current preferences.
@@ -15,25 +15,6 @@ pub(crate) fn current(resources: &Resources) -> Arc<Preferences> {
         .get::<Arc<PrefsStore>>()
         .map(|s| s.current())
         .unwrap_or_default()
-}
-
-/// Viewer and timeline tabs use the item's current label and the user's palette.
-pub(crate) fn related_tab(
-    cx: &bae_ui::PanelContext<'_>,
-    title: String,
-    item: &PrimPath,
-) -> bae_ui::TabInfo {
-    let tab = bae_ui::TabInfo::new(title);
-    let prefs = current(cx.resources);
-    if !prefs.bool("appearance.use_label_color_for_related_tabs") {
-        return tab;
-    }
-    let index = crate::actions::label_of(cx.stage, item);
-    if !(1..=16).contains(&index) {
-        return tab;
-    }
-    let [r, g, b] = prefs.label_color(index as usize);
-    tab.label(egui::Color32::from_rgb(r, g, b))
 }
 
 /// Labels page: the default label of a new layer of `kind`.
