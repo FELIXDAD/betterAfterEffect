@@ -1,7 +1,8 @@
 //! The Puppet tools in the Composition viewer (AE's Puppet Position, Starch
 //! and Overlap Pin tools, Cmd/Ctrl+P): a click on a layer adds a pin there
 //! (`puppet.add_pin`; the first pin adds the Puppet effect); a click on a pin
-//! selects it (Shift: adds or removes it), a drag moves the selected pins
+//! selects it (Shift: adds or removes it), a marquee dragged from off the
+//! layer selects the pins inside it (Shift adds), a drag moves the selected pins
 //! together, previewed live, one undo step; Delete removes them. A selected
 //! Bend or Advanced pin shows AE's ring: drag the ring to rotate, the square
 //! on it to scale (live, one undo step). The selected
@@ -13,7 +14,7 @@ use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_model::{PrimPath, PrimType, Time, Value};
 use bae_motion::query;
 use bae_ui::PanelContext;
-use egui::{Color32, CursorIcon, Painter, Pos2, Response, Stroke, Ui};
+use egui::{Color32, CursorIcon, Painter, Pos2, Rect, Response, Stroke, Ui};
 
 use crate::render::View;
 use crate::session::{Scrub, SharedSession};
@@ -62,6 +63,9 @@ pub(crate) struct PuppetState {
     turn: Option<Turn>,
     /// Selected pins.
     selected: Vec<PrimPath>,
+    /// A marquee dragged from off the layer: where it started and the pins
+    /// selected before it (kept while Shift is down).
+    marquee: Option<(Pos2, Vec<PrimPath>)>,
 }
 
 impl PuppetState {
@@ -420,8 +424,32 @@ pub(crate) fn frame(
                     "density": density,
                 }),
             );
-        } else if !shift {
-            state.selected.clear();
+        } else {
+            // Off the layer: a click deselects, a drag selects the pins in
+            // its marquee (AE; Shift adds).
+            state.marquee = Some((p, state.selected.clone()));
+            if !shift {
+                state.selected.clear();
+            }
+        }
+    }
+    if let Some((from, base)) = &state.marquee
+        && let Some(to) = resp.interact_pointer_pos().or(resp.hover_pos())
+    {
+        let r = Rect::from_two_pos(*from, to);
+        let shift = ui.input(|i| i.modifiers.shift);
+        let mut picked = if shift { base.clone() } else { Vec::new() };
+        for h in handles.iter().filter(|h| r.contains(h.pos)) {
+            if !picked.contains(&h.pin) {
+                picked.push(h.pin.clone());
+            }
+        }
+        state.selected = picked;
+        if r.area() > 0.0 {
+            super::transform::paint_marquee(painter, r);
+        }
+        if !ui.input(|i| i.pointer.primary_down()) {
+            state.marquee = None;
         }
     }
     if let Some(t) = &state.turn {

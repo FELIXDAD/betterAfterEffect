@@ -151,3 +151,41 @@ fn advanced_pins_turn_on_their_ring_and_scale_on_its_square() {
         value(&h, "scale")
     );
 }
+
+/// A marquee dragged from off the layer selects the pins inside it (Shift
+/// adds); a press on the layer still adds a pin.
+#[test]
+fn a_marquee_selects_puppet_pins() {
+    let mut h = H::new();
+    // The solid spans comp x 220…420, y 130…230.
+    let solid = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.select(&[&solid]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.tools().lock().set(Tool::PuppetPosition);
+    for (x, y) in [(260.0, 160.0), (380.0, 200.0)] {
+        let r = h.click(x, y, Modifiers::NONE);
+        h.apply(&r);
+    }
+    let effect = bae_motion::effect::effects_of(&h.stage, &solid)[0].clone();
+    let pins = bae_motion::puppet::pins_of(&h.stage, &effect);
+    assert_eq!(pins.len(), 2);
+    let deleted = |h: &mut H| {
+        let r = h.action_with(crate::actions::ids::DELETE, json!({}));
+        assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+        r.invocations[0].params["pins"].clone()
+    };
+    // From above the layer's top-left corner, around the first pin only.
+    h.drag_to((200.0, 100.0), (300.0, 180.0), Modifiers::NONE);
+    let r = h.release((300.0, 180.0), Modifiers::NONE);
+    assert!(
+        r.invocations.is_empty(),
+        "no pin added: {:?}",
+        r.invocations
+    );
+    assert_eq!(deleted(&mut h), json!([pins[0]]));
+    // Shift: a marquee around the other pin adds it to the selected one.
+    h.click(260.0, 160.0, Modifiers::NONE);
+    h.drag_to((440.0, 250.0), (360.0, 190.0), Modifiers::SHIFT);
+    h.release((360.0, 190.0), Modifiers::SHIFT);
+    assert_eq!(deleted(&mut h), json!([pins[0], pins[1]]));
+}
