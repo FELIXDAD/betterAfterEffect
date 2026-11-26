@@ -114,14 +114,70 @@ pub(crate) struct Wheel {
     pub alt: bool,
 }
 
+/// Preferences ▸ Previews ▸ Magnification (AE 26): how the wheel and the
+/// trackpad zoom the Composition and Layer panels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Magnification {
+    /// Type: Legacy — each wheel notch steps through the zoom menu's levels
+    /// (instead of Smooth's ×9/8).
+    pub legacy: bool,
+    /// Behavior: Centered — zoom around the view's center instead of
+    /// following the pointer (Alt/Option swaps the two).
+    pub centered: bool,
+    /// Trackpad Scroll: Zoom — two-finger scrolling zooms instead of panning.
+    pub trackpad_zooms: bool,
+}
+
+impl Magnification {
+    pub(crate) fn of(resources: &bae_app::Resources) -> Self {
+        let p = crate::prefs::current(resources);
+        Magnification {
+            legacy: p.str("previews.magnification_type") == "legacy",
+            centered: p.str("previews.magnification_behavior") == "centered",
+            trackpad_zooms: p.str("previews.magnification_trackpad_scroll") == "zoom",
+        }
+    }
+
+    /// Whether the wheel zooms around the pointer (`alt`: Alt/Option held).
+    pub(crate) fn follows_pointer(self, alt: bool) -> bool {
+        self.centered == alt
+    }
+
+    /// The magnification after `notches` wheel notches (up > 0) from `mag`.
+    /// Legacy steps whole notches; `rest` carries the fraction between frames
+    /// (trackpads and high-resolution wheels).
+    pub(crate) fn wheel_zoom(self, mag: f32, notches: f32, rest: &mut f32) -> f32 {
+        if !self.legacy {
+            *rest = 0.0;
+            let step = if notches > 0.0 {
+                WHEEL_ZOOM_IN
+            } else {
+                WHEEL_ZOOM_OUT
+            };
+            return mag * step.powf(notches.abs());
+        }
+        *rest += notches;
+        let whole = rest.trunc();
+        *rest -= whole;
+        let mut m = mag;
+        for _ in 0..whole.abs() as usize {
+            if let Some(next) = next_step(m, whole > 0.0) {
+                m = next;
+            }
+        }
+        m
+    }
+}
+
 /// Points of pixel-precise scrolling that make one wheel notch (Windows and
 /// Linux high-resolution wheels report pixels).
 const POINTS_PER_NOTCH: f32 = 50.0;
 
 /// Read this frame's wheel input. A mouse wheel zooms; Shift+wheel scrolls
-/// sideways; pixel-precise scrolling pans on macOS (AE 25.3+ trackpads) and
-/// zooms elsewhere, where it comes from high-resolution wheels (#571).
-pub(crate) fn wheel(ui: &Ui) -> Wheel {
+/// sideways; pixel-precise scrolling pans on macOS (AE 25.3+ trackpads; it
+/// zooms with Trackpad Scroll: Zoom) and zooms elsewhere, where it comes from
+/// high-resolution wheels (#571).
+pub(crate) fn wheel(ui: &Ui, m: Magnification) -> Wheel {
     ui.input(|i| {
         let mut w = Wheel {
             pinch: i.zoom_delta(),
@@ -145,7 +201,13 @@ pub(crate) fn wheel(ui: &Ui) -> Wheel {
                         };
                         w.pan.x += (delta.x + delta.y) * lines;
                     }
-                    egui::MouseWheelUnit::Point if cfg!(target_os = "macos") => w.pan += *delta,
+                    egui::MouseWheelUnit::Point if cfg!(target_os = "macos") => {
+                        if m.trackpad_zooms {
+                            w.notches += delta.y / POINTS_PER_NOTCH;
+                        } else {
+                            w.pan += *delta;
+                        }
+                    }
                     egui::MouseWheelUnit::Point => w.notches += delta.y / POINTS_PER_NOTCH,
                     egui::MouseWheelUnit::Line => w.notches += delta.y,
                     egui::MouseWheelUnit::Page => w.notches += delta.y * 4.0,
@@ -167,6 +229,8 @@ pub struct CompositionViewer {
     banner: errors::Banner,
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
     zoom: Option<f32>,
+    /// Legacy magnification: the part of a wheel notch not yet stepped.
+    wheel_rest: f32,
     pan: Vec2,
     /// Title/action safe and grid from the saved panel state, given to the
     /// session's view options on the first frame.
@@ -708,7 +772,8 @@ impl Panel for CompositionViewer {
         // around the view's center; Shift: scrolls sideways); trackpad scrolling
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
-            let w = wheel(ui);
+            let m = Magnification::of(cx.resources);
+            let w = wheel(ui, m);
             if smart_zoom(ui.ctx()) {
                 if self.zoom.is_some() {
                     self.zoom = None;
@@ -721,13 +786,16 @@ impl Panel for CompositionViewer {
                 self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
                 if w.notches != 0.0 {
-                    let around = if w.alt { None } else { resp.hover_pos() };
-                    let step = if w.notches > 0.0 {
-                        WHEEL_ZOOM_IN
+                    let around = if m.follows_pointer(w.alt) {
+                        resp.hover_pos()
                     } else {
-                        WHEEL_ZOOM_OUT
+                        None
                     };
-                    self.zoom_by(step.powf(w.notches.abs()), around, area, &info, ppp);
+                    let (_, mag) = self.view(area, &info, ppp);
+                    let to = m.wheel_zoom(mag, w.notches, &mut self.wheel_rest);
+                    if to != mag {
+                        self.zoom_by(to / mag, around, area, &info, ppp);
+                    }
                 }
                 self.pan += w.pan;
             }

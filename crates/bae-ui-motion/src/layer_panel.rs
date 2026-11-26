@@ -57,6 +57,8 @@ pub struct LayerPanel {
     trim: Option<(bool, Time)>,
     /// Magnification (1 = 100 %); `None` = Fit up to 100 %.
     pub(crate) zoom: Option<f32>,
+    /// Legacy magnification: the part of a wheel notch not yet stepped.
+    wheel_rest: f32,
     /// The picture's offset from centred, in points.
     pan: egui::Vec2,
 }
@@ -252,7 +254,6 @@ impl LayerPanel {
     /// Zoom and pan from the pointer, the wheel and the tools; `true` while
     /// Space is held (the picture pans instead of the tool working).
     fn navigate(&mut self, ui: &Ui, cx: &PanelContext<'_>, area: Rect, size: egui::Vec2) -> bool {
-        use crate::viewer::{WHEEL_ZOOM_IN, WHEEL_ZOOM_OUT};
         let ppp = ui.ctx().pixels_per_point();
         let resp = ui.interact(
             area,
@@ -261,8 +262,13 @@ impl LayerPanel {
         );
         // The viewer's wheel rules (#571): one shared reading.
         if let Some(pointer) = resp.hover_pos() {
-            let w = crate::viewer::wheel(ui);
-            let around = if w.alt { area.center() } else { pointer };
+            let m = crate::viewer::Magnification::of(cx.resources);
+            let w = crate::viewer::wheel(ui, m);
+            let around = if m.follows_pointer(w.alt) {
+                pointer
+            } else {
+                area.center()
+            };
             if cfg!(target_os = "macos") && crate::viewer::smart_zoom(ui.ctx()) {
                 if self.zoom.is_some() {
                     self.zoom = None;
@@ -274,12 +280,11 @@ impl LayerPanel {
             } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, pointer, area, size, ppp);
             } else if w.notches != 0.0 {
-                let step = if w.notches > 0.0 {
-                    WHEEL_ZOOM_IN
-                } else {
-                    WHEEL_ZOOM_OUT
-                };
-                self.zoom_by(step.powf(w.notches.abs()), around, area, size, ppp);
+                let (_, mag) = self.view(area, size, ppp);
+                let to = m.wheel_zoom(mag, w.notches, &mut self.wheel_rest);
+                if to != mag {
+                    self.zoom_by(to / mag, around, area, size, ppp);
+                }
             }
             self.pan += w.pan;
         }
