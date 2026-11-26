@@ -1,5 +1,80 @@
 use bae_model::{AuthorId, CommandRegistry, PrimPath, Stage, Time, Value};
 use serde_json::{Value as Json, json};
+
+#[test]
+fn corner_pin_keeps_the_layer_of_the_chosen_effect_point() {
+    let mut registry = CommandRegistry::with_builtins();
+    bae_motion::register_commands(&mut registry);
+    let author = AuthorId::new("user:tracker").unwrap();
+    let mut stage = Stage::new();
+    let run = |s: &mut Stage, id, p| registry.execute(s, &author, id, p).unwrap().output;
+    let comp = run(
+        &mut stage,
+        "comp.create",
+        json!({"width":128,"height":128,"fps":30}),
+    )["path"]
+        .clone();
+    let source = run(
+        &mut stage,
+        "layer.create",
+        json!({"comp":comp,"kind":"solid"}),
+    )["path"]
+        .clone();
+    let dest = run(
+        &mut stage,
+        "layer.create",
+        json!({"comp":comp,"kind":"solid"}),
+    )["path"]
+        .clone();
+    let dest = PrimPath::new(dest.as_str().unwrap()).unwrap();
+    let folder = dest.child(bae_motion::effect::EFFECTS_FOLDER).unwrap();
+    let effect = folder.child("Point_Control").unwrap();
+    run(
+        &mut stage,
+        "prim.create",
+        json!({"path":folder,"prim_type":"Folder"}),
+    );
+    run(
+        &mut stage,
+        "prim.create",
+        json!({"path":effect,"prim_type":"Effect"}),
+    );
+    let tracker = run(
+        &mut stage,
+        "tracker.create",
+        json!({"layer":source,"center":[12,12]}),
+    );
+    let tracker = PrimPath::new(tracker.as_str().unwrap()).unwrap();
+    let point = bae_model::effect::param_attr(1);
+    run(
+        &mut stage,
+        "tracker.configure",
+        json!({"tracker":tracker,"values":{
+            "target": Value::PrimRef(effect.clone()), "target_property": Value::String(point.clone())
+        }}),
+    );
+    let target = |s: &Stage| {
+        let get = |key| bae_motion::tracker::setting(s, &tracker, key).unwrap();
+        (get("target"), get("target_property"))
+    };
+    for mode in ["parallel", "perspective"] {
+        run(
+            &mut stage,
+            "tracker.configure",
+            json!({"tracker":tracker,"values":{"track_type":Value::Enum(mode.into())}}),
+        );
+        assert_eq!(
+            target(&stage),
+            (Value::PrimRef(dest.clone()), Value::String(String::new()))
+        );
+        stage.undo(&author).unwrap();
+        assert_eq!(
+            target(&stage),
+            (Value::PrimRef(effect.clone()), Value::String(point.clone()))
+        );
+    }
+}
+
 #[test]
 fn stabilize_records_applies_and_undoes_one_operation_at_a_time() {
     let mut reg = CommandRegistry::with_builtins();
