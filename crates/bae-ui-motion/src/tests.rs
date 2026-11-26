@@ -3219,3 +3219,50 @@ fn project_panel_renames_the_item_another_panel_asks_for() {
     assert!(project.is_renaming());
     assert!(h.session().lock().rename_item.is_none());
 }
+
+/// File ▸ New ▸ New Folder goes into the selected folder; Layer ▸ Open Layer
+/// shows the Layer panel, Open Layer Source a pre-comp's composition.
+#[test]
+fn new_folder_and_open_layer() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::NEW_FOLDER));
+    assert_eq!(r.invocations[0].id, "folder.create");
+    assert!(r.invocations[0].params.get("parent").is_none());
+    let folder = h.run("folder.create", json!({"name": "Shots"}))["path"].clone();
+    h.session().lock().selected_items = vec![PrimPath::new(folder.as_str().unwrap()).unwrap()];
+    let r = h.action(&mut viewer, Invocation::new(ids::NEW_FOLDER));
+    assert_eq!(r.invocations[0].params["parent"], folder);
+
+    let inner = h.run("comp.create", json!({"name": "Inner"}))["path"].clone();
+    let pre = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "pre_comp", "source": inner}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().selected_layers = vec![pre.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER));
+    assert!(r.open.iter().any(|p| p.as_str() == "layer"));
+    assert_eq!(h.session().lock().layer_panel, Some(pre.clone()));
+    let r = h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
+    assert!(r.open.iter().any(|p| p.as_str() == "composition"));
+    assert_eq!(
+        h.session()
+            .lock()
+            .active_comp
+            .as_ref()
+            .map(|c| c.to_string()),
+        inner.as_str().map(str::to_owned)
+    );
+    // A solid's source is not a comp or footage: its Layer panel.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
+    assert_eq!(h.session().lock().layer_panel, Some(solid));
+}
