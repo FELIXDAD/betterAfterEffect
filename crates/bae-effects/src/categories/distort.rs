@@ -1,8 +1,11 @@
+mod cc;
 mod rolling;
 mod warp;
+
 use crate::{Registry, effects};
 
 pub(crate) fn register(registry: &mut Registry) {
+    cc::register(registry);
     registry
         .effects
         .extend([warp::builtin(), rolling::builtin()]);

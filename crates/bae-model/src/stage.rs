@@ -94,21 +94,6 @@ impl Stage {
         self.revision
     }
 
-    /// Changes since a previously observed version. A new project or an older
-    /// version outside the bounded journal requires rebuilding the consumer.
-    /// Tracking starts on the first read, so unopened projects pay no event-copy cost.
-    pub fn changes_since(&self, revision: u64) -> Option<impl Iterator<Item = &StageEvent>> {
-        let entries = self.changes.get_or_init(VecDeque::new);
-        let from = if revision == self.revision {
-            entries.len()
-        } else {
-            entries
-                .iter()
-                .position(|(previous, _)| *previous == revision)?
-        };
-        Some(entries.iter().skip(from).map(|(_, event)| event))
-    }
-
     /// Pin this composed stage, including linked projects. Call the returned
     /// reader on a worker to materialize it without serializing the project on the UI thread.
     pub fn snapshot_reader(&self) -> Box<dyn FnOnce() -> Result<Self> + Send> {
@@ -134,6 +119,21 @@ impl Stage {
             }
             Ok(stage)
         })
+    }
+
+    /// Changes since a previously observed version. A new project or an older
+    /// version outside the bounded journal requires rebuilding the consumer.
+    /// Tracking starts on the first read, so unopened projects pay no event-copy cost.
+    pub fn changes_since(&self, revision: u64) -> Option<impl Iterator<Item = &StageEvent>> {
+        let entries = self.changes.get_or_init(VecDeque::new);
+        let from = if revision == self.revision {
+            entries.len()
+        } else {
+            entries
+                .iter()
+                .position(|(previous, _)| *previous == revision)?
+        };
+        Some(entries.iter().skip(from).map(|(_, event)| event))
     }
 
     /// A stage with one empty `root` sublayer as the edit target.

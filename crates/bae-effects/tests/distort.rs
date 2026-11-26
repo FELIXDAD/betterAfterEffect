@@ -286,6 +286,63 @@ fn editable_mesh_translates_pixels_and_other_warps_dispatch() {
 }
 
 #[test]
+fn split_can_open_each_side_independently() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(64, 32);
+    let input = Pixels::new(r, |_, _| [1.0; 4]);
+    for (name, second, lower) in [("CC Split", 50.0, 0.0), ("CC Split 2", 0.0, 1.0)] {
+        let mut params = vec![(3, Value::Float(50.0))];
+        if name == "CC Split 2" {
+            params.push((4, Value::Float(second)));
+        }
+        let img = run(&gpu, F32, builtin(name), params, &input, r, 1.0);
+        assert_eq!(img.get(32, 14)[3], 0.0);
+        assert_eq!(img.get(32, 18)[3], lower);
+    }
+}
+
+#[test]
+fn blobbylize_keeps_the_layer_alpha_inside_its_edges() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(48, 48);
+    let square = |x: i32, y: i32| (12..36).contains(&x) && (12..36).contains(&y);
+    let input = Pixels::new(rect, |x, y| {
+        if square(x, y) {
+            [0.8, 0.6, 0.2, 1.]
+        } else {
+            [0.; 4]
+        }
+    });
+    // Default Softness 20 sampled alpha 5 px outside every edge.
+    let out = run(
+        &gpu,
+        F32,
+        builtin("CC Blobbylize"),
+        vec![],
+        &input,
+        rect,
+        1.,
+    );
+    for (x, y) in [(14, 24), (33, 24), (24, 14), (24, 33)] {
+        assert!(out.get(x, y)[3] > 0.99, "({x}, {y}): {:?}", out.get(x, y));
+    }
+    assert_eq!(out.get(4, 4)[3], 0.);
+}
+
+#[test]
+fn blobbylize_requests_scene_data_only_for_comp_lights() {
+    let fx = builtin("CC Blobbylize");
+    for (using, expected) in [(1, false), (2, true)] {
+        let instance = instance("CC Blobbylize", vec![(22, Value::Int(using))]);
+        assert_eq!(
+            fx.effect()
+                .uses_scene(&bae_render::EffectParams::new(&instance)),
+            expected
+        );
+    }
+}
+
+#[test]
 fn measured_translation_cancels_camera_pan_in_every_warp_method() {
     let Some(gpu) = context() else {
         return;
