@@ -201,7 +201,8 @@ fn vignette(rgb:vec3f,pos:vec2f)->vec3f {
         let white=mix(edge_sample(0u,63u).x,edge_sample(1u,63u).x,slider-min(19.,floor(slider)));
         graded=select(graded,vec3f(pow(white,2.4)),c>=vec3f(1.));
     }
-    return encoded(mix(c,graded,mask));
+    let protect=select(1.,1.-u.creative.x*smoothstep(.25,1.,y),(u.flags&256u)!=0u);
+    return encoded(mix(c,graded,mask*protect));
 }
 
 @compute @workgroup_size(8,8)
