@@ -367,7 +367,7 @@ function __call(fn, c, l, prim, attr, t, seed) {
   try {
     var r = fn(c, l, prim, attr, t);
     // A Source Text expression may end with a text style (AE 17.0+).
-    if (r instanceof TextStyle) return { __style: true, changes: r.__c };
+    if (r instanceof TextStyle) return { __style: true, changes: r.__edits };
     return __val(r);
   } finally {
     __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __offset = saveOffset; __timeless = saveTl;
@@ -623,7 +623,7 @@ Property.prototype.createPath = function (points, inTangents, outTangents, isClo
 
 // ---- text (AE: thisLayer.text.sourceText and the 17.0+ style API) ----
 Property.prototype.getStyleAt = function (charIndex, t) {
-  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t), {});
+  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t, charIndex || 0), {}, [], charIndex || 0);
 };
 Property.prototype.createStyle = function () { return this.getStyleAt(0, __now); };
 Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, __now); } });
@@ -647,7 +647,12 @@ __TextGroup.prototype = {
 
 // A text style: what the text uses (`__f`, from the host) plus the `set…`
 // calls made on it (`__c`), each returning a new style.
-function TextStyle(fields, changes) { this.__f = fields; this.__c = changes; }
+function TextStyle(fields, changes, edits, index) {
+  this.__f = fields;
+  this.__c = changes;
+  this.__edits = edits;
+  this.__index = index;
+}
 TextStyle.prototype = {
   get horizontalScale() { return "horizontalScale" in this.__c ? this.__c.horizontalScale : 100; },
   get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
@@ -655,7 +660,7 @@ TextStyle.prototype = {
 [
   ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
   ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
-  ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
+  ["baselineOption", "baselineOption"], ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
   ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
 ].forEach(function (p) {
   Object.defineProperty(TextStyle.prototype, p[0], {
@@ -665,16 +670,20 @@ TextStyle.prototype = {
 [
   ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
   ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
-  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineShift", "baselineShift"],
+  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineOption", "baselineOption"], ["setBaselineShift", "baselineShift"],
   ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
   ["setSmallCaps", "smallCaps"], ["setApplyFill", "applyFill"], ["setApplyStroke", "applyStroke"],
   ["setHorizontalScale", "horizontalScale"], ["setVerticalScale", "verticalScale"],
 ].forEach(function (p) {
-  TextStyle.prototype[p[0]] = function (v) {
+  TextStyle.prototype[p[0]] = function (v, start, count) {
     var c = {};
     for (var k in this.__c) c[k] = this.__c[k];
-    c[p[1]] = __val(v);
-    return new TextStyle(this.__f, c);
+    start = Math.max(0, Math.trunc(start || 0));
+    count = count === undefined ? undefined : Math.max(0, Math.trunc(count));
+    var change = {start: start, count: count};
+    change[p[1]] = __val(v);
+    if (this.__index >= start && (count === undefined || this.__index < start + count)) c[p[1]] = change[p[1]];
+    return new TextStyle(this.__f, c, this.__edits.concat([change]), this.__index);
   };
 });
 

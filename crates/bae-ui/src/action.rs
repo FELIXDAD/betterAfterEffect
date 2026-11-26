@@ -174,6 +174,11 @@ pub mod ids {
     /// Save a copy elsewhere; the open project keeps its location and stays
     /// unsaved if it was (AE File > Save As > Save a Copy...).
     pub const SAVE_A_COPY: &str = "file.save_a_copy";
+    /// Save under the project's name with the next number and go on working
+    /// in that file (AE File > Increment and Save).
+    pub const INCREMENT_AND_SAVE: &str = "file.increment_and_save";
+    /// Reload the last saved version, after asking (AE File > Revert).
+    pub const REVERT: &str = "file.revert";
     /// Show the saved project file in Finder / Explorer (Project panel ▸
     /// Reveal Project in Finder).
     pub const REVEAL_PROJECT: &str = "file.reveal_project";
@@ -216,6 +221,8 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::SAVE, "Save"),
     (ids::SAVE_AS, "Save As..."),
     (ids::SAVE_A_COPY, "Save a Copy..."),
+    (ids::INCREMENT_AND_SAVE, "Increment and Save"),
+    (ids::REVERT, "Revert"),
     (ids::REVEAL_PROJECT, "Reveal Project"),
     (ids::SWITCH_WORKSPACE, "Switch Workspace"),
     (ids::RESET_WORKSPACE, "Reset to Saved Layout"),

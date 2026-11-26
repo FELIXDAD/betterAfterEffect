@@ -166,7 +166,7 @@ const FILE: &[Node] = &[
         "New",
         &[
             it(16187393, "New Project", "file.new_project", "", B, Done),
-            it(16187394, "New Folder", "motion.file.new_folder", "", B, Todo),
+            it(16187394, "New Folder", "motion.file.new_folder", "", B, Done),
             it(16187395, "Adobe Photoshop File...", "motion.file.adobe_photoshop_file", "", B, Adobe),
             it(16187396, "Maxon Cinema 4D File...", "motion.file.maxon_cinema_4d_file", "", B, Adobe),
         ],
@@ -193,8 +193,8 @@ const FILE: &[Node] = &[
             it(21889029, "Save a Copy As 24.x...", "motion.file.save_a_copy_as_24_x", "", B, Adobe),
         ],
     ),
-    it(131082, "Increment and Save", "motion.file.increment_and_save", "", B, Todo),
-    it(131083, "Revert", "motion.file.revert", "", B, Todo),
+    it(131082, "Increment and Save", "file.increment_and_save", "", B, Done),
+    it(131083, "Revert", "file.revert", "", B, Done),
     SEP,
     sub(
         "Import",
@@ -539,8 +539,8 @@ const LAYER: &[Node] = &[
     ),
     it(393218, "Layer Settings...", "motion.layer.layer_settings", "", E, Done),
     SEP,
-    it(393220, "Open Layer", "motion.layer.open_layer", "", E, Later),
-    it(393221, "Open Layer Source", "motion.layer.open_layer_source", "", B, Todo),
+    it(393220, "Open Layer", "motion.layer.open_layer", "", E, Done),
+    it(393221, "Open Layer Source", "motion.layer.open_layer_source", "", B, Done),
     it(393222, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
     SEP,
     sub(

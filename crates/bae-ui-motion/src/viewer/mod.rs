@@ -306,7 +306,7 @@ pub struct CompositionViewer {
 /// start with are prepared.
 const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300);
 /// Frames prepared from where playback would start.
-const PREFETCH_FRAMES: i64 = 3;
+const PREFETCH_FRAMES: i64 = 6;
 
 impl CompositionViewer {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
