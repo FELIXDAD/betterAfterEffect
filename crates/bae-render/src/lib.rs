@@ -54,6 +54,7 @@ pub mod light;
 pub mod mask;
 mod module;
 pub mod motion;
+pub mod paint;
 mod parameter_track;
 pub mod png_out;
 pub mod pool;
@@ -77,6 +78,7 @@ pub use export::{
     frame_file, has_frame_run,
 };
 pub use geom::{IRect, Rect};
+pub use gpu::CompositorWarmUp;
 pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{

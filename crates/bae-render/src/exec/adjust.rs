@@ -16,7 +16,7 @@ pub(crate) struct MixPipelines {
 }
 
 impl MixPipelines {
-    fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.adjust"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../gpu/adjust.wgsl").into()),
@@ -60,6 +60,11 @@ impl MixPipelines {
             pipeline_layout,
             pipelines: FxHashMap::default(),
         }
+    }
+
+    /// Compiles the pipeline for `format` (the warm-up).
+    pub(crate) fn warm(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+        self.pipeline(device, format);
     }
 
     fn pipeline(
