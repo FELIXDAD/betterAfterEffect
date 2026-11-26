@@ -50,6 +50,15 @@ fn expressions_add_pick_whip_switch_and_multiline_edit() {
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     let rot2 = bar_key(&tl, &h.key(ROT, 1.0));
     assert!(rot2.y > rot.y + 10.0, "{rot:?} {rot2:?}");
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set("scripting_expressions.write_expression_pick_whip_in_plain_english", false);
+    h.resources.insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
+    let (_, _, _, whip) = row(&tl);
+    let r = h.drag(&mut tl, whip, rot2, Modifiers::NONE);
+    h.apply(&r);
+    let expected = format!("temp = thisLayer(\"{}\")(\"{}\");\n[temp, temp]", bae_ui::tr("Transform"), bae_ui::tr("Rotation"));
+    assert_eq!(expr(&h), Some((expected, true)));
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     // The = switch disables it.
     let (_, _, eq, _) = row(&tl);
     let r = h.click(&mut tl, eq, Modifiers::NONE);
