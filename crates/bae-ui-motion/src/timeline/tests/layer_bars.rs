@@ -193,6 +193,9 @@ fn time_remap_row_scrubs_and_the_bar_runs_past_the_source() {
         panic!("live scrub: {live:?}")
     };
     assert!(t > Time::from_seconds(1.0), "{t:?}");
+    // The viewer drops the live value on pointer-up before the Timeline draws
+    // the release frame: the dragged value still lands.
+    h.session().lock().scrub = None;
     let r = h.frame(
         &mut tl,
         vec![button(to, false, Modifiers::NONE)],
