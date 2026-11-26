@@ -435,3 +435,71 @@ fn masks_only_on_layers_that_take_them() {
         json!({"layer": shape, "kind": "rect", "size": [10.0, 10.0]}),
     );
 }
+
+/// AE's shape Add menu (`shape.add_item`): at the end of the layer's
+/// contents, inside a selected group, or right after a selected item; one
+/// undo step.
+#[test]
+fn add_menu_items_go_after_the_selection() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let out = fx.run(
+        "shape.add",
+        json!({"comp": comp, "kind": "rect", "position": [0.0, 0.0],
+               "size": [200.0, 100.0], "fill": fill(), "stroke": stroke()}),
+    );
+    let layer = p(out["layer"].as_str().unwrap());
+    let group = p(out["group"].as_str().unwrap());
+    let contents = layer.child("contents").unwrap();
+    // The layer: Trim Paths 1 after the group.
+    let out = fx.run(
+        "shape.add_item",
+        json!({"targets": [layer], "item": "trim"}),
+    );
+    let trim = p(out["items"][0].as_str().unwrap());
+    assert_eq!(fx.names(&contents), ["Rectangle 1", "Trim Paths 1"]);
+    assert_eq!(
+        fx.value(&trim, "operator"),
+        Some(Value::Enum("trim".into()))
+    );
+    // The group: a Repeater at the end of its contents.
+    fx.run(
+        "shape.add_item",
+        json!({"targets": [group], "item": "repeater"}),
+    );
+    assert_eq!(
+        fx.names(&fx.contents(&group)),
+        ["Rectangle Path 1", "Stroke 1", "Fill 1", "Repeater 1"]
+    );
+    // An item: a second Fill right after the path, with the given color.
+    let path = fx.stage.children(&fx.contents(&group))[0].clone();
+    let out = fx.run(
+        "shape.add_item",
+        json!({"targets": [path], "item": "fill", "color": [0.0, 0.0, 1.0, 1.0]}),
+    );
+    let fill2 = p(out["items"][0].as_str().unwrap());
+    assert_eq!(
+        fx.names(&fx.contents(&group)),
+        [
+            "Rectangle Path 1",
+            "Fill 2",
+            "Stroke 1",
+            "Fill 1",
+            "Repeater 1"
+        ]
+    );
+    assert_eq!(
+        fx.value(&fill2, "color"),
+        Some(Value::Color([0.0, 0.0, 1.0, 1.0]))
+    );
+    // One undo step removes the last item.
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(fx.stage.prim(&fill2).is_none());
+    assert!(
+        fx.try_run(
+            "shape.add_item",
+            json!({"targets": [layer], "item": "spline"})
+        )
+        .is_err()
+    );
+}

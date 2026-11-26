@@ -477,3 +477,4 @@ mod shape_tools;
 mod tools;
 mod type_tool;
 mod view3d;
+mod view_options;
