@@ -186,6 +186,7 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "Layer" if path.get(1) == Some(&"New") => Comp,
         "Layer" | "Effect" => Layers,
         "Animation" => match item.action {
+            "motion.anim.convert_audio_to_keyframes" => Comp,
             a if a.starts_with("motion.anim.recent_animation_preset")
                 || a == "motion.anim.browse_presets"
                 || a == "motion.anim.apply_animation_preset" =>
@@ -436,15 +437,48 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
         }
+        crate::viewer::view_options::ids::PANEL_BACKGROUND => {
+            let key = spec_param(item.params, "color")
+                .unwrap_or_default()
+                .to_owned();
+            spec.checked_when(move |cx| {
+                crate::viewer::view_options::background_checked(cx.resources, &key)
+            })
+        }
+        crate::viewer::view3d::ids::CREATE_CAMERA => {
+            spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
+        }
+
         id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
             && id != "motion.view.clear_guides" =>
         {
             spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
         }
+
+        crate::viewer::view3d::ids::LAYOUT => {
+            let n = item
+                .params
+                .trim_start_matches("{\"views\":")
+                .trim_end_matches('}');
+            let n: usize = n.parse().unwrap_or(1);
+            spec.checked_when(move |cx| crate::viewer::view3d::layout(cx.resources) == n)
+        }
+
+        "motion.view.look_at_selected_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, false))
+        }
+        "motion.view.look_at_all_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, true))
+        }
         crate::viewer::view3d::ids::SWITCH => {
             let view = spec_param(item.params, "view").unwrap_or_default();
             spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
         }
+        actions::ids::TIME_REMAP => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let first = session.lock().selected_layers.first().cloned();
+            first.is_some_and(|l| actions::switch_on(cx.stage, &l, "time_remap_enabled"))
+        }),
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
             spec.checked_when(move |cx| cx.panel_open(&panel))

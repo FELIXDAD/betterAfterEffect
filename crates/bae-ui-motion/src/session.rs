@@ -7,9 +7,9 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use bae_model::{PrimPath, Stage, Time, TimeRange, Value};
+use bae_model::{FrameRate, PrimPath, Stage, Time, TimeRange, Value};
 use bae_motion::KeyRef;
 use bae_motion::query::{self, CompInfo};
 
@@ -24,6 +24,17 @@ pub enum Reveal {
     Attrs(Vec<String>),
     /// Exactly these properties (Reveal Expression Errors).
     Props(Vec<(PrimPath, String)>),
+}
+
+/// Window > Motion Sketch, armed by Start Capture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchArm {
+    pub layer: PrimPath,
+    /// Capture speed, percent of real time.
+    pub speed: f64,
+    /// Smoothing: how far (pixels) the recorded path may stray from the kept
+    /// keyframes.
+    pub smoothing: f64,
 }
 
 /// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
@@ -45,12 +56,50 @@ pub fn group_prim(id: &str) -> Option<PrimPath> {
 pub struct Playback {
     pub comp: PrimPath,
     started: Instant,
-    from: Time,
+    /// The frame shown and the frame this run started from (comp frames).
+    frame: i64,
+    start: i64,
+    rate: FrameRate,
+    /// Frames per second of the clock: Preview ▸ Frame Rate (the comp's on Auto).
+    fps: f64,
+    ordinal: u64,
+    /// The work area this run was started for: editing it restarts playback.
+    work_area: TimeRange,
+    revision: Option<u64>,
     /// Range played (Preview panel ▸ Range); playback loops or stops at its end.
     pub range: TimeRange,
     /// The current time before playing (kept on stop when Move Time To
     /// Preview Time is off).
     before: Time,
+}
+
+impl Playback {
+    fn ordinal_at(&self, now: Instant) -> u64 {
+        (now.saturating_duration_since(self.started).as_secs_f64() * self.fps) as u64
+    }
+
+    fn frame_range(&self) -> (i64, i64) {
+        let first = self.rate.time_to_frame(self.range.start);
+        let last = self
+            .rate
+            .time_to_frame(Time(self.range.end.0 - 1))
+            .max(first);
+        (first, last)
+    }
+
+    fn deadline(&self) -> Instant {
+        self.started + Duration::from_secs_f64((self.ordinal + 1) as f64 / self.fps)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PlaybackStats {
+    pub fps: f64,
+    pub dropped: u64,
+    drawn: Option<Time>,
+    next_source: u64,
+    sample: Option<Instant>,
+    frames: u32,
 }
 
 /// Preview panel ▸ Range (AE's choices for the Spacebar shortcut).
@@ -101,12 +150,37 @@ pub struct Scrub {
     /// The same property on the other selected layers (or selected across
     /// layers), changing with it: path and its value.
     pub peers: Vec<(PrimPath, Value)>,
+    /// Comp time of the drag (a keyframe there when the property is animated).
+    pub time: Time,
+    /// The drag ended and its command was sent: still shown until it runs
+    /// (the stage revision then changes), so the panels never flash the old
+    /// value. With the revision it was sent at.
+    pub committed: Option<(u64, Instant)>,
 }
 
 impl Scrub {
     /// Every prim the drag changes, with its value.
     pub fn targets(&self) -> impl Iterator<Item = (&PrimPath, &Value)> {
         std::iter::once((&self.path, &self.value)).chain(self.peers.iter().map(|(p, v)| (p, v)))
+    }
+
+    /// What the evaluators show while the drag lasts: each target's attribute
+    /// as the commit will leave it ([`bae_motion::keys::spec_with_value_at`]).
+    pub fn overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        self.targets()
+            .filter(|(p, _)| stage.has_prim(p))
+            .map(|(p, v)| bae_anim::AttrOverride {
+                prim: p.clone(),
+                attr: self.attr.clone(),
+                spec: bae_motion::keys::spec_with_value_at(
+                    stage,
+                    p,
+                    &self.attr,
+                    query::to_key_time(stage, p, self.time),
+                    v.clone(),
+                ),
+            })
+            .collect()
     }
 
     /// The previewed value of `attr` of `path`, if the drag changes it.
@@ -148,6 +222,10 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Keep these keys selected although they do not exist yet: the selection
+    /// already names where a queued command (a keyframe drag) puts them, and
+    /// panels drawn before it runs must not drop them (#551).
+    Keys(Vec<KeyRef>),
 }
 
 #[derive(Debug, Default)]
@@ -180,7 +258,9 @@ pub struct Session {
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
+    pub(crate) playback_stats: PlaybackStats,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
@@ -201,8 +281,22 @@ pub struct Session {
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
+    /// View ▸ View Options: the layer controls the viewers draw.
+    pub(crate) layer_controls: crate::viewer::view_options::LayerControls,
+    /// View ▸ Panel Background Color.
+    pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
+    /// An expression just added (Alt+click on the stopwatch, Animation ▸ Add
+    /// Expression): the Timeline focuses its field with the text selected, so
+    /// typing replaces it (AE). Dropped after a second if never shown.
+    pub(crate) focus_expression: Option<(PrimPath, String, Instant)>,
+    /// A project item to rename in the Project panel (the Timeline's Rename
+    /// on empty space renames its comp there, AE 26).
+    pub(crate) rename_item: Option<PrimPath>,
+    /// Frames in the GPU preview cache (the timeline's green bar): comp,
+    /// stage revision, cached spans.
+    pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
@@ -220,8 +314,13 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// When L was last pressed to reveal the audio waveform on a second press.
     pub(crate) last_l: Option<Instant>,
+    /// Motion Sketch armed (Start Capture): the next drag in the Composition
+    /// panel records this layer's position.
+    pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The frame the Composition viewer shows and its key (Lumetri Scopes).
+    pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
@@ -247,6 +346,23 @@ impl SharedSession {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// A new or opened project in the same window: fresh view state on this
+    /// same session. Panels, the script host and the audio warm-up all reach
+    /// the session through it, so the audio output (an application device)
+    /// stays open; the loop setting is the user's, not the project's.
+    pub fn replace_project(&self) {
+        let mut s = self.lock();
+        s.stop();
+        let fresh = Session {
+            output: s.output.take(),
+            retry_audio_after: s.retry_audio_after.take(),
+            opening_audio: s.opening_audio,
+            loop_playback: s.loop_playback,
+            ..Session::default()
+        };
+        *s = fresh;
+    }
+
     /// Called on a background thread. Device negotiation may block in the OS.
     pub(crate) fn open_audio(&self) -> Result<(), String> {
         let device = bae_media::playback::AudioOutput::open();
@@ -254,6 +370,7 @@ impl SharedSession {
         s.opening_audio = false;
         match device {
             Ok(output) => {
+                output.set_gain(10.0_f32.powf(s.master_db / 20.0));
                 let previous = s.output.replace(output);
                 s.mix_revision = None;
                 s.retry_audio_after = None;
@@ -268,25 +385,23 @@ impl SharedSession {
         }
     }
 
-    /// A user can connect a device after starting the application.
-    pub(crate) fn retry_audio(&self) {
-        let mut s = self.lock();
-        let needed = s.retry_audio_after.map_or_else(
-            || {
-                s.output
+    /// Opens the output device on its own thread (OS negotiation may block). It
+    /// needs no GPU. Does nothing while a device is open or opening.
+    pub(crate) fn start_audio(&self) {
+        {
+            let mut s = self.lock();
+            if s.opening_audio
+                || s.output
                     .as_ref()
-                    .is_some_and(bae_media::playback::AudioOutput::device_lost)
-            },
-            |at| Instant::now() >= at,
-        );
-        if !needed || s.opening_audio {
-            return;
+                    .is_some_and(|output| !output.device_lost())
+            {
+                return;
+            }
+            s.opening_audio = true;
         }
-        s.opening_audio = true;
-        drop(s);
         let session = self.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("bae-audio-reopen".into())
+            .name("bae-audio-device".into())
             .spawn(move || {
                 if let Err(error) = session.open_audio() {
                     tracing::warn!(%error, "Audio output unavailable");
@@ -296,6 +411,42 @@ impl SharedSession {
             self.lock().opening_audio = false;
             tracing::warn!(%error, "Could not start the audio device worker");
         }
+    }
+
+    /// A user can connect a device after starting the application.
+    pub(crate) fn retry_audio(&self) {
+        let needed = {
+            let s = self.lock();
+            match s.retry_audio_after {
+                Some(at) => Instant::now() >= at,
+                // Never opened or lost: open it now rather than wait for a failure.
+                None => s
+                    .output
+                    .as_ref()
+                    .is_none_or(bae_media::playback::AudioOutput::device_lost),
+            }
+        };
+        if needed {
+            self.start_audio();
+        }
+    }
+}
+
+/// Module setup already started the device. As the first warm-up task this
+/// only reopens a failed or lost one, on its own thread, so it never holds up
+/// the GPU tasks.
+impl bae_gpu::WarmUp for SharedSession {
+    fn name(&self) -> &str {
+        "audio output"
+    }
+
+    fn priority(&self) -> u8 {
+        0
+    }
+
+    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        self.start_audio();
+        Ok(())
     }
 }
 
@@ -318,15 +469,34 @@ impl Session {
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
         let at = self.update_time(info, t);
-        if let Some(pb) = &mut self.playback
-            && pb.comp == info.path
-        {
-            if pb.range.contains(at) {
-                pb.from = at;
-                pb.started = Instant::now();
-            } else {
-                self.stop();
+        let playing = self
+            .playback
+            .as_ref()
+            .filter(|pb| pb.comp == info.path)
+            .map(|pb| pb.range);
+        match playing {
+            Some(range) if range.contains(at) => {
+                self.restart_clock(at);
+                if self.audio_clock {
+                    self.audio_clock = self.sound(at, range, self.loop_playback);
+                }
             }
+            Some(_) => self.stop(),
+            None => {}
+        }
+    }
+
+    /// Restart the frame clock at `t`: playback continues from there.
+    fn restart_clock(&mut self, t: Time) {
+        if let Some(pb) = &mut self.playback {
+            pb.frame = pb.rate.time_to_frame(t);
+            pb.start = pb.frame;
+            pb.started = Instant::now();
+            pb.ordinal = 0;
+            self.playback_stats = PlaybackStats {
+                sample: Some(pb.started),
+                ..Default::default()
+            };
         }
     }
 
@@ -385,8 +555,24 @@ impl Session {
     /// Drop references to prims that no longer exist and resolve pending items.
     /// Called once per frame by the panels (cheap).
     pub fn sync(&mut self, stage: &Stage) {
+        if let Some((revision, at)) = self.scrub.as_ref().and_then(|s| s.committed)
+            && (stage.revision() != revision
+                || at.elapsed() > std::time::Duration::from_millis(500))
+        {
+            self.scrub = None;
+        }
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::Keys(keys) = &what {
+                let landed = keys.iter().all(|k| {
+                    query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+                });
+                if !landed && age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewEffects { layers, before } = &what {
                 let added: Vec<PrimPath> = layers
                     .iter()
@@ -415,7 +601,7 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {
                     unreachable!("handled above")
                 }
             };
@@ -429,7 +615,7 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
+                    Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -441,7 +627,7 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => None,
             })
             .collect();
         self.reserved
@@ -460,10 +646,24 @@ impl Session {
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));
-        self.selected_keys.retain(|k| {
-            query::attr_spec(stage, &k.path, &k.attr)
-                .is_some_and(|s| s.keyframes.contains_key(&k.time))
-        });
+        let expected: Vec<&KeyRef> = self
+            .pending
+            .iter()
+            .filter_map(|(w, _)| match w {
+                Pending::Keys(keys) => Some(keys.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let selected = std::mem::take(&mut self.selected_keys);
+        self.selected_keys = selected
+            .into_iter()
+            .filter(|k| {
+                expected.contains(&k)
+                    || query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+            })
+            .collect();
         self.reveal.retain(|l, _| stage.has_prim(l));
         self.selected_props
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
@@ -471,8 +671,29 @@ impl Session {
         self.selected_effects.retain(|e| stage.has_prim(e));
     }
 
+    /// Keep the meters moving through the last audible scrub sample.
+    pub(crate) fn monitoring_audio(&self) -> bool {
+        (self.audio_clock || self.last_scrub.is_some())
+            && self
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.finished())
+    }
+
     pub fn is_playing(&self) -> bool {
         self.playback.is_some()
+    }
+
+    /// Playback follows the audio device's clock (it plays the comp's mix).
+    #[cfg(test)]
+    pub(crate) fn audio_clock(&self) -> bool {
+        self.audio_clock
+    }
+
+    /// The device is being opened; an output device is open.
+    #[cfg(test)]
+    pub(crate) fn audio_device(&self) -> (bool, bool) {
+        (self.opening_audio, self.output.is_some())
     }
 
     /// The range Preview ▸ Range plays for the current time `now`.
@@ -495,9 +716,10 @@ impl Session {
         }
     }
 
-    /// Start playing the active comp (Preview panel options): from the current
-    /// time or the start of the range, through the range.
-    pub fn play(&mut self, info: &CompInfo) {
+    /// Where playback of `info` would start and the range it plays (Preview
+    /// panel options): the current time inside the range (not on its last
+    /// frame) when playing from the current time, else the range's start.
+    pub fn play_start(&self, info: &CompInfo) -> (Time, TimeRange) {
         let now = self.time(&info.path);
         let range = self.preview_range(info, now);
         let from = if self.preview.from_current
@@ -508,14 +730,46 @@ impl Session {
         } else {
             range.start
         };
+        (from, range)
+    }
+
+    /// Start playing the active comp (Preview panel options): from the current
+    /// time or the start of the range, through the range.
+    pub fn play(&mut self, info: &CompInfo) {
+        let now = self.time(&info.path);
+        let (from, range) = self.play_start(info);
+        let started = Instant::now();
         self.times.insert(info.path.clone(), from);
+        let frame = info.frame_rate.time_to_frame(from);
         self.playback = Some(Playback {
             comp: info.path.clone(),
-            started: Instant::now(),
-            from,
+            started,
+            frame,
+            start: frame,
+            rate: info.frame_rate,
+            fps: self
+                .preview
+                .fps
+                .unwrap_or_else(|| info.frame_rate.as_f64())
+                .max(1e-3),
+            ordinal: 0,
+            work_area: info.work_area,
+            revision: None,
             range,
             before: now,
         });
+        self.playback_stats = PlaybackStats {
+            sample: Some(started),
+            ..Default::default()
+        };
+    }
+
+    /// Another preview frame rate plays at another speed: the sound does not
+    /// drive the clock then (AE plays it only at the comp's rate).
+    fn sound_clocks(&self, info: &CompInfo) -> bool {
+        self.preview
+            .fps
+            .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3)
     }
 
     /// Refresh the producer's snapshot once per composition edit. Timeline seeks
@@ -556,13 +810,8 @@ impl Session {
         self.prepare_mix(cx, info);
         self.play(info);
         let pb = self.playback.as_ref().unwrap();
-        // Another preview frame rate plays at another speed: the sound does
-        // not drive the clock then (AE plays it only at the comp's rate).
-        let comp_rate = self
-            .preview
-            .fps
-            .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3);
-        self.audio_clock = comp_rate && self.sound(pb.from, pb.range, self.loop_playback);
+        let at = pb.rate.frame_to_time(pb.frame);
+        self.audio_clock = self.sound_clocks(info) && self.sound(at, pb.range, self.loop_playback);
     }
 
     pub(crate) fn scrub_to(
@@ -597,21 +846,18 @@ impl Session {
         self.audio_clock = false;
     }
 
-    pub(crate) fn update_preview(
-        &mut self,
-        cx: &bae_ui::PanelContext<'_>,
-        info: &CompInfo,
-    ) -> bool {
-        if self.prepare_mix(cx, info) && self.is_playing() {
-            // Pick up a late device or a live layer edit at the current CTI.
-            let from = self.time(&info.path);
-            let pb = self.playback.as_mut().unwrap();
-            pb.from = from;
-            pb.started = Instant::now();
-            let range = pb.range;
-            self.audio_clock = self.sound(from, range, self.loop_playback);
+    /// Keep the audio mix current (once per composition edit). While playing,
+    /// a new mix restarts the device and the clock at the current frame: a late
+    /// device or a live layer edit. The shell ticks the clock.
+    pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        if self.prepare_mix(cx, info)
+            && let Some(pb) = &self.playback
+        {
+            let (from, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
+            self.restart_clock(from);
+            self.audio_clock =
+                self.sound_clocks(info) && self.sound(from, range, self.loop_playback);
         }
-        self.tick(info)
     }
 
     /// Stop playing (Spacebar): the current time stays on the last frame shown,
@@ -625,59 +871,108 @@ impl Session {
         }
     }
 
-    /// Advance playback to the wall-clock time. Returns whether it is still playing
-    /// (the caller then requests a repaint).
-    pub fn tick(&mut self, info: &CompInfo) -> bool {
-        if self
-            .playback
-            .as_ref()
-            .is_some_and(|p| p.comp == info.path && p.range != info.work_area)
-        {
-            self.play(info);
-        }
-        let Some(pb) = self.playback.clone() else {
-            return false;
+    /// Edits to the work area or frame rate take effect without restarting the
+    /// UI clock on unrelated project changes.
+    pub fn sync_playback(&mut self, stage: &Stage) {
+        let Some(pb) = self.playback.as_mut() else {
+            return;
         };
-        if pb.comp != info.path {
-            return true;
+        if pb.revision == Some(stage.revision()) {
+            return;
         }
-        let elapsed = if self.audio_clock {
-            let output = self.output.as_ref().unwrap();
+        pb.revision = Some(stage.revision());
+        let Some(info) = query::comp_info(stage, &pb.comp) else {
+            self.stop();
+            return;
+        };
+        if pb.work_area != info.work_area || pb.rate != info.frame_rate {
+            self.play(&info);
+            if let Some(pb) = self.playback.as_mut() {
+                pb.revision = Some(stage.revision());
+                let (at, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
+                if self.audio_clock {
+                    self.audio_clock = self.sound(at, range, self.loop_playback);
+                }
+            }
+        }
+    }
+
+    pub fn playback_deadline(&self) -> Option<Instant> {
+        self.playback.as_ref().map(Playback::deadline)
+    }
+
+    /// Advance once before building the workspace. Ordinals count scheduled
+    /// frames across loops, even when the event loop wakes several frames late.
+    /// While the device plays the mix it is the clock: the wall clock start is
+    /// re-anchored to its elapsed time, so deadlines follow the audio too.
+    pub fn tick(&mut self, now: Instant) {
+        let Some(pb) = self.playback.as_mut() else {
+            return;
+        };
+        let mut finished = false;
+        if let Some(output) = self.output.as_ref().filter(|_| self.audio_clock) {
             output.set_loop(self.loop_playback);
-            if output.finished() {
-                let at = pb.from + output.elapsed();
-                self.stop();
-                self.set_time(info, at.min(pb.range.end - info.frame_duration()));
-                return false;
-            }
-            output.elapsed()
+            finished = output.finished();
+            let elapsed = Duration::from_secs_f64(output.elapsed().as_seconds().max(0.));
+            pb.started = now.checked_sub(elapsed).unwrap_or(now);
+        }
+        let ordinal = pb.ordinal_at(now).max(pb.ordinal);
+        let stats = &mut self.playback_stats;
+        stats.drawn = None;
+        if ordinal == pb.ordinal && !finished {
+            return;
+        }
+        let (first, last) = pb.frame_range();
+        let delta = ordinal - pb.ordinal;
+        let until_end = (last - pb.frame + 1) as u64;
+        let previous_ordinal = pb.ordinal;
+        pb.ordinal = ordinal;
+        // The device stops by itself at the end of a range it does not loop.
+        let ended = finished || (!self.loop_playback && delta >= until_end);
+        pb.frame = if ended {
+            last
         } else {
-            // Frame Rate: a lower rate plays slower, as in AE.
-            let speed = self
-                .preview
-                .fps
-                .map_or(1.0, |fps| fps / info.frame_rate.as_f64().max(1e-6));
-            Time::from_seconds(pb.started.elapsed().as_secs_f64() * speed)
+            first + (pb.frame - first + delta as i64).rem_euclid(last - first + 1)
         };
-        let span = pb.range.duration();
-        let mut t = pb.from + elapsed;
         // Skip: only every (skip + 1)th frame is shown.
-        if self.preview.skip > 0 {
-            let step = i64::from(self.preview.skip) + 1;
-            let f = info.frame_rate.time_to_frame(t - pb.from);
-            t = pb.from + info.frame_rate.frame_to_time(f - f.rem_euclid(step));
+        let step = i64::from(self.preview.skip) + 1;
+        let shown = pb.frame - (pb.frame - pb.start).rem_euclid(step);
+        self.times
+            .insert(pb.comp.clone(), pb.rate.frame_to_time(shown.max(first)));
+        if ended {
+            stats.dropped += (previous_ordinal + until_end).saturating_sub(stats.next_source);
+            self.stop();
         }
-        if t >= pb.range.end {
-            if self.loop_playback && span.0 > 0 {
-                t = pb.range.start + Time((t - pb.range.start).0.rem_euclid(span.0));
-            } else {
-                self.stop();
-                self.set_time(info, pb.range.end - info.frame_duration());
-                return false;
+    }
+
+    /// Called by the viewer for the actual texture used in this UI pass.
+    pub(crate) fn drew_preview(&mut self, actual: Time) {
+        self.playback_stats.drawn = Some(actual);
+    }
+
+    /// Count only frames submitted to the native presentation surface.
+    pub fn frame_presented(&mut self, now: Instant) {
+        let Some(pb) = &self.playback else { return };
+        let stats = &mut self.playback_stats;
+        if let Some(time) = stats.drawn.take() {
+            let (first, last) = pb.frame_range();
+            let behind = (pb.frame - pb.rate.time_to_frame(time)).rem_euclid(last - first + 1);
+            // A late frame still counts when it reaches the surface. A gap is
+            // final only after a newer source frame has actually been shown.
+            if let Some(source) = pb.ordinal.checked_sub(behind as u64)
+                && source >= stats.next_source
+            {
+                stats.dropped += source - stats.next_source;
+                stats.next_source = source + 1;
+                stats.frames += 1;
             }
         }
-        self.update_time(info, t);
-        true
+        let elapsed = now.duration_since(*stats.sample.get_or_insert(now));
+        if elapsed >= Duration::from_millis(500) {
+            stats.fps = f64::from(stats.frames) / elapsed.as_secs_f64();
+            stats.frames = 0;
+            stats.sample = Some(now);
+        }
     }
 }
 
@@ -752,12 +1047,75 @@ mod tests {
         s.play(&i);
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
-        assert!(s.tick(&i));
         let seek = i.frame_rate.frame_to_time(42);
         s.set_time(&i, seek);
-        assert_eq!(s.playback.as_ref().unwrap().from, seek);
+        assert_eq!(s.playback.as_ref().unwrap().frame, 42);
         s.set_time(&i, Time::ZERO);
         assert!(!s.is_playing());
-        assert!(!s.tick(&i));
+    }
+
+    #[test]
+    fn presentation_counts_distinct_frames_across_lateness_loops_and_seeks() {
+        let mut i = info();
+        i.frame_rate = FrameRate::FPS_59_94;
+        let time = |f| i.frame_rate.frame_to_time(f);
+        i.work_area = TimeRange::new(Time::ZERO, time(3));
+        let mut s = Session {
+            loop_playback: true,
+            ..Default::default()
+        };
+        s.play(&i);
+        let start = s.playback.as_ref().unwrap().started;
+        let next = s.playback_deadline().unwrap();
+        s.tick(next - Duration::from_nanos(1));
+        assert_eq!(s.time(&i.path), time(0));
+        s.tick(next);
+        // The first texture arrives after its deadline, then is presented twice.
+        for _ in 0..2 {
+            s.drew_preview(time(0));
+            s.frame_presented(next);
+        }
+        assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (1, 0));
+        s.tick(start + Duration::from_millis(51));
+        assert_eq!(s.time(&i.path), time(0));
+        s.drew_preview(time(0));
+        s.frame_presented(start + Duration::from_millis(51));
+        assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (2, 2));
+        s.set_time(&i, time(1));
+        let seek = s.playback.as_ref().unwrap().started;
+        s.drew_preview(time(1));
+        s.frame_presented(seek);
+        assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (1, 0));
+        s.loop_playback = false;
+        s.tick(seek + Duration::from_secs(1));
+        assert!(!s.is_playing());
+        assert_eq!(s.time(&i.path), time(2));
+        assert_eq!(s.playback_stats.dropped, 1);
+    }
+
+    /// Waits for a device open started by `retry_audio` (no device in CI).
+    fn settle(shared: &SharedSession) {
+        let start = Instant::now();
+        while shared.lock().opening_audio && start.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_replaced_project_keeps_the_audio_device_and_play_opens_a_missing_one() {
+        let shared = SharedSession::default();
+        // Nothing opened yet and no failure recorded: Play opens the device.
+        shared.retry_audio();
+        settle(&shared);
+        let opened = shared.lock().output.is_some();
+        assert!(
+            opened || shared.lock().retry_audio_after.is_some(),
+            "an open was attempted"
+        );
+        shared.lock().open_comp(&PrimPath::new("/c").unwrap());
+        shared.replace_project();
+        let s = shared.lock();
+        assert!(s.open_comps.is_empty());
+        assert_eq!(s.output.is_some(), opened);
     }
 }

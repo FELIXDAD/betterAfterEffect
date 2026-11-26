@@ -32,9 +32,24 @@ fn auto_histogram(@builtin(global_invocation_id) id: vec3u, @builtin(workgroup_i
         for (var x = id.x; x < u.image.size.x; x += 128u) {
             let c = fx_load(src, u.image, vec2i(vec2u(x,y)), true);
             let rgb = vec3u(round(saturate(c.rgb) * 255.0));
-            atomicAdd(&counts[rgb.r], 1u);
-            atomicAdd(&counts[256u + rgb.g], 1u);
-            atomicAdd(&counts[512u + rgb.b], 1u);
+            if u.mode==5u {
+                // The average colour of what is visible: a transparent pixel's
+                // colour is undefined.
+                if c.a<=0.0 { continue; }
+                let bin=u32(round(fx_luma(vec3f(rgb))));
+                atomicAdd(&counts[bin],rgb.r);
+                atomicAdd(&counts[256u+bin],rgb.g);
+                atomicAdd(&counts[512u+bin],rgb.b);
+                atomicAdd(&counts[768u+bin],1u);
+                continue;
+            }
+            // Color Link (mode 4) averages the colour of what is visible; the
+            // alpha histogram still counts every pixel.
+            if u.mode != 4u || c.a > 0.0 {
+                atomicAdd(&counts[rgb.r], 1u);
+                atomicAdd(&counts[256u + rgb.g], 1u);
+                atomicAdd(&counts[512u + rgb.b], 1u);
+            }
             let y8 = u32(round(dot(vec3f(rgb), vec3f(0.299, 0.587, 0.114))));
             if u.mode == 2u {
                 let low = min(rgb.r, min(rgb.g, rgb.b));
@@ -46,7 +61,7 @@ fn auto_histogram(@builtin(global_invocation_id) id: vec3u, @builtin(workgroup_i
                     atomicAdd(&counts[768], 1u);
                 }
             } else {
-                let bin = select(y8, lightness_bin(rgb), u.mode == 3u);
+                let bin = select(select(y8, lightness_bin(rgb), u.mode == 3u),u32(round(saturate(c.a)*255.0)),u.mode==4u);
                 atomicAdd(&counts[768u + bin], 1u);
             }
         }
@@ -56,6 +71,7 @@ fn auto_histogram(@builtin(global_invocation_id) id: vec3u, @builtin(workgroup_i
         let v = vec4u(atomicLoad(&counts[k]), atomicLoad(&counts[256u + k]),
                       atomicLoad(&counts[512u + k]), atomicLoad(&counts[768u + k]));
         var partial = vec4f(v) / 1024.0;
+        if u.mode==5u { partial=vec4f(partial.rgb/255.0,partial.a); }
         if u.mode == 2u && k >= 4u && k < 12u {
             partial.w /= 128.;
         }
@@ -74,6 +90,39 @@ fn auto_mapping(@builtin(local_invocation_index) lane: u32) {
     workgroupBarrier();
     var total = vec4f(0);
     for (var k = 0u; k < 256u; k++) { total += density[k]; }
+    if u.mode>=4u {
+        if lane!=0u { return; }
+        let mode=u.equalize;
+        // Find the clipped low/high quantiles and the median of each channel.
+        let trim=min(u.black,0.49999);
+        let low_cut=trim*total;
+        let high_cut=total-low_cut;
+        var cum=vec4f(0); var sums=vec4f(0); var median=vec4f(0);
+        var low=vec4f(0); var high=vec4f(0);
+        for(var k=0u;k<256u;k++) {
+            let next=cum+density[k];
+            let weight=max(vec4f(0),min(high_cut,next)-max(low_cut,cum));
+            sums+=weight*f32(k);
+            low=select(low,vec4f(f32(k)),(cum<=low_cut)&(next>low_cut));
+            high=select(high,vec4f(f32(k)),(cum<high_cut)&(next>=high_cut));
+            median=select(median,vec4f(f32(k)),(cum<total*0.5)&(next>=total*0.5));
+            cum=next;
+        }
+        var linked=sums/max(vec4f(1e-10),high_cut-low_cut)/255.0;
+        switch mode {
+            case 2u,9u: { linked=median/255.0; }
+            case 3u,4u: {
+                let bin=u32(select(low.w,high.w,mode==3u));
+                let v=density[bin]; linked=vec4f(v.xyz/max(1e-10,v.w),1);
+            }
+            case 5u,10u: { linked=high/255.0; }
+            case 6u,11u: { linked=low/255.0; }
+            default: {}
+        }
+        if mode>=8u { linked=vec4f(linked.www,1); }
+        textureStore(dst,vec2u(0),vec4f(linked.rgb,1));
+        return;
+    }
     var lo = vec4f(255);
     var hi = vec4f(0);
     var cumulative = vec4f(0);

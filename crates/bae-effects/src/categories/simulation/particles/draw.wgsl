@@ -13,7 +13,7 @@ fn advance_emitter(@builtin(global_invocation_id) tid: vec3u) {
         return;
     }
     let hold = select(0., f(91) * .01 * life, cfg.kind == WORLD);
-    sprites[tid.x] = particle(id,frame.timing.x,at_age(id,birth,max(0.,age-hold)),life);
+    sprites[tid.x] = particle(id,frame.timing.x,at_age(id,birth,max(0.,age-hold),life),life);
 }
 
 @compute @workgroup_size(128)
@@ -30,7 +30,9 @@ fn advance_drizzle(@builtin(global_invocation_id) tid: vec3u) {
     if tid.x >= frame.count {
         return;
     }
-    let birth = birth_at(tid.x);
+    let order=select(tid.x,frame.count-1u-tid.x,cfg.kind==FOAM && f(50)==2.);
+    let birth=birth_at(order);
+    if cfg.kind==FOAM {sprites[tid.x]=foam(birth,frame.timing.x);return;}
     let s = spawn(birth.id,birth.time);
     let age = clamp((frame.timing.x-s.birth) / max(.000001,birth.life), 0., 1.);
     let r = max(1., age * f(6) * cfg.size.x * .001);

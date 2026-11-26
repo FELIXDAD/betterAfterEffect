@@ -11,6 +11,8 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
+mod audio;
+
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::props::{self, Node};
@@ -106,11 +108,10 @@ pub struct PropertiesPanel {
 }
 
 impl Panel for PropertiesPanel {
+    /// "Properties: <layer>" for the layer selected now, even while the panel
+    /// is not drawn (a collapsed or background tab, #465).
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
-        // From the selection now, not the last drawn frame: a collapsed panel
-        // in a stack is not drawn and kept the old layer's name (#465).
-        let session = common::session(cx.resources);
-        match selected_layer(cx.stage, &session) {
+        match selected_layer(cx.stage, &common::session(cx.resources)) {
             Some(layer) => TabInfo::new(format!(
                 "{}: {}",
                 tr("Properties"),
@@ -195,6 +196,24 @@ impl Panel for PropertiesPanel {
                             commit = true;
                         }
                     });
+                    // Paragraph alignment.
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(tr("Paragraph")).color(color::TEXT));
+                        for (icon, value, name) in [
+                            (Icon::TextAlignLeft, "left", "Left Align Text"),
+                            (Icon::TextAlignCenter, "center", "Center Text"),
+                            (Icon::TextAlignRight, "right", "Right Align Text"),
+                        ] {
+                            let on = d2.justification == value;
+                            let r = icons::button(ui, icon, 20.0, on)
+                                .labeled_toggle(egui::WidgetType::Button, tr(name), on)
+                                .on_hover_text(tr(name));
+                            if r.clicked() && !on {
+                                d2.justification = value.to_owned();
+                                commit = true;
+                            }
+                        }
+                    });
                     if commit {
                         let key_now = query::to_key_time(stage, &layer, now);
                         cx.invoke_with(
@@ -213,6 +232,22 @@ impl Panel for PropertiesPanel {
                 for (path, attr, label) in flat.into_iter().filter(|(_, a, _)| a == "color" || a == "size" || a == "width") {
                     let owner = query::display_name_of(stage, &path);
                     prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &format!("{owner} · {label}"), now, 2);
+                }
+            }
+            // Effects: each effect's controls, in stacking order (AE).
+            let effects = props::effect_nodes(stage, &layer);
+            if !effects.is_empty() {
+                section(ui, tr("Effects"));
+                for effect in &effects {
+                    let Node::Group { label, children, .. } = effect else {
+                        continue;
+                    };
+                    ui.label(egui::RichText::new(label).color(color::TEXT_STRONG));
+                    let mut flat = Vec::new();
+                    collect_props(children, &mut flat);
+                    for (path, attr, label) in flat {
+                        prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &label, now, dims);
+                    }
                 }
             }
         });
@@ -354,10 +389,9 @@ impl Panel for PreviewPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let info = common::active_comp(cx.stage, &session);
-        if let Some(info) = &info
-            && session.lock().update_preview(cx, info)
-        {
-            ui.ctx().request_repaint();
+        // The shell ticks the clock; this keeps the audio mix current.
+        if let Some(info) = &info {
+            session.lock().update_preview(cx, info);
         }
         let playing = session.lock().is_playing();
         ui.add_space(4.0);
@@ -594,6 +628,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Expression", "表达式"),
     ("Font Size", "字体大小"),
     ("Fill Color", "填充颜色"),
+    ("Left Align Text", "左对齐文本"),
+    ("Center Text", "居中对齐文本"),
+    ("Right Align Text", "右对齐文本"),
     ("Zoom", "缩放"),
     ("Intensity", "强度"),
     ("No layer selected", "未选择图层"),
@@ -602,6 +639,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Select a layer to see its properties.",
         "选择一个图层以查看其属性。",
     ),
+    ("Master Volume", "主音量"),
+    ("Left output level", "左输出电平"),
+    ("Right output level", "右输出电平"),
     // Preview panel
     ("First Frame", "第一帧"),
     ("Previous Frame", "上一帧"),
@@ -620,6 +660,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers this module's Chinese strings and panels (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "audio",
+        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+    );
     crate::register_panel(
         app,
         "properties",

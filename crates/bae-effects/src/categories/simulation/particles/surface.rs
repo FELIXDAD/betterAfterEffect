@@ -7,6 +7,7 @@ use bae_render::{GpuImage, IRect, RenderError};
 use std::sync::Arc;
 
 pub(super) fn frame(
+    kind: Kind,
     scene: &Scene<'_>,
     input: &GpuImage,
     roi: IRect,
@@ -33,59 +34,67 @@ pub(super) fn frame(
             input.rect.height() as f32,
         ],
     );
-    for i in 0..4 {
+    let times = if kind == Kind::World && scene.p.popup(47) != 2 {
+        super::texture_times(
+            scene.p.p.time.as_seconds(),
+            super::max_lifetime(scene.p, 5),
+            scene.p.popup(47) == 1,
+        )
+    } else {
+        [0.; 4]
+    };
+    for (i, time) in times.into_iter().enumerate() {
         let r = maps.get(i).and_then(Option::as_ref).unwrap_or(input).rect;
-        u.f32s(48 + 16 * i, &[0., 0., r.width() as f32, r.height() as f32]);
+        u.f32s(
+            48 + 16 * i,
+            &[time as f32, 0., r.width() as f32, r.height() as f32],
+        );
     }
     let side = maps.get(4).and_then(Option::as_ref).unwrap_or(input).rect;
     u.f32s(208, &[side.width() as f32, side.height() as f32]);
-    if let Some(view) = scene.p.p.scene {
-        if let Some(camera) = view.camera {
-            let inv = view.placement.inverse();
-            let origin = glam::DVec2::from_array(scene.origin.map(f64::from));
-            let center = glam::DVec2::from_array(view.size.map(f64::from)) * 0.5;
-            let project = |v: glam::DVec3| {
-                let xy = view.placement.transform_point2(v.truncate() + origin);
-                let c = camera.view().transform_point3(xy.extend(v.z));
-                let (w, zoom) = match camera.projection {
-                    bae_render::camera::Projection::Perspective => (c.z, camera.zoom),
-                    bae_render::camera::Projection::Orthographic { scale } => (1., scale),
-                };
-                let xy = inv.matrix2 * (c.truncate() * zoom + center * w)
-                    + (inv.translation - origin) * w;
-                glam::DVec4::new(xy.x, xy.y, 0., w)
-            };
-            let base = project(glam::DVec3::ZERO);
-            for (i, col) in [
-                project(glam::DVec3::X) - base,
-                project(glam::DVec3::Y) - base,
-                project(glam::DVec3::Z) - base,
-                base,
-            ]
-            .iter()
-            .enumerate()
-            {
-                u.f32s(112 + i * 16, &col.as_vec4().to_array());
-            }
-            u.f32(8, 1.);
-        }
-        if let Some(light) = view.layer_light {
-            let xy = view
-                .placement
-                .inverse()
-                .transform_point2(light.position().truncate());
-            u.f32s(
-                176,
-                &[
-                    xy.x as f32 - scene.origin[0],
-                    xy.y as f32 - scene.origin[1],
-                    light.position().z as f32,
-                    light.intensity * 0.01,
-                ],
-            );
-            u.f32s(192, &light.color);
-            u.f32(12, 1.);
-        }
+    let origin = glam::DVec2::from_array(scene.origin.map(f64::from));
+    let view = scene.p.p.scene;
+    let projection = view
+        .and_then(|s| {
+            s.camera.map(|camera| {
+                super::projection::particle_scene_projection(
+                    camera,
+                    glam::DVec2::from_array(s.size.map(f64::from)),
+                    s.placement,
+                    origin,
+                )
+            })
+        })
+        .or_else(|| {
+            (kind == Kind::World).then(|| {
+                super::projection::particle_world_projection(
+                    glam::DVec2::from_array(scene.size.map(f64::from)),
+                    |id| scene.p.f(id),
+                )
+            })
+        });
+    if let Some(projection) = projection {
+        u.f32s(112, &projection.as_mat4().to_cols_array());
+        u.f32(8, 1.);
+    }
+    if let Some(view) = view
+        && let Some(light) = view.layer_light
+    {
+        let xy = view
+            .placement
+            .inverse()
+            .transform_point2(light.position().truncate());
+        u.f32s(
+            176,
+            &[
+                xy.x as f32 - scene.origin[0],
+                xy.y as f32 - scene.origin[1],
+                light.position().z as f32,
+                light.intensity * 0.01,
+            ],
+        );
+        u.f32s(192, &light.color);
+        u.f32(12, 1.);
     }
     u
 }
@@ -133,6 +142,7 @@ pub(super) fn composite(
         Kind::Rain => (p.f(16) as f32, if p.popup(15) == 2 { 5 } else { 1 }),
         Kind::Hair => (1., 1),
         Kind::Mercury => (0., 4),
+        Kind::Foam if p.popup(2) == 2 => (1., 1),
         Kind::Stars => (p.f(6) as f32, 1),
         Kind::Bubbles | Kind::Drizzle => (1., 1),
         _ => (0., 1),

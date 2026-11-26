@@ -1,4 +1,4 @@
-//! Timeline: select, rename (Enter / double-click, type, Enter / click away /
+//! Timeline: select, rename (Enter, type, Enter / click away /
 //! Esc), Chinese through an IME composition, spaces, emoji, long names;
 //! stopwatch and Option+Shift+P keyframes, J/K; Space with the focus in a text
 //! field, on a button and on nothing; undo / redo of all of it.
@@ -55,13 +55,15 @@ fn rename_field_value(h: &Ui) -> Option<String> {
         .and_then(|n| n.value())
 }
 
-fn start_rename_by_double_click(h: &mut Ui, name: &str) {
+/// AE's rename: select the layer, press Enter (Return).
+fn start_rename(h: &mut Ui, name: &str) {
     let at = layer_row(h, name);
-    double_click_at(h, at);
+    click_at(h, at);
+    key(h, Modifiers::NONE, Key::Enter);
     assert_eq!(
         rename_field_value(h).as_deref(),
         Some(name),
-        "double-click did not open the rename field"
+        "Enter did not open the rename field"
     );
 }
 
@@ -86,7 +88,7 @@ fn rename_commits_on_enter_and_click_away_and_esc_cancels() {
     let layer = h.state().layers()[0].clone();
 
     // Double-click, type, Enter.
-    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
+    start_rename(&mut h, "Dark Gray Solid 1");
     replace_text(&mut h, "Hero");
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&layer), "Hero");
@@ -96,7 +98,7 @@ fn rename_commits_on_enter_and_click_away_and_esc_cancels() {
     );
 
     // Double-click, type, click elsewhere (an empty part of the timeline graph).
-    start_rename_by_double_click(&mut h, "Hero");
+    start_rename(&mut h, "Hero");
     replace_text(&mut h, "Hero 2");
     let head = header(&h);
     click_at(&mut h, pos2(head.left() + 900.0, head.bottom() + 80.0));
@@ -107,7 +109,7 @@ fn rename_commits_on_enter_and_click_away_and_esc_cancels() {
     );
 
     // Double-click, type, Esc: unchanged.
-    start_rename_by_double_click(&mut h, "Hero 2");
+    start_rename(&mut h, "Hero 2");
     replace_text(&mut h, "Discarded");
     key(&mut h, Modifiers::NONE, Key::Escape);
     assert_eq!(h.state().name(&layer), "Hero 2", "Esc did not cancel");
@@ -128,7 +130,7 @@ fn rename_field_starts_with_the_whole_name_selected() {
     // AE selects the whole name when the field opens: typing replaces it.
     let mut h = comp_with_solid();
     let layer = h.state().layers()[0].clone();
-    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
+    start_rename(&mut h, "Dark Gray Solid 1");
     type_text(&mut h, "Hero");
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&layer), "Hero");
@@ -155,7 +157,7 @@ fn rename_with_ime_spaces_emoji_and_long_names() {
     let layer = h.state().layers()[0].clone();
 
     // Chinese through a Pinyin composition: marked text, then the commit.
-    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
+    start_rename(&mut h, "Dark Gray Solid 1");
     press(&mut h, Modifiers::COMMAND, Key::A);
     settle(&mut h);
     ime_compose(&mut h, &["b", "bei", "bei j", "bei jing"], "背景");
@@ -169,21 +171,21 @@ fn rename_with_ime_spaces_emoji_and_long_names() {
     // Spaces inside, leading and trailing.
     for name in ["  spaced  name  ", "Comp 背景 ✨ 🎬👩‍👩‍👧", "a"] {
         let current = h.state().name(&layer);
-        start_rename_by_double_click(&mut h, &current);
+        start_rename(&mut h, &current);
         replace_text(&mut h, name);
         key(&mut h, Modifiers::NONE, Key::Enter);
         assert_eq!(h.state().name(&layer), name, "rename to {name:?}");
     }
 
     // A whitespace-only name is refused (the layer keeps its name).
-    start_rename_by_double_click(&mut h, "a");
+    start_rename(&mut h, "a");
     replace_text(&mut h, "   ");
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&layer), "a");
 
     // A very long name (2 000 characters, mixed scripts).
     let long: String = "长名字 Long name ".repeat(125);
-    start_rename_by_double_click(&mut h, "a");
+    start_rename(&mut h, "a");
     replace_text(&mut h, &long);
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&layer), long);
@@ -204,7 +206,7 @@ fn rename_with_ime_spaces_emoji_and_long_names() {
 #[test]
 fn space_in_a_text_field_types_and_does_not_play() {
     let mut h = comp_with_solid();
-    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
+    start_rename(&mut h, "Dark Gray Solid 1");
     replace_text(&mut h, "A");
     press(&mut h, Modifiers::NONE, Key::Space);
     send(&mut h, Event::Text(" ".into()));
@@ -258,7 +260,7 @@ fn space_with_nothing_focused_plays_and_stops() {
 fn space_on_a_focused_button_presses_it_and_does_not_play() {
     let mut h = comp_with_solid();
     // The Render Queue's "Remove" button gets keyboard focus (Tab), then Space.
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     queue_control(&h, 1, "Remove").expect("Remove").focus();
     settle(&mut h);
@@ -487,7 +489,7 @@ fn enter_renames_the_topmost_selected_layer() {
 #[test]
 fn enter_on_a_focused_button_does_not_start_a_rename() {
     let mut h = comp_with_solid();
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     h.state().session().lock().selected_layers = h.state().layers();
     queue_control(&h, 1, "Remove").expect("Remove").focus();
@@ -504,14 +506,22 @@ fn enter_on_a_focused_button_does_not_start_a_rename() {
     );
 }
 
+/// AE: a double-click on a layer name opens the Layer panel, not the rename
+/// field (#459).
 #[test]
-fn double_click_rename_also_selects_the_name_for_ime() {
+fn double_click_on_a_layer_name_opens_the_layer_panel() {
     let mut h = comp_with_solid();
-    let layer = h.state().layers()[0].clone();
-    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
-    ime_compose(&mut h, &["wen", "wen zi"], "文字");
-    key(&mut h, Modifiers::NONE, Key::Enter);
-    assert_eq!(h.state().name(&layer), "文字");
+    let at = layer_row(&h, "Dark Gray Solid 1");
+    double_click_at(&mut h, at);
+    assert_eq!(rename_field_value(&h), None, "no rename field");
+    assert!(
+        h.state()
+            .workspace
+            .open_panels()
+            .iter()
+            .any(|p| p.kind() == "layer"),
+        "the Layer panel opened"
+    );
 }
 
 /// Five layers; returns their timeline row positions top to bottom.
@@ -699,5 +709,61 @@ fn transport_keys_move_the_playhead_after_clicking_a_layer() {
     assert!(
         bae_motion::markers::markers_of(h.state().stage(), &comp).is_empty(),
         "Shift+PageDown set no comp marker"
+    );
+}
+
+fn right_click(h: &mut Ui, at: Pos2) {
+    pause(h);
+    send(h, Event::PointerMoved(at));
+    for pressed in [true, false] {
+        send(
+            h,
+            Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        );
+    }
+    settle(h);
+}
+
+/// Right-click in the timeline: under the layers AE's New menu, on the layer
+/// number and label columns the layer menu (#466).
+#[test]
+fn timeline_right_click_menus() {
+    let mut h = comp_with_solid();
+    let row = layer_row(&h, "Dark Gray Solid 1");
+    right_click(&mut h, pos2(row.x, row.y + 80.0));
+    let texts = painted_texts(&h);
+    assert!(
+        texts.iter().any(|t| t == "New"),
+        "New menu under the layers: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "Pre-compose..."),
+        "no layer menu: {texts:?}"
+    );
+    send(
+        &mut h,
+        Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    settle(&mut h);
+    let number = find_texts(&h, |t| t == "1")
+        .into_iter()
+        .find(|r| (r.center().y - row.y).abs() < 6.0)
+        .expect("layer number");
+    right_click(&mut h, number.center());
+    let texts = painted_texts(&h);
+    assert!(
+        texts.iter().any(|t| t == "Pre-compose..."),
+        "layer menu on #: {texts:?}"
     );
 }
