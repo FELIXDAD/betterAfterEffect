@@ -834,11 +834,35 @@ fn catalog_lines() -> Vec<String> {
                     sort_run(&mut level, &mut run);
                     level.push(format!("{prefix} > {} ▸", sub.title));
                     let mut inner = Vec::new();
-                    walk(
-                        &format!("{prefix} > {}", sub.title),
-                        sub.children,
-                        &mut inner,
-                    );
+                    if sub.title == "Layer Styles" {
+                        let path = format!("{prefix} > {}", sub.title);
+                        // Both captured menu bars have an empty dynamic submenu.
+                        // The layer context-menu capture supplies its populated order.
+                        for title in [
+                            "Convert to Editable Styles",
+                            "Show All",
+                            "Remove All",
+                            "---",
+                            "Blending Options",
+                            "Drop Shadow",
+                            "Inner Shadow",
+                            "Outer Glow",
+                            "Inner Glow",
+                            "Bevel and Emboss",
+                            "Satin",
+                            "Color Overlay",
+                            "Gradient Overlay",
+                            "Stroke",
+                        ] {
+                            inner.push(format!("{path} > {title}"));
+                        }
+                    } else {
+                        walk(
+                            &format!("{prefix} > {}", sub.title),
+                            sub.children,
+                            &mut inner,
+                        );
+                    }
                     level.extend(inner);
                 }
                 Node::Effects => {
