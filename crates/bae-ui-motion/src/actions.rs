@@ -74,6 +74,8 @@ pub mod ids {
     pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > New Comp from Selection... (Alt+\).
+    pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
     pub const REPLACE_FOOTAGE: &str = "motion.file.replace_footage_file";
     /// File > Reload Footage (Cmd/Ctrl+Alt+L).
@@ -358,6 +360,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
     (ids::REVEAL_IN_EXPLORER, "Reveal in Explorer"),
@@ -1388,6 +1391,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::import::import_file(cx, session);
             return true;
         }
+        ids::NEW_COMP_FROM_SELECTION => {
+            // Comps, footage and solids selected in the Project panel.
+            let items: Vec<PrimPath> = session
+                .lock()
+                .selected_items
+                .iter()
+                .filter(|i| {
+                    query::comp_info(stage, i).is_some()
+                        || stage
+                            .prim(i)
+                            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+                })
+                .cloned()
+                .collect();
+            let prefs = crate::prefs::current(cx.resources);
+            let still = crate::import::ImportDefaults::of(&prefs).still_duration;
+            crate::dialogs::comp_from_selection(cx, items, still);
+            return true;
+        }
         ids::REPLACE_FOOTAGE => {
             crate::import::replace_footage(cx, session);
             return true;
@@ -1677,18 +1699,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
         ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
-            let queue = crate::render_queue::shared(cx.resources);
-            let dir = crate::render_queue::default_output_dir();
-            let mut queue = queue.lock();
-            if id == ids::SAVE_FRAME_AS {
-                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
-            } else {
-                queue.add(&info, &dir);
-            }
-            queue.assign_output(
-                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
-            );
-            drop(queue);
+            let frame = (id == ids::SAVE_FRAME_AS).then(|| info.frame_rate.time_to_frame(now));
+            crate::render_queue::add_to_queue(cx, &info, frame);
             cx.open_panel("render_queue");
         }
         ids::SELECT_NEXT_LAYER | ids::SELECT_PREV_LAYER => {
@@ -2092,22 +2104,34 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     Some(_) => {}
                     None => cx.invoke_with(
                         "marker.add",
-                        json!({"owner": info.path, "time": now, "comment": n.to_string()}),
+                        json!({"owner": info.path, "time": now, "comment": n.to_string(), "label": crate::prefs::marker_label(&crate::prefs::current(cx.resources), false)}),
                     ),
                 }
             }
         }
         ids::ADD_MARKER => {
+            let label = crate::prefs::marker_label(&crate::prefs::current(cx.resources), false);
             if layers.is_empty() {
-                cx.invoke_with("marker.add", json!({"owner": info.path, "time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owner": info.path, "time": now, "label": label}),
+                );
             } else {
-                cx.invoke_with("marker.add", json!({"owners": layers, "comp_time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owners": layers, "comp_time": now, "label": label}),
+                );
             }
         }
         ids::ADD_MARKER_DIALOG => {
             let owner = layers.first().cloned().unwrap_or_else(|| info.path.clone());
             s.key_dialog = Some(crate::timeline::KeyDialog::Marker(Box::new(
-                crate::timeline::MarkerDialog::new_marker(&info, owner, now),
+                crate::timeline::MarkerDialog::new_marker(
+                    &info,
+                    owner,
+                    now,
+                    crate::prefs::marker_label(&crate::prefs::current(cx.resources), false),
+                ),
             )));
         }
         ids::DELETE_ALL_MARKERS if !layers.is_empty() => {

@@ -68,7 +68,9 @@ pub(super) fn show(ui: &mut Ui, prefs: &Preferences) {
     }
     add("\noffset();", "default");
     let galley = ui.fonts_mut(|f| f.layout_job(job));
-    let (rect, _) = ui.allocate_exact_size(vec2(width, galley.size().y + 8.0), Sense::hover());
+    let (rect, sample) = ui.allocate_exact_size(vec2(width, galley.size().y + 8.0), Sense::hover());
+    let sample = sample.labeled(egui::WidgetType::Label, galley.text());
+    crate::a11y::value_source(&sample, crate::a11y::VERBATIM_VALUE);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     painter.rect_filled(rect, 1.0, color(prefs, "background"));
     let origin = rect.min + vec2(gutter, 4.0);
