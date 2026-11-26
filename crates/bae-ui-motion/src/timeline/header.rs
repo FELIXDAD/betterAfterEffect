@@ -491,7 +491,8 @@ impl TimelinePanel {
             }
             f += step;
         }
-        if let Some((path, revision, spans)) = &session.lock().cached_preview
+        if self.display.cache
+            && let Some((path, revision, spans)) = &session.lock().cached_preview
             && path == &info.path
             && *revision == cx.stage.revision()
         {
@@ -585,10 +586,15 @@ impl TimelinePanel {
                     t = snap;
                 }
             }
-            session.lock().scrub_to(cx, info, t, sound);
+            let mut s = session.lock();
+            if !self.display.live && ruler_resp.dragged() && s.held_viewer_time.is_none() {
+                s.held_viewer_time = Some((info.path.clone(), now));
+            }
+            s.scrub_to(cx, info, t, sound);
             self.drag = Some(Drag::Cti);
         }
         if ruler_resp.drag_stopped() {
+            session.lock().held_viewer_time = None;
             session.lock().stop();
             self.drag = None;
         }
