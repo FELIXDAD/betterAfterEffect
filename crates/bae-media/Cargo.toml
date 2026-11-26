@@ -52,7 +52,7 @@ objc2-core-foundation = { workspace = true, features = ["CFBase", "CFDictionary"
 objc2-av-foundation = { workspace = true, features = ["AVAsset", "AVAssetReader", "AVAssetReaderOutput", "AVAssetTrack", "AVAssetTrackSegment", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVSampleCursor", "AVTime", "AVVideoSettings", "objc2-core-media", "objc2-core-video"] }
 objc2-core-media = { workspace = true, features = ["CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "objc2-core-audio-types", "CMTime", "CMTimeRange", "objc2-core-video"] }
 objc2-core-video = { workspace = true, features = ["CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVPixelBufferPool", "CVPixelFormatDescription", "CVReturn", "objc2-metal"] }
-objc2-video-toolbox = { workspace = true, features = ["VTCompressionProperties"] }
+objc2-video-toolbox = { workspace = true, features = ["VTCompressionProperties", "VTCompressionSession", "VTErrors", "objc2-core-media"] }
 objc2-metal = { workspace = true, features = ["MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
 
 # Test fixtures: movies are written with AVAssetWriter (no binary files in git).

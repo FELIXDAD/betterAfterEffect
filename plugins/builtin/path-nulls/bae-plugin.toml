@@ -1,0 +1,21 @@
+schema_version = 1
+
+[plugin]
+id = "org.bae.path-nulls"
+version = "0.1.0"
+api = "0.1"
+name = "Create Nulls From Paths"
+
+[script]
+entry = "main.js"
+
+[permissions]
+project = "write"
+
+[[command]]
+id = "bind"
+name = "Create Nulls From Paths"
+description = "Bind null layers to selected mask or shape paths."
+implementation = "script"
+entry = "bind"
+schema = "args.json"

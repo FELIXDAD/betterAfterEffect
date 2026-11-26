@@ -342,3 +342,54 @@ fn double_clicking_a_parametric_shape_selects_its_group() {
         "the layer stays"
     );
 }
+
+/// While mask or shape vertices are dragged, the picture follows (#593): the
+/// preview goes into the evaluated comp's mask shape and Path item.
+#[test]
+fn edited_paths_show_in_the_evaluated_comp() {
+    let mut h = H::new();
+    let solid = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "mask.create",
+        json!({"layer": solid, "kind": "rect", "position": [100.0, 50.0], "size": [100.0, 50.0]}),
+    );
+    let mask = h.children(&solid.child("masks").unwrap())[0].clone();
+    let out = h.run(
+        "shape.add",
+        json!({"comp": h.comp, "kind": "rect", "bezier": true,
+               "position": [0.0, 0.0], "size": [100.0, 50.0]}),
+    );
+    let group = path(&out["group"]);
+    let item = h.children(&group.child("contents").unwrap())[0].clone();
+    let moved = BezierPath {
+        vertices: vec![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+        in_tangents: vec![[0.0, 0.0]; 3],
+        out_tangents: vec![[0.0, 0.0]; 3],
+        closed: true,
+        ..BezierPath::default()
+    };
+    let mut comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+    crate::viewer::overlay::apply_path_preview(&mut comp, &mask, &moved);
+    crate::viewer::overlay::apply_path_preview(&mut comp, &item, &moved);
+    let m = comp
+        .layers
+        .iter()
+        .flat_map(|l| &l.masks)
+        .find(|m| m.path == mask)
+        .expect("mask");
+    assert_eq!(m.shape, moved);
+    fn find<'a>(
+        items: &'a [bae_anim::EvaluatedPrim],
+        p: &PrimPath,
+    ) -> Option<&'a bae_anim::EvaluatedPrim> {
+        items
+            .iter()
+            .find_map(|i| (i.path == *p).then_some(i).or_else(|| find(&i.children, p)))
+    }
+    let e = comp
+        .layers
+        .iter()
+        .find_map(|l| find(&l.contents, &item))
+        .expect("path item");
+    assert_eq!(e.get("path"), Some(&Value::Bezier(moved)));
+}

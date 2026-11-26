@@ -15,7 +15,7 @@
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
-use bae_model::PrimPath;
+use bae_model::{BezierPath, PrimPath};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::PanelContext;
 use bae_ui::theme;
@@ -71,6 +71,18 @@ pub(crate) struct SelectState {
 }
 
 impl SelectState {
+    /// The mask or shape path a vertex drag or free transform is changing,
+    /// and its previewed value.
+    pub(super) fn path_preview(&self) -> Option<(PrimPath, BezierPath)> {
+        if let Some(d) = &self.path_drag {
+            return Some((d.prim().clone(), d.preview().path));
+        }
+        self.free
+            .as_ref()
+            .filter(|f| f.dragging())
+            .map(|f| (f.prim.clone(), f.preview().clone()))
+    }
+
     /// A drag is in progress.
     pub(crate) fn busy(&self) -> bool {
         self.drag.is_some()
@@ -292,7 +304,9 @@ pub(super) fn frame(
         && let Some(pos) = hover
     {
         // AE: double-clicking a text layer edits its text (Type tool); a shape
-        // layer, its path under the pointer (or its first) in Free Transform.
+        // layer, its path under the pointer (or its first) in Free Transform;
+        // a pre-comp opens its composition; any other layer opens in the
+        // Layer panel.
         let under: Vec<PrimPath> = layers_at(stage, comp, view, pos).collect();
         if let Some(layer) = under
             .iter()
@@ -344,7 +358,8 @@ pub(super) fn frame(
                         state.path_drag = None;
                     }
                 }
-                _ => {}
+                Some(_) => crate::layer_panel::open(cx, session, layer),
+                None => {}
             }
         }
     }

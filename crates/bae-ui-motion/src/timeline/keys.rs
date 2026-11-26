@@ -24,6 +24,11 @@ pub(super) fn paint_key(p: &egui::Painter, c: Pos2, k: &Keyframe, selected: bool
         color::KEYFRAME
     };
     let stroke = Stroke::new(1.0, Color32::from_gray(20));
+    // Roving keyframes: a small dot (AE).
+    if k.flags.roving {
+        p.circle(c, 2.5, fill, stroke);
+        return;
+    }
     let r = 5.0;
     let half = |left: bool, interp: Interpolation, auto: bool| -> Vec<Pos2> {
         let s = if left { -1.0 } else { 1.0 };
