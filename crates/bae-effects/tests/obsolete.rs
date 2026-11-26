@@ -151,6 +151,68 @@ fn alpha_levels_converts_8bit_controls_and_brightness_selects_legacy_mode() {
 }
 
 #[test]
+fn noise_and_utility_aliases_and_targets_are_registered() {
+    for (old, modern) in [
+        ("ADBE Noise", "ADBE Noise2"),
+        ("ADBE Noise Alpha", "ADBE Noise Alpha2"),
+        ("ADBE Noise HLS", "ADBE Noise HLS2"),
+        ("ADBE Noise HLS Auto", "ADBE Noise HLS Auto2"),
+        ("ADBE Cineon Converter", "ADBE Cineon Converter2"),
+        ("CC Composite", "CS Composite"),
+    ] {
+        get(modern).unwrap_or_else(|| panic!("missing {modern}"));
+        check_schemas(&[old]);
+    }
+}
+
+#[test]
+fn legacy_composite_reads_its_own_source() {
+    let fx = get("CC Composite").unwrap();
+    let instance = common::instance("CC Composite", vec![]);
+    let params = bae_render::EffectParams::new(&instance);
+    let dependencies = fx.effect().layer_dependencies(&params);
+    assert_eq!(dependencies.len(), 1);
+    assert_eq!(
+        dependencies[0].layer,
+        instance.path.parent().unwrap().parent().unwrap()
+    );
+    assert_eq!(
+        dependencies[0].stage,
+        bae_render::effect::LayerStage::Source
+    );
+}
+
+#[test]
+fn cineon_legacy_modes_use_the_modern_conversion_directions() {
+    let old = get("ADBE Cineon Converter").unwrap();
+    let modern = get("ADBE Cineon Converter2").unwrap();
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(7, 1);
+    let input = Pixels::new(rect, |x, _| [x as f32 / 7., 0.35, 0.75, 1.]);
+    for (legacy, direction) in [(1, 2), (2, 1), (3, 2), (4, 3), (5, 2), (6, 3)] {
+        let a = run(
+            &gpu,
+            F32,
+            old,
+            vec![(1, Value::Int(legacy))],
+            &input,
+            rect,
+            1.,
+        );
+        let b = run(
+            &gpu,
+            F32,
+            modern,
+            vec![(1, Value::Int(direction))],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&a, &b, rect, 0.00001, "Cineon");
+    }
+}
+
+#[test]
 fn the_planner_resolves_an_alias_to_its_target_once() {
     let fx = get("ADBE Brightness & Contrast").unwrap().effect();
     let old = common::instance("ADBE Brightness & Contrast", vec![(2, Value::Float(45.))]);
