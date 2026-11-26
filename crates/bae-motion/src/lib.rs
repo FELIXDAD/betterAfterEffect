@@ -89,6 +89,7 @@ pub mod photoshop;
 pub mod precompose;
 pub mod project_settings;
 pub mod query;
+mod roto;
 pub mod shape;
 pub mod solid;
 pub mod text;
@@ -144,6 +145,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
         r.register(paint::AddStroke),
+        r.register(roto::Freeze),
         r.register(tracker::CreateTracker),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),

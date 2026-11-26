@@ -50,7 +50,7 @@ pub fn layer_of_effect(effect: &PrimPath) -> Option<PrimPath> {
 }
 
 /// The definition of `match_name` in `defs`.
-fn find_def(defs: &Registry<EffectDef>, match_name: &str) -> Option<Arc<EffectDef>> {
+pub(crate) fn find_def(defs: &Registry<EffectDef>, match_name: &str) -> Option<Arc<EffectDef>> {
     defs.snapshot()
         .iter()
         .find(|e| e.item().match_name == match_name)
@@ -256,7 +256,7 @@ pub fn instance_default(
     }
 }
 
-fn add_instance(
+pub(crate) fn add_instance(
     tx: &mut Transaction<'_>,
     layer: &PrimPath,
     def: &EffectDef,
@@ -661,6 +661,7 @@ pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand
 pub fn register_effect_commands(r: &mut CommandRegistry, defs: Arc<Registry<EffectDef>>) {
     let results = [
         r.register(ApplyEffect::new(defs.clone())),
+        r.register(crate::roto::Stroke(defs.clone())),
         r.register(ApplyPreset::new(defs.clone())),
         r.register(crate::tracker::ApplyTrack(defs.clone())),
         r.register(RemoveEffects),

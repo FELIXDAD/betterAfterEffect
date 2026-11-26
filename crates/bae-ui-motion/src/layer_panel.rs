@@ -15,6 +15,7 @@
 //! the layer's Paint effect (`paint.add_stroke`, one undo step) with the Paint
 //! and Brushes panels' settings; Alt/Option-click sets the Clone Stamp source.
 
+mod roto;
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
 use bae_model::{PrimPath, Time, Value};
@@ -41,6 +42,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    roto: roto::Brush,
     display: crate::source_view_menu::SourceView,
     tracks: crate::tracker::overlay::Overlay,
     eval: EvalCache,
@@ -174,7 +176,18 @@ pub(crate) fn alone(
     let mut out = comp.clone();
     out.width = size.x.ceil() as u32;
     out.height = size.y.ceil() as u32;
+    let baked: Vec<_> = l
+        .effects
+        .iter()
+        .filter_map(|e| e.param(bae_vision::FROZEN)?.as_prim_ref())
+        .filter_map(|path| comp.layer(path).cloned())
+        .map(|mut matte| {
+            matte.visible = false;
+            matte
+        })
+        .collect();
     out.layers = vec![l];
+    out.layers.extend(baked);
     out.camera = None;
     out.bg_color = [0.0, 0.0, 0.0, 0.0];
     Some((out, min))
@@ -201,13 +214,18 @@ impl Panel for LayerPanel {
         let full = ui.available_rect_before_wrap();
         let bar_h = 28.0;
         let ruler_h = 22.0;
+        let roto_tool = matches!(
+            crate::tools::shared(cx.resources).current(),
+            crate::tools::Tool::RotoBrush | crate::tools::Tool::RefineEdge
+        );
+        let span_h = if roto_tool { 24.0 } else { 0.0 };
         let area = Rect::from_min_max(
             full.min,
-            pos2(full.right(), full.bottom() - bar_h - ruler_h),
+            pos2(full.right(), full.bottom() - bar_h - ruler_h - span_h),
         );
         let ruler = Rect::from_min_max(
-            pos2(full.left(), area.bottom()),
-            pos2(full.right(), area.bottom() + ruler_h),
+            pos2(full.left(), area.bottom() + span_h),
+            pos2(full.right(), area.bottom() + span_h + ruler_h),
         );
         let bar = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
         ui.allocate_rect(full, Sense::hover());
@@ -240,11 +258,18 @@ impl Panel for LayerPanel {
         let Some(evaluated) = comp.layer(&layer) else {
             return;
         };
+        let roto_index = evaluated
+            .effects
+            .iter()
+            .position(|e| e.match_name == bae_vision::ROTO);
+        if roto_tool && let Some(i) = roto_index {
+            self.show = Show::Effect(i);
+        }
         let effects = match (self.show, self.render) {
             (Show::Effect(i), true) => i + 1,
             _ => 0,
         };
-        if let Some((one, min)) = alone(&comp, &layer, effects) {
+        if let Some((mut one, min)) = alone(&comp, &layer, effects) {
             let source = cx
                 .stage
                 .prim(&evaluated.path)
@@ -254,12 +279,41 @@ impl Panel for LayerPanel {
             let panning = self.navigate(ui, cx, area, size);
             let (mut view, _) = self.view(area, size, ui.ctx().pixels_per_point());
             view.aspect = aspect;
+            if !panning && roto_tool {
+                let tool = crate::tools::shared(cx.resources);
+                self.roto.paint(
+                    ui,
+                    cx,
+                    area,
+                    &view,
+                    min,
+                    evaluated,
+                    &mut one.layers[0],
+                    tool.current(),
+                );
+            } else {
+                self.roto.cancel_stroke();
+            }
             self.picture(ui, cx, area, &one, min, evaluated, &view);
+            self.roto.cursor(ui, area);
             // Space pans whatever the tool (AE); a paint tool paints,
             // otherwise a shown Liquify effect brushes.
-            if !panning && !self.paint(ui, cx, area, &view, min, evaluated) {
+            if !roto_tool && !panning && !self.paint(ui, cx, area, &view, min, evaluated) {
                 self.liquify(ui, cx, &session, area, &view, min, evaluated, time);
             }
+        }
+        self.roto.poll(cx);
+        if roto_tool && let Some(i) = roto_index {
+            self.roto.span(
+                ui,
+                cx,
+                &session,
+                Rect::from_min_max(area.left_bottom(), ruler.right_top()),
+                evaluated,
+                &evaluated.effects[i],
+                &info,
+                time,
+            );
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
         if let Some(edit) = self.time_ruler(ui, &session, &info, ruler, time, in_out) {
@@ -949,6 +1003,7 @@ impl LayerPanel {
 /// Registers this module's panel (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    crate::vision_bake::register(app);
     crate::register_panel(
         app,
         "layer",
@@ -958,6 +1013,11 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 
 /// Chinese (AE's zh_CN dictionary).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Roto Brush Canvas", "Roto 笔刷画布"),
+    ("Freeze", "冻结"),
+    ("Unfreeze", "解除冻结"),
+    ("Propagation Span", "传播范围"),
+    ("Frozen Matte", "冻结遮罩"),
     ("Set In Point to Current Time", "将入点设置为当前时间"),
     ("Set Out Point to Current Time", "将出点设置为当前时间"),
 ];

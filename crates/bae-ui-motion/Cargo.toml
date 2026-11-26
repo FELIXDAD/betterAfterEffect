@@ -12,6 +12,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bae-vision.workspace = true
+png.workspace = true
+tempfile.workspace = true
 bae-interop-psd.workspace = true
 bae-effects.workspace = true
 bae-app.workspace = true
@@ -47,4 +50,3 @@ egui-wgpu.workspace = true
 bae-vector = { workspace = true, features = ["render"] }
 # Render queue tests write TIFF too (bae-media encoders).
 bae-render = { workspace = true, features = ["media"] }
-tempfile.workspace = true
