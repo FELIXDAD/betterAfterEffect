@@ -378,7 +378,7 @@ impl LayerPanel {
             Stroke::new(1.0, Color32::from_gray(90)),
             egui::StrokeKind::Outside,
         );
-        self.tracks.draw(ui, cx, area, &view, min, &layer.path);
+        self.tracks.draw(ui, cx, area, view, min, &layer.path);
         if self.show == Show::Masks {
             let to_panel = DMat4::from_translation((-min).extend(0.0));
             for m in &layer.masks {

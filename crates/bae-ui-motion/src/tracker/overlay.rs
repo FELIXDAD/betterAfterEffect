@@ -140,9 +140,7 @@ impl Overlay {
                 && let Some(p) = pointer
             {
                 let delta = view.to_comp(p) - view.to_comp(d.start);
-                g = d
-                    .base
-                    .moved(d.handle, delta);
+                g = d.base.moved(d.handle, delta);
             }
             let center = screen(g.center);
             let attach = screen(g.attach);
@@ -206,9 +204,7 @@ impl Overlay {
             && p != d.start
         {
             let delta = view.to_comp(p) - view.to_comp(d.start);
-            let new = d
-                .base
-                .moved(d.handle, delta);
+            let new = d.base.moved(d.handle, delta);
             let time = query::to_key_time(cx.stage, &d.point, d.time);
             let edits:Vec<_>=new.edits(d.handle).into_iter().map(|(attr,v)|json!({"path":d.point,"attr":attr,"value":Value::Vec2(v.to_array()),"time":time})).collect();
             cx.invoke_with("attr.set_many", json!({"edits":edits}));
