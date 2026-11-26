@@ -189,3 +189,22 @@ fn glass_refracts_between_two_distinct_layers() {
         "{pixel:?}"
     );
 }
+
+#[test]
+fn line_sweep_default_direction_sweeps_top_to_bottom() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(64, 64);
+    let input = Pixels::new(r, |_, _| [1., 1., 1., 1.]);
+    // AE: 0° is up and clockwise, so the default 180° erases from the top.
+    let out = run(
+        &gpu,
+        F32,
+        builtin("CS LineSweep"),
+        vec![(1, Value::Float(40.)), (4, Value::Float(99.))],
+        &input,
+        r,
+        1.,
+    );
+    assert_eq!(out.get(32, 4)[3], 0., "top");
+    assert_eq!(out.get(32, 60)[3], 1., "bottom");
+}
