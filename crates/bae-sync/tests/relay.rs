@@ -1,4 +1,5 @@
-//! Relay connections with session settings of their own (`Relay::connect_with`).
+//! Relay connections with session settings of their own (`Relay::connect_with`)
+//! and what a peer was not sent yet (`Relay::unsynced`).
 
 mod common;
 
@@ -134,4 +135,43 @@ fn connect_with_gives_one_peer_its_own_send_interval() {
         t1 + Duration::from_secs(10) + Duration::from_millis(1),
     );
     assert!(slow.has(&v3));
+}
+
+/// `Relay::unsynced`: the documents a peer has not been sent yet, e.g. while
+/// its send interval holds an edit back (the hub pumps on shutdown until its
+/// project directory has nothing left); `None` once it is gone.
+#[test]
+fn unsynced_lists_what_a_peer_was_not_sent_yet() {
+    let base = base_snapshots();
+    let mut relay = Relay::new(ClientId::new("hub").unwrap());
+    let mut editor = Client::join(&mut relay, "editor", &base);
+    let (link, hub_end) = MemoryTransport::pair();
+    let mut config = relay.session_config();
+    config.min_send_interval = Duration::from_secs(10);
+    let store = relay.connect_with(Box::new(hub_end), config);
+    let mut store_client = Client::new("store", &base, link);
+
+    let who = author("user:editor");
+    let t0 = Instant::now();
+    settle(&mut relay, &mut [&mut editor, &mut store_client], t0);
+    assert_eq!(relay.unsynced(store), Some(Vec::new()));
+    // The first edit goes out at once (nothing was sent before).
+    let v1 = editor.set_opacity(&who, 1.0);
+    settle(&mut relay, &mut [&mut editor, &mut store_client], t0);
+    assert!(store_client.has(&v1));
+    assert_eq!(relay.unsynced(store), Some(Vec::new()));
+
+    // The next one waits for the send interval.
+    let v2 = editor.set_opacity(&who, 2.0);
+    let t1 = t0 + Duration::from_millis(1);
+    settle(&mut relay, &mut [&mut editor, &mut store_client], t1);
+    assert!(!store_client.has(&v2));
+    assert_eq!(relay.unsynced(store), Some(vec![root()]));
+    let t2 = t0 + Duration::from_secs(10);
+    settle(&mut relay, &mut [&mut editor, &mut store_client], t2);
+    assert!(store_client.has(&v2));
+    assert_eq!(relay.unsynced(store), Some(Vec::new()));
+
+    assert!(relay.disconnect(store));
+    assert_eq!(relay.unsynced(store), None);
 }

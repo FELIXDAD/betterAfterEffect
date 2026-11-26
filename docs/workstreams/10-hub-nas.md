@@ -97,6 +97,8 @@
   - 写缓冲上限不再是常态：会话有了背压（spec 2.4），给慢的或不读的客户端最多排约 1 MiB 加一条消息，不断开它，它恢复后补齐。Hub 内存：每个连接最多约一条消息 + 1 MiB，tungstenite 的缓冲只有几百 KiB（消息分成 256 KiB 的帧发送）。
   - `link.rs`：超时按收到的字节算（`HubTransport::bytes_received()`），大的上传在慢链路上超过 60 秒也不会被当成断线；只读连接 `set_receive_limit(16 MiB)`，不再让 Hub 缓冲 256 MiB 的消息再丢掉；转发 `backlog()` 和 `max_message_size()`。
   - 测试（`tests/hub.rs`）：`max_message_mib_reaches_the_handshake`（Hub 设 1 MiB 时，默认设置的客户端发 2 MiB 被断开、别人收不到，小修改照常；用同样上限的客户端自己就不发）、`a_slow_upload_is_not_taken_for_a_dead_link`（4 MB/s 的代理、6 MiB、超时 0.5 秒）、`read_only_clients_cannot_send_large_messages`（17 MiB 被断开）。去掉对应的修改时都失败。
+- 第二次审查后：
+  - 关闭、卸载工程时修改全部写盘。存盘对端原来也受背压限制（每次最多排 1 MiB），最后一次 pump 写不完，大的上传刚结束就关闭时会丢文档。现在它不受背压限制，关闭时 pump 到 `Relay::unsynced` 为空。测试：`stopping_the_hub_saves_every_edit`、`unloading_an_idle_project_saves_every_edit`（24 个 512 KiB 的文档，修改前丢约 20 个）。
 
 ## 请求（其他工作流在这里留言）
 

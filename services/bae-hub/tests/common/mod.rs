@@ -9,11 +9,13 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use bae_hub::{Access, HubConfig, RunningHub, TokenConfig};
+use bae_model::loro::{ExportMode, LoroDoc};
 use bae_model::{
     AuthorId, Keyframe, Op, PrimPath, PrimType, Specifier, Stage, Sublayer, SublayerId, Time, Value,
 };
 use bae_sync::{
-    ClientId, HubTransport, PumpOutcome, SessionConfig, SyncError, SyncSession, ThreadedTransport,
+    ClientId, DirConfig, DirTransport, DocKey, DocSet, HubTransport, MemDocs, PumpOutcome,
+    SessionConfig, SyncError, SyncSession, ThreadedTransport,
 };
 
 pub const WRITE: &str = "write-token-0123456789";
@@ -153,7 +155,6 @@ fn relay_bytes(mut from: TcpStream, mut to: TcpStream, rate: Option<usize>) {
 /// Set `attr` of the title layer to `len` random letters (Loro cannot compress
 /// them much). Returns the version that includes the edit.
 pub fn paste(c: &mut Client, attr: &str, len: usize, seed: u64) -> bae_model::loro::VersionVector {
-    use bae_sync::DocSet;
     let mut rng = Rng::new(seed);
     let text: String = (0..len)
         .map(|_| char::from(b'a' + rng.below(26) as u8))
@@ -170,7 +171,7 @@ pub fn paste(c: &mut Client, attr: &str, len: usize, seed: u64) -> bae_model::lo
         })
         .unwrap();
     c.stage
-        .version(&bae_sync::DocKey::sublayer(&SublayerId::root()))
+        .version(&DocKey::sublayer(&SublayerId::root()))
         .unwrap()
 }
 
@@ -389,4 +390,90 @@ pub fn fingerprint(stage: &Stage) -> String {
 /// `GET path` on the hub.
 pub fn http_get(addr: SocketAddr, path: &str, token: Option<&str>) -> bae_hub::probe::Response {
     bae_hub::probe::get(addr, path, token, Duration::from_secs(5)).expect("http")
+}
+
+// ---- plain documents (no stage), for tests that need many large ones ----
+
+/// `n` documents `doc0`… of `len` random letters each (Loro cannot compress
+/// them much).
+pub fn big_docs(n: usize, len: usize, seed: u64) -> MemDocs {
+    let mut rng = Rng::new(seed);
+    let mut docs = MemDocs::new();
+    for i in 0..n {
+        let mut text = String::with_capacity(len + 8);
+        while text.len() < len {
+            for b in rng.next().to_le_bytes() {
+                text.push(char::from(b'a' + b % 26));
+            }
+        }
+        text.truncate(len);
+        let doc = LoroDoc::new();
+        doc.get_text("t").insert(0, &text).unwrap();
+        doc.commit();
+        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+        docs.load(DocKey::parse(&format!("doc{i}")).unwrap(), &snapshot)
+            .unwrap();
+    }
+    docs
+}
+
+/// A client syncing plain documents with the hub, linked like the app.
+pub struct DocsClient {
+    pub docs: MemDocs,
+    pub session: SyncSession,
+    pub link: ThreadedTransport,
+}
+
+impl DocsClient {
+    pub fn join(addr: SocketAddr, project: &str, name: &str, docs: MemDocs) -> DocsClient {
+        DocsClient {
+            docs,
+            session: SyncSession::new(SessionConfig::new(ClientId::new(name).unwrap())),
+            link: connect(addr, project, Some(WRITE)).expect("connect"),
+        }
+    }
+
+    pub fn pump(&mut self) {
+        self.session
+            .pump(&mut self.docs, &mut self.link)
+            .expect("pump");
+    }
+
+    /// Has every document of `want` at least at its version.
+    pub fn has(&self, want: &MemDocs) -> bool {
+        missing(want, &self.docs).is_empty()
+    }
+}
+
+/// Documents of `want` that `got` lacks or has at an older version.
+pub fn missing(want: &MemDocs, got: &MemDocs) -> Vec<DocKey> {
+    want.doc_keys()
+        .into_iter()
+        .filter(|k| {
+            let w = want.version(k).unwrap();
+            !got.version(k).is_some_and(|g| g.includes_vv(&w))
+        })
+        .collect()
+}
+
+/// What the project directory `dir` holds, read the way the hub loads it
+/// (everything before the directory's `Hello`).
+pub fn read_project_dir(dir: &Path) -> MemDocs {
+    let config = DirConfig {
+        watch: false,
+        log_gc_after: None,
+        ..DirConfig::default()
+    };
+    let mut link = DirTransport::open(dir, ClientId::new("check").unwrap(), config).unwrap();
+    let mut session = SyncSession::new(SessionConfig::new(ClientId::new("check").unwrap()));
+    let mut docs = MemDocs::new();
+    let start = Instant::now();
+    while !session.is_connected() {
+        session.pump(&mut docs, &mut link).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "the project directory did not finish loading"
+        );
+    }
+    docs
 }

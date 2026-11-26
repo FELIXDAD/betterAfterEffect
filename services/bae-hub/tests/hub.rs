@@ -3,11 +3,12 @@
 
 mod common;
 
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use bae_hub::{Access, Anonymous};
 use bae_model::{Op, SublayerId, Value};
-use bae_sync::{DocKey, DocSet, HubLimits, HubTransport, PresenceState, SyncError};
+use bae_sync::{DocKey, DocSet, HubLimits, HubTransport, MemDocs, PresenceState, SyncError};
 use common::*;
 
 const PROJECT: &str = "film";
@@ -266,6 +267,81 @@ fn idle_projects_are_unloaded_and_reloaded() {
             .is_some_and(|v| v.includes_vv(&want))
     });
     assert_eq!(again[0].fingerprint(), expected);
+}
+
+/// Upload `project` through the hub and wait until a second client has all of
+/// it, so the hub's relay holds every document. Both clients then disconnect.
+fn upload(addr: SocketAddr, project: MemDocs) -> MemDocs {
+    let mut uploader = DocsClient::join(addr, PROJECT, "uploader", project);
+    let mut watcher = DocsClient::join(addr, PROJECT, "watcher", MemDocs::new());
+    let start = Instant::now();
+    while !watcher.has(&uploader.docs) {
+        uploader.pump();
+        watcher.pump();
+        assert!(
+            start.elapsed() < Duration::from_secs(120),
+            "the upload did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    uploader.docs
+}
+
+/// Many large documents: 12 MiB in 24 documents of 512 KiB.
+const SAVE_DOCS: usize = 24;
+const SAVE_DOC_LEN: usize = 512 << 10;
+
+/// Everything the relay holds is in the project directory once the hub has
+/// stopped, however much arrived just before. The directory is local disk, not
+/// a slow link, so the session's backpressure (nothing new while more than
+/// 1 MiB is queued) does not hold its writes back, and the last pump before
+/// closing writes it all. Before, the directory got about 1.5 MiB per 250 ms
+/// and the final pump wrote only what fit under 1 MiB: most of the 24
+/// documents were lost.
+#[test]
+fn stopping_the_hub_saves_every_edit() {
+    let data = tempfile::tempdir().unwrap();
+    let hub = start(config(data.path()));
+    let project = upload(hub.local_addr(), big_docs(SAVE_DOCS, SAVE_DOC_LEN, 1));
+    hub.shutdown();
+    let saved = read_project_dir(&data.path().join("projects").join(PROJECT));
+    let lost = missing(&project, &saved);
+    assert!(
+        lost.is_empty(),
+        "{} of {SAVE_DOCS} documents not saved: {lost:?}",
+        lost.len()
+    );
+}
+
+/// The same when a project is unloaded after a while without connections (the
+/// same path as a hub shutdown).
+#[test]
+fn unloading_an_idle_project_saves_every_edit() {
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.idle_unload = Some(Duration::from_millis(100));
+    let hub = start(cfg);
+    let addr = hub.local_addr();
+    let project = upload(addr, big_docs(SAVE_DOCS, SAVE_DOC_LEN, 2));
+    let start = Instant::now();
+    loop {
+        let list = http_get(addr, "/v1/projects", Some(WRITE));
+        if list.body.contains("\"loaded\":false") {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(30), "{}", list.body);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // It shows as unloaded while it is still being unloaded; stopping the hub
+    // waits for that (the project is no longer there to be stopped).
+    hub.shutdown();
+    let saved = read_project_dir(&data.path().join("projects").join(PROJECT));
+    let lost = missing(&project, &saved);
+    assert!(
+        lost.is_empty(),
+        "{} of {SAVE_DOCS} documents not saved: {lost:?}",
+        lost.len()
+    );
 }
 
 /// An edit larger than tungstenite's default 16 MiB frame limit (e.g. the first

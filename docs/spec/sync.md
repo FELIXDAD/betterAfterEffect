@@ -97,8 +97,9 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - **按连接设置会话**：
   - `connect(transport)` 用默认设置：Relay 的 ID 和 `hello_interval`。`session_config()` 返回这份设置。
   - `connect_with(transport, config)` 给一个连接单独的设置。从 `session_config()` 改起；`config.client` 保持 Relay 的 ID，对端在 `Hello` 里看到的就是它。
-  - 例子：Hub 存盘用的对端（工程目录的 `DirTransport`）`min_send_interval` 设成 250 ms，客户端拖动一个值时少写几次盘。
-  - `peer_config_mut(handle)` 改已连接的对端的设置，下一次 `pump` 生效。Hub 关闭工程前用它去掉存盘对端的节流，最后一次 `pump` 把所有修改都写进去。
+  - 例子：Hub 存盘用的对端（工程目录的 `DirTransport`，放在 `ThreadedTransport` 里）`min_send_interval` 设成 250 ms，客户端拖动一个值时少写几次盘；`max_backlog` 设成 `usize::MAX`，不受背压（2.4）限制。背压是给慢链路用的，存盘的队列只在进程内存里，本机磁盘几毫秒就写完；限制它只会让修改晚写盘，关闭工程时还压着的修改就丢了。
+  - `peer_config_mut(handle)` 改已连接的对端的设置，下一次 `pump` 生效。Hub 关闭（或卸载）工程前用它去掉存盘对端的节流和背压，然后 `pump` 到 `unsynced(handle)` 为空为止（最多 8 次）：所有修改都交给了存盘对端。丢掉 Relay 时 `ThreadedTransport` 把队列里的全部写完才结束。
+  - `unsynced(handle)`：这个对端还没收到的文档（它的会话的 `SyncSession::unsynced`；它还没发 `Hello` 时是全部文档），对端不在时返回 `None`。
 
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 

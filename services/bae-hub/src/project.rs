@@ -42,9 +42,13 @@ const STORE_TICK: Duration = Duration::from_millis(250);
 const STORE_RETRY: Duration = Duration::from_secs(5);
 /// The relay sends edits to the project directory at most this often. While a
 /// client drags a value, the edits of 250 ms become one append to the log
-/// instead of one per message: fewer disk writes. Shutdown saves what is still
-/// held back.
+/// instead of one per message: fewer disk writes. Shutdown drops the throttle
+/// and saves what is still held back.
 const STORE_SEND_INTERVAL: Duration = Duration::from_millis(250);
+/// Most pumps on shutdown, until the project directory has been sent every
+/// edit. One is enough unless clients are still sending: what a pump imports
+/// in its last round reaches the directory on the next one.
+const FINAL_PUMPS: usize = 8;
 
 /// Identifies a project on the hub; also its directory name. 1-64 ASCII letters,
 /// digits, `_` and `-`.
@@ -274,10 +278,19 @@ fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError>
     }))
 }
 
-/// Attach the project directory to the relay, with its send throttle.
+/// Attach the project directory to the relay, with its send throttle and
+/// without backpressure.
+///
+/// Backpressure (`SessionConfig::max_backlog`) keeps a slow client from
+/// queuing more than one large message at a time; what waits stays in the
+/// relay's documents. The directory is not a slow link: its queue is in-process
+/// memory in front of the local disk, which takes it within milliseconds.
+/// Holding it back would only leave edits unsaved for longer, and those still
+/// held back when the project closes would be lost.
 fn connect_store(relay: &mut Relay, store: ThreadedTransport) -> PeerHandle {
     let mut config = relay.session_config();
     config.min_send_interval = STORE_SEND_INTERVAL;
+    config.max_backlog = usize::MAX;
     relay.connect_with(Box::new(store), config)
 }
 
@@ -441,14 +454,24 @@ impl RelayThread {
                 break;
             }
         }
-        // Final pump, without the store's throttle so it gets every edit;
-        // dropping the relay closes every connection and drops the store
-        // transport, which writes everything still queued before its thread
-        // ends.
+        // Final pumps: the store gets every edit, without its throttle (and
+        // without backpressure, set again in case it was changed). Dropping
+        // the relay closes every connection and drops the store transport,
+        // which writes everything still queued before its thread ends.
         if let Some(config) = store.and_then(|h| relay.peer_config_mut(h)) {
             config.min_send_interval = Duration::ZERO;
+            config.max_backlog = usize::MAX;
         }
-        relay.pump();
+        for _ in 0..FINAL_PUMPS {
+            relay.pump();
+            // Done once the store has been sent everything (or is gone).
+            if store
+                .and_then(|h| relay.unsynced(h))
+                .is_none_or(|docs| docs.is_empty())
+            {
+                break;
+            }
+        }
         drop(relay);
         tracing::info!(project = %self.id, "project closed");
     }

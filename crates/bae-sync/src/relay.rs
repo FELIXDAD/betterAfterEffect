@@ -12,7 +12,7 @@ use crate::client::ClientId;
 use crate::docs::MemDocs;
 use crate::error::SyncError;
 use crate::presence::PresenceTable;
-use crate::protocol::Message;
+use crate::protocol::{DocKey, Message};
 use crate::session::{SessionConfig, SyncSession};
 use crate::transport::Transport;
 
@@ -109,7 +109,9 @@ impl Relay {
     }
 
     /// [`connect`](Self::connect) with session settings for this connection only,
-    /// e.g. a `min_send_interval` for a peer that writes everything to disk.
+    /// e.g. a `min_send_interval` for a peer that writes everything to disk, or
+    /// a `max_backlog` of `usize::MAX` for one that is not a slow link (its
+    /// queue only waits for the local disk).
     /// Start from [`session_config`](Self::session_config) and keep
     /// `config.client`: it is the relay's ID in the `Hello`s every peer sees.
     pub fn connect_with(
@@ -160,6 +162,16 @@ impl Relay {
             .iter_mut()
             .find(|p| p.handle == handle)
             .map(|p| p.session.config_mut())
+    }
+
+    /// Documents with changes the peer `handle` is not known to have yet (see
+    /// [`SyncSession::unsynced`]: all of them before it said hello). `None` if
+    /// it is not connected. E.g. to pump until a store has been sent everything.
+    pub fn unsynced(&self, handle: PeerHandle) -> Option<Vec<DocKey>> {
+        self.peers
+            .iter()
+            .find(|p| p.handle == handle)
+            .map(|p| p.session.unsynced(&self.docs))
     }
 
     /// Connected peers and the client IDs they announced.

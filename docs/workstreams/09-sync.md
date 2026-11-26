@@ -79,6 +79,8 @@
   - 共享目录（spec 4.3、4.6）：自己没接管的日志先读再写，不覆盖；更新版本格式的日志不改名、不覆盖；清理的"现在"用锁文件的修改时间（共享目录的时钟）；删不掉的日志在没有变化时不重复读（`DirStats::logs_scanned`）。
   - 测试：`tests/backpressure.rs`（慢链路模拟：8 MiB 只发一次；12 个文档一次排一个）、`tests/hub_limits.rs`（不读的对端不被断开、恢复后补齐；16 MiB 的第一次同步上传和下载；超限的文档不挡别的）、`tests/shared_dir.rs` 3 个、`dir.rs` 单元测试 1 个。每一条都确认过：去掉对应的修改后失败。
   - 没做：Hub 没有全局的内存预算（N 个客户端同时下载同一个大工程层，最坏 N 份）；一个文档的增量超过消息上限时仍然同步不了（要协议支持分块）。
+- 第二次审查后的修改（同一分支）：
+  - **Hub 关闭、卸载工程时丢修改**：存盘对端（工程目录）也受了背压限制，每 250 ms 只写约 1.5 MiB，最后一次 `pump` 只写得进 1 MiB 以内，其余的丢了（24 个 512 KiB 的文档丢约 20 个）。现在存盘对端 `max_backlog = usize::MAX`（不是慢链路，队列在进程内存里）；关闭前去掉节流和背压，`pump` 到 `Relay::unsynced(store)` 为空（新 API，最多 8 次）。测试：`bae-hub` 的 `stopping_the_hub_saves_every_edit`、`unloading_an_idle_project_saves_every_edit`（直接读工程目录）；`tests/relay.rs` 的 `unsynced_lists_what_a_peer_was_not_sent_yet`。两条 Hub 测试在修改前都失败，两半修改各自都能让它们通过。
 
 ## 请求（其他工作流在这里留言）
 

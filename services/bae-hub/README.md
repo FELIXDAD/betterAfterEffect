@@ -138,7 +138,7 @@ Authorization: Bearer <令牌>
 | 文件 | 内容 |
 |---|---|
 | `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept_with(stream, None, limits)` 完成握手（`limits` 来自 `max_message_mib`），然后挂到工程的 Relay 上。 |
-| `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。发给目录的修改最多每 250 ms 一次（`Relay::connect_with`），拖动时少写几次盘；关闭工程时最后一次 pump 不节流，修改全部写盘。 |
+| `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。发给目录的修改最多每 250 ms 一次（`Relay::connect_with`），拖动时少写几次盘。目录不受背压限制（它不是慢链路：队列在进程内存里，本机磁盘很快写完）。关闭或卸载工程时去掉节流，一直 pump 到目录收到了全部修改（`Relay::unsynced`），再等后台线程全部写盘。 |
 | `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改，只读连接的消息最大 16 MiB；60 秒没收到任何字节就断开；转发 `backlog()`（背压）和消息上限。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
 | `src/auth.rs` | 令牌只保存 BLAKE3 哈希，比较用常数时间。 |
@@ -166,3 +166,4 @@ Authorization: Bearer <令牌>
 - **`max_message_mib` 用在握手上**：Hub 设成 1 MiB 时，默认设置的客户端发一条 2 MiB 的修改会被断开，另一个客户端收不到它，小修改照常；用同样上限的客户端自己就不发（`MessageTooLarge`）。
 - **慢上传**：经限速 4 MB/s 的代理上传 6 MiB（约 1.5 秒），Hub 的超时设成 0.5 秒，客户端不被断开，另一个客户端收到修改。超时只看完整消息时失败。
 - **只读连接的消息上限**：只读客户端发 17 MiB 的修改被断开。
+- **关闭、卸载时全部写盘**：一个客户端上传 24 个 512 KiB 的文档（共 12 MiB），另一个客户端全部收到后马上停掉 Hub（或者等工程空闲卸载），直接读工程目录，24 个文档都在。存盘对端受背压限制时，大约 20 个丢失。
