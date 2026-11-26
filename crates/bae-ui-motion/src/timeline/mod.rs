@@ -785,7 +785,7 @@ impl Panel for TimelinePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
         match common::active_comp(cx.stage, &common::session(cx.resources)) {
-            Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
+            Some(info) => common::related_tab(cx, "Timeline", &info.path, &info.name),
             None => TabInfo::new(tr("Timeline")),
         }
         .close_submenu()
@@ -1156,7 +1156,9 @@ impl TimelinePanel {
             pos2(body.left() + cols.end - 8.0, body.bottom()),
         );
         if outline_bg.height() > 0.0 {
-            let bg = ui.interact(outline_bg, ui.id().with("outline_bg"), Sense::click());
+            let bg = ui
+                .interact(outline_bg, ui.id().with("outline_bg"), Sense::click())
+                .labeled(egui::WidgetType::Other, tr("Timeline Layer List"));
             if bg.clicked() {
                 let mut s = session.lock();
                 s.selected_keys.clear();

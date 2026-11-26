@@ -633,6 +633,8 @@ impl bae_model::Command for AudioAmplitude {
             source: None,
             index: None,
             color: None,
+            solids_folder_name: None,
+            solids_folder_label: None,
             size: None,
             pixel_aspect: None,
             text: None,

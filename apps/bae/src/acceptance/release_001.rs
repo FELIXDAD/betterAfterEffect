@@ -675,7 +675,14 @@ fn new_ui_in_one_language(zh: bool) {
     let mut problems = Vec::new();
     let mut scan = |h: &mut Ui, step: &str| {
         settle(h);
-        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok) {
+        // AE's zh_CN Preferences uses these exact labels on these two pages
+        // (docs/reference/ae/ui/preferences-dialog.json).
+        let expected_zh_label = match step {
+            "settings project" => Some("New Project"),
+            "settings scripting_expressions" => Some("px"),
+            _ => None,
+        };
+        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok, expected_zh_label) {
             problems.push(format!("{step}: {p}"));
         }
     };

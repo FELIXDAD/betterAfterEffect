@@ -321,11 +321,12 @@ pub struct EffectControlsPanel {
 impl Panel for EffectControlsPanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         match self.layer(cx.stage, &common::session(cx.resources)) {
-            Some(layer) => TabInfo::new(format!(
-                "{}: {}",
-                tr("Effect Controls"),
-                query::display_name_of(cx.stage, &layer)
-            )),
+            Some(layer) => common::related_tab(
+                cx,
+                "Effect Controls",
+                &layer,
+                &query::display_name_of(cx.stage, &layer),
+            ),
             None => TabInfo::new(tr("Effect Controls")),
         }
     }
