@@ -54,6 +54,13 @@ impl AppModule for RenderModule {
     fn build(&self, app: &mut AppBuilder) {
         // The GPU module provides the context descriptor (and the placeholder).
         app.add_module(bae_gpu::GpuModule);
+        #[cfg(all(target_os = "macos", feature = "media"))]
+        if let Err(e) = app.register_arc::<dyn bae_gpu::WarmUp>(
+            "bae.media.quicktime",
+            std::sync::Arc::new(bae_media::apple::EncoderWarmUp),
+        ) {
+            tracing::warn!("QuickTime warm-up not registered: {e}");
+        }
         // The compositor's pipelines, compiled in the app's warm-up.
         for (id, task) in [
             (
@@ -409,6 +416,11 @@ fn run(
             .and_then(|p| ExportFormat::from_path(p))
             .unwrap_or_default(),
     };
+    // QuickTime movies (ProRes, mov-*) are written with AVFoundation: say so
+    // before rendering anything elsewhere.
+    if format.is_quicktime() && !cfg!(target_os = "macos") {
+        anyhow::bail!("{} export needs macOS", format.name());
+    }
     let out_pattern = m.get_one::<PathBuf>("out").cloned().unwrap_or_else(|| {
         PathBuf::from(if sequence && format.is_image() {
             format!("{}_####.{}", comp.name(), format.extension())

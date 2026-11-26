@@ -93,14 +93,26 @@ struct Row {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ItemKind {
+pub(crate) enum ItemKind {
     Folder,
     Comp,
     Footage,
     Solid,
 }
 
-fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
+impl ItemKind {
+    pub(crate) fn context_kind(self) -> u8 {
+        use crate::context_menu as m;
+        match self {
+            Self::Comp => m::COMP,
+            Self::Folder => m::FOLDER,
+            Self::Solid => m::SOLID,
+            Self::Footage => m::FOOTAGE,
+        }
+    }
+}
+
+pub(crate) fn item_kind(stage: &Stage, path: &PrimPath) -> Option<ItemKind> {
     let v = stage.prim(path)?;
     let t = v.prim_type()?;
     if *t == PrimType::FOLDER {
@@ -228,6 +240,19 @@ fn columns(width: f32) -> [f32; 5] {
         22.0 + name_w + 90.0,
         22.0 + name_w + 170.0,
     ]
+}
+
+/// The project's color depth in bits per channel (Project Settings).
+fn project_depth(stage: &bae_model::Stage) -> String {
+    PrimPath::new("/project")
+        .ok()
+        .and_then(|p| stage.prim(&p))
+        .and_then(|v| query::static_value(&v, "bit_depth"))
+        .and_then(|v| match v {
+            bae_model::Value::Enum(s) | bae_model::Value::String(s) => Some(s),
+            _ => None,
+        })
+        .unwrap_or_else(|| "8".into())
 }
 
 #[cfg(test)]
@@ -437,12 +462,7 @@ impl Panel for ProjectPanel {
                             }
                         }
                         use crate::context_menu as m;
-                        let kind = match row.kind {
-                            ItemKind::Comp => m::COMP,
-                            ItemKind::Folder => m::FOLDER,
-                            ItemKind::Solid => m::SOLID,
-                            ItemKind::Footage => m::FOOTAGE,
-                        };
+                        let kind = row.kind.context_kind();
                         let chosen = m::show_item(ui, cx, m::PROJECT_ITEM, &[], kind);
                         if chosen == Some("Rename") {
                             self.rename = Some((row.path.clone(), name.clone()));
@@ -480,22 +500,41 @@ impl Panel for ProjectPanel {
             color::TEXT_DIM,
         );
         let mut x = foot.right() - 6.0;
-        let mut button = |ui: &mut Ui, icon: Icon, tip: &str| {
-            x -= 24.0;
-            let r = Rect::from_min_size(pos2(x, foot.top() + 3.0), vec2(22.0, 22.0));
+        let button = |ui: &mut Ui, x: &mut f32, icon: Icon, tip: &str| {
+            *x -= 24.0;
+            let r = Rect::from_min_size(pos2(*x, foot.top() + 3.0), vec2(22.0, 22.0));
             let resp = ui
                 .put(r, |ui: &mut Ui| icons::button(ui, icon, 22.0, false))
                 .labeled(egui::WidgetType::Button, tr(tip));
             resp.on_hover_text(tr(tip)).clicked()
         };
-        if button(ui, Icon::Trash, "Delete") {
+        if button(ui, &mut x, Icon::Trash, "Delete") {
             delete = session.lock().selected_items.clone();
         }
-        if button(ui, Icon::Composition, "New Composition") {
+        // AE: the project's color depth; a click opens Project Settings.
+        let depth = project_depth(stage);
+        let label = format!("{depth} bpc");
+        let w = 46.0;
+        x -= w + 2.0;
+        let r = Rect::from_min_size(pos2(x, foot.top() + 4.0), vec2(w, 20.0));
+        let bpc = ui
+            .put(
+                r,
+                egui::Button::new(egui::RichText::new(&label).small()).frame(false),
+            )
+            .labeled_value(egui::WidgetType::Button, tr("Project Settings"), &label)
+            .on_hover_text(tr("Project Settings"));
+        if bpc.clicked() {
+            cx.invoke("motion.file.project_settings");
+        }
+        if button(ui, &mut x, Icon::Composition, "New Composition") {
             menu_new_comp = true;
         }
-        if button(ui, Icon::Folder, "New Folder") {
+        if button(ui, &mut x, Icon::Folder, "New Folder") {
             menu_new_folder = true;
+        }
+        if button(ui, &mut x, Icon::InterpretFootage, "Interpret Footage") {
+            cx.invoke(crate::actions::ids::INTERPRET_FOOTAGE);
         }
 
         // Apply.
@@ -628,6 +667,7 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Footer: the project color depth button opens Project Settings.
     // Project panel
     ("Name", "名称"),
     ("Type", "类型"),

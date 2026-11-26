@@ -103,3 +103,112 @@ fn double_clicking_a_layer_bar_opens_it_in_the_layer_panel() {
         ((b - a).x.ceil(), (b - a).y.ceil())
     );
 }
+
+/// Time Remap: the bar stops at the source end until remapping is on, then
+/// runs past it; the Time Remap row's timecode scrubs live and keys once on
+/// release (AE).
+#[test]
+fn time_remap_row_scrubs_and_the_bar_runs_past_the_source() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let inner = path(
+        &h.run(
+            "comp.create",
+            json!({"width": 64, "height": 64, "fps": 30, "duration": 2 * SEC}),
+        )["path"],
+    );
+    h.session().lock().open_comp(&comp);
+    let pre = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "pre_comp", "source": inner}),
+        )["path"],
+    );
+    let out = |h: &H| query::layer_timing(&h.stage, &pre).out_point;
+    assert_eq!(out(&h), Time(2 * SEC));
+    let mut tl = TimelinePanel::default();
+    h.session().lock().selected_layers = vec![pre.clone()];
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let trim_to_4s = |h: &mut H, tl: &mut TimelinePanel| {
+        let b = bar_rect(tl, &pre);
+        let edge = pos2(b.right() - 1.0, b.center().y);
+        let r = h.drag(tl, edge, pos2(x_of(tl, 4.0), edge.y), Modifiers::NONE);
+        h.apply(&r);
+        h.frame(tl, Vec::new(), Modifiers::NONE);
+    };
+    trim_to_4s(&mut h, &mut tl);
+    assert_eq!(out(&h), Time(2 * SEC), "stops at the source end");
+
+    h.run(
+        "layer.time_remap",
+        json!({"layers": [pre], "enabled": true}),
+    );
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    trim_to_4s(&mut h, &mut tl);
+    assert!(
+        (out(&h) - Time(4 * SEC)).0.abs() <= SEC / 30,
+        "{:?}",
+        out(&h)
+    );
+
+    // The row (U shows it: it has keys) at 1 s reads 0:00:01:00.
+    {
+        let info = query::comp_info(&h.stage, &comp).unwrap();
+        let s = h.session();
+        let mut s = s.lock();
+        s.reveal
+            .insert(pre.clone(), crate::session::Reveal::Animated);
+        s.set_time(&info, Time::from_seconds(1.0));
+    }
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let texts = h.painted_text.clone().unwrap();
+    let label = texts
+        .iter()
+        .find(|(s, _)| s == bae_ui::tr("Time Remap"))
+        .map(|(_, r)| *r)
+        .expect("Time Remap row");
+    let value = texts
+        .iter()
+        .find(|(s, r)| s == "0:00:01:00" && (r.center().y - label.center().y).abs() < 4.0)
+        .map(|(_, r)| r.center())
+        .expect("timecode value on the row");
+    // Drag 15 points right: 15 frames later, live, then one key on release.
+    let to = value + vec2(15.0, 0.0);
+    h.frame(&mut tl, vec![Event::PointerMoved(value)], Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![button(value, true, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    for i in 1..=5 {
+        let p = value + (to - value) * (i as f32 / 5.0);
+        let r = h.frame(&mut tl, vec![Event::PointerMoved(p)], Modifiers::NONE);
+        assert!(r.invocations.is_empty());
+    }
+    let live = h.session().lock().scrub.as_ref().map(|s| s.value.clone());
+    let Some(Value::Time(t)) = live else {
+        panic!("live scrub: {live:?}")
+    };
+    assert!(t > Time::from_seconds(1.0), "{t:?}");
+    // The viewer drops the live value on pointer-up before the Timeline draws
+    // the release frame: the dragged value still lands.
+    h.session().lock().scrub = None;
+    let r = h.frame(
+        &mut tl,
+        vec![button(to, false, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let spec = query::attr_spec(&h.stage, &pre, "time_remap")
+        .cloned()
+        .unwrap();
+    let key = spec
+        .keyframes
+        .get(&Time::from_seconds(1.0))
+        .expect("key at the current time");
+    assert_eq!(key.value, Value::Time(t));
+}

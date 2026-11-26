@@ -461,6 +461,34 @@ pub(crate) struct CompiledCamera {
     pub(crate) focus_distance: Prop,
     pub(crate) aperture: Prop,
     pub(crate) blur_level: Prop,
+    pub(crate) iris_shape: Prop,
+    pub(crate) iris_rotation: Prop,
+    pub(crate) iris_roundness: Prop,
+    pub(crate) iris_aspect_ratio: Prop,
+    pub(crate) iris_diffraction_fringe: Prop,
+    pub(crate) highlight_gain: Prop,
+    pub(crate) highlight_threshold: Prop,
+    pub(crate) highlight_saturation: Prop,
+}
+
+impl CompiledCamera {
+    /// Every animatable option.
+    fn props(&self) -> [&Prop; 12] {
+        [
+            &self.zoom,
+            &self.focus_distance,
+            &self.aperture,
+            &self.blur_level,
+            &self.iris_shape,
+            &self.iris_rotation,
+            &self.iris_roundness,
+            &self.iris_aspect_ratio,
+            &self.iris_diffraction_fringe,
+            &self.highlight_gain,
+            &self.highlight_threshold,
+            &self.highlight_saturation,
+        ]
+    }
 }
 
 #[derive(Debug)]
@@ -498,6 +526,7 @@ pub(crate) struct CompiledLayer {
     pub(crate) transform: CompiledTransform,
     pub(crate) masks: Vec<CompiledMask>,
     pub(crate) effects: Vec<CompiledEffect>,
+    layer_styles: Option<CompiledEffect>,
     /// Layer markers, by layer time (expressions' `thisLayer.marker`).
     pub(crate) markers: Vec<CompiledMarker>,
     pub(crate) contents: Vec<CompiledPrim>,
@@ -603,7 +632,11 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
                 None => i.checked_sub(1),
             };
         }
-        if let CompiledSource::Comp { path, .. } = &layer.source {
+        // Source items too: their settings (solid color, size, footage
+        // interpretation) are compiled into the layer.
+        if let CompiledSource::Comp { path, .. } | CompiledSource::Asset(path, _) = &layer.source
+            && !deps.contains(path)
+        {
             deps.push(path.clone());
         }
         layers.push(layer);
@@ -770,10 +803,18 @@ fn compile_layer(
         focus_distance: p(cam::FOCUS_DISTANCE, Value::Float(1777.8)),
         aperture: p(cam::APERTURE, Value::Float(25.3)),
         blur_level: p(cam::BLUR_LEVEL, Value::Float(100.0)),
+        iris_shape: p(cam::IRIS_SHAPE, Value::Int(1)),
+        iris_rotation: p(cam::IRIS_ROTATION, Value::Float(0.0)),
+        iris_roundness: p(cam::IRIS_ROUNDNESS, Value::Float(0.0)),
+        iris_aspect_ratio: p(cam::IRIS_ASPECT_RATIO, Value::Float(1.0)),
+        iris_diffraction_fringe: p(cam::IRIS_DIFFRACTION_FRINGE, Value::Float(0.0)),
+        highlight_gain: p(cam::HIGHLIGHT_GAIN, Value::Float(0.0)),
+        highlight_threshold: p(cam::HIGHLIGHT_THRESHOLD, Value::Float(1.0)),
+        highlight_saturation: p(cam::HIGHLIGHT_SATURATION, Value::Float(0.0)),
     });
     let mut options: Vec<(&'static str, Prop)> = [
-        ("material:casts_shadows", Value::Bool(false)),
-        ("material:accepts_shadows", Value::Bool(true)),
+        ("material:casts_shadows", Value::Int(0)),
+        ("material:accepts_shadows", Value::Int(1)),
         ("material:accepts_lights", Value::Bool(true)),
         ("material:ambient", Value::Float(100.0)),
         ("material:diffuse", Value::Float(50.0)),
@@ -851,48 +892,51 @@ fn compile_layer(
             })
         })
         .collect();
+    let compile_effect = |ep: PrimPath| {
+        let ev = stage.prim(&ep)?;
+        if !ev.is_a(&PrimType::EFFECT) {
+            return None;
+        }
+        let et = &PrimType::EFFECT;
+        let mut names: Vec<String> = ev.attr_names().into_iter().map(str::to_owned).collect();
+        for n in override_names(&ep) {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        let params = names
+            .iter()
+            .filter_map(|name| {
+                let id = name.strip_prefix(fx::PARAM_PREFIX)?;
+                let spec = spec_of(&ev, name)?;
+                Some((id.to_owned(), Prop::from_spec(&spec, Some(et), &ep, name)?))
+            })
+            .collect();
+        Some(CompiledEffect {
+            name: ev
+                .value(fx::NAME)
+                .and_then(Value::as_str)
+                .unwrap_or(ev.name())
+                .to_owned(),
+            match_name: setting_str(&ev, et, fx::MATCH_NAME).unwrap_or_default(),
+            enabled: setting(&ev, et, fx::ENABLED)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            params,
+            children: stage
+                .children(&ep)
+                .into_iter()
+                .filter_map(|cp| compile_generic(stage, &cp, 0))
+                .collect(),
+            path: ep,
+        })
+    };
     let effects = child_prims(l::EFFECTS)
         .into_iter()
-        .filter_map(|ep| {
-            let ev = stage.prim(&ep)?;
-            if !ev.is_a(&PrimType::EFFECT) {
-                return None;
-            }
-            let et = &PrimType::EFFECT;
-            let mut names: Vec<String> = ev.attr_names().into_iter().map(str::to_owned).collect();
-            for n in override_names(&ep) {
-                if !names.contains(&n) {
-                    names.push(n);
-                }
-            }
-            let params = names
-                .iter()
-                .filter_map(|name| {
-                    let id = name.strip_prefix(fx::PARAM_PREFIX)?;
-                    let spec = spec_of(&ev, name)?;
-                    Some((id.to_owned(), Prop::from_spec(&spec, Some(et), &ep, name)?))
-                })
-                .collect();
-            Some(CompiledEffect {
-                name: ev
-                    .value(fx::NAME)
-                    .and_then(Value::as_str)
-                    .unwrap_or(ev.name())
-                    .to_owned(),
-                match_name: setting_str(&ev, et, fx::MATCH_NAME).unwrap_or_default(),
-                enabled: setting(&ev, et, fx::ENABLED)
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
-                params,
-                children: stage
-                    .children(&ep)
-                    .into_iter()
-                    .filter_map(|cp| compile_generic(stage, &cp, 0))
-                    .collect(),
-                path: ep,
-            })
-        })
+        .filter_map(&compile_effect)
         .collect();
+    let layer_styles =
+        bae_model::layer_styles::effective_styles(stage, v.path()).and_then(compile_effect);
     let contents: Vec<CompiledPrim> = child_prims(l::CONTENTS)
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
@@ -947,6 +991,7 @@ fn compile_layer(
         transform,
         masks,
         effects,
+        layer_styles,
         markers: compile_markers(stage, v.path()),
         fixed_contents: fixed_list(&contents),
         contents,
@@ -1182,6 +1227,10 @@ impl CompiledComp {
                         .iter()
                         .map(|e| sample_effect(e, &cx, &layer.timing))
                         .collect(),
+                    layer_styles: layer
+                        .layer_styles
+                        .as_ref()
+                        .map(|e| sample_effect(e, &cx, &layer.timing)),
                     contents: sample_prims(&layer.contents, layer.fixed_contents.as_ref(), &cx),
                     text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
                         Value::TextDocument(doc) => Some(doc),
@@ -1202,6 +1251,7 @@ impl CompiledComp {
                     }),
                     camera: None,
                     light: None,
+                    material: None,
                     depends_on: Vec::new(),
                 }
             })
@@ -1234,6 +1284,39 @@ impl CompiledComp {
             };
             let wm = out[i].world_matrix;
             let poi = layer.transform.point_of_interest.vec3(&cx);
+            if out[i].switches.three_d {
+                let opt = |attr: &str| {
+                    layer
+                        .options
+                        .iter()
+                        .find(|(n, _)| *n == attr)
+                        .map(|(_, p)| p.sample(&cx))
+                };
+                let percent = |attr: &str, default: f64| {
+                    opt(attr).and_then(|v| v.as_f64()).unwrap_or(default)
+                };
+                // Older projects stored the shadow switches as booleans.
+                let mode = |attr: &str, default: u8| match opt(attr) {
+                    Some(Value::Bool(on)) => u8::from(on),
+                    Some(v) => v
+                        .as_f64()
+                        .map_or(default, |n| n.round().clamp(0.0, 2.0) as u8),
+                    None => default,
+                };
+                out[i].material = Some(crate::evaluated::MaterialState {
+                    casts_shadows: mode("material:casts_shadows", 0),
+                    light_transmission: percent("material:light_transmission", 0.0),
+                    accepts_shadows: mode("material:accepts_shadows", 1),
+                    accepts_lights: opt("material:accepts_lights")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true),
+                    ambient: percent("material:ambient", 100.0),
+                    diffuse: percent("material:diffuse", 50.0),
+                    specular_intensity: percent("material:specular_intensity", 50.0),
+                    specular_shininess: percent("material:specular_shininess", 5.0),
+                    metal: percent("material:metal", 100.0),
+                });
+            }
             if let Some(cm) = &layer.camera {
                 out[i].camera = Some(CameraState {
                     two_node: layer.auto_orient == AutoOrient::Towards,
@@ -1242,6 +1325,16 @@ impl CompiledComp {
                     focus_distance: cm.focus_distance.f64(&cx),
                     aperture: cm.aperture.f64(&cx),
                     blur_level: cm.blur_level.f64(&cx),
+                    iris: crate::evaluated::Iris {
+                        shape: cm.iris_shape.f64(&cx).round().clamp(1.0, 10.0) as u32,
+                        rotation: cm.iris_rotation.f64(&cx),
+                        roundness: cm.iris_roundness.f64(&cx),
+                        aspect_ratio: cm.iris_aspect_ratio.f64(&cx),
+                        diffraction_fringe: cm.iris_diffraction_fringe.f64(&cx),
+                        highlight_gain: cm.highlight_gain.f64(&cx),
+                        highlight_threshold: cm.highlight_threshold.f64(&cx),
+                        highlight_saturation: cm.highlight_saturation.f64(&cx),
+                    },
                     point_of_interest: poi,
                     world_matrix: wm,
                 });
@@ -2054,6 +2147,16 @@ impl CompiledLayer {
                 cam::FOCUS_DISTANCE => self.camera.as_ref().map(|c| &c.focus_distance),
                 cam::APERTURE => self.camera.as_ref().map(|c| &c.aperture),
                 cam::BLUR_LEVEL => self.camera.as_ref().map(|c| &c.blur_level),
+                cam::IRIS_SHAPE => self.camera.as_ref().map(|c| &c.iris_shape),
+                cam::IRIS_ROTATION => self.camera.as_ref().map(|c| &c.iris_rotation),
+                cam::IRIS_ROUNDNESS => self.camera.as_ref().map(|c| &c.iris_roundness),
+                cam::IRIS_ASPECT_RATIO => self.camera.as_ref().map(|c| &c.iris_aspect_ratio),
+                cam::IRIS_DIFFRACTION_FRINGE => {
+                    self.camera.as_ref().map(|c| &c.iris_diffraction_fringe)
+                }
+                cam::HIGHLIGHT_GAIN => self.camera.as_ref().map(|c| &c.highlight_gain),
+                cam::HIGHLIGHT_THRESHOLD => self.camera.as_ref().map(|c| &c.highlight_threshold),
+                cam::HIGHLIGHT_SATURATION => self.camera.as_ref().map(|c| &c.highlight_saturation),
                 li::INTENSITY => self.light.as_ref().map(|c| &c.intensity),
                 li::COLOR => self.light.as_ref().map(|c| &c.color),
                 li::CONE_ANGLE => self.light.as_ref().map(|c| &c.cone_angle),
@@ -2078,7 +2181,12 @@ impl CompiledLayer {
                 _ => None,
             };
         }
-        if let Some(e) = self.effects.iter().find(|e| e.path.as_str() == prim) {
+        if let Some(e) = self
+            .effects
+            .iter()
+            .chain(&self.layer_styles)
+            .find(|e| e.path.as_str() == prim)
+        {
             let id = attr.strip_prefix(fx::PARAM_PREFIX)?;
             return e.params.iter().find(|(i, _)| i == id).map(|(_, p)| p);
         }
@@ -2111,7 +2219,7 @@ impl CompiledLayer {
         for m in &self.masks {
             all.extend([&m.shape, &m.feather, &m.opacity, &m.expansion]);
         }
-        for e in &self.effects {
+        for e in self.effects.iter().chain(&self.layer_styles) {
             all.extend(e.params.iter().map(|(_, p)| p));
         }
         fn walk<'a>(p: &'a CompiledPrim, out: &mut Vec<&'a Prop>) {
@@ -2124,8 +2232,9 @@ impl CompiledLayer {
             walk(c, &mut all);
         }
         if let Some(c) = &self.camera {
-            all.extend([&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]);
+            all.extend(c.props());
         }
+        all.extend(self.options.iter().map(|(_, p)| p));
         if let Some(t) = &self.text_path {
             all.extend([&t.first_margin, &t.last_margin]);
         }
@@ -2178,17 +2287,32 @@ impl CompiledLayer {
             || self
                 .effects
                 .iter()
+                .chain(&self.layer_styles)
                 .any(|e| e.params.iter().any(|(_, p)| p.has_expression()))
             || self.contents.iter().any(CompiledPrim::has_expressions)
             || self
                 .text_animators
                 .iter()
                 .any(CompiledPrim::has_expressions)
-            || self.camera.as_ref().is_some_and(|c| {
-                [&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]
-                    .iter()
-                    .any(|p| p.has_expression())
+            || self
+                .camera
+                .as_ref()
+                .is_some_and(|c| c.props().iter().any(|p| p.has_expression()))
+            || self.light.as_ref().is_some_and(|l| {
+                [
+                    &l.intensity,
+                    &l.color,
+                    &l.cone_angle,
+                    &l.cone_feather,
+                    &l.radius,
+                    &l.falloff_distance,
+                    &l.shadow_darkness,
+                    &l.shadow_diffusion,
+                ]
+                .iter()
+                .any(|p| p.has_expression())
             })
+            || self.options.iter().any(|(_, p)| p.has_expression())
     }
 
     /// Source size (footage, solid or pre-comp), for `width` / `height` in expressions.

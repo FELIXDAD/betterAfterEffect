@@ -17,7 +17,7 @@
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
-use bae_model::{PrimPath, Time};
+use bae_model::{PrimPath, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
 use bae_ui::theme::{self, color};
@@ -41,6 +41,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    display: crate::source_view_menu::SourceView,
     tracks: crate::tracker::overlay::Overlay,
     eval: EvalCache,
     gpu: Option<GpuPreview>,
@@ -52,11 +53,16 @@ pub struct LayerPanel {
     stroke: Option<(Vec<DVec2>, std::time::Instant)>,
     /// Clone Stamp: the source point (Alt/Option-click), layer pixels.
     clone_point: Option<DVec2>,
+    /// Liquify: the mesh being brushed, the pointer's last position (layer
+    /// pixels).
+    liquify: Option<(bae_effects::effects::liquify::Mesh, DVec2)>,
     /// An end of the layer being dragged on the ruler: the in point (`true`)
     /// or the out point, and where it would go.
     trim: Option<(bool, Time)>,
     /// Magnification (1 = 100 %); `None` = Fit up to 100 %.
     pub(crate) zoom: Option<f32>,
+    /// Legacy magnification: the part of a wheel notch not yet stepped.
+    wheel_rest: f32,
     /// The picture's offset from centred, in points.
     pan: egui::Vec2,
 }
@@ -124,6 +130,10 @@ pub(crate) fn alone(
 }
 
 impl Panel for LayerPanel {
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        self.display.menu(ui);
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         let session = common::session(cx.resources);
         match shown_layer(&session) {
@@ -152,7 +162,8 @@ impl Panel for LayerPanel {
         );
         let bar = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
         ui.allocate_rect(full, Sense::hover());
-        ui.painter().rect_filled(area, 0.0, Color32::from_gray(35));
+        ui.painter()
+            .rect_filled(area, 0.0, self.display.background(ui));
         let info = common::active_comp(cx.stage, &session);
         let layer = shown_layer(&session).filter(|l| cx.stage.prim(l).is_some());
         let (Some(info), Some(layer)) = (info, layer) else {
@@ -185,12 +196,20 @@ impl Panel for LayerPanel {
             _ => 0,
         };
         if let Some((one, min)) = alone(&comp, &layer, effects) {
-            let size = vec2(one.width as f32, one.height as f32);
+            let source = cx
+                .stage
+                .prim(&evaluated.path)
+                .and_then(|l| l.value("source").and_then(|v| v.as_prim_ref()).cloned());
+            let aspect = self.display.aspect(cx.stage, source.as_ref());
+            let size = vec2(one.width as f32 * aspect, one.height as f32);
             let panning = self.navigate(ui, cx, area, size);
-            let view = self.picture(ui, cx, area, &one, min, evaluated);
-            // Space pans whatever the tool (AE).
-            if !panning {
-                self.paint(ui, cx, area, &view, min, evaluated);
+            let (mut view, _) = self.view(area, size, ui.ctx().pixels_per_point());
+            view.aspect = aspect;
+            self.picture(ui, cx, area, &one, min, evaluated, &view);
+            // Space pans whatever the tool (AE); a paint tool paints,
+            // otherwise a shown Liquify effect brushes.
+            if !panning && !self.paint(ui, cx, area, &view, min, evaluated) {
+                self.liquify(ui, cx, &session, area, &view, min, evaluated, time);
             }
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
@@ -208,13 +227,16 @@ impl Panel for LayerPanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({ "render": self.render }))
+        Some(serde_json::json!({ "render": self.render, "display": self.display }))
     }
 }
 
 impl LayerPanel {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
         LayerPanel {
+            display: state
+                .and_then(|v| serde_json::from_value(v["display"].clone()).ok())
+                .unwrap_or_default(),
             render: state
                 .and_then(|s| s.get("render"))
                 .and_then(|v| v.as_bool())
@@ -233,6 +255,7 @@ impl LayerPanel {
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let view = View {
             origin: area.center() - size * scale / 2.0 + self.pan,
+            aspect: 1.0,
             scale,
             point: 6.0,
             camera: None,
@@ -252,7 +275,6 @@ impl LayerPanel {
     /// Zoom and pan from the pointer, the wheel and the tools; `true` while
     /// Space is held (the picture pans instead of the tool working).
     fn navigate(&mut self, ui: &Ui, cx: &PanelContext<'_>, area: Rect, size: egui::Vec2) -> bool {
-        use crate::viewer::{WHEEL_ZOOM_IN, WHEEL_ZOOM_OUT};
         let ppp = ui.ctx().pixels_per_point();
         let resp = ui.interact(
             area,
@@ -261,17 +283,29 @@ impl LayerPanel {
         );
         // The viewer's wheel rules (#571): one shared reading.
         if let Some(pointer) = resp.hover_pos() {
-            let w = crate::viewer::wheel(ui);
-            let around = if w.alt { area.center() } else { pointer };
-            if w.pinch != 1.0 {
+            let m = crate::viewer::Magnification::of(cx.resources);
+            let w = crate::viewer::wheel(ui, m);
+            let around = if m.follows_pointer(w.alt) {
+                pointer
+            } else {
+                area.center()
+            };
+            if cfg!(target_os = "macos") && crate::viewer::smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = egui::Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, size, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), pointer, area, size, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, pointer, area, size, ppp);
             } else if w.notches != 0.0 {
-                let step = if w.notches > 0.0 {
-                    WHEEL_ZOOM_IN
-                } else {
-                    WHEEL_ZOOM_OUT
-                };
-                self.zoom_by(step.powf(w.notches.abs()), around, area, size, ppp);
+                let (_, mag) = self.view(area, size, ppp);
+                let to = m.wheel_zoom(mag, w.notches, &mut self.wheel_rest);
+                if to != mag {
+                    self.zoom_by(to / mag, around, area, size, ppp);
+                }
             }
             self.pan += w.pan;
         }
@@ -300,6 +334,7 @@ impl LayerPanel {
     }
 
     /// The layer's picture, fitted in `area`, and the masks in Masks view.
+    #[allow(clippy::too_many_arguments)]
     fn picture(
         &mut self,
         ui: &Ui,
@@ -308,11 +343,13 @@ impl LayerPanel {
         one: &EvaluatedComp,
         min: DVec2,
         layer: &bae_anim::EvaluatedLayer,
-    ) -> View {
-        let ppp = ui.ctx().pixels_per_point();
-        let (view, _) = self.view(area, vec2(one.width as f32, one.height as f32), ppp);
-        let frame = render::comp_rect(&view, one.width, one.height);
+        view: &View,
+    ) {
+        let frame = render::comp_rect(view, one.width, one.height);
         let painter = ui.painter_at(area);
+        if self.display.grid {
+            crate::viewer::checkerboard(&painter, frame.intersect(area));
+        }
         if self.gpu.is_none() && !self.gpu_tried {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
@@ -358,21 +395,63 @@ impl LayerPanel {
             Stroke::new(1.0, Color32::from_gray(90)),
             egui::StrokeKind::Outside,
         );
-        self.tracks.draw(ui, cx, area, &view, min, &layer.path);
+        self.tracks.draw(
+            ui,
+            cx,
+            area,
+            view,
+            min,
+            &layer.path,
+            |painter, lens, source, scale| {
+                let to_screen = |v: DVec2| {
+                    lens.center()
+                        + egui::vec2(
+                            (v.x - source.x) as f32 * view.aspect,
+                            (v.y - source.y) as f32,
+                        ) * scale
+                };
+                painter.rect_filled(lens, 0., Color32::from_gray(35));
+                if let Some(img) = image {
+                    let r = img.rect;
+                    let rect = Rect::from_min_max(
+                        to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
+                        to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
+                    );
+                    painter.image(
+                        egui::TextureId::User(img.handle),
+                        rect,
+                        Rect::from_min_max(pos2(0., 0.), pos2(1., 1.)),
+                        Color32::WHITE,
+                    );
+                } else {
+                    let mut shapes = Vec::new();
+                    render::paint_comp(
+                        one,
+                        painter,
+                        &to_screen,
+                        Affine::new(DMat4::IDENTITY),
+                        1.0,
+                        f64::from(scale),
+                        &|s| egui::FontId::proportional(s),
+                        &mut shapes,
+                    );
+                    painter.extend(shapes);
+                }
+            },
+        );
         if self.show == Show::Masks {
             let to_panel = DMat4::from_translation((-min).extend(0.0));
             for m in &layer.masks {
                 let stroke = Stroke::new(1.0, crate::viewer::mask_color(cx.stage, &m.path));
                 painter.extend(crate::viewer::path_shapes(
-                    &m.shape, &to_panel, &view, stroke,
+                    &m.shape, &to_panel, view, stroke,
                 ));
             }
         }
-        view
     }
 
     /// The paint tools: drag to paint a stroke; Alt/Option-click with the
-    /// Clone Stamp sets its source.
+    /// Clone Stamp sets its source. `false` when no paint tool is active.
     fn paint(
         &mut self,
         ui: &Ui,
@@ -381,7 +460,7 @@ impl LayerPanel {
         view: &View,
         min: DVec2,
         layer: &bae_anim::EvaluatedLayer,
-    ) {
+    ) -> bool {
         use crate::tools::Tool;
         let shared = crate::tools::shared(cx.resources);
         let (tool, p) = {
@@ -390,7 +469,7 @@ impl LayerPanel {
         };
         if !matches!(tool, Tool::Brush | Tool::CloneStamp | Tool::Eraser) {
             self.stroke = None;
-            return;
+            return false;
         }
         let resp = ui.interact(area, ui.id().with("paint"), Sense::click_and_drag());
         let to_layer = |pos: egui::Pos2| view.to_comp(pos) + min;
@@ -402,7 +481,7 @@ impl LayerPanel {
             && let Some(pos) = resp.interact_pointer_pos()
         {
             self.clone_point = Some(to_layer(pos));
-            return;
+            return true;
         }
         if resp.drag_started_by(egui::PointerButton::Primary)
             && let Some(pos) = ui.input(|i| i.pointer.press_origin())
@@ -503,6 +582,75 @@ impl LayerPanel {
                 .unwrap_or(layer.effects.len());
             self.show = Show::Effect(paint);
         }
+        true
+    }
+
+    /// The Liquify brush: with a Liquify effect in the View popup, dragging
+    /// applies its tool to the Distortion Mesh (previewed live, one undo step).
+    #[allow(clippy::too_many_arguments)]
+    fn liquify(
+        &mut self,
+        ui: &Ui,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        area: Rect,
+        view: &View,
+        min: DVec2,
+        layer: &bae_anim::EvaluatedLayer,
+        time: Time,
+    ) {
+        use bae_effects::effects::liquify::{self as lq, Mesh};
+        let Show::Effect(i) = self.show else {
+            return;
+        };
+        let Some(fx) = layer
+            .effects
+            .get(i)
+            .filter(|e| e.match_name == lq::MATCH_NAME)
+        else {
+            return;
+        };
+        let num = |id: u32, d: f64| fx.param(id).and_then(Value::as_f64).unwrap_or(d);
+        let tool = (num(lq::TOOL, 1.0).round() as usize).saturating_sub(1);
+        let radius = num(lq::BRUSH_SIZE, 64.0) / 2.0;
+        let pressure = num(lq::BRUSH_PRESSURE, 50.0) / 100.0;
+        let resp = ui.interact(area, ui.id().with("liquify"), Sense::click_and_drag());
+        let to_layer = |p: egui::Pos2| view.to_comp(p) + min;
+        if let Some(pos) = resp.hover_pos() {
+            ui.painter_at(area).circle_stroke(
+                pos,
+                (radius as f32 * view.scale).max(1.0),
+                Stroke::new(1.0, Color32::from_gray(220)),
+            );
+        }
+        let attr = format!("param:{:04}", lq::MESH);
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(pos) = ui.input(|i| i.pointer.press_origin())
+        {
+            let mesh = fx.param(lq::MESH).and_then(Mesh::from_value).or_else(|| {
+                let (a, b) = render::layer_bounds(layer)?;
+                Some(Mesh::new(a, b - a))
+            });
+            self.liquify = mesh.map(|m| (m, to_layer(pos)));
+        }
+        let Some((mesh, last)) = &mut self.liquify else {
+            return;
+        };
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let at = to_layer(pos);
+            mesh.brush(tool, at, radius, pressure, at - *last);
+            *last = at;
+            ui.ctx().request_repaint();
+        }
+        let value = mesh.to_value();
+        let done = !ui.input(|i| i.pointer.primary_down());
+        let edit = if done {
+            self.liquify = None;
+            common::Edit::Commit(value)
+        } else {
+            common::Edit::Live(value)
+        };
+        common::apply_edit(cx, session, &fx.path, &attr, time, edit);
     }
 
     /// The bar under the ruler; returns a trim the { or } button asked for.

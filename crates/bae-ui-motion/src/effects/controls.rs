@@ -24,6 +24,7 @@ use crate::session::SharedSession;
 pub(crate) struct ControlsState {
     /// Collapsed effects (AE shows new effects expanded).
     collapsed: HashSet<String>,
+    pub(crate) show_presets: bool,
     /// Parameters whose slider / dial row is shown.
     open_params: HashSet<String>,
     /// Collapsed parameter groups.
@@ -69,6 +70,41 @@ pub(crate) fn show(
         if state.collapsed.contains(effect.as_str()) {
             continue;
         }
+        if state.show_presets {
+            widgets::menu_button(ui, tr("Animation Presets"), |ui| {
+                let indexed = cx
+                    .resources
+                    .get::<std::sync::Arc<crate::presets::PresetIndex>>()
+                    .map(|index| {
+                        index.refresh(false);
+                        index.entries()
+                    })
+                    .unwrap_or_default();
+                let mut available = false;
+                for preset in indexed.iter() {
+                    let [saved] = preset.effects.as_ref() else {
+                        continue;
+                    };
+                    if saved.match_name != match_name {
+                        continue;
+                    }
+                    available = true;
+                    if ui.button(&preset.name).clicked() {
+                        let time = query::to_key_time(cx.stage, effect, now);
+                        let edits: Vec<_> = saved.values.iter().map(|(attr,value)| {
+                            json!({"path":effect,"time":time,"attr":attr,"value":value})
+                        }).collect();
+                        if !edits.is_empty() {
+                            cx.invoke_with("attr.set_many", json!({"edits":edits}));
+                        }
+                        ui.close();
+                    }
+                }
+                if !available {
+                    ui.add_enabled(false, egui::Button::new(tr("None")));
+                }
+            });
+        }
         match def {
             Some(def) => params(ui, cx, session, eval, state, effect, &def, now),
             None => {
@@ -100,7 +136,7 @@ fn header(
         .and_then(|v| query::static_value(&v, "enabled"))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let name = query::display_name_of(stage, effect);
+    let name = super::instance_name(stage, effect);
     let session = common::session(cx.resources);
     let selected = session.lock().selected_effects.contains(effect);
     ui.add_space(2.0);
@@ -155,22 +191,9 @@ fn header(
                 json!({"effects": [moved.0], "index": index}),
             );
         }
-        title.context_menu(|ui| {
-            if ui.button(tr("Reset")).clicked() {
-                reset(cx, effect, now);
-                ui.close();
-            }
-            if ui.button(tr("Duplicate")).clicked() {
-                cx.invoke_with("effect.duplicate", json!({"effects": [effect]}));
-                ui.close();
-            }
-            if ui.button(tr("Remove Effect")).clicked() {
-                cx.invoke_with("effect.remove", json!({"effects": [effect]}));
-                ui.close();
-            }
-        });
+        title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let about = ui.add(egui::Label::new(tr("About...")).sense(Sense::click()));
+            let about = widgets::link(ui, tr("About..."));
             egui::Popup::menu(&about).show(|ui| {
                 let shown = super::effect_name(match_name, def);
                 ui.label(egui::RichText::new(shown).strong());
@@ -181,11 +204,7 @@ fn header(
                 };
                 ui.label(source);
             });
-            if def.is_some()
-                && ui
-                    .add(egui::Label::new(tr("Reset")).sense(Sense::click()))
-                    .clicked()
-            {
+            if def.is_some() && widgets::link(ui, tr("Reset")).clicked() {
                 reset(cx, effect, now);
             }
         });
@@ -225,6 +244,13 @@ fn params(
     def: &EffectDef,
     now: Time,
 ) {
+    if def.match_name == "ADBE Deflicker" && ui.button(tr("Set Frame")).clicked() {
+        let local = query::to_key_time(cx.stage, effect, now);
+        cx.invoke_with(
+            "attr.set_at",
+            json!({"path":effect,"attr":param_attr(9001),"time":local,"value":Value::Time(local)}),
+        );
+    }
     let mut depth = 1usize;
     // Depth at which a closed group hides its contents.
     let mut hidden_from: Option<usize> = None;
@@ -272,19 +298,13 @@ fn params(
                 .as_ref()
                 .map_or(48_000, |output| output.sample_rate());
             super::eq_response::show(ui, rate, |id| {
-                common::current_value(
-                    eval.get(cx.resources),
-                    cx.stage,
-                    effect,
-                    &param_attr(id),
-                    now,
-                )
-                .or_else(|| def.param(id)?.default.clone())
-                .and_then(|v| {
-                    v.as_f64()
-                        .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
-                })
-                .unwrap_or_default()
+                common::current_value(eval.get(cx.stage), cx.stage, effect, &param_attr(id), now)
+                    .or_else(|| def.param(id)?.default.clone())
+                    .and_then(|v| {
+                        v.as_f64()
+                            .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
+                    })
+                    .unwrap_or_default()
             });
             continue;
         }
@@ -321,7 +341,7 @@ fn param_row(
         .as_ref()
         .and_then(|s| s.value_for(effect, &attr))
         .cloned()
-        .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
+        .or_else(|| common::current_value(eval.get(cx.stage), stage, effect, &attr, now))
         .or_else(|| {
             let layer = super::layer_of(effect)?;
             bae_motion::effect::instance_default(stage, &layer, param)
@@ -374,7 +394,7 @@ fn param_row(
             if param.id==1 && matches!(param.kind,ParamKind::Button){
                 let is_cdl=def.match_name=="ADBE OCIO CDL Transform";
                 let data_id=if is_cdl{6}else{5};
-                let stored=common::current_value(eval.get(cx.resources),stage,effect,&param_attr(data_id),now);
+                let stored=common::current_value(eval.get(cx.stage),stage,effect,&param_attr(data_id),now);
                 let filename=stored.as_ref().and_then(|v|match v{Value::Bytes(data)=>data.split(|b|*b==0).next().and_then(|s|std::str::from_utf8(s).ok()),_=>None});
                 if ui.button(filename.unwrap_or(tr("Open..."))).clicked(){
                     cx.invoke_with("motion.effect.open_color_file",json!({"path":effect,"time":query::to_key_time(stage,effect,now),"cdl":is_cdl}));
@@ -396,8 +416,12 @@ fn param_row(
             ui.colored_label(color::TEXT_DISABLED, tr("Not available in BAE yet"));
         } else {
             ui.add_enabled_ui(!disabled, |ui| {
+                if let Some(channel_edit)=super::exr::control(ui,session,effect,&def.match_name,param.id,value.as_ref(),now) {
+                    edit=channel_edit;
+                    return;
+                }
                 if def.match_name=="ADBE MESH WARP" && param.id==4 {
-                    let mut number=|id:u32|common::current_value(eval.get(cx.resources),stage,effect,&param_attr(id),now)
+                    let mut number=|id:u32|common::current_value(eval.get(cx.stage),stage,effect,&param_attr(id),now)
                         .or_else(||def.param(id).and_then(|p|p.default.clone())).and_then(|v|v.as_f64()).unwrap_or(0.);
                     edit=super::warp_grid::edit(ui,value.as_ref(),[number(2) as usize,number(1) as usize]);
                     return;
@@ -415,9 +439,27 @@ fn param_row(
             });
         }
     });
+    if def.match_name == "ADBE Lumetri"
+        && let Edit::Commit(Value::Color([r, g, b, a])) = &edit
+        && let Some(curve) = bae_effects::LumetriCurve::from_param(param.id)
+    {
+        let curve_attr = param_attr(curve.id());
+        let old = common::current_value(eval.get(stage), stage, effect, &curve_attr, now);
+        let time = query::to_key_time(stage, effect, now);
+        let points = curve.pick([*r, *g, *b], old.as_ref());
+        cx.invoke_with(
+            "attr.set_many",
+            json!({"edits":[
+                {"path":effect,"attr":attr,"time":time,"value":Value::Color([*r,*g,*b,*a])},
+                {"path":effect,"attr":curve_attr,"time":time,"value":points}
+            ]}),
+        );
+        session.lock().scrub = None;
+        return;
+    }
     // An expression pick whip dragged from the Timeline.
     if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
-        crate::expr::link(cx, eval.get(cx.resources), &whip, effect, Some(&attr), now);
+        crate::expr::link(cx, eval.get(cx.stage), &whip, effect, Some(&attr), now);
     }
     if twirl && state.open_params.contains(&key) {
         ui.horizontal(|ui| {
@@ -428,22 +470,33 @@ fn param_row(
         });
     }
     if def.match_name == "ADBE Lumetri"
-        && param.id == 94
         && let Edit::Commit(Value::Color(sample)) = &edit
-        && let Some([temp, tint]) = bae_effects::lumetri_white_balance_settings(*sample)
     {
-        let time = query::to_key_time(stage, effect, now);
-        let changes = [
-            (94, Value::Color(*sample)),
-            (7, Value::Float(temp)),
-            (8, Value::Float(tint)),
-        ];
-        let edits = changes.map(|(id, value)| json!({"path": effect, "attr": param_attr(id), "time": time, "value": value}));
-        session.lock().scrub = None;
-        cx.invoke_with("attr.set_many", json!({"edits": edits}));
-    } else {
-        common::apply_edit(cx, session, effect, &attr, now, edit);
+        let changes = match param.id {
+            70..=72 => Some(bae_effects::lumetri_key_edits(param.id, *sample, |id| {
+                common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
+            })),
+            94 => bae_effects::lumetri_white_balance_settings(*sample).map(|[temp, tint]| {
+                vec![
+                    (94, Value::Color(*sample)),
+                    (7, Value::Float(temp)),
+                    (8, Value::Float(tint)),
+                ]
+            }),
+            _ => None,
+        };
+        if let Some(changes) = changes {
+            session.lock().scrub = None;
+            if !changes.is_empty() {
+                let time = query::to_key_time(stage, effect, now);
+                let edits: Vec<_> = changes.into_iter().map(|(id, value)|
+                    json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
+                cx.invoke_with("attr.set_many", json!({"edits": edits}));
+            }
+            return;
+        }
     }
+    common::apply_edit(cx, session, effect, &attr, now, edit);
 }
 
 /// The value column of one parameter (red when an expression drives it).
@@ -459,6 +512,15 @@ fn value_control(
     expression: bool,
 ) -> Edit {
     let id = ui.id().with(("fx-param", effect.as_str(), param.id));
+    if def.match_name == "ADBE Lumetri"
+        && let Some(curve) = bae_effects::LumetriCurve::from_param(param.id)
+    {
+        return if curve.id() == param.id {
+            super::lumetri_curve::graph(ui, id, curve, value, label)
+        } else {
+            super::lumetri_curve::picker(ui, id, value, label)
+        };
+    }
     match &param.kind {
         ParamKind::Slider {
             valid_min,
@@ -773,4 +835,20 @@ fn hot_number(
         return Num::Commit(v);
     }
     Num::None
+}
+
+/// Context actions shared by the effect header and the flowchart effect icon.
+pub(crate) fn effect_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, effect: &PrimPath, now: Time) {
+    if ui.button(tr("Reset")).clicked() {
+        reset(cx, effect, now);
+        ui.close();
+    }
+    if ui.button(tr("Duplicate")).clicked() {
+        cx.invoke_with("effect.duplicate", json!({"effects": [effect]}));
+        ui.close();
+    }
+    if ui.button(tr("Remove Effect")).clicked() {
+        cx.invoke_with("effect.remove", json!({"effects": [effect]}));
+        ui.close();
+    }
 }

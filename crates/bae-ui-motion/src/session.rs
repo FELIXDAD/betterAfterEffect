@@ -114,6 +114,8 @@ pub enum PreviewRange {
 /// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewOptions {
+    /// Prefer an open Active Camera view when previewing a 3D composition.
+    pub favor_active_camera: bool,
     pub range: PreviewRange,
     /// Play From: the current time (else the start of the range).
     pub from_current: bool,
@@ -131,6 +133,7 @@ pub struct PreviewOptions {
 impl Default for PreviewOptions {
     fn default() -> Self {
         PreviewOptions {
+            favor_active_camera: true,
             range: PreviewRange::default(),
             from_current: true,
             fps: None,
@@ -230,6 +233,7 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) channel_frame: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     /// Last UI frame in which a visible timeline requested per-layer CPU timings.
     pub(crate) timing_column_frame: Option<u64>,
     pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
@@ -246,6 +250,7 @@ pub struct Session {
     /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
     /// mask, effect or text animator; [`group_prim`] gives the prim).
     pub selected_groups: Vec<String>,
+    pub(crate) reveal_tracker: Option<PrimPath>,
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
@@ -298,6 +303,7 @@ pub struct Session {
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
@@ -322,8 +328,16 @@ pub struct Session {
     pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// Timeline column toggles asked for while another panel had focus (F4
+    /// Switches / Modes, Shift+F4 Parent & Link): the Timeline applies them.
+    pub timeline_toggles: Vec<&'static str>,
     /// The frame the Composition viewer shows and its key (Lumetri Scopes).
     pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
+    /// The Character panel's settings for new text (set while no text layer is
+    /// selected, as in AE; `None`: the defaults).
+    pub text_defaults: Option<bae_model::TextDocument>,
+    /// Viewer selection at a specific source-text frame, retained across panel focus changes.
+    pub(crate) text_selection: Option<(PrimPath, Time, std::ops::Range<usize>)>,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
@@ -457,6 +471,14 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    pub(crate) fn text_range(&self, layer: Option<&PrimPath>) -> Option<std::ops::Range<usize>> {
+        let (owner, time, range) = self.text_selection.as_ref()?;
+        (Some(owner) == layer
+            && *time == self.active_time()
+            && self.selected_layers.as_slice() == std::slice::from_ref(owner))
+        .then(|| range.clone())
+    }
+
     /// Current time of `comp` (comp time, on a frame boundary).
     pub fn time(&self, comp: &PrimPath) -> Time {
         self.times.get(comp).copied().unwrap_or(Time::ZERO)
@@ -646,6 +668,12 @@ impl Session {
             self.stop();
         }
         // AE: a locked layer cannot be selected, so locking one deselects it.
+        if let Some((owner, time, _)) = &self.text_selection
+            && (self.selected_layers.as_slice() != std::slice::from_ref(owner)
+                || *time != self.active_time())
+        {
+            self.text_selection = None;
+        }
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));

@@ -64,10 +64,25 @@ fn count(stage: &Stage, tracker: &PrimPath) -> usize {
 }
 
 pub fn points(stage: &Stage, tracker: &PrimPath) -> Vec<PrimPath> {
-    (1..=count(stage, tracker))
+    let built_in = (1..=count(stage, tracker))
         .filter_map(|n| tracker.child(&format!("point_{n}")).ok())
-        .filter(|p| stage.has_prim(p))
-        .collect()
+        .filter(|p| stage.has_prim(p));
+    let mut extra: Vec<_> = stage
+        .children(tracker)
+        .into_iter()
+        .filter_map(|p| {
+            let number = p
+                .as_str()
+                .rsplit('/')
+                .next()?
+                .strip_prefix("custom_point_")?
+                .parse::<usize>()
+                .ok()?;
+            Some((number, p))
+        })
+        .collect();
+    extra.sort_unstable_by_key(|(n, _)| *n);
+    built_in.chain(extra.into_iter().map(|(_, p)| p)).collect()
 }
 
 pub fn vector_at(stage: &Stage, point: &PrimPath, key: &str, comp_time: Time) -> Option<[f64; 2]> {
@@ -80,6 +95,23 @@ pub fn vector_at(stage: &Stage, point: &PrimPath, key: &str, comp_time: Time) ->
     }
 }
 
+pub fn trackable_property(stage: &Stage, path: &PrimPath, attr: &str) -> bool {
+    if query::is_layer(stage, path) {
+        return matches!(
+            attr,
+            "transform:position" | "transform:rotation" | "transform:scale"
+        );
+    }
+    attr.starts_with("param:")
+        && stage.prim(path).is_some_and(|p| p.is_a(&PrimType::EFFECT))
+        && query::attr_spec(stage, path, attr).is_some_and(|a| {
+            matches!(a.value, Some(Value::Vec2(_)))
+                || a.keyframes
+                    .values()
+                    .any(|k| matches!(k.value, Value::Vec2(_)))
+        })
+}
+
 fn require_tracker(stage: &Stage, tracker: &PrimPath) -> Result<(), CommandError> {
     if !stage
         .prim(tracker)
@@ -88,6 +120,14 @@ fn require_tracker(stage: &Stage, tracker: &PrimPath) -> Result<(), CommandError
         return Err(fail("expected a motion tracker"));
     }
     ensure_unlocked(stage, [tracker])
+}
+
+/// The layer just above `layer` in its comp (AE's default motion target).
+pub fn layer_above(stage: &bae_model::Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let comp = query::owning_comp(stage, layer)?;
+    let layers = query::comp_layers(stage, &comp);
+    let index = layers.iter().position(|l| l == layer)?;
+    layers.get(index.checked_sub(1)?).cloned()
 }
 
 /// Half the width and height of the rectangle multi-point trackers start on.
@@ -129,17 +169,78 @@ fn sync_points(
             2 => [origin[0] - hx, origin[1] + hy],
             _ => [origin[0] + hx, origin[1] + hy],
         };
-        for (key, _) in PROPERTIES {
-            let val = match key {
-                "feature_center" | "attach_point" => Value::Vec2(center),
-                _ => bae_model::schema::attr_def(&PrimType::TRACK_POINT, key)
-                    .and_then(|d| d.default.to_value())
-                    .expect("track point schema"),
-            };
-            write_attr(tx, &p, key, AttrSpec::with_value(val))?;
+        initialize_point(tx, &p, center)?;
+    }
+    if reset {
+        for point in points(tx.stage(), tracker) {
+            if point
+                .as_str()
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.starts_with("custom_point_"))
+            {
+                initialize_point(tx, &point, origin)?;
+            }
         }
     }
     Ok(())
+}
+
+fn initialize_point(
+    tx: &mut Transaction<'_>,
+    point: &PrimPath,
+    center: [f64; 2],
+) -> Result<(), CommandError> {
+    for (key, _) in PROPERTIES {
+        let value = match key {
+            "feature_center" | "attach_point" => Value::Vec2(center),
+            _ => bae_model::schema::attr_def(&PrimType::TRACK_POINT, key)
+                .and_then(|d| d.default.to_value())
+                .expect("track point schema"),
+        };
+        write_attr(tx, point, key, AttrSpec::with_value(value))?;
+    }
+    Ok(())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AddPointParams {
+    pub tracker: PrimPath,
+}
+
+pub struct AddPoint;
+impl Command for AddPoint {
+    type Params = AddPointParams;
+    type Output = PrimPath;
+    const ID: &'static str = "tracker.add_point";
+    const TITLE: &'static str = "New Track Point";
+    const DESCRIPTION: &'static str = "Add an independently analyzed point to the current tracker.";
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<PrimPath, CommandError> {
+        require_tracker(tx.stage(), &p.tracker)?;
+        let Some(Value::Vec2(center)) = setting(tx.stage(), &p.tracker, "origin") else {
+            return Err(fail("missing tracker origin"));
+        };
+        let number = (1..)
+            .find(|n| {
+                !tx.stage().has_prim(
+                    &p.tracker
+                        .child(&format!("custom_point_{n}"))
+                        .expect("point name"),
+                )
+            })
+            .expect("unbounded");
+        let point = child(&p.tracker, &format!("custom_point_{number}"))?;
+        let name = if crate::names::chinese() {
+            "跟踪点"
+        } else {
+            "Track Point"
+        };
+        let index = points(tx.stage(), &p.tracker).len() + 1;
+        create(tx, &point, PrimType::TRACK_POINT, None)?;
+        set(tx, &point, "name", format!("{name} {index}"))?;
+        initialize_point(tx, &point, center)?;
+        Ok(point)
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -148,6 +249,7 @@ pub struct CreateParams {
     pub center: [f64; 2],
     #[serde(default)]
     pub stabilize: bool,
+    pub property_target: Option<(PrimPath, String)>,
 }
 pub struct CreateTracker;
 impl Command for CreateTracker {
@@ -177,14 +279,39 @@ impl Command for CreateTracker {
         };
         set(tx, &path, "name", format!("{label} {i}"))?;
         set(tx, &path, "origin", Value::Vec2(p.center))?;
-        let target = query::owning_comp(tx.stage(), &p.layer)
-            .and_then(|comp| {
-                query::comp_layers(tx.stage(), &comp)
-                    .into_iter()
-                    .find(|l| l != &p.layer && !query::is_locked(tx.stage(), l))
-            })
-            .unwrap_or_else(|| p.layer.clone());
-        set(tx, &path, "target", Value::PrimRef(target))?;
+        // AE: the motion goes to the layer just above the source. The source
+        // itself would move twice; with no layer above, the user picks one.
+        if let Some(target) = layer_above(tx.stage(), &p.layer) {
+            set(tx, &path, "target", Value::PrimRef(target))?;
+        }
+        if let Some((dest, attr)) = p.property_target {
+            let layer = query::owning_layer(tx.stage(), &dest)
+                .ok_or_else(|| fail("expected a target layer"))?;
+            ensure_unlocked(tx.stage(), [&layer])?;
+            if query::owning_comp(tx.stage(), &layer) != query::owning_comp(tx.stage(), &p.layer) {
+                return Err(fail("target is in another composition"));
+            }
+            let transform = dest == layer;
+            if !trackable_property(tx.stage(), &dest, &attr) {
+                return Err(fail("expected a trackable property"));
+            }
+            set(tx, &path, "target", Value::PrimRef(dest))?;
+            for key in ["position", "rotation", "scale"] {
+                set(
+                    tx,
+                    &path,
+                    key,
+                    Value::Bool(if transform {
+                        attr.strip_prefix("transform:") == Some(key)
+                    } else {
+                        key == "position"
+                    }),
+                )?;
+            }
+            if !transform {
+                set(tx, &path, "target_property", Value::String(attr))?;
+            }
+        }
         if p.stabilize {
             set(tx, &path, "track_type", Value::Enum("stabilize".into()))?;
         }
@@ -217,6 +344,15 @@ impl Command for ConfigureTracker {
                 return Err(fail("threshold must be a percentage"));
             }
             set(tx, &p.tracker, &key, val)?;
+        }
+        if matches!(
+            mode(tx.stage(), &p.tracker).as_str(),
+            "parallel" | "perspective"
+        ) && let Some(Value::PrimRef(target)) = setting(tx.stage(), &p.tracker, "target")
+            && let Some(layer) = crate::effect::layer_of_effect(&target)
+        {
+            set(tx, &p.tracker, "target", Value::PrimRef(layer))?;
+            set(tx, &p.tracker, "target_property", String::new())?;
         }
         sync_points(tx, &p.tracker, false)
     }

@@ -719,6 +719,15 @@
     get fileName() { return ""; },
   };
   g.bae = {
+    copyLayersToComp: function (layers, comp) {
+      return H("copyLayersToComp", {layers: layers, comp: comp});
+    },
+    pathProperty: function (path) {
+      var info = H("pathInfo", { path: path });
+      info.layer = mkLayer(info.layer);
+      info.property = new Property(path, "path", info.name);
+      return info;
+    },
     commands: {
       // Runs any registered BAE command (the same ones MCP tools and menus run).
       invoke: function (id, params) { return H("invoke", { id: String(id), params: params || {} }); },

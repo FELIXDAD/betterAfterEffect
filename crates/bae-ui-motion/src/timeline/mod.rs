@@ -49,7 +49,7 @@ use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use columns::Column;
 use columns::{Cols, Columns};
-pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
+pub(crate) use dialogs::{InterpolationDialog, KeyDialog, SequenceDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
 pub(crate) use markers::MarkerDialog;
@@ -386,6 +386,17 @@ fn label_of(stage: &Stage, path: &PrimPath) -> usize {
 }
 
 impl TimelinePanel {
+    /// F4 (Switches / Modes columns) or Shift+F4 (Parent & Link column).
+    fn toggle_columns(&mut self, id: &str) {
+        match id {
+            actions::ids::TOGGLE_SWITCHES_MODES => self.columns.toggle_switches_modes(),
+            actions::ids::TOGGLE_PARENT_COLUMN => self.columns.toggle(Column::Parent),
+            _ => {}
+        }
+    }
+}
+
+impl TimelinePanel {
     /// The field selection the language menu will replace (tests).
     #[cfg(test)]
     pub(crate) fn lang_insert(&self) -> Option<crate::expr::Selection> {
@@ -542,12 +553,19 @@ impl TimelinePanel {
                 );
             }
         }
-        self.expression_lines(stage, out)
+        out
     }
 
     /// Multi-line expressions take one row per line (the text being edited, else
     /// the expression; at most [`MAX_EXPR_LINES`]).
-    fn expression_lines(&self, stage: &Stage, rows: Vec<Row>) -> Vec<Row> {
+    fn expression_lines(
+        &self,
+        stage: &Stage,
+        rows: Vec<Row>,
+        ui: &Ui,
+        resources: &bae_app::Resources,
+        width: f32,
+    ) -> Vec<Row> {
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             let RowKind::Expression { path, attr, .. } = &row.kind else {
@@ -555,15 +573,19 @@ impl TimelinePanel {
                 continue;
             };
             let stored = query::attr_spec(stage, path, attr).and_then(|s| s.expression.as_ref());
-            let lines = match &self.expr_edit {
+            let source = match &self.expr_edit {
                 Some((p, a, buf, base))
                     if p == path && a == attr && stored.is_some_and(|e| e.source == *base) =>
                 {
-                    buf.split('\n').count()
+                    buf.as_str()
                 }
-                _ => stored.map_or(1, |e| e.source.split('\n').count()),
-            }
-            .clamp(1, MAX_EXPR_LINES);
+                _ => stored.map_or("", |e| e.source.as_str()),
+            };
+            let height = crate::expr_menu::field_height(ui, resources, source, width);
+            let hard_lines = source.bytes().filter(|c| *c == b'\n').count() + 1;
+            let lines = ((height / ROW_H).ceil() as usize)
+                .max(hard_lines)
+                .min(MAX_EXPR_LINES);
             for line in 0..lines {
                 out.push(Row {
                     kind: RowKind::Expression {
@@ -639,6 +661,27 @@ impl TimelinePanel {
     }
 }
 
+#[derive(Clone, Copy)]
+enum OtherTimelines {
+    All,
+    Left,
+    Right,
+}
+impl OtherTimelines {
+    fn matches(self, index: usize, active: usize) -> bool {
+        match self {
+            Self::All => index != active,
+            Self::Left => index < active,
+            Self::Right => index > active,
+        }
+    }
+}
+const OTHER_TIMELINES: [(OtherTimelines, &str); 3] = [
+    (OtherTimelines::All, "Close Other Timeline Panels"),
+    (OtherTimelines::Right, "Close Timeline Panels to the Right"),
+    (OtherTimelines::Left, "Close Timeline Panels to the Left"),
+];
+
 impl Panel for TimelinePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
@@ -646,6 +689,38 @@ impl Panel for TimelinePanel {
             Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
             None => TabInfo::new(tr("Timeline")),
         }
+        .close_submenu()
+    }
+
+    fn related_tabs_menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) -> bool {
+        let session = common::session(cx.resources);
+        let mut session = session.lock();
+        let active = session
+            .active_comp
+            .as_ref()
+            .and_then(|c| session.open_comps.iter().position(|p| p == c));
+        for (action, label) in OTHER_TIMELINES {
+            if matches!(action, OtherTimelines::Right) {
+                ui.separator();
+            }
+            let targets: Vec<_> = session
+                .open_comps
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| active.is_some_and(|at| action.matches(*i, at)))
+                .map(|(_, c)| c.clone())
+                .collect();
+            if ui
+                .add_enabled(!targets.is_empty(), egui::Button::new(tr(label)))
+                .clicked()
+            {
+                for target in targets {
+                    session.close_comp(&target);
+                }
+                ui.close();
+            }
+        }
+        true
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
@@ -667,12 +742,8 @@ impl Panel for TimelinePanel {
                 }
                 true
             }
-            "motion.timeline.toggle_switches_modes" => {
-                self.columns.toggle_switches_modes();
-                true
-            }
-            "motion.timeline.toggle_parent_column" => {
-                self.columns.toggle(Column::Parent);
+            id @ (actions::ids::TOGGLE_SWITCHES_MODES | actions::ids::TOGGLE_PARENT_COLUMN) => {
+                self.toggle_columns(id);
                 true
             }
             // Edit ▸ Find (Ctrl+F): the search field.
@@ -685,7 +756,13 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        // F4 / Shift+F4 pressed with another panel in front.
+        let toggles = std::mem::take(&mut common::session(cx.resources).lock().timeline_toggles);
+        for id in toggles {
+            self.toggle_columns(id);
+        }
         let full = ui.available_rect_before_wrap();
+        crate::import::drop_on_panel(ui, cx);
         let cols = self.columns.layout(ui, full);
         self.contents(ui, cx, &cols);
     }
@@ -693,8 +770,19 @@ impl Panel for TimelinePanel {
 impl TimelinePanel {
     fn contents(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, cols: &Cols) {
         let session = common::session(cx.resources);
+        self.expanded
+            .extend(session.lock().reveal_style_groups.drain(..));
         session.lock().sync(cx.stage);
         let stage = cx.stage;
+        if let Some(track) = session.lock().reveal_tracker.take()
+            && let Some(layer) = query::owning_layer(stage, &track)
+        {
+            self.expanded.extend([
+                layer.to_string(),
+                format!("{layer}#trackers"),
+                track.to_string(),
+            ]);
+        }
         let renaming_before = self.rename.is_some();
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, color::PANEL);
@@ -718,7 +806,41 @@ impl TimelinePanel {
         self.graph_mode = session.lock().graph_editor;
         let graph_left = full.left() + cols.viewport + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
-        let axis = self.axis(&info, graph_left, graph_w);
+        let mut axis = self.axis(&info, graph_left, graph_w);
+        if cfg!(target_os = "macos")
+            && ui.rect_contains_pointer(Rect::from_min_max(
+                pos2(graph_left, tabs.bottom()),
+                full.max,
+            ))
+            && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
+        {
+            let smart = crate::viewer::smart_zoom(ui.ctx());
+            let factor = ui.input(|i| i.zoom_delta());
+            if smart || factor != 1.0 {
+                let time = axis.t(pointer.x);
+                let full_span = info.duration.0 as f64;
+                let min_span = (info.frame_duration().0 * 10).min(info.duration.0) as f64;
+                let span = if smart {
+                    if self.zoom > 0.0 {
+                        full_span
+                    } else {
+                        full_span / 2.0
+                    }
+                } else {
+                    axis.span.0 as f64 / f64::from(factor)
+                };
+                if full_span > min_span {
+                    self.zoom = 1.0
+                        - ((span - min_span) / (full_span - min_span))
+                            .clamp(0.0, 1.0)
+                            .cbrt() as f32;
+                    let new_axis = self.axis(&info, graph_left, graph_w);
+                    self.scroll = time - (new_axis.t(pointer.x) - new_axis.start);
+                    axis = self.axis(&info, graph_left, graph_w);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
         #[cfg(test)]
         {
             self.last_axis = Some(axis);
@@ -771,6 +893,7 @@ impl TimelinePanel {
             }
             self.rows(stage, &layers, &s)
         };
+        let rows = self.expression_lines(stage, rows, ui, cx.resources, graph_body.width() - 8.0);
         if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
             self.press_mods = m;
         }
@@ -854,6 +977,7 @@ impl TimelinePanel {
                 let mut clip = ui.clip_rect();
                 clip.max.x = clip.max.x.min(graph_left - 2.0);
                 outline.set_clip_rect(clip);
+                let visible_end = range.end;
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =
@@ -881,6 +1005,7 @@ impl TimelinePanel {
                         &axis,
                         row,
                         rect,
+                        i + 1 == visible_end,
                         switch_input,
                         &layers,
                         &parent_items,
@@ -892,6 +1017,22 @@ impl TimelinePanel {
                         }
                         RowKind::Prop { path, attr, .. } => {
                             prop_rows.push((rect, path.clone(), attr.clone()))
+                        }
+                        // An effect or a mask: the expression pick whip refers to
+                        // it as a whole (empty attribute).
+                        RowKind::Group { id, .. } => {
+                            if let Some(prim) = id
+                                .split_once('#')
+                                .and_then(|(_, p)| PrimPath::new(p).ok())
+                                .filter(|p| {
+                                    stage.prim(p).is_some_and(|v| {
+                                        v.is_a(&bae_model::PrimType::EFFECT)
+                                            || v.is_a(&bae_model::PrimType::MASK)
+                                    })
+                                })
+                            {
+                                prop_rows.push((rect, prim, String::new()));
+                            }
                         }
                         _ => {}
                     }
@@ -1170,4 +1311,25 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
             Box::new(TimelinePanel::from_state(spawn.state))
         }),
     );
+}
+
+#[cfg(test)]
+mod close_menu_tests {
+    use super::*;
+    #[test]
+    fn close_other_timeline_choices_keep_the_active_comp() {
+        let zh = [
+            "关闭其他时间轴面板",
+            "关闭右侧的时间轴面板",
+            "关闭左侧的时间轴面板",
+        ];
+        for ((which, name), label) in OTHER_TIMELINES.into_iter().zip(zh) {
+            assert!(ZH.contains(&(name, label)));
+            assert!(!which.matches(0, 0));
+        }
+        assert!(!OtherTimelines::Left.matches(1, 0));
+        assert!(!OtherTimelines::Right.matches(0, 1));
+        assert!(OtherTimelines::Left.matches(0, 1));
+        assert!(OtherTimelines::Right.matches(1, 0));
+    }
 }

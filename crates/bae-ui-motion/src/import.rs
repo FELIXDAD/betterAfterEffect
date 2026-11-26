@@ -10,7 +10,10 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+mod verify;
+pub(crate) use verify::FrameChecks;
 
 use bae_media::sequence::{ScannedItem, scan_directory};
 use bae_media::{MediaFormats, OpenOptions, SequenceInfo, SequenceMode};
@@ -33,6 +36,8 @@ fn formats() -> &'static MediaFormats {
 pub struct Probed {
     pub files: Vec<ImportFile>,
     pub failed: Vec<String>,
+    notices: Vec<String>,
+    sequences_to_verify: Vec<(PathBuf, String)>,
 }
 
 /// AE's name for a sequence item: the frame range in brackets
@@ -70,6 +75,10 @@ pub struct ImportDefaults {
     pub still_duration: Option<bae_model::Time>,
     /// Labels of stills, moving footage and audio.
     pub labels: Option<[i64; 3]>,
+    /// Report gaps between the first and last sequence frame.
+    pub report_missing: bool,
+    /// Decode each existing frame in the background to check it is readable.
+    pub verify_frames: bool,
 }
 
 impl Default for ImportDefaults {
@@ -79,6 +88,8 @@ impl Default for ImportDefaults {
             sequence_fps: 30.0,
             still_duration: None,
             labels: None,
+            report_missing: true,
+            verify_frames: false,
         }
     }
 }
@@ -88,6 +99,8 @@ impl ImportDefaults {
         use bae_media::MediaKind;
         ImportDefaults {
             sequence_fps: crate::prefs::sequence_fps(prefs),
+            report_missing: prefs.bool("import.report_missing_frames"),
+            verify_frames: prefs.bool("import.verify_individual_frames"),
             still_duration: crate::prefs::still_duration(prefs),
             labels: Some([
                 crate::prefs::footage_label(prefs, MediaKind::Still),
@@ -128,7 +141,20 @@ fn probe_file(
                 return;
             }
             let name = match &info.sequence {
-                Some(seq) => sequence_name(seq),
+                Some(seq) => {
+                    let name = sequence_name(seq);
+                    if defaults.report_missing && !seq.missing.is_empty() {
+                        out.notices.push(format!(
+                            "{name} — {}: {}",
+                            tr("Missing frames"),
+                            verify::ranges(&seq.missing)
+                        ));
+                    }
+                    if defaults.verify_frames {
+                        out.sequences_to_verify.push((info.path.clone(), name.clone()));
+                    }
+                    name
+                }
                 None => file_name(path),
             };
             let mut attrs: std::collections::BTreeMap<String, bae_model::Value> = info
@@ -203,8 +229,9 @@ fn probe_dir(
         .into_iter()
         .flatten()
         .flatten()
+        .filter(|e| e.file_type().is_ok_and(|ty| ty.is_dir()))
         .map(|e| e.path())
-        .filter(|p| p.is_dir() && !file_name(p).starts_with('.'))
+        .filter(|p| !file_name(p).starts_with('.'))
         .collect();
     subdirs.sort();
     for sub in subdirs {
@@ -232,9 +259,41 @@ pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
     out
 }
 
+/// Route external drops on the Composition and Timeline panels through the same
+/// import command as the Project panel, including folders and image sequences;
+/// the files also become layers of the open comp (AE), in the same undo step.
+pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
+    if ui.rect_contains_pointer(ui.available_rect_before_wrap()) {
+        let paths = ui.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_owned())
+                .collect::<Vec<_>>()
+        });
+        if paths.is_empty() {
+            return;
+        }
+        let comp = cx
+            .resources
+            .get::<crate::SharedSession>()
+            .and_then(|s| s.lock().active_comp.clone());
+        import_into(cx, &paths, None, comp);
+    }
+}
+
 /// Import `paths` into `parent` (default the assets folder): one
 /// `item.import`; unreadable files are reported in an alert.
 pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent: Option<PrimPath>) {
+    import_into(cx, paths, parent, None);
+}
+
+fn import_into(
+    cx: &mut PanelContext<'_>,
+    paths: &[PathBuf],
+    parent: Option<PrimPath>,
+    comp: Option<PrimPath>,
+) {
     if paths.is_empty() {
         return;
     }
@@ -245,16 +304,12 @@ pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent:
         if let Some(p) = parent {
             params["parent"] = json!(p);
         }
+        if let Some(c) = comp {
+            params["comp"] = json!(c);
+        }
         cx.invoke_with("item.import", params);
     }
-    if !probed.failed.is_empty() {
-        let message =
-            tr("These files could not be imported because their format is not supported:")
-                .to_owned()
-                + "\n"
-                + &probed.failed.join("\n");
-        crate::dialogs::alert(cx, tr("Import File"), message);
-    }
+    verify::report(cx, tr("Import File"), probed);
 }
 
 /// Where File > Import puts the items: the folder selected in the Project
@@ -349,12 +404,14 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         let Some(path) = footage_file(cx.stage, &item) else {
             continue;
         };
-        if let Some(file) = probe(&[path], &defaults).files.pop() {
+        let mut probed = probe(&[path], &defaults);
+        if let Some(file) = probed.files.pop() {
             cx.invoke_with(
                 "item.replace_file",
                 json!({ "item": item, "file": file, "keep_name": true }),
             );
         }
+        verify::report(cx, tr("Reload Footage"), probed);
     }
 }
 
@@ -385,17 +442,10 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
     };
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
     let mut probed = probe(&[path], &defaults);
-    match probed.files.pop() {
-        Some(file) => cx.invoke_with("item.replace_file", json!({ "item": item, "file": file })),
-        None => {
-            let message =
-                tr("These files could not be imported because their format is not supported:")
-                    .to_owned()
-                    + "\n"
-                    + &probed.failed.join("\n");
-            crate::dialogs::alert(cx, tr("Replace Footage File"), message);
-        }
+    if let Some(file) = probed.files.pop() {
+        cx.invoke_with("item.replace_file", json!({ "item": item, "file": file }));
     }
+    verify::report(cx, tr("Replace Footage File"), probed);
 }
 
 /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I): the open panel comes back
@@ -417,6 +467,9 @@ pub(crate) fn import_multiple(cx: &mut PanelContext<'_>, session: &SharedSession
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Missing frames", "缺少帧"),
+    ("Unreadable frames", "无法读取的帧"),
+    ("Could not verify the image sequence.", "无法校验图像序列。"),
     // File > Import and dropped files (`import`).
     ("Import File", "导入文件"),
     ("Import Multiple Files", "导入多个文件"),
@@ -434,8 +487,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
-pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
+        "bae.media/import-formats",
+        Arc::new(verify::FormatWarmUp),
+    );
 }
 
 #[cfg(test)]

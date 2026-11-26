@@ -470,6 +470,7 @@ mod guides;
 mod masks;
 mod motion_sketch;
 mod navigation;
+mod parity;
 mod pen;
 mod resolution;
 mod selection;

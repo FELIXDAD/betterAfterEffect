@@ -166,6 +166,28 @@ impl OutputTarget {
     pub fn size(&self) -> [u32; 2] {
         [self.0.texture().width(), self.0.texture().height()]
     }
+
+    /// A new display target of `size` (allocated ahead of the frames it will
+    /// hold, such as playback's spare targets).
+    pub fn new(device: &wgpu::Device, [w, h]: [u32; 2]) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bae-render.output"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        OutputTarget(texture.create_view(&Default::default()))
+    }
 }
 
 pub(crate) struct DisplayOutput {
@@ -192,26 +214,7 @@ impl DisplayOutput {
         let target = self
             .available
             .filter(|t| t.size() == [w.max(1), h.max(1)])
-            .unwrap_or_else(|| {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("bae-render.output"),
-                    size: wgpu::Extent3d {
-                        width: w.max(1),
-                        height: h.max(1),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
-                let view = texture.create_view(&Default::default());
-                OutputTarget(view)
-            });
+            .unwrap_or_else(|| OutputTarget::new(device, [w, h]));
         crate::exec::record_output_pass(
             device,
             pipelines,
@@ -395,6 +398,14 @@ impl Renderer {
         self.frames.clear();
     }
 
+    /// Original channel names and picker data for a frame already decoded by this renderer.
+    pub fn footage_channels(
+        &self,
+        footage: &FootageRef,
+    ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+        self.footage.channels(footage)
+    }
+
     /// Closes every open footage file so the next frame reopens them (after
     /// files changed on disk or assets were relinked).
     pub fn reload_footage(&mut self) {
@@ -506,7 +517,9 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
-        let tiles = request.roi.map(|_| crate::exec::TileCache {
+        let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
+        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
+            feedback,
             frames: &mut self.frames,
             request: RenderRequest {
                 roi: None,

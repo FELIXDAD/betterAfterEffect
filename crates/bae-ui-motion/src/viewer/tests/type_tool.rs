@@ -148,7 +148,7 @@ fn type_tool_edits_an_existing_text_layer() {
     assert_eq!(text, "!Hello");
     h.apply(&r);
     assert_eq!(h.doc(&layer).text, text);
-    assert_eq!(h.doc(&layer).font_size, 72.0, "style kept");
+    assert_eq!(h.doc(&layer).style.font_size, 72.0, "style kept");
     h.stage.undo(&h.author).unwrap();
     assert_eq!(h.doc(&layer).text, "Hello");
     // Past the end of the text: the caret goes to the end.
@@ -162,4 +162,40 @@ fn type_tool_edits_an_existing_text_layer() {
     h.frame(Vec::new(), Modifiers::NONE);
     assert_eq!(h.tools().lock().current(), Tool::TypeHorizontal);
     assert_eq!(h.viewer.type_tool.edited_layer(), Some(&layer));
+}
+
+#[test]
+fn type_selection_drags_and_extends_by_character_then_styles_once() {
+    let mut h = H::new();
+    let layer = path(
+        &h.run(
+            "text.create",
+            json!({"comp":h.comp,"text":"Hello","position":[100.0,200.0]}),
+        )["path"],
+    );
+    h.tools().lock().set(Tool::TypeHorizontal);
+    h.drag((101., 180.), (150., 180.), Modifiers::NONE);
+    let selected = h.session().lock().text_range(Some(&layer)).unwrap();
+    assert_eq!(selected.start, 0);
+    assert!((1..5).contains(&selected.end));
+    let key = |pressed| Event::Key {
+        key: Key::ArrowRight,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::SHIFT,
+    };
+    h.frame(vec![key(true)], Modifiers::SHIFT);
+    h.frame(vec![key(false)], Modifiers::SHIFT);
+    let extended = h.session().lock().text_range(Some(&layer)).unwrap();
+    assert_eq!(extended, 0..selected.end + 1);
+    h.run(
+        "text.set_style",
+        json!({"layers":[layer],"range":extended,"style":{"font_size":33,"faux_bold":true}}),
+    );
+    let doc = h.doc(&layer);
+    assert!(doc.style_at(selected.end).faux_bold);
+    assert_eq!(doc.style_at(extended.end).font_size, 72.);
+    h.stage.undo(&h.author).unwrap();
+    assert!(h.doc(&layer).runs.is_empty());
 }

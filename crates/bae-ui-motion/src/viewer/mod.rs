@@ -30,6 +30,7 @@ pub(crate) mod errors;
 mod feather_tool;
 mod free_transform;
 mod gizmo3d;
+mod group_edit;
 pub(crate) mod guides;
 mod layout;
 mod look_at;
@@ -89,6 +90,17 @@ pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
     }
 }
 
+/// Associate the native smart-magnify event with the next input pass.
+pub fn request_smart_zoom(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("mac.smart_zoom"), pass));
+}
+
+pub(crate) fn smart_zoom(ctx: &egui::Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new("mac.smart_zoom"))) == Some(pass)
+}
+
 /// What the mouse wheel and trackpad did this frame over a picture (the
 /// viewer and the Layer panel share it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -103,14 +115,70 @@ pub(crate) struct Wheel {
     pub alt: bool,
 }
 
+/// Preferences ▸ Previews ▸ Magnification (AE 26): how the wheel and the
+/// trackpad zoom the Composition and Layer panels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Magnification {
+    /// Type: Legacy — each wheel notch steps through the zoom menu's levels
+    /// (instead of Smooth's ×9/8).
+    pub legacy: bool,
+    /// Behavior: Centered — zoom around the view's center instead of
+    /// following the pointer (Alt/Option swaps the two).
+    pub centered: bool,
+    /// Trackpad Scroll: Zoom — two-finger scrolling zooms instead of panning.
+    pub trackpad_zooms: bool,
+}
+
+impl Magnification {
+    pub(crate) fn of(resources: &bae_app::Resources) -> Self {
+        let p = crate::prefs::current(resources);
+        Magnification {
+            legacy: p.str("previews.magnification_type") == "legacy",
+            centered: p.str("previews.magnification_behavior") == "centered",
+            trackpad_zooms: p.str("previews.magnification_trackpad_scroll") == "zoom",
+        }
+    }
+
+    /// Whether the wheel zooms around the pointer (`alt`: Alt/Option held).
+    pub(crate) fn follows_pointer(self, alt: bool) -> bool {
+        self.centered == alt
+    }
+
+    /// The magnification after `notches` wheel notches (up > 0) from `mag`.
+    /// Legacy steps whole notches; `rest` carries the fraction between frames
+    /// (trackpads and high-resolution wheels).
+    pub(crate) fn wheel_zoom(self, mag: f32, notches: f32, rest: &mut f32) -> f32 {
+        if !self.legacy {
+            *rest = 0.0;
+            let step = if notches > 0.0 {
+                WHEEL_ZOOM_IN
+            } else {
+                WHEEL_ZOOM_OUT
+            };
+            return mag * step.powf(notches.abs());
+        }
+        *rest += notches;
+        let whole = rest.trunc();
+        *rest -= whole;
+        let mut m = mag;
+        for _ in 0..whole.abs() as usize {
+            if let Some(next) = next_step(m, whole > 0.0) {
+                m = next;
+            }
+        }
+        m
+    }
+}
+
 /// Points of pixel-precise scrolling that make one wheel notch (Windows and
 /// Linux high-resolution wheels report pixels).
 const POINTS_PER_NOTCH: f32 = 50.0;
 
 /// Read this frame's wheel input. A mouse wheel zooms; Shift+wheel scrolls
-/// sideways; pixel-precise scrolling pans on macOS (AE 25.3+ trackpads) and
-/// zooms elsewhere, where it comes from high-resolution wheels (#571).
-pub(crate) fn wheel(ui: &Ui) -> Wheel {
+/// sideways; pixel-precise scrolling pans on macOS (AE 25.3+ trackpads; it
+/// zooms with Trackpad Scroll: Zoom) and zooms elsewhere, where it comes from
+/// high-resolution wheels (#571).
+pub(crate) fn wheel(ui: &Ui, m: Magnification) -> Wheel {
     ui.input(|i| {
         let mut w = Wheel {
             pinch: i.zoom_delta(),
@@ -134,7 +202,13 @@ pub(crate) fn wheel(ui: &Ui) -> Wheel {
                         };
                         w.pan.x += (delta.x + delta.y) * lines;
                     }
-                    egui::MouseWheelUnit::Point if cfg!(target_os = "macos") => w.pan += *delta,
+                    egui::MouseWheelUnit::Point if cfg!(target_os = "macos") => {
+                        if m.trackpad_zooms {
+                            w.notches += delta.y / POINTS_PER_NOTCH;
+                        } else {
+                            w.pan += *delta;
+                        }
+                    }
                     egui::MouseWheelUnit::Point => w.notches += delta.y / POINTS_PER_NOTCH,
                     egui::MouseWheelUnit::Line => w.notches += delta.y,
                     egui::MouseWheelUnit::Page => w.notches += delta.y * 4.0,
@@ -152,10 +226,13 @@ pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
     zoom: Option<f32>,
+    /// Legacy magnification: the part of a wheel notch not yet stepped.
+    wheel_rest: f32,
     pan: Vec2,
     /// Title/action safe and grid from the saved panel state, given to the
     /// session's view options on the first frame.
@@ -230,7 +307,7 @@ pub struct CompositionViewer {
 /// start with are prepared.
 const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300);
 /// Frames prepared from where playback would start.
-const PREFETCH_FRAMES: i64 = 3;
+const PREFETCH_FRAMES: i64 = 6;
 
 impl CompositionViewer {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
@@ -286,10 +363,18 @@ impl CompositionViewer {
         let fit = fit.min(1.0 / ppp);
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let origin = area.center() - vec2(w, h) * scale / 2.0 + self.pan;
+        // At native size a fractional texture edge blends adjacent texels.
+        let origin = if cfg!(target_os = "macos") && scale == 1.0 / ppp {
+            use egui::emath::GuiRounding as _;
+            origin.round_to_pixels(ppp)
+        } else {
+            origin
+        };
         let point = self.prefs.point_size;
         (
             View {
                 origin,
+                aspect: 1.0,
                 scale,
                 point,
                 camera: None,
@@ -444,7 +529,7 @@ pub(crate) fn live_evaluator<'a>(
         .as_ref()
         .map(|s| s.overrides(cx.stage))
         .unwrap_or_default();
-    let eval = eval.get(cx.resources);
+    let eval = eval.get(cx.stage);
     eval.set_overrides(overrides);
     eval
 }
@@ -499,7 +584,7 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
-fn checkerboard(p: &egui::Painter, r: Rect) {
+pub(crate) fn checkerboard(p: &egui::Painter, r: Rect) {
     p.rect_filled(r, 0.0, Color32::from_gray(200));
     let s = 8.0;
     let mut y = r.top();
@@ -631,6 +716,7 @@ impl Panel for CompositionViewer {
         let opts = session.lock().view_options;
         self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
+        crate::import::drop_on_panel(ui, cx);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
@@ -645,13 +731,41 @@ impl Panel for CompositionViewer {
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
         // View layout: the active view is the viewer, the others are drawn below.
-        let (panes, active) = session
-            .lock()
-            .views3d
-            .get(&info.path)
-            .map_or((vec![view3d::View3d::Active], 0), |v| {
-                (v.panes(), v.active())
-            });
+        let (panes, active) = {
+            let s = session.lock();
+            s.views3d
+                .get(&info.path)
+                .map_or((vec![view3d::View3d::Active], 0), |v| {
+                    let panes = v.panes();
+                    let active = layout::preview_pane(
+                        &panes,
+                        v.active(),
+                        s.is_playing() && s.preview.favor_active_camera,
+                        || {
+                            let revision = cx.stage.revision();
+                            if let Some((comp, rev, result)) = &self.preview_3d
+                                && comp == &info.path
+                                && *rev == revision
+                            {
+                                return *result;
+                            }
+                            let result =
+                                query::comp_layers(cx.stage, &info.path)
+                                    .iter()
+                                    .any(|layer| {
+                                        cx.stage
+                                            .prim(layer)
+                                            .and_then(|p| query::static_value(&p, "three_d"))
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false)
+                                    });
+                            self.preview_3d = Some((info.path.clone(), revision, result));
+                            result
+                        },
+                    );
+                    (panes, active)
+                })
+        };
         let pane_rects = layout::rects(area, panes.len());
         let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
@@ -696,18 +810,30 @@ impl Panel for CompositionViewer {
         // around the view's center; Shift: scrolls sideways); trackpad scrolling
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
-            let w = wheel(ui);
-            if w.pinch != 1.0 {
+            let m = Magnification::of(cx.resources);
+            let w = wheel(ui, m);
+            if smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, &info, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), resp.hover_pos(), area, &info, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
                 if w.notches != 0.0 {
-                    let around = if w.alt { None } else { resp.hover_pos() };
-                    let step = if w.notches > 0.0 {
-                        WHEEL_ZOOM_IN
+                    let around = if m.follows_pointer(w.alt) {
+                        resp.hover_pos()
                     } else {
-                        WHEEL_ZOOM_OUT
+                        None
                     };
-                    self.zoom_by(step.powf(w.notches.abs()), around, area, &info, ppp);
+                    let (_, mag) = self.view(area, &info, ppp);
+                    let to = m.wheel_zoom(mag, w.notches, &mut self.wheel_rest);
+                    if to != mag {
+                        self.zoom_by(to / mag, around, area, &info, ppp);
+                    }
                 }
                 self.pan += w.pan;
             }
@@ -918,6 +1044,22 @@ impl Panel for CompositionViewer {
             }
         }
         apply_overrides(&mut comp, self.select.drag.as_ref());
+        // A shape group being dragged.
+        if let Some(d) = &self.select.group_drag
+            && let Some(l) = comp.layers.iter_mut().find(|l| l.path == d.layer)
+        {
+            d.preview(l);
+        }
+        // A mask or shape path being edited shows in the picture, not only as
+        // its outline (#593).
+        if let Some((prim, path)) = self
+            .select
+            .path_preview()
+            .or(self.pen.path_preview())
+            .or(self.feather.path_preview())
+        {
+            overlay::apply_path_preview(&mut comp, &prim, &path);
+        }
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
         if camera_tool.is_camera() || self.camera_drag.is_some() {
@@ -941,7 +1083,7 @@ impl Panel for CompositionViewer {
                 .lock()
                 .views3d
                 .get(&info.path)
-                .and_then(|v| v.camera(size))
+                .and_then(|v| v.camera_of(panes[active], size))
         });
         let view = View {
             camera: Some((
@@ -1003,6 +1145,7 @@ impl Panel for CompositionViewer {
                 && let Some(g) = self.gpu.as_mut()
                 && let Some((texture, rect)) = g.playback.shown_texture()
             {
+                session.lock().channel_frame = g.playback.shown_channels();
                 g.show_cached(texture, rect);
             }
             completed
@@ -1281,6 +1424,16 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
+        // The paint tools paint in the Layer panel: a double-click on a layer
+        // opens it there (AE).
+        if matches!(effective, Tool::Brush | Tool::CloneStamp | Tool::Eraser)
+            && resp.double_clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, pos)
+        {
+            session.lock().selected_layers = vec![layer.clone()];
+            crate::layer_panel::open(cx, &session, &layer);
+        }
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.

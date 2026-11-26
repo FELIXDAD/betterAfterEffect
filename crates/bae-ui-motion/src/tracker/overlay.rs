@@ -72,6 +72,7 @@ pub(crate) struct Overlay {
     drag: Option<Drag>,
 }
 impl Overlay {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
         ui: &Ui,
@@ -80,6 +81,7 @@ impl Overlay {
         view: &View,
         min: DVec2,
         layer: &PrimPath,
+        magnify: impl Fn(&egui::Painter, Rect, DVec2, f32),
     ) {
         let Some(sh) = cx.resources.get::<Shared>() else {
             self.drag = None;
@@ -110,26 +112,28 @@ impl Overlay {
                 search: at("search_size"),
                 attach: at("attach_point"),
             };
-            let mut path = Vec::new();
-            if let Some(a) = query::attr_spec(cx.stage, pt, "feature_center") {
-                for k in a.keyframes.values() {
-                    if let Value::Vec2(x) = k.value {
-                        path.push(screen(x.into()));
+            let stroke = Stroke::new(1., Color32::YELLOW);
+            if s.display.paths {
+                let mut path = Vec::new();
+                if let Some(a) = query::attr_spec(cx.stage, pt, "feature_center") {
+                    for k in a.keyframes.values() {
+                        if let Value::Vec2(x) = k.value {
+                            path.push(screen(x.into()));
+                        }
                     }
                 }
-            }
-            let stroke = Stroke::new(1., Color32::YELLOW);
-            if path.len() > 1 {
-                painter.add(egui::Shape::line(path, stroke));
-            }
-            let mut live = Vec::new();
-            for f in &s.live {
-                if let Some(v) = f.points.get(i) {
-                    live.push(screen(v.center.into()));
+                if path.len() > 1 {
+                    painter.add(egui::Shape::line(path, stroke));
                 }
-            }
-            if live.len() > 1 {
-                painter.add(egui::Shape::line(live, stroke));
+                let mut live = Vec::new();
+                for f in &s.live {
+                    if let Some(v) = f.points.get(i) {
+                        live.push(screen(v.center.into()));
+                    }
+                }
+                if live.len() > 1 {
+                    painter.add(egui::Shape::line(live, stroke));
+                }
             }
             if let Some(v) = s.live.last().and_then(|f| f.points.get(i)) {
                 g.center = v.center.into();
@@ -139,12 +143,24 @@ impl Overlay {
                 && d.point == *pt
                 && let Some(p) = pointer
             {
-                let delta = (p - d.start) / view.scale;
-                g = d
-                    .base
-                    .moved(d.handle, DVec2::new(f64::from(delta.x), f64::from(delta.y)));
+                let delta = view.to_comp(p) - view.to_comp(d.start);
+                g = d.base.moved(d.handle, delta);
             }
             let center = screen(g.center);
+            if s.display.magnify && self.drag.as_ref().is_some_and(|drag| drag.point == *pt) {
+                let scale = 4.0 / ui.ctx().pixels_per_point();
+                let size = vec2(g.feature.x as f32 * view.aspect, g.feature.y as f32) * scale;
+                let lens = Rect::from_center_size(center, size);
+                if lens.intersects(area) {
+                    magnify(
+                        &painter.with_clip_rect(area.intersect(lens)),
+                        lens,
+                        g.center - min,
+                        scale,
+                    );
+                    painter.rect_stroke(lens, 0., stroke, StrokeKind::Inside);
+                }
+            }
             let attach = screen(g.attach);
             for outer in [true, false] {
                 let c = if outer { g.center + g.offset } else { g.center };
@@ -205,10 +221,8 @@ impl Overlay {
             && let Some(p) = pointer
             && p != d.start
         {
-            let delta = (p - d.start) / view.scale;
-            let new = d
-                .base
-                .moved(d.handle, DVec2::new(f64::from(delta.x), f64::from(delta.y)));
+            let delta = view.to_comp(p) - view.to_comp(d.start);
+            let new = d.base.moved(d.handle, delta);
             let time = query::to_key_time(cx.stage, &d.point, d.time);
             let edits:Vec<_>=new.edits(d.handle).into_iter().map(|(attr,v)|json!({"path":d.point,"attr":attr,"value":Value::Vec2(v.to_array()),"time":time})).collect();
             cx.invoke_with("attr.set_many", json!({"edits":edits}));

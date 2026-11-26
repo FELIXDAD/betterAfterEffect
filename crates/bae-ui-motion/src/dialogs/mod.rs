@@ -9,8 +9,10 @@ mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
+mod interpret_footage;
 mod layer_time;
 mod light_settings;
+mod mask_value;
 pub mod memory;
 mod precompose;
 mod project_settings;
@@ -28,6 +30,7 @@ use bae_ui::PanelContext;
 pub use camera_settings::{CameraSettings, CameraSettingsMemory, CameraValues, FilmUnits};
 pub use comp_settings::{CompSettings, CompSettingsMemory};
 pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
+pub use mask_value::{Kind as MaskKind, MaskValue};
 pub use precompose::{PrecomposeDialog, PrecomposeMemory};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
 pub use transform_value::{Kind as TransformKind, TransformValue};
@@ -39,6 +42,8 @@ use crate::session::SharedSession;
 pub enum Dialog {
     /// Analysis of the composition work area for the Keyframe Assistant.
     AudioAnalysis(crate::audio_analysis::Analysis),
+    /// Display units and slider floor of the Audio panel.
+    AudioOptions(crate::panels::audio::AudioOptionsDialog),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
@@ -50,6 +55,8 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// File > Interpret Footage > Main (Cmd/Ctrl+Alt+G).
+    InterpretFootage(Box<interpret_footage::InterpretFootage>),
     /// Layer > Time > Time Stretch.
     TimeStretch(Box<layer_time::TimeStretch>),
     /// Layer > Transform > Auto-Orient (Cmd/Ctrl+Alt+O).
@@ -58,28 +65,38 @@ pub enum Dialog {
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
+    EffectManager(Box<crate::effects::manager::EffectManager>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
     TransformValue(Box<TransformValue>),
+    /// Layer ▸ Mask ▸ Mask Shape… / Feather… / Opacity… / Expansion….
+    MaskValue(Box<MaskValue>),
     /// A Render Queue item's Render Settings.
     RenderSettings(Box<render_output::RenderSettings>),
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
-    Alert { title: String, message: String },
+    Alert {
+        title: String,
+        message: String,
+    },
     /// View ▸ View Options (Cmd/Ctrl+Alt+U).
     ViewOptions(Box<crate::viewer::view_options::LayerControls>),
     /// View ▸ Panel Background Color ▸ Select Custom Background Color…
     BackgroundColor([u8; 3]),
     /// View ▸ Resolution ▸ Custom…: pixel steps (horizontal, vertical);
     /// `nested`: also for the comps nested in the active one.
-    CustomResolution { steps: [u32; 2], nested: bool },
+    CustomResolution {
+        steps: [u32; 2],
+        nested: bool,
+    },
 }
 
 /// Open dialog and remembered values.
 #[derive(Debug, Default)]
 pub struct Dialogs {
     pub open: Option<Dialog>,
+    pub(crate) frame_checks: crate::import::FrameChecks,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
@@ -273,6 +290,18 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Interpret Footage for the footage selected in the Project panel.
+pub(crate) fn interpret_footage(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    let selected = session.lock().selected_items.clone();
+    if d.open.is_none()
+        && let Some(f) = interpret_footage::InterpretFootage::new(cx.stage, &selected)
+    {
+        d.open = Some(Dialog::InterpretFootage(Box::new(f)));
+    }
+}
+
 /// Open Time Stretch for the selected layers.
 pub(crate) fn time_stretch(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -314,6 +343,17 @@ pub(crate) fn project_settings(cx: &PanelContext<'_>) {
         d.open = Some(Dialog::ProjectSettings(Box::new(
             project_settings::ProjectSettings::new(cx.stage),
         )));
+    }
+}
+
+pub(crate) fn audio_options(
+    cx: &PanelContext<'_>,
+    options: crate::panels::audio::AudioOptionsDialog,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::AudioOptions(options));
     }
 }
 
@@ -385,6 +425,24 @@ pub(crate) fn transform_value(
     }
 }
 
+/// Open the mask value dialog of `kind` for `masks` at comp time `now`.
+pub(crate) fn mask_value(
+    cx: &PanelContext<'_>,
+    comp: &PrimPath,
+    masks: &[PrimPath],
+    now: bae_model::Time,
+    kind: MaskKind,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = MaskValue::new(cx.stage, comp, masks, now, kind) {
+        d.open = Some(Dialog::MaskValue(Box::new(v)));
+    }
+}
+
 /// AE's initial New Solid color (tests).
 #[cfg(test)]
 pub(crate) fn solid_settings_default_color() -> [f64; 4] {
@@ -400,10 +458,12 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        interpret_footage::STRINGS,
         layer_time::STRINGS,
         go_to_time::STRINGS,
         project_settings::STRINGS,
         transform_value::STRINGS,
+        mask_value::STRINGS,
         render_output::STRINGS,
     ]
     .concat()
@@ -421,22 +481,29 @@ impl bae_ui::DialogHost for MotionDialogs {
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
-        let Some(mut open) = dialogs.lock().open.take() else {
-            return;
+        let open = {
+            let mut d = dialogs.lock();
+            d.frame_checks.repaint_while_running(ctx);
+            d.open.take().or_else(|| d.frame_checks.next_notice())
         };
+        let Some(mut open) = open else { return };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
+            Dialog::AudioOptions(d) => d.ui(ctx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::InterpretFootage(d) => d.ui(ctx, cx),
             Dialog::TimeStretch(d) => d.ui(ctx, cx),
             Dialog::AutoOrient(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
+            Dialog::EffectManager(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),
+            Dialog::MaskValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),

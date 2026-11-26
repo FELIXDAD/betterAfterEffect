@@ -310,3 +310,86 @@ fn double_clicking_shape_and_text_layers_edits_them() {
     assert_eq!(h.tools().lock().current(), Tool::TypeHorizontal);
     assert_eq!(h.viewer.type_tool.edited_layer(), Some(&text));
 }
+
+/// #400: double-clicking a parametric shape selects its group (AE): its box
+/// moves the group, not the layer.
+#[test]
+fn double_clicking_a_parametric_shape_selects_its_group() {
+    let mut h = H::new();
+    let r = h.draw(Tool::Rectangle, (200.0, 100.0), (300.0, 200.0));
+    h.apply(&r);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let group = h.contents(&layer)[0].clone();
+    let before = vec2v(h.value(&group, "transform:position"));
+    let layer_pos = h.v3(&layer, "transform:position");
+    h.session().lock().selected_layers.clear();
+    h.tools().lock().set(Tool::Selection);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    assert_eq!(h.viewer.select.group.as_ref(), Some(&group));
+    let r = h.drag((250.0, 150.0), (280.0, 160.0), Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let after = vec2v(h.value(&group, "transform:position"));
+    assert!(
+        close(after, [before[0] + 30.0, before[1] + 10.0]),
+        "{before:?} → {after:?}"
+    );
+    assert_eq!(
+        h.v3(&layer, "transform:position"),
+        layer_pos,
+        "the layer stays"
+    );
+}
+
+/// While mask or shape vertices are dragged, the picture follows (#593): the
+/// preview goes into the evaluated comp's mask shape and Path item.
+#[test]
+fn edited_paths_show_in_the_evaluated_comp() {
+    let mut h = H::new();
+    let solid = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "mask.create",
+        json!({"layer": solid, "kind": "rect", "position": [100.0, 50.0], "size": [100.0, 50.0]}),
+    );
+    let mask = h.children(&solid.child("masks").unwrap())[0].clone();
+    let out = h.run(
+        "shape.add",
+        json!({"comp": h.comp, "kind": "rect", "bezier": true,
+               "position": [0.0, 0.0], "size": [100.0, 50.0]}),
+    );
+    let group = path(&out["group"]);
+    let item = h.children(&group.child("contents").unwrap())[0].clone();
+    let moved = BezierPath {
+        vertices: vec![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+        in_tangents: vec![[0.0, 0.0]; 3],
+        out_tangents: vec![[0.0, 0.0]; 3],
+        closed: true,
+        ..BezierPath::default()
+    };
+    let mut comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+    crate::viewer::overlay::apply_path_preview(&mut comp, &mask, &moved);
+    crate::viewer::overlay::apply_path_preview(&mut comp, &item, &moved);
+    let m = comp
+        .layers
+        .iter()
+        .flat_map(|l| &l.masks)
+        .find(|m| m.path == mask)
+        .expect("mask");
+    assert_eq!(m.shape, moved);
+    fn find<'a>(
+        items: &'a [bae_anim::EvaluatedPrim],
+        p: &PrimPath,
+    ) -> Option<&'a bae_anim::EvaluatedPrim> {
+        items
+            .iter()
+            .find_map(|i| (i.path == *p).then_some(i).or_else(|| find(&i.children, p)))
+    }
+    let e = comp
+        .layers
+        .iter()
+        .find_map(|l| find(&l.contents, &item))
+        .expect("path item");
+    assert_eq!(e.get("path"), Some(&Value::Bezier(moved)));
+}

@@ -17,9 +17,10 @@ use bae_gpu::{
 };
 use bae_model::{FrameRate, PrimPath, Stage, Time, TimeRange};
 use bae_render::cache::{FrameCache, FrameKey};
-use bae_render::{AnimEvaluator, IRect, RenderPurpose};
+use bae_render::{AnimEvaluator, IRect, OutputTarget, RenderPurpose};
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 const DEPTH: usize = 3;
 
@@ -57,6 +58,7 @@ struct Scene {
 }
 
 struct Slot {
+    channels: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
     rect: IRect,
@@ -65,11 +67,17 @@ struct Slot {
     bytes: u64,
     /// The published texture (the Info panel and snapshots read it).
     texture: wgpu::Texture,
+    /// Its target, handed to [`Spares`] when the frame is dropped.
+    target: Option<OutputTarget>,
+    spares: Arc<Mutex<Spares>>,
 }
 
 impl Drop for Slot {
     fn drop(&mut self) {
         self.registry.remove(self.id);
+        if let Some(target) = self.target.take() {
+            self.spares.lock().unwrap().give(target);
+        }
     }
 }
 
@@ -79,6 +87,60 @@ impl Slot {
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect,
         })
+    }
+}
+
+/// Spare output targets kept at most (a 4K target is 33 MB).
+const MAX_SPARES: usize = 6;
+/// Spare targets allocated while the viewer is idle, so live playback renders
+/// into them instead of allocating.
+const PREALLOC_SPARES: usize = 4;
+/// A dropped frame's target is reused after this: the viewer no longer
+/// draws it.
+const REUSE_AFTER: Duration = Duration::from_millis(100);
+
+/// Output targets of dropped frames, and targets allocated while idle,
+/// rendered into again instead of allocating a whole frame during playback:
+/// allocating a 4K target there stalled the first live frame after the
+/// prefetched ones by 18–20 ms (the driver growing its heap).
+#[derive(Default)]
+struct Spares {
+    targets: VecDeque<(Instant, OutputTarget)>,
+    /// The frame size spares are made in (the last frame rendered).
+    size: Option<[u32; 2]>,
+}
+
+impl Spares {
+    fn give(&mut self, target: OutputTarget) {
+        if self.targets.len() < MAX_SPARES && Some(target.size()) == self.size {
+            self.targets.push_back((Instant::now(), target));
+        }
+    }
+
+    /// A spare the viewer no longer draws.
+    fn take(&mut self) -> Option<OutputTarget> {
+        let size = self.size?;
+        self.targets.retain(|(_, t)| t.size() == size);
+        if self.targets.front()?.0.elapsed() < REUSE_AFTER {
+            return None;
+        }
+        self.targets.pop_front().map(|(_, t)| t)
+    }
+
+    /// The size to allocate another spare in, while fewer than
+    /// [`PREALLOC_SPARES`] are ready.
+    fn wanted(&self) -> Option<[u32; 2]> {
+        (self.targets.len() < PREALLOC_SPARES)
+            .then_some(self.size)
+            .flatten()
+    }
+
+    /// A target allocated ahead (usable at once).
+    fn add(&mut self, target: OutputTarget) {
+        let ready = Instant::now()
+            .checked_sub(REUSE_AFTER)
+            .unwrap_or_else(Instant::now);
+        self.targets.push_back((ready, target));
     }
 }
 
@@ -262,14 +324,21 @@ impl PlaybackPreview {
             effects: effects.map(|e| e.0.generation()),
         };
         let mut state = self.shared.state.lock().unwrap();
-        let budget_mib = resources
-            .get::<Arc<bae_prefs::PrefsStore>>()
-            .map_or(1024, |store| {
-                store.current().int(bae_prefs::keys::PREVIEW_CACHE_MIB)
-            });
-        state
-            .cache
-            .sync(stage, &key, (budget_mib.max(0) as u64) << 20);
+        let (budget_mib, reserved_gb) =
+            resources
+                .get::<Arc<bae_prefs::PrefsStore>>()
+                .map_or((1024, 0), |store| {
+                    let prefs = store.current();
+                    (
+                        prefs.int(bae_prefs::keys::PREVIEW_CACHE_MIB),
+                        prefs.int(bae_prefs::keys::RAM_RESERVED_GB),
+                    )
+                });
+        state.cache.sync(
+            stage,
+            &key,
+            cache_budget(budget_mib, reserved_gb, bae_platform::memory::total_bytes()),
+        );
         let frame_key = key.frame(time);
         let replaced = state.demand.as_ref().is_none_or(|d| d.scene.key != key);
         if replaced {
@@ -365,6 +434,10 @@ impl PlaybackPreview {
     }
 
     /// The texture and rect of the frame [`Self::poll`] returned last.
+    pub(super) fn shown_channels(&self) -> Option<Arc<crate::gpu_preview::ChannelFrame>> {
+        self.shown.as_ref()?.channels.clone()
+    }
+
     pub(super) fn shown_texture(&self) -> Option<(wgpu::Texture, IRect)> {
         let shown = self.shown.as_ref()?;
         Some((shown.texture.clone(), shown.rect))
@@ -579,6 +652,18 @@ fn failed(shared: &Shared, epoch: u64, time: Time, error: &str) {
 
 /// The pipeline's second stage: encodes and submits converted frames; a
 /// frame is published when the GPU has finished it.
+/// Whether the viewer is idle (not playing): it then demands only its
+/// current frame.
+fn idle(shared: &Shared) -> bool {
+    shared
+        .state
+        .lock()
+        .unwrap()
+        .demand
+        .as_ref()
+        .is_none_or(|d| d.range.duration() <= d.rate.frame_duration())
+}
+
 fn render_worker(
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
@@ -592,6 +677,7 @@ fn render_worker(
     let mut engine = RenderEngine::new(gpu.clone(), 0);
     let mut synced: Option<(Option<u64>, Option<u64>)> = None;
     let mut in_flight = false;
+    let spares: Arc<Mutex<Spares>> = Arc::default();
     loop {
         let job = match rx.try_recv() {
             Ok(job) => job,
@@ -604,6 +690,17 @@ fn render_worker(
                         return;
                     }
                     in_flight = false;
+                }
+                // Idle viewer: allocate the targets playback will render into.
+                if idle(&shared) {
+                    loop {
+                        let wanted = spares.lock().unwrap().wanted();
+                        let Some(size) = wanted else {
+                            break;
+                        };
+                        let target = OutputTarget::new(gpu.device(), size);
+                        spares.lock().unwrap().add(target);
+                    }
                 }
                 match rx.recv() {
                     Ok(job) => job,
@@ -620,6 +717,7 @@ fn render_worker(
             sync_engine(&mut engine, &job.scene);
             synced = Some(generations);
         }
+        let spare = spares.lock().unwrap().take();
         let result = engine
             .render(
                 &job.stage,
@@ -627,23 +725,35 @@ fn render_worker(
                 job.scene.key.resolution,
                 bae_render::Display::default(),
                 None,
-                None,
+                spare,
             )
             .map_err(|e| e.to_string())
-            // Not an interactive thread: it waits for the warm-up instead.
             .and_then(|(target, rect, temporal)| {
-                Ok((target, rect.ok_or("incomplete frame")?, temporal))
-            })
-            .and_then(|(target, rect, temporal)| {
+                let mut spares_now = spares.lock().unwrap();
+                spares_now.size = Some(target.size());
+                // Not an interactive thread: it waits for the warm-up instead.
+                let Some(rect) = rect else {
+                    spares_now.give(target);
+                    return Err("incomplete frame".to_owned());
+                };
+                drop(spares_now);
                 let texture = target.view().texture().clone();
+                let channels = engine.channels.clone();
+                let pick_bytes = channels
+                    .as_ref()
+                    .map_or(0, |c| c.layers.values().map(|l| l.pick_bytes()).sum());
                 let slot = Arc::new(Slot {
+                    channels,
                     registry: registry.clone(),
                     id: registry.create("playback frame"),
                     rect,
                     time: job.time,
                     errors: job.errors,
-                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
+                        + pick_bytes,
                     texture,
+                    target: Some(target),
+                    spares: spares.clone(),
                 });
                 registry
                     .publish(slot.id, &slot.texture, wgpu::FilterMode::Linear)
@@ -698,5 +808,56 @@ fn render_worker(
             }
             Err(error) => failed(&shared, epoch, time, &error),
         }
+    }
+}
+
+/// The preview cache's byte budget: the GPU Preview Cache setting, never more
+/// than the RAM left after Memory & CPU ▸ RAM Reserved for Other Applications.
+fn cache_budget(cache_mib: i64, reserved_gb: i64, installed: Option<u64>) -> u64 {
+    let budget = (cache_mib.max(0) as u64) << 20;
+    installed.map_or(budget, |total| {
+        budget.min(total.saturating_sub((reserved_gb.max(0) as u64) << 30))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_cache_leaves_the_reserved_ram_alone() {
+        let gib = 1u64 << 30;
+        assert_eq!(super::cache_budget(1024, 6, Some(16 * gib)), 1 << 30);
+        assert_eq!(super::cache_budget(32768, 6, Some(16 * gib)), 10 * gib);
+        assert_eq!(super::cache_budget(512, 64, Some(16 * gib)), 0);
+        assert_eq!(super::cache_budget(512, 6, None), 512 << 20);
+    }
+
+    use super::*;
+
+    #[test]
+    fn spare_targets_wait_until_the_viewer_stopped_drawing_them() {
+        let Some(gpu) = bae_gpu::testing::shared_context() else {
+            return;
+        };
+        let mut spares = Spares::default();
+        assert!(spares.wanted().is_none(), "no frame size yet");
+        spares.size = Some([64, 32]);
+        // Allocated ahead: usable at once.
+        while let Some(size) = spares.wanted() {
+            spares.add(OutputTarget::new(gpu.device(), size));
+        }
+        assert_eq!(spares.targets.len(), PREALLOC_SPARES);
+        let first = spares.take().expect("a spare");
+        assert_eq!(first.size(), [64, 32]);
+        // A dropped frame's target waits; another size is not kept.
+        let mut fresh = Spares {
+            size: Some([64, 32]),
+            ..Spares::default()
+        };
+        fresh.give(first);
+        fresh.give(OutputTarget::new(gpu.device(), [10, 10]));
+        assert_eq!(fresh.targets.len(), 1);
+        assert!(fresh.take().is_none(), "still drawn");
+        std::thread::sleep(REUSE_AFTER);
+        assert!(fresh.take().is_some());
     }
 }
