@@ -89,9 +89,8 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     crate::i18n::register(&names);
     let bindings = crate::KeymapBindings::new(
         crate::presets::AE_KEYMAP,
+        // AE has no Cmd+, (Settings live in the app menu's Settings ▸).
         vec![
-            #[cfg(target_os = "macos")]
-            crate::Binding::new("Cmd+,", ACTION),
             crate::Binding::new("Cmd+Alt+;", ACTION)
                 .params(serde_json::json!({"page": "startup_repair"})),
         ],
