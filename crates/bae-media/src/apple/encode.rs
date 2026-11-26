@@ -98,7 +98,7 @@ fn is_mp4(path: &Path) -> bool {
         .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "mp4" | "m4v"))
 }
 
-/// Load the native encoder registry on the app's low-priority warm-up thread.
+/// Prepare the system codecs one at a time on the low-priority warm-up thread.
 pub struct EncoderWarmUp;
 
 impl bae_gpu::WarmUp for EncoderWarmUp {
@@ -107,19 +107,72 @@ impl bae_gpu::WarmUp for EncoderWarmUp {
     }
 
     fn run(&self, _: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
-        let mut list = std::ptr::null();
-        // SAFETY: VideoToolbox writes a retained CFArray to the out pointer.
-        let status =
-            unsafe { objc2_video_toolbox::VTCopyVideoEncoderList(None, NonNull::from(&mut list)) };
-        if let Some(ptr) = NonNull::new(list.cast_mut()) {
-            // SAFETY: the Copy rule transfers ownership of this array.
-            drop(unsafe { CFRetained::from_raw(ptr) });
+        use objc2_core_media::{
+            kCMVideoCodecType_AppleProRes422, kCMVideoCodecType_AppleProRes422HQ,
+            kCMVideoCodecType_AppleProRes4444, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC,
+        };
+
+        let mut errors = Vec::new();
+        for codec in [
+            kCMVideoCodecType_H264,
+            kCMVideoCodecType_AppleProRes422,
+            kCMVideoCodecType_AppleProRes422HQ,
+            kCMVideoCodecType_AppleProRes4444,
+            kCMVideoCodecType_HEVC,
+        ] {
+            if let Err(error) = prepare_codec(codec) {
+                errors.push(error);
+            }
         }
-        if status == 0 {
+        if errors.is_empty() {
             Ok(())
         } else {
-            Err(format!("VTCopyVideoEncoderList: {status}"))
+            Err(errors.join(", "))
         }
+    }
+}
+
+fn prepare_codec(codec: objc2_core_media::CMVideoCodecType) -> Result<(), String> {
+    use objc2_core_foundation::{CFBoolean, CFDictionary};
+    use objc2_video_toolbox::VTCompressionSession;
+
+    // SAFETY: the key is a process-lifetime VideoToolbox constant.
+    let hardware = CFDictionary::from_slices(
+        &[unsafe { kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder }],
+        &[CFBoolean::new(true)],
+    );
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: no frames or callbacks are scheduled. The session is owned by
+    // this worker and invalidated before preparing the next codec.
+    let status = unsafe {
+        let created = VTCompressionSession::create(
+            None,
+            128,
+            128,
+            codec,
+            Some(hardware.as_opaque()),
+            None,
+            None,
+            None,
+            std::ptr::null_mut(),
+            NonNull::from(&mut raw),
+        );
+        let Some(ptr) = NonNull::new(raw) else {
+            return Err(format!("VTCompressionSessionCreate({codec:#x}): {created}"));
+        };
+        let session = CFRetained::from_raw(ptr);
+        let status = if created == 0 {
+            session.prepare_to_encode_frames()
+        } else {
+            created
+        };
+        session.invalidate();
+        status
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("prepare encoder {codec:#x}: {status}"))
     }
 }
 
