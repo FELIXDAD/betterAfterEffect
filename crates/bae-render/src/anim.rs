@@ -40,7 +40,7 @@ use crate::request::RenderPurpose;
 #[derive(Debug)]
 pub struct AnimEvaluator {
     inner: Evaluator,
-    scalar_tracks: rustc_hash::FxHashMap<(PrimPath, String), Arc<crate::effect::ScalarTrack>>,
+    scalar_tracks: crate::parameter_track::TrackCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
@@ -238,6 +238,8 @@ impl AnimEvaluator {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         out.time = l.layer_time;
+        out.start_time = l.timing.start_time;
+        out.time_scale = l.timing.stretch_percent() / 100.;
         out.in_point = l.timing.in_point.min(l.timing.out_point);
         out.active = l.active && guide_ok;
         out.visible = l.visible;
@@ -437,10 +439,7 @@ impl CompEvaluator for AnimEvaluator {
         frame: &crate::graph::EffectFrame,
         attr: &bae_model::AttrSpec,
     ) -> Option<Arc<crate::effect::ScalarTrack>> {
-        let slot = self
-            .scalar_tracks
-            .entry((path.clone(), name.to_owned()))
-            .or_default();
+        let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
         crate::parameter_track::prepare(slot, attr, frame, |t| {
             self.inner
                 .evaluate_attribute(stage, path, name, t)
@@ -450,7 +449,6 @@ impl CompEvaluator for AnimEvaluator {
     }
 
     fn invalidate(&mut self, event: &StageEvent) {
-        self.scalar_tracks.clear();
         self.inner.invalidate(event);
     }
 
