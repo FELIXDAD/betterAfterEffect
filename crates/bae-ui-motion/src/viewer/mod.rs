@@ -163,6 +163,7 @@ pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
@@ -664,13 +665,41 @@ impl Panel for CompositionViewer {
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
         // View layout: the active view is the viewer, the others are drawn below.
-        let (panes, active) = session
-            .lock()
-            .views3d
-            .get(&info.path)
-            .map_or((vec![view3d::View3d::Active], 0), |v| {
-                (v.panes(), v.active())
-            });
+        let (panes, active) = {
+            let s = session.lock();
+            s.views3d
+                .get(&info.path)
+                .map_or((vec![view3d::View3d::Active], 0), |v| {
+                    let panes = v.panes();
+                    let active = layout::preview_pane(
+                        &panes,
+                        v.active(),
+                        s.is_playing() && s.preview.favor_active_camera,
+                        || {
+                            let revision = cx.stage.revision();
+                            if let Some((comp, rev, result)) = &self.preview_3d
+                                && comp == &info.path
+                                && *rev == revision
+                            {
+                                return *result;
+                            }
+                            let result =
+                                query::comp_layers(cx.stage, &info.path)
+                                    .iter()
+                                    .any(|layer| {
+                                        cx.stage
+                                            .prim(layer)
+                                            .and_then(|p| query::static_value(&p, "three_d"))
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false)
+                                    });
+                            self.preview_3d = Some((info.path.clone(), revision, result));
+                            result
+                        },
+                    );
+                    (panes, active)
+                })
+        };
         let pane_rects = layout::rects(area, panes.len());
         let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
@@ -945,6 +974,16 @@ impl Panel for CompositionViewer {
             }
         }
         apply_overrides(&mut comp, self.select.drag.as_ref());
+        // A mask or shape path being edited shows in the picture, not only as
+        // its outline (#593).
+        if let Some((prim, path)) = self
+            .select
+            .path_preview()
+            .or(self.pen.path_preview())
+            .or(self.feather.path_preview())
+        {
+            overlay::apply_path_preview(&mut comp, &prim, &path);
+        }
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
         if camera_tool.is_camera() || self.camera_drag.is_some() {
@@ -968,7 +1007,7 @@ impl Panel for CompositionViewer {
                 .lock()
                 .views3d
                 .get(&info.path)
-                .and_then(|v| v.camera(size))
+                .and_then(|v| v.camera_of(panes[active], size))
         });
         let view = View {
             camera: Some((
