@@ -365,6 +365,12 @@ impl Panel for ProjectPanel {
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let selected_first = session.lock().selected_items.first().cloned();
+        // Another panel asked to rename an item here (the Timeline's Rename).
+        if let Some(p) = session.lock().rename_item.take()
+            && stage.has_prim(&p)
+        {
+            self.rename = Some((p.clone(), query::display_name_of(stage, &p)));
+        }
         self.info_area(ui, cx, selected_first.as_ref());
 
         ui.horizontal(|ui| {

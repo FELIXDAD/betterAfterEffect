@@ -214,6 +214,31 @@ fn every_title_has_chinese() {
     assert!(missing.is_empty(), "no Chinese for {missing:?}");
 }
 
+/// Our own items (Rename …) are greyed exactly where AE 26 greys them (#599).
+#[test]
+fn own_items_are_greyed_like_ae() {
+    let json: Value = serde_json::from_str(AE).unwrap();
+    for (name, menu) in [
+        ("viewer.blank", VIEWER_BLANK),
+        ("timeline.blank", TIMELINE_BLANK),
+    ] {
+        let ae = json["menus"][name].as_array().unwrap();
+        for e in menu {
+            let (title, enabled) = match *e {
+                Own(t) => (t, true),
+                Off(t) => (t, false),
+                _ => continue,
+            };
+            let item = ae
+                .iter()
+                .find(|i| i["title"] == title)
+                .unwrap_or_else(|| panic!("{name}: no AE item {title}"));
+            let ae_enabled = item["enabled"].as_bool() != Some(false);
+            assert_eq!(enabled, ae_enabled, "{name}: {title}");
+        }
+    }
+}
+
 /// #600: the Project item menu greys by item kind as AE does — the comp-only
 /// and not-for-comps entries match `project.item.comp` and `.folder`.
 #[test]

@@ -108,6 +108,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
     /// Numbered comp marker N at the current time (AE Shift+0–9 on the main
@@ -315,6 +316,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
+    (ids::TRACK_MOTION, "Track Motion"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
@@ -831,6 +833,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let id = inv.id.as_str();
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
+    }
+    if id == ids::TRACK_MOTION {
+        let layer = session.lock().selected_layers.first().cloned();
+        if let Some(layer) = layer
+            && !query::is_locked(stage, &layer)
+        {
+            crate::tracker::create(cx, &layer, false);
+        }
+        return true;
     }
     if id == ids::CUT {
         // AE: Cut = Copy + Clear (one undo step: the Clear).

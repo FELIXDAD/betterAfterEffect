@@ -79,7 +79,7 @@ impl Cached {
 }
 
 #[derive(Default)]
-pub(super) struct Waveforms {
+pub(crate) struct Waveforms {
     files: HashMap<PathBuf, Cached>,
     worker: Option<Worker>,
 }
@@ -111,13 +111,15 @@ impl Waveforms {
         entry.peaks.as_ref().map_or(&[], |(_, levels)| levels)
     }
 
-    pub(super) fn draw(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw(
         &mut self,
         ui: &Ui,
         stage: &Stage,
         layer: &PrimPath,
         axis: &TimeAxis,
         rect: Rect,
+        tint: egui::Color32,
         rectified: bool,
     ) {
         let Some(file) = bae_media::audio::layer_file(stage, layer) else {
@@ -171,7 +173,7 @@ impl Waveforms {
                 let x = x as f32;
                 mesh.add_colored_rect(
                     Rect::from_min_max(egui::pos2(x - 0.5, top), egui::pos2(x + 0.5, bottom + 1.0)),
-                    color::TEXT,
+                    tint,
                 );
             }
         }
