@@ -19,7 +19,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Alphabetical", "按字母顺序"),
     ("Explorer Folders", "资源管理器文件夹"),
     ("Finder Folders", "查找程序文件夹"),
-    ("Enabled", "启用"),
     ("Category", "类别"),
     ("Version", "版本"),
     ("Effect Manager", "效果管理器"),
