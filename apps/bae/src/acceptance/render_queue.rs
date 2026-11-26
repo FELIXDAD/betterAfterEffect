@@ -72,7 +72,8 @@ fn files_in(dir: &Path, ext: &str) -> Vec<String> {
 }
 
 fn render(h: &mut Ui) {
-    h.get_by_label("Render").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+        .click();
     settle(h);
 }
 
@@ -107,7 +108,8 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
         "default range is the work area"
     );
     assert!(
-        h.query_by_label("Render").is_some(),
+        h.query_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+            .is_some(),
         "Render Queue panel not open"
     );
 
@@ -203,7 +205,9 @@ fn stop_keeps_the_rendered_frames_and_reports_n_of_m() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        h.get_by_label("Render").accesskit_node().is_disabled(),
+        h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+            .accesskit_node()
+            .is_disabled(),
         "Render enabled while rendering"
     );
     queue_control(&h, 1, "Stop").expect("Stop").click();

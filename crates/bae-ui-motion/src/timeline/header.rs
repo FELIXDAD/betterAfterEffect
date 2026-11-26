@@ -122,33 +122,42 @@ impl TimelinePanel {
         now: Time,
     ) {
         let p = ui.painter().clone();
-        // Current time: big blue timecode, scrubbable.
+        let show_both = crate::prefs::current(cx.resources)
+            .bool("appearance.show_both_timecode_and_frames_in_timeline");
+        let project = PrimPath::new(bae_motion::project_settings::PROJECT).expect("project path");
+        let frames_first = cx
+            .stage
+            .prim(&project)
+            .and_then(|v| query::static_value(&v, "time_display"))
+            .is_some_and(|v| v.as_str() == Some("frames"));
+        let start_frame = info.frame_rate.time_to_frame(info.display_start);
+        let frames = format!("{:05}", common::frame_of(info, now + info.display_start));
+        let tc_text = common::timecode(info, now);
+        let (primary, alternate) = if frames_first {
+            (frames, tc_text)
+        } else {
+            (tc_text, frames)
+        };
         let tc = Rect::from_min_size(head.min + vec2(8.0, 2.0), vec2(120.0, head.height() - 4.0));
         p.text(
-            pos2(tc.left(), tc.center().y - 4.0),
+            pos2(tc.left(), tc.center().y - if show_both { 4.0 } else { 0.0 }),
             Align2::LEFT_CENTER,
-            common::timecode(info, now),
+            &primary,
             theme::font(17.0),
             color::ACCENT,
         );
-        p.text(
-            pos2(tc.left(), tc.bottom() - 4.0),
-            Align2::LEFT_CENTER,
-            format!(
-                "{:05} ({:.2} fps)",
-                common::frame_of(info, now),
-                info.frame_rate.as_f64()
-            ),
-            theme::small(),
-            color::TEXT_DIM,
-        );
+        if show_both {
+            p.text(
+                pos2(tc.left(), tc.bottom() - 4.0),
+                Align2::LEFT_CENTER,
+                format!("{alternate} ({:.2} fps)", info.frame_rate.as_f64()),
+                theme::small(),
+                color::TEXT_DIM,
+            );
+        }
         let tresp = ui
             .interact(tc, ui.id().with("cti_scrub"), Sense::drag())
-            .labeled_value(
-                egui::WidgetType::DragValue,
-                tr("Current Time"),
-                &common::timecode(info, now),
-            );
+            .labeled_value(egui::WidgetType::DragValue, tr("Current Time"), &primary);
         if tresp.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
@@ -461,7 +470,11 @@ impl TimelinePanel {
             p.text(
                 pos2(x + 3.0, tick_y - 12.0),
                 Align2::LEFT_CENTER,
-                ruler_label(f, info),
+                if frames_first {
+                    (start_frame + f).to_string()
+                } else {
+                    ruler_label(start_frame + f, info)
+                },
                 theme::small(),
                 color::TEXT,
             );

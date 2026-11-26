@@ -75,7 +75,7 @@
 | Adobe Dynamic Link ▸ New Premiere Sequence... | 12845057 | `motion.file.new_premiere_sequence` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
 | Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ✅ |
-| Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ☐ |
+| Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ✅ |
 | New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ☐ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ⏸ |
@@ -160,7 +160,7 @@
 | Label ▸ Cyan | 16646162 | `motion.edit.label` | `{"label":14}` |  |  | B | ✅ |
 | Label ▸ Sandstone | 16646163 | `motion.edit.label` | `{"label":15}` |  |  | B | ✅ |
 | Label ▸ Dark Green | 16646164 | `motion.edit.label` | `{"label":16}` |  |  | B | ✅ |
-| Label ▸ Edit Label Colors... | 16646166 | `motion.edit.edit_label_colors` |  |  |  | D | ⏸ |
+| Label ▸ Edit Label Colors... | 16646166 | `motion.edit.edit_label_colors` |  |  |  | D | ✅ |
 | Select Keyframe Label Group ▸ On Selected Layers | 23592961 | `motion.edit.select_keyframe_label_group` | `{"scope":"selected_layers"}` |  |  | C | ✅ |
 | Select Keyframe Label Group ▸ On All Layers | 23592962 | `motion.edit.select_keyframe_label_group` | `{"scope":"all_layers"}` |  |  | C | ✅ |
 | Select Keyframe Label Group ▸ Visible Keyframes on Selected Layers | 23592964 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_selected_layers"}` |  |  | C | ◐ |
@@ -173,7 +173,7 @@
 | Purge ▸ Undo | 11403270 | `motion.edit.purge` | `{"what":"undo"}` |  |  | B | ☐ |
 | Purge ▸ Image Cache Memory | 11403271 | `motion.edit.purge` | `{"what":"image_cache_memory"}` |  |  | B | ⏸ |
 | Purge ▸ Snapshot | 11403272 | `motion.edit.purge` | `{"what":"snapshot"}` |  |  | B | ⏸ |
-| Edit Original... | 196636 | `motion.edit.edit_original` |  | Ctrl+E | Cmd+E | B | ⏸ |
+| Edit Original... | 196636 | `motion.edit.edit_original` |  | Ctrl+E | Cmd+E | B | ✅ |
 | Edit in Adobe Audition | 196637 | `motion.edit.edit_in_adobe_audition` |  |  |  | B | Ⓐ |
 | Templates ▸ Render Settings... | 16252929 | `motion.edit.templates_render_settings` |  |  |  | E | ⏸ |
 | Templates ▸ Output Module... | 16252930 | `motion.edit.templates_output_module` |  |  |  | E | ⏸ |
@@ -412,7 +412,7 @@
 | Camera ▸ Link Focus Distance to Point of Interest | 21954566 | `motion.layer.link_focus_distance_to_point_of_interest` |  |  |  | B | ⏸ |
 | Camera ▸ Link Focus Distance to Layer | 21954567 | `motion.layer.link_focus_distance_to_layer` |  |  |  | B | ⏸ |
 | Camera ▸ Set Focus Distance to Layer | 21954568 | `motion.layer.set_focus_distance_to_layer` |  |  |  | B | ⏸ |
-| Camera ▸ Camera Settings... | 21954570 | `motion.layer.camera_settings` |  |  |  | E | ☐ |
+| Camera ▸ Camera Settings... | 21954570 | `motion.layer.camera_settings` |  |  |  | E | ✅ |
 | Camera ▸ Reset 3D View | 21954571 | `motion.view.reset_3d_view` |  |  |  | A | ⏸ |
 | Light ▸ Create Lights from 3D Model | 328990721 | `motion.layer.create_lights_from_3d_model` |  |  |  | B | ⏸ |
 | Light ▸ Control Light with Camera | 328990722 | `motion.layer.control_light_with_camera` |  |  |  | B | ⏸ |
@@ -489,7 +489,7 @@
 | Add Text Selector ▸ Expression | 1245187 | `motion.anim.add_text_selector` | `{"selector":"expression"}` |  |  | A | ⏸ |
 | Remove All Text Animators | 851984 | `motion.anim.remove_all_text_animators` |  |  |  | A | ✅ |
 | Add Expression | 851986 | `motion.anim.add_expression` |  | Alt+Shift+= | Opt+Shift+= | C | ☐ |
-| Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ☐ |
+| Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ✅ |
 | Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
 | Warp Stabilizer VFX | 851989 | `motion.anim.warp_stabilizer_vfx` |  |  |  | B | ⏸ |
 | Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ✅ |
@@ -539,8 +539,8 @@
 | Show Grid | 589845 | `motion.view.show_grid` |  | Ctrl+' | Cmd+' | B | ☐ |
 | Snap to Grid | 589846 | `motion.view.snap_to_grid` |  | Ctrl+Shift+' | Cmd+Shift+' | B | ☐ |
 | View Options... | 589848 | `motion.view.view_options` |  | Ctrl+Alt+U | Cmd+Opt+U | E | ⏸ |
-| Show Layer Controls | 589849 | `motion.view.show_layer_controls` |  | Ctrl+Shift+H | Cmd+Shift+H | B | ☐ |
-| Camera Settings... | 589851 | `motion.layer.camera_settings` |  |  |  | E | ☐ |
+| Show Layer Controls | 589849 | `motion.view.show_layer_controls` |  | Ctrl+Shift+H | Cmd+Shift+H | B | ✅ |
+| Camera Settings... | 589851 | `motion.layer.camera_settings` |  |  |  | E | ✅ |
 | Reset 3D View | 589852 | `motion.view.reset_3d_view` |  |  |  | A | ⏸ |
 | Create Camera from 3D View | 589853 | `motion.view.create_camera_from_3d_view` |  |  |  | A | ⏸ |
 | Switch View Layout ▸ 1 View | 23396353 | `motion.view.view_layout` | `{"views":1}` |  |  | A | ⏸ |
@@ -718,7 +718,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `SelectPreviousAdd` | `motion.layer.select_previous` | `{"add":true}` | Ctrl+Shift+Up | Cmd+Shift+Up |  | B | ☐ |
 | `SetWorkAreaEnd` | `motion.work_area_end` |  | N | N |  | B | ✅ |
 | `SetWorkAreaStart` | `motion.work_area_start` |  | B | B |  | B | ✅ |
-| `SetWorkAreaToSelection` | `motion.comp.set_work_area_to_selection` |  | Ctrl+Alt+B | Cmd+Opt+B |  | B | ☐ |
+| `SetWorkAreaToSelection` | `motion.comp.set_work_area_to_selection` |  | Ctrl+Alt+B | Cmd+Opt+B |  | B | ✅ |
 
 ### `CCompCompCmd`
 
@@ -818,8 +818,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `PrevKeyframe` | `motion.prev_key` |  | J | J |  | B | ✅ |
 | `PrevKeyframeInSelection` | `motion.timeline.previous_keyframe_in_selection` |  | Shift+J | Shift+J |  | C | ✅ |
 | `SelectAllVisibleKeyframes` | `motion.timeline.select_all_visible_keyframes` |  | Ctrl+Alt+A | Cmd+Opt+A |  | C | ✅ |
-| `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ☐ |
-| `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ☐ |
+| `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ✅ |
+| `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ✅ |
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ✅ |
 | `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ✅ |
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  |  | C | ⏸ |
@@ -888,27 +888,27 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 |---|---|---|---|---|---|---|---|
 | `TimeFastForward` | `motion.go_end` |  | Ctrl+Alt+Right / End | Cmd+Opt+Right / End |  | B | ✅ |
 | `TimeJumpToIn` | `motion.go_in` |  | I | I |  | B | ✅ |
-| `TimeJumpToNextInOut` | `motion.comp.go_to_next_in_or_out_point` |  | Ctrl+Alt+Shift+Right | Cmd+Opt+Shift+Right |  | B | ☐ |
+| `TimeJumpToNextInOut` | `motion.comp.go_to_next_in_or_out_point` |  | Ctrl+Alt+Shift+Right | Cmd+Opt+Shift+Right |  | B | ✅ |
 | `TimeJumpToOut` | `motion.go_out` |  | O | O |  | B | ✅ |
-| `TimeJumpToPrevInOut` | `motion.comp.go_to_previous_in_or_out_point` |  | Ctrl+Alt+Shift+Left | Cmd+Opt+Shift+Left |  | B | ☐ |
-| `TimeJumpToWAEnd` | `motion.comp.go_to_work_area_end` |  | Shift+End | Shift+End |  | B | ☐ |
-| `TimeJumpToWAStart` | `motion.comp.go_to_work_area_start` |  | Shift+Home | Shift+Home |  | B | ☐ |
+| `TimeJumpToPrevInOut` | `motion.comp.go_to_previous_in_or_out_point` |  | Ctrl+Alt+Shift+Left | Cmd+Opt+Shift+Left |  | B | ✅ |
+| `TimeJumpToWAEnd` | `motion.comp.go_to_work_area_end` |  | Shift+End | Shift+End |  | B | ✅ |
+| `TimeJumpToWAStart` | `motion.comp.go_to_work_area_start` |  | Shift+Home | Shift+Home |  | B | ✅ |
 | `TimeRewind` | `motion.go_start` |  | Ctrl+Alt+Left / Home | Cmd+Opt+Left / Home |  | B | ✅ |
 | `TimeSetIn` | `motion.move_in` |  | [ | [ |  | B | ✅ |
-| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ |  | B | ☐ |
+| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ |  | B | ✅ |
 | `TimeSetOut` | `motion.move_out` |  | ] | ] |  | B | ✅ |
-| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] |  | B | ☐ |
+| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] |  | B | ✅ |
 | `TimeShiftSpacebarPlay` | `motion.play` | `{"alternate":true}` | Shift+Space | Shift+Space |  | B | ☐ |
 | `TimeStepBack` | `motion.step` | `{"frames":-1}` | Ctrl+Left / PageUp | Cmd+Left / PageUp |  | B | ✅ |
 | `TimeStepBackMore` | `motion.step` | `{"frames":-10}` | Shift+PageUp / Ctrl+Shift+Left | Shift+PageUp / Cmd+Shift+Left |  | B | ✅ |
 | `TimeStepForward` | `motion.step` | `{"frames":1}` | Ctrl+Right / PageDown | Cmd+Right / PageDown |  | B | ✅ |
 | `TimeStepForwardMore` | `motion.step` | `{"frames":10}` | Shift+PageDown / Ctrl+Shift+Right | Shift+PageDown / Cmd+Shift+Right |  | B | ✅ |
-| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, |  | C | ☐ |
-| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, |  | C | ☐ |
+| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, |  | C | ✅ |
+| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, |  | C | ✅ |
 | `TimeTrimIn` | `motion.trim_in` |  | Alt+[ | Opt+[ |  | B | ✅ |
-| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ |  | B | ☐ |
+| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ |  | B | ✅ |
 | `TimeTrimOut` | `motion.trim_out` |  | Alt+] | Opt+] |  | B | ✅ |
-| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] |  | B | ☐ |
+| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] |  | B | ✅ |
 
 ### `CDirItemTabPanelTime`
 
@@ -1216,15 +1216,15 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - | timeline | C | ✅ |
 | `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; | timeline | C | ☐ |
 | `TimeSetIn` | `motion.move_in` |  | [ | [ | timeline | B | ✅ |
-| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ | timeline | B | ☐ |
+| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ | timeline | B | ✅ |
 | `TimeSetOut` | `motion.move_out` |  | ] | ] | timeline | B | ✅ |
-| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] | timeline | B | ☐ |
-| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, | timeline | C | ☐ |
-| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, | timeline | C | ☐ |
+| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] | timeline | B | ✅ |
+| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, | timeline | C | ✅ |
+| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, | timeline | C | ✅ |
 | `TimeTrimIn` | `motion.trim_in` |  | Alt+[ | Opt+[ | timeline | B | ✅ |
-| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ | timeline | B | ☐ |
+| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ | timeline | B | ✅ |
 | `TimeTrimOut` | `motion.trim_out` |  | Alt+] | Opt+] | timeline | B | ✅ |
-| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] | timeline | B | ☐ |
+| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] | timeline | B | ✅ |
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 | timeline | C | ✅ |
 | `CompTimeZoomWorkArea`（只在 macOS 26.2 的快捷键文件里） | `motion.timeline.zoom_to_work_area` |  |  | Opt+; | timeline | C | ☐ |
 
