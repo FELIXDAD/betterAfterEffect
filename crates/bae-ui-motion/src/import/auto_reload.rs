@@ -248,7 +248,12 @@ pub(crate) fn on_focus(ctx: &egui::Context, cx: &mut PanelContext<'_>) {
             if current.as_ref() != Some(&result.source.file) {
                 continue;
             }
-            if let Some(file) = result.probed.files.pop() {
+            if let Some((path, _)) = result.probed.photoshop.pop() {
+                // A changed layered PSD goes through the Photoshop import, as
+                // File > Reload Footage does (its layers are rebuilt).
+                let defaults = ImportDefaults::of(&prefs);
+                super::queue_psd_replace(cx, &path, &result.source.item, &defaults, true);
+            } else if let Some(file) = result.probed.files.pop() {
                 super::apply_reload(cx, result.source.item, file);
             }
             super::verify::report(cx, bae_ui::tr("Reload Footage"), result.probed);
