@@ -320,6 +320,7 @@ pub struct SettingsDialog {
     installed_ram: Option<u64>,
     open: bool,
     confirm_reset: bool,
+    save_theme_name: Option<String>,
     display_changed: bool,
     page: usize,
     draft: Preferences,
@@ -381,6 +382,7 @@ impl SettingsDialog {
         self.draft = current.clone();
         self.open = true;
         self.confirm_reset = false;
+        self.save_theme_name = None;
         self.display_changed = false;
         self.lang_at_open = Some((
             crate::i18n::lang(),
@@ -443,6 +445,36 @@ impl SettingsDialog {
             .fixed_size(SIZE)
             .default_pos(screen.center() - SIZE / 2.0)
             .show(ctx, |ui| outcome = self.contents(ui));
+        if let Some(name) = &mut self.save_theme_name {
+            let mut closed = false;
+            egui::Modal::new(egui::Id::new("save-expression-theme")).show(ctx, |ui| {
+                ui.heading(tr("Save Theme"));
+                let label = ui.label(tr("Theme name"));
+                let input = ui.text_edit_singleline(name).labelled_by(label.id);
+                if !input.has_focus() && ui.ctx().memory(|m| m.focused().is_none()) {
+                    input.request_focus();
+                }
+                ui.horizontal(|ui| {
+                    let available = self.draft.can_save_expression_theme(name);
+                    if ui
+                        .add_enabled(available, egui::Button::new(tr("Save")))
+                        .clicked()
+                        || available && ui.input(|i| i.key_pressed(Key::Enter))
+                    {
+                        self.draft.save_expression_theme(name);
+                        closed = true;
+                    }
+                    if ui.button(tr("Cancel")).clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                    {
+                        closed = true;
+                    }
+                });
+            });
+            if closed {
+                self.save_theme_name = None;
+            }
+            return Outcome::None;
+        }
         if self.confirm_reset {
             egui::Modal::new(egui::Id::new("reset-all-preferences")).show(ctx, |ui| {
                 ui.label(tr("Reset All Preferences to Default..."));
@@ -592,6 +624,24 @@ impl SettingsDialog {
                 ui.add_space(4.0);
             }
             Item::Button(id, label) => {
+                if *id == "scripting_expressions.expr_save_theme" {
+                    if ui.button(tr(label)).clicked() {
+                        self.save_theme_name = Some(String::new());
+                    }
+                    return;
+                }
+                if *id == "scripting_expressions.expr_delete_theme" {
+                    if ui
+                        .add_enabled(
+                            self.draft.selected_expression_theme().is_some(),
+                            egui::Button::new(tr(label)),
+                        )
+                        .clicked()
+                    {
+                        self.draft.delete_selected_expression_theme();
+                    }
+                    return;
+                }
                 if *id == "startup_repair.reset_all_preferences" {
                     if ui.button(tr(label)).clicked() {
                         self.confirm_reset = true;
@@ -800,6 +850,26 @@ impl SettingsDialog {
             Kind::Choice { options, style } => {
                 let current = draft.str(p.key).to_owned();
                 match style {
+                    Style::Dropdown if p.key == bae_prefs::keys::EXPR_THEME => {
+                        field_label(ui, shown);
+                        let built_in = options.iter().map(|o| tr(o.label));
+                        let names: Vec<_> =
+                            built_in.chain(draft.saved_expression_themes()).collect();
+                        let mut selected = draft
+                            .selected_expression_theme()
+                            .and_then(|name| names[options.len()..].iter().position(|&n| n == name))
+                            .map(|i| i + options.len())
+                            .or_else(|| options.iter().position(|o| o.value == current))
+                            .unwrap_or(0);
+                        if widgets::dropdown(ui, p.key, &mut selected, &names, 220.0).changed() {
+                            if let Some(o) = options.get(selected) {
+                                self.set(p.key, o.value);
+                            } else {
+                                let name = names[selected].to_owned();
+                                self.draft.select_expression_theme(&name);
+                            }
+                        }
+                    }
                     Style::Dropdown => {
                         field_label(ui, shown);
                         if matches!(p.key, "audio.audio_map_left" | "audio.audio_map_right") {
