@@ -140,6 +140,17 @@ pub mod ids {
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
     /// Layer ▸ Track Matte ▸ … (params `{"matte": "alpha", "source": "above"}`).
     pub const TRACK_MATTE: &str = "motion.layer.track_matte";
+    /// ; — zoom in to frames (again: the whole comp); Shift+; — the whole
+    /// comp and back to the last zoom.
+    pub const ZOOM_FRAMES: &str = "motion.timeline.zoom_to_frames";
+    pub const ZOOM_TOGGLE: &str = "motion.timeline.zoom_toggle_full";
+    /// D: scroll the Timeline to the CTI; X: the selected layer to the top.
+    pub const SCROLL_TO_NOW: &str = "motion.timeline.scroll_to_current_time";
+    pub const SCROLL_LAYER_TOP: &str = "motion.timeline.scroll_selected_layer_to_top";
+    /// Ctrl+`: show / hide every property of the selected layers.
+    pub const TWIRL: &str = "motion.timeline.twirl";
+    /// Ctrl+Alt+V: paste layers at the current time.
+    pub const PASTE_AT_TIME: &str = "motion.edit.paste_at_current_time";
     /// Ctrl+Down / Ctrl+Up (Shift adds): the next layer down / up the stack.
     pub const SELECT_NEXT_LAYER: &str = "motion.layer.select_next";
     pub const SELECT_PREV_LAYER: &str = "motion.layer.select_previous";
@@ -359,6 +370,11 @@ pub const ACTIONS: &[(&str, &str)] = &[
         "Toggle Switches / Modes Columns",
     ),
     (ids::TOGGLE_PARENT_COLUMN, "Show / Hide Parent Column"),
+    (ids::ZOOM_FRAMES, "Zoom In to Frames"),
+    (ids::ZOOM_TOGGLE, "Toggle Zoom Level"),
+    (ids::SCROLL_TO_NOW, "Scroll to Current Time"),
+    (ids::SCROLL_LAYER_TOP, "Scroll Selected Layer to Top"),
+    (ids::PASTE_AT_TIME, "Paste Layers at Current Time"),
     (
         ids::WORK_AREA_TO_SELECTION,
         "Set Work Area to Selected Layers",
@@ -515,6 +531,12 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         r#"{"what":"animated","add":true}"#,
         "Add Animated Properties to Revealed Properties",
     ),
+    (
+        ids::TWIRL,
+        r#"{"explode":true,"preserve_solo":false}"#,
+        "Show or Hide All Properties of Selected Layers",
+    ),
+    (ids::PLAY, r#"{"alternate":true}"#, "Preview (Shift)"),
     (
         ids::MOVE_IN,
         r#"{"relative":true}"#,
@@ -1424,15 +1446,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         // F4 / Shift+F4 with another panel in front: the Timeline toggles its
         // columns on its next frame (AE: they work whatever panel is active).
-        ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN | ids::SELECT_VISIBLE_KEYS => {
-            let id = [
-                ids::TOGGLE_SWITCHES_MODES,
-                ids::TOGGLE_PARENT_COLUMN,
-                ids::SELECT_VISIBLE_KEYS,
-            ]
-            .into_iter()
-            .find(|i| *i == id)
-            .unwrap_or(ids::TOGGLE_PARENT_COLUMN);
+        ids::TOGGLE_SWITCHES_MODES
+        | ids::TOGGLE_PARENT_COLUMN
+        | ids::SELECT_VISIBLE_KEYS
+        | ids::ZOOM_FRAMES
+        | ids::ZOOM_TOGGLE
+        | ids::SCROLL_TO_NOW
+        | ids::SCROLL_LAYER_TOP
+        | ids::TWIRL => {
+            let id = crate::timeline::QUEUED
+                .into_iter()
+                .find(|i| *i == id)
+                .unwrap_or(ids::TOGGLE_PARENT_COLUMN);
             session.lock().timeline_toggles.push(id);
             return true;
         }
@@ -2626,6 +2651,21 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if !items.is_empty() {
                 cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
+        }
+        ids::PASTE_AT_TIME if !s.layer_clipboard.is_empty() => {
+            let before = query::comp_layers(stage, &info.path);
+            let above = before
+                .iter()
+                .find(|l| s.selected_layers.contains(l))
+                .cloned();
+            cx.invoke_with(
+                "layer.paste",
+                json!({"comp": info.path, "layers": s.layer_clipboard, "above": above, "time": now}),
+            );
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before,
+            });
         }
         ids::PASTE if !s.layer_clipboard.is_empty() => {
             // Above the topmost selected layer, else on top; named like
