@@ -50,3 +50,34 @@ fn dragging_an_end_of_the_layer_ruler_trims_the_layer() {
         t.in_point
     );
 }
+
+/// A mouse-wheel notch over the picture zooms in by AE's step (×9/8).
+#[test]
+fn the_wheel_zooms_the_layer_picture() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    assert_eq!(panel.zoom, None, "Fit");
+    let at = pos2(640.0, 300.0);
+    h.frame("layer", &mut panel, vec![Event::PointerMoved(at)]);
+    h.frame(
+        "layer",
+        &mut panel,
+        vec![Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 1.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }],
+    );
+    // The 640 × 360 solid fits at 100 % (the window is larger).
+    let zoom = panel.zoom.expect("zoomed");
+    assert!((zoom - 9.0 / 8.0).abs() < 1e-3, "{zoom}");
+}
