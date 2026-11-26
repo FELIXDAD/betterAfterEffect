@@ -434,6 +434,7 @@ type CompositeKey = (wgpu::TextureFormat, BlendKind, Variant);
 /// compiled in the background and the frame is incomplete meanwhile.
 pub(crate) struct Shared {
     device: wgpu::Device,
+    outputs: Mutex<FxHashMap<wgpu::TextureFormat, wgpu::RenderPipeline>>,
     base: Pipelines,
     /// `None`: being compiled in the background.
     composite: Mutex<FxHashMap<CompositeKey, Option<wgpu::RenderPipeline>>>,
@@ -457,6 +458,7 @@ impl Shared {
         }
         let shared = Arc::new(Shared {
             device: gpu.device().clone(),
+            outputs: Default::default(),
             base: Pipelines::build(gpu.device()),
             composite: Mutex::new(FxHashMap::default()),
             masks: Arc::new(Mutex::new(None)),
@@ -618,6 +620,16 @@ impl bae_gpu::WarmUp for CompositorWarmUp {
         let mut formats = vec![(wgpu::TextureFormat::Rgba16Float, true)];
         if gpu.features().contains(float32) {
             formats.push((wgpu::TextureFormat::Rgba32Float, true));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut pipelines = shared.fork();
+            for format in [
+                wgpu::TextureFormat::Bgra8Unorm,
+                wgpu::TextureFormat::Rgba16Float,
+            ] {
+                pipelines.output_for(gpu.device(), format);
+            }
         }
         shared.warm(&formats);
         Ok(())
@@ -798,7 +810,7 @@ impl Pipelines {
             output,
             output_module,
             output_pipeline_layout,
-            outputs: FxHashMap::default(),
+            outputs: Default::default(),
             bind_groups: FxHashMap::default(),
             frame: 0,
             shared: None,
@@ -838,10 +850,25 @@ impl Pipelines {
         if format == wgpu::TextureFormat::Rgba8Unorm {
             return &self.output;
         }
-        let (module, layout) = (&self.output_module, &self.output_pipeline_layout);
+        let build = || {
+            output_pipeline(
+                device,
+                &self.output_module,
+                &self.output_pipeline_layout,
+                format,
+            )
+        };
         self.outputs
             .entry(format)
-            .or_insert_with(|| output_pipeline(device, module, layout, format))
+            .or_insert_with(|| match &self.shared {
+                Some(shared) => shared
+                    .outputs
+                    .lock()
+                    .entry(format)
+                    .or_insert_with(build)
+                    .clone(),
+                None => build(),
+            })
     }
 
     /// The composite pipeline for a target format, blend kind and fragment

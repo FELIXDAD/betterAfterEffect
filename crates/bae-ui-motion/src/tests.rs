@@ -1232,6 +1232,7 @@ fn render_button_activates_with_space_and_enter() {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
+            item.set_format(bae_render::ExportFormat::Png);
             item.output = dir
                 .path()
                 .join(format!("k{n}/f_####.png"))

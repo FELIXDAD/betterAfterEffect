@@ -362,6 +362,13 @@ impl CompositionViewer {
         let fit = fit.min(1.0 / ppp);
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let origin = area.center() - vec2(w, h) * scale / 2.0 + self.pan;
+        // At native size a fractional texture edge blends adjacent texels.
+        let origin = if cfg!(target_os = "macos") && scale == 1.0 / ppp {
+            use egui::emath::GuiRounding as _;
+            origin.round_to_pixels(ppp)
+        } else {
+            origin
+        };
         let point = self.prefs.point_size;
         (
             View {
