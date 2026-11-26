@@ -11,7 +11,9 @@ use serde_json::json;
 use crate::session::SharedSession;
 use crate::{CompositionViewer, ProjectPanel, TimelinePanel};
 
+mod layer_panel;
 mod playback_4k;
+mod playback_worker;
 
 struct Harness {
     stage: Stage,
@@ -514,14 +516,19 @@ fn gpu_preview_publishes_the_rendered_comp() {
         gpu.adapter_info().device_type
     );
     let mut h = Harness::new();
-    let (comp, _solid, _shape) = h.comp_with_layers();
+    let (comp, solid, _) = h.comp_with_layers();
+    // A mask produces a per-layer render pass even when solids batch together.
+    h.run(
+        "mask.create",
+        json!({"layer":solid,"kind":"rect","position":[320.0,180.0],"size":[640.0,360.0]}),
+    );
     let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
     let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
     let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
     // No display handle until the shell registers the texture.
     assert!(
         preview
-            .frame(&h.resources, &h.stage, &evaluated, 1, None)
+            .frame(&h.resources, &h.stage, &evaluated, 1, None, false)
             .is_none()
     );
     let published = registry.get(preview.viewport()).expect("published");
@@ -529,7 +536,7 @@ fn gpu_preview_publishes_the_rendered_comp() {
     assert_eq!(published.format, wgpu::TextureFormat::Rgba8Unorm);
     registry.set_display_handle(preview.viewport(), Some(7));
     let img = preview
-        .frame(&h.resources, &h.stage, &evaluated, 1, None)
+        .frame(&h.resources, &h.stage, &evaluated, 1, None, false)
         .expect("image");
     assert_eq!(img.handle, 7);
     assert_eq!(
@@ -537,7 +544,12 @@ fn gpu_preview_publishes_the_rendered_comp() {
         (640, 360)
     );
     // Half resolution publishes a half-size texture.
-    preview.frame(&h.resources, &h.stage, &evaluated, 2, None);
+    preview.frame(&h.resources, &h.stage, &evaluated, 2, None, true);
+    let samples = h.session().lock().layer_times.clone();
+    assert!(samples.contains_key(&solid));
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, true);
+    assert_eq!(h.session().lock().layer_times, samples);
+    preview.frame(&h.resources, &h.stage, &evaluated, 2, None, true);
     assert_eq!(registry.get(preview.viewport()).unwrap().size, [320, 180]);
     // The pixels: the full-comp red solid shows where the star is not.
     let mut anim = bae_render::AnimEvaluator::new(None);
@@ -1766,6 +1778,74 @@ fn import_fixture(tag: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("sample.wav");
+    std::fs::write(&file, b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\x40").unwrap();
+    h.run("item.import", json!({"files":[{"path":file,"name":"sample.wav",
+        "attrs":{"has_audio":{"type":"bool","value":true},"duration":{"type":"time","value":88200}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "sample.wav")
+        .unwrap();
+    let mut tracks = Vec::new();
+    for (kind, muted) in [("audio", false), ("footage", false), ("footage", true)] {
+        let path = h.run(
+            "layer.create",
+            json!({"kind":kind,"comp":comp,"source":asset}),
+        )["path"]
+            .clone();
+        tracks.push(path.clone());
+        h.run(
+            "attr.set",
+            json!({"path":path,"attr":"audio_enabled","value":{"type":"bool","value":!muted}}),
+        );
+        h.run(
+            "attr.set_animated",
+            json!({"path":path,"attr":"audio:levels","animated":true,"time":0}),
+        );
+        h.run("attr.set_at",json!({"path":path,"attr":"audio:levels","time":0,"value":{"type":"vec2","value":[0.0,-6.0206]}}));
+    }
+    let mut mix = bae_media::mix::AudioMix::from_stage(&h.stage, &comp);
+    let mut block = [[0.0; 2]; 2];
+    mix.render(0, 8_000, &mut block).unwrap();
+    assert!(
+        (block[0][0] - 1.0).abs() < 1e-5 && (block[0][1] - 0.5).abs() < 1e-5,
+        "{block:?}"
+    );
+    assert_eq!(block[1], [0.0; 2]);
+
+    // Distinguish the two enabled sources, then toggle the switches independently.
+    h.run(
+        "attr.set_at",
+        json!({"path":tracks[1],"attr":"audio:levels","time":0,
+        "value":Value::Vec2([-6.0206,-12.0412])}),
+    );
+    let mut switch = |layer: usize, attr: &str, on: bool, expected: f32| {
+        h.run(
+            "attr.set",
+            json!({"path":tracks[layer],"attr":attr,"value":Value::Bool(on)}),
+        );
+        bae_media::mix::AudioMix::from_stage(&h.stage, &comp)
+            .render(0, 8000, &mut block)
+            .unwrap();
+        assert!(
+            (block[0][0] - expected).abs() < 1e-5,
+            "{attr}={on}: {block:?}"
+        );
+    };
+    switch(2, "solo", true, 0.75); // a muted solo does not suppress the mix
+    switch(0, "solo", true, 0.5);
+    switch(0, "enabled", false, 0.5); // eye does not mute sound
+    switch(0, "audio_enabled", false, 0.25); // last audible solo muted
+    switch(0, "audio_enabled", true, 0.5);
+}
+
+#[test]
 fn import_probes_files_sequences_and_folders() {
     let dir = import_fixture("probe");
     let defaults = crate::import::ImportDefaults::default();
@@ -1816,6 +1896,55 @@ impl bae_ui::files::FilePicker for Picker {
         } else {
             answers.remove(0)
         }
+    }
+}
+
+#[test]
+fn double_l_reveals_the_imported_audio_layer_waveform() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tone.wav");
+    // One mono 16-bit PCM sample at 8 kHz.
+    std::fs::write(&file,b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\xff\x3f").unwrap();
+    let probed = crate::import::probe(std::slice::from_ref(&file), &Default::default());
+    h.run("item.import", json!({"files":probed.files}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "tone.wav")
+        .unwrap();
+    let layer = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp":comp,"kind":"footage","source":asset}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        bae_media::audio::layer_file(&h.stage, &layer)
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        file.canonicalize().unwrap()
+    );
+    h.session().lock().selected_layers = vec![layer.clone()];
+    let mut panel = TimelinePanel::default();
+    for expected in ["audio:levels", "audio:waveform"] {
+        h.action(
+            &mut panel,
+            Invocation::with_params(
+                crate::actions::ids::REVEAL,
+                json!({"what":"audio:levels","add":false}),
+            ),
+        );
+        assert_eq!(
+            h.session().lock().reveal.get(&layer),
+            Some(&crate::session::Reveal::Attrs(vec![expected.into()]))
+        );
     }
 }
 
@@ -2443,4 +2572,37 @@ fn layer_mask_menu() {
     assert_eq!(r.invocations[0].id, "item.delete");
     h.apply(r);
     assert!(crate::masks::masks_of(&h.stage, &solid).is_empty());
+}
+
+/// The Paint and Brushes panels edit the next stroke's settings; Clone Options
+/// show with the Clone Stamp, Erase with the Eraser.
+#[test]
+fn paint_and_brushes_panels_show_for_each_paint_tool() {
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    h.session().lock().open_comp(&comp);
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    for tool in [
+        crate::tools::Tool::Brush,
+        crate::tools::Tool::CloneStamp,
+        crate::tools::Tool::Eraser,
+    ] {
+        tools.lock().set(tool);
+        h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
+        h.frame(
+            "brushes",
+            &mut crate::paint_panels::BrushesPanel,
+            Vec::new(),
+        );
+    }
+    let p = tools.lock().options.paint.clone();
+    assert_eq!(
+        (p.opacity, p.diameter, p.duration.as_str()),
+        (100.0, 21.0, "constant")
+    );
 }
