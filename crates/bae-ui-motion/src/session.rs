@@ -291,6 +291,9 @@ pub struct Session {
     /// Expression): the Timeline focuses its field with the text selected, so
     /// typing replaces it (AE). Dropped after a second if never shown.
     pub(crate) focus_expression: Option<(PrimPath, String, Instant)>,
+    /// A project item to rename in the Project panel (the Timeline's Rename
+    /// on empty space renames its comp there, AE 26).
+    pub(crate) rename_item: Option<PrimPath>,
     /// Frames in the GPU preview cache (the timeline's green bar): comp,
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
@@ -303,6 +306,9 @@ pub struct Session {
     /// Layer contents on the clipboard (Copy with groups selected); the last copy
     /// wins over the other clipboards.
     pub content_clipboard: Vec<bae_motion::CopiedContent>,
+    /// Copy Expression Only on a property: Paste puts it on the selected
+    /// properties (AE).
+    pub(crate) expression_clipboard: Option<String>,
     pending: Vec<(Pending, u32)>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.

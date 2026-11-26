@@ -167,8 +167,8 @@ pub trait CompEvaluator {
         frame: &crate::graph::EffectFrame,
         attr: &AttrSpec,
     ) -> Option<Arc<crate::effect::ScalarTrack>> {
-        crate::parameter_track::prepare(&mut Arc::default(), attr, frame, |t| {
-            self.attribute(stage, path, name, t)?.as_f64()
+        crate::parameter_track::prepare(&mut Default::default(), attr, frame, |t| {
+            Some((self.attribute(stage, path, name, t)?.as_f64()?, Vec::new()))
         })
     }
 
