@@ -1,4 +1,6 @@
 mod common;
+#[path = "immersive/generators.rs"]
+mod generators;
 use bae_model::Value;
 use bae_render::{EffectParams, IRect};
 use common::*;

@@ -10,6 +10,836 @@ authors = ["BAE"]
 license = "Apache-2.0"
 
 [[effect]]
+id = "vr-chromatic-aberration"
+name = "VR Chromatic Aberration"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Chromatic Aberrat"]
+shader = "shaders/vr_chromatic_aberration.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl"]
+identity_when = "params.aberration_red == 0 && params.aberration_green == 0 && params.aberration_blue == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_chromatic_aberration"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 9
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 2
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 10
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 11
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 3
+key = "point_of_interest"
+type = "point"
+name = "Point of Interest"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 4
+key = "aberration_red"
+type = "float"
+name = "Aberration Red"
+default = -10
+range = [-100, 100]
+
+[[effect.param]]
+id = 5
+key = "aberration_green"
+type = "float"
+name = "Aberration Green"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 6
+key = "aberration_blue"
+type = "float"
+name = "Aberration Blue"
+default = 10
+range = [-100, 100]
+
+[[effect.param]]
+id = 7
+key = "falloff_distance"
+type = "float"
+name = "Falloff Distance"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 8
+key = "invert_falloff"
+type = "checkbox"
+name = "Invert Falloff"
+default = false
+
+[[effect]]
+id = "vr-color-gradients"
+name = "VR Color Gradients"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Color Gradients"]
+shader = "shaders/vr_color_gradients.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/blend.wgsl", "shaders/composite.wgsl"]
+
+[[effect.pass]]
+entry = "vr_color_gradients"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 26
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 2
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 27
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 28
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 3
+key = "number_of_points"
+type = "int"
+name = "Number of Points"
+default = 8
+range = [1, 8]
+
+[[effect.param]]
+id = 4
+key = "gradient_power"
+type = "float"
+name = "Gradient Power"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 5
+key = "gradient_blending"
+type = "float"
+name = "Gradient Blending"
+default = 10
+range = [0, 100]
+
+[[effect.param]]
+id = 7
+key = "points"
+type = "group"
+name = "Points"
+end_id = 24
+
+[[effect.param]]
+id = 8
+key = "point_1"
+type = "point"
+name = "Point 1"
+group = "points"
+default = [0.13, 0.33]
+
+[[effect.param]]
+id = 9
+key = "color_1"
+type = "color"
+name = "Color 1"
+group = "points"
+default = [1, 0, 0, 1]
+
+[[effect.param]]
+id = 10
+key = "point_2"
+type = "point"
+name = "Point 2"
+group = "points"
+default = [0.38, 0.33]
+
+[[effect.param]]
+id = 11
+key = "color_2"
+type = "color"
+name = "Color 2"
+group = "points"
+default = [0, 1, 1, 1]
+
+[[effect.param]]
+id = 12
+key = "point_3"
+type = "point"
+name = "Point 3"
+group = "points"
+default = [0.63, 0.33]
+
+[[effect.param]]
+id = 13
+key = "color_3"
+type = "color"
+name = "Color 3"
+group = "points"
+default = [0, 1, 0, 1]
+
+[[effect.param]]
+id = 14
+key = "point_4"
+type = "point"
+name = "Point 4"
+group = "points"
+default = [0.87, 0.33]
+
+[[effect.param]]
+id = 15
+key = "color_4"
+type = "color"
+name = "Color 4"
+group = "points"
+default = [1, 1, 0, 1]
+
+[[effect.param]]
+id = 16
+key = "point_5"
+type = "point"
+name = "Point 5"
+group = "points"
+default = [0.13, 0.66]
+
+[[effect.param]]
+id = 17
+key = "color_5"
+type = "color"
+name = "Color 5"
+group = "points"
+default = [0, 0, 1, 1]
+
+[[effect.param]]
+id = 18
+key = "point_6"
+type = "point"
+name = "Point 6"
+group = "points"
+default = [0.38, 0.66]
+
+[[effect.param]]
+id = 19
+key = "color_6"
+type = "color"
+name = "Color 6"
+group = "points"
+default = [1, 0, 1, 1]
+
+[[effect.param]]
+id = 20
+key = "point_7"
+type = "point"
+name = "Point 7"
+group = "points"
+default = [0.63, 0.66]
+
+[[effect.param]]
+id = 21
+key = "color_7"
+type = "color"
+name = "Color 7"
+group = "points"
+default = [0, 0, 0, 1]
+
+[[effect.param]]
+id = 22
+key = "point_8"
+type = "point"
+name = "Point 8"
+group = "points"
+default = [0.87, 0.66]
+
+[[effect.param]]
+id = 23
+key = "color_8"
+type = "color"
+name = "Color 8"
+group = "points"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 25
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 6
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 2
+choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "vr-digital-glitch"
+name = "VR Digital Glitch"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Digital Glitch"]
+shader = "shaders/vr_digital_glitch.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/noise.wgsl"]
+identity_when = "params.master_amplitude == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_digital_glitch"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 40
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 2
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 41
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 42
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 35
+key = "point_of_interest"
+type = "point"
+name = "Point of Interest"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 36
+key = "poi_scale"
+type = "float"
+name = "POI Scale"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 37
+key = "poi_aspect_ratio"
+type = "float"
+name = "POI Aspect Ratio"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 39
+key = "master_amplitude"
+type = "float"
+name = "Master Amplitude"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 3
+key = "distortion"
+type = "group"
+name = "Distortion"
+end_id = 22
+
+[[effect.param]]
+id = 24
+key = "color_distortion"
+type = "float"
+name = "Color Distortion"
+group = "distortion"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 4
+key = "geometry_distortion_x"
+type = "float"
+name = "Geometry Distortion X"
+group = "distortion"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 5
+key = "geometry_distortion_y"
+type = "float"
+name = "Geometry Distortion Y"
+group = "distortion"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 6
+key = "geometry_distortion_z"
+type = "float"
+name = "Geometry Distortion Z"
+group = "distortion"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 7
+key = "distortion_complexity"
+type = "float"
+name = "Distortion Complexity"
+group = "distortion"
+default = 40
+range = [1, 100]
+
+[[effect.param]]
+id = 8
+key = "distortion_rate"
+type = "float"
+name = "Distortion Rate"
+group = "distortion"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 9
+key = "distortion_evolution"
+type = "angle"
+name = "Distortion Evolution"
+group = "distortion"
+default = 0
+
+[[effect.param]]
+id = 26
+key = "color_evolution"
+type = "angle"
+name = "Color Evolution"
+group = "distortion"
+default = 0
+
+[[effect.param]]
+id = 10
+key = "transform"
+type = "group"
+name = "Transform"
+group = "distortion"
+end_id = 17
+
+[[effect.param]]
+id = 11
+key = "scale_x"
+type = "float"
+name = "Scale X"
+group = "transform"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 12
+key = "scale_y"
+type = "float"
+name = "Scale Y"
+group = "transform"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 13
+key = "scale_z"
+type = "float"
+name = "Scale Z"
+group = "transform"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 14
+key = "translate_x"
+type = "float"
+name = "Translate X"
+group = "transform"
+default = 0
+range = [0, 10]
+
+[[effect.param]]
+id = 15
+key = "translate_y"
+type = "float"
+name = "Translate Y"
+group = "transform"
+default = 0
+range = [0, 10]
+
+[[effect.param]]
+id = 16
+key = "translate_z"
+type = "float"
+name = "Translate Z"
+group = "transform"
+default = 0
+range = [0, 10]
+
+[[effect.param]]
+id = 18
+key = "sub_settings"
+type = "group"
+name = "Sub Settings"
+group = "distortion"
+end_id = 21
+
+[[effect.param]]
+id = 19
+key = "sub_influence"
+type = "float"
+name = "Sub Influence"
+group = "sub_settings"
+default = 95
+range = [10, 100]
+
+[[effect.param]]
+id = 20
+key = "sub_scaling"
+type = "float"
+name = "Sub Scaling"
+group = "sub_settings"
+default = 50
+range = [10, 100]
+
+[[effect.param]]
+id = 28
+key = "noise"
+type = "group"
+name = "Noise"
+end_id = 34
+
+[[effect.param]]
+id = 30
+key = "noise_strength"
+type = "float"
+name = "Noise Strength"
+group = "noise"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 29
+key = "noise_amount"
+type = "float"
+name = "Noise Amount"
+group = "noise"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 31
+key = "noise_scale"
+type = "float"
+name = "Noise Scale"
+group = "noise"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 32
+key = "noise_evolution"
+type = "angle"
+name = "Noise Evolution"
+group = "noise"
+default = 0
+
+[[effect.param]]
+id = 33
+key = "color_noise"
+type = "checkbox"
+name = "Color Noise"
+group = "noise"
+default = false
+
+[[effect.param]]
+id = 38
+key = "random_seed"
+type = "int"
+name = "Random Seed"
+default = 0
+range = [0, 1000]
+
+[[effect]]
+id = "vr-fractal-noise"
+name = "VR Fractal Noise"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Fractal Noise"]
+shader = "shaders/vr_fractal_noise.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/blend.wgsl", "shaders/composite.wgsl", "shaders/noise.wgsl"]
+
+[[effect.pass]]
+entry = "vr_fractal_noise"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 25
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 2
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 26
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 27
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 3
+key = "fractal_type"
+type = "popup"
+name = "Fractal Type"
+default = 1
+choices = ["Basic", "Turbulent Sharp", "Max", "Strings"]
+
+[[effect.param]]
+id = 4
+key = "contrast"
+type = "float"
+name = "Contrast"
+default = 100
+range = [0, 400]
+
+[[effect.param]]
+id = 5
+key = "brightness"
+type = "float"
+name = "Brightness"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 6
+key = "invert"
+type = "checkbox"
+name = "Invert"
+default = false
+
+[[effect.param]]
+id = 7
+key = "complexity"
+type = "float"
+name = "Complexity"
+default = 6
+range = [1, 10]
+
+[[effect.param]]
+id = 8
+key = "evolution"
+type = "angle"
+name = "Evolution"
+default = 0
+
+[[effect.param]]
+id = 9
+key = "transform"
+type = "group"
+name = "Transform"
+end_id = 14
+
+[[effect.param]]
+id = 10
+key = "scale"
+type = "float"
+name = "Scale"
+group = "transform"
+default = 8
+range = [1, 100]
+
+[[effect.param]]
+id = 11
+key = "tilt_x_axis"
+type = "angle"
+name = "Tilt (X Axis)"
+group = "transform"
+default = 0
+
+[[effect.param]]
+id = 12
+key = "pan_y_axis"
+type = "angle"
+name = "Pan (Y Axis)"
+group = "transform"
+default = 0
+
+[[effect.param]]
+id = 13
+key = "roll_z_axis"
+type = "angle"
+name = "Roll (Z Axis)"
+group = "transform"
+default = 0
+
+[[effect.param]]
+id = 15
+key = "sub_settings"
+type = "group"
+name = "Sub Settings"
+end_id = 21
+
+[[effect.param]]
+id = 16
+key = "sub_influence"
+type = "float"
+name = "Sub Influence"
+group = "sub_settings"
+default = 50
+range = [10, 100]
+
+[[effect.param]]
+id = 17
+key = "sub_scaling"
+type = "float"
+name = "Sub Scaling"
+group = "sub_settings"
+default = 50
+range = [10, 100]
+
+[[effect.param]]
+id = 18
+key = "sub_tilt_x_axis"
+type = "angle"
+name = "Sub Tilt (X Axis)"
+group = "sub_settings"
+default = 0
+
+[[effect.param]]
+id = 19
+key = "sub_pan_y_axis"
+type = "angle"
+name = "Sub Pan (Y Axis)"
+group = "sub_settings"
+default = 0
+
+[[effect.param]]
+id = 20
+key = "sub_roll_z_axis"
+type = "angle"
+name = "Sub Roll (Z Axis)"
+group = "sub_settings"
+default = 0
+
+[[effect.param]]
+id = 22
+key = "random_seed"
+type = "int"
+name = "Random Seed"
+default = 0
+range = [0, 1000]
+
+[[effect.param]]
+id = 24
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 23
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 2
+choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
 id = "vr-converter"
 name = "VR Converter"
 category = "Immersive Video"
