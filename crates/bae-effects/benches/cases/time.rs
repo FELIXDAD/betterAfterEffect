@@ -19,6 +19,13 @@ pub(super) fn register(out: &mut Vec<Case>) {
             "ADBE ShadowHighlight",
             vec![(4, Value::Float(0.2)), (5, Value::Bool(true))],
         ),
+        ("pixel motion blur", "ADBE OFMotionBlur", vec![]),
+        (
+            "timewarp pixel motion frame 10.5",
+            "ADBE Timewarp",
+            vec![(2, Value::Int(2)), (4, Value::Float(10.5))],
+        ),
+        ("cc wide time 1+1", "CC Wide Time", vec![]),
     ] {
         out.push(Case {
             name: format!("1080p temporal {name}"),

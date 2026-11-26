@@ -111,7 +111,7 @@ impl TimelinePanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn header(
         &mut self,
-        ui: &Ui,
+        ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
@@ -121,7 +121,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         now: Time,
     ) {
-        let p = ui.painter();
+        let p = ui.painter().clone();
         // Current time: big blue timecode, scrubbable.
         let tc = Rect::from_min_size(head.min + vec2(8.0, 2.0), vec2(120.0, head.height() - 4.0));
         p.text(
@@ -161,15 +161,31 @@ impl TimelinePanel {
             }
         }
 
+        // Search field, between the current time and the comp switches.
+        let left = tc.right() + 12.0;
+        let right = (left + 170.0).min(head.left() + cols.end - 140.0);
+        if right - left > 60.0 {
+            self.search_ui(
+                ui,
+                Rect::from_min_max(
+                    pos2(left, head.center().y - 10.0),
+                    pos2(right, head.center().y + 10.0),
+                ),
+            );
+        }
+
         // Graph Editor switch (AE's comp button; Shift+F3).
         let ge = Rect::from_center_size(
-            pos2(head.left() + cols.end - 14.0, head.center().y),
+            pos2(head.left() + cols.viewport - 14.0, head.center().y),
             vec2(20.0, 20.0),
         );
-        let on = session.lock().graph_editor;
-        let gresp = ui
-            .interact(ge, ui.id().with("graph_editor_switch"), Sense::click())
-            .labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
+        let gresp = ui.interact(ge, ui.id().with("graph_editor_switch"), Sense::click());
+        if gresp.clicked() {
+            self.graph_mode = !self.graph_mode;
+            session.lock().graph_editor = self.graph_mode;
+        }
+        let on = self.graph_mode;
+        let gresp = gresp.labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
         if on {
             ui.painter().rect_filled(ge, 2.0, color::BUTTON_ON);
         }
@@ -185,14 +201,20 @@ impl TimelinePanel {
                 color::ICON_DIM
             },
         );
-        if gresp.clicked() {
-            session.lock().graph_editor = !on;
-        }
         gresp.on_hover_text(tr("Graph Editor"));
 
+        let flow = ge.translate(vec2(-5.0 * 26.0, 0.0));
+        let title = tr("Composition Mini-Flowchart");
+        let button = ui
+            .interact(flow, ui.id().with("mini_flow"), Sense::click())
+            .labeled(egui::WidgetType::Button, title);
+        icons::paint(&p, flow.shrink(3.0), Icon::MiniFlowchart, color::ICON);
+        if button.on_hover_text(title).clicked() {
+            cx.invoke(ids::MINI_FLOW);
+        }
+
         // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
-        // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
-        // comp, as AE does.
+        // Frame Blending, Motion Blur.
         for (i, (attr, icon, name, tip, enabled)) in [
             (
                 "motion_blur",
@@ -206,7 +228,7 @@ impl TimelinePanel {
                 Icon::FrameBlend,
                 "Enable Frame Blending",
                 "Enables Frame Blending for all layers with the Frame Blend switch set",
-                false,
+                true,
             ),
             (
                 "hide_shy_layers",
@@ -220,7 +242,7 @@ impl TimelinePanel {
                 Icon::Cube,
                 "Draft 3D",
                 "Turn fast 3D previews on or off",
-                true,
+                false,
             ),
         ]
         .into_iter()
@@ -228,8 +250,16 @@ impl TimelinePanel {
         {
             let r = ge.translate(vec2(-26.0 * (i as f32 + 1.0), 0.0));
             let on = enabled && bool_attr(cx.stage, &info.path, attr);
-            let resp = ui
-                .interact(r, ui.id().with(("comp_switch", attr)), Sense::click())
+            let mut cell = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(r)
+                    .id_salt(("comp_switch", attr)),
+            );
+            if !enabled {
+                cell.disable();
+            }
+            let resp = cell
+                .interact(r, cell.id().with("button"), Sense::click())
                 .labeled_toggle(egui::WidgetType::Button, tr(name), on);
             if on {
                 ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
@@ -254,14 +284,10 @@ impl TimelinePanel {
         }
 
         // Column headers (right-click: AE's Hide This / Columns ▸ menu).
-        let cresp = ui.interact(
-            colrow,
-            ui.id().with("timeline_columns"),
-            egui::Sense::click(),
-        );
-        crate::common::context_menu(&cresp, &mut |ui| {
-            crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_HEADER);
-        });
+        let clip = ui.clip_rect();
+        let mut outline_clip = clip;
+        outline_clip.max.x = outline_clip.max.x.min(axis.left - 2.0);
+        ui.set_clip_rect(outline_clip);
         let p = ui.painter();
         p.rect_filled(colrow, 0.0, color::PANEL);
         p.hline(
@@ -274,34 +300,43 @@ impl TimelinePanel {
         for (i, icon) in [Icon::Eye, Icon::Speaker, Icon::Solo, Icon::Lock]
             .into_iter()
             .enumerate()
+            .filter(|_| cols.visible(Column::Av))
         {
             icons::paint(
                 p,
                 Rect::from_center_size(
-                    pos2(l + cols.av + SW * (i as f32 + 0.5), cy),
+                    pos2(l + cols.x(Column::Av) + SW * (i as f32 + 0.5), cy),
                     vec2(12.0, 12.0),
                 ),
                 icon,
                 color::ICON_DIM,
             );
         }
-        icons::paint(
-            p,
-            Rect::from_center_size(pos2(l + cols.label + 7.0, cy), vec2(12.0, 12.0)),
-            Icon::Tag,
-            color::ICON_DIM,
-        );
+        if cols.visible(Column::Label) {
+            icons::paint(
+                p,
+                Rect::from_center_size(pos2(l + cols.x(Column::Label) + 7.0, cy), vec2(12.0, 12.0)),
+                Icon::Tag,
+                color::ICON_DIM,
+            );
+        }
+        if cols.visible(Column::Index) {
+            p.text(
+                pos2(l + cols.x(Column::Index) + 4.0, cy),
+                Align2::LEFT_CENTER,
+                "#",
+                theme::small(),
+                color::TEXT,
+            );
+        }
         p.text(
-            pos2(l + cols.index + 4.0, cy),
+            pos2(l + cols.x(Column::Name) + 2.0, cy),
             Align2::LEFT_CENTER,
-            "#",
-            theme::small(),
-            color::TEXT,
-        );
-        p.text(
-            pos2(l + cols.name + 2.0, cy),
-            Align2::LEFT_CENTER,
-            tr("Layer Name"),
+            tr(if self.columns.layer_names {
+                "Layer Name"
+            } else {
+                "Source Name"
+            }),
             theme::small(),
             color::TEXT,
         );
@@ -318,26 +353,26 @@ impl TimelinePanel {
         for (i, icon) in switch_icons
             .into_iter()
             .enumerate()
-            .filter(|_| cols.panes.switches)
+            .filter(|_| cols.visible(Column::Switches))
         {
             icons::paint(
                 p,
                 Rect::from_center_size(
-                    pos2(l + cols.switches + SW * (i as f32 + 0.5), cy),
+                    pos2(l + cols.x(Column::Switches) + SW * (i as f32 + 0.5), cy),
                     vec2(12.0, 12.0),
                 ),
                 icon,
                 color::ICON_DIM,
             );
         }
-        if cols.panes.modes {
+        if cols.visible(Column::Modes) {
             for (x, title) in [
                 (4.0, "Mode"),
                 (96.0 + 4.0 + 5.0, "T"),
                 (96.0 + SW + 8.0, "Track Matte"),
             ] {
                 p.text(
-                    pos2(l + cols.modes + x, cy),
+                    pos2(l + cols.x(Column::Modes) + x, cy),
                     Align2::LEFT_CENTER,
                     tr(title),
                     theme::small(),
@@ -345,15 +380,39 @@ impl TimelinePanel {
                 );
             }
         }
-        if cols.panes.parent {
+        if cols.visible(Column::Parent) {
             p.text(
-                pos2(l + cols.parent + PARENT_PAD, cy),
+                pos2(l + cols.x(Column::Parent) + PARENT_PAD, cy),
                 Align2::LEFT_CENTER,
                 tr("Parent & Link"),
                 theme::small(),
                 color::TEXT,
             );
         }
+
+        for c in [
+            Column::Comment,
+            Column::Keys,
+            Column::RenderTime,
+            Column::In,
+            Column::Out,
+            Column::Duration,
+            Column::Stretch,
+        ] {
+            if cols.visible(c) {
+                widgets::clipped_text(
+                    p,
+                    pos2(l + cols.x(c) + 3.0, cy),
+                    tr(c.title()),
+                    theme::small(),
+                    color::TEXT,
+                    cols.width(c) - 6.0,
+                );
+            }
+        }
+        self.columns.header_controls(ui, colrow, cols);
+
+        ui.set_clip_rect(clip);
 
         // Ruler and work area (right part of both header rows).
         let ruler = Rect::from_min_max(
@@ -418,6 +477,20 @@ impl TimelinePanel {
                 }
             }
             f += step;
+        }
+        if let Some((path, revision, spans)) = &session.lock().cached_preview
+            && path == &info.path
+            && *revision == cx.stage.revision()
+        {
+            // AE: green segments directly under the work area bar, above the
+            // ruler ticks, one per cached run of frames (AE-UI-064).
+            for span in spans {
+                p.hline(
+                    axis.x(span.start)..=axis.x(span.end),
+                    wa_top + 8.0 + 2.0,
+                    Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
+                );
+            }
         }
         // CTI handle.
         let x = axis.x(now);
@@ -527,7 +600,7 @@ impl TimelinePanel {
             },
         );
         if resp.clicked() {
-            self.panes.toggle_switches_modes();
+            self.columns.toggle_switches_modes();
         }
         ui.painter().hline(
             foot.x_range(),

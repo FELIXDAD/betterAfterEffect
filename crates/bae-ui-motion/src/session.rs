@@ -26,6 +26,17 @@ pub enum Reveal {
     Props(Vec<(PrimPath, String)>),
 }
 
+/// Window > Motion Sketch, armed by Start Capture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchArm {
+    pub layer: PrimPath,
+    /// Capture speed, percent of real time.
+    pub speed: f64,
+    /// Smoothing: how far (pixels) the recorded path may stray from the kept
+    /// keyframes.
+    pub smoothing: f64,
+}
+
 /// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
 /// it stands for one (not Contents, Transform …).
 pub fn group_prim(id: &str) -> Option<PrimPath> {
@@ -101,12 +112,37 @@ pub struct Scrub {
     /// The same property on the other selected layers (or selected across
     /// layers), changing with it: path and its value.
     pub peers: Vec<(PrimPath, Value)>,
+    /// Comp time of the drag (a keyframe there when the property is animated).
+    pub time: Time,
+    /// The drag ended and its command was sent: still shown until it runs
+    /// (the stage revision then changes), so the panels never flash the old
+    /// value. With the revision it was sent at.
+    pub committed: Option<(u64, Instant)>,
 }
 
 impl Scrub {
     /// Every prim the drag changes, with its value.
     pub fn targets(&self) -> impl Iterator<Item = (&PrimPath, &Value)> {
         std::iter::once((&self.path, &self.value)).chain(self.peers.iter().map(|(p, v)| (p, v)))
+    }
+
+    /// What the evaluators show while the drag lasts: each target's attribute
+    /// as the commit will leave it ([`bae_motion::keys::spec_with_value_at`]).
+    pub fn overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        self.targets()
+            .filter(|(p, _)| stage.has_prim(p))
+            .map(|(p, v)| bae_anim::AttrOverride {
+                prim: p.clone(),
+                attr: self.attr.clone(),
+                spec: bae_motion::keys::spec_with_value_at(
+                    stage,
+                    p,
+                    &self.attr,
+                    query::to_key_time(stage, p, self.time),
+                    v.clone(),
+                ),
+            })
+            .collect()
     }
 
     /// The previewed value of `attr` of `path`, if the drag changes it.
@@ -148,14 +184,22 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Keep these keys selected although they do not exist yet: the selection
+    /// already names where a queued command (a keyframe drag) puts them, and
+    /// panels drawn before it runs must not drop them (#551).
+    Keys(Vec<KeyRef>),
 }
 
 #[derive(Debug, Default)]
 pub struct Session {
+    /// Last UI frame in which a visible timeline requested per-layer CPU timings.
+    pub(crate) timing_column_frame: Option<u64>,
+    pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
     /// Comp shown in the viewer and timeline.
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
     pub selected_keys: Vec<KeyRef>,
@@ -177,6 +221,7 @@ pub struct Session {
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
@@ -199,6 +244,13 @@ pub struct Session {
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
+    /// An expression just added (Alt+click on the stopwatch, Animation ▸ Add
+    /// Expression): the Timeline focuses its field with the text selected, so
+    /// typing replaces it (AE). Dropped after a second if never shown.
+    pub(crate) focus_expression: Option<(PrimPath, String, Instant)>,
+    /// Frames in the GPU preview cache (the timeline's green bar): comp,
+    /// stage revision, cached spans.
+    pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
@@ -216,6 +268,9 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// When L was last pressed to reveal the audio waveform on a second press.
     pub(crate) last_l: Option<Instant>,
+    /// Motion Sketch armed (Start Capture): the next drag in the Composition
+    /// panel records this layer's position.
+    pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
     /// The frame the Composition viewer shows and its key (Lumetri Scopes).
@@ -252,6 +307,7 @@ impl SharedSession {
         s.opening_audio = false;
         match device {
             Ok(output) => {
+                output.set_gain(10.0_f32.powf(s.master_db / 20.0));
                 let previous = s.output.replace(output);
                 s.mix_revision = None;
                 s.retry_audio_after = None;
@@ -266,25 +322,23 @@ impl SharedSession {
         }
     }
 
-    /// A user can connect a device after starting the application.
-    pub(crate) fn retry_audio(&self) {
-        let mut s = self.lock();
-        let needed = s.retry_audio_after.map_or_else(
-            || {
-                s.output
+    /// Opens the output device on its own thread (OS negotiation may block). It
+    /// needs no GPU. Does nothing while a device is open or opening.
+    pub(crate) fn start_audio(&self) {
+        {
+            let mut s = self.lock();
+            if s.opening_audio
+                || s.output
                     .as_ref()
-                    .is_some_and(bae_media::playback::AudioOutput::device_lost)
-            },
-            |at| Instant::now() >= at,
-        );
-        if !needed || s.opening_audio {
-            return;
+                    .is_some_and(|output| !output.device_lost())
+            {
+                return;
+            }
+            s.opening_audio = true;
         }
-        s.opening_audio = true;
-        drop(s);
         let session = self.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("bae-audio-reopen".into())
+            .name("bae-audio-device".into())
             .spawn(move || {
                 if let Err(error) = session.open_audio() {
                     tracing::warn!(%error, "Audio output unavailable");
@@ -294,6 +348,42 @@ impl SharedSession {
             self.lock().opening_audio = false;
             tracing::warn!(%error, "Could not start the audio device worker");
         }
+    }
+
+    /// A user can connect a device after starting the application.
+    pub(crate) fn retry_audio(&self) {
+        let needed = {
+            let s = self.lock();
+            match s.retry_audio_after {
+                Some(at) => Instant::now() >= at,
+                // Never opened or lost: open it now rather than wait for a failure.
+                None => s
+                    .output
+                    .as_ref()
+                    .is_none_or(bae_media::playback::AudioOutput::device_lost),
+            }
+        };
+        if needed {
+            self.start_audio();
+        }
+    }
+}
+
+/// Module setup already started the device. As the first warm-up task this
+/// only reopens a failed or lost one, on its own thread, so it never holds up
+/// the GPU tasks.
+impl bae_gpu::WarmUp for SharedSession {
+    fn name(&self) -> &str {
+        "audio output"
+    }
+
+    fn priority(&self) -> u8 {
+        0
+    }
+
+    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        self.start_audio();
+        Ok(())
     }
 }
 
@@ -337,6 +427,7 @@ impl Session {
     /// Make `comp` the active comp (opening a timeline tab for it).
     pub fn open_comp(&mut self, comp: &PrimPath) {
         if self.active_comp.as_ref() != Some(comp) {
+            self.mini_flow = None;
             self.selected_layers.clear();
             self.selected_keys.clear();
             self.selected_props.clear();
@@ -352,6 +443,7 @@ impl Session {
     pub fn close_comp(&mut self, comp: &PrimPath) {
         self.open_comps.retain(|c| c != comp);
         if self.active_comp.as_ref() == Some(comp) {
+            self.mini_flow = None;
             self.active_comp = self.open_comps.last().cloned();
             self.selected_layers.clear();
             self.selected_keys.clear();
@@ -381,8 +473,24 @@ impl Session {
     /// Drop references to prims that no longer exist and resolve pending items.
     /// Called once per frame by the panels (cheap).
     pub fn sync(&mut self, stage: &Stage) {
+        if let Some((revision, at)) = self.scrub.as_ref().and_then(|s| s.committed)
+            && (stage.revision() != revision
+                || at.elapsed() > std::time::Duration::from_millis(500))
+        {
+            self.scrub = None;
+        }
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::Keys(keys) = &what {
+                let landed = keys.iter().all(|k| {
+                    query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+                });
+                if !landed && age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewEffects { layers, before } = &what {
                 let added: Vec<PrimPath> = layers
                     .iter()
@@ -411,7 +519,7 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {
                     unreachable!("handled above")
                 }
             };
@@ -425,7 +533,7 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
+                    Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -437,7 +545,7 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => None,
             })
             .collect();
         self.reserved
@@ -456,15 +564,38 @@ impl Session {
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));
-        self.selected_keys.retain(|k| {
-            query::attr_spec(stage, &k.path, &k.attr)
-                .is_some_and(|s| s.keyframes.contains_key(&k.time))
-        });
+        let expected: Vec<&KeyRef> = self
+            .pending
+            .iter()
+            .filter_map(|(w, _)| match w {
+                Pending::Keys(keys) => Some(keys.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let selected = std::mem::take(&mut self.selected_keys);
+        self.selected_keys = selected
+            .into_iter()
+            .filter(|k| {
+                expected.contains(&k)
+                    || query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+            })
+            .collect();
         self.reveal.retain(|l, _| stage.has_prim(l));
         self.selected_props
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
         self.selected_effects.retain(|e| stage.has_prim(e));
+    }
+
+    /// Keep the meters moving through the last audible scrub sample.
+    pub(crate) fn monitoring_audio(&self) -> bool {
+        (self.audio_clock || self.last_scrub.is_some())
+            && self
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.finished())
     }
 
     pub fn is_playing(&self) -> bool {
@@ -491,9 +622,10 @@ impl Session {
         }
     }
 
-    /// Start playing the active comp (Preview panel options): from the current
-    /// time or the start of the range, through the range.
-    pub fn play(&mut self, info: &CompInfo) {
+    /// Where playback of `info` would start and the range it plays (Preview
+    /// panel options): the current time inside the range (not on its last
+    /// frame) when playing from the current time, else the range's start.
+    pub fn play_start(&self, info: &CompInfo) -> (Time, TimeRange) {
         let now = self.time(&info.path);
         let range = self.preview_range(info, now);
         let from = if self.preview.from_current
@@ -504,6 +636,14 @@ impl Session {
         } else {
             range.start
         };
+        (from, range)
+    }
+
+    /// Start playing the active comp (Preview panel options): from the current
+    /// time or the start of the range, through the range.
+    pub fn play(&mut self, info: &CompInfo) {
+        let now = self.time(&info.path);
+        let (from, range) = self.play_start(info);
         self.times.insert(info.path.clone(), from);
         self.playback = Some(Playback {
             comp: info.path.clone(),

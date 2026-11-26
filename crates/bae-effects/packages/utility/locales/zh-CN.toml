@@ -1,0 +1,16 @@
+[effect.cc-overbrights]
+name = "CC Overbrights"
+keywords = ["实用工具"]
+
+[effect.cc-overbrights.params]
+channel = "Channel"
+clip_color = "Clip Color"
+
+[effect.cc-overbrights.choices.channel]
+1 = "RGB Solid"
+2 = "Lightness Solid"
+3 = "Luminance Solid"
+4 = "(-"
+5 = "RGB Clip"
+6 = "Lightness Clip"
+7 = "Luminance Clip"
