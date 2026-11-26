@@ -513,7 +513,7 @@ fn eval_fast(f: &fast::Fast, cx: &Cx<'_, '_>, e: &ExprProp, pre: &Value) -> Opti
         flat: !layer.switches.three_d
             && e.prim == layer.path
             && matches!(&*e.attr, tr::POSITION | tr::ANCHOR_POINT | tr::SCALE),
-        seed: seed_of(e, cx.comp, cx.layer),
+        seed: e.seed,
     };
     let comps = f.eval(&env)?;
     // Errors (non-finite results) are reported by the JS path.
@@ -833,7 +833,7 @@ fn call<'js>(
     e: &ExprProp,
 ) -> Result<rquickjs::Value<'js>, String> {
     let call: Function<'js> = ctx.globals().get("__call").map_err(|e| e.to_string())?;
-    let seed = seed_of(e, cx.comp, cx.layer);
+    let seed = e.seed;
     call.call((
         func.clone(),
         cx.comp as i32,
@@ -1287,9 +1287,7 @@ fn components(v: &Value) -> Vec<f64> {
     }
 }
 
-// The property's random seed: FNV-1a over its identity (prim, 0, attr, comp
-// id, layer index), stable across runs and machines. The prim and attr part is
-// hashed once when the comp compiles ([`seed_prefix`]).
+// A property's absolute prim path and attribute identify it independently of layer order.
 
 fn fnv(mut h: u32, bytes: impl IntoIterator<Item = u8>) -> u32 {
     for b in bytes {
@@ -1299,23 +1297,9 @@ fn fnv(mut h: u32, bytes: impl IntoIterator<Item = u8>) -> u32 {
     h
 }
 
-/// The FNV-1a state after the property's prim and attr.
+/// Seed shared by the compiled expression and reads of the same property.
 pub(crate) fn seed_prefix(prim: &str, attr: &str) -> u32 {
     fnv(0x811c_9dc5, prim.bytes().chain([0]).chain(attr.bytes()))
-}
-
-fn seed_of(e: &ExprProp, comp: usize, layer: usize) -> u32 {
-    seed_with(e.seed, comp, layer)
-}
-
-fn seed_with(prefix: u32, comp: usize, layer: usize) -> u32 {
-    fnv(
-        prefix,
-        (comp as u32)
-            .to_le_bytes()
-            .into_iter()
-            .chain((layer as u32).to_le_bytes()),
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2142,15 +2126,15 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
-                Ok::<_, rquickjs::Error>(seed_with(
-                    seed_prefix(own(&prim, &comp.layers[li]), &attr),
-                    c as usize,
-                    li,
-                ))
+                Ok::<_, rquickjs::Error>(seed_prefix(own(&prim, &comp.layers[li]), &attr))
             },
         )?,
     )?;
 
+    h.set(
+        "wiggleNoise",
+        Function::new(ctx.clone(), fast::wiggle_noise)?,
+    )?;
     ctx.globals().set("__h", h)?;
     Ok(())
 }
