@@ -19,13 +19,43 @@ use std::sync::Arc;
 use bae_app::{AppBuilder, AppModule};
 use bae_model::EffectDef;
 use bae_render::Effect;
-use bae_render::effect::registry_id;
+use bae_render::effect::{FRAME_INTERPOLATOR_ID, registry_id};
 
 use crate::catalog::EffectInfo;
 
 /// App module of the built-in effects.
 #[derive(Debug, Default)]
 pub struct EffectsModule;
+
+/// Compiles the built-in effects' pipelines during the app's warm-up, before
+/// the first effect is applied: RGBA16F (the default working format), then
+/// RGBA32F where the GPU supports 32 bpc. Anything the UI needs earlier is
+/// compiled on demand in the background (`gpu::Runtime::kernel`).
+struct WarmUp;
+
+impl bae_gpu::WarmUp for WarmUp {
+    fn name(&self) -> &str {
+        "effects"
+    }
+
+    fn priority(&self) -> u8 {
+        20
+    }
+
+    fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        crate::prewarm(gpu, bae_render::WorkFormat::Rgba16Float.texture_format())
+            .map_err(|e| e.to_string())?;
+        // 32 bpc projects work in RGBA32F when the GPU can filter and blend
+        // it (`Renderer::work_format` falls back to RGBA16F otherwise).
+        let float32 = bae_gpu::wgpu::Features::FLOAT32_FILTERABLE
+            | bae_gpu::wgpu::Features::FLOAT32_BLENDABLE;
+        if gpu.device().features().contains(float32) {
+            crate::prewarm(gpu, bae_render::WorkFormat::Rgba32Float.texture_format())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
 
 impl AppModule for EffectsModule {
     fn name(&self) -> &str {
@@ -49,6 +79,13 @@ impl AppModule for EffectsModule {
             }
         });
         effects.batch(|tx| {
+            if let Err(e) = tx.register_arc(
+                owner.clone(),
+                FRAME_INTERPOLATOR_ID,
+                crate::effects::temporal::interpolator(),
+            ) {
+                tracing::warn!("frame interpolator not registered: {e}");
+            }
             for b in crate::builtins() {
                 if let Err(e) =
                     tx.register_arc(owner.clone(), registry_id(&b.info.match_name), b.effect())
@@ -57,6 +94,9 @@ impl AppModule for EffectsModule {
                 }
             }
         });
+        if let Err(e) = app.register_arc::<dyn bae_gpu::WarmUp>("bae.effects", Arc::new(WarmUp)) {
+            tracing::warn!("effects warm-up not registered: {e}");
+        }
         infos.batch(|tx| {
             for b in crate::builtins() {
                 let info: Arc<EffectInfo> = Arc::new(b.info.clone());
@@ -85,11 +125,12 @@ mod tests {
         let effects = app.get_registry::<dyn Effect>().expect("effects");
         let infos = app.get_registry::<EffectInfo>().expect("infos");
         assert_eq!(defs.len(), n);
-        assert_eq!(effects.len(), n);
+        assert_eq!(effects.len(), n + 1);
         assert_eq!(infos.len(), n);
         let mut library = bae_render::EffectLibrary::new();
         assert!(library.sync(&effects));
         assert!(!library.sync(&effects));
+        assert!(library.frame_interpolator().is_some());
         assert_eq!(library.len(), n);
         assert!(library.get("ADBE Gaussian Blur 2").is_some());
         for b in crate::builtins() {

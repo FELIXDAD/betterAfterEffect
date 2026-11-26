@@ -27,6 +27,11 @@ pub(crate) mod ids {
     /// Esc.
     pub const LAST: &str = "motion.view.switch_to_last_3d_view";
     pub const RESET: &str = "motion.view.reset_3d_view";
+    /// View ▸ Create Camera from 3D View.
+    pub const CREATE_CAMERA: &str = "motion.view.create_camera_from_3d_view";
+
+    /// `{"views": 1 | 2 | 4}`: View ▸ Switch View Layout.
+    pub const LAYOUT: &str = "motion.view.view_layout";
 }
 
 /// `(action id, English title)` for the action registry.
@@ -36,6 +41,8 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     (ids::ASSIGN, "Assign 3D View Shortcut"),
     (ids::LAST, "Switch to Last 3D View"),
     (ids::RESET, "Reset 3D View"),
+    (ids::CREATE_CAMERA, "Create Camera from 3D View"),
+    (ids::LAYOUT, "Switch View Layout"),
 ];
 
 /// The 3D view shortcut commands, named as in AE's Keyboard Shortcuts.
@@ -150,6 +157,25 @@ impl ViewCamera {
         }
     }
 
+    /// A perspective camera that sees what this view sees: position, point of
+    /// interest and zoom. An orthographic view becomes a camera along its
+    /// viewing direction that shows the plane through its centre at the same
+    /// magnification.
+    pub fn lens(self, view: View3d, size: DVec2) -> (DVec3, DVec3, f64) {
+        match self {
+            ViewCamera::Perspective {
+                position,
+                target,
+                zoom,
+            } => (position, target, zoom),
+            ViewCamera::Ortho { centre, scale } => {
+                let zoom = bae_render::camera::default_zoom(size.x as u32);
+                let dir = self.camera(view).direction();
+                (centre - dir * zoom / scale.max(1e-6), centre, zoom)
+            }
+        }
+    }
+
     pub fn camera(self, view: View3d) -> Camera {
         match (self, view) {
             (ViewCamera::Ortho { centre, scale }, View3d::Ortho(o)) => {
@@ -189,19 +215,74 @@ const CUSTOM: [([f64; 3], f64); 3] = [
 /// One comp's 3D views.
 #[derive(Clone, Debug, Default)]
 pub struct Views {
+    /// The active view's 3D view.
     pub current: View3d,
     /// Where Esc goes back to.
     pub last: View3d,
     /// Cameras the camera tools moved (the others are [`ViewCamera::initial`]).
     cameras: HashMap<View3d, ViewCamera>,
+    /// The other views of the layout (View ▸ Switch View Layout), in order;
+    /// the active view is at `active`.
+    others: Vec<View3d>,
+    active: usize,
 }
 
 impl Views {
+    /// Views in the layout: 1, 2 or 4.
+    pub fn layout(&self) -> usize {
+        self.others.len() + 1
+    }
+
+    /// 1, 2 or 4 views. The active view keeps its 3D view and comes last;
+    /// the others start as AE's (Top; Top, Front, Right, 待核).
+    pub fn set_layout(&mut self, n: usize) {
+        use OrthoView::*;
+        let others: &[View3d] = match n {
+            2 => &[View3d::Ortho(Top)],
+            4 => &[
+                View3d::Ortho(Top),
+                View3d::Ortho(Front),
+                View3d::Ortho(Right),
+            ],
+            _ => &[],
+        };
+        self.others = others.to_vec();
+        self.active = others.len();
+    }
+
+    /// The 3D view of each view of the layout, in order.
+    pub fn panes(&self) -> Vec<View3d> {
+        let mut v = self.others.clone();
+        v.insert(self.active.min(v.len()), self.current);
+        v
+    }
+
+    /// Index of the active view.
+    pub fn active(&self) -> usize {
+        self.active
+    }
+
+    /// Make view `i` of the layout the active one (a click in it).
+    pub fn activate(&mut self, i: usize) {
+        let mut panes = self.panes();
+        if i >= panes.len() || i == self.active {
+            return;
+        }
+        self.current = panes.remove(i);
+        self.others = panes;
+        self.active = i;
+    }
+
     pub fn switch(&mut self, to: View3d) {
         if to != self.current {
             self.last = self.current;
             self.current = to;
         }
+    }
+
+    /// A camera tool moved `view`'s camera.
+    pub fn set_camera(&mut self, view: View3d, camera: ViewCamera) {
+        self.cameras.insert(view, camera);
     }
 
     pub fn view_camera(&self, view: View3d, size: DVec2) -> ViewCamera {
@@ -214,8 +295,12 @@ impl Views {
     /// The camera the viewer shows the current view with; `None` for Active
     /// Camera (the comp's own).
     pub fn camera(&self, size: DVec2) -> Option<Camera> {
-        (self.current != View3d::Active)
-            .then(|| self.view_camera(self.current, size).camera(self.current))
+        self.camera_of(self.current, size)
+    }
+
+    /// The camera `view` shows the comp with; `None` for Active Camera.
+    pub fn camera_of(&self, view: View3d, size: DVec2) -> Option<Camera> {
+        (view != View3d::Active).then(|| self.view_camera(view, size).camera(view))
     }
 }
 
@@ -253,7 +338,7 @@ fn slot(inv: &Invocation) -> usize {
 }
 
 /// Runs the 3D view commands on the active comp.
-pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
+pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
     if !ACTIONS.iter().any(|(id, _)| *id == inv.id) {
         return false;
     }
@@ -262,8 +347,13 @@ pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
     let Some(comp) = s.active_comp.clone() else {
         return true;
     };
+    // Esc first cancels the Timeline's open keyframe dialog (its own Esc).
+    if inv.id == ids::LAST && s.key_dialog.is_some() {
+        s.key_dialog = None;
+        return true;
+    }
     let shortcuts = s.view_shortcuts;
-    let views = s.views3d.entry(comp).or_default();
+    let views = s.views3d.entry(comp.clone()).or_default();
     match inv.id.as_str() {
         ids::SWITCH => {
             if let Some(v) = inv
@@ -277,6 +367,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
         }
         ids::SHORTCUT => views.switch(shortcuts.0[slot(inv)]),
         ids::LAST => views.switch(views.last),
+        ids::RESET if views.current == View3d::Active => {
+            // AE's "Reset Camera 1": the active camera layer back to the
+            // default camera's place, keeping its zoom.
+            let time = s.time(&comp);
+            drop(s);
+            reset_camera(cx, &comp, time);
+            return true;
+        }
         ids::RESET => {
             let current = views.current;
             views.cameras.remove(&current);
@@ -285,9 +383,83 @@ pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
             let current = views.current;
             s.view_shortcuts.0[slot(inv)] = current;
         }
+        ids::CREATE_CAMERA if views.current != View3d::Active => {
+            let Some(info) = bae_motion::query::comp_info(cx.stage, &comp) else {
+                return true;
+            };
+            let size = DVec2::new(f64::from(info.width), f64::from(info.height));
+            let (eye, target, zoom) = views
+                .view_camera(views.current, size)
+                .lens(views.current, size);
+            drop(s);
+            common::new_layer(
+                cx,
+                &session,
+                bae_model::LayerKind::Camera,
+                serde_json::json!({
+                    "camera": { "zoom": zoom },
+                    "position_3d": eye.to_array(),
+                    "point_of_interest": target.to_array(),
+                }),
+            );
+        }
+
+        ids::LAYOUT => {
+            let n = inv
+                .params
+                .get("views")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1);
+            views.set_layout(n as usize);
+        }
         _ => {}
     }
     true
+}
+
+/// Whether View ▸ Create Camera from 3D View applies: the active comp shows a
+/// view other than Active Camera.
+pub(crate) fn can_create_camera(resources: &bae_app::Resources) -> bool {
+    common::session(resources).lock().active_comp.is_some() && current(resources) != View3d::Active
+}
+
+/// The active comp's view layout: 1, 2 or 4 views.
+pub(crate) fn layout(resources: &bae_app::Resources) -> usize {
+    let session = common::session(resources);
+    let s = session.lock();
+    s.active_comp
+        .as_ref()
+        .and_then(|c| s.views3d.get(c))
+        .map_or(1, Views::layout)
+}
+
+/// Active Camera ▸ Reset: the comp's camera layer at `(W/2, H/2, −zoom)` aimed
+/// at the comp centre, no orientation or rotation (one undo step).
+fn reset_camera(cx: &mut PanelContext<'_>, comp: &bae_model::PrimPath, time: bae_model::Time) {
+    let Ok(ev) = bae_anim::evaluate_comp(cx.stage, comp, time) else {
+        return;
+    };
+    let Some((layer, zoom)) = ev
+        .camera
+        .and_then(|i| ev.layers.get(i))
+        .and_then(|l| Some((l.path.clone(), l.camera.as_ref()?.zoom)))
+    else {
+        return;
+    };
+    let (w, h) = (f64::from(ev.width) / 2.0, f64::from(ev.height) / 2.0);
+    let t = bae_motion::query::to_key_time(cx.stage, &layer, time);
+    let v3 = |v: [f64; 3]| serde_json::json!({"type": "vec3", "value": v});
+    let f = |v: f64| serde_json::json!({"type": "float", "value": v});
+    let edit = |attr: &str, value: serde_json::Value| serde_json::json!({"path": layer, "attr": attr, "time": t, "value": value});
+    let edits = vec![
+        edit("transform:position", v3([w, h, -zoom])),
+        edit("transform:point_of_interest", v3([w, h, 0.0])),
+        edit("transform:orientation", v3([0.0; 3])),
+        edit("transform:rotation_x", f(0.0)),
+        edit("transform:rotation_y", f(0.0)),
+        edit("transform:rotation", f(0.0)),
+    ];
+    cx.invoke_with("attr.set_many", serde_json::json!({ "edits": edits }));
 }
 
 /// The active comp's current 3D view (menus, the viewer's popup).

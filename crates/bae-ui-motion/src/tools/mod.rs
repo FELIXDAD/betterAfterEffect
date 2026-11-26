@@ -275,6 +275,7 @@ impl Tool {
             Group::Selection | Group::Hand | Group::Zoom | Group::Rotation | Group::PanBehind
         ) || self.is_shape()
             || self.is_pen()
+            || self.is_camera()
             // Vertical type needs a text direction in the model (not yet).
             || self == Tool::TypeHorizontal
     }
@@ -519,8 +520,19 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::NUDGE, "Nudge Layer Position"),
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
+            (crate::viewer::ZOOM_100, "Zoom to 100%"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
+        .chain(crate::viewer::view_options::ACTIONS.iter().copied())
+        .chain(crate::viewer::guides::ACTIONS.iter().copied())
+        .chain([
+            (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
+            (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
+            (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
+        ])
+        .chain(GIZMOS.iter().map(|(id, title, ..)| (*id, *title)))
+        .chain(crate::viewer::look_at_actions())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -552,6 +564,12 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
         (ids::RESOLUTION, params, *title)
     });
+    let channels = crate::viewer::display::CHANNEL_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::SHOW_CHANNEL, params, *title)
+        });
     let views = crate::viewer::view3d::SHORTCUT_NAMES
         .iter()
         .map(|(slot, title)| {
@@ -561,13 +579,27 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
                 *title,
             )
         });
+    let custom = crate::viewer::view_options::VARIANTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (
+                crate::viewer::view_options::ids::CUSTOM_RESOLUTION,
+                params,
+                *title,
+            )
+        });
     nudges
         .chain(resolutions)
         .chain(views)
+        .chain(custom)
+        .chain(channels)
+        .map(|(id, params, title)| (id, params, title.to_owned()))
+        .chain(crate::viewer::display::snapshot_names())
         .map(|(id, params, title)| {
             (
                 format!("{id}/{params}"),
-                bae_ui::CommandVariant::new(id, params, title.to_owned()),
+                bae_ui::CommandVariant::new(id, params, title),
             )
         })
         .collect()
@@ -581,9 +613,11 @@ pub fn bindings() -> Vec<Binding> {
         .chain(NUDGES.iter().map(|(chord, dx, dy, _)| {
             Binding::new(chord, ids::NUDGE).params(nudge_params(*dx, *dy))
         }))
-        // AE binds Esc everywhere; here only in the Composition panel, which
-        // passes it on to whatever there uses Esc (a drag, text, a menu).
-        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST).when("composition")])
+        // Esc is Switch to Last 3D View whichever panel has focus (AE). Text
+        // fields and open menus keep their Esc (the workbench); the viewer
+        // passes it on to a drag or text it is editing.
+        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
+        .chain(GIZMOS.iter().map(|(id, _, chord, _)| Binding::new(chord, id)))
         .collect()
 }
 
@@ -657,6 +691,113 @@ pub enum AxisMode {
     View,
 }
 
+/// Paint and Brushes panel settings for the next stroke (AE-UI-104); each
+/// stroke keeps its own copy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PaintOptions {
+    pub foreground: [f64; 3],
+    pub background: [f64; 3],
+    /// Percent.
+    pub opacity: f64,
+    pub flow: f64,
+    /// A layer blend mode token.
+    pub mode: String,
+    /// `rgba`, `rgb` or `alpha`.
+    pub channels: String,
+    /// `constant`, `write_on`, `single_frame` or `custom`.
+    pub duration: String,
+    /// Custom duration in frames.
+    pub frames: u32,
+    /// Eraser: `layer_and_paint`, `paint` or `last_stroke`.
+    pub erase: String,
+    /// Clone Stamp: the source layer (none: the layer painted on).
+    pub clone_source: Option<bae_model::PrimPath>,
+    pub aligned: bool,
+    pub lock_source_time: bool,
+    /// Clone Stamp: source point minus the stroke's start (pixels).
+    pub clone_offset: [f64; 2],
+    /// Clone Stamp: source time shift in seconds.
+    pub clone_time_shift: f64,
+    /// Brush tip (Brushes panel): pixels, degrees, percents.
+    pub diameter: f64,
+    pub angle: f64,
+    pub roundness: f64,
+    pub hardness: f64,
+    pub spacing: f64,
+    /// Brush Dynamics of Size, Angle, Roundness, Opacity, Flow: 0 Off, 1 Pen
+    /// Pressure, 2 Pen Tilt, 3 Stylus Wheel.
+    pub dynamics: [u8; 5],
+    pub minimum_size: f64,
+}
+
+impl Default for PaintOptions {
+    fn default() -> Self {
+        PaintOptions {
+            foreground: [0.0, 0.0, 0.0],
+            background: [1.0, 1.0, 1.0],
+            opacity: 100.0,
+            flow: 100.0,
+            mode: "normal".to_owned(),
+            channels: "rgba".to_owned(),
+            duration: "constant".to_owned(),
+            frames: 1,
+            erase: "layer_and_paint".to_owned(),
+            clone_source: None,
+            aligned: true,
+            lock_source_time: false,
+            clone_offset: [0.0, 0.0],
+            clone_time_shift: 0.0,
+            diameter: 21.0,
+            angle: 0.0,
+            roundness: 100.0,
+            hardness: 100.0,
+            spacing: 25.0,
+            dynamics: [1, 0, 0, 0, 0],
+            minimum_size: 1.0,
+        }
+    }
+}
+
+/// What the Selection tool's 3D gizmo does (AE's 3D Gizmo modes).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GizmoMode {
+    #[default]
+    Position,
+    Scale,
+    Rotation,
+}
+
+/// AE's 3D Gizmo shortcuts: `(action id, English title, chord, mode)`; `None`
+/// goes to the next mode.
+const GIZMOS: &[(&str, &str, &str, Option<GizmoMode>)] = &[
+    (
+        "motion.tool.gizmo_position",
+        "3D Gizmo: Position",
+        "4",
+        Some(GizmoMode::Position),
+    ),
+    (
+        "motion.tool.gizmo_scale",
+        "3D Gizmo: Scale",
+        "5",
+        Some(GizmoMode::Scale),
+    ),
+    (
+        "motion.tool.gizmo_rotate",
+        "3D Gizmo: Rotation",
+        "6",
+        Some(GizmoMode::Rotation),
+    ),
+    (
+        "motion.tool.gizmo_toggle",
+        "Toggle 3D Gizmo Mode",
+        "Shift+V",
+        None,
+    ),
+];
+
 /// Options of the tools, shown right of the tool buttons. First-run values follow
 /// the spec's best understanding of AE's (AE-SHP-057, 待核).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -677,12 +818,15 @@ pub struct ToolOptions {
     /// Type and paint tools: open the Character / Paragraph (Paint / Brushes) panels.
     pub auto_open_panels: bool,
     pub axis_mode: AxisMode,
+    pub gizmo: GizmoMode,
     /// Rotation tool on 3D layers: set Orientation (true) or Rotation.
     pub rotation_sets_orientation: bool,
     /// Rounded Rectangle tool: last roundness in pixels.
     pub roundness: f64,
     /// Polygon and Star tools: last number of points.
     pub points: f64,
+    /// Paint and Brushes panels.
+    pub paint: PaintOptions,
     /// Puppet tools: show the mesh, expansion and density.
     pub puppet_show_mesh: bool,
     pub puppet_expansion: f64,
@@ -704,9 +848,11 @@ impl Default for ToolOptions {
             snapping: false,
             auto_open_panels: true,
             axis_mode: AxisMode::Local,
+            gizmo: GizmoMode::Position,
             rotation_sets_orientation: true,
             roundness: 10.0,
             points: 5.0,
+            paint: PaintOptions::default(),
             puppet_show_mesh: false,
             puppet_expansion: 3.0,
             puppet_density: 10.0,
@@ -965,7 +1111,8 @@ impl ActionHandler for ToolActions {
                 .unwrap_or(1);
             let session = crate::common::session(cx.resources);
             let nested = inv.params.get("nested").and_then(|v| v.as_bool()) == Some(true);
-            crate::viewer::set_resolution(cx, &session, factor.max(1) as u32, nested);
+            let f = factor.max(1) as u32;
+            crate::viewer::set_resolution(cx, &session, [f, f], nested);
             return true;
         }
         if inv.id == ids::NUDGE {
@@ -975,7 +1122,29 @@ impl ActionHandler for ToolActions {
             let session = crate::common::session(cx.resources);
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
         }
-        if crate::viewer::view3d::handle(inv, cx) {
+        if crate::viewer::view3d::handle(inv, cx) || crate::viewer::guides::handle(inv, cx) {
+            return true;
+        }
+        if let Some((.., mode)) = GIZMOS.iter().find(|(id, ..)| *id == inv.id) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            let o = &mut t.options;
+            o.gizmo = mode.unwrap_or(match o.gizmo {
+                GizmoMode::Position => GizmoMode::Scale,
+                GizmoMode::Scale => GizmoMode::Rotation,
+                GizmoMode::Rotation => GizmoMode::Position,
+            });
+            t.set(Tool::Selection);
+            return true;
+        }
+        if crate::viewer::look_at(inv, cx) {
+            return true;
+        }
+        if inv.id == crate::viewer::ZOOM_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
+            return true;
+        }
+        if crate::viewer::view_options::handle(inv, cx) {
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
@@ -992,6 +1161,27 @@ impl ActionHandler for ToolActions {
 /// Chinese names of the tools and tool options (`docs/glossary.md`; names marked
 /// 待核 in the PR are best effort until R1 checks AE 26's Chinese UI).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // The shape tools' Add menu (AE's ShapeLayer/AddMenu).
+    ("Add Shape Item", "添加形状项"),
+    ("Group (empty)", "组（空）"),
+    ("Polystar", "多边星形"),
+    ("Gradient Fill", "渐变填充"),
+    ("Gradient Stroke", "渐变描边"),
+    ("Merge Paths", "合并路径"),
+    ("Offset Paths", "位移路径"),
+    ("Pucker & Bloat", "收缩和膨胀"),
+    ("Repeater", "中继器"),
+    ("Round Corners", "圆角"),
+    ("Trim Paths", "修剪路径"),
+    ("Twist", "扭转"),
+    ("Wiggle Paths", "摆动路径"),
+    ("Wiggle Transform", "摆动变换"),
+    ("Zig Zag", "Z 字形"),
+    ("Zoom to 100%", "缩放到 100%"),
+    ("3D Gizmo: Position", "3D 位置 Gizmo"),
+    ("3D Gizmo: Scale", "三维缩放 Gizmo"),
+    ("3D Gizmo: Rotation", "三维旋转 Gizmo"),
+    ("Toggle 3D Gizmo Mode", "向前循环 3D Gizmo 模式"),
     ("Orbit Around Scene Tool", "绕场景旋转工具"),
     ("Orbit Around Camera POI Tool", "绕摄像机目标点旋转工具"),
     ("Pan Camera POI Tool", "平移摄像机目标点工具"),

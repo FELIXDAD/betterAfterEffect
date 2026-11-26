@@ -7,6 +7,8 @@
 //! equivalent of AE SmartFX pre-render), then encodes GPU work. Effects whose
 //! definition says `thread_safe: false` are called one at a time.
 
+pub use bae_anim::effect_history::{HISTORY_PARAM, PROFILE_SAMPLES};
+
 use std::fmt;
 use std::sync::Arc;
 
@@ -15,9 +17,159 @@ use rustc_hash::FxHashMap;
 
 use crate::error::RenderError;
 use crate::geom::IRect;
-use crate::input::RenderEffect;
+use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
+
+/// A parameter lookup can borrow the evaluated values and shadow individual IDs.
+/// A shadow with no value hides that ID from the target effect.
+#[derive(Clone, Copy, Debug)]
+pub struct EffectValues<'a> {
+    source: &'a [(u32, Value)],
+    changes: &'a [(u32, Option<Value>)],
+}
+
+impl<'a> EffectValues<'a> {
+    /// Read the changed IDs first, then the borrowed source values.
+    pub fn new(source: &'a [(u32, Value)], changes: &'a [(u32, Option<Value>)]) -> Self {
+        Self { source, changes }
+    }
+
+    fn value(&self, id: u32) -> Option<&Value> {
+        if let Some((_, value)) = self.changes.iter().find(|(n, _)| *n == id) {
+            return value.as_ref();
+        }
+        self.source.iter().find(|(n, _)| *n == id).map(|(_, v)| v)
+    }
+}
+
+/// Composition projection and lighting for effects with an internal 3D scene.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectScene {
+    /// Layer plane to composition pixels (homogeneous coordinates).
+    pub projection: glam::DMat3,
+    /// First composition light, in layer units; RGB includes intensity.
+    pub light: Option<([f64; 3], [f32; 3])>,
+    /// Active composition camera for volumetric effects.
+    pub camera: Option<crate::camera::Camera>,
+    /// Composition size in pixels.
+    pub size: [u32; 2],
+    /// Layer placement used to map projected particles back to effect pixels.
+    pub placement: glam::DAffine2,
+    /// First enabled light whose scope includes this layer, in composition space.
+    pub layer_light: Option<crate::light::Light>,
+}
+
+/// Nonnegative animated scalar in layer seconds. Each knot carries the integral
+/// from zero, so a seek only searches authored curve intervals.
+#[derive(Debug, Clone, Default)]
+pub struct ScalarTrack {
+    knots: Vec<ScalarKnot>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScalarKnot {
+    time: f64,
+    value: f64,
+    incoming: f64,
+    area: f64,
+    peak: f64,
+    fingerprint: u64,
+}
+
+impl ScalarTrack {
+    pub(crate) fn push(&mut self, time: Time, value: f64, incoming: f64) {
+        use std::hash::{Hash, Hasher};
+        let time = time.as_seconds();
+        let (value, incoming) = (value.max(0.), incoming.max(0.));
+        let area = self.knots.last().map_or(0., |p| {
+            p.area + (time - p.time) * (p.value + incoming) * 0.5
+        });
+        let peak = self
+            .knots
+            .last()
+            .map_or(value, |p| p.peak.max(value).max(incoming));
+        let mut h = rustc_hash::FxHasher::default();
+        (
+            self.fingerprint(),
+            time.to_bits(),
+            value.to_bits(),
+            incoming.to_bits(),
+        )
+            .hash(&mut h);
+        self.knots.push(ScalarKnot {
+            time,
+            value,
+            incoming,
+            area,
+            peak,
+            fingerprint: h.finish(),
+        });
+    }
+
+    pub(crate) fn fingerprint(&self) -> u64 {
+        self.knots.last().map_or(0, |last| last.fingerprint)
+    }
+    pub(crate) fn truncate_from(&mut self, time: Time) {
+        // The expression VM rounds property reads to its subframe grid. When
+        // the edited segment starts between samples, resample its left neighbor.
+        let through = self.knots.partition_point(|k| k.time <= time.as_seconds());
+        self.knots.truncate(through.saturating_sub(1));
+    }
+    /// Keeps the first `len` knots (samples recomputed after an edit).
+    pub(crate) fn truncate_to(&mut self, len: usize) {
+        self.knots.truncate(len);
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.knots.len()
+    }
+
+    /// Largest value reached up to t, independent of any later samples.
+    pub fn maximum_through(&self, t: f64) -> f64 {
+        let n = self.knots.partition_point(|k| k.time <= t);
+        self.at(t)
+            .0
+            .max(n.checked_sub(1).map_or(0., |i| self.knots[i].peak))
+    }
+
+    /// Authored or sampled knot times strictly inside the interval.
+    pub fn breaks(&self, start: f64, end: f64) -> impl Iterator<Item = f64> + '_ {
+        let first = self.knots.partition_point(|k| k.time <= start);
+        self.knots[first..]
+            .iter()
+            .take_while(move |k| k.time < end)
+            .map(|k| k.time)
+    }
+
+    /// Left limit at a key. Hold interpolation can jump at the exact key.
+    pub fn incoming(&self, t: f64) -> f64 {
+        self.knots
+            .binary_search_by(|k| k.time.total_cmp(&t))
+            .map_or_else(|_| self.at(t).0, |i| self.knots[i].incoming)
+    }
+
+    /// Value and cumulative integral at a nonnegative layer time.
+    pub fn at(&self, t: f64) -> (f64, f64) {
+        let i = self.knots.partition_point(|k| k.time <= t);
+        let Some(a) = i.checked_sub(1).map(|i| self.knots[i]) else {
+            return (0., 0.);
+        };
+        let dt = t - a.time;
+        let end = self.knots.get(i).map_or(a.value, |b| {
+            a.value + (b.incoming - a.value) * dt / (b.time - a.time)
+        });
+        (end, a.area + dt * (a.value + end) * 0.5)
+    }
+}
+
+/// One evaluated set of controls in layer time.
+#[derive(Clone, Debug)]
+pub struct ParameterSample {
+    /// Layer time of the sample.
+    pub time: Time,
+    /// Sampled controls. An omitted control keeps its current instance value.
+    pub values: Vec<(u32, Value)>,
+}
 
 /// Evaluated parameters of one effect instance plus the frame context an
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
@@ -25,10 +177,24 @@ use crate::source::{EncodeContext, GpuImage};
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
+    /// Values the implementation reads, after any effect alias translation.
+    pub translated_values: Option<&'a EffectValues<'a>>,
+    /// Prior values of animated controls requested by this effect.
+    pub parameter_samples: &'a [ParameterSample],
+    /// Cumulative scalar controls requested by the effect, in layer time.
+    pub tracks: &'a [(u32, Arc<ScalarTrack>)],
+    /// Composition scene requested by the effect.
+    pub scene: Option<&'a EffectScene>,
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
     pub comp_time: Time,
+    /// Comp time at the first visible frame of the effect's layer.
+    pub layer_in: Time,
+    /// Ordered, evaluated masks requested through [`Effect::path_dependencies`].
+    pub mask_paths: &'a [RenderMask],
+    /// Evaluated parameters requested through [`Effect::parameter_sample_times`].
+    pub history: &'a [(Time, RenderEffect)],
     /// Comp-time seconds per layer-time second (AE time stretch).
     pub layer_time_scale: f64,
     /// Resolution scale (0.5 at half resolution): pixel-sized parameters such as a
@@ -73,8 +239,15 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            translated_values: None,
+            parameter_samples: &[],
+            tracks: &[],
+            scene: None,
             time: Time::ZERO,
             comp_time: Time::ZERO,
+            layer_in: Time::ZERO,
+            mask_paths: &[],
+            history: &[],
             layer_time_scale: 1.0,
             scale: 1.0,
             layer_bounds: IRect::EMPTY,
@@ -94,7 +267,10 @@ impl<'a> EffectParams<'a> {
 impl EffectParams<'_> {
     /// Raw value of parameter `id`.
     pub fn value(&self, id: u32) -> Option<&Value> {
-        self.effect.param(id)
+        match self.translated_values {
+            Some(values) => values.value(id),
+            None => self.effect.param(id),
+        }
     }
 
     /// A slider / angle value.
@@ -188,14 +364,15 @@ pub enum LayerStage {
     BeforeEffect(PrimPath),
 }
 
-/// Masks of the effect's own layer an effect reads (AE path parameters, Fill's
-/// All Masks): delivered as a layer-space image whose alpha is the coverage.
+/// Selects masks of an effect's own layer (AE path parameters and All Masks).
+/// Effects can request either rendered coverage or the evaluated paths.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MaskSelect {
-    /// One mask (a `Mask` prim of the layer), with its inversion, feather and
-    /// expansion; its mode is ignored.
+    /// One mask (a `Mask` prim of the layer). Its coverage includes inversion,
+    /// feather and expansion and ignores the mask mode.
     One(PrimPath),
-    /// Every mask of the layer combined, as they cut the layer.
+    /// Every mask in layer order. A coverage request combines them as they
+    /// cut the layer.
     All,
 }
 
@@ -204,10 +381,26 @@ pub trait Effect: Send + Sync {
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
 
+    /// Attach derived scene inputs before the render node computes its cache key.
+    fn prepare_scene(
+        &self,
+        _instance: &mut RenderEffect,
+        _comp: &crate::RenderComp,
+        _layer: &crate::RenderLayer,
+    ) {
+    }
+
     /// Whether this effect contributes a render node. Parameter-only controls
     /// are registered so their definitions are available without encoding GPU work.
     fn renders_pixels(&self) -> bool {
         true
+    }
+
+    /// An alias that renders through another effect with translated parameters
+    /// (obsolete AE identities). The planner calls this once per frame and plans
+    /// the returned effect and instance in its place. Default: not an alias.
+    fn resolve_alias(&self, _instance: &RenderEffect) -> Option<(Arc<dyn Effect>, RenderEffect)> {
+        None
     }
 
     /// Output bounds for input bounds (layer pixels at the request scale).
@@ -221,6 +414,36 @@ pub trait Effect: Send + Sync {
         output_roi
     }
 
+    /// Part of the available input needed to produce the requested output.
+    fn required_input(&self, params: &EffectParams<'_>, output: IRect, available: IRect) -> IRect {
+        self.input_roi(params, output).intersect(&available)
+    }
+
+    /// Requests the composition camera and first light for its internal scene.
+    fn uses_scene(&self, _params: &EffectParams<'_>) -> bool {
+        false
+    }
+
+    /// A window of parameter values needed to simulate this frame.
+    fn parameter_times(&self, _params: &EffectParams<'_>) -> Vec<Time> {
+        Vec::new()
+    }
+
+    /// Controls to sample at parameter_times. Empty selects all authored controls.
+    fn parameter_ids(&self) -> &'static [u32] {
+        &[]
+    }
+
+    /// Animated scalars for which the effect needs a random-access integral.
+    fn integrated_parameters(&self) -> &'static [u32] {
+        &[]
+    }
+
+    /// Whether drawing this effect needs the whole output surface at once.
+    fn full_surface(&self) -> bool {
+        false
+    }
+
     /// Other layers this instance reads (scheduled before it). Default: none.
     fn layer_dependencies(&self, _params: &EffectParams<'_>) -> Vec<LayerDependency> {
         Vec::new()
@@ -228,6 +451,17 @@ pub trait Effect: Send + Sync {
 
     /// Masks of its own layer this instance reads. Default: none.
     fn mask_dependencies(&self, _params: &EffectParams<'_>) -> Vec<MaskSelect> {
+        Vec::new()
+    }
+
+    /// Raw, evaluated mask geometry, in layer order and without rasterization.
+    fn path_dependencies(&self, _params: &EffectParams<'_>) -> Option<MaskSelect> {
+        None
+    }
+
+    /// Comp times to sample the parameters of this same effect, without rendering
+    /// layer pixels. Available in `EffectParams::history` during rendering.
+    fn parameter_sample_times(&self, _params: &EffectParams<'_>) -> Vec<Time> {
         Vec::new()
     }
 
@@ -275,10 +509,17 @@ pub fn registry_id(match_name: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// Implementation-only registry entry for the two-frame Pixel Motion interpolator.
+pub const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
+
 /// Effect implementations by effect ID (match name).
 #[derive(Default)]
 pub struct EffectLibrary {
     effects: FxHashMap<String, Arc<dyn Effect>>,
+    /// Frame interpolation for Pixel Motion frame blending (not a listed
+    /// effect): params 1 = phase 0–1, 2 = the next frame's comp time (flicks,
+    /// read through [`LayerDependency::source`] of the layer).
+    interpolator: Option<Arc<dyn Effect>>,
     /// Generation of the app registry last synced from ([`Self::sync`]).
     synced: Option<u64>,
 }
@@ -297,6 +538,16 @@ impl EffectLibrary {
     /// Removes an implementation.
     pub fn unregister(&mut self, match_name: &str) -> Option<Arc<dyn Effect>> {
         self.effects.remove(match_name)
+    }
+
+    /// Sets the frame interpolator for a manually built library.
+    pub fn set_frame_interpolator(&mut self, effect: Arc<dyn Effect>) {
+        self.interpolator = Some(effect);
+    }
+
+    /// The frame interpolator, when one is registered.
+    pub fn frame_interpolator(&self) -> Option<&Arc<dyn Effect>> {
+        self.interpolator.as_ref()
     }
 
     /// The implementation of `match_name`.
@@ -326,9 +577,14 @@ impl EffectLibrary {
         }
         self.synced = Some(generation);
         self.effects.clear();
+        self.interpolator = None;
         for entry in registry.snapshot().iter() {
             let effect = entry.item().clone();
-            self.effects.insert(effect.def().match_name.clone(), effect);
+            if entry.id().as_ref() == FRAME_INTERPOLATOR_ID {
+                self.interpolator = Some(effect);
+            } else {
+                self.effects.insert(effect.def().match_name.clone(), effect);
+            }
         }
         true
     }

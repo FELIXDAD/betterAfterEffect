@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use bae_app::Registry;
-use bae_model::effect::param_attr;
+use bae_model::effect::{PointDefaultSpace, param_attr};
 use bae_model::{
     AttrSpec, CommandError, CommandRegistry, DynCommand, EffectDef, Keyframe, Op, PrimPath,
     PrimType, Stage, Time, Transaction, Value,
@@ -145,6 +145,81 @@ impl bae_model::Command for ApplyEffect {
     }
 }
 
+/// One effect of an animation preset: its matchName, name and the values of
+/// the parameters it stores (`param:<id>` attributes).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct PresetEffect {
+    pub match_name: String,
+    /// `param:<id>` → value.
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, Value>,
+}
+
+/// Animation ▸ Apply Animation Preset (and double-click in Effects & Presets):
+/// the preset's effects with their values, added to each layer.
+pub struct ApplyPreset {
+    defs: Arc<Registry<EffectDef>>,
+}
+
+impl ApplyPreset {
+    pub fn new(defs: Arc<Registry<EffectDef>>) -> Self {
+        Self { defs }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ApplyPresetParams {
+    pub layers: Vec<PrimPath>,
+    pub effects: Vec<PresetEffect>,
+}
+
+impl bae_model::Command for ApplyPreset {
+    type Params = ApplyPresetParams;
+    type Output = EffectsOutput;
+    const ID: &'static str = "effect.apply_preset";
+    const TITLE: &'static str = "Apply Animation Preset";
+    const DESCRIPTION: &'static str = "Apply an animation preset (AE: Animation > Apply Animation Preset, Effects & Presets): add its effects with their stored parameter values to each layer, at the bottom of the stack. One undo step.";
+
+    fn run(
+        &self,
+        tx: &mut Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<EffectsOutput, CommandError> {
+        if p.layers.is_empty() {
+            return Err(fail("no layers given"));
+        }
+        if p.effects.is_empty() {
+            return Err(fail("the preset has no effects"));
+        }
+        let defs: Vec<_> = p
+            .effects
+            .iter()
+            .map(|e| {
+                find_def(&self.defs, &e.match_name)
+                    .ok_or_else(|| fail(format!("unknown effect `{}`", e.match_name)))
+            })
+            .collect::<Result<_, _>>()?;
+        ensure_unlocked(tx.stage(), &p.layers)?;
+        let mut out = Vec::new();
+        for layer in &p.layers {
+            if !query::is_layer(tx.stage(), layer) {
+                return Err(fail(format!("{layer} is not a layer")));
+            }
+            for (e, def) in p.effects.iter().zip(&defs) {
+                // Named like any new instance (AE numbers repeats).
+                let effect = add_instance(tx, layer, def, None)?;
+                for (attr, value) in &e.values {
+                    if attr.starts_with("param:") {
+                        set(tx, &effect, attr, value.clone())?;
+                    }
+                }
+                out.push(effect);
+            }
+        }
+        Ok(EffectsOutput { effects: out })
+    }
+}
+
 /// The value a new (or reset) instance of `param` starts with on `layer`.
 /// Relative point defaults ([`bae_model::ParamFlags::relative_default`]) are
 /// scaled by the layer's source size (else the comp size); built-in AE point
@@ -154,13 +229,10 @@ pub fn instance_default(
     layer: &PrimPath,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    let unit = if param.flags.relative_default {
-        [1.0, 1.0]
-    } else if param.flags.reference_point_default {
-        [1.0 / 640.0, 1.0 / 360.0]
-    } else {
+    let space = param.flags.point_default_space();
+    if space == PointDefaultSpace::Pixels {
         return param.default.clone();
-    };
+    }
     let size = || -> Option<[f64; 2]> {
         let source_size = stage
             .prim(layer)
@@ -174,11 +246,10 @@ pub fn instance_default(
             Some([f64::from(comp.width), f64::from(comp.height)])
         })
     };
-    let scale = |x: f64, y: f64, s: [f64; 2]| [x * s[0] * unit[0], y * s[1] * unit[1]];
     match (&param.default, size()) {
-        (Some(Value::Vec2([x, y])), Some(s)) => Some(Value::Vec2(scale(*x, *y, s))),
-        (Some(Value::Vec3([x, y, z])), Some(s)) if param.flags.relative_default => {
-            let [x, y] = scale(*x, *y, s);
+        (Some(Value::Vec2(xy)), Some(s)) => Some(Value::Vec2(space.layer_pixels(*xy, s))),
+        (Some(Value::Vec3([x, y, z])), Some(s)) if space == PointDefaultSpace::LayerFraction => {
+            let [x, y] = space.layer_pixels([*x, *y], s);
             Some(Value::Vec3([x, y, *z]))
         }
         _ => param.default.clone(),
@@ -499,6 +570,83 @@ fn base_name(name: &str) -> &str {
 
 // ---------------------------------------------------------------------------
 
+/// Writes one undoable null layer and its three AE Slider Control effects.
+pub struct AudioAmplitude {
+    defs: Arc<Registry<EffectDef>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AudioAmplitudeParams {
+    pub comp: PrimPath,
+    pub first: i64,
+    pub amplitudes: Vec<[f64; 2]>,
+    pub layer_name: String,
+    pub channel_names: [String; 3],
+}
+
+impl bae_model::Command for AudioAmplitude {
+    type Params = AudioAmplitudeParams;
+    type Output = crate::LayerOutput;
+    const ID: &'static str = "audio.create_amplitude_layer";
+    const TITLE: &'static str = "Convert Audio to Keyframes";
+    const DESCRIPTION: &'static str = "Create an Audio Amplitude null with frame-sampled left, right and combined Slider Control keyframes.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<Self::Output, CommandError> {
+        let info =
+            query::comp_info(tx.stage(), &p.comp).ok_or_else(|| fail("composition missing"))?;
+        if p.first < 0
+            || p.first.saturating_add(p.amplitudes.len() as i64) > info.frame_count()
+            || p.amplitudes.is_empty()
+            || p.amplitudes
+                .iter()
+                .flatten()
+                .any(|v| !v.is_finite() || *v < 0.0)
+        {
+            return Err(fail("invalid audio amplitudes"));
+        }
+        let def = find_def(&self.defs, "ADBE Slider Control")
+            .ok_or_else(|| fail("Slider Control missing"))?;
+        let params = crate::layer::CreateLayerParams {
+            comp: p.comp,
+            kind: bae_model::LayerKind::Null,
+            name: Some(p.layer_name),
+            source: None,
+            index: None,
+            color: None,
+            size: None,
+            pixel_aspect: None,
+            text: None,
+            font_size: None,
+            shape: None,
+            position: None,
+            start: Some(Time::ZERO),
+            camera: None,
+            light: None,
+            label: None,
+            position_3d: None,
+            point_of_interest: None,
+        };
+        let layer = crate::CreateLayer.run(tx, params)?;
+        for (ch, name) in p.channel_names.into_iter().enumerate() {
+            let effect = add_instance(tx, &layer.path, &def, None)?;
+            set(tx, &effect, "name", Value::String(name))?;
+            let mut spec = AttrSpec::default();
+            for (i, &[left, right]) in p.amplitudes.iter().enumerate() {
+                let value = match ch {
+                    0 => left,
+                    1 => right,
+                    _ => (left + right) * 0.5,
+                };
+                let t = info.frame_rate.frame_to_time(p.first + i as i64);
+                spec.keyframes
+                    .insert(t, Keyframe::linear(Value::Float(value)));
+            }
+            write_attr(tx, &effect, &param_attr(1), spec)?;
+        }
+        Ok(layer)
+    }
+}
+
 /// The effect commands, reading definitions from `defs` (the app's
 /// `Registry<EffectDef>`).
 pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand>> {
@@ -512,10 +660,13 @@ pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand
 pub fn register_effect_commands(r: &mut CommandRegistry, defs: Arc<Registry<EffectDef>>) {
     let results = [
         r.register(ApplyEffect::new(defs.clone())),
+        r.register(ApplyPreset::new(defs.clone())),
+        r.register(crate::tracker::ApplyTrack(defs.clone())),
         r.register(RemoveEffects),
         r.register(RemoveAllEffects),
         r.register(ReorderEffects),
         r.register(SetEffectsEnabled),
+        r.register(AudioAmplitude { defs: defs.clone() }),
         r.register(ResetEffects::new(defs)),
         r.register(DuplicateEffects),
     ];

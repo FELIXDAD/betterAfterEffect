@@ -39,7 +39,10 @@ cancel_grace_minutes = 2
 max_cancellations = 2
 # When the PR at the front has waited this long, a later PR (in label order) that is
 # fully ready merges first; the front PR keeps its place.
-skip_ahead_after_minutes = 30
+skip_ahead_after_minutes = 2
+# While the head waits for CI, update this many later PRs that need it so their
+# CI runs in parallel.
+preupdate_ahead = 4
 
 [labels]
 queue = "merge-ready"

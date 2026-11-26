@@ -6,7 +6,9 @@
 
 ## 本机启动
 
-同步需要通过环境变量 GITHUB_TOKEN 或 GH_TOKEN 提供可读取本仓库 issue 和 PR 的 GitHub 令牌。本机若已登录 gh，可以在当前终端运行 `export GH_TOKEN="$(gh auth token)"`。
+GitHub 同步在有 gh 登录的 Mac 上运行。执行 `./install-sync.sh` 后，launchd 每五分钟从 Application Support 运行独立脚本，只拉取上次同步以来更新的 PR 和 issue，分批通过 env 中的正式地址和写入 token 提交，并更新本机原型；服务器合并增量，不整体替换。各地址的上次同步时间记在 `~/Library/Caches/bae-progress-sync/watermarks.json`，删除该文件即全量重同步（服务器数据库重建后需要这样做）。可在同步机手动运行 `python3 sync.py`。日志位于 `~/Library/Logs/bae-progress-sync.log`。
+
+关闭未合并的 PR（例如被替代）不参与判断。能力在关联 PR 中至少一个已合并、其余未关闭的 PR 也都已合并时计为完成。其余能力只要近两小时收到 doing 汇报、有开放 Draft，或关联 PR 的最近提交在两小时内，就显示“开发中”；其次有开放非 Draft 的 PR 显示“待合并”，其余显示“未开始”。重复 doing 可续期，动态流仍去重。每项列出三类 PR 数量以及最近的汇报者或提交者。合并队列按整个仓库开放且带 merge-ready 标签的 PR 去重统计。worker 报告保留在动态中。PR 正文的 Fixes #编号按 issue 和模块自动关联，也可在 issue 正文写 `能力 ID: text-path` 或用 report.sh 显式关联。
 
 在完整仓库里运行：
 
@@ -31,7 +33,7 @@ python3 server.py
 
 ## Agent 汇报
 
-在“里程碑”或“效果矩阵”搜索名称或 ID，复制名称下的完整 ID。效果 ID 以 `fx:` 开头，含空格时加引号。Agent 页面列出该 agent 当前负责的所有进行中项和最后汇报时间。
+在“里程碑”或“效果矩阵”搜索名称或 ID，复制名称下的完整 ID（已完成项默认折叠在各组的“已完成 N 项”里，选“完成”筛选或搜索时全部展开）。效果 ID 以 `fx:` 开头，含空格时加引号。“实时动态”页顶部列出每个 agent 当前负责的进行中项和最后汇报时间。页面地址后加 `#ms`、`#fx`、`#feed`、`#parity` 可直接打开对应标签页。
 
 将管理员分发的 env 放在本机 `~/.config/bae-board/env`（Windows 为 `$HOME\.config\bae-board\env`），使用 UTF-8，每行一个 `键=值`，无需引号。跨机器使用部署地址。仅向有写入权限的 agent 分发 token。默认 agent 为机器名/当前分支，可设置环境变量或在 env 文件指定 `BAE_BOARD_AGENT`。
 
@@ -74,8 +76,8 @@ macOS/Linux 的 shell 脚本需要 Bash、Python 3、Git。Windows 脚本使用�
 
 1. 用 EC2 Instance Connect 或 SSM 连接选定的 Linux 实例。确认 8787 可用，且独立目录和同名服务未被其他应用使用。
 2. 将 server.py、index.html、board.json、milestones.tsv 和 legacy-effects.tsv 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
-3. 在服务器的 `/etc/bae-progress-web/github.env`（root 所有、0600）中设置 `GITHUB_TOKEN`，使用专供该服务的只读令牌。将 bae-progress-web.service 安装至 `/etc/systemd/system/`，运行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now bae-progress-web`。通过 `systemctl is-enabled bae-progress-web`、`systemctl is-active bae-progress-web` 和实际带认证的状态请求核验。服务无需管理员权限。
-4. 有域名时在 HTTPS 入口转发到本服务，关闭 SSE 响应缓冲，保持长连接，服务单元默认仅监听 127.0.0.1。临时 IP 模式需单独调整监听地址，并按来源 IP 限制安全组 TCP 8787 的访问。HTTP Basic 和 Bearer 在 HTTP 链路上以明文传递。
+3. 将 bae-progress-web.service 安装至 `/etc/systemd/system/`，运行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now bae-progress-web`。通过 `systemctl is-enabled bae-progress-web`、`systemctl is-active bae-progress-web` 和实际带认证的状态请求核验。服务无需管理员权限。
+4. 有域名时在 HTTPS 入口转发到本服务，将该虚拟主机请求体上限设为 2 MiB，关闭 SSE 响应缓冲，保持长连接，服务单元默认仅监听 127.0.0.1。临时 IP 模式需单独调整监听地址，并按来源 IP 限制安全组 TCP 8787 的访问。HTTP Basic 和 Bearer 在 HTTP 链路上以明文传递。
 5. 将各汇报机 env 的 BAE_BOARD_URL 改为已验证的 AWS 地址。用两个浏览器窗口验证汇报动态与实时更新。
 
 制作一致性快照（目标路径为新文件）：
@@ -89,7 +91,7 @@ python3 -c 'import sqlite3, sys; from pathlib import Path; sqlite3.connect(Path.
 
 “AE 交互对齐”列出 issue、修复和验收三种独立状态。#400 共七项，编号顺序与正文和补充评论一致。第 N 项的修复 ID 是 `ae-400-N-fix`，验收 ID 是 `ae-400-N-verify`。七项修复计入里程碑，验收单独计数。
 
-看板服务启动时及此后每五分钟，通过带认证的 GitHub API 分页读取仓库中所有带 `ae-parity` 标签的开放和关闭 issue。以 issue 编号去重，#400 复用上述七项。新 issue 的修复和验收初始均为待办，例如第 401 号对应 `ae-401-fix`、`ae-401-verify`。每项按模块显示，可在 issue 正文单独写一行 `模块：时间轴` 覆盖按标签、标题和正文的自动归类。另有面板 / 工作区里程碑 `ae-panels-workspace`，由 K 跟进。
+Mac 定时任务每五分钟使用 gh 的 GitHub 认证 分页读取仓库中所有带 `ae-parity` 标签的开放和关闭 issue。以 issue 编号去重，#400 复用上述七项。新 issue 的修复和验收初始均为待办，例如第 401 号对应 `ae-401-fix`、`ae-401-verify`。每项按模块显示，可在 issue 正文单独写一行 `模块：时间轴` 覆盖按标签、标题和正文的自动归类。另有面板 / 工作区里程碑 `ae-panels-workspace`，由 K 跟进。
 
 普通 issue 开放时为待修，关闭时为已解决，重开后回到待修，之后合并的新修复可再次解决。PR 须由 GitHub 确认为 merged。匹配依据包括 PR 关闭引用（例如 `Fixes #401`）、关闭事件的合并提交、看板汇报时显式提交的 PR，或 issue 正文/维护者评论的独立行 `修复 PR: #456`。只开 PR 可以登记关联。人工关闭且无合并依据显示“已解决 · PR 暂无”。
 

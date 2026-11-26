@@ -73,9 +73,23 @@ pub(crate) fn kernel_with_inputs(
     uniform_size: u32,
     input_count: u32,
 ) -> Result<Arc<Kernel>, RenderError> {
+    kernel_at(rt, format, label, source, "main", uniform_size, input_count)
+}
+
+/// [`kernel_with_inputs`] for a module with its own entry point (a pass that
+/// fills workgroup memory before it evaluates pixels).
+pub(crate) fn kernel_at(
+    rt: &Runtime,
+    format: wgpu::TextureFormat,
+    label: &'static str,
+    source: &str,
+    entry: &'static str,
+    uniform_size: u32,
+    input_count: u32,
+) -> Result<Arc<Kernel>, RenderError> {
     let key = KernelKey {
         owner: Arc::from(label),
-        entry: Arc::from("main"),
+        entry: Arc::from(entry),
         variant: gpu::format_key(format),
     };
     rt.kernel(&key, || {
@@ -89,7 +103,7 @@ pub(crate) fn kernel_with_inputs(
             ]
             .concat()
             .replace("WORKING_FORMAT", format_name),
-            entry: "main",
+            entry,
             bindings: std::iter::once((0, Binding::Uniform(uniform_size)))
                 .chain((1..=input_count).map(|slot| (slot, Binding::Texture)))
                 .chain(std::iter::once((input_count + 1, Binding::Storage(format))))

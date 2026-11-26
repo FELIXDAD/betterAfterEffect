@@ -160,7 +160,10 @@ impl Differences {
             ParamKind::Layer => "LAYER_INDEX",
             ParamKind::Path => "MASK_INDEX",
             ParamKind::CurvePoints | ParamKind::ArbitraryData => "CUSTOM_VALUE",
-            ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Button => "NO_VALUE",
+            ParamKind::GroupStart
+            | ParamKind::GroupEnd
+            | ParamKind::Button
+            | ParamKind::Display => "NO_VALUE",
         };
         self.field(id, "type", prop["propertyValueType"].clone(), json!(ty));
         let expected = &prop["defaultValue"];
@@ -248,6 +251,38 @@ pub(super) fn check() {
                 native || fx.info.obsolete,
                 "{}: missing AE reference",
                 fx.info.match_name
+            );
+        }
+    }
+    // Behavior exceptions document product decisions. They never waive a schema field.
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Intentional {
+        effect: String,
+        parameters: Vec<u32>,
+        behavior: String,
+        reason: String,
+    }
+    let intentional: Vec<Intentional> =
+        serde_json::from_str(include_str!("ae-intentional.json")).unwrap();
+    let mut seen = BTreeSet::new();
+    for entry in intentional {
+        assert!(
+            !entry.reason.trim().is_empty()
+                && !entry.behavior.trim().is_empty()
+                && !entry.parameters.is_empty(),
+            "incomplete intentional difference for {}",
+            entry.effect
+        );
+        let fx = bae_effects::builtins()
+            .iter()
+            .find(|fx| fx.info.match_name == entry.effect)
+            .expect("intentional difference must name a built-in");
+        for id in entry.parameters {
+            assert!(
+                fx.def().param(id).is_some() && seen.insert((entry.effect.clone(), id)),
+                "unknown or repeated intentional difference: {}-{id:04}",
+                entry.effect
             );
         }
     }

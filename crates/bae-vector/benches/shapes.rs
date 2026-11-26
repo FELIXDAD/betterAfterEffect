@@ -2,13 +2,14 @@
 //! layers (a rectangle or a star with a fill), each spinning through the
 //! expression `time*1000`, played through the viewer's GPU preview path:
 //! `bae_anim::Evaluator` (expressions) → `AnimEvaluator::convert` →
-//! `Renderer::render_frame_with` + `output_texture`.
+//! `Renderer::render_frame_output` (frame + 8-bit conversion, one submit).
 //!
 //! Prints the time per frame of each stage and the sustained frame rate with
 //! the GPU included. `cargo bench -p bae-vector --bench shapes [-- <layers>…]`
 //! (default 100 and 1000). `BAE_BENCH_FRAMES` (default 120), `BAE_BENCH_4K=1`
 //! (3840 × 2160 instead of 1920 × 1080), `BAE_BENCH_FX=<n>` (the first n
-//! layers also get Gaussian Blur 20 and Glow with radius 30).
+//! layers also get Gaussian Blur 20 and Glow with radius 30). Set
+//! `BAE_BENCH_NO_FRAME_CACHE=1` for the playback worker cache configuration.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -160,6 +161,8 @@ struct Times {
     eval: Duration,
     convert: Duration,
     render: Duration,
+    build: Duration,
+    encode: Duration,
     wait: Duration,
 }
 
@@ -174,7 +177,11 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
     let mut renderer = Renderer::with_config(
         gpu.clone(),
         RendererConfig {
-            frame_cache_bytes: 512 << 20,
+            frame_cache_bytes: if std::env::var_os("BAE_BENCH_NO_FRAME_CACHE").is_some() {
+                0
+            } else {
+                512 << 20
+            },
             pool_idle_bytes: 128 << 20,
         },
     );
@@ -189,6 +196,9 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
         purpose: RenderPurpose::Preview,
         ..RenderRequest::full()
     };
+    // `BAE_BENCH_LAYER_TIMES=1`: the Render Time column's per-layer timing on.
+    let layer_times = std::env::var_os("BAE_BENCH_LAYER_TIMES").is_some();
+    renderer.set_layer_times(layer_times);
     {
         let ec = eval
             .evaluate_comp(&stage, &comp, Time::ZERO)
@@ -201,6 +211,7 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
         );
     }
     let rate = FrameRate::FPS_30;
+    let mut target = None;
     let mut frame = |f: usize, times: &mut Times, wait: bool| {
         let time = rate.frame_to_time(f as i64);
         let t = Instant::now();
@@ -214,13 +225,19 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
             stage: &stage,
             evaluator: &mut anim,
         };
-        let out = renderer
-            .render_frame_with(&rc, &request, Some(&mut frames))
+        let (out, texture) = renderer
+            .render_frame_output(
+                &rc,
+                &request,
+                Some(&mut frames),
+                OutputAlpha::Premultiplied,
+                target.take(),
+            )
             .expect("render");
-        renderer
-            .output_texture(&out, OutputAlpha::Premultiplied)
-            .expect("output");
+        target = Some(texture);
         times.render += t.elapsed();
+        times.build += out.stats.build;
+        times.encode += out.stats.encode;
         if wait {
             let t = Instant::now();
             renderer.wait_idle().expect("idle");
@@ -242,11 +259,28 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
     }
     renderer.wait_idle().expect("idle");
     let fps = frames as f64 / start.elapsed().as_secs_f64();
+    if layer_times {
+        let ec = eval
+            .evaluate_comp(&stage, &comp, rate.frame_to_time(1))
+            .expect("evaluate");
+        let rc = anim.convert(&stage, &ec, 0).expect("convert");
+        let out = renderer.render_frame(&rc, &request).expect("render");
+        let total = |t: &[(PrimPath, Duration)]| t.iter().map(|(_, d)| *d).sum::<Duration>();
+        println!(
+            "  layer times: {} layers, CPU {:?}; GPU {} layers, {:?}",
+            out.layer_times.len(),
+            total(&out.layer_times),
+            out.layer_gpu_times.len(),
+            total(&out.layer_gpu_times),
+        );
+    }
     println!(
-        "  {layers:5} layers: eval {:6.2} ms  convert {:6.2} ms  render+submit {:6.2} ms  gpu wait {:6.2} ms  |  sustained {fps:6.1} fps",
+        "  {layers:5} layers: eval {:6.2} ms  convert {:6.2} ms  render+submit {:6.2} ms (graph {:5.2}, encode {:5.2})  gpu wait {:6.2} ms  |  sustained {fps:6.1} fps",
         ms(times.eval, frames),
         ms(times.convert, frames),
         ms(times.render, frames),
+        ms(times.build, frames),
+        ms(times.encode, frames),
         ms(times.wait, frames),
     );
 }

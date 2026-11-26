@@ -61,6 +61,80 @@ fn close(a: [u8; 4], b: [u8; 4], tol: u8) -> bool {
 }
 
 #[test]
+fn output_targets_reuse_only_the_returned_storage() {
+    let Some(gpu) = gpu() else { return };
+    let mut renderer = Renderer::with_config(
+        gpu.clone(),
+        bae_render::RendererConfig {
+            frame_cache_bytes: 0,
+            ..Default::default()
+        },
+    );
+    let comp = RenderComp::new(p("/comps/main"), 64, 48);
+    let frame = renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    let target = renderer
+        .output_texture(&frame, OutputAlpha::Over([1.0, 0.0, 0.0]), None)
+        .unwrap();
+    let spare = renderer
+        .output_texture(&frame, OutputAlpha::Straight, None)
+        .unwrap();
+    let storage = spare.view().texture().clone();
+    let (_, spare) = renderer
+        .render_frame_output(
+            &comp,
+            &RenderRequest::full(),
+            None,
+            OutputAlpha::Over([0.0, 0.0, 1.0]),
+            Some(spare),
+        )
+        .unwrap();
+    assert_eq!(spare.view().texture(), &storage);
+    assert_ne!(target.view().texture(), &storage);
+    let pixels =
+        |texture: &bae_gpu::wgpu::Texture| bae_gpu::transfer::read_texture(&gpu, texture).unwrap();
+    assert_eq!(
+        pixels(target.view().texture()).pixel(0, 0),
+        [255, 0, 0, 255]
+    );
+    assert_eq!(pixels(spare.view().texture()).pixel(0, 0), [0, 0, 255, 255]);
+    let half = renderer
+        .render_frame(
+            &comp,
+            &RenderRequest {
+                resolution: Resolution::Half,
+                ..RenderRequest::full()
+            },
+        )
+        .unwrap();
+    let resized = renderer
+        .output_texture(&half, OutputAlpha::Straight, Some(spare))
+        .unwrap();
+    assert_eq!(resized.size(), [32, 24]);
+    assert_ne!(resized.view().texture(), &storage);
+    assert_eq!(renderer.frame_cache().stats().entries, 0);
+    renderer.set_frame_cache_budget(1 << 20);
+    renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    let (cached, output) = renderer
+        .render_frame_output(
+            &comp,
+            &RenderRequest::full(),
+            None,
+            OutputAlpha::Over([0.0, 1.0, 0.0]),
+            Some(target),
+        )
+        .unwrap();
+    assert!(cached.from_cache);
+    assert_eq!(
+        pixels(output.view().texture()).pixel(0, 0),
+        [0, 255, 0, 255]
+    );
+}
+
+#[test]
 fn solids_are_pixel_exact_and_cover_their_rectangles() {
     let Some(gpu) = gpu() else { return };
     let mut r = Renderer::new(gpu);
@@ -82,13 +156,9 @@ fn solids_are_pixel_exact_and_cover_their_rectangles() {
         &RenderRequest::full(),
         OutputAlpha::Premultiplied,
     );
-    assert!(
-        close(img.px(10, 6), [128, 0, 0, 128], 1),
-        "{:?}",
-        img.px(10, 6)
-    );
+    assert_eq!(img.px(10, 6), [128, 0, 0, 128]);
     assert_eq!(img.px(11, 6), [255, 0, 0, 255]);
-    assert!(close(img.px(30, 6), [128, 0, 0, 128], 1));
+    assert_eq!(img.px(30, 6), [128, 0, 0, 128]);
 }
 
 #[test]

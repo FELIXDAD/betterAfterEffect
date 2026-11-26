@@ -154,7 +154,7 @@ fn layer_items_are_greyed_out_and_shortcuts_do_nothing_without_a_comp() {
         (cmd | Modifiers::ALT | Modifiers::SHIFT, Key::T),
         (cmd, Key::D),
         (cmd | Modifiers::SHIFT, Key::D),
-        (cmd, Key::M),
+        (cmd | Modifiers::CTRL, Key::M),
         (Modifiers::NONE, Key::F9),
     ] {
         key(&mut h, m, k);
@@ -169,7 +169,7 @@ fn layer_items_are_greyed_out_and_shortcuts_do_nothing_without_a_comp() {
     );
     assert!(
         h.state().render_queue().lock().items().is_empty(),
-        "Cmd+M queued without a comp"
+        "Ctrl+Cmd+M queued without a comp"
     );
     assert!(
         h.state()
@@ -530,7 +530,7 @@ fn is_locked(h: &Ui, l: &PrimPath) -> bool {
 
 /// The timeline row of layer `name`: its painted name.
 fn row_of(h: &Ui, name: &str) -> egui::Rect {
-    let head = find_text(h, "Layer Name").expect("timeline");
+    let head = timeline_header(h).expect("timeline");
     find_texts(h, |t| t == name)
         .into_iter()
         .find(|r| r.top() > head.bottom() && r.left() < head.left() + 400.0)
@@ -714,7 +714,7 @@ fn locked_layers_copy_paste_and_duplicate() {
     // Copy from the locked layer (reading is fine), paste on the unlocked one.
     // Keyframe copy / paste is a Timeline action: focus it (a click on the
     // empty graph also clears the selection, so select afterwards).
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(
         &mut h,
         egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
@@ -840,7 +840,7 @@ fn deleting_the_parent_of_a_locked_layer_is_not_silent() {
     let [child, parent]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
     assert_eq!(set_parent(&mut h, &child, Some(&parent)), "changed");
     lock(&mut h, &child);
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(
         &mut h,
         egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
@@ -938,7 +938,7 @@ fn undoing_a_parent_delete_reparents_the_locked_child() {
     lock(&mut h, &child);
     let parent_before = parent_of(&h, &child);
     assert!(parent_before.is_some());
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(
         &mut h,
         egui::pos2(head.left() + 800.0, head.bottom() + 150.0),

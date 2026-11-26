@@ -20,8 +20,7 @@ fn shift_f3_and_the_switch_toggle_the_graph_editor() {
     let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
     h.click(&mut tl, sw, Modifiers::NONE);
     assert!(h.session().lock().graph_editor);
-    // The button bar is shown from the next frame.
-    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    // The graph and its button bar are visible on the release frame.
     assert!(!tl.graph_editor().last.buttons.is_empty());
 }
 
@@ -371,7 +370,7 @@ fn clicks_marquee_and_alt_click_select_keys() {
     assert!(h.session().lock().selected_keys.is_empty());
     // Marquee around the first two keys.
     let p0 = key_pos(&mut tl, &h.key(ROT, 0.0), 0);
-    let a = pos2(p0.x - 10.0, p0.y.min(p1.y) - 10.0);
+    let a = pos2(p0.x - 4.0, p0.y.min(p1.y) - 10.0);
     let b = pos2(p1.x + 10.0, p0.y.max(p1.y) + 10.0);
     let r = h.drag(&mut tl, a, b, Modifiers::NONE);
     assert!(r.invocations.is_empty());
@@ -625,4 +624,23 @@ fn graph_editor_frame_cost() {
     measure(&mut h, &mut tl, "graph editor, pointer move", true, false);
     measure(&mut h, &mut tl, "graph editor, key drag", true, true);
     assert_eq!(tl.graph_editor().last.vaxes.len(), 183);
+}
+
+/// #603: Show Layer Markers draws the shown layers' markers in the Graph
+/// Editor; turning it off hides them (both menu items work, as in AE).
+#[test]
+fn graph_editor_shows_layer_markers() {
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (2.0, float(90.0))]);
+    let layer = h.layer.clone();
+    h.run("marker.add", json!({"owner": layer, "comp_time": SEC}));
+    let mut tl = h.graph();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let xs = tl.graph_editor().last.markers.clone();
+    assert_eq!(xs.len(), 1, "{xs:?}");
+    assert!((xs[0] - x_of(&tl, 1.0)).abs() < 1.0, "{xs:?}");
+    tl.graph_editor().settings.show_markers = false;
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(tl.graph_editor().last.markers.is_empty());
+    assert!(crate::graph::GraphSettings::default().show_waveforms);
 }

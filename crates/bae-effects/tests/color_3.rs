@@ -89,6 +89,44 @@ fn lumetri_input_and_creative_look_use_straight_color_in_order() {
 }
 
 #[test]
+fn lumetri_secondary_curves_change_only_enabled_channels() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(0, 0, 3, 2);
+    let input = test_image(rect).map(|_| [0.25, 0., 0., 0.5]);
+    let gray = 0.25 * 0.2126_f32.powf(1. / 2.4);
+    for (id, enable, amount, expected) in [
+        (106, 105, 1. / 3., [0., 0.25, 0., 0.5]),
+        (108, 107, 1., [0.25 * 2_f32.powf(1. / 2.4), 0., 0., 0.5]),
+        (110, 109, -1., [gray, gray, gray, 0.5]),
+        (112, 111, -1., [gray, gray, gray, 0.5]),
+    ] {
+        for enabled in [true, false] {
+            let params = vec![
+                (id, Value::FloatList(vec![0., 0., amount])),
+                (enable, Value::Bool(enabled)),
+            ];
+            let got = run(
+                &gpu,
+                Rgba32Float,
+                builtin("ADBE Lumetri"),
+                params,
+                &input,
+                rect,
+                1.,
+            );
+            let want = input.map(|p| if enabled { expected } else { p });
+            assert_close(
+                &got,
+                &want,
+                rect,
+                0.0006,
+                "Lumetri secondary curve and bypass",
+            );
+        }
+    }
+}
+
+#[test]
 fn lumetri_mask_refinement_and_sharpen_match_full_frame_on_a_tile() {
     let Some(gpu) = context() else { return };
     let rect = IRect::new(-11, 6, 89, 58);
@@ -325,4 +363,34 @@ fn legacy_corrections_clip_straight_hdr_before_premultiplying() {
         1.,
     );
     assert_close(&actual, &white, rect, 1e-5, "broadcast white");
+}
+
+#[test]
+fn ocio_file_and_cdl_apply_embedded_grades_on_gpu() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(4, 4);
+    let pixels = Pixels::new(rect, |_, _| [0.15, 0.1, 0.05, 0.5]);
+    let cdl =
+        b"test.cc\0<ColorCorrection><SOPNode><Slope>2 1 1</Slope></SOPNode></ColorCorrection>"
+            .to_vec();
+    let cube = b"test.cube\0LUT_1D_SIZE 2\n0 0 0\n2 1 1\n".to_vec();
+    for (name, id, bytes) in [
+        ("ADBE OCIO CDL Transform", 6, cdl),
+        ("ADBE OCIO FILE Transform", 5, cube),
+    ] {
+        let out = run(
+            &gpu,
+            F32,
+            builtin(name),
+            vec![(id, Value::Bytes(bytes))],
+            &pixels,
+            rect,
+            1.,
+        );
+        for (actual, expected) in out.get(2, 2).into_iter().zip([0.3, 0.1, 0.05, 0.5]) {
+            assert!((actual - expected).abs() < 0.0001, "{name}: {actual}");
+        }
+    }
 }

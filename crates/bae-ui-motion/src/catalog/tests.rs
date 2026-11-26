@@ -200,7 +200,8 @@ fn every_ae_shortcut_command_is_mapped() {
 }
 
 /// On macOS every command has AE's macOS defaults (AE 26.2.1's own file): the
-/// Windows chord with Ctrl → ⌘ and Alt → Option, or the `MAC_KEYS` exception.
+/// Windows chord with Ctrl → ⌘ and Alt → Option, or the `MAC_KEYS` exception,
+/// as AE uses them with "Use System Shortcut Keys" on (see `Key::chords`).
 #[test]
 fn mac_chords_follow_the_mac_file() {
     let json: Value = serde_json::from_str(MAC_SHORTCUTS_JSON).unwrap();
@@ -215,7 +216,12 @@ fn mac_chords_follow_the_mac_file() {
                 .iter()
                 .map(|k| k.as_str().unwrap())
                 .collect();
-            let mut want: Vec<String> = mac_chords(&keys.join("|"));
+            let file = mac_chords(&keys.join("|"));
+            let mut want: Vec<String> = match ctx.as_str() {
+                "MacSysShortcutsAlt" => Vec::new(),
+                "MacSysShortcutsStd" => file,
+                _ => file.into_iter().map(mac_system_key).collect(),
+            };
             let Some(row) = KEYS
                 .iter()
                 .find(|k| k.context == ctx && k.command == command)
@@ -1017,6 +1023,95 @@ fn menu_items_show_the_chord_ae_shows() {
         {
             errors.push(format!(
                 "{} ▸ {}: AE shows {sc}, BAE {first}",
+                path.join(" ▸ "),
+                it.title
+            ));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+/// AE's macOS menu shows ⌃⌥⌘H, ⌃⌘H and ⌃⌘M for the commands whose file chords
+/// the system owns (Hide Others, Hide, Minimize); Windows keeps the file's.
+#[test]
+fn mac_system_chords_get_control() {
+    let row = |cmd: &str| KEYS.iter().find(|k| k.command == cmd).unwrap();
+    let hold = row("ToggleKeyframeHoldInterp");
+    assert_eq!(hold.chords(true), ["Ctrl+Cmd+Alt+H"]);
+    assert_eq!(hold.chords(false), ["Cmd+Alt+H"]);
+    assert_eq!(row("ReplaceFootage").chords(true), ["Ctrl+Cmd+H"]);
+    assert!(
+        row("AddCompToRenderQueue")
+            .chords(true)
+            .contains(&"Ctrl+Cmd+M".to_owned())
+    );
+}
+
+/// Menu items read like AE's Chinese menu: the `menus.json` label of the same
+/// command id, without the `(X)` access key, "After Effects" read as "BAE" and
+/// the Window panel entries without AE's ": （无）". Labels AE fills in at run
+/// time and the differences `zh.rs` explains are listed.
+#[test]
+fn menu_items_use_ae_chinese_labels() {
+    const DIFFERENT: &[&str] = &[
+        "(installed script)",
+        "(recent presets)",
+        "(script panel)",
+        "Undo",
+        "Redo",
+        "Reset to Saved Layout",
+        "Shift+F10",
+        "Shift+F11",
+        "Shift+F12",
+        "Anchor Point...",
+        "Solid...",
+    ];
+    fn collect(v: &Value, out: &mut BTreeMap<u32, String>) {
+        for i in v["items"].as_array().into_iter().flatten() {
+            if let (Some(id), Some(label)) = (i["commandId"].as_u64(), i["label"].as_str()) {
+                out.insert(id as u32, label.to_owned());
+            }
+            collect(i, out);
+        }
+    }
+    fn plain(label: &str) -> String {
+        let mut out = label.trim().replace("After Effects", "BAE");
+        while let Some(i) = out.find('(') {
+            let key = out.as_bytes().get(i + 1).copied().unwrap_or(0);
+            if !(key.is_ascii_uppercase() || key.is_ascii_digit())
+                || out.as_bytes().get(i + 2) != Some(&b')')
+            {
+                break;
+            }
+            out.replace_range(i..i + 3, "");
+        }
+        out.trim_end_matches(": （无）").to_owned()
+    }
+    let json: Value = serde_json::from_str(MENUS_JSON).unwrap();
+    let mut labels = BTreeMap::new();
+    for top in json["menus"].as_array().unwrap() {
+        collect(top, &mut labels);
+    }
+    let all = crate::i18n::all();
+    let zh: BTreeMap<&str, &str> = all
+        .iter()
+        .chain(crate::tools::ZH)
+        .chain(MENU_ZH)
+        .copied()
+        .collect();
+    let mut errors = Vec::new();
+    for (path, it) in menu_items() {
+        let Some(label) = labels.get(&it.ae) else {
+            continue;
+        };
+        let ours = zh
+            .get(it.title)
+            .copied()
+            .or_else(|| bae_ui::i18n::translation(it.title))
+            .unwrap_or(it.title);
+        if ours != plain(label) && !DIFFERENT.contains(&it.title) {
+            errors.push(format!(
+                "{} ▸ {}: {ours} vs AE {label}",
                 path.join(" ▸ "),
                 it.title
             ));

@@ -2,6 +2,103 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Time Stretch and Auto-Orientation (docs/reference/ae/ui/dialogs).
+    ("Original Duration:", "原持续时间:"),
+    ("Stretch Factor:", "拉伸因数:"),
+    ("Stretch Factor", "拉伸因数"),
+    ("New Duration:", "新持续时间:"),
+    ("Hold in Place", "固定位置"),
+    ("Current Frame", "当前帧"),
+    ("Layer In-point", "图层进入点"),
+    ("Layer Out-point", "图层输出点"),
+    ("Auto-Orientation", "自动方向"),
+    ("Orient Along Path", "沿路径定向"),
+    ("Orient Towards Point of Interest", "定位于目标点"),
+    ("Orient Towards Camera", "定位于摄像机"),
+    (
+        "Orient Each Character Independently (requires Per-character 3D)",
+        "独立定向每个字符（需要逐字 3D 化）",
+    ),
+    // Go to Time and Project Settings (docs/reference/ae/ui/dialogs).
+    ("Go to Time", "转到时间"),
+    ("Time Input", "时间码输入"),
+    ("is {time}  Base {base}", "是 {time}  基础 {base}"),
+    ("Video Rendering and Effects", "视频渲染和效果"),
+    ("Time Display Style", "时间显示样式"),
+    ("Use:", "使用范围:"),
+    ("Footage Start Time:", "素材开始时间:"),
+    ("Use Media Source", "使用媒体源"),
+    ("Default Base:", "默认基准:"),
+    ("Use Feet + Frames:", "使用英尺数 + 帧数:"),
+    ("Frame Count:", "帧计数:"),
+    ("Timecode Conversion", "时间码转换"),
+    ("Color Engine:", "颜色引擎："),
+    ("Bit Depth:", "位深度:"),
+    ("8 bits per channel", "每通道 8 位"),
+    ("16 bits per channel", "每通道 16 位"),
+    ("32 bits per channel (float)", "每通道 32 位（浮点）"),
+    ("Working Color Space:", "工作色彩空间:"),
+    ("Linearize Working Space", "线性化工作色彩空间"),
+    ("Blend Colors Using 1.0 Gamma", "使用 1.0 灰度系数混合颜色"),
+    (
+        "Compensate for Scene-referred Profiles",
+        "补偿场景引用的配置文件",
+    ),
+    ("Sample Rate:", "采样率:"),
+    ("Expressions Engine:", "表达式引擎:"),
+    ("Legacy ExtendScript", "旧版 ExtendScript"),
+    (
+        "Mercury GPU Acceleration (Metal)",
+        "Mercury GPU 加速 (Metal)",
+    ),
+    (
+        "Mercury GPU Acceleration (Direct3D)",
+        "Mercury GPU 加速 (Direct3D)",
+    ),
+    // Render Settings and Output Module Settings (docs/reference/ae/ui/dialogs).
+    ("Quality:", "品质:"),
+    ("Best", "最佳"),
+    ("Size:", "大小:"),
+    ("Disk Cache:", "磁盘缓存:"),
+    ("Read Only", "只读"),
+    ("Proxy Use:", "代理使用:"),
+    ("Use No Proxies", "不使用代理"),
+    ("Effects:", "效果:"),
+    ("Solo Switches:", "单独开关:"),
+    ("Guide Layers:", "引导层:"),
+    ("All Off", "全部关闭"),
+    ("Color Depth:", "颜色深度:"),
+    ("Time Sampling", "时间采样"),
+    ("Frame Blending:", "帧混合:"),
+    ("On for Checked Layers", "对选中图层打开"),
+    ("Off", "关"),
+    ("Field Render:", "场渲染:"),
+    ("Motion Blur:", "运动模糊:"),
+    ("Time Span:", "时间跨度:"),
+    ("Length of Comp", "合成长度"),
+    ("Work Area Only", "仅工作区域"),
+    ("Start:", "开始:"),
+    ("End:", "结束:"),
+    ("Use comp's frame rate", "使用合成的帧速率"),
+    ("Use this frame rate:", "使用此帧速率:"),
+    ("Options", "选项"),
+    (
+        "Skip existing files (allows multi-machine rendering)",
+        "跳过现有文件（允许多机渲染）",
+    ),
+    ("Output Module Settings", "输出模块设置"),
+    ("Format:", "格式:"),
+    ("Post-Render Action:", "渲染后动作:"),
+    ("Video Output", "视频输出"),
+    ("Channels:", "通道:"),
+    ("Depth:", "深度:"),
+    ("Millions of Colors", "数百万种颜色"),
+    ("Premultiplied (Matted)", "预乘（遮罩）"),
+    ("Bitrate:", "比特率:"),
+    ("Resize", "调整大小"),
+    ("Crop", "裁剪"),
+    ("Audio Output", "音频输出"),
+    ("Audio Output Auto", "自动音频输出"),
     // Dialogs (`dialogs`): Composition Settings. Terms follow the AE 26 Simplified
     // Chinese UI (docs/glossary.md §十).
     ("Composition Settings", "合成设置"),
@@ -30,9 +127,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("% of composition", "合成的 %"),
     ("in", "英寸"),
     ("mm", "毫米"),
-    ("Width: {pct}% of comp", "宽度：合成的 {pct}%"),
-    ("Height: {pct}% of comp", "高度：合成的 {pct}%"),
-    ("Frame Aspect Ratio: {ratio}", "画面长宽比：{ratio}"),
+    ("{pct}% of comp", "合成的 {pct}%"),
+    (
+        "Lock Aspect Ratio to {w}:{h} ({ratio})",
+        "将长宽比锁定为 {w}:{h} ({ratio})",
+    ),
     ("Make Comp Size", "制作合成大小"),
     ("Solid Color", "纯色颜色"),
     (
@@ -55,7 +154,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("White", "白色"),
     ("Dark Gray", "深灰色"),
     ("Medium Gray", "中灰色"),
-    ("Light Gray", "浅灰色"),
+    ("Light Gray", "淡灰色"),
     ("{gray}-{hue}", "{gray}-{hue}"),
     ("Dark {hue}", "深{hue}"),
     // Pre-compose (`dialogs::precompose`, docs/spec/ae AE-PRJ-401).
@@ -121,7 +220,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Diagonally", "对角"),
     ("Light Settings", "灯光设置"),
     ("Light Settings...", "灯光设置..."),
-    ("Light...", "灯光..."),
+    ("Light...", "灯光…"),
     ("Settings", "设置"),
     ("Light Type:", "灯光类型:"),
     ("Light Type", "灯光类型"),
@@ -172,27 +271,28 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Renderer:", "渲染器:"),
     ("Renderer", "渲染器"),
     ("Classic 3D", "经典 3D"),
-    ("Cinema 4D", "CINEMA 4D"),
+    ("Cinema 4D", "Cinema 4D"),
     ("Advanced 3D", "高级 3D"),
     ("Options...", "选项..."),
     ("About...", "关于..."),
+    ("Enabled", "启用"),
+    ("Disabled", "禁用"),
+    ("Save Custom Preset", "保存自定义预设"),
+    ("Delete Custom Preset", "删除自定义预设"),
+    ("Choose Name", "选择名称"),
+    ("Custom Resolution", "自定义分辨率"),
+    ("Render every", "渲染每"),
+    ("pixel(s) horizontally.", "个像素（水平）。"),
+    ("pixel(s) vertically.", "个像素（垂直）。"),
     (
-        "Extruded text and shapes, reflections; slower than Classic 3D.",
-        "可以凸出文本和形状、反射；比经典 3D 慢。",
-    ),
-    (
-        "GPU-accelerated 3D with lights, shadows and 3D models.",
-        "GPU 加速的 3D，支持灯光、阴影和 3D 模型。",
-    ),
-    (
-        "Layers as planes in 3D space; supports all 2D features.",
-        "图层是 3D 空间中的平面；支持所有 2D 功能。",
+        "{w} x {h}, {size} per 8bpc frame",
+        "{w} x {h}，{size}（每 8bpc 帧）",
     ),
     ("Square Pixels", "方形像素"),
     ("D1/DV NTSC (0.91)", "D1/DV NTSC (0.91)"),
-    ("D1/DV NTSC Widescreen (1.21)", "D1/DV NTSC 宽银幕 (1.21)"),
+    ("D1/DV NTSC Widescreen (1.21)", "D1/DV NTSC 宽银幕  (1.21)"),
     ("D1/DV PAL (1.09)", "D1/DV PAL (1.09)"),
-    ("D1/DV PAL Widescreen (1.46)", "D1/DV PAL 宽银幕 (1.46)"),
+    ("D1/DV PAL Widescreen (1.46)", "D1/DV PAL 宽银幕  (1.46)"),
     ("Anamorphic 2:1 (2)", "变形 2:1 (2)"),
     (
         "HDV 1080/DVCPRO HD 720 (1.33)",
@@ -208,4 +308,89 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Cineon Full", "Cineon 完整"),
     ("Film (2K)", "胶片 (2K)"),
     ("Film (4K)", "胶片 (4K)"),
+    // The 3D Renderer and Advanced tabs' texts (AE 26's Chinese).
+    (
+        super::comp_settings::MOTION_BLUR_HELP,
+        "“每帧样本”控制经典 3D 图层、形状图层和特定效果的运动模糊样本数。需要时，二维图层运动会自动使用更大的每帧样本，最高可达“自适应采样限制”指定的值。",
+    ),
+    (
+        super::comp_settings::RENDERER_HELP,
+        "所选渲染器确定合成中的 3D 图层可以使用的功能，以及它们如何与 2D 图层交互。",
+    ),
+    (
+        super::comp_settings::ABOUT_CLASSIC,
+        "Classic 3D 是传统的 After Effects 渲染器。图层可以作为平面放置在 3D 空间中。",
+    ),
+    (
+        super::comp_settings::ABOUT_ADVANCED,
+        "3D 渲染器支持 3D 模型、环境光、阴影以及文本和形状的凸出。",
+    ),
+    (
+        super::comp_settings::ABOUT_C4D,
+        "Cinema 4D 渲染器可以启用挤压文本和形状。",
+    ),
+    (
+        super::comp_settings::ENABLED_ADVANCED,
+        "• 3D 模型和素材
+• 环境光和阴影
+• 基于物理的 3D 图层渲染
+• 拉伸和斜角 3D 文本和形状
+• 文本/形状斜角和侧面上的素材覆盖
+• 弯曲素材图层
+• 仅接受阴影
+• 聚光和平行光的阴影",
+    ),
+    (
+        super::comp_settings::DISABLED_ADVANCED,
+        "• 效果、混合模式、图层样式、跟踪遮罩、蒙版并保留以下对象的底层透明度:
+    • 3D 模型
+    • 3D 文本和形状图层
+    • 折叠的 3D 预合成图层
+    • 连续栅格化 3D 图层
+• 运动模糊和景深
+• 光透射
+• 点光和环境光的阴影",
+    ),
+    (
+        super::comp_settings::ENABLED_C4D,
+        "• AE 光和阴影
+• 挤压和斜角 3D 文本和形状
+• 文本/形状斜角和侧面上的素材覆盖
+• 弯曲素材图层
+• 环境图层（仅在反射中）
+• 使用 3D 通道传递深度效果（需要预合成）",
+    ),
+    (
+        super::comp_settings::DISABLED_C4D,
+        "• 3D 模型和素材
+• 环境光
+• 基于物理的 3D 图层渲染
+• 效果、混合模式、图层样式、跟踪遮罩、蒙版并保留以下对象的底层透明度：
+    • 3D 模型
+    • 3D 文本和形状图层
+    • 折叠的 3D 预合成图层
+    • 连续栅格化 3D 图层
+• 运动模糊和景深
+• 光传输
+• 仅接受阴影",
+    ),
+    // Layer ▸ Transform value dialogs (AE 26's Chinese).
+    ("X:", "X:"),
+    ("Y:", "Y:"),
+    ("Z:", "Z:"),
+    ("% of source", "源的 %"),
+    ("Depth", "深度"),
+    ("Preserve:", "保留:"),
+    ("Preserve", "保留"),
+    ("Current Aspect Ratio (xy)", "当前长宽比 (xy)"),
+    ("Current Aspect Ratio (xyz)", "当前长宽比 (xyz)"),
+    ("Include Pixel Aspect Ratio", "包括像素长宽比"),
+    ("Revolutions:", "旋转次数:"),
+    ("+ Degrees:", "+ 角度:"),
+    ("(positive is clockwise)", "（正号表示顺时针）"),
+    ("Opacity:", "不透明度:"),
+    (
+        "Center Anchor Point in Layer Content",
+        "在图层内容中居中放置锚点",
+    ),
 ];

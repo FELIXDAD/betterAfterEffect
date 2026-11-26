@@ -8,11 +8,13 @@ fn prim(ty: PrimType, attrs: &[(&str, Value)]) -> EvaluatedPrim {
     EvaluatedPrim {
         path: PrimPath::new("/test").unwrap(),
         prim_type: Some(ty),
-        attrs: attrs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect(),
-        children: vec![],
+        attrs: std::sync::Arc::new(
+            attrs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        ),
+        children: Vec::new().into(),
     }
 }
 
@@ -46,7 +48,7 @@ fn square_units_offset_reversal_and_add() {
         ("words", [0., 0., 0., 1., 0.]),
         ("lines", [0., 0., 0., 0., 1.]),
     ] {
-        group.children = vec![selector(unit, 1.0, 0.0, 1.0)];
+        group.children = vec![selector(unit, 1.0, 0.0, 1.0)].into();
         apply_animators(&mut layout, std::slice::from_ref(&group));
         let delta: Vec<_> = layout
             .styles
@@ -57,7 +59,7 @@ fn square_units_offset_reversal_and_add() {
             .collect();
         assert_eq!(delta, expected.map(|v| v * 20.), "{unit}");
     }
-    group.children = vec![selector("characters_excluding_spaces", 2.25, 3.0, 0.0); 2];
+    group.children = vec![selector("characters_excluding_spaces", 2.25, 3.0, 0.0); 2].into();
     apply_animators(&mut layout, &[group]);
     let i = layout
         .chars
@@ -81,7 +83,7 @@ fn rotation_scale_color_and_balanced_tracking() {
             ("animator:fill_color", Value::Color([1., 0., 0., 1.])),
         ],
     );
-    group.children.push(selector("characters", 0., 0.5, 0.));
+    group.children = vec![selector("characters", 0., 0.5, 0.)].into();
     let hash = layout.content_hash();
     apply_animators(&mut layout, &[group]);
     let pivot = layout.chars[0].origin + Vec2::new(layout.chars[0].advance * 0.5, 0.);
@@ -167,14 +169,15 @@ fn square_position_and_opacity_match_ae_frames() {
             ("animator:opacity", number("opacity").into()),
         ],
     );
-    group.children.push(prim(
+    group.children = vec![prim(
         PrimType::TEXT_SELECTOR,
         &[
             ("start", number("start").into()),
             ("end", number("end").into()),
             ("offset", number("offset").into()),
         ],
-    ));
+    )]
+    .into();
     apply_animators(&mut layout, &[group]);
     let animated = render_metrics(&layout, w, h);
     let ae_base = golden_metrics(include_bytes!("ae/golden/plain.png"));

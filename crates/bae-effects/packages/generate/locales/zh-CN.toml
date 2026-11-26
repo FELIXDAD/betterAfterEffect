@@ -1,0 +1,178 @@
+[effect.lens-flare]
+name = "镜头光晕"
+keywords = ["光晕"]
+
+[effect.lens-flare.params]
+flare_center = "光晕中心"
+flare_brightness = "光晕亮度"
+lens_type = "镜头类型"
+blend_with_original = "与原始图像混合"
+
+[effect.lens-flare.choices.lens_type]
+1 = "50-300 毫米变焦"
+2 = "35 毫米定焦"
+3 = "105 毫米定焦"
+
+[effect.beam]
+name = "光束"
+keywords = ["光束"]
+
+[effect.beam.params]
+starting_point = "起始点"
+ending_point = "结束点"
+length = "长度"
+time = "时间"
+starting_thickness = "起始厚度"
+ending_thickness = "结束厚度"
+softness = "柔和度"
+inside_color = "内部颜色"
+outside_color = "外部颜色"
+perspective_3d = "3D 透视"
+composite_on_original = "在原始图像上合成"
+
+[effect.advanced-lightning]
+name = "高级闪电"
+keywords = ["闪电"]
+
+[effect.advanced-lightning.params]
+lightning_type = "闪电类型"
+origin = "源点"
+context_control = "上下文控制"
+conductivity_state = "传导率状态"
+core_settings = "核心设置"
+core_radius = "核心半径"
+core_opacity = "核心不透明度"
+core_color = "核心颜色"
+glow_settings = "发光设置"
+glow_radius = "发光半径"
+glow_opacity = "发光不透明度"
+glow_color = "发光颜色"
+alpha_obstacle = "Alpha 障碍"
+turbulence = "湍流"
+forking = "分叉"
+decay = "衰减"
+decay_main_core = "主核心衰减"
+composite_on_original = "在原始图像上合成"
+expert_settings = "专家设置"
+complexity = "复杂度"
+min_forkdistance = "最小分叉距离"
+termination_threshold = "终止阈值"
+main_core_collisions_only = "仅主核心碰撞"
+fractal_type = "分形类型"
+core_drain = "核心消耗"
+fork_strength = "分叉强度"
+fork_variation = "分叉变化"
+
+[effect.advanced-lightning.choices.lightning_type]
+1 = "方向"
+2 = "击打"
+3 = "阻断"
+4 = "回弹"
+5 = "(-"
+6 = "全方位"
+7 = "随机"
+8 = "垂直"
+9 = "双向击打"
+
+[effect.advanced-lightning.choices.fractal_type]
+1 = "线性"
+2 = "半线性"
+3 = "样条"
+
+[effect.cc-light-sweep]
+name = "CC Light Sweep"
+keywords = ["扫光"]
+
+[effect.cc-light-sweep.params]
+center = "Center"
+direction = "Direction"
+shape = "Shape"
+width = "Width"
+sweep_intensity = "Sweep Intensity"
+edge_intensity = "Edge Intensity"
+edge_thickness = "Edge Thickness"
+light_color = "Light Color"
+light_reception = "Light Reception"
+
+[effect.cc-light-sweep.choices.shape]
+1 = "Linear"
+2 = "Smooth"
+3 = "Sharp"
+
+[effect.cc-light-sweep.choices.light_reception]
+1 = "Add"
+2 = "Composite"
+3 = "Cutout"
+
+[effect.fractal]
+name = "分形"
+keywords = ["生成"]
+
+[effect.fractal.params]
+set_choice = "设置选项"
+equation = "等式"
+mandelbrot = "曼德布罗特"
+mandelbrot_x_real = "X（真实的）"
+mandelbrot_y_imaginary = "Y（虚构的）"
+mandelbrot_magnification = "放大率"
+mandelbrot_escape_limit = "扩展限制"
+julia = "朱莉娅"
+julia_x_real = "X（真实的）"
+julia_y_imaginary = "Y（虚构的）"
+julia_magnification = "放大率"
+julia_escape_limit = "扩展限制"
+offset_after_inversion = "反转后偏移"
+offset_after_inversion_x_real = "X（真实的）"
+offset_after_inversion_y_imaginary = "Y（虚构的）"
+color = "颜色"
+overlay = "叠加"
+transparency = "透明度"
+palette = "调板"
+hue = "色相"
+cycle_steps = "循环步骤"
+cycle_offset = "循环位移"
+edge_highlight_force_lq = "边缘高亮（强制 LQ）"
+high_quality_settings = "高品质设置"
+oversample_method = "过采样方法"
+oversample_factor = "过采样因素"
+
+[effect.fractal.choices.set_choice]
+1 = "曼德布罗特"
+2 = "曼德布罗特反向"
+3 = "曼德布罗特在朱莉娅上"
+4 = "曼德布罗特反向在朱莉娅上"
+5 = "朱莉娅"
+6 = "朱莉娅反向"
+
+[effect.fractal.choices.equation]
+1 = "z = z^2 + c"
+2 = "z = z^3 + c"
+3 = "z = z^5 + c"
+4 = "z = z^7 + c"
+
+[effect.fractal.choices.palette]
+1 = "亮度渐变"
+2 = "色相轮"
+3 = "黑白"
+4 = "纯色"
+5 = "扩展角度"
+6 = "灰度"
+7 = "苹果]["
+
+[effect.fractal.choices.oversample_method]
+1 = "边缘检测 - 快 - 可能缺失像素"
+2 = "强力攻击 - 慢 - 每个像素"
+
+[effect.cc-threads]
+name = "CC Threads"
+keywords = ["生成"]
+
+[effect.cc-threads.params]
+width = "Width"
+height = "Height"
+overlaps = "Overlaps"
+direction = "Direction"
+center = "Center"
+coverage = "Coverage"
+shadowing = "Shadowing"
+texture = "Texture"

@@ -5,7 +5,7 @@ struct Grading {
     key_color:vec3f, has_key:u32, range:vec4f,
     white_balance:vec3f, sat:f32, contrast:f32, invert:u32, mask_view:u32, spatial:u32,
     vignette:vec4f, blur0:vec4f,
-    curves:array<vec4f,320>, film:array<vec4u,32>, vibrance:array<vec4u,264>, edge:array<vec4u,32>, tint_curve:array<vec4f,66>, secondary_curve:array<vec4f,16>, correction:vec4f, chroma:array<vec4u,256>,
+    curves:array<vec4u,288>, film:array<vec4u,32>, vibrance:array<vec4u,264>, edge:array<vec4u,32>, tint_curve:array<vec4f,66>, secondary_curve:array<vec4f,16>, correction:vec4f, chroma:array<vec4u,256>,
 }
 @group(0) @binding(0) var<uniform> u:Grading;
 @group(0) @binding(1) var src:texture_2d<f32>;
@@ -140,7 +140,7 @@ fn secondary_contrast(rgb:vec3f)->vec3f {
 }
 fn curve_sample(ch:u32,i:u32)->f32 {
     let j=256u*ch+i;
-    return u.curves[j/4u][j%4u];
+    return unpack2x16float(u.curves[j/8u][(j/2u)%4u])[j%2u];
 }
 fn curve(ch:u32,x:f32)->f32 {
     if (u.curve_mask & (1u<<ch))==0u {return x;}
@@ -201,7 +201,8 @@ fn vignette(rgb:vec3f,pos:vec2f)->vec3f {
         let white=mix(edge_sample(0u,63u).x,edge_sample(1u,63u).x,slider-min(19.,floor(slider)));
         graded=select(graded,vec3f(pow(white,2.4)),c>=vec3f(1.));
     }
-    return encoded(mix(c,graded,mask));
+    let protect=select(1.,1.-u.creative.x*smoothstep(.25,1.,y),(u.flags&256u)!=0u);
+    return encoded(mix(c,graded,mask*protect));
 }
 
 @compute @workgroup_size(8,8)
@@ -244,10 +245,25 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
             c=encoded(a+(light-lo)*(b-a)/max(1e-12,hi-lo));
         }
         c=vec3f(curve(1u,c.r),curve(2u,c.g),curve(3u,c.b));
-        if (u.curve_mask&16u)!=0u {
-            let light=linear(c);
-            let y=dot(light,luma);
-            c=encoded(y+(light-y)*(1.+curve(4u,fx_hsl(light).x)));
+        if (u.curve_mask & 496u) != 0u {
+            var light = linear(c);
+            let hue = fx_hsl(light).x;
+            if (u.curve_mask & 16u) != 0u {
+                let y = dot(light,luma);
+                light = y + (light-y) * max(0.,1.+curve(4u,hue));
+            }
+            if (u.curve_mask & 32u) != 0u {
+                let hsl = fx_hsl(encoded(light));
+                light = linear(fx_rgb(vec3f(fract(hsl.x + curve(5u,hsl.x)),hsl.yz)));
+            }
+            if (u.curve_mask & 64u) != 0u {
+                light *= exp2(curve(6u,hue));
+            }
+            let y = dot(light,luma);
+            var factor = 1.;
+            if (u.curve_mask & 128u) != 0u { factor *= max(0.,1.+curve(7u,y)); }
+            if (u.curve_mask & 256u) != 0u { factor *= max(0.,1.+curve(8u,fx_hsl(light).y)); }
+            c = encoded(select(y + (light-y)*factor, light, factor == 1.));
         }
     }
     if (u.flags&2u)!=0u {

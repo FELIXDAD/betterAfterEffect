@@ -223,3 +223,30 @@ fn layer_expression_commands_disable_convert_and_reveal_errors() {
         Some(crate::session::Reveal::Props(p)) if p == &[(layer.clone(), "transform:opacity".to_owned())]
     ));
 }
+
+/// #592: an expression just added takes the focus with its text selected, so
+/// typing replaces the default (AE).
+#[test]
+fn added_expression_is_focused_with_its_text_selected() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.session().lock().selected_props = vec![(layer.clone(), POS.to_owned())];
+    let mut tl = h.bars();
+    let r = h.action(&mut tl, Invocation::new(ids::ADD_EXPRESSION));
+    h.apply(&r);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![Event::Text("wiggle(2, 50)".into())],
+        Modifiers::NONE,
+    );
+    bae_ui::set_keypad_enter(true);
+    let r = h.frame(&mut tl, vec![press(egui::Key::Enter)], Modifiers::NONE);
+    bae_ui::set_keypad_enter(false);
+    h.apply(&r);
+    let source = query::attr_spec(&h.stage, &layer, POS)
+        .and_then(|s| s.expression.clone())
+        .map(|e| e.source);
+    assert_eq!(source.as_deref(), Some("wiggle(2, 50)"));
+}
