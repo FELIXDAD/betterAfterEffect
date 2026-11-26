@@ -99,6 +99,87 @@ impl Fx {
     }
 }
 
+#[test]
+fn source_styles_convert_with_keyframes_and_remove_per_instance() {
+    use bae_model::layer_styles::{self as styles, effective_styles};
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let asset = fx
+        .value(&a, "source")
+        .unwrap()
+        .as_prim_ref()
+        .unwrap()
+        .clone();
+    let b = fx.layer(&comp, "solid", json!({"source":asset}));
+    let source = asset.child(styles::PRIM).unwrap();
+    fx.run("prim.create", json!({"path":source,"prim_type":"Effect"}));
+    let attr = bae_model::effect::param_attr(styles::group("solidFill").unwrap().enabled);
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":"match_name","value":Value::String(styles::RENDER_ID.into())}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":attr,"value":Value::Bool(true)}),
+    );
+    let opacity = "param:0703";
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":opacity,"value":Value::Float(10.)}),
+    );
+    fx.run(
+        "attr.set_animated",
+        json!({"path":source,"attr":opacity,"animated":true,"time":0}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path":source,"attr":opacity,"time":SEC,"value":Value::Float(90.)}),
+    );
+    fx.run("layer.styles", json!({"layers":[a],"operation":"convert"}));
+    let local = a.child(styles::PRIM).unwrap();
+    assert_eq!(effective_styles(&fx.stage, &a), Some(local.clone()));
+    assert_eq!(effective_styles(&fx.stage, &b), Some(source.clone()));
+    assert_eq!(fx.keys(&local, opacity), vec![0, SEC]);
+    let sample = bae_anim::evaluate_comp(&fx.stage, &comp, Time::from_flicks(SEC)).unwrap();
+    for layer in &sample.layers {
+        assert_eq!(
+            layer.layer_styles.as_ref().unwrap().param(703),
+            Some(&Value::Float(90.))
+        );
+    }
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"remove_all"}),
+    );
+    assert_eq!(effective_styles(&fx.stage, &a), None);
+    assert_eq!(effective_styles(&fx.stage, &b), Some(source));
+}
+
+#[test]
+fn showing_all_styles_preserves_values_and_leaves_new_styles_disabled() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let local = a.child(bae_model::layer_styles::PRIM).unwrap();
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"add","style":"dropShadow"}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path":local,"attr":"param:0103","value":Value::Float(27.)}),
+    );
+    fx.run("layer.styles", json!({"layers":[a],"operation":"show_all"}));
+    assert_eq!(fx.value(&local, "param:0103"), Some(Value::Float(27.)));
+    assert_eq!(fx.value(&local, "param:0900"), Some(Value::Bool(false)));
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"add","style":"frameFX"}),
+    );
+    assert_eq!(fx.value(&local, "param:0900"), Some(Value::Bool(true)));
+}
+
 fn key(path: &PrimPath, attr: &str, t: i64) -> Json {
     json!({"path": path, "attr": attr, "time": t})
 }
@@ -299,6 +380,31 @@ fn parenting_keeps_the_layer_in_place() {
         json!({"layers": [child], "parent": parent, "keep_transform": false}),
     );
     assert!((fx.world_pos(&comp, &child) - before).length() > 1.0);
+    // Shift: onto the parent (its anchor point, on screen where the parent is).
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": null, "keep_transform": false}),
+    );
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": parent, "move_to_parent": true}),
+    );
+    let at = fx.world_pos(&comp, &child);
+    let p = fx.world_pos(&comp, &parent);
+    let anchor = match fx.value(&parent, "transform:anchor_point") {
+        Some(Value::Vec3(a)) => DVec3::from_array(a),
+        _ => DVec3::ZERO,
+    };
+    let e = bae_anim::evaluate_comp(&fx.stage, &comp, Time::ZERO).unwrap();
+    let parent_anchor = e
+        .layer(&parent)
+        .unwrap()
+        .world_matrix
+        .transform_point3(anchor);
+    assert!(
+        (at - parent_anchor).length() < 1e-6,
+        "{at} vs {parent_anchor} ({p})"
+    );
 }
 
 #[test]
@@ -2038,4 +2144,82 @@ fn set_track_matte_sets_type_source_and_hides_the_matte() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn exponential_scale_and_sequence_layers() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let scale = "transform:scale";
+    let vec3 = |v: f64| json!({"type": "vec3", "value": [v, v, 100.0]});
+    fx.run(
+        "attr.set_animated",
+        json!({"path": a, "attr": scale, "animated": true, "time": 0}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path": a, "attr": scale, "time": 0, "value": vec3(100.0)}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path": a, "attr": scale, "time": SEC, "value": vec3(400.0)}),
+    );
+    // Exponential Scale: a key per frame, 100 → 400 doubling each half.
+    let out = fx.run(
+        "key.exponential_scale",
+        json!({"keys": [key(&a, scale, SEC), key(&a, scale, 0)]}),
+    );
+    assert_eq!(out["keys"].as_array().unwrap().len(), 31);
+    assert_eq!(fx.keys(&a, scale).len(), 31);
+    let spec = query::attr_spec(&fx.stage, &a, scale).unwrap();
+    let Value::Vec3(mid) = spec.keyframes[&Time(SEC / 2)].value else {
+        panic!("vec3 scale");
+    };
+    assert!((mid[0] - 200.0).abs() < 1e-6, "{mid:?}");
+    assert!(
+        spec.keyframes
+            .values()
+            .all(|k| k.interp_in == Interpolation::Linear || k.interp_out == Interpolation::Linear)
+    );
+    // Other properties or a single key: refused.
+    assert!(
+        fx.try_run(
+            "key.exponential_scale",
+            json!({"keys": [key(&a, scale, 0)]})
+        )
+        .is_err()
+    );
+
+    // Sequence Layers: b then c follow a, overlapping by 1 s with a cross dissolve.
+    let b = fx.layer(&comp, "solid", json!({}));
+    let c = fx.layer(&comp, "solid", json!({}));
+    for l in [&a, &b, &c] {
+        fx.run(
+            "layer.trim",
+            json!({"layers": [l], "in_point": 0, "out_point": 3 * SEC}),
+        );
+    }
+    fx.run(
+        "layer.sequence",
+        json!({"layers": [a, b, c], "overlap": SEC, "transition": "cross_dissolve"}),
+    );
+    let span = |fx: &Fx, l: &PrimPath| {
+        let t = query::layer_timing(&fx.stage, l);
+        (t.in_point.0, t.out_point.0)
+    };
+    assert_eq!(span(&fx, &a), (0, 3 * SEC));
+    assert_eq!(span(&fx, &b), (2 * SEC, 5 * SEC));
+    assert_eq!(span(&fx, &c), (4 * SEC, 7 * SEC));
+    // b fades in over 2–3 s and out over 4–5 s (its keys are in layer time).
+    let opacity = "transform:opacity";
+    assert_eq!(fx.keys(&b, opacity), vec![0, SEC, 2 * SEC, 3 * SEC]);
+    let spec = query::attr_spec(&fx.stage, &b, opacity).unwrap();
+    assert_eq!(spec.keyframes[&Time(0)].value, Value::Float(0.0));
+    assert_eq!(spec.keyframes[&Time(3 * SEC)].value, Value::Float(0.0));
+    assert_eq!(spec.keyframes[&Time(SEC)].value, Value::Float(100.0));
+    // Without a transition nothing is keyed.
+    fx.run("layer.sequence", json!({"layers": [c, a], "overlap": 0}));
+    assert_eq!(span(&fx, &a), (7 * SEC, 10 * SEC));
+    assert_eq!(fx.keys(&a, opacity), vec![2 * SEC, 3 * SEC]);
 }

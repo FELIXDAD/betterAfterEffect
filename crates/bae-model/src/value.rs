@@ -1,5 +1,6 @@
 //! Attribute values.
 
+use crate::TextDocument;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -210,84 +211,6 @@ pub struct FeatherPoint {
     /// Relative corner angle in degrees.
     #[serde(default)]
     pub corner_angle: f64,
-}
-
-/// A text document (AE `TextDocument`), the value of a text layer's source text.
-/// Character-level style runs come later; until then the whole text shares one style.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct TextDocument {
-    pub text: String,
-    /// PostScript font name, e.g. `ArialMT`.
-    pub font: String,
-    pub font_size: f64,
-    #[serde(default = "white")]
-    pub fill_color: [f64; 4],
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stroke_color: Option<[f64; 4]>,
-    #[serde(default, skip_serializing_if = "is_zero_f64")]
-    pub stroke_width: f64,
-    #[serde(default)]
-    pub stroke_over_fill: bool,
-    /// `left`, `center`, `right`, `justify_last_left`, …
-    #[serde(default = "left")]
-    pub justification: String,
-    /// Tracking in 1/1000 em.
-    #[serde(default, skip_serializing_if = "is_zero_f64")]
-    pub tracking: f64,
-    /// Leading in pixels; `None` = auto.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub leading: Option<f64>,
-    #[serde(default, skip_serializing_if = "is_zero_f64")]
-    pub baseline_shift: f64,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub faux_bold: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub faux_italic: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub all_caps: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub small_caps: bool,
-    /// Paragraph (box) text size; `None` = point text.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub box_size: Option<[f64; 2]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub box_position: Option<[f64; 2]>,
-}
-
-fn white() -> [f64; 4] {
-    [1.0, 1.0, 1.0, 1.0]
-}
-
-fn left() -> String {
-    "left".to_owned()
-}
-
-fn is_zero_f64(v: &f64) -> bool {
-    *v == 0.0
-}
-
-impl TextDocument {
-    pub fn new(text: impl Into<String>, font: impl Into<String>, font_size: f64) -> Self {
-        TextDocument {
-            text: text.into(),
-            font: font.into(),
-            font_size,
-            fill_color: white(),
-            stroke_color: None,
-            stroke_width: 0.0,
-            stroke_over_fill: false,
-            justification: left(),
-            tracking: 0.0,
-            leading: None,
-            baseline_shift: 0.0,
-            faux_bold: false,
-            faux_italic: false,
-            all_caps: false,
-            small_caps: false,
-            box_size: None,
-            box_position: None,
-        }
-    }
 }
 
 impl BezierPath {
