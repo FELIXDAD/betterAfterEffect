@@ -469,6 +469,33 @@ fn param_row(
             }
         });
     }
+    if def.match_name == "ADBE Lumetri"
+        && let Edit::Commit(Value::Color(sample)) = &edit
+    {
+        let changes = match param.id {
+            70..=72 => Some(bae_effects::lumetri_key_edits(param.id, *sample, |id| {
+                common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
+            })),
+            94 => bae_effects::lumetri_white_balance_settings(*sample).map(|[temp, tint]| {
+                vec![
+                    (94, Value::Color(*sample)),
+                    (7, Value::Float(temp)),
+                    (8, Value::Float(tint)),
+                ]
+            }),
+            _ => None,
+        };
+        if let Some(changes) = changes {
+            session.lock().scrub = None;
+            if !changes.is_empty() {
+                let time = query::to_key_time(stage, effect, now);
+                let edits: Vec<_> = changes.into_iter().map(|(id, value)|
+                    json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
+                cx.invoke_with("attr.set_many", json!({"edits": edits}));
+            }
+            return;
+        }
+    }
     common::apply_edit(cx, session, effect, &attr, now, edit);
 }
 
@@ -476,7 +503,7 @@ fn param_row(
 #[allow(clippy::too_many_arguments)]
 fn value_control(
     ui: &mut Ui,
-    cx: &PanelContext<'_>,
+    cx: &mut PanelContext<'_>,
     effect: &PrimPath,
     def: &EffectDef,
     param: &EffectParamDef,
@@ -548,7 +575,18 @@ fn value_control(
         }
         ParamKind::Popup { .. } => {
             let options = super::option_labels(&def.match_name, param);
-            let raw = popup_index(value);
+            let lut = (def.match_name == "ADBE Lumetri")
+                .then(|| bae_effects::LumetriLut::from_menu(param.id))
+                .flatten();
+            let (mut raw, mut filename) = (popup_index(value), None);
+            if let Some(slot) = lut
+                && let Some(prim) = cx.stage.prim(effect)
+            {
+                let [first, second, file] = slot.parameters().map(param_attr);
+                let asset = prim.value(&file);
+                raw = slot.choice(prim.value(&first), prim.value(&second), asset);
+                filename = bae_effects::LumetriLut::filename(asset).map(str::to_owned);
+            }
             let current = if def.match_name.starts_with("ADBE OCIO ") && raw > options.len() as i64
             {
                 1
@@ -561,7 +599,11 @@ fn value_control(
                 .unwrap_or_default();
             let mut chosen = None;
             egui::ComboBox::from_id_salt(id)
-                .selected_text(shown)
+                .selected_text(if current == 2 {
+                    filename.as_deref().unwrap_or(&shown)
+                } else {
+                    &shown
+                })
                 .show_ui(ui, |ui| {
                     for (i, o) in options.iter().enumerate() {
                         let n = i as i64 + 1;
@@ -575,6 +617,20 @@ fn value_control(
                         }
                     }
                 });
+            if let Some(slot) = lut {
+                let needs_file = current > 4 || current == 2 && filename.is_none();
+                if needs_file {
+                    ui.label(tr("Load your own LUT"));
+                }
+                if chosen == Some(3) || needs_file && ui.button(tr("Browse...")).clicked() {
+                    cx.invoke_with(super::lut::BROWSE, json!({"path": effect, "menu":param.id}));
+                } else if let Some(n) = chosen
+                    && n != current
+                {
+                    super::lut::commit(cx, effect, slot, n, None);
+                }
+                return Edit::None;
+            }
             match chosen {
                 Some(n) if n != current => Edit::Commit(Value::Int(n)),
                 _ => Edit::None,

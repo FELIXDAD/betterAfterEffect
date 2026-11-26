@@ -54,8 +54,14 @@ fn multipart_depth_reaches_registered_effects_without_half_quantization() {
         MediaFormats::builtin(),
         Arc::new(FrameCache::new(1 << 20)),
     ));
-    let source =
-        FootageSource::open(library, Arc::new(MediaGpu::new(gpu.clone())), &path, None).unwrap();
+    let source = FootageSource::open(
+        library,
+        Arc::new(MediaGpu::new(gpu.clone())),
+        &path,
+        None,
+        None,
+    )
+    .unwrap();
     let roi = bae_render::IRect::from_size(2, 1);
     let input = testing::render_source(
         &gpu,
@@ -188,6 +194,7 @@ fn ranked_mattes_and_integer_ids_survive_the_import_path() {
         Arc::new(MediaGpu::new(gpu.clone())),
         &path,
         Some(bae_model::FrameRate::FPS_30),
+        None,
     )
     .unwrap();
     let roi = bae_render::IRect::from_size(2, 1);

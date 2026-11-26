@@ -147,6 +147,7 @@ impl Default for PreviewOptions {
 /// A value being dragged in a panel, previewed by the viewer before the command runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scrub {
+    pub auto_key: bool,
     pub path: PrimPath,
     pub attr: String,
     pub value: Value,
@@ -181,6 +182,7 @@ impl Scrub {
                     &self.attr,
                     query::to_key_time(stage, p, self.time),
                     v.clone(),
+                    self.auto_key,
                 ),
             })
             .collect()
@@ -233,6 +235,10 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) loading_lut: Option<crate::effects::lut::Load>,
+    /// Automatically key animatable UI value edits.
+    pub auto_key: bool,
+    pub(crate) held_viewer_time: Option<(PrimPath, Time)>,
     pub(crate) channel_frame: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     /// Last UI frame in which a visible timeline requested per-layer CPU timings.
     pub(crate) timing_column_frame: Option<u64>,
@@ -323,16 +329,23 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// When L was last pressed to reveal the audio waveform on a second press.
     pub(crate) last_l: Option<Instant>,
+    /// When M was last pressed (MM: every mask property).
+    pub(crate) last_m: Option<Instant>,
+    /// When E was last pressed (EE: the expressions).
+    pub(crate) last_e: Option<Instant>,
     /// Motion Sketch armed (Start Capture): the next drag in the Composition
     /// panel records this layer's position.
     pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
-    /// Timeline column toggles asked for while another panel had focus (F4
-    /// Switches / Modes, Shift+F4 Parent & Link): the Timeline applies them.
+    /// Timeline actions asked for while another panel had focus (F4 Switches /
+    /// Modes, Shift+F4 Parent & Link, Select All Visible Keyframes …): the
+    /// Timeline runs them on its next frame.
     pub timeline_toggles: Vec<&'static str>,
     /// The frame the Composition viewer shows and its key (Lumetri Scopes).
     pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
+    /// Working pixels before the display conversion, when a scope requests them.
+    pub scope_source: Option<bae_render::GpuImage>,
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,

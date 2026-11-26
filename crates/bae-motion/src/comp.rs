@@ -596,7 +596,7 @@ pub struct CreateFolderParams {
     /// Parent folder (default the project root).
     #[serde(default)]
     pub parent: Option<PrimPath>,
-    /// Project label index of the new folder.
+    /// Project panel label, 0 to 16.
     #[serde(default)]
     pub label: Option<i64>,
 }
@@ -634,8 +634,8 @@ pub(crate) fn create_project_folder(
     let path = child(parent, &query::unique_child_name(tx.stage(), parent, &name))?;
     create(tx, &path, PrimType::FOLDER, None)?;
     set(tx, &path, "name", Value::String(name))?;
-    if let Some(label) = label {
-        set(tx, &path, "label", Value::Int(label.clamp(0, 16)))?;
+    if let Some(label) = label.filter(|n| (0..=16).contains(n)) {
+        set(tx, &path, "label", Value::Int(label))?;
     }
     Ok(path)
 }
