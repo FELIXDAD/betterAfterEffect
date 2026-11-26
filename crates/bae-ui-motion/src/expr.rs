@@ -98,7 +98,24 @@ pub(crate) fn reference(
 ) -> Option<String> {
     let layer = query::owning_layer(stage, path)?;
     let Some(attr) = attr else {
-        return Some(layer_ref(stage, from, &layer).unwrap_or_else(|| "thisLayer".into()));
+        // An effect or a mask as a whole: effect("Blur"), mask("Mask 1").
+        let whole = stage.prim(path).and_then(|v| {
+            let name = js(&query::display_name_of(stage, path));
+            if v.is_a(&PrimType::EFFECT) {
+                Some(format!("effect({name})"))
+            } else if v.is_a(&PrimType::MASK) {
+                Some(format!("mask({name})"))
+            } else {
+                None
+            }
+        });
+        let layer_part = layer_ref(stage, from, &layer);
+        return Some(match (layer_part, whole) {
+            (Some(l), Some(w)) => format!("{l}.{w}"),
+            (None, Some(w)) => w,
+            (Some(l), None) => l,
+            (None, None) => "thisLayer".into(),
+        });
     };
     let prop = property_ref(stage, &layer, path, attr)?;
     Some(match layer_ref(stage, from, &layer) {

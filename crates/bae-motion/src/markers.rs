@@ -65,6 +65,9 @@ pub struct MarkerFields {
     pub label: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protected_region: Option<bool>,
+    /// Layer markers: a Segmentation Marker rather than a Comment Marker (AE 26).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment: Option<bool>,
 }
 
 impl MarkerFields {
@@ -88,6 +91,9 @@ impl MarkerFields {
         }
         if let Some(p) = self.protected_region {
             set(tx, path, "protected_region", Value::Bool(p))?;
+        }
+        if let Some(seg) = self.segment {
+            set(tx, path, "segment", Value::Bool(seg))?;
         }
         Ok(())
     }

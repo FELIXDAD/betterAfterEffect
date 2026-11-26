@@ -369,10 +369,22 @@ impl TimelinePanel {
                         vec2(14.0, 14.0),
                     );
                     icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
-                    let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
-                        egui::WidgetType::Button,
-                        &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
-                    );
+                    let wresp = ui
+                        .interact(whip, rid("whip"), Sense::click_and_drag())
+                        .labeled(
+                            egui::WidgetType::Button,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
+                        );
+                    // Cmd/Ctrl-click: remove the parent (Alt too: the layer jumps).
+                    if wresp.clicked() && ui.input(|i| i.modifiers.command) {
+                        let layers = if layer_selected {
+                            session.lock().selected_layers.clone()
+                        } else {
+                            vec![layer.clone()]
+                        };
+                        let mods = ui.input(|i| i.modifiers);
+                        cx.invoke_with("layer.set_parent", parent_params(&layers, None, now, mods));
+                    }
                     if wresp.drag_started() {
                         let layers = if layer_selected {
                             session.lock().selected_layers.clone()
@@ -420,9 +432,15 @@ impl TimelinePanel {
                     if sel != before {
                         let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
                         if parent.as_ref() != Some(layer) {
+                            let mods = ui.input(|i| i.modifiers);
                             cx.invoke_with(
                                 "layer.set_parent",
-                                json!({"layers": [layer], "parent": parent, "time": now}),
+                                parent_params(
+                                    std::slice::from_ref(layer),
+                                    parent.as_ref(),
+                                    now,
+                                    mods,
+                                ),
                             );
                         }
                     }
@@ -936,6 +954,35 @@ impl TimelinePanel {
                 } else {
                     common::Edit::None
                 }
+            } else if let bae_model::Value::Time(t) = value {
+                // Time Remap: the source time as hot timecode, a frame per point.
+                let rate = info.frame_rate;
+                let mut frames = rate.time_to_frame(t) as f64;
+                let display = |f: f64| widgets::timecode(f.round() as i64, rate.as_f64());
+                let parse = |s: &str| super::markers::parse_timecode(info, s).map(|f| f as f64);
+                let resp = child
+                    .push_id(id.with("ed"), |ui| {
+                        ui.add(
+                            widgets::HotNumber::new(&mut frames)
+                                .tint(if expression {
+                                    common::EXPRESSION_VALUE
+                                } else {
+                                    color::ACCENT
+                                })
+                                .speed(1.0)
+                                .text(&display, &parse)
+                                .label(&prop_name),
+                        )
+                    })
+                    .inner;
+                let to = bae_model::Value::Time(rate.frame_to_time(frames.round() as i64));
+                if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                    common::Edit::Commit(to)
+                } else if resp.dragged() && resp.changed() {
+                    common::Edit::Live(to)
+                } else {
+                    common::Edit::None
+                }
             } else {
                 common::value_editor(
                     &mut child,
@@ -1286,4 +1333,22 @@ fn footage_frame_blending(stage: &Stage, layer: &PrimPath) -> Option<FrameBlendi
     } else {
         None
     }
+}
+
+/// `layer.set_parent` for a pick whip or Parent & Link choice with `mods`
+/// held (AE): Shift moves the layers to the parent, Alt lets them jump
+/// instead of staying where they are.
+pub(super) fn parent_params(
+    layers: &[PrimPath],
+    parent: Option<&PrimPath>,
+    now: Time,
+    mods: egui::Modifiers,
+) -> serde_json::Value {
+    json!({
+        "layers": layers,
+        "parent": parent,
+        "time": now,
+        "keep_transform": !mods.alt,
+        "move_to_parent": mods.shift && parent.is_some(),
+    })
 }

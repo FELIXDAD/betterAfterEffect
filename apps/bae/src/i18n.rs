@@ -73,6 +73,13 @@ const ZH: &[(&str, &str)] = &[
         "“{file}”是一个文件夹，但不是 BAE 项目。请换一个名字。",
     ),
     ("Could not open the project.", "无法打开项目。"),
+    ("RAM Available for BAE:", "BAE 可用内存："),
+    ("Memory Usage Details", "内存使用情况详细信息"),
+    ("Resident Memory:", "驻留内存："),
+    ("GPU Information", "GPU 信息"),
+    ("Driver:", "驱动程序："),
+    ("Maximum Texture Dimension:", "最大纹理尺寸："),
+    ("No active GPU device.", "当前没有可用的 GPU 设备。"),
     // AE 2026 zh_CN: RevertCancelAlert
     (
         "Revert the project to the last saved version? All changes will be lost.",
