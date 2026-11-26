@@ -865,7 +865,7 @@ fn transform_edits(
 /// Handle a motion action. Returns `false` for ids it does not know.
 /// File ▸ New ▸ New Folder: an “Untitled N” folder in the folder selected in
 /// the Project panel, else at the top level (AE).
-fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
+pub(crate) fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
     use crate::project::{ItemKind, item_kind};
     let parent = session
         .lock()
@@ -880,7 +880,7 @@ fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
         parent.as_ref().unwrap_or(&root),
         "Untitled",
     );
-    let mut params = json!({ "name": name });
+    let mut params = json!({ "name": name, "label": crate::prefs::current(cx.resources).int("labels.label_default_folder") });
     if let Some(folder) = &parent {
         params["parent"] = json!(folder);
     }
@@ -1471,22 +1471,34 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     Some(_) => {}
                     None => cx.invoke_with(
                         "marker.add",
-                        json!({"owner": info.path, "time": now, "comment": n.to_string()}),
+                        json!({"owner": info.path, "time": now, "comment": n.to_string(), "label": crate::prefs::marker_label(&crate::prefs::current(cx.resources), false)}),
                     ),
                 }
             }
         }
         ids::ADD_MARKER => {
+            let label = crate::prefs::marker_label(&crate::prefs::current(cx.resources), false);
             if layers.is_empty() {
-                cx.invoke_with("marker.add", json!({"owner": info.path, "time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owner": info.path, "time": now, "label": label}),
+                );
             } else {
-                cx.invoke_with("marker.add", json!({"owners": layers, "comp_time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owners": layers, "comp_time": now, "label": label}),
+                );
             }
         }
         ids::ADD_MARKER_DIALOG => {
             let owner = layers.first().cloned().unwrap_or_else(|| info.path.clone());
             s.key_dialog = Some(crate::timeline::KeyDialog::Marker(Box::new(
-                crate::timeline::MarkerDialog::new_marker(&info, owner, now),
+                crate::timeline::MarkerDialog::new_marker(
+                    &info,
+                    owner,
+                    now,
+                    crate::prefs::marker_label(&crate::prefs::current(cx.resources), false),
+                ),
             )));
         }
         ids::DELETE_ALL_MARKERS if !layers.is_empty() => {

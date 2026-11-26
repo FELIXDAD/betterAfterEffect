@@ -39,6 +39,15 @@ pub(crate) fn comp_label(p: &Preferences) -> i64 {
     p.int("labels.label_default_comp")
 }
 
+/// Default label for newly created comment or segmentation markers.
+pub(crate) fn marker_label(prefs: &Preferences, segment: bool) -> usize {
+    prefs.int(if segment {
+        "labels.label_default_marker_segmentation"
+    } else {
+        "labels.label_default_marker_comment"
+    }) as usize
+}
+
 /// Composition page: new layers start at the comp's start (else at the
 /// current time).
 pub(crate) fn layers_at_comp_start(p: &Preferences) -> bool {

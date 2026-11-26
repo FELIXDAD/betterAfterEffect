@@ -39,6 +39,7 @@ mod import_preferences;
 mod layers;
 #[cfg(target_os = "macos")]
 mod layout;
+mod marker_label_preferences;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;

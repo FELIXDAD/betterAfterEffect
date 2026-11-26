@@ -44,6 +44,9 @@ pub struct ImportFile {
 #[derive(Deserialize, JsonSchema)]
 pub struct ImportParams {
     pub files: Vec<ImportFile>,
+    /// Label of newly created folders in a directory import.
+    #[serde(default)]
+    pub folder_label: Option<i64>,
     /// Project folder to import into (default the assets folder).
     #[serde(default)]
     pub parent: Option<PrimPath>,
@@ -88,6 +91,7 @@ fn folder_path(
     tx: &mut Transaction<'_>,
     parent: &PrimPath,
     rel: &str,
+    label: Option<i64>,
 ) -> Result<PrimPath, CommandError> {
     let mut cur = parent.clone();
     for part in rel.split('/').map(str::trim).filter(|p| !p.is_empty()) {
@@ -99,12 +103,7 @@ fn folder_path(
         });
         cur = match existing {
             Some(c) => c,
-            None => {
-                let path = child(&cur, &query::unique_child_name(tx.stage(), &cur, part))?;
-                create(tx, &path, PrimType::FOLDER, None)?;
-                set(tx, &path, "name", Value::String(part.to_owned()))?;
-                path
-            }
+            None => crate::comp::create_project_folder(tx, &cur, part.to_owned(), label)?,
         };
     }
     Ok(cur)
@@ -143,7 +142,7 @@ impl Command for ImportItems {
                 return Err(fail(format!("{bad} is not a footage attribute")));
             }
             let folder = match f.folder.as_deref() {
-                Some(rel) => folder_path(tx, &parent, rel)?,
+                Some(rel) => folder_path(tx, &parent, rel, p.folder_label)?,
                 None => parent.clone(),
             };
             let name = f
