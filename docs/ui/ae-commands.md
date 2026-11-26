@@ -250,30 +250,30 @@
 | Open Layer | 393220 | `motion.layer.open_layer` |  |  |  | E | ✅ |
 | Open Layer Source | 393221 | `motion.layer.open_layer_source` |  | Alt+PadEnter | Opt+PadEnter | B | ✅ |
 | Reveal in Explorer | 393222 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
-| Mask ▸ New Mask | 8519681 | `motion.layer.new_mask` |  | Ctrl+Shift+N | Cmd+Shift+N | A | ☐ |
-| Mask ▸ Mask Shape... | 8519683 | `motion.layer.mask_shape` |  | Ctrl+Shift+M | Cmd+Shift+M | E | ☐ |
-| Mask ▸ Mask Feather... | 8519684 | `motion.layer.mask_feather` |  | Ctrl+Shift+F | Cmd+Shift+F | E | ☐ |
-| Mask ▸ Mask Opacity... | 8519685 | `motion.layer.mask_opacity` |  |  |  | E | ☐ |
-| Mask ▸ Mask Expansion... | 8519686 | `motion.layer.mask_expansion` |  |  |  | E | ☐ |
-| Mask ▸ Reset Mask | 8519688 | `motion.layer.reset_mask` |  |  |  | B | ☐ |
-| Mask ▸ Remove Mask | 8519689 | `motion.layer.remove_mask` |  |  |  | B | ☐ |
-| Mask ▸ Remove All Masks | 8519690 | `motion.layer.remove_all_masks` |  |  |  | B | ☐ |
-| Mask ▸ Mode ▸ None | 11468801 | `motion.layer.mask_mode` | `{"mode":"none"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Add | 11468803 | `motion.layer.mask_mode` | `{"mode":"add"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Subtract | 11468804 | `motion.layer.mask_mode` | `{"mode":"subtract"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Intersect | 11468805 | `motion.layer.mask_mode` | `{"mode":"intersect"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Lighten | 11468806 | `motion.layer.mask_mode` | `{"mode":"lighten"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Darken | 11468807 | `motion.layer.mask_mode` | `{"mode":"darken"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Difference | 11468808 | `motion.layer.mask_mode` | `{"mode":"difference"}` |  |  | B | ☐ |
-| Mask ▸ Inverted | 8519693 | `motion.layer.mask_inverted` |  | Ctrl+Shift+I | Cmd+Shift+I | B | ☐ |
-| Mask ▸ Locked | 8519694 | `motion.layer.mask_locked` |  |  |  | B | ☐ |
+| Mask ▸ New Mask | 8519681 | `motion.layer.new_mask` |  | Ctrl+Shift+N | Cmd+Shift+N | A | ✅ |
+| Mask ▸ Mask Shape... | 8519683 | `motion.layer.mask_shape` |  | Ctrl+Shift+M | Cmd+Shift+M | E | ✅ |
+| Mask ▸ Mask Feather... | 8519684 | `motion.layer.mask_feather` |  | Ctrl+Shift+F | Cmd+Shift+F | E | ✅ |
+| Mask ▸ Mask Opacity... | 8519685 | `motion.layer.mask_opacity` |  |  |  | E | ✅ |
+| Mask ▸ Mask Expansion... | 8519686 | `motion.layer.mask_expansion` |  |  |  | E | ✅ |
+| Mask ▸ Reset Mask | 8519688 | `motion.layer.reset_mask` |  |  |  | B | ✅ |
+| Mask ▸ Remove Mask | 8519689 | `motion.layer.remove_mask` |  |  |  | B | ✅ |
+| Mask ▸ Remove All Masks | 8519690 | `motion.layer.remove_all_masks` |  |  |  | B | ✅ |
+| Mask ▸ Mode ▸ None | 11468801 | `motion.layer.mask_mode` | `{"mode":"none"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Add | 11468803 | `motion.layer.mask_mode` | `{"mode":"add"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Subtract | 11468804 | `motion.layer.mask_mode` | `{"mode":"subtract"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Intersect | 11468805 | `motion.layer.mask_mode` | `{"mode":"intersect"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Lighten | 11468806 | `motion.layer.mask_mode` | `{"mode":"lighten"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Darken | 11468807 | `motion.layer.mask_mode` | `{"mode":"darken"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Difference | 11468808 | `motion.layer.mask_mode` | `{"mode":"difference"}` |  |  | B | ✅ |
+| Mask ▸ Inverted | 8519693 | `motion.layer.mask_inverted` |  | Ctrl+Shift+I | Cmd+Shift+I | B | ✅ |
+| Mask ▸ Locked | 8519694 | `motion.layer.mask_locked` |  |  |  | B | ✅ |
 | Mask ▸ Motion Blur ▸ Same As Layer | 14352385 | `motion.layer.mask_motion_blur` | `{"mode":"same_as_layer"}` |  |  | B | ⏸ |
 | Mask ▸ Motion Blur ▸ On | 14352386 | `motion.layer.mask_motion_blur` | `{"mode":"on"}` |  |  | B | ⏸ |
 | Mask ▸ Motion Blur ▸ Off | 14352387 | `motion.layer.mask_motion_blur` | `{"mode":"off"}` |  |  | B | ⏸ |
 | Mask ▸ Feather Falloff ▸ Smooth | 22544385 | `motion.layer.mask_feather_falloff` | `{"falloff":"smooth"}` |  |  | B | ⏸ |
 | Mask ▸ Feather Falloff ▸ Linear | 22544386 | `motion.layer.mask_feather_falloff` | `{"falloff":"linear"}` |  |  | B | ⏸ |
-| Mask ▸ Unlock All Masks | 8519698 | `motion.layer.unlock_all_masks` |  |  |  | B | ☐ |
-| Mask ▸ Lock Other Masks | 8519699 | `motion.layer.lock_other_masks` |  |  |  | B | ☐ |
+| Mask ▸ Unlock All Masks | 8519698 | `motion.layer.unlock_all_masks` |  |  |  | B | ✅ |
+| Mask ▸ Lock Other Masks | 8519699 | `motion.layer.lock_other_masks` |  |  |  | B | ✅ |
 | Mask ▸ Hide Locked Masks | 8519700 | `motion.layer.hide_locked_masks` |  |  |  | B | ⏸ |
 | Mask and Shape Path ▸ RotoBezier | 11010049 | `motion.layer.rotobezier` |  |  |  | A | ☐ |
 | Mask and Shape Path ▸ Closed | 11010050 | `motion.layer.path_closed` |  |  |  | A | ☐ |

@@ -47,7 +47,7 @@ function $bm_sub(a, b) {
   a = __val(a); b = __val(b);
   if (__isNum(a) && __isNum(b)) return a - b;
   if (__isArr(a) && __isNum(b)) { a = a.slice(0); a[0] -= b; return a; }
-  if (__isNum(a) && __isArr(b)) { b = b.slice(0); b[0] = a - b[0]; return b; }
+  if (__isNum(a) && __isArr(b)) { return b.map(function (x, i) { return (i === 0 ? a : 0) - x; }); }
   if (__isArr(a) && __isArr(b)) {
     var n = Math.max(a.length, b.length), out = new Array(n);
     for (var i = 0; i < n; i++) out[i] = (i < a.length ? a[i] : 0) - (i < b.length ? b[i] : 0);
@@ -97,13 +97,13 @@ function mul(a, b) { return $bm_mul(a, b); }
 function div(a, b) { return $bm_div(a, b); }
 function clamp(v, lo, hi) {
   v = __val(v); lo = __val(lo); hi = __val(hi);
-  if (__isArr(v)) {
-    return v.map(function (x, i) {
-      var l = __isArr(lo) ? lo[i] : lo, h = __isArr(hi) ? hi[i] : hi;
-      return Math.min(Math.max(x, Math.min(l, h)), Math.max(l, h));
-    });
-  }
-  return Math.min(Math.max(v, Math.min(lo, hi)), Math.max(lo, hi));
+  function bound(x, l, h) { return Math.min(Math.max(x, Math.min(l, h)), Math.max(l, h)); }
+  if (!__isArr(v) && !__isArr(lo) && !__isArr(hi)) return bound(v, lo, hi);
+  var n = Math.max(__isArr(v) ? v.length : 0, __isArr(lo) ? lo.length : 0, __isArr(hi) ? hi.length : 0);
+  function at(a, i) { return __isArr(a) ? (i < a.length ? a[i] : 0) : a; }
+  var out = new Array(n);
+  for (var i = 0; i < n; i++) out[i] = bound(at(v, i), at(lo, i), at(hi, i));
+  return out;
 }
 function dot(a, b) {
   a = __val(a); b = __val(b);
@@ -113,7 +113,8 @@ function dot(a, b) {
 }
 function cross(a, b) {
   a = __val(a); b = __val(b);
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  var az = a.length > 2 ? a[2] : 0, bz = b.length > 2 ? b[2] : 0;
+  return [a[1] * bz - az * b[1], az * b[0] - a[0] * bz, a[0] * b[1] - a[1] * b[0]];
 }
 function length(a, b) {
   a = __val(a);
@@ -131,8 +132,11 @@ function normalize(a) {
 function lookAt(from, to) {
   from = __val(from); to = __val(to);
   var d = normalize($bm_sub(to, from));
-  var yaw = Math.atan2(d[0], d[2]), pitch = Math.atan2(-d[1], Math.sqrt(d[0] * d[0] + d[2] * d[2]));
-  return [radiansToDegrees(pitch), radiansToDegrees(yaw), 0];
+  // Decompose the upright look direction in AE's X-Y-Z Orientation order.
+  var x = d[0], y = d[1], z = d[2], horizontal = Math.hypot(x, z);
+  if (horizontal === 0) return [y === 0 ? 0 : (y > 0 ? -90 : 90), 0, 0];
+  return [radiansToDegrees(Math.atan2(-y, z)), radiansToDegrees(Math.asin(clamp(x, -1, 1))),
+          radiansToDegrees(Math.atan2(x * y, z))];
 }
 function degreesToRadians(d) { return d * Math.PI / 180; }
 function radiansToDegrees(r) { return r * 180 / Math.PI; }
@@ -143,7 +147,7 @@ function __interp(shape, args) {
   if (args.length <= 3) { t = args[0]; tMin = 0; tMax = 1; v1 = args[1]; v2 = args[2]; }
   else { t = args[0]; tMin = args[1]; tMax = args[2]; v1 = args[3]; v2 = args[4]; }
   t = __val(t); tMin = __val(tMin); tMax = __val(tMax); v1 = __val(v1); v2 = __val(v2);
-  if (tMin > tMax) { var x = tMin; tMin = tMax; tMax = x; x = v1; v1 = v2; v2 = x; }
+  if (tMin > tMax) { var x = tMin; tMin = tMax; tMax = x; }
   var f = tMax === tMin ? (t < tMin ? 0 : 1) : (t - tMin) / (tMax - tMin);
   f = Math.min(Math.max(f, 0), 1);
   var p = shape(f);
