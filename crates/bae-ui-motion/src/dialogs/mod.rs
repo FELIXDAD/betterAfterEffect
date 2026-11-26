@@ -494,7 +494,6 @@ impl bae_ui::DialogHost for MotionDialogs {
         // Draw without holding the lock (a dialog may read the memory).
         let open = {
             let mut d = dialogs.lock();
-            d.frame_checks.repaint_while_running(ctx);
             d.open
                 .take()
                 .or_else(|| d.frame_checks.next_notice())

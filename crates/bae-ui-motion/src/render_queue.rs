@@ -2006,6 +2006,8 @@ fn item_ui(
                         &name("Output To"),
                         &module.output,
                     );
+                    // The path is the user's, not UI text to translate.
+                    bae_ui::a11y::value_source(&file_link, bae_ui::a11y::VERBATIM_VALUE);
                     let follows = extension_follows_format(&module.output, module.format);
                     if let Some(extension) = follows {
                         file_link.clone().on_hover_text(

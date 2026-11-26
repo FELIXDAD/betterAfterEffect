@@ -13,6 +13,7 @@ mod exr;
 mod lumetri_curve;
 pub(crate) mod lut;
 pub mod manager;
+mod pinyin;
 mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
@@ -340,6 +341,28 @@ pub(crate) fn remove_all_enabled(cx: &bae_ui::menu::MenuContext<'_>) -> bool {
 /// `["Effect", <category>]`, `levels` = the submenu's position): every AE
 /// effect of the category, sorted by its localized name like AE, greyed
 /// unless BAE implements it and layers are selected.
+/// How an effect's menu title sorts: as itself in English; in Chinese
+/// lowercased with each character as its pinyin, so Chinese names fall among
+/// the Latin ones as in AE 26 (场深度 before Cryptomatte, #730).
+fn menu_sort_key(title: &str) -> String {
+    if bae_ui::i18n::lang() != bae_ui::i18n::Lang::Zh {
+        return title.to_owned();
+    }
+    zh_sort_key(title)
+}
+
+/// [`menu_sort_key`] in Chinese.
+fn zh_sort_key(title: &str) -> String {
+    let mut out = String::with_capacity(title.len() * 2);
+    for c in title.chars() {
+        match pinyin::PINYIN.binary_search_by_key(&c, |(k, _)| *k) {
+            Ok(i) => out.push_str(pinyin::PINYIN[i].1),
+            Err(_) => out.extend(c.to_lowercase()),
+        }
+    }
+    out
+}
+
 pub(crate) fn menu_items(
     path: &[&'static str],
     levels: &[MenuPos],
@@ -352,7 +375,7 @@ pub(crate) fn menu_items(
         .enumerate()
         .map(|(i, e)| {
             let mut at = levels.to_vec();
-            at.push(MenuPos::new(0, i as i32 + 1).sorted());
+            at.push(MenuPos::new(0, i as i32 + 1).collated(menu_sort_key));
             let match_name = e.match_name;
             let spec = MenuItemSpec::new(path, e.name, APPLY)
                 .workspace(workspace)
@@ -373,6 +396,36 @@ mod tests;
 #[cfg(test)]
 mod directory_tests {
     use super::*;
+
+    /// #730: Effect ▸ 3D Channel in Chinese sorts as AE 26 (pinyin among the
+    /// Latin names).
+    #[test]
+    fn chinese_effect_menu_sorts_by_pinyin() {
+        let mut names = [
+            "Cryptomatte",
+            "雾 3D",
+            "IDentifier",
+            "场深度",
+            "3D 通道提取",
+            "深度遮罩",
+            "ID 遮罩",
+            "EXtractoR",
+        ];
+        names.sort_by_key(|n| zh_sort_key(n));
+        assert_eq!(
+            names,
+            [
+                "3D 通道提取",
+                "场深度",
+                "Cryptomatte",
+                "EXtractoR",
+                "ID 遮罩",
+                "IDentifier",
+                "深度遮罩",
+                "雾 3D",
+            ]
+        );
+    }
 
     #[test]
     fn directory_matches_ae_menu() {
