@@ -237,9 +237,12 @@ impl PhotoshopDialog {
         replace: Option<&PrimPath>,
         reload: bool,
     ) {
+        let keep = reload
+            || crate::prefs::current(cx.resources).str("import.footage_interpretation_on_replace")
+                == "remember";
         cx.invoke_with("item.import_photoshop", serde_json::json!({
             "file": self.path, "document": doc, "kind": self.kind, "selection": selection,
-            "parent": self.parent, "comp": self.comp, "folder": self.folder, "replace": replace, "keep_name": reload,
+            "parent": self.parent, "comp": self.comp, "folder": self.folder, "replace": replace, "keep_name": reload, "keep_interpretation": keep,
             "editable": self.editable, "ignore_styles": self.kind == ImportKind::Footage && self.ignore,
             "fps": self.defaults.sequence_fps, "duration": self.defaults.still_duration,
             "label": self.defaults.labels.map(|labels| labels[0])

@@ -240,10 +240,6 @@ impl Command for ReplaceFile {
         if !view.is_a(&PrimType::ASSET) || kind == "solid" {
             return Err(fail(format!("{} is not a footage item", p.item)));
         }
-        if bae_model::psd::LayerImage::from_asset(&view).is_some() {
-            let styles = child(&p.item, bae_model::layer_styles::PRIM)?;
-            crate::effect::delete_all(tx, &[styles, child(&p.item, "masks")?])?;
-        }
         let path = Path::new(&p.file.path);
         let mut file = AssetFile::from_path(path, None, false)
             .map_err(|e| fail(format!("cannot use {}: {e}", p.file.path)))?;
@@ -280,6 +276,10 @@ impl Command for ReplaceFile {
             .filter(|n| !n.trim().is_empty())
             .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "Footage".to_owned());
+        if bae_model::psd::LayerImage::from_asset(&view).is_some() {
+            let styles = child(&p.item, bae_model::layer_styles::PRIM)?;
+            crate::effect::delete_all(tx, &[styles, child(&p.item, "masks")?])?;
+        }
         if !p.keep_name {
             set(tx, &p.item, "name", Value::String(name))?;
         }
