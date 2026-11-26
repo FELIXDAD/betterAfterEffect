@@ -256,6 +256,7 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) loading_lut: Option<crate::effects::lut::Load>,
     /// Automatically key animatable UI value edits.
     pub auto_key: bool,
     pub(crate) held_viewer_time: Option<(PrimPath, Time)>,
@@ -364,6 +365,8 @@ pub struct Session {
     pub timeline_toggles: Vec<&'static str>,
     /// The frame the Composition viewer shows and its key (Lumetri Scopes).
     pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
+    /// Working pixels before the display conversion, when a scope requests them.
+    pub scope_source: Option<bae_render::GpuImage>,
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,

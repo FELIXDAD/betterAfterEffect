@@ -137,8 +137,27 @@ fn version_line_and_about() {
 
 #[test]
 fn controls_have_accessibility_labels() {
-    // VoiceOver reads accesskit labels; icon buttons (toolbar tools, panel
-    // close / menu buttons, stopwatches), tabs and timeline rows have none.
+    if in_child(
+        "acceptance::startup::controls_have_accessibility_labels",
+        &[("BAE_LANG", "en")],
+    ) {
+        assert_control_labels();
+    }
+}
+
+#[test]
+fn controls_have_chinese_accessibility_labels() {
+    if in_child(
+        "acceptance::startup::controls_have_chinese_accessibility_labels",
+        &[("BAE_LANG", "zh")],
+    ) {
+        assert_control_labels();
+    }
+}
+
+fn assert_control_labels() {
+    use egui::accesskit::Role;
+    crate::i18n::init_from_env();
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
     let mut labelled = 0;
@@ -146,6 +165,17 @@ fn controls_have_accessibility_labels() {
     for n in h.root().children_recursive() {
         let a = n.accesskit_node();
         if a.bounding_box().is_none() || a.role() == egui::accesskit::Role::GenericContainer {
+            continue;
+        }
+        // An empty TextEdit exposes its insertion point as a zero-width TextRun.
+        // VoiceOver names the field, while its text run contains the editable value.
+        if a.role() == Role::TextRun
+            && a.bounding_box().is_some_and(|b| b.width() == 0.0)
+            && a.parent().is_some_and(|parent| {
+                matches!(parent.role(), Role::TextInput | Role::SearchInput)
+                    && parent.label().is_some_and(|name| !name.is_empty())
+            })
+        {
             continue;
         }
         if a.label().is_some_and(|l| !l.is_empty()) || a.value().is_some_and(|v| !v.is_empty()) {
@@ -164,11 +194,16 @@ fn controls_have_accessibility_labels() {
         }
     }
     println!("accessibility: {labelled} labelled, {unlabelled} unlabelled widgets");
-    assert!(
-        unlabelled * 10 <= labelled + unlabelled,
-        "{unlabelled} of {} widgets have no label",
-        labelled + unlabelled
-    );
+    assert_eq!(unlabelled, 0, "accessibility names missing at startup");
+    for name in [
+        "Scroll Project Columns",
+        "Timeline Layer Pane Width",
+        "Timeline Columns",
+        "Timeline Layer List",
+    ] {
+        let label = bae_ui::tr(name);
+        assert!(h.query_by_label(label).is_some(), "missing {label}");
+    }
 }
 
 // ---- Retest of #116 (dev d23a328): find controls by accessible name ----

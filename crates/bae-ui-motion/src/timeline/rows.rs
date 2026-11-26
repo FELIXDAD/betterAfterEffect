@@ -163,14 +163,20 @@ impl TimelinePanel {
                     .filter(|c| cols.visible(*c))
                     .collect();
                 if let (Some(first), Some(last)) = (lead_cols.first(), lead_cols.last()) {
-                    let lead = ui.interact(
-                        Rect::from_min_max(
-                            pos2(l + cols.x(*first), rect.top()),
-                            pos2(l + cols.right(*last), rect.bottom()),
-                        ),
-                        rid("lead"),
-                        Sense::click(),
-                    );
+                    let lead = ui
+                        .interact(
+                            Rect::from_min_max(
+                                pos2(l + cols.x(*first), rect.top()),
+                                pos2(l + cols.right(*last), rect.bottom()),
+                            ),
+                            rid("lead"),
+                            Sense::click(),
+                        )
+                        .labeled_toggle(
+                            egui::WidgetType::SelectableLabel,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Label and Layer Number")]),
+                            layer_selected,
+                        );
                     if lead.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
