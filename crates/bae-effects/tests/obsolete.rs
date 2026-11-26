@@ -281,3 +281,23 @@ fn the_planner_resolves_an_alias_to_its_target_once() {
             .is_none()
     );
 }
+
+#[test]
+fn legacy_lightning_uses_the_advanced_core_and_preserves_its_background() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(48, 32);
+    let background = Pixels::new(rect, |_, _| [0.12, 0.02, 0., 1.]);
+    let fx = get("ADBE Lightning").unwrap();
+    let args = vec![
+        (1, Value::Vec2([8., 16.5])),
+        (2, Value::Vec2([40., 16.5])),
+        (4, Value::Float(0.)),
+        (7, Value::Float(0.)),
+        (16, Value::Float(5.)),
+    ];
+    let image = run(&gpu, F32, fx, args, &background, rect, 1.);
+    assert!(image.data[16 * 48 + 24][1] > 0.8);
+    let corner = image.data[0];
+    assert!((corner[0] - 0.12).abs() < 0.001 && (corner[1] - 0.02).abs() < 0.001);
+    assert_eq!(corner[3], 1.);
+}
