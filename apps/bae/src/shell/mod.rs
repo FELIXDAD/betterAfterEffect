@@ -24,6 +24,8 @@ mod open_documents;
 #[cfg(any(windows, test))]
 mod save_guard;
 mod script_bindings;
+#[cfg(any(windows, test))]
+mod win_keys;
 #[cfg(windows)]
 mod win_save;
 mod window_state;
@@ -169,7 +171,13 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => None,
     };
 
-    let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows as _;
+        builder.with_msg_hook(win_keys::hook);
+    }
+    let event_loop = match builder.build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             tracing::error!("cannot create the event loop: {error}");
@@ -1118,23 +1126,7 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
 
 /// Shows `path` in Finder / Explorer (Reveal Preferences).
 fn reveal(path: &std::path::Path) {
-    let result = if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(path)
-            .spawn()
-    } else if cfg!(windows) {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .spawn()
-    } else {
-        std::process::Command::new("xdg-open")
-            .arg(path.parent().unwrap_or(path))
-            .spawn()
-    };
-    if let Err(error) = result {
-        tracing::warn!("could not reveal {}: {error}", path.display());
-    }
+    bae_platform::reveal(path);
 }
 
 /// Draws `shapes` (this frame's UI, textures already uploaded) offscreen and

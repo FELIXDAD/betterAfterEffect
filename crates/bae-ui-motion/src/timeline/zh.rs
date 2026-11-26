@@ -276,4 +276,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Composition Mini-Flowchart", "合成微型流程图"),
     ("Select", "选择"),
+    ("Frame Mix", "帧混合"),
+    ("Pixel Motion", "像素运动"),
 ];

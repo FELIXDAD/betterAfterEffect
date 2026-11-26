@@ -273,3 +273,103 @@ key = "direction"
 type = "angle"
 name = "Direction"
 default = 50
+
+[[effect]]
+id = "cc-jaws"
+name = "CC Jaws"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["CC Jaws"]
+shader = "shaders/cc_jaws.wgsl"
+
+[[effect.param]]
+id = 1
+key = "completion"
+type = "float"
+name = "Completion"
+default = 0
+range = [0, 1]
+
+[[effect.param]]
+id = 2
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 3
+key = "direction"
+type = "angle"
+name = "Direction"
+default = 0
+
+[[effect.param]]
+id = 4
+key = "height"
+type = "float"
+name = "Height"
+default = 0.099991
+range = [0, 1]
+
+[[effect.param]]
+id = 5
+key = "width"
+type = "float"
+name = "Width"
+default = 10
+range = [2, 25]
+
+[[effect.param]]
+id = 6
+key = "shape"
+type = "popup"
+name = "Shape"
+default = 1
+choices = ["Spikes", "RoboJaw", "Block", "Waves"]
+
+[[effect]]
+id = "cc-line-sweep"
+name = "CC Line Sweep"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["CS LineSweep"]
+shader = "shaders/cc_line_sweep.wgsl"
+
+[[effect.param]]
+id = 1
+key = "completion"
+type = "float"
+name = "Completion"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "direction"
+type = "angle"
+name = "Direction"
+default = 180
+
+[[effect.param]]
+id = 3
+key = "thickness"
+type = "float"
+name = "Thickness"
+default = 50
+range = [1, 1000]
+
+[[effect.param]]
+id = 4
+key = "slant"
+type = "float"
+name = "Slant"
+default = 50
+range = [0, 99]
+
+[[effect.param]]
+id = 5
+key = "flip_direction"
+type = "checkbox"
+name = "Flip Direction"
+default = false
