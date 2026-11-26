@@ -380,7 +380,10 @@ pub(super) fn frame(
         if !ui.input(|i| i.pointer.any_down()) {
             e.refocus = false;
         }
-    } else if escape || command_enter || (out.lost_focus() && !out.has_focus()) {
+    } else if escape {
+        // Esc cancels (AE): new text is not created, edits are dropped (#573).
+        state.editing = None;
+    } else if command_enter || (out.lost_focus() && !out.has_focus()) {
         let mut e = state.editing.take().expect("editing");
         if command_enter && e.buffer.ends_with('\n') {
             // The Enter of Cmd/Ctrl+Enter is not part of the text.
