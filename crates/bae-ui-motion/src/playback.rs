@@ -414,7 +414,14 @@ fn render_worker(
             synced = Some(generations);
         }
         let result = engine
-            .render(&job.stage, &job.rc, job.scene.key.resolution, None)
+            .render(
+                &job.stage,
+                &job.rc,
+                job.scene.key.resolution,
+                bae_render::Display::default(),
+                None,
+                None,
+            )
             .map_err(|e| e.to_string())
             // Not an interactive thread: it waits for the warm-up instead.
             .and_then(|(target, rect)| Ok((target, rect.ok_or("incomplete frame")?)))

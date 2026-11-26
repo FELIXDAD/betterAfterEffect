@@ -806,8 +806,9 @@ impl bae_gpu::WarmUp for VectorWarmUp {
         "vector renderer"
     }
 
+    /// Right after the fonts (text and shapes need it).
     fn priority(&self) -> u8 {
-        0
+        1
     }
 
     fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {

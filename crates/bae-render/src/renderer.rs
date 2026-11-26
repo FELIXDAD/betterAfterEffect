@@ -100,12 +100,33 @@ pub enum OutputAlpha {
     Over([f32; 3]),
 }
 
+/// How a viewer shows a frame (AE's Show Channel and Exposure); display only,
+/// never in exports.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Display {
+    /// 0 RGB, 1 Red, 2 Green, 3 Blue, 4 Alpha, 5 RGB Straight.
+    pub channel: u32,
+    /// Show a colour channel in its colour, not grey.
+    pub colorize: bool,
+    /// Exposure in stops.
+    pub exposure: f32,
+}
+
 /// Size of the output pass's uniform block.
 pub(crate) const OUTPUT_PARAMS_SIZE: u64 = 32;
 
 /// The output pass's uniform block (`output.wgsl` `Params`). `float`: the
 /// target is a float format, so colour outside `[0, alpha]` is kept.
 pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARAMS_SIZE as usize] {
+    output_params_display(alpha, float, Display::default())
+}
+
+/// [`output_params`] with a viewer's [`Display`].
+fn output_params_display(
+    alpha: OutputAlpha,
+    float: bool,
+    display: Display,
+) -> [u8; OUTPUT_PARAMS_SIZE as usize] {
     let (mode, bg) = match alpha {
         OutputAlpha::Premultiplied => (0u32, [0.0f32; 3]),
         OutputAlpha::Straight => (1, [0.0; 3]),
@@ -115,6 +136,9 @@ pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARA
     params[..12].copy_from_slice(bytemuck::cast_slice(&bg));
     params[16..20].copy_from_slice(&mode.to_ne_bytes());
     params[20..24].copy_from_slice(&u32::from(float).to_ne_bytes());
+    params[12..16].copy_from_slice(&display.exposure.to_ne_bytes());
+    params[24..28].copy_from_slice(&display.channel.to_ne_bytes());
+    params[28..32].copy_from_slice(&u32::from(display.colorize).to_ne_bytes());
     params
 }
 
@@ -197,7 +221,7 @@ pub struct Renderer {
     pipelines: Pipelines,
     pool: TexturePool,
     draws: DrawBuffer,
-    output_uniform: Option<(OutputAlpha, wgpu::Buffer)>,
+    output_uniform: Option<([u8; OUTPUT_PARAMS_SIZE as usize], wgpu::Buffer)>,
     readback_target: Option<OutputTarget>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
@@ -258,7 +282,7 @@ impl Renderer {
 
     /// A renderer with explicit settings.
     pub fn with_config(gpu: Arc<GpuContext>, config: RendererConfig) -> Self {
-        let pipelines = Pipelines::new(gpu.device());
+        let pipelines = Pipelines::new(&gpu);
         Self {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
@@ -409,7 +433,7 @@ impl Renderer {
         alpha: OutputAlpha,
         available: Option<OutputTarget>,
     ) -> Result<(RenderedFrame, OutputTarget), RenderError> {
-        let output = self.display_output(alpha, available);
+        let output = self.display_output(alpha, Display::default(), available);
         let (frame, target) = self.render(comp, request, frames, Some(output))?;
         Ok((frame, target.expect("display output requested")))
     }
@@ -436,7 +460,7 @@ impl Renderer {
             && let Some(image) = self.frames.get(key)
         {
             let image = image.clone();
-            let output = output.map(|out| self.submit_output(&image, out));
+            let output = output.map(|out| self.submit_output(&image, out, false));
             return Ok((
                 RenderedFrame {
                     image,
@@ -569,16 +593,33 @@ impl Renderer {
         alpha: OutputAlpha,
         available: Option<OutputTarget>,
     ) -> Result<OutputTarget, RenderError> {
-        let out = self.display_output(alpha, available);
-        Ok(self.submit_output(&frame.image, out))
+        self.output_texture_display(frame, alpha, Display::default(), available)
     }
 
-    fn submit_output(&mut self, image: &GpuImage, output: DisplayOutput) -> OutputTarget {
+    /// [`Renderer::output_texture`] as a viewer shows it ([`Display`]). When
+    /// the frame is incomplete, `available` comes back untouched.
+    pub fn output_texture_display(
+        &mut self,
+        frame: &RenderedFrame,
+        alpha: OutputAlpha,
+        display: Display,
+        available: Option<OutputTarget>,
+    ) -> Result<OutputTarget, RenderError> {
+        let out = self.display_output(alpha, display, available);
+        Ok(self.submit_output(&frame.image, out, frame.incomplete))
+    }
+
+    fn submit_output(
+        &mut self,
+        image: &GpuImage,
+        output: DisplayOutput,
+        incomplete: bool,
+    ) -> OutputTarget {
         let device = self.gpu.device();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("bae-render.output"),
         });
-        let target = output.record(device, &mut self.pipelines, &mut encoder, image, false);
+        let target = output.record(device, &mut self.pipelines, &mut encoder, image, incomplete);
         self.gpu.queue().submit([encoder.finish()]);
         target
     }
@@ -586,25 +627,25 @@ impl Renderer {
     fn display_output(
         &mut self,
         alpha: OutputAlpha,
+        display: Display,
         available: Option<OutputTarget>,
     ) -> DisplayOutput {
+        let params = output_params_display(alpha, false, display);
         let device = self.gpu.device();
         let (previous, uniform) = self.output_uniform.get_or_insert_with(|| {
             use wgpu::util::DeviceExt;
             (
-                alpha,
+                params,
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("bae-render.output"),
-                    contents: &output_params(alpha, false),
+                    contents: &params,
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 }),
             )
         });
-        if *previous != alpha {
-            self.gpu
-                .queue()
-                .write_buffer(uniform, 0, &output_params(alpha, false));
-            *previous = alpha;
+        if *previous != params {
+            self.gpu.queue().write_buffer(uniform, 0, &params);
+            *previous = params;
         }
         DisplayOutput {
             available,
