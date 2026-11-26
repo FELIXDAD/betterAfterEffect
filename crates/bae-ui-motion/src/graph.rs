@@ -1702,7 +1702,9 @@ impl GraphEditor {
         if resp.hovered() {
             let trackpad = cfg!(target_os = "macos") && ui.input(|i| i.events.iter().any(|event| matches!(event, egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, .. } if delta.y != 0.0)));
             let dy = if trackpad {
-                crate::viewer::wheel(ui).pan.y
+                crate::viewer::wheel(ui, crate::viewer::Magnification::default())
+                    .pan
+                    .y
             } else {
                 ui.input(|i| i.smooth_scroll_delta.y)
             };
