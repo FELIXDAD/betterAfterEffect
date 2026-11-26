@@ -973,6 +973,67 @@ fn a_departed_log_nobody_holds_is_taken_over() {
     newcomer_sees(&dir, "n", &expected);
 }
 
+/// A client's own log can be all that holds some ops: edits nobody saved, or a
+/// departed client's log that was deleted because this one held it. A client
+/// that restarts from the saved project and at once takes a departed log over
+/// (its first cleanup pass asks its session for a snapshot) must not replace
+/// its log with a snapshot made before the session read that log back.
+#[test]
+fn a_restarted_client_keeps_what_only_its_own_log_holds() {
+    let (_tmp, dir) = project_dir();
+    let absorb = || DirConfig {
+        absorb_departed: true,
+        ..cleaner()
+    };
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "a", absorb(), 2),
+    ];
+    work(&mut clients, 20);
+    let mut a = clients.pop().unwrap();
+    drop(clients);
+    // a goes on alone, then quits; nobody saves the project.
+    for _ in 0..10 {
+        a.edit();
+        a.pump();
+    }
+    edit_each(&mut a);
+    a.pump();
+    let expected = state(&a.stage);
+    drop(a);
+
+    // 1. a comes back while x looks long gone and no log holds x's: its first
+    // pump scans the folder, runs a cleanup pass and asks for a snapshot.
+    age_client(&dir, "x", true);
+    let mut a = Client::open(&dir, "a", absorb(), 3);
+    for _ in 0..4 {
+        a.pump();
+    }
+    assert_eq!(state(&a.stage), expected);
+    newcomer_sees(&dir, "n1", &expected);
+    let stats = a.dir.stats().clone();
+    assert_eq!(has_logs(&dir, "x"), [false, false], "{stats:?}");
+    assert_eq!(stats.snapshots_appended, 0, "{stats:?}");
+
+    // 2. Now a's logs are all that hold x's edits. y joins, edits and leaves; a
+    // quits and comes back once more, and takes y's logs over too.
+    let mut both = vec![a, Client::open(&dir, "y", fast(), 4)];
+    work(&mut both, 10);
+    edit_each(&mut both[1]);
+    settle(&mut both);
+    let expected = state(&both[0].stage);
+    drop(both);
+    age_client(&dir, "y", true);
+    let mut a = Client::open(&dir, "a", absorb(), 5);
+    for _ in 0..4 {
+        a.pump();
+    }
+    assert_eq!(state(&a.stage), expected);
+    drop(a);
+    newcomer_sees(&dir, "n2", &expected);
+    assert_eq!(has_logs(&dir, "y"), [false, false]);
+}
+
 #[test]
 fn leftover_temporary_and_lock_files_are_removed() {
     let (_tmp, dir) = project_dir();

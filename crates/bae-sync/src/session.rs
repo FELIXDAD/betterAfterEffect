@@ -14,7 +14,19 @@ use crate::protocol::{DocKey, Message};
 use crate::transport::Transport;
 
 /// Payloads received in one pump, per document: `(version, data)`.
-type Incoming = BTreeMap<DocKey, Vec<(VersionVector, Vec<u8>)>>;
+type Payloads = BTreeMap<DocKey, Vec<(VersionVector, Vec<u8>)>>;
+
+/// What one pump received that is handled after its receive loop.
+#[derive(Default)]
+struct Incoming {
+    /// Imported one batch per document.
+    payloads: Payloads,
+    /// Documents the remote asked a snapshot of. They are answered after the
+    /// import, so a snapshot holds everything that arrived before the request:
+    /// the shared folder asks right after it delivered the records of our own log
+    /// (on start, or re-delivered), and replaces that log with the answer.
+    snapshot_requests: Vec<DocKey>,
+}
 
 /// Settings of a [`SyncSession`].
 #[derive(Clone, Debug)]
@@ -258,15 +270,18 @@ impl SyncSession {
     ) -> Result<PumpOutcome, SyncError> {
         let mut out = PumpOutcome::default();
         let hello = self.maybe_hello(docs, transport, now, &mut out);
-        let mut incoming = Incoming::new();
+        let mut incoming = Incoming::default();
         let received = self.receive(docs, transport, &mut incoming, now, &mut out);
         // Import what arrived even when the link failed part-way (a periodic
         // `Hello` that could not be sent included): the remote counts it as
         // delivered (a client that sends its last edits and closes at once must
         // not lose them), and the CRDT import does not need the link.
-        self.import(docs, incoming, &mut out);
+        self.import(docs, incoming.payloads, &mut out);
         hello?;
         received?;
+        for doc in incoming.snapshot_requests {
+            self.send_snapshot(docs, transport, doc, &mut out)?;
+        }
         out.presence_changed |= self.peers.expire(now);
         self.maybe_presence(transport, now, &mut out)?;
         // A document that appeared since the last hello (created locally, or the
@@ -314,9 +329,10 @@ impl SyncSession {
         Ok(out)
     }
 
-    /// Handle up to `max_messages_per_pump` received messages; payloads are
-    /// collected in `incoming` for [`import`](Self::import). Stops at the first
-    /// transport error, keeping what was collected before it.
+    /// Handle up to `max_messages_per_pump` received messages; payloads and
+    /// snapshot requests are collected in `incoming` for after the loop
+    /// ([`import`](Self::import), [`send_snapshot`](Self::send_snapshot)).
+    /// Stops at the first transport error, keeping what was collected before it.
     fn receive(
         &mut self,
         docs: &dyn DocSet,
@@ -331,7 +347,7 @@ impl SyncSession {
             };
             out.received += 1;
             self.stats.messages_received += 1;
-            self.handle(docs, transport, msg, incoming, now, out)?;
+            self.handle(docs, msg, incoming, now, out);
         }
         Ok(())
     }
@@ -369,12 +385,11 @@ impl SyncSession {
     fn handle(
         &mut self,
         docs: &dyn DocSet,
-        transport: &mut dyn Transport,
         msg: Message,
         incoming: &mut Incoming,
         now: Instant,
         out: &mut PumpOutcome,
-    ) -> Result<(), SyncError> {
+    ) {
         match msg {
             Message::Hello {
                 protocol,
@@ -398,7 +413,11 @@ impl SyncSession {
                     remote.entry(doc.clone()).or_default().merge(&version);
                 }
                 // Imported after the receive loop, one batch per document.
-                incoming.entry(doc).or_default().push((version, data));
+                incoming
+                    .payloads
+                    .entry(doc)
+                    .or_default()
+                    .push((version, data));
             }
             Message::Presence { ref client, .. } => {
                 if client != &self.config.client {
@@ -407,21 +426,37 @@ impl SyncSession {
                 }
             }
             Message::SnapshotRequest { doc } => {
-                let Some(version) = docs.version(&doc) else {
-                    return Ok(());
-                };
-                match docs.export_snapshot(&doc) {
-                    Ok(data) => {
-                        if let Some(remote) = &mut self.remote {
-                            remote.entry(doc.clone()).or_default().merge(&version);
-                        }
-                        self.send(transport, Message::Snapshot { doc, version, data }, out)?;
-                    }
-                    Err(e) => out.errors.push(e),
+                if !incoming.snapshot_requests.contains(&doc) {
+                    incoming.snapshot_requests.push(doc);
                 }
             }
         }
-        Ok(())
+    }
+
+    /// Answer a `SnapshotRequest` (after this pump's import): a snapshot of the
+    /// whole document. Documents we do not have are not answered.
+    fn send_snapshot(
+        &mut self,
+        docs: &dyn DocSet,
+        transport: &mut dyn Transport,
+        doc: DocKey,
+        out: &mut PumpOutcome,
+    ) -> Result<(), SyncError> {
+        let Some(version) = docs.version(&doc) else {
+            return Ok(());
+        };
+        match docs.export_snapshot(&doc) {
+            Ok(data) => {
+                if let Some(remote) = &mut self.remote {
+                    remote.entry(doc.clone()).or_default().merge(&version);
+                }
+                self.send(transport, Message::Snapshot { doc, version, data }, out)
+            }
+            Err(e) => {
+                out.errors.push(e);
+                Ok(())
+            }
+        }
     }
 
     /// Send our presence when it changed or the heartbeat is due, or "left".
@@ -461,7 +496,7 @@ impl SyncSession {
 
     /// Import what arrived, one batch per document (one mirror rebuild and one
     /// event per sublayer instead of one per message).
-    fn import(&mut self, docs: &mut dyn DocSet, incoming: Incoming, out: &mut PumpOutcome) {
+    fn import(&mut self, docs: &mut dyn DocSet, incoming: Payloads, out: &mut PumpOutcome) {
         for (doc, items) in incoming {
             // A set may create documents on import (the relay does), so a missing
             // document is only "unknown" if the set says so.
