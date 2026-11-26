@@ -235,6 +235,7 @@ impl Message {
     /// [`encode`](Self::encode) in two parts, `head` then `data`, without copying
     /// the payload of `Updates` and `Snapshot` (`data` is that payload, empty for
     /// other messages). For transports that send large messages piece by piece.
+    #[cfg(any(feature = "hub", test))]
     pub(crate) fn into_encoded_parts(self) -> (Vec<u8>, Vec<u8>) {
         let tag = match &self {
             Message::Updates { .. } => TAG_UPDATES,
