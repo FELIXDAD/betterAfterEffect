@@ -64,6 +64,9 @@ pub(crate) use menus::{
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
 
+// Registration contract of the footage optical-flow backend.
+const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
+
 /// Row height and switch cell width: AE 26's (17 and about 15 points).
 const ROW_H: f32 = 17.0;
 const TABS_H: f32 = 22.0;
@@ -199,7 +202,10 @@ pub struct TimelinePanel {
     focus_search: bool,
     comment_edit: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
-    expr_edit: Option<(PrimPath, String, String)>,
+    /// The expression field being edited: its text, and the stored source it
+    /// started from (a pick whip or the language menu changing the stored
+    /// expression meanwhile replaces the text).
+    expr_edit: Option<(PrimPath, String, String, String)>,
     /// The field being edited: its text and selection (chars), for the pick whip
     /// and the language menu, which take its focus.
     expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
@@ -533,11 +539,14 @@ impl TimelinePanel {
                 out.push(row);
                 continue;
             };
+            let stored = query::attr_spec(stage, path, attr).and_then(|s| s.expression.as_ref());
             let lines = match &self.expr_edit {
-                Some((p, a, buf)) if p == path && a == attr => buf.split('\n').count(),
-                _ => query::attr_spec(stage, path, attr)
-                    .and_then(|s| s.expression.as_ref())
-                    .map_or(1, |e| e.source.split('\n').count()),
+                Some((p, a, buf, base))
+                    if p == path && a == attr && stored.is_some_and(|e| e.source == *base) =>
+                {
+                    buf.split('\n').count()
+                }
+                _ => stored.map_or(1, |e| e.source.split('\n').count()),
             }
             .clamp(1, MAX_EXPR_LINES);
             for line in 0..lines {
@@ -772,8 +781,12 @@ impl TimelinePanel {
                     Sense::click_and_drag(),
                 )
                 .labeled(egui::WidgetType::Other, tr("Time Graph"));
+            // From where the button went down, not where the drag was recognised
+            // (a few points later), or a tight marquee misses keys there (#551).
             if bg.drag_started_by(egui::PointerButton::Primary)
-                && let Some(p) = bg.interact_pointer_pos()
+                && let Some(p) = ui
+                    .input(|i| i.pointer.press_origin())
+                    .or_else(|| bg.interact_pointer_pos())
             {
                 self.drag = Some(Drag::Marquee {
                     origin: p,
@@ -809,7 +822,11 @@ impl TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
-        let switch_input = ui.input(switches::SwitchInput::read);
+        let pixel_motion = cx
+            .resources
+            .get::<crate::gpu_preview::PreviewEffects>()
+            .is_some_and(|effects| effects.0.contains(FRAME_INTERPOLATOR_ID));
+        let switch_input = ui.input(|input| switches::SwitchInput::read(input, pixel_motion));
         let scrolled = egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])

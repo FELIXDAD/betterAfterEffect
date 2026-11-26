@@ -4,7 +4,7 @@
 //! implements a panel registers its id first and replaces the outline.
 
 use bae_ui::{Panel, PanelContext, PanelKind, tr};
-use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
+use egui::{Align2, Sense, Ui, vec2};
 
 use bae_ui::theme::{self, color};
 
@@ -205,7 +205,6 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
         ],
     ),
     ("progress", "Progress", &[Area("")]),
-    ("audio", "Audio", &[]),
     (
         "layer",
         "Layer",
@@ -228,11 +227,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
             if tx.get(id).is_some_and(|k| !k.is_placeholder) {
                 continue;
             }
-            let kind = if *id == "audio" {
-                PanelKind::new(*title, |_| Box::new(AudioPanel))
-            } else {
-                PanelKind::new(*title, move |_| Box::new(Shell { rows }))
-            };
+            let kind = PanelKind::new(*title, move |_| Box::new(Shell { rows }));
             let _ = tx.replace(owner.clone(), *id, std::sync::Arc::new(kind));
         }
     });
@@ -363,73 +358,6 @@ impl Panel for ToolsPanel {
     }
 }
 
-/// AE's Audio panel: the level meters of the left and right channels with the
-/// dB scale, and the level sliders, all at rest.
-struct AudioPanel;
-
-impl Panel for AudioPanel {
-    fn ui(&mut self, ui: &mut Ui, _cx: &mut PanelContext<'_>) {
-        let r = ui.max_rect().shrink2(vec2(10.0, 8.0));
-        ui.allocate_rect(r, Sense::hover());
-        let p = ui.painter();
-        let font = theme::small();
-        let top = r.top() + 6.0;
-        let bottom = r.bottom() - 24.0;
-        if bottom - top < 40.0 {
-            return;
-        }
-        let y_of = |db: f32| top + (12.0 - db) / 60.0 * (bottom - top);
-        // Meters: two bars, the dB scale to their right.
-        let meter = |x: f32| Rect::from_min_max(pos2(x, top), pos2(x + 10.0, bottom));
-        for x in [r.left(), r.left() + 13.0] {
-            p.rect_filled(meter(x), 0.0, Color32::from_gray(24));
-        }
-        let scale_x = r.left() + 28.0;
-        // Sliders: the level of each channel, their dB scale on the right.
-        let slider_x = r.left() + (r.width() * 0.55).max(90.0);
-        for db in [
-            12.0, 6.0, 0.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0, -42.0, -48.0,
-        ] {
-            let y = y_of(db);
-            p.text(
-                pos2(scale_x, y),
-                Align2::LEFT_CENTER,
-                format!("{db:.1}"),
-                font.clone(),
-                color::TEXT_DIM,
-            );
-            p.text(
-                pos2(slider_x + 34.0, y),
-                Align2::LEFT_CENTER,
-                format!("{db:+.1} dB").replace("+0.0", "0.0"),
-                font.clone(),
-                color::TEXT_DIM,
-            );
-        }
-        for x in [slider_x, slider_x + 14.0] {
-            p.line_segment(
-                [pos2(x + 4.0, top), pos2(x + 4.0, bottom)],
-                (2.0, Color32::from_gray(20)),
-            );
-            let y = y_of(0.0);
-            p.add(egui::Shape::convex_polygon(
-                vec![pos2(x, y - 4.0), pos2(x + 8.0, y), pos2(x, y + 4.0)],
-                color::TEXT_DIM,
-                egui::Stroke::NONE,
-            ));
-        }
-        for (i, x) in [slider_x - 6.0, slider_x + 20.0].into_iter().enumerate() {
-            p.text(
-                pos2(x, r.bottom() - 8.0),
-                Align2::LEFT_CENTER,
-                if i == 0 { "0.0" } else { "0.0  dB" },
-                font.clone(),
-                color::ACCENT_DIM,
-            );
-        }
-    }
-}
-
 /// Chinese for the outlines (AE 26's zh_CN dictionary).
 pub(crate) const ZH: &[(&str, &str)] = &[
     ("Presets", "预设"),
@@ -535,6 +463,7 @@ mod tests {
             let elsewhere = matches!(
                 id,
                 "info"
+                    | "audio"
                     | "character"
                     | "align"
                     | "paragraph"

@@ -179,10 +179,13 @@ impl TimelinePanel {
             pos2(head.left() + cols.viewport - 14.0, head.center().y),
             vec2(20.0, 20.0),
         );
-        let on = session.lock().graph_editor;
-        let gresp = ui
-            .interact(ge, ui.id().with("graph_editor_switch"), Sense::click())
-            .labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
+        let gresp = ui.interact(ge, ui.id().with("graph_editor_switch"), Sense::click());
+        if gresp.clicked() {
+            self.graph_mode = !self.graph_mode;
+            session.lock().graph_editor = self.graph_mode;
+        }
+        let on = self.graph_mode;
+        let gresp = gresp.labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
         if on {
             ui.painter().rect_filled(ge, 2.0, color::BUTTON_ON);
         }
@@ -198,9 +201,6 @@ impl TimelinePanel {
                 color::ICON_DIM
             },
         );
-        if gresp.clicked() {
-            session.lock().graph_editor = !on;
-        }
         gresp.on_hover_text(tr("Graph Editor"));
 
         let flow = ge.translate(vec2(-5.0 * 26.0, 0.0));
@@ -214,8 +214,7 @@ impl TimelinePanel {
         }
 
         // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
-        // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
-        // comp, as AE does.
+        // Frame Blending, Motion Blur.
         for (i, (attr, icon, name, tip, enabled)) in [
             (
                 "motion_blur",
@@ -229,7 +228,7 @@ impl TimelinePanel {
                 Icon::FrameBlend,
                 "Enable Frame Blending",
                 "Enables Frame Blending for all layers with the Frame Blend switch set",
-                false,
+                true,
             ),
             (
                 "hide_shy_layers",
@@ -243,7 +242,7 @@ impl TimelinePanel {
                 Icon::Cube,
                 "Draft 3D",
                 "Turn fast 3D previews on or off",
-                true,
+                false,
             ),
         ]
         .into_iter()
@@ -251,8 +250,16 @@ impl TimelinePanel {
         {
             let r = ge.translate(vec2(-26.0 * (i as f32 + 1.0), 0.0));
             let on = enabled && bool_attr(cx.stage, &info.path, attr);
-            let resp = ui
-                .interact(r, ui.id().with(("comp_switch", attr)), Sense::click())
+            let mut cell = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(r)
+                    .id_salt(("comp_switch", attr)),
+            );
+            if !enabled {
+                cell.disable();
+            }
+            let resp = cell
+                .interact(r, cell.id().with("button"), Sense::click())
                 .labeled_toggle(egui::WidgetType::Button, tr(name), on);
             if on {
                 ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
@@ -470,6 +477,20 @@ impl TimelinePanel {
                 }
             }
             f += step;
+        }
+        if let Some((path, revision, spans)) = &session.lock().cached_preview
+            && path == &info.path
+            && *revision == cx.stage.revision()
+        {
+            // AE: green segments directly under the work area bar, above the
+            // ruler ticks, one per cached run of frames (AE-UI-064).
+            for span in spans {
+                p.hline(
+                    axis.x(span.start)..=axis.x(span.end),
+                    wa_top + 8.0 + 2.0,
+                    Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
+                );
+            }
         }
         // CTI handle.
         let x = axis.x(now);
