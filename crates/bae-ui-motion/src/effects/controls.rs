@@ -24,6 +24,7 @@ use crate::session::SharedSession;
 pub(crate) struct ControlsState {
     /// Collapsed effects (AE shows new effects expanded).
     collapsed: HashSet<String>,
+    pub(crate) show_presets: bool,
     /// Parameters whose slider / dial row is shown.
     open_params: HashSet<String>,
     /// Collapsed parameter groups.
@@ -68,6 +69,41 @@ pub(crate) fn show(
         );
         if state.collapsed.contains(effect.as_str()) {
             continue;
+        }
+        if state.show_presets {
+            widgets::menu_button(ui, tr("Animation Presets"), |ui| {
+                let indexed = cx
+                    .resources
+                    .get::<std::sync::Arc<crate::presets::PresetIndex>>()
+                    .map(|index| {
+                        index.refresh(false);
+                        index.entries()
+                    })
+                    .unwrap_or_default();
+                let mut available = false;
+                for preset in indexed.iter() {
+                    let [saved] = preset.effects.as_ref() else {
+                        continue;
+                    };
+                    if saved.match_name != match_name {
+                        continue;
+                    }
+                    available = true;
+                    if ui.button(&preset.name).clicked() {
+                        let time = query::to_key_time(cx.stage, effect, now);
+                        let edits: Vec<_> = saved.values.iter().map(|(attr,value)| {
+                            json!({"path":effect,"time":time,"attr":attr,"value":value})
+                        }).collect();
+                        if !edits.is_empty() {
+                            cx.invoke_with("attr.set_many", json!({"edits":edits}));
+                        }
+                        ui.close();
+                    }
+                }
+                if !available {
+                    ui.add_enabled(false, egui::Button::new(tr("None")));
+                }
+            });
         }
         match def {
             Some(def) => params(ui, cx, session, eval, state, effect, &def, now),
