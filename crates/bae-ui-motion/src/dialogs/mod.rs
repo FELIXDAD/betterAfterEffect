@@ -6,6 +6,7 @@
 //! values; OK runs one `bae-motion` command (one undo step), Cancel runs none.
 
 mod camera_settings;
+mod comp_from_selection;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
@@ -77,6 +78,8 @@ pub enum Dialog {
     RenderSettings(Box<render_output::RenderSettings>),
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
+    /// File ▸ New Comp from Selection….
+    CompFromSelection(Box<comp_from_selection::CompFromSelection>),
     /// An alert: a message and OK (import errors …).
     Alert {
         title: String,
@@ -374,12 +377,12 @@ pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
 }
 
 /// Open Output Module Settings for render queue item `item`.
-pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64) {
+pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64, module: usize) {
     let queue = crate::render_queue::shared(cx.resources);
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
     if d.open.is_none()
-        && let Some(o) = render_output::OutputModule::new(&queue, item)
+        && let Some(o) = render_output::OutputModule::new(&queue, item, module)
     {
         d.open = Some(Dialog::OutputModule(Box::new(o)));
     }
@@ -429,6 +432,22 @@ pub(crate) fn transform_value(
     }
 }
 
+/// File ▸ New Comp from Selection… for `items` (Project panel selection).
+pub(crate) fn comp_from_selection(
+    cx: &PanelContext<'_>,
+    items: Vec<PrimPath>,
+    still: Option<bae_model::Time>,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = comp_from_selection::CompFromSelection::new(cx.stage, items, still) {
+        d.open = Some(Dialog::CompFromSelection(Box::new(v)));
+    }
+}
+
 /// Open the mask value dialog of `kind` for `masks` at comp time `now`.
 pub(crate) fn mask_value(
     cx: &PanelContext<'_>,
@@ -469,6 +488,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         transform_value::STRINGS,
         mask_value::STRINGS,
         render_output::STRINGS,
+        comp_from_selection::STRINGS,
     ]
     .concat()
 }
@@ -491,10 +511,21 @@ impl bae_ui::DialogHost for MotionDialogs {
             return;
         }
         let dialogs = shared(cx.resources);
+        // Comps New Comp from Selection made, for the Render Queue.
+        let queue = std::mem::take(&mut crate::common::session(cx.resources).lock().queue_comps);
+        if !queue.is_empty() {
+            let rq = crate::render_queue::shared(cx.resources);
+            for comp in &queue {
+                if let Some(info) = query::comp_info(cx.stage, comp) {
+                    rq.lock()
+                        .add(&info, &crate::render_queue::default_output_dir());
+                }
+            }
+            cx.open_panel("render_queue");
+        }
         // Draw without holding the lock (a dialog may read the memory).
         let open = {
             let mut d = dialogs.lock();
-            d.frame_checks.repaint_while_running(ctx);
             d.open
                 .take()
                 .or_else(|| d.frame_checks.next_notice())
@@ -525,6 +556,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::MaskValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
+            Dialog::CompFromSelection(d) => d.ui(ctx, cx, &session),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
             Dialog::ViewOptions(v) => crate::viewer::view_options::view_options_ui(ctx, cx, v),
             Dialog::BackgroundColor(c) => {

@@ -25,6 +25,8 @@ mod appearance_preferences;
 mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
+mod camera_preferences;
+mod classic_effects;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
@@ -42,9 +44,12 @@ mod layer_creation_preferences;
 mod layers;
 #[cfg(target_os = "macos")]
 mod layout;
+mod liquify;
+mod marker_label_preferences;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
+mod panel_parity;
 mod preference_controls;
 mod project_preferences;
 #[cfg(target_os = "macos")]
@@ -312,11 +317,15 @@ impl Gui {
     }
 
     /// A native menu click on the contributed item `registry_id` (e.g.
-    /// `motion.layer.new.solid`): queued like `UserEvent::Menu`. Returns `false`
-    /// (and does nothing) when the item is disabled, as a greyed-out menu item.
+    /// `motion.layer.new.solid`), queued like `UserEvent::Menu`. Disabled items
+    /// and commands blocked by a modal dialog return `false`.
     pub fn menu(&mut self, registry_id: &str) -> bool {
         let item = self.menu_item(registry_id);
-        if !item.enabled {
+        if !item.enabled
+            || !self
+                .workspace
+                .accepts_native_menu(self.app.resources(), &item.invocation)
+        {
             return false;
         }
         self.pending.push(item.invocation);
@@ -731,17 +740,28 @@ pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {
 /// Every painted text of the last frame (debugging aid for failures).
 pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     let mut out = Vec::new();
-    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+    visit_painted_text(h, |_, text| out.push(text.galley.text().to_owned()));
+    out
+}
+
+fn visit_painted_text<State>(
+    h: &Harness<'_, State>,
+    mut visit: impl FnMut(Rect, &egui::epaint::TextShape),
+) {
+    fn walk(
+        shape: &egui::Shape,
+        clip: Rect,
+        visit: &mut impl FnMut(Rect, &egui::epaint::TextShape),
+    ) {
         match shape {
-            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Text(t) => visit(clip, t),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, visit)),
             _ => {}
         }
     }
     for clipped in &h.output().shapes {
-        walk(&clipped.shape, &mut out);
+        walk(&clipped.shape, clipped.clip_rect, &mut visit);
     }
-    out
 }
 
 /// The process-wide GPU for tests (`None` without an adapter), shared with every
