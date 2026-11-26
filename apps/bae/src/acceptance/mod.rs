@@ -48,6 +48,7 @@ mod marker_label_preferences;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
+mod panel_parity;
 mod preference_controls;
 mod project_preferences;
 #[cfg(target_os = "macos")]
