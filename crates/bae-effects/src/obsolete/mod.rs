@@ -1,6 +1,7 @@
 //! Obsolete AE identities keep their disk parameter schemas and render through the modern effect.
 mod color;
 mod noise_utility;
+mod spatial;
 
 use super::{Builtin, EffectInfo, Registry};
 use crate::params::Params;
@@ -180,6 +181,7 @@ pub(super) fn register(r: &mut Registry) {
     for target in &r.effects {
         noise_utility::register(target, &mut aliases);
         color::register(target, &mut aliases);
+        spatial::register(target, &mut aliases);
     }
     r.effects.extend(aliases);
 }

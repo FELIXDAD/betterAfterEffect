@@ -82,6 +82,42 @@ fn particle_world_seek_reproduces_pixels_and_cropped_tiles() {
 }
 
 #[test]
+fn long_lived_floor_particles_match_after_a_backward_seek() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(80, 64);
+    let input = test_image(rect).upload(&gpu, TextureFormat::Rgba16Float);
+    let inst = instance(
+        "CC Particle World",
+        vec![
+            (4, Value::Float(0.00001)),
+            (5, Value::Float(3000.)),
+            (16, Value::Float(0.)),
+            (18, Value::Float(0.02)),
+            (23, Value::Int(4)),
+            (24, Value::Float(2.)),
+            (25, Value::Float(2.)),
+            (66, Value::Int(4)),
+        ],
+    );
+    let mut target = Standalone::new(gpu.clone(), TextureFormat::Rgba16Float);
+    let mut render = |seconds| {
+        let p = EffectParams {
+            time: Time::from_seconds(seconds),
+            ..EffectParams::new(&inst)
+        };
+        let out = builtin(&inst.effect)
+            .render(&mut target, &p, &input, rect)
+            .unwrap();
+        target.finish().unwrap();
+        Pixels::download(&gpu, &out).data
+    };
+    let late = render(2999.);
+    assert!(late.iter().any(|p| p[3] > 0.1));
+    assert_ne!(render(10.), late);
+    assert_eq!(render(2999.), late);
+}
+
+#[test]
 fn simulation_presets_render_finite_pixels_in_both_working_formats() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(80, 64);
