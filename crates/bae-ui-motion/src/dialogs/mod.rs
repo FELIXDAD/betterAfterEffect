@@ -67,14 +67,20 @@ pub enum Dialog {
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
-    Alert { title: String, message: String },
+    Alert {
+        title: String,
+        message: String,
+    },
     /// View ▸ View Options (Cmd/Ctrl+Alt+U).
     ViewOptions(Box<crate::viewer::view_options::LayerControls>),
     /// View ▸ Panel Background Color ▸ Select Custom Background Color…
     BackgroundColor([u8; 3]),
     /// View ▸ Resolution ▸ Custom…: pixel steps (horizontal, vertical);
     /// `nested`: also for the comps nested in the active one.
-    CustomResolution { steps: [u32; 2], nested: bool },
+    CustomResolution {
+        steps: [u32; 2],
+        nested: bool,
+    },
 }
 
 /// Open dialog and remembered values.
