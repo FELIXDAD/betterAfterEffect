@@ -11,7 +11,13 @@ fn animation_track_camera_applies_the_perspective_effect() {
         .first()
         .expect("selected plate")
         .clone();
-    assert!(h.state_mut().menu("motion.anim.track_camera"));
+    let item = h
+        .state()
+        .menu_items()
+        .into_iter()
+        .find(|i| i.invocation.id == "motion.anim.track_camera")
+        .expect("Animation > Track Camera");
+    assert!(h.state_mut().menu(&item.id));
     settle(&mut h);
     let stage = h.state().stage();
     let effects = effect::effects_of(stage, &plate);

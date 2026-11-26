@@ -1053,7 +1053,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     }
     if id == ids::TRACK_CAMERA {
         let layers = session.lock().selected_layers.clone();
-        if layers.len() == 1 && !query::is_locked(stage, &layers[0]) {
+        if !layers.is_empty() && layers.iter().all(|l| !query::is_locked(stage, l)) {
             crate::effects::apply(cx, &layers, bae_motion::camera_track::MATCH_NAME);
         }
         return true;

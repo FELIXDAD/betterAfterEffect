@@ -34,6 +34,8 @@ struct Job {
     step: Arc<AtomicU8>,
     result: mpsc::Receiver<Result<Solution, String>>,
     revision: u64,
+    sources: Vec<PrimPath>,
+    comp: PrimPath,
 }
 impl Drop for Job {
     fn drop(&mut self) {
@@ -88,12 +90,34 @@ fn start(
     let (send, result) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let step = Arc::new(AtomicU8::new(1));
+    let mut inputs = vec![source.clone()];
+    let mut n = 0;
+    while n < inputs.len() {
+        let path = &inputs[n];
+        let mut next = query::comp_layers(cx.stage, path);
+        if let Some(v) = cx
+            .stage
+            .prim(path)
+            .and_then(|p| query::static_value(&p, "source"))
+            && let Some(src) = v.as_prim_ref()
+        {
+            next.push(src.clone());
+        }
+        for p in next {
+            if !inputs.contains(&p) {
+                inputs.push(p);
+            }
+        }
+        n += 1;
+    }
     let job = Job {
         settings,
         stop: stop.clone(),
         step: step.clone(),
         result,
         revision: cx.stage.revision(),
+        sources: inputs,
+        comp: comp.clone(),
     };
     let ui = ui.clone();
     std::thread::Builder::new()
@@ -234,7 +258,24 @@ impl bae_ui::DialogHost for Host {
             if !cx.stage.has_prim(p) {
                 return false;
             }
-            if cx.stage.revision() != j.revision {
+            let invalid = cx.stage.changes_since(j.revision).is_none_or(|events| {
+                events.flat_map(|e| &e.changes).any(|change| {
+                    let path = change.path();
+                    if p.is_prefix_of(path) {
+                        return Settings::read(cx.stage, p) != j.settings;
+                    }
+                    let touches = |path: &PrimPath| {
+                        path == &j.comp
+                            || j.sources
+                                .iter()
+                                .any(|src| src.is_prefix_of(path) || path.is_prefix_of(src))
+                    };
+                    touches(path)
+                        || matches!(change,bae_model::Change::PrimMoved{from,..} if touches(from))
+                })
+            });
+            j.revision = cx.stage.revision();
+            if invalid {
                 completed.push((
                     p.clone(),
                     j.settings,
