@@ -195,6 +195,7 @@ pub struct OpenOptions {
     /// Frame rate assigned to image sequences (AE preference "Sequence Footage
     /// frames per second", default 30).
     pub sequence_frame_rate: FrameRate,
+    pub psd_layer: Option<bae_model::psd::LayerImage>,
 }
 
 impl Default for OpenOptions {
@@ -202,6 +203,7 @@ impl Default for OpenOptions {
         OpenOptions {
             sequence: SequenceMode::Single,
             sequence_frame_rate: DEFAULT_SEQUENCE_RATE,
+            psd_layer: None,
         }
     }
 }
@@ -212,6 +214,7 @@ impl OpenOptions {
         OpenOptions {
             sequence: SequenceMode::Sequence,
             sequence_frame_rate: rate,
+            ..Default::default()
         }
     }
 }
@@ -315,6 +318,9 @@ impl MediaFormats {
         path: &Path,
         options: &OpenOptions,
     ) -> Result<Box<dyn MediaSource>, MediaError> {
+        if let Some(layer) = options.psd_layer {
+            return crate::psd::open(path, Some(layer));
+        }
         let format = self.find(path)?;
         if options.sequence == SequenceMode::Sequence
             && format.is_image()
