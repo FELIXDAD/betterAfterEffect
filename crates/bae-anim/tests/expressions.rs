@@ -89,6 +89,41 @@ fn eval(s: &Stage, t: f64) -> bae_anim::EvaluatedComp {
 }
 
 #[test]
+fn vector_and_interpolation_examples() {
+    let samples = [
+        ("add([4,5],[1,2,3])[2]", 3.0),
+        ("sub(5,[2,3])[1]", -3.0),
+        ("mul([2,3],4)[1]", 12.0),
+        ("div([2,3],4)[1]", 0.75),
+        ("clamp([1,2],[0],[3,4])[1]", 2.0),
+        ("dot([1,2],[3,4,5])", 11.0),
+        ("cross([1,2],[3,4])[0]", 0.0),
+        ("length([1,2],[4,6])", 5.0),
+        ("normalize([3,4])[0]", 0.6),
+        ("lookAt([0,0,0],[1,1,1])[2]", 30.0),
+        ("linear(0.4,1,0,10,20)", 14.0),
+        ("ease(.25,0,1)", 0.15625),
+        ("easeIn(.25,0,1)", 0.109375),
+        ("easeOut(.25,0,1)", 0.296875),
+    ];
+    let s = stage(|b| {
+        for (i, (source, _)) in samples.iter().enumerate() {
+            let layer = b.layer(MAIN, &format!("case{i}"), "null");
+            b.expr(&layer, "transform:rotation", 0.0, source);
+        }
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    for (layer, (source, want)) in comp.layers.iter().zip(samples) {
+        assert!(
+            (layer.transform.rotation.z - want).abs() < 1e-8,
+            "{source}: {}",
+            layer.transform.rotation.z
+        );
+    }
+}
+
+#[test]
 fn vector_arithmetic_on_2d_position() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");
