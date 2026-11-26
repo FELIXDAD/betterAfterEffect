@@ -712,10 +712,10 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `ClearMask` | `motion.layer.delete_mask_or_vertices` |  | Alt+Backspace / Alt+Delete | Opt+Backspace / Opt+Delete |  | A | ⏸ |
 | `OpenSource` | `motion.layer.open_source` |  | PadEnter / Enter | PadEnter / Enter |  | B | ☐ |
 | `PasteAlt` | `motion.edit.paste_at_current_time` |  | Ctrl+Alt+V | Cmd+Opt+V |  | B | ☐ |
-| `SelectNext` | `motion.layer.select_next` | `{"add":false}` | Ctrl+Down | Cmd+Down |  | B | ☐ |
-| `SelectNextAdd` | `motion.layer.select_next` | `{"add":true}` | Ctrl+Shift+Down | Cmd+Shift+Down |  | B | ☐ |
-| `SelectPrevious` | `motion.layer.select_previous` | `{"add":false}` | Ctrl+Up | Cmd+Up |  | B | ☐ |
-| `SelectPreviousAdd` | `motion.layer.select_previous` | `{"add":true}` | Ctrl+Shift+Up | Cmd+Shift+Up |  | B | ☐ |
+| `SelectNext` | `motion.layer.select_next` | `{"add":false}` | Ctrl+Down | Cmd+Down |  | B | ✅ |
+| `SelectNextAdd` | `motion.layer.select_next` | `{"add":true}` | Ctrl+Shift+Down | Cmd+Shift+Down |  | B | ✅ |
+| `SelectPrevious` | `motion.layer.select_previous` | `{"add":false}` | Ctrl+Up | Cmd+Up |  | B | ✅ |
+| `SelectPreviousAdd` | `motion.layer.select_previous` | `{"add":true}` | Ctrl+Shift+Up | Cmd+Shift+Up |  | B | ✅ |
 | `SetWorkAreaEnd` | `motion.work_area_end` |  | N | N |  | B | ✅ |
 | `SetWorkAreaStart` | `motion.work_area_start` |  | B | B |  | B | ✅ |
 | `SetWorkAreaToSelection` | `motion.comp.set_work_area_to_selection` |  | Ctrl+Alt+B | Cmd+Opt+B |  | B | ✅ |
@@ -727,15 +727,15 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompOpenCompStuff` | `motion.panel.toggle_viewer_timeline` |  | \\ | \\ |  | B | ☐ |
 | `CompScollSelectedLayerToTop` | `motion.timeline.scroll_selected_layer_to_top` |  | X | X |  | C | ☐ |
 | `CompScrollToCurrentTime` | `motion.timeline.scroll_to_current_time` |  | D | D |  | C | ☐ |
-| `CompSelectLayer1` | `motion.timeline.select_layer` | `{"index":1}` | Pad1 | Pad1 |  | B | ☐ |
-| `CompSelectLayer2` | `motion.timeline.select_layer` | `{"index":2}` | Pad2 | Pad2 |  | B | ☐ |
-| `CompSelectLayer3` | `motion.timeline.select_layer` | `{"index":3}` | Pad3 | Pad3 |  | B | ☐ |
-| `CompSelectLayer4` | `motion.timeline.select_layer` | `{"index":4}` | Pad4 | Pad4 |  | B | ☐ |
-| `CompSelectLayer5` | `motion.timeline.select_layer` | `{"index":5}` | Pad5 | Pad5 |  | B | ☐ |
-| `CompSelectLayer6` | `motion.timeline.select_layer` | `{"index":6}` | Pad6 | Pad6 |  | B | ☐ |
-| `CompSelectLayer7` | `motion.timeline.select_layer` | `{"index":7}` | Pad7 | Pad7 |  | B | ☐ |
-| `CompSelectLayer8` | `motion.timeline.select_layer` | `{"index":8}` | Pad8 | Pad8 |  | B | ☐ |
-| `CompSelectLayer9` | `motion.timeline.select_layer` | `{"index":9}` | Pad9 | Pad9 |  | B | ☐ |
+| `CompSelectLayer1` | `motion.timeline.select_layer` | `{"index":1}` | Pad1 | Pad1 |  | B | ✅ |
+| `CompSelectLayer2` | `motion.timeline.select_layer` | `{"index":2}` | Pad2 | Pad2 |  | B | ✅ |
+| `CompSelectLayer3` | `motion.timeline.select_layer` | `{"index":3}` | Pad3 | Pad3 |  | B | ✅ |
+| `CompSelectLayer4` | `motion.timeline.select_layer` | `{"index":4}` | Pad4 | Pad4 |  | B | ✅ |
+| `CompSelectLayer5` | `motion.timeline.select_layer` | `{"index":5}` | Pad5 | Pad5 |  | B | ✅ |
+| `CompSelectLayer6` | `motion.timeline.select_layer` | `{"index":6}` | Pad6 | Pad6 |  | B | ✅ |
+| `CompSelectLayer7` | `motion.timeline.select_layer` | `{"index":7}` | Pad7 | Pad7 |  | B | ✅ |
+| `CompSelectLayer8` | `motion.timeline.select_layer` | `{"index":8}` | Pad8 | Pad8 |  | B | ✅ |
+| `CompSelectLayer9` | `motion.timeline.select_layer` | `{"index":9}` | Pad9 | Pad9 |  | B | ✅ |
 | `CompTimeZoomFrames` | `motion.timeline.zoom_to_frames` |  | ; | ; |  | C | ☐ |
 | `CompTimeZoomIn` | `timeline.zoom_in` |  | = | = |  | C | ✅ |
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - |  | C | ✅ |
@@ -750,15 +750,15 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompToggleMaskShapesAddState` | `motion.reveal` | `{"what":"mask_path","add":true}` | Shift+M | Shift+M |  | B | ✅ |
 | `CompToggleMaskShapesAddStateNewKF` | `motion.toggle_key` | `{"attr":"mask_path"}` | Alt+Shift+M | Opt+Shift+M |  | B | ✅ |
 | `CompToggleMaskShapesNewKF` | `motion.toggle_key` | `{"attr":"mask_path","only":true}` |  | Opt+M |  | B | ☐ |
-| `CompToggleSelectLayer1` | `motion.timeline.select_layer` | `{"index":1,"toggle":true}` | Shift+Pad1 | Shift+Pad1 |  | B | ☐ |
-| `CompToggleSelectLayer2` | `motion.timeline.select_layer` | `{"index":2,"toggle":true}` | Shift+Pad2 | Shift+Pad2 |  | B | ☐ |
-| `CompToggleSelectLayer3` | `motion.timeline.select_layer` | `{"index":3,"toggle":true}` | Shift+Pad3 | Shift+Pad3 |  | B | ☐ |
-| `CompToggleSelectLayer4` | `motion.timeline.select_layer` | `{"index":4,"toggle":true}` | Shift+Pad4 | Shift+Pad4 |  | B | ☐ |
-| `CompToggleSelectLayer5` | `motion.timeline.select_layer` | `{"index":5,"toggle":true}` | Shift+Pad5 | Shift+Pad5 |  | B | ☐ |
-| `CompToggleSelectLayer6` | `motion.timeline.select_layer` | `{"index":6,"toggle":true}` | Shift+Pad6 | Shift+Pad6 |  | B | ☐ |
-| `CompToggleSelectLayer7` | `motion.timeline.select_layer` | `{"index":7,"toggle":true}` | Shift+Pad7 | Shift+Pad7 |  | B | ☐ |
-| `CompToggleSelectLayer8` | `motion.timeline.select_layer` | `{"index":8,"toggle":true}` | Shift+Pad8 | Shift+Pad8 |  | B | ☐ |
-| `CompToggleSelectLayer9` | `motion.timeline.select_layer` | `{"index":9,"toggle":true}` | Shift+Pad9 | Shift+Pad9 |  | B | ☐ |
+| `CompToggleSelectLayer1` | `motion.timeline.select_layer` | `{"index":1,"toggle":true}` | Shift+Pad1 | Shift+Pad1 |  | B | ✅ |
+| `CompToggleSelectLayer2` | `motion.timeline.select_layer` | `{"index":2,"toggle":true}` | Shift+Pad2 | Shift+Pad2 |  | B | ✅ |
+| `CompToggleSelectLayer3` | `motion.timeline.select_layer` | `{"index":3,"toggle":true}` | Shift+Pad3 | Shift+Pad3 |  | B | ✅ |
+| `CompToggleSelectLayer4` | `motion.timeline.select_layer` | `{"index":4,"toggle":true}` | Shift+Pad4 | Shift+Pad4 |  | B | ✅ |
+| `CompToggleSelectLayer5` | `motion.timeline.select_layer` | `{"index":5,"toggle":true}` | Shift+Pad5 | Shift+Pad5 |  | B | ✅ |
+| `CompToggleSelectLayer6` | `motion.timeline.select_layer` | `{"index":6,"toggle":true}` | Shift+Pad6 | Shift+Pad6 |  | B | ✅ |
+| `CompToggleSelectLayer7` | `motion.timeline.select_layer` | `{"index":7,"toggle":true}` | Shift+Pad7 | Shift+Pad7 |  | B | ✅ |
+| `CompToggleSelectLayer8` | `motion.timeline.select_layer` | `{"index":8,"toggle":true}` | Shift+Pad8 | Shift+Pad8 |  | B | ✅ |
+| `CompToggleSelectLayer9` | `motion.timeline.select_layer` | `{"index":9,"toggle":true}` | Shift+Pad9 | Shift+Pad9 |  | B | ✅ |
 | `CompToggleUberAnimatingKeyframesAddState` | `motion.reveal` | `{"what":"animated","add":true}` | Shift+U | Shift+U |  | B | ✅ |
 | `CompToggleUberAnimatingKeyframesAndExpressionsAddState` | `motion.reveal` | `{"what":"animation","add":true}` |  |  |  | B | ✅ |
 | `CompTwirlAnchorPoint` | `motion.reveal` | `{"what":"transform:anchor_point","add":false}` | A | A |  | B | ✅ |
@@ -789,30 +789,30 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `NextKeyframeInSelection` | `motion.timeline.next_keyframe_in_selection` |  | Shift+K | Shift+K |  | C | ✅ |
 | `NudgeDown` | `motion.layer.nudge_position` | `{"dx":0,"dy":1}` | Down | Down |  | A | ☐ |
 | `NudgeDownMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":10}` | Shift+Down | Shift+Down |  | A | ☐ |
-| `NudgeEarlier` | `motion.layer.nudge_time` | `{"frames":-1}` | Alt+PageUp | Opt+PageUp |  | B | ☐ |
-| `NudgeEarlierMore` | `motion.layer.nudge_time` | `{"frames":-10}` | Alt+Shift+PageUp | Opt+Shift+PageUp |  | B | ☐ |
-| `NudgeKeyframesEarlier` | `motion.timeline.nudge_keyframes` | `{"frames":-1}` | Alt+Left | Opt+Left |  | C | ☐ |
-| `NudgeKeyframesEarlierMore` | `motion.timeline.nudge_keyframes` | `{"frames":-10}` | Alt+Shift+Left | Opt+Shift+Left |  | C | ☐ |
-| `NudgeKeyframesLater` | `motion.timeline.nudge_keyframes` | `{"frames":1}` | Alt+Right | Opt+Right |  | C | ☐ |
-| `NudgeKeyframesLaterMore` | `motion.timeline.nudge_keyframes` | `{"frames":10}` | Alt+Shift+Right | Opt+Shift+Right |  | C | ☐ |
-| `NudgeLater` | `motion.layer.nudge_time` | `{"frames":1}` | Alt+PageDown | Opt+PageDown |  | B | ☐ |
-| `NudgeLaterMore` | `motion.layer.nudge_time` | `{"frames":10}` | Alt+Shift+PageDown | Opt+Shift+PageDown |  | B | ☐ |
+| `NudgeEarlier` | `motion.layer.nudge_time` | `{"frames":-1}` | Alt+PageUp | Opt+PageUp |  | B | ✅ |
+| `NudgeEarlierMore` | `motion.layer.nudge_time` | `{"frames":-10}` | Alt+Shift+PageUp | Opt+Shift+PageUp |  | B | ✅ |
+| `NudgeKeyframesEarlier` | `motion.timeline.nudge_keyframes` | `{"frames":-1}` | Alt+Left | Opt+Left |  | C | ✅ |
+| `NudgeKeyframesEarlierMore` | `motion.timeline.nudge_keyframes` | `{"frames":-10}` | Alt+Shift+Left | Opt+Shift+Left |  | C | ✅ |
+| `NudgeKeyframesLater` | `motion.timeline.nudge_keyframes` | `{"frames":1}` | Alt+Right | Opt+Right |  | C | ✅ |
+| `NudgeKeyframesLaterMore` | `motion.timeline.nudge_keyframes` | `{"frames":10}` | Alt+Shift+Right | Opt+Shift+Right |  | C | ✅ |
+| `NudgeLater` | `motion.layer.nudge_time` | `{"frames":1}` | Alt+PageDown | Opt+PageDown |  | B | ✅ |
+| `NudgeLaterMore` | `motion.layer.nudge_time` | `{"frames":10}` | Alt+Shift+PageDown | Opt+Shift+PageDown |  | B | ✅ |
 | `NudgeLeft` | `motion.layer.nudge_position` | `{"dx":-1,"dy":0}` | Left | Left |  | A | ☐ |
 | `NudgeLeftMore` | `motion.layer.nudge_position` | `{"dx":-10,"dy":0}` | Shift+Left | Shift+Left |  | A | ☐ |
-| `NudgeOpacityDown` | `motion.layer.nudge_opacity` | `{"delta":-1}` | Ctrl+Alt+PadMinus | Control+Opt+PadMinus |  | B | ☐ |
-| `NudgeOpacityDownMore` | `motion.layer.nudge_opacity` | `{"delta":-10}` | Ctrl+Alt+Shift+PadMinus | Control+Opt+Shift+PadMinus |  | B | ☐ |
-| `NudgeOpacityUp` | `motion.layer.nudge_opacity` | `{"delta":1}` | Ctrl+Alt+PadPlus | Control+Opt+PadPlus |  | B | ☐ |
-| `NudgeOpacityUpMore` | `motion.layer.nudge_opacity` | `{"delta":10}` | Ctrl+Alt+Shift+PadPlus | Control+Opt+Shift+PadPlus |  | B | ☐ |
+| `NudgeOpacityDown` | `motion.layer.nudge_opacity` | `{"delta":-1}` | Ctrl+Alt+PadMinus | Control+Opt+PadMinus |  | B | ✅ |
+| `NudgeOpacityDownMore` | `motion.layer.nudge_opacity` | `{"delta":-10}` | Ctrl+Alt+Shift+PadMinus | Control+Opt+Shift+PadMinus |  | B | ✅ |
+| `NudgeOpacityUp` | `motion.layer.nudge_opacity` | `{"delta":1}` | Ctrl+Alt+PadPlus | Control+Opt+PadPlus |  | B | ✅ |
+| `NudgeOpacityUpMore` | `motion.layer.nudge_opacity` | `{"delta":10}` | Ctrl+Alt+Shift+PadPlus | Control+Opt+Shift+PadPlus |  | B | ✅ |
 | `NudgeRight` | `motion.layer.nudge_position` | `{"dx":1,"dy":0}` | Right | Right |  | A | ☐ |
 | `NudgeRightMore` | `motion.layer.nudge_position` | `{"dx":10,"dy":0}` | Shift+Right | Shift+Right |  | A | ☐ |
-| `NudgeRotCCW` | `motion.layer.nudge_rotation` | `{"delta":-1}` | PadMinus | PadMinus |  | B | ☐ |
-| `NudgeRotCCWMore` | `motion.layer.nudge_rotation` | `{"delta":-10}` | Shift+PadMinus | Shift+PadMinus |  | B | ☐ |
-| `NudgeRotCW` | `motion.layer.nudge_rotation` | `{"delta":1}` | PadPlus | PadPlus |  | B | ☐ |
-| `NudgeRotCWMore` | `motion.layer.nudge_rotation` | `{"delta":10}` | Shift+PadPlus | Shift+PadPlus |  | B | ☐ |
-| `NudgeScaleLarger` | `motion.layer.nudge_scale` | `{"delta":1}` | Alt+PadPlus / Ctrl+PadPlus | Opt+PadPlus / Cmd+PadPlus |  | B | ☐ |
-| `NudgeScaleLargerMore` | `motion.layer.nudge_scale` | `{"delta":10}` | Alt+Shift+PadPlus / Ctrl+Shift+PadPlus | Opt+Shift+PadPlus / Cmd+Shift+PadPlus |  | B | ☐ |
-| `NudgeScaleSmaller` | `motion.layer.nudge_scale` | `{"delta":-1}` | Alt+PadMinus / Ctrl+PadMinus | Opt+PadMinus / Cmd+PadMinus |  | B | ☐ |
-| `NudgeScaleSmallerMore` | `motion.layer.nudge_scale` | `{"delta":-10}` | Alt+Shift+PadMinus / Ctrl+Shift+PadMinus | Opt+Shift+PadMinus / Cmd+Shift+PadMinus |  | B | ☐ |
+| `NudgeRotCCW` | `motion.layer.nudge_rotation` | `{"delta":-1}` | PadMinus | PadMinus |  | B | ✅ |
+| `NudgeRotCCWMore` | `motion.layer.nudge_rotation` | `{"delta":-10}` | Shift+PadMinus | Shift+PadMinus |  | B | ✅ |
+| `NudgeRotCW` | `motion.layer.nudge_rotation` | `{"delta":1}` | PadPlus | PadPlus |  | B | ✅ |
+| `NudgeRotCWMore` | `motion.layer.nudge_rotation` | `{"delta":10}` | Shift+PadPlus | Shift+PadPlus |  | B | ✅ |
+| `NudgeScaleLarger` | `motion.layer.nudge_scale` | `{"delta":1}` | Alt+PadPlus / Ctrl+PadPlus | Opt+PadPlus / Cmd+PadPlus |  | B | ✅ |
+| `NudgeScaleLargerMore` | `motion.layer.nudge_scale` | `{"delta":10}` | Alt+Shift+PadPlus / Ctrl+Shift+PadPlus | Opt+Shift+PadPlus / Cmd+Shift+PadPlus |  | B | ✅ |
+| `NudgeScaleSmaller` | `motion.layer.nudge_scale` | `{"delta":-1}` | Alt+PadMinus / Ctrl+PadMinus | Opt+PadMinus / Cmd+PadMinus |  | B | ✅ |
+| `NudgeScaleSmallerMore` | `motion.layer.nudge_scale` | `{"delta":-10}` | Alt+Shift+PadMinus / Ctrl+Shift+PadMinus | Opt+Shift+PadMinus / Cmd+Shift+PadMinus |  | B | ✅ |
 | `NudgeUp` | `motion.layer.nudge_position` | `{"dx":0,"dy":-1}` | Up | Up |  | A | ☐ |
 | `NudgeUpMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":-10}` | Shift+Up | Shift+Up |  | A | ☐ |
 | `PrevKeyframe` | `motion.prev_key` |  | J | J |  | B | ✅ |
