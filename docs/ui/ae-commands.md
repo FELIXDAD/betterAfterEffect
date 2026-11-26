@@ -117,7 +117,7 @@
 | License... | 131108 | `motion.file.license` |  |  |  | B | Ⓐ |
 | Reveal in Explorer | 131109 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
 | Reveal in Bridge | 131110 | `motion.file.reveal_in_bridge` |  |  |  | B | Ⓐ |
-| Project Settings... | 131112 | `motion.file.project_settings` |  | Ctrl+Alt+Shift+K | Cmd+Opt+Shift+K | E | ☐ |
+| Project Settings... | 131112 | `motion.file.project_settings` |  | Ctrl+Alt+Shift+K | Cmd+Opt+Shift+K | E | ✅ |
 | Exit（仅 Windows） | 131114 | `app.quit` |  | Ctrl+Q | Cmd+Q | B | ✅ |
 
 ### Edit
@@ -565,7 +565,7 @@
 | Switch to Last 3D View | 589857 | `motion.view.switch_to_last_3d_view` |  | Esc | Esc | A | ⏸ |
 | Look at Selected Layers | 589858 | `motion.view.look_at_selected_layers` |  | Ctrl+Alt+Shift+\\ / F | Cmd+Opt+Shift+\\ / F | A | ⏸ |
 | Look at All Layers | 589859 | `motion.view.look_at_all_layers` |  | Ctrl+Shift+F | Cmd+Shift+F | A | ⏸ |
-| Go to Time... | 589861 | `motion.view.go_to_time` |  | Alt+Shift+J | Opt+Shift+J | B | ☐ |
+| Go to Time... | 589861 | `motion.view.go_to_time` |  | Alt+Shift+J | Opt+Shift+J | B | ✅ |
 
 ### Window
 

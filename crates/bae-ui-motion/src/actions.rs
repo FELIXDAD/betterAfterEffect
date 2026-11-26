@@ -57,6 +57,8 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const GO_TO_TIME: &str = "motion.view.go_to_time";
+    pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
@@ -209,6 +211,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::GO_TO_TIME, "Go to Time..."),
+    (ids::PROJECT_SETTINGS, "Project Settings..."),
     (ids::ADD_EXPRESSION, "Add Expression"),
     (ids::ENABLE_EXPRESSIONS, "Enable Expressions"),
     (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
@@ -940,6 +944,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::GO_TO_TIME => {
+            crate::dialogs::go_to_time(cx, session);
+            return true;
+        }
+        ids::PROJECT_SETTINGS => {
+            crate::dialogs::project_settings(cx);
             return true;
         }
         ids::PRE_COMPOSE => {
@@ -1781,6 +1793,8 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Go to Time...", "转到时间..."),
+    ("Project Settings...", "项目设置..."),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),

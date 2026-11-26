@@ -498,6 +498,10 @@ pub fn registry_id(match_name: &str) -> std::borrow::Cow<'_, str> {
 #[derive(Default)]
 pub struct EffectLibrary {
     effects: FxHashMap<String, Arc<dyn Effect>>,
+    /// Frame interpolation for Pixel Motion frame blending (not a listed
+    /// effect): params 1 = phase 0–1, 2 = the next frame's comp time (flicks,
+    /// read through [`LayerDependency::source`] of the layer).
+    interpolator: Option<Arc<dyn Effect>>,
     /// Generation of the app registry last synced from ([`Self::sync`]).
     synced: Option<u64>,
 }
@@ -519,6 +523,16 @@ impl EffectLibrary {
     }
 
     /// The implementation of `match_name`.
+    /// Sets the frame interpolator (see the field); kept across [`Self::sync`].
+    pub fn set_frame_interpolator(&mut self, effect: Arc<dyn Effect>) {
+        self.interpolator = Some(effect);
+    }
+
+    /// The frame interpolator, when one is registered.
+    pub fn frame_interpolator(&self) -> Option<&Arc<dyn Effect>> {
+        self.interpolator.as_ref()
+    }
+
     pub fn get(&self, match_name: &str) -> Option<&Arc<dyn Effect>> {
         self.effects.get(match_name)
     }
