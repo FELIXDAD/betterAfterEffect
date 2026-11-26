@@ -68,7 +68,7 @@ fn for_batches(
     mut visit: impl FnMut(&[PositionedGlyph], Affine, TextPaint, f32),
 ) {
     if text.styles.is_empty() {
-        visit(&run.glyphs, transform, text.paint, 1.0);
+        visit(&run.glyphs, transform, run.paint, 1.0);
         return;
     }
     for batch in run.glyphs.chunk_by(|a, b| {
@@ -501,7 +501,7 @@ impl TextProvider {
                             &mut layout,
                             &mask.shape,
                             options,
-                            &doc.justification,
+                            &doc.paragraph.justification,
                         );
                     }
                     layout

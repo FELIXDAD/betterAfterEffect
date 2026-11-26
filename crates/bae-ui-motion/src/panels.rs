@@ -207,25 +207,25 @@ impl Panel for PropertiesPanel {
                     if r.lost_focus() {
                         ui.data_mut(|d| d.remove::<String>(key));
                         if text != doc.text {
-                            d2.text = text;
+                            d2.set_text(&text);
                             commit = true;
                         }
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        let mut size = d2.font_size;
+                        let mut size = d2.style.font_size;
                         let px = format!(" {}", tr("px")); // 像素 in Chinese (#197)
                         let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(&px).range(1.0..=2000.0).label(tr("Font Size")));
                         if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                            d2.font_size = size;
+                            d2.style.font_size = size;
                             commit = true;
                         }
                     });
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Fill Color")).color(color::TEXT));
-                        let mut c = d2.fill_color.map(|v| v as f32);
+                        let mut c = d2.style.fill_color.map(|v| v as f32);
                         if ui.color_edit_button_rgba_unmultiplied(&mut c).changed() {
-                            d2.fill_color = c.map(f64::from);
+                            d2.style.fill_color = c.map(f64::from);
                             commit = true;
                         }
                     });
@@ -237,12 +237,12 @@ impl Panel for PropertiesPanel {
                             (Icon::TextAlignCenter, "center", "Center Text"),
                             (Icon::TextAlignRight, "right", "Right Align Text"),
                         ] {
-                            let on = d2.justification == value;
+                            let on = d2.paragraph.justification == value;
                             let r = icons::button(ui, icon, 20.0, on)
                                 .labeled_toggle(egui::WidgetType::Button, tr(name), on)
                                 .on_hover_text(tr(name));
                             if r.clicked() && !on {
-                                d2.justification = value.to_owned();
+                                d2.paragraph.justification = value.to_owned();
                                 commit = true;
                             }
                         }

@@ -73,6 +73,11 @@ const ZH: &[(&str, &str)] = &[
         "“{file}”是一个文件夹，但不是 BAE 项目。请换一个名字。",
     ),
     ("Could not open the project.", "无法打开项目。"),
+    // AE 2026 zh_CN: RevertCancelAlert
+    (
+        "Revert the project to the last saved version? All changes will be lost.",
+        "是否将项目恢复到上次保存的版本？所有更改都将丢失。",
+    ),
     // Why a project did not open (open_error)
     ("“{file}” does not exist.", "“{file}”不存在。"),
     (
@@ -265,6 +270,8 @@ mod tests {
                 "Don't Save",
                 "Cancel",
                 "Could not open the project.",
+                "Revert the project to the last saved version? All changes will be lost.",
+                "Revert",
                 "Could not save the project.",
                 "Untitled Project",
                 "Layer “{name}” is locked. Unlock it first.",
