@@ -371,10 +371,15 @@ pub(super) fn frame(
                 {
                     // A parametric shape (rectangle, ellipse, polystar): AE
                     // selects its group and shows the group's box.
-                    session.lock().selected_layers = vec![layer.clone()];
                     state.group = comp
                         .layer(layer)
                         .and_then(|l| group_edit::group_at(l, view, pos));
+                    let mut s = session.lock();
+                    s.selected_layers = vec![layer.clone()];
+                    // The Timeline selects its row too.
+                    if let Some(g) = &state.group {
+                        s.selected_groups = vec![format!("{layer}#{g}")];
+                    }
                 }
                 Some(bae_model::LayerKind::Shape) => {
                     let own = overlay::editable_paths(
@@ -410,7 +415,20 @@ pub(super) fn frame(
         }
     }
 
-    // The selected shape group: only while its layer stays selected.
+    // The shape group selected in the Timeline shows its box (AE: a shape
+    // tool's new group, a group row clicked); the viewer selects groups there.
+    state.group = session
+        .lock()
+        .selected_groups
+        .iter()
+        .rev()
+        .filter_map(|id| crate::session::group_prim(id))
+        .find(|g| {
+            stage
+                .prim(g)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::SHAPE_GROUP))
+        });
+    // Only while its layer stays selected.
     if state
         .group
         .as_ref()
@@ -512,8 +530,13 @@ pub(super) fn frame(
             _ if !shift => state.vertices.clear(),
             _ => {}
         }
-        if !matches!(t, Press::Group | Press::GroupHandle(_)) {
-            state.group = None;
+        if !matches!(t, Press::Group | Press::GroupHandle(_))
+            && let Some(g) = state.group.take()
+        {
+            session
+                .lock()
+                .selected_groups
+                .retain(|id| crate::session::group_prim(id).as_ref() != Some(&g));
         }
         state.press = Some((t, pos));
     }

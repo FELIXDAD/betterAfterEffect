@@ -133,6 +133,7 @@ pub fn place_on_path(
     let first = options.first_margin;
     let last = len - options.last_margin;
     let baseline = layout.lines[0].baseline;
+    let vertical = layout.vertical();
     for line in &layout.lines {
         let chars = line.chars.clone();
         if chars.is_empty() {
@@ -140,7 +141,18 @@ pub fn place_on_path(
         }
         let centers: Vec<f64> = layout.chars[chars.clone()]
             .iter()
-            .map(|c| c.origin.x + c.advance / 2.0)
+            .map(|c| {
+                if vertical {
+                    c.origin.y
+                        + if c.combined_em.is_some() {
+                            0.
+                        } else {
+                            c.advance / 2.
+                        }
+                } else {
+                    c.origin.x + c.advance / 2.
+                }
+            })
             .collect();
         let start = match justification {
             "center" | "justify_last_center" => (first + last) / 2.0 - line.width / 2.0,
@@ -149,7 +161,6 @@ pub fn place_on_path(
         };
         let count = centers.len();
         for (k, i) in chars.enumerate() {
-            let c = &layout.chars[i];
             let s = if options.force_alignment && count > 1 {
                 let a = first + layout.chars[line.chars.start].advance / 2.0;
                 let b = last - layout.chars[line.chars.end - 1].advance / 2.0;
@@ -160,10 +171,19 @@ pub fn place_on_path(
             let (p, dir) = path.at(s);
             let angle = if options.perpendicular {
                 dir.y.atan2(dir.x)
+                    - if vertical {
+                        std::f64::consts::FRAC_PI_2
+                    } else {
+                        0.
+                    }
             } else {
                 0.0
             };
-            let pivot = Vec2::new(c.origin.x + c.advance / 2.0, baseline);
+            let pivot = if vertical {
+                Vec2::new(baseline, centers[k])
+            } else {
+                Vec2::new(centers[k], baseline)
+            };
             let place =
                 Affine::translate(p.to_vec2()) * Affine::rotate(angle) * Affine::translate(-pivot);
             let style = &mut layout.styles[i];

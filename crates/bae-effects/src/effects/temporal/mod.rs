@@ -16,8 +16,10 @@ use crate::{
 };
 
 use super::{image_grid, layer_input};
+use bae_render::effect::LayerStage;
 
 mod flow;
+mod timewarp;
 
 const LABEL: &str = "bae.effects.temporal";
 const SHADER: &str = include_str!("time.wgsl");
@@ -312,9 +314,7 @@ fn next_frame(p: &EffectParams<'_>) -> Option<LayerDependency> {
     ))
 }
 
-/// AE Timewarp's parameters. Only Method, Adjust Time By, Speed, Source Frame
-/// Vector Detail and Motion Blur act (Pixel Motion through the shared optical
-/// flow); smoothing, filtering, matte, warp layer and crops are not used.
+/// AE Timewarp's registered parameters.
 fn timewarp() -> DefBuilder {
     let mut b = DefBuilder::new("ADBE Timewarp", "Timewarp", "Time")
         .popup(
@@ -543,29 +543,69 @@ fn mixed_frames(kind: Kind, p: &EffectParams<'_>, v: Params<'_>) -> Vec<(Time, f
 
 /// Timewarp's source positions (fractional frames at the comp rate): one, or
 /// one per motion-blur sample across what the shutter sees.
+fn shutter_times(p: &EffectParams<'_>, v: Params<'_>) -> Vec<Time> {
+    if !v.b(24) {
+        return vec![p.time];
+    }
+    let (angle, phase) = if v.popup(25) == 2 {
+        (p.shutter_angle, p.shutter_phase)
+    } else {
+        (v.f(26), -v.f(26) * 0.5)
+    };
+    if angle == 0. {
+        return vec![p.time];
+    }
+    let n = v.f(27).max(1.) as usize;
+    let step = p.time_step.as_seconds() / p.layer_time_scale;
+    (0..n)
+        .map(|i| {
+            let offset = phase + angle * (i as f64 + 0.5) / n as f64;
+            p.time + Time::from_seconds(step * offset / 360.)
+        })
+        .collect()
+}
+
 fn timewarp_samples(p: &EffectParams<'_>, v: Params<'_>) -> Vec<f64> {
     let fps = p.frame_rate.as_f64();
-    let speed = v.f(3) / 100.;
-    let source = if v.popup(2) == 2 {
-        v.f(4)
-    } else {
-        p.time.as_seconds() * speed * fps
-    };
-    let (n, span) = if v.b(24) {
-        let angle = if v.popup(25) == 2 { 180. } else { v.f(26) };
-        let moving = if v.popup(2) == 1 { speed.abs() } else { 0. };
-        (v.f(27).max(1.) as usize, moving * angle / 360.)
-    } else {
-        (1, 0.)
-    };
-    (0..n)
-        .map(|i| source + span * ((i as f64 + 0.5) / n as f64 - 0.5) + 1e-9)
+    let track = p.tracks.iter().find(|(id, _)| *id == 3);
+    shutter_times(p, v)
+        .into_iter()
+        .map(|time| {
+            let frame = if v.popup(2) == 2 {
+                v.at_time(time).f(4)
+            } else {
+                let seconds = time.as_seconds();
+                let integral =
+                    track.map_or_else(|| seconds * v.f(3), |(_, t)| t.signed_integral(seconds));
+                integral * fps / 100.
+            };
+            frame + 1e-9
+        })
         .collect()
 }
 
 /// The comp time showing source frame `frame` of the layer.
 fn source_frame_time(p: &EffectParams<'_>, frame: f64) -> Time {
     local_offset(p, frame / p.frame_rate.as_f64() - p.time.as_seconds())
+}
+
+/// Exposure offsets as fractions of the motion from the current to the next frame.
+fn pixel_shutter(v: Params<'_>) -> (f32, f32, u32) {
+    let (phase, angle) = if v.popup(1) == 2 {
+        (v.p.shutter_phase, v.p.shutter_angle)
+    } else {
+        (-v.f(2) * 0.5, v.f(2))
+    };
+    (
+        (phase / 360.) as f32,
+        (angle / 360.) as f32,
+        v.f(3).max(1.) as u32,
+    )
+}
+
+fn stationary_shutter(v: Params<'_>) -> bool {
+    let (start, span, samples) = pixel_shutter(v);
+    span == 0. || (samples == 1 && start + span / 2. == 0.)
 }
 
 /// Adds `sample · weight` into `out` (Echo's Blend operator).
@@ -603,6 +643,25 @@ fn frame_at(
         .cloned()
 }
 
+fn mixed_dependency(kind: Kind, v: Params<'_>, time: Time) -> Option<LayerDependency> {
+    let native_motion_blur = match kind {
+        Kind::WideTime => v.popup(3) == 1,
+        Kind::ForceBlur => v.popup(4) == 1,
+        _ => true,
+    };
+    if native_motion_blur && time == v.p.comp_time {
+        return None;
+    }
+    Some(LayerDependency {
+        layer: layer_input::own_layer(v.p)?,
+        time,
+        stage: LayerStage::BeforeEffect {
+            effect: v.p.effect.path.clone(),
+            native_motion_blur,
+        },
+    })
+}
+
 fn difference_target(p: &EffectParams<'_>, v: Params<'_>) -> Option<LayerDependency> {
     let mut dep = layer_input::dependency(p, 1, true)?;
     dep.time = local_offset(p, v.f(2));
@@ -635,6 +694,38 @@ impl Effect for Temporal {
         &self.def
     }
 
+    fn integrated_parameters(&self) -> &'static [u32] {
+        if self.kind == Kind::Timewarp {
+            &[3]
+        } else {
+            &[]
+        }
+    }
+
+    fn parameter_ids(&self) -> &'static [u32] {
+        if self.kind == Kind::Timewarp {
+            &[4]
+        } else {
+            &[]
+        }
+    }
+
+    fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<Time> {
+        let v = Params::new(&self.def, p);
+        if self.kind != Kind::Timewarp || v.popup(2) != 2 || !v.b(24) {
+            return Vec::new();
+        }
+        let mut times = shutter_times(p, v);
+        times.sort_unstable();
+        times.dedup();
+        times
+    }
+
+    fn full_surface(&self) -> bool {
+        // Estimate one layer-aligned motion field for every preview tile.
+        matches!(self.kind, Kind::PixelMotionBlur | Kind::Timewarp)
+    }
+
     fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<LayerDependency> {
         let v = Params::new(&self.def, p);
         match self.kind {
@@ -659,15 +750,16 @@ impl Effect for Temporal {
                     .collect()
             }
             Kind::Difference => difference_target(p, v).into_iter().collect(),
+            Kind::PixelMotionBlur if stationary_shutter(v) => Vec::new(),
             Kind::PixelMotionBlur => [p.comp_time + p.time_step, p.comp_time - p.time_step]
                 .into_iter()
                 .filter_map(|time| before_effect(p, time))
                 .collect(),
             Kind::Interpolate => next_frame(p).into_iter().collect(),
-            Kind::WideTime | Kind::ForceBlur | Kind::Timewarp => mixed_frames(self.kind, p, v)
+            Kind::Timewarp => timewarp::dependencies(p, v),
+            Kind::WideTime | Kind::ForceBlur => mixed_frames(self.kind, p, v)
                 .into_iter()
-                .filter(|&(time, _)| time != p.comp_time)
-                .filter_map(|(time, _)| before_effect(p, time))
+                .filter_map(|(time, _)| mixed_dependency(self.kind, v, time))
                 .collect(),
             Kind::Displacement => {
                 let Some(map) = layer_input::dependency(p, 1, true) else {
@@ -732,61 +824,53 @@ impl TargetEffect for Temporal {
                     [(v.f(3) / 50.) as f32, 0., 0., 0.],
                 )
             }
-            Kind::Timewarp if v.popup(1) == 3 => {
-                // Pixel Motion: each pair of neighbouring frames is tweened
-                // along the flow, once per pair.
-                let samples = timewarp_samples(p, v);
-                let weight = 1. / samples.len() as f32;
-                let mut pairs: Vec<(f64, Vec<f32>)> = Vec::new();
-                for s in samples {
-                    let f0 = s.floor();
-                    match pairs.iter_mut().find(|(f, _)| *f == f0) {
-                        Some((_, phases)) => phases.push((s - f0) as f32),
-                        None => pairs.push((f0, vec![(s - f0) as f32])),
-                    }
-                }
-                let mut out = None;
-                for (f0, phases) in pairs {
-                    let a = frame_at(&*target, p, input, source_frame_time(p, f0));
-                    let b = frame_at(&*target, p, input, source_frame_time(p, f0 + 1.));
-                    let images = match (a, b) {
-                        (Some(a), Some(b)) if phases.iter().any(|w| *w > 1e-3) => {
-                            flow::tween(target, &a, &b, roi, grid, v.f(6), &phases)?
-                        }
-                        (Some(a), _) => vec![a; phases.len()],
-                        _ => continue,
-                    };
-                    for image in images {
-                        out = Some(accumulate(target, &pass, p, input, out, &image, weight)?);
-                    }
-                }
-                Ok(out.unwrap_or_else(|| input.clone()))
-            }
-            Kind::WideTime | Kind::ForceBlur | Kind::Timewarp => {
+            Kind::Timewarp => timewarp::render(target, p, v, input, &pass),
+            Kind::WideTime | Kind::ForceBlur => {
                 let mut out = None;
                 for (time, weight) in mixed_frames(self.kind, p, v) {
-                    if let Some(sample) = frame_at(&*target, p, input, time) {
+                    let sample = match mixed_dependency(self.kind, v, time) {
+                        Some(dep) => target.effect_layer(&dep),
+                        None => Some(input),
+                    }
+                    .cloned();
+                    if let Some(sample) = sample {
                         out = Some(accumulate(target, &pass, p, input, out, &sample, weight)?);
                     }
                 }
                 Ok(out.unwrap_or_else(|| input.clone()))
             }
             Kind::PixelMotionBlur => {
-                let other = frame_at(&*target, p, input, p.comp_time + p.time_step)
-                    .or_else(|| frame_at(&*target, p, input, p.comp_time - p.time_step));
-                let Some(other) = other else {
+                if stationary_shutter(v) {
+                    return Ok(input.clone());
+                }
+                let other = [p.comp_time + p.time_step, p.comp_time - p.time_step]
+                    .into_iter()
+                    .find_map(|time| Some((time, frame_at(&*target, p, input, time)?)));
+                let Some((time, other)) = other else {
                     return Ok(input.clone());
                 };
-                let angle = if v.popup(1) == 2 {
-                    p.shutter_angle
-                } else {
-                    v.f(2)
-                };
-                let span = (angle / 360.) as f32;
-                let pyramid = flow::pyramid(target, input, &other, roi, grid, v.f(4))?;
-                let field = flow::flow(target, &pyramid, false)?;
-                let samples = v.f(3).max(1.) as u32;
-                flow::vector_blur(target, input, &field, roi, grid, -span / 2., span, samples)
+                let (start, span, samples) = pixel_shutter(v);
+                let direction = if time < p.comp_time { 1. } else { -1. };
+                let field = flow::Pair {
+                    images: [input, &other],
+                    times: [p.comp_time, time],
+                    layer: &layer_input::own_layer(p).unwrap_or_else(|| p.effect.path.clone()),
+                    roi,
+                    grid,
+                    detail: v.f(4),
+                    analysis: flow::Analysis::default(),
+                }
+                .forward(target)?;
+                flow::vector_blur(
+                    target,
+                    input,
+                    &field,
+                    roi,
+                    grid,
+                    start * direction,
+                    span * direction,
+                    samples,
+                )
             }
             Kind::Interpolate => {
                 let next = next_frame(p).and_then(|d| target.effect_layer(&d)).cloned();
@@ -794,8 +878,20 @@ impl TargetEffect for Temporal {
                     return Ok(input.clone());
                 };
                 let phase = v.f(1) as f32;
-                let mut frames = flow::tween(target, input, &next, roi, grid, 50., &[phase])?;
-                Ok(frames.pop().unwrap_or_else(|| input.clone()))
+                let pair = flow::Pair {
+                    images: [input, &next],
+                    times: [
+                        p.comp_time,
+                        next_frame(p).expect("resolved next frame").time,
+                    ],
+                    layer: &layer_input::own_layer(p).unwrap_or_else(|| p.effect.path.clone()),
+                    roi,
+                    grid,
+                    detail: 50.,
+                    analysis: flow::Analysis::default(),
+                };
+                let [ab, ba] = pair.both(target)?;
+                pair.interpolate(target, [input, &next], [&ab, &ba], phase, false, false)
             }
             Kind::Posterize => {
                 let time = held_time(p, v.f(1).max(0.009995));
