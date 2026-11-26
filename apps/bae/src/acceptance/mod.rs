@@ -25,7 +25,6 @@ mod appearance_preferences;
 mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
-mod camera_preferences;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
@@ -65,6 +64,7 @@ mod stress;
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod window_workspaces;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -731,28 +731,17 @@ pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {
 /// Every painted text of the last frame (debugging aid for failures).
 pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     let mut out = Vec::new();
-    visit_painted_text(h, |_, text| out.push(text.galley.text().to_owned()));
-    out
-}
-
-fn visit_painted_text<State>(
-    h: &Harness<'_, State>,
-    mut visit: impl FnMut(Rect, &egui::epaint::TextShape),
-) {
-    fn walk(
-        shape: &egui::Shape,
-        clip: Rect,
-        visit: &mut impl FnMut(Rect, &egui::epaint::TextShape),
-    ) {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
         match shape {
-            egui::Shape::Text(t) => visit(clip, t),
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, visit)),
+            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
             _ => {}
         }
     }
     for clipped in &h.output().shapes {
-        walk(&clipped.shape, clipped.clip_rect, &mut visit);
+        walk(&clipped.shape, &mut out);
     }
+    out
 }
 
 /// The process-wide GPU for tests (`None` without an adapter), shared with every

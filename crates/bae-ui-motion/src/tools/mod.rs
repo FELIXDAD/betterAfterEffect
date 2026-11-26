@@ -634,49 +634,6 @@ pub fn keymap_bindings() -> KeymapBindings {
         .for_workspace(crate::menus::WORKSPACE)
 }
 
-/// Keep the Motion keymap and the Keyboard Shortcuts editor on the same factory
-/// bindings. The workbench applies the user's own shortcuts over these.
-pub fn configure_camera_keys(app: &bae_app::App, prefs: &bae_prefs::PrefsStore) {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    const KEY: &str = "3d.override_123456_for_gizmos";
-    let Some(registry) = app.get_registry::<KeymapBindings>() else {
-        return;
-    };
-    let snapshot = registry.snapshot();
-    let Some(entry) = snapshot.entry("motion.tools") else {
-        return;
-    };
-    let owner = entry.owner().clone();
-    let apply = move |camera: bool| {
-        let mut map = keymap_bindings();
-        if !camera {
-            for number in 1..=6 {
-                for (prefix, action) in [
-                    ("", crate::actions::ids::GO_TO_COMP_MARKER),
-                    ("Shift+", crate::actions::ids::SET_COMP_MARKER),
-                ] {
-                    let marker = Binding::new(&format!("{prefix}{number}"), action)
-                        .params(serde_json::json!({"number":number}));
-                    map.bindings.retain(|b| b.chord != marker.chord);
-                    map.bindings.push(marker);
-                }
-            }
-        }
-        let _ = registry.replace(owner.clone(), "motion.tools", Arc::new(map));
-    };
-    let initial = prefs.current().bool(KEY);
-    if !initial {
-        apply(initial);
-    }
-    let previous = AtomicBool::new(initial);
-    prefs.subscribe(move |p| {
-        let enabled = p.bool(KEY);
-        if previous.swap(enabled, Ordering::Relaxed) != enabled {
-            apply(enabled);
-        }
-    });
-}
-
 /// A tool switched on while its key is held (AE: hold a tool's key to use it,
 /// release to get the previous tool back).
 #[derive(Clone, Debug)]

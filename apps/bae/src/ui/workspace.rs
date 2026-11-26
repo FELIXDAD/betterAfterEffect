@@ -202,7 +202,6 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
-        bae_ui_motion::tools::configure_camera_keys(app, &prefs);
         if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
             let apply = move |p: &bae_prefs::Preferences| {
                 session.configure_output(
@@ -524,11 +523,15 @@ impl Workspace {
 
     /// English title of the active workspace.
     pub fn active_workspace_title(&self) -> &str {
-        let active = self.workbench.active_workspace();
+        self.workspace_title(self.workbench.active_workspace())
+            .unwrap_or("")
+    }
+
+    pub fn workspace_title(&self, workspace: &str) -> Option<&str> {
         self.workbench
             .workspaces()
-            .find(|(id, _)| *id == active)
-            .map_or("", |(_, p)| p.title.as_str())
+            .find(|(id, _)| *id == workspace)
+            .map(|(_, p)| p.title.as_str())
     }
 
     /// Workspace ids and English titles in bar order (Window menu).
@@ -555,8 +558,7 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
         ui.separator();
     }
     if !status.gpu.is_empty() {
-        let adapter = ui.label(small(status.gpu.clone()));
-        bae_ui::a11y::value_source(&adapter, bae_ui::a11y::GPU_STATUS);
+        ui.label(small(status.gpu.clone()));
         ui.separator();
     }
     ui.label(small(
