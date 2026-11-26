@@ -401,7 +401,7 @@ impl LayerPanel {
         }
         if self.gpu.is_none() && !self.gpu_tried {
             self.gpu_tried = true;
-            self.gpu = GpuPreview::new(cx.resources);
+            self.gpu = GpuPreview::new(cx.resources, ui.ctx());
         }
         let image = self
             .gpu
