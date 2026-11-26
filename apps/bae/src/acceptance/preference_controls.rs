@@ -134,3 +134,45 @@ fn home_preference_controls_startup_and_new_project_opens_the_editor() {
     new_comp(&mut h);
     assert!(h.state().active_comp().is_some());
 }
+
+#[test]
+fn panel_coachmarks_can_be_dismissed_and_reset() {
+    let mut h = gui();
+    h.state_mut().workspace.focus_panel("project");
+    settle(&mut h);
+    let tip = "Drop files here to import footage.";
+    assert!(find_text(&h, tip).is_none());
+    let open_appearance = |h: &mut Ui| {
+        h.state_mut().workspace.show_settings(Some("appearance"));
+        settle(h);
+    };
+    open_appearance(&mut h);
+    h.get_by_label("Show Coachmarks").click();
+    settle(&mut h);
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    let project = find_text(&h, "Project").unwrap().center();
+    click_at(&mut h, project);
+    settle(&mut h);
+    assert!(find_text(&h, tip).is_some());
+    h.get_by_label("Got it").click();
+    settle(&mut h);
+    assert!(find_text(&h, tip).is_none());
+    assert!(
+        h.state_mut()
+            .workspace
+            .state()
+            .dismissed_coachmarks
+            .contains("project")
+    );
+    open_appearance(&mut h);
+    h.get_by_label("Reset Coachmarks").click();
+    settle(&mut h);
+    assert!(h.state_mut().workspace.take_settings_requests().is_empty());
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    let project = find_text(&h, "Project").unwrap().center();
+    click_at(&mut h, project);
+    settle(&mut h);
+    assert!(find_text(&h, tip).is_some());
+}
