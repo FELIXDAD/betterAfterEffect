@@ -185,7 +185,17 @@ pub(crate) struct GpuPreview {
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
     pub preparing: bool,
+    /// Renders the newest dragged value in the background (#593).
+    live: crate::live_preview::LivePreview,
+    /// The project version live frames render with.
+    live_scene: Option<Arc<crate::live_preview::LiveScene>>,
+    /// The key and view of the last live request.
+    live_sent: Option<LiveKey>,
+    /// The live target the registry shows.
+    live_texture: Option<wgpu::Texture>,
 }
+
+type LiveKey = ((u64, Time, u32), (bae_render::Display, Option<IRect>));
 
 impl GpuPreview {
     /// A preview on the app's GPU context, if the app has one (the headless test
@@ -200,6 +210,7 @@ impl GpuPreview {
         let id = registry.create("motion composition viewer");
         let engine = RenderEngine::new(gpu.clone(), 512 << 20);
         let playback = super::playback::PlaybackPreview::new(gpu.clone(), registry.clone());
+        let live = crate::live_preview::LivePreview::new(gpu.clone());
         GpuPreview {
             gpu,
             registry,
@@ -219,6 +230,10 @@ impl GpuPreview {
             target_shown: false,
             cached: None,
             preparing: false,
+            live,
+            live_scene: None,
+            live_sent: None,
+            live_texture: None,
         }
     }
 
@@ -278,6 +293,7 @@ impl GpuPreview {
             .get::<crate::session::SharedSession>()
             .and_then(|s| s.lock().scrub.as_ref().map(|s| s.overrides(stage)))
             .unwrap_or_default();
+        let live = (!overrides.is_empty()).then(|| overrides.clone());
         self.engine.anim.set_overrides(overrides);
         if self.changes.changed(resources) {
             self.engine.anim.clear_compiled();
@@ -300,6 +316,19 @@ impl GpuPreview {
         }
         let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         let view = (self.display, self.roi);
+        // A value drag: the newest value renders in the background.
+        if let Some(overrides) = live {
+            return self.live_frame(
+                resources,
+                stage,
+                rc,
+                (key, view),
+                resolution,
+                measure_layer_times,
+                overrides,
+            );
+        }
+        self.live_sent = None;
         if self.last != Some(key) || self.last_view != Some(view) {
             self.last_view = Some(view);
             self.engine.renderer.set_layer_times(measure_layer_times);
@@ -362,6 +391,7 @@ impl GpuPreview {
             self.rect = Some(rect);
             self.target = Some(target);
             self.target_shown = true;
+            self.live_texture = None;
             self.sampled = None;
         }
         // Back from a snapshot: show the frame again.
@@ -379,6 +409,7 @@ impl GpuPreview {
                 .is_ok()
         {
             self.target_shown = true;
+            self.live_texture = None;
         }
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
@@ -427,12 +458,97 @@ impl GpuPreview {
 
     /// Show Snapshot: publish snapshot `slot` instead of the frame (the next
     /// [`GpuPreview::frame`] shows the frame again).
+    /// [`GpuPreview::frame`] during a value drag: submits the newest value to
+    /// the background renderer (replacing a request that has not started)
+    /// and shows the newest finished frame, never waiting for one.
+    #[allow(clippy::too_many_arguments)]
+    fn live_frame(
+        &mut self,
+        resources: &Resources,
+        stage: &Stage,
+        rc: bae_render::RenderComp,
+        sent: LiveKey,
+        resolution: u32,
+        measure_layer_times: bool,
+        overrides: Vec<bae_anim::AttrOverride>,
+    ) -> Option<PreviewImage> {
+        use crate::live_preview::{LiveJob, LiveScene};
+        // The frame is rendered again here once the drag ends.
+        self.last = None;
+        if self.live_sent != Some(sent) {
+            let sources = resources.get::<PreviewSources>();
+            let effects = resources.get::<PreviewEffects>();
+            let scene_key = (
+                stage.revision(),
+                sources.map(|s| s.0.generation()),
+                effects.map(|e| e.0.generation()),
+            );
+            let scene = match &self.live_scene {
+                Some(scene) if scene.key == scene_key => scene.clone(),
+                _ => {
+                    let scene = Arc::new(LiveScene {
+                        key: scene_key,
+                        snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
+                        sources: sources.cloned(),
+                        effects: effects.cloned(),
+                    });
+                    self.live_scene = Some(scene.clone());
+                    scene
+                }
+            };
+            self.live.submit(LiveJob {
+                scene,
+                rc,
+                overrides,
+                resolution,
+                display: self.display,
+                roi: self.roi,
+                measure: measure_layer_times,
+            });
+            self.live_sent = Some(sent);
+        }
+        if let Some(frame) = self.live.take() {
+            self.preparing = frame.rect.is_none();
+            if let Some(rect) = frame.rect {
+                if self.live_texture.as_ref() != Some(frame.view.texture()) {
+                    if let Err(e) = self.registry.publish_view(
+                        self.id,
+                        frame.view.clone(),
+                        frame.size,
+                        frame.view.texture().format(),
+                        wgpu::FilterMode::Linear,
+                    ) {
+                        tracing_warn(&format!("preview: {e}"));
+                        return None;
+                    }
+                    self.live_texture = Some(frame.view.texture().clone());
+                    self.target_shown = false;
+                }
+                self.rect = Some(rect);
+                self.sampled = None;
+            }
+            if measure_layer_times
+                && let Some((comp, times)) = frame.layer_times
+                && let Some(session) = resources.get::<crate::session::SharedSession>()
+            {
+                let mut s = session.lock();
+                s.layer_times.retain(|layer, _| !comp.is_prefix_of(layer));
+                s.layer_times.extend(times);
+            }
+        }
+        Some(PreviewImage {
+            handle: self.registry.display_handle(self.id)?,
+            rect: self.rect?,
+        })
+    }
+
     pub fn show_snapshot(&mut self, slot: usize) -> Option<PreviewImage> {
         let (t, rect) = self.snapshots.get(slot)?.clone()?;
         self.registry
             .publish(self.id, &t, wgpu::FilterMode::Linear)
             .ok()?;
         self.target_shown = false;
+        self.live_texture = None;
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
             rect,
