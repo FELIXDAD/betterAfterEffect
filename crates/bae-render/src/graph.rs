@@ -188,6 +188,12 @@ pub struct ShadowMapNode {
     pub layer: PrimPath,
     /// The layer's lighting with its casters.
     pub lighting: Arc<crate::light::Lighting>,
+    /// Output texels the layer covers: when they outnumber a map slot's
+    /// texels, testing the casters per output pixel costs more than the map.
+    pub screen_texels: u64,
+    /// Per slot, the key of its contents (the layer, its casters and that
+    /// light): a slot whose light did not change is copied, not drawn.
+    pub slot_keys: Vec<u64>,
 }
 
 /// Depth of field of one 3D layer (AE's camera Depth of Field): the layer
@@ -1004,9 +1010,6 @@ impl Builder<'_, '_> {
         }
         let r = lighting.rect;
         [r.x0, r.y0, r.x1, r.y1].map(f64::to_bits).hash(&mut h);
-        for l in lighting.lights.iter() {
-            crate::input::hash_light(l, &mut h);
-        }
         for c in lighting.casters.iter() {
             for v in c.matrix.to_cols_array() {
                 v.to_bits().hash(&mut h);
@@ -1021,14 +1024,27 @@ impl Builder<'_, '_> {
                 crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
             }
         }
-        let key = h.finish();
+        let base = h.finish();
+        let slot_keys: Vec<u64> = lighting
+            .shadow_slots()
+            .into_iter()
+            .map(|li| {
+                let mut h = FxHasher::default();
+                base.hash(&mut h);
+                crate::input::hash_light(&lighting.lights[li], &mut h);
+                h.finish()
+            })
+            .collect();
+        let key = hash_of(&(base, &slot_keys));
         let (_, [w, ht]) = lighting.shadow_map_size();
-        let slots = lighting.shadow_slots().len() as i32;
+        let slots = slot_keys.len() as i32;
         let node = self.owned(comp, index, depth, |b| {
             b.push(Node {
                 kind: NodeKind::ShadowMap(ShadowMapNode {
                     layer: op.layer.clone(),
                     lighting: lighting.clone(),
+                    screen_texels: u64::from(op.bounds.width()) * u64::from(op.bounds.height()),
+                    slot_keys,
                 }),
                 rect: IRect::new(0, 0, w as i32 * slots, ht as i32),
                 pixel_scale: 1.0,

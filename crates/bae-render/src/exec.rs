@@ -439,10 +439,17 @@ pub(crate) fn execute(
             }
             (NodeKind::ShadowMap(map), None) => match shadow_maps.get(node.key) {
                 Some(image) => image,
-                // A new map (the layer, its lights or casters changed): this
-                // frame tests the casters per pixel; the map is drawn once the
-                // same key comes again (animated shadows never pay for maps).
-                None if !shadow_maps.stable(&map.layer, node.key) => {
+                // A new map (the layer, its lights or casters changed) on a
+                // layer covering fewer output pixels than a map slot has
+                // texels: this frame tests the casters per pixel, and the map
+                // is drawn once the same key comes again (animated shadows
+                // pay for maps only where they are cheaper, such as at 4K).
+                None if !shadow_maps.stable(&map.layer, node.key)
+                    && map.screen_texels <= {
+                        let (_, [w, h]) = map.lighting.shadow_map_size();
+                        u64::from(w) * u64::from(h)
+                    } =>
+                {
                     ctx.skipped_maps.insert(NodeId(index as u32));
                     pool.acquire_texels(
                         device,
@@ -454,6 +461,10 @@ pub(crate) fn execute(
                 }
                 None => {
                     let l = &map.lighting;
+                    // Slots whose light did not change come from the cache.
+                    let reuse: Vec<Option<(GpuImage, u32)>> =
+                        map.slot_keys.iter().map(|k| shadow_maps.slot(*k)).collect();
+                    let draw: Vec<bool> = reuse.iter().map(Option::is_none).collect();
                     let casters: Vec<NodeId> = l
                         .casters
                         .iter()
@@ -462,7 +473,7 @@ pub(crate) fn execute(
                             crate::light::CasterPixels::Solid(_) => None,
                         })
                         .collect();
-                    let atlas = if casters.is_empty() {
+                    let atlas = if casters.is_empty() || !draw.contains(&true) {
                         None
                     } else {
                         let (slots, size) = shadow::layout(&casters, &outputs);
@@ -511,9 +522,34 @@ pub(crate) fn execute(
                         &layout,
                         &record,
                         atlas.as_ref().map(|(a, _)| &a.view),
+                        &draw,
                     );
                     ctx.passes += 1;
-                    shadow_maps.insert(node.key, target.clone());
+                    for (slot, cached) in reuse.iter().enumerate() {
+                        let Some((from, from_slot)) = cached else {
+                            continue;
+                        };
+                        let at = |texture, slot: u32| wgpu::TexelCopyTextureInfo {
+                            texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d {
+                                x: slot * w,
+                                y: 0,
+                                z: 0,
+                            },
+                            aspect: wgpu::TextureAspect::All,
+                        };
+                        encoder.copy_texture_to_texture(
+                            at(&from.texture, *from_slot),
+                            at(&target.texture, slot as u32),
+                            wgpu::Extent3d {
+                                width: w,
+                                height: h,
+                                depth_or_array_layers: 1,
+                            },
+                        );
+                    }
+                    shadow_maps.insert(node.key, target.clone(), &map.slot_keys);
                     target
                 }
             },

@@ -159,6 +159,7 @@ pub(crate) fn encode(
     layout: &MapLayout,
     record: &[[f32; 4]],
     atlas: Option<&wgpu::TextureView>,
+    draw: &[bool],
 ) {
     let p = pipeline.get_or_insert_with(|| ShadowMapPipeline::new(device));
     let mut params: Vec<u8> = Vec::with_capacity(64);
@@ -212,7 +213,7 @@ pub(crate) fn encode(
             },
         ],
     });
-    let [w, h] = [layout.slot[0] * layout.count, layout.slot[1]];
+    let h = layout.slot[1];
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("bae-render.shadowmap"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -231,8 +232,15 @@ pub(crate) fn encode(
     });
     pass.set_pipeline(&p.pipeline);
     pass.set_bind_group(0, &group, &[]);
-    pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
-    pass.draw(0..3, 0..1);
+    for (slot, _) in draw.iter().enumerate().filter(|(_, d)| **d) {
+        pass.set_scissor_rect(
+            slot as u32 * layout.slot[0],
+            0,
+            layout.slot[0].max(1),
+            h.max(1),
+        );
+        pass.draw(0..3, 0..1);
+    }
 }
 
 /// Shadow maps kept across frames, by node key; dropped two frames after
@@ -240,6 +248,9 @@ pub(crate) fn encode(
 #[derive(Default)]
 pub(crate) struct ShadowMapCache {
     maps: FxHashMap<u64, (GpuImage, u64)>,
+    /// Each slot by its key: the map holding it, its slot and the frame it
+    /// was last used.
+    slots: FxHashMap<u64, (GpuImage, u32, u64)>,
     /// Each layer's map key last asked for, with that frame.
     last: FxHashMap<bae_model::PrimPath, (u64, u64)>,
     frame: u64,
@@ -264,7 +275,20 @@ impl ShadowMapCache {
         }
     }
 
-    pub(crate) fn insert(&mut self, key: u64, image: GpuImage) {
+    /// The map and slot holding the slot `key`.
+    pub(crate) fn slot(&mut self, key: u64) -> Option<(GpuImage, u32)> {
+        let frame = self.frame;
+        self.slots.get_mut(&key).map(|(image, slot, used)| {
+            *used = frame;
+            (image.clone(), *slot)
+        })
+    }
+
+    pub(crate) fn insert(&mut self, key: u64, image: GpuImage, slot_keys: &[u64]) {
+        for (slot, k) in slot_keys.iter().enumerate() {
+            self.slots
+                .insert(*k, (image.clone(), slot as u32, self.frame));
+        }
         self.maps.insert(key, (image, self.frame));
     }
 
@@ -273,6 +297,7 @@ impl ShadowMapCache {
         self.frame += 1;
         let frame = self.frame;
         self.maps.retain(|_, (_, used)| frame - *used <= 2);
+        self.slots.retain(|_, (_, _, used)| frame - *used <= 2);
         self.last.retain(|_, (_, asked)| frame - *asked <= 2);
     }
 }
