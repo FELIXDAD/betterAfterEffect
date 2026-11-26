@@ -18,6 +18,10 @@ pub(crate) fn register(registry: &mut Registry) {
             Kind::Polly,
             Kind::Shatter,
             Kind::Cards,
+            Kind::Playground,
+            Kind::Ball,
+            Kind::Mercury,
+            Kind::Hair,
         ]
         .map(builtin),
     );

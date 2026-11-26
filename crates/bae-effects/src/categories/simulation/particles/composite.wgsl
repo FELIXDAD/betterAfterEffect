@@ -16,6 +16,20 @@ fn composite(@builtin(global_invocation_id) tid: vec3u) {
     let bg = textureLoad(input_tex, src, 0);
     let fg = textureLoad(overlay, xy, 0);
     var result = fg;
+    if u.kind==13u{
+        let field=fg.r;
+        let grad=vec2f(textureLoad(overlay,xy+vec2i(1,0),0).r-textureLoad(overlay,xy-vec2i(1,0),0).r,
+                       textureLoad(overlay,xy+vec2i(0,1),0).r-textureLoad(overlay,xy-vec2i(0,1),0).r);
+        let alpha=smoothstep(.22,.32,field)*u.metal.w;
+        let n=normalize(vec3f(-grad*12.,1.));
+        let direction=select(vec2f(sin(u.position.z),-cos(u.position.z)),normalize(u.position.xy-vec2f(src)+.0001),u.position.w==2.);
+        let light=normalize(vec3f(direction,u.ripple.w));
+        let reflection=textureLoad(input_tex,vec2i(clamp(vec2f(src)+n.xy*16.,vec2f(0.),u.metal.yz-1.)),0);
+        let base=mix(vec3f(.7),reflection.rgb/max(.001,reflection.a),u.metal.x);
+        let color=base*(u.material.x+u.material.y*max(0.,dot(n,light))*u.ripple.z*u.light.rgb)
+            +u.material.z*u.ripple.z*u.light.rgb*pow(max(0.,dot(n,normalize(light+vec3f(0.,0.,1.)))),1./max(.002,u.material.w));
+        textureStore(output_tex,xy,vec4f(color*alpha,alpha));return;
+    }
     if u.kind == 5u {
         let slope = fg.rg * u.ripple.y;
         let refract = vec2i(clamp(vec2f(src) + slope * u.ripple.x, vec2f(0.), u.metal.yz-1.));

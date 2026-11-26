@@ -278,8 +278,21 @@ pub(crate) fn key_menu(
         })
         .unwrap_or_default();
     ui.add_enabled(false, egui::Button::new(value));
-    // Edit Value… (AE-ANI-073): the value dialog is not built yet.
-    ui.add_enabled(false, egui::Button::new(tr("Edit Value...")));
+    // Edit Value… (AE-ANI-073): the property's value dialog, for this
+    // keyframe (transform properties; the others' dialog is not built yet).
+    let kind = crate::dialogs::TransformKind::of_attr(&clicked.attr)
+        .filter(|_| query::is_layer(stage, &clicked.path));
+    if ui
+        .add_enabled(kind.is_some(), egui::Button::new(tr("Edit Value...")))
+        .clicked()
+    {
+        if let (Some(kind), Some(info)) = (kind, common::active_comp(stage, session)) {
+            let t = query::to_comp_time(stage, &clicked.path, clicked.time);
+            let layers = [clicked.path.clone()];
+            crate::dialogs::transform_value(cx, &info.path, &layers, t, kind, Some(&clicked.attr));
+        }
+        ui.close();
+    }
     if ui.button(tr("Go To Keyframe Time")).clicked() {
         if let Some(info) = common::active_comp(stage, session) {
             let t = query::to_comp_time(stage, &clicked.path, clicked.time);

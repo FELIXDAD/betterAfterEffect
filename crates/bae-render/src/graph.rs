@@ -167,7 +167,7 @@ pub enum NodeKind {
     /// Pixels from a [`LayerSource`] (footage, shapes, text, generators).
     Source(SourceNode),
     /// An effect applied to its input.
-    Effect(EffectNode),
+    Effect(Box<EffectNode>),
     /// A layer's masks combined into one coverage image (layer space).
     Mask(MaskNode),
     /// An adjustment layer's result mixed into its backdrop.
@@ -386,6 +386,8 @@ pub struct EffectFrame {
     pub time: Time,
     /// Comp time.
     pub comp_time: Time,
+    /// Composition time corresponding to zero on the layer clock.
+    pub layer_start_time: Time,
     /// Comp time when the layer first becomes active.
     pub layer_in: Time,
     /// Comp-time seconds per layer-time second.
@@ -411,8 +413,8 @@ pub struct EffectFrame {
 impl EffectFrame {
     /// Map a layer sample time to the corresponding composition time.
     pub fn comp_at(&self, local: Time) -> Time {
-        self.comp_time
-            + Time::from_seconds((local - self.time).as_seconds() * self.layer_time_scale)
+        self.layer_start_time
+            + Time::from_flicks((local.flicks() as f64 * self.layer_time_scale).round() as i64)
     }
 
     /// The parameters of `instance` in this frame.
@@ -717,7 +719,16 @@ impl Builder<'_, '_> {
         }
         let mut h = FxHasher::default();
         "composite".hash(&mut h);
-        comp.hash_content(&mut h, Some(self.effects));
+        if depth == 0 {
+            // The frame's own comp is the only root: its key only has to be
+            // unique in this graph, so the whole comp is not hashed per frame
+            // (1000 layers: ~6 % of render+submit). Nested comps hash their
+            // content so identical pre-comp instances share one node.
+            comp.path.hash(&mut h);
+            comp.time.hash(&mut h);
+        } else {
+            comp.hash_content(&mut h, Some(self.effects));
+        }
         rect.hash(&mut h);
         scale.to_bits().hash(&mut h);
         self.clamp.hash(&mut h);
@@ -875,6 +886,7 @@ impl Builder<'_, '_> {
         let frame = EffectFrame {
             time: layer.time,
             comp_time: comp.time,
+            layer_start_time: layer.start_time,
             layer_time_scale: layer.time_scale,
             layer_in: layer.in_point,
             scale: 1.0 / scale,
@@ -1530,6 +1542,7 @@ impl Builder<'_, '_> {
         let frame = EffectFrame {
             time: layer.time,
             comp_time: comp.time,
+            layer_start_time: layer.start_time,
             layer_time_scale: layer.time_scale,
             layer_in: layer.in_point,
             scale: 1.0 / scale,
@@ -1828,7 +1841,7 @@ impl Builder<'_, '_> {
             })
         });
         Ok(self.push(Node {
-            kind: NodeKind::Effect(EffectNode {
+            kind: NodeKind::Effect(Box::new(EffectNode {
                 scene,
                 layer: layer.path.clone(),
                 effect,
@@ -1838,7 +1851,7 @@ impl Builder<'_, '_> {
                 layers,
                 masks,
                 samples,
-            }),
+            })),
             rect,
             pixel_scale: scale,
             key: h.finish(),
@@ -1956,6 +1969,7 @@ impl Builder<'_, '_> {
             let frame = EffectFrame {
                 time: layer.time,
                 comp_time: comp.time,
+                layer_start_time: layer.start_time,
                 layer_time_scale: layer.time_scale,
                 layer_in: layer.in_point,
                 scale: 1.0 / scale,
@@ -2123,9 +2137,11 @@ impl Builder<'_, '_> {
         }
         for instance in layer.effects.iter().take(count).filter(|e| e.enabled) {
             match self.effects.get(&instance.effect) {
-                Some(effect) if effect.renders_pixels() => {
-                    out.push((effect.clone(), instance.clone()))
-                }
+                Some(effect) if effect.renders_pixels() => out.push(
+                    effect
+                        .resolve_alias(instance)
+                        .unwrap_or_else(|| (effect.clone(), instance.clone())),
+                ),
                 Some(_) => {}
                 None => self.warn(format!(
                     "{}: effect `{}` is not available, skipped",
@@ -2623,19 +2639,29 @@ mod tests {
 
     #[test]
     fn keys_are_stable_and_parameter_sensitive() {
-        let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
-        comp.layers.push(solid("a", 10, 10, [1.0; 4], (0.0, 0.0)));
-        let k1 = build_default(&comp, &RenderRequest::full())
-            .output_node()
-            .key;
-        let k2 = build_default(&comp, &RenderRequest::full())
-            .output_node()
-            .key;
-        assert_eq!(k1, k2);
-        comp.layers[0].opacity = 0.5;
-        let k3 = build_default(&comp, &RenderRequest::full())
-            .output_node()
-            .key;
+        // A nested comp's node key follows its content (identical pre-comp
+        // instances share a node); the root's only has to be stable.
+        let mut inner = RenderComp::new(p("/comps/inner"), 50, 50);
+        inner.layers.push(solid("a", 10, 10, [1.0; 4], (0.0, 0.0)));
+        let nested_key = |inner: &RenderComp| {
+            let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+            comp.layers.push(RenderLayer::new(
+                p("/comps/main/layers/pre"),
+                LayerContent::Comp(Arc::new(inner.clone())),
+            ));
+            let g = build_default(&comp, &RenderRequest::full());
+            let nested = g
+                .nodes
+                .iter()
+                .find(|n| matches!(&n.kind, NodeKind::Composite(c) if c.prim == inner.path))
+                .map(|n| n.key);
+            (g.output_node().key, nested.expect("nested composite"))
+        };
+        let (root1, k1) = nested_key(&inner);
+        let (root2, k2) = nested_key(&inner);
+        assert_eq!((root1, k1), (root2, k2));
+        inner.layers[0].opacity = 0.5;
+        let (_, k3) = nested_key(&inner);
         assert_ne!(k1, k3);
     }
 }

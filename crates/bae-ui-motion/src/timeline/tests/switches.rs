@@ -6,7 +6,12 @@ use super::*;
 fn f4_alternates_switches_and_modes() {
     let mut h = H::new();
     let mut tl = h.bars();
-    let p = |tl: &TimelinePanel| (tl.panes().switches, tl.panes().modes);
+    let p = |tl: &TimelinePanel| {
+        (
+            tl.column_visible(crate::timeline::Column::Switches),
+            tl.column_visible(crate::timeline::Column::Modes),
+        )
+    };
     assert_eq!(p(&tl), (true, false), "AE starts with Switches");
     let f4 = || Invocation::new(crate::actions::ids::TOGGLE_SWITCHES_MODES);
     h.action(&mut tl, f4());
@@ -17,7 +22,7 @@ fn f4_alternates_switches_and_modes() {
         &mut tl,
         Invocation::new(crate::actions::ids::TOGGLE_PARENT_COLUMN),
     );
-    assert!(!tl.panes().parent);
+    assert!(!tl.column_visible(crate::timeline::Column::Parent));
     // With Modes hidden no Modes cells are drawn.
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     assert!(tl.last_modes.is_empty());

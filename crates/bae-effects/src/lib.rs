@@ -222,6 +222,7 @@ fn registry() -> &'static Registry {
         categories::blur_sharpen::register(&mut r);
         categories::channel::register(&mut r);
         categories::color::register(&mut r);
+        categories::audio::register(&mut r);
         categories::controls::register(&mut r);
         categories::distort::register(&mut r);
         categories::generate::register(&mut r);

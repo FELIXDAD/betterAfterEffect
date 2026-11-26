@@ -27,7 +27,17 @@ impl Shader {
         rt: &gpu::Runtime,
         format: wgpu::TextureFormat,
     ) -> Result<std::sync::Arc<gpu::Kernel>, RenderError> {
-        image_grid::kernel_with_inputs(rt, format, self.label, self.source, BYTES, 5)
+        self.kernel_at(rt, format, "main")
+    }
+
+    /// The kernel of another `@compute` entry point in the same source.
+    pub(crate) fn kernel_at(
+        &self,
+        rt: &gpu::Runtime,
+        format: wgpu::TextureFormat,
+        entry: &'static str,
+    ) -> Result<std::sync::Arc<gpu::Kernel>, RenderError> {
+        image_grid::kernel_at(rt, format, self.label, self.source, entry, BYTES, 5)
     }
 
     pub fn dispatch<const N: usize>(
@@ -39,9 +49,26 @@ impl Shader {
         aux: [Option<&GpuImage>; N],
         stage: [u32; 2],
     ) -> Result<GpuImage, RenderError> {
+        self.dispatch_at("main", target, v, roi, input, aux, stage, |_, _| {})
+    }
+
+    /// [`Self::dispatch`] through entry point `entry`; `extra` writes uniforms
+    /// past the parameter slots (given the header size).
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_at<const N: usize>(
+        &self,
+        entry: &'static str,
+        target: &mut dyn EffectTarget,
+        v: Params<'_>,
+        roi: IRect,
+        input: &GpuImage,
+        aux: [Option<&GpuImage>; N],
+        stage: [u32; 2],
+        extra: impl FnOnce(&mut UniformWriter, usize),
+    ) -> Result<GpuImage, RenderError> {
         const { assert!(N <= 4) };
         let rt = gpu::runtime(target.gpu());
-        let kernel = self.kernel(&rt, target.format())?;
+        let kernel = self.kernel_at(&rt, target.format(), entry)?;
         let grid = image_grid::grid_scale(v.p, input);
         let layer = if v.p.layer_bounds.is_empty() {
             image_grid::pixel_rect(input.rect, 1. / grid)
@@ -95,6 +122,7 @@ impl Shader {
                 _ => {}
             }
         }
+        extra(&mut u, HEADER);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &kernel,

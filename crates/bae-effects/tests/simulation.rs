@@ -7,6 +7,44 @@ use bae_render::{EffectParams, IRect, RenderComp, Renderer};
 use common::{Pixels, builtin, context, instance, test_image};
 
 #[test]
+fn playground_grid_emits_with_the_cannon_off() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(64, 48);
+    let input = test_image(rect).upload(&gpu, TextureFormat::Rgba16Float);
+    let mut target = Standalone::new(gpu.clone(), TextureFormat::Rgba16Float);
+    let emit = instance(
+        "ADBE Playgnd",
+        vec![
+            (103, Value::Float(0.)),
+            (132, Value::Float(32.)),
+            (133, Value::Float(24.)),
+            (134, Value::Float(2.)),
+            (135, Value::Float(2.)),
+            (
+                501,
+                Value::PrimRef(bae_model::PrimPath::new("/comps/main/layers/map").unwrap()),
+            ),
+            (502, Value::Int(3)),
+        ],
+    );
+    let params = EffectParams::new(&emit);
+    let fx = builtin(&emit.effect);
+    let dep = fx.effect().layer_dependencies(&params).pop().unwrap();
+    let map = Pixels::new(rect, |_, _| [0.75, 0., 0., 1.]).upload(&gpu, TextureFormat::Rgba16Float);
+    target.set_effect_inputs(vec![(dep, map)], vec![]);
+    let out = fx.render(&mut target, &params, &input, rect).unwrap();
+    target.finish().unwrap();
+    let pixels = Pixels::download(&gpu, &out);
+    for y in [18, 30] {
+        for x in [24, 40] {
+            assert!(pixels.get(x, y)[3] > 0.9);
+            assert!((pixels.get(x, y)[1] - 0.75).abs() < 0.01);
+        }
+    }
+    assert_eq!(pixels.get(32, 24), [0.; 4]);
+}
+
+#[test]
 fn particle_world_seek_reproduces_pixels_and_cropped_tiles() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(128, 96);
@@ -41,6 +79,42 @@ fn particle_world_seek_reproduces_pixels_and_cropped_tiles() {
     assert_eq!(a.data, render(74, rect).data);
     let tile = IRect::new(41, 38, 87, 66);
     common::assert_close(&render(74, tile), &a, tile, 0.004, "particle tile");
+}
+
+#[test]
+fn long_lived_floor_particles_match_after_a_backward_seek() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(80, 64);
+    let input = test_image(rect).upload(&gpu, TextureFormat::Rgba16Float);
+    let inst = instance(
+        "CC Particle World",
+        vec![
+            (4, Value::Float(0.00001)),
+            (5, Value::Float(3000.)),
+            (16, Value::Float(0.)),
+            (18, Value::Float(0.02)),
+            (23, Value::Int(4)),
+            (24, Value::Float(2.)),
+            (25, Value::Float(2.)),
+            (66, Value::Int(4)),
+        ],
+    );
+    let mut target = Standalone::new(gpu.clone(), TextureFormat::Rgba16Float);
+    let mut render = |seconds| {
+        let p = EffectParams {
+            time: Time::from_seconds(seconds),
+            ..EffectParams::new(&inst)
+        };
+        let out = builtin(&inst.effect)
+            .render(&mut target, &p, &input, rect)
+            .unwrap();
+        target.finish().unwrap();
+        Pixels::download(&gpu, &out).data
+    };
+    let late = render(2999.);
+    assert!(late.iter().any(|p| p[3] > 0.1));
+    assert_ne!(render(10.), late);
+    assert_eq!(render(2999.), late);
 }
 
 #[test]

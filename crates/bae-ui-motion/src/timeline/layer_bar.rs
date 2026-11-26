@@ -170,6 +170,7 @@ impl TimelinePanel {
         info: &CompInfo,
         axis: &TimeAxis,
         layer: &PrimPath,
+        layer_ctx: &str,
         rect: Rect,
         selected: bool,
     ) {
@@ -235,10 +236,7 @@ impl TimelinePanel {
                         )
                         .labeled(
                             egui::WidgetType::Other,
-                            &bae_ui::a11y::context(&[
-                                &self.layer_ctx(stage, layer),
-                                tr("Slip Edit"),
-                            ]),
+                            &bae_ui::a11y::context(&[layer_ctx, tr("Slip Edit")]),
                         );
                     if resp.hovered() {
                         ui.ctx().set_cursor_icon(CursorIcon::Grab);
@@ -276,7 +274,7 @@ impl TimelinePanel {
             )
             .labeled_toggle(
                 egui::WidgetType::Other,
-                &bae_ui::a11y::context(&[&self.layer_ctx(stage, layer), tr("Duration Bar")]),
+                &bae_ui::a11y::context(&[layer_ctx, tr("Duration Bar")]),
                 selected,
             );
         let hover_edge = resp.hover_pos().map(|p| {
@@ -295,7 +293,11 @@ impl TimelinePanel {
             select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
         if resp.double_clicked() {
-            crate::layer_panel::open(cx, session, layer);
+            // A precomp opens its comp at the matching time, any other layer the
+            // Layer panel (AE).
+            if !self.open_precomp(cx, session, layer) {
+                crate::layer_panel::open(cx, session, layer);
+            }
         }
         // Right-click: the layer context menu (as on the layer name).
         let mut menu_out = None;
