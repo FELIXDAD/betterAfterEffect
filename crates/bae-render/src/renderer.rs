@@ -142,6 +142,16 @@ fn output_params_display(
     params
 }
 
+/// `frames` for one call (the trait object's lifetime shortened to the borrow).
+fn reborrow<'s>(
+    frames: &'s mut Option<&mut dyn crate::graph::CompFrames>,
+) -> Option<&'s mut dyn crate::graph::CompFrames> {
+    match frames {
+        Some(f) => Some(&mut **f),
+        None => None,
+    }
+}
+
 /// Exact-sized display output. Keep the view with the texture so repeated
 /// presentations never sample the padding of a working texture.
 pub struct OutputTarget(wgpu::TextureView);
@@ -155,6 +165,28 @@ impl OutputTarget {
     /// Exact pixel dimensions of this RGBA8 display target.
     pub fn size(&self) -> [u32; 2] {
         [self.0.texture().width(), self.0.texture().height()]
+    }
+
+    /// A new display target of `size` (allocated ahead of the frames it will
+    /// hold, such as playback's spare targets).
+    pub fn new(device: &wgpu::Device, [w, h]: [u32; 2]) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bae-render.output"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        OutputTarget(texture.create_view(&Default::default()))
     }
 }
 
@@ -182,26 +214,7 @@ impl DisplayOutput {
         let target = self
             .available
             .filter(|t| t.size() == [w.max(1), h.max(1)])
-            .unwrap_or_else(|| {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("bae-render.output"),
-                    size: wgpu::Extent3d {
-                        width: w.max(1),
-                        height: h.max(1),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
-                let view = texture.create_view(&Default::default());
-                OutputTarget(view)
-            });
+            .unwrap_or_else(|| OutputTarget::new(device, [w, h]));
         crate::exec::record_output_pass(
             device,
             pipelines,
@@ -230,6 +243,8 @@ pub struct Renderer {
     effects: EffectLibrary,
     /// Measure per-layer render times ([`RenderedFrame::layer_times`]).
     layer_times: bool,
+    /// `sampleImage` read-backs in flight.
+    sample_jobs: crate::sample::SampleJobs,
     /// Timestamp queries for per-layer GPU times (created when needed).
     gpu_timer: Option<crate::gpu_timer::GpuTimer>,
     /// The newest per-layer GPU times read back.
@@ -295,6 +310,7 @@ impl Renderer {
             providers: SourceProviders::new(),
             effects: EffectLibrary::new(),
             layer_times: false,
+            sample_jobs: Default::default(),
             gpu_timer: None,
             gpu_times: Vec::new(),
             gpu,
@@ -493,7 +509,9 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
-        let tiles = request.roi.map(|_| crate::exec::TileCache {
+        let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
+        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
+            feedback,
             frames: &mut self.frames,
             request: RenderRequest {
                 roi: None,
@@ -566,6 +584,196 @@ impl Renderer {
             },
             output,
         ))
+    }
+
+    /// Serves the `sampleImage` requests waiting in `samples` (expressions of
+    /// `comp` or of comps `frames` evaluates): draws each sampled layer in its
+    /// layer space at full resolution (its source, or with masks and effects) and
+    /// starts reading the sample areas back, without waiting for the GPU.
+    /// [`Renderer::poll_samples`] stores the values once they arrive.
+    pub fn read_samples(
+        &mut self,
+        samples: &bae_anim::ImageSamples,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        mut frames: Option<&mut dyn crate::graph::CompFrames>,
+    ) -> Result<(), RenderError> {
+        use crate::effect::{LayerDependency, LayerStage};
+        let taken = samples.take_requests();
+        if taken.keys.is_empty() {
+            return Ok(());
+        }
+        let mut groups: Vec<(LayerDependency, PrimPath, Vec<bae_anim::SampleKey>)> = Vec::new();
+        for key in taken.keys {
+            let stage = if key.post_effect {
+                LayerStage::EffectsAndMasks
+            } else {
+                LayerStage::Source
+            };
+            match groups.iter_mut().find(|(d, c, _)| {
+                d.layer == key.layer && d.time == key.time && d.stage == stage && *c == key.comp
+            }) {
+                Some((_, _, keys)) => keys.push(key),
+                None => groups.push((
+                    LayerDependency {
+                        layer: key.layer.clone(),
+                        time: key.time,
+                        stage,
+                    },
+                    key.comp.clone(),
+                    vec![key],
+                )),
+            }
+        }
+        let request = RenderRequest {
+            resolution: crate::request::Resolution::Full,
+            roi: None,
+            ..*request
+        };
+        let format = self.work_format(&request);
+        let mut encoder =
+            self.gpu
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("bae-render.samples"),
+                });
+        let mut started = Vec::new();
+        let mut failed = None;
+        for (dep, comp_path, keys) in groups {
+            match self.sample_group(
+                comp,
+                &request,
+                format,
+                &mut frames,
+                &dep,
+                &comp_path,
+                &keys,
+                &mut encoder,
+            ) {
+                Ok(Some((readback, image))) => started.push((readback, image, keys)),
+                // Nothing to draw (or it failed): transparent black.
+                result => {
+                    if let Err(e) = result {
+                        failed.get_or_insert(e);
+                    }
+                    for key in keys {
+                        samples.fulfil(taken.generation, key, [0.0; 4]);
+                    }
+                }
+            }
+        }
+        self.pool.end_frame();
+        self.gpu.queue().submit([encoder.finish()]);
+        // The images stayed leased until their copies were submitted (the pool
+        // could otherwise hand a texture to the next group's draws first).
+        for (readback, image, keys) in started {
+            self.sample_jobs
+                .push(taken.generation, readback.map(), image.rect, keys);
+        }
+        failed.map_or(Ok(()), Err)
+    }
+
+    /// Draws one sampled layer and records the read-back of its sample region.
+    #[allow(clippy::too_many_arguments)]
+    fn sample_group(
+        &mut self,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        format: wgpu::TextureFormat,
+        frames: &mut Option<&mut dyn crate::graph::CompFrames>,
+        dep: &crate::effect::LayerDependency,
+        comp_path: &PrimPath,
+        keys: &[bae_anim::SampleKey],
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Option<(bae_gpu::transfer::TextureReadback, GpuImage)>, RenderError> {
+        {
+            let owned;
+            let at = match crate::sample::find_comp(comp, comp_path, dep.time, &dep.layer) {
+                Some(c) => Some(c),
+                None => match reborrow(frames) {
+                    Some(f) => {
+                        owned = f.comp_at(comp_path, dep.time)?;
+                        owned.as_ref()
+                    }
+                    None => None,
+                },
+            };
+            let region = crate::sample::region(keys);
+            let graph = match at {
+                Some(at) => {
+                    let mut resolver = Resolver {
+                        footage: &mut self.footage,
+                        providers: &self.providers,
+                        warnings: Vec::new(),
+                    };
+                    graph::build_layer_image(
+                        at,
+                        request,
+                        &mut resolver,
+                        &self.effects,
+                        reborrow(frames),
+                        dep,
+                        region,
+                    )?
+                }
+                None => None,
+            };
+            let Some(graph) = graph else {
+                return Ok(None);
+            };
+            let image = execute(
+                &self.gpu,
+                &mut self.pipelines,
+                &mut self.pool,
+                &mut self.draws,
+                &mut self.mask_buffers,
+                &graph,
+                format,
+                None,
+                crate::exec::Timing {
+                    cpu: false,
+                    gpu: None,
+                },
+                None,
+            )?
+            .image;
+            let [w, h] = image.texel_size();
+            let readback = bae_gpu::transfer::TextureReadback::record(
+                &self.gpu,
+                encoder,
+                &image.texture,
+                bae_gpu::transfer::TextureRegion {
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                },
+            )?;
+            Ok(Some((readback, image)))
+        }
+    }
+
+    /// Stores the `sampleImage` values whose read-back finished, without
+    /// blocking. True when any arrived (evaluate the comp again to use them).
+    pub fn poll_samples(&mut self, samples: &bae_anim::ImageSamples) -> bool {
+        if self.sample_jobs.is_empty() {
+            return false;
+        }
+        self.gpu.poll();
+        self.sample_jobs.finish(samples)
+    }
+
+    /// Waits for every `sampleImage` read-back (export, tests).
+    pub fn wait_samples(&mut self, samples: &bae_anim::ImageSamples) -> Result<(), RenderError> {
+        self.sample_jobs.wait(&self.gpu, samples)
+    }
+
+    /// Whether `sampleImage` read-backs are in flight.
+    pub fn samples_pending(&self) -> bool {
+        !self.sample_jobs.is_empty()
     }
 
     /// Blocks until the GPU has finished all submitted work.

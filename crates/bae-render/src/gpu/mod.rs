@@ -121,6 +121,9 @@ pub(crate) mod flags {
 pub(crate) enum Variant {
     /// `fs_main`.
     Plain,
+    /// Ordinary textured 2D draws on Metal.
+    #[cfg(target_os = "macos")]
+    AffineImage,
     /// `fs_lit`: 3D layers lit by the comp's lights.
     Lit,
     /// `fs_motion`: motion-blurred layers (lit or not).
@@ -541,6 +544,10 @@ impl Shared {
             } else {
                 &[BlendKind::Replace]
             };
+            #[cfg(target_os = "macos")]
+            if blendable {
+                self.warm_one((format, BlendKind::Normal, Variant::AffineImage));
+            }
             for &kind in kinds {
                 for variant in [Variant::Plain, Variant::Lit, Variant::Motion] {
                     self.warm_one((format, kind, variant));
@@ -599,6 +606,12 @@ impl bae_gpu::WarmUp for CompositorWarmUp {
                 BlendKind::Normal,
                 Variant::Plain,
             ));
+            #[cfg(target_os = "macos")]
+            shared.warm_one((
+                wgpu::TextureFormat::Rgba16Float,
+                BlendKind::Normal,
+                Variant::AffineImage,
+            ));
             return Ok(());
         }
         let float32 = wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE;
@@ -622,9 +635,12 @@ impl Pipelines {
 
     /// The shared base: shader modules, layouts and the RGBA8 output.
     fn build(device: &wgpu::Device) -> Self {
+        let composite = wgsl!("composite.wgsl");
+        #[cfg(target_os = "macos")]
+        let composite = [composite, wgsl!("metal_image.wgsl")].concat();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.composite"),
-            source: wgpu::ShaderSource::Wgsl(wgsl!("composite.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(composite.into()),
         });
         let storage = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -959,6 +975,9 @@ pub(crate) struct EdgeData {
     pub xmax: f32,
     pub chan: u32,
     pub size: [f32; 2],
+    /// Winding contribution (1; 1/N for variable-width feather contours).
+    pub weight: f32,
+    pub _pad: f32,
 }
 
 /// One full-screen mask pass, laid out like `struct Pass` in `mask.wgsl`.
@@ -1171,12 +1190,19 @@ fn composite_pipeline(
     layout: &wgpu::PipelineLayout,
     (format, kind, variant): CompositeKey,
 ) -> wgpu::RenderPipeline {
+    let (vertex, fragment) = match variant {
+        Variant::Plain => ("vs_main", "fs_main"),
+        Variant::Lit => ("vs_main", "fs_lit"),
+        Variant::Motion => ("vs_main", "fs_motion"),
+        #[cfg(target_os = "macos")]
+        Variant::AffineImage => ("vs_image", "fs_image"),
+    };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("bae-render.composite"),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module,
-            entry_point: Some("vs_main"),
+            entry_point: Some(vertex),
             compilation_options: Default::default(),
             buffers: &[],
         },
@@ -1185,11 +1211,7 @@ fn composite_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module,
-            entry_point: Some(match variant {
-                Variant::Plain => "fs_main",
-                Variant::Lit => "fs_lit",
-                Variant::Motion => "fs_motion",
-            }),
+            entry_point: Some(fragment),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
@@ -1213,7 +1235,7 @@ mod tests {
         // 21 vec4s: the WGSL struct stride.
         assert_eq!(std::mem::size_of::<DrawData>(), 336);
         assert_eq!(std::mem::size_of::<SampleData>(), 48);
-        assert_eq!(std::mem::size_of::<EdgeData>(), 32);
+        assert_eq!(std::mem::size_of::<EdgeData>(), 40);
         assert_eq!(std::mem::size_of::<MaskPassData>(), 112);
     }
 

@@ -16,7 +16,8 @@
       version = current;
       snapshot = {
         items: new Map(), layers: new Map(), layerRows: new Map(), properties: new Map(),
-        folders: new Map(), itemRows: new Map()
+        folders: new Map(), itemRows: new Map(), effects: new Map(), effectInfo: new Map(),
+        masks: new Map()
       };
     }
     return snapshot;
@@ -67,6 +68,14 @@
     if (!attrs.has(p._a)) attrs.set(p._a, H("prop", { path: p._p, attr: p._a }));
     return attrs.get(p._a);
   }
+  function cachedRead(map, key, method, args) {
+    var cache = reads()[map];
+    if (!cache.has(key)) cache.set(key, H(method, args));
+    return cache.get(key);
+  }
+  function layerEffects(layer) { return cachedRead("effects", layer, "effects", { layer: layer }); }
+  function effectInfo(path) { return cachedRead("effectInfo", path, "effect", { path: path }); }
+  function layerMasks(layer) { return cachedRead("masks", layer, "masks", { layer: layer }); }
   function selection() {
     var cache = reads();
     if (!cache.selected) cache.selected = new Set(H("context").selected);
@@ -435,11 +444,11 @@
 
   var effectGroup = function (layer, e) {
     var eg = group(e.name, e.matchName, null, function () {
-      return H("effect", { path: e.path }).params.map(function (p) {
+      return effectInfo(e.path).params.map(function (p) {
         return new Property(e.path, p.attr, p.name, p.matchName, eg);
       });
     }, {
-      get enabled() { return H("effect", { path: e.path }).enabled; },
+      get enabled() { return effectInfo(e.path).enabled; },
       set enabled(v) { H("setEffectEnabled", { path: e.path, value: !!v }); },
       get active() { return this.enabled; },
       get propertyType() { return g.PropertyType.NAMED_GROUP; },
@@ -450,12 +459,12 @@
 
   var effectsGroup = function (layer) {
     var eg = group("Effects", "ADBE Effect Parade", layer, function () {
-      return H("effects", { layer: layer._p }).map(function (e) { return effectGroup(layer, e); });
+      return layerEffects(layer._p).map(function (e) { return effectGroup(layer, e); });
     }, {
       canAddProperty: function () { return true; },
       addProperty: function (matchName) {
         var path = H("applyEffect", { layer: layer._p, matchName: String(matchName) });
-        var e = H("effects", { layer: layer._p }).filter(function (x) { return x.path === path; })[0];
+        var e = layerEffects(layer._p).filter(function (x) { return x.path === path; })[0];
         return effectGroup(layer, e);
       },
     });
@@ -471,7 +480,7 @@
 
   var masksGroup = function (layer) {
     return group("Masks", "ADBE Mask Parade", layer, function () {
-      return H("masks", { layer: layer._p }).map(function (m) {
+      return layerMasks(layer._p).map(function (m) {
         var mg = group(m.name, "ADBE Mask Atom", null, function () {
           return MASK_PROPS.map(function (d) { return new Property(m.path, d[2], d[0], d[1], mg); });
         });
@@ -710,6 +719,12 @@
     get fileName() { return ""; },
   };
   g.bae = {
+    pathProperty: function (path) {
+      var info = H("pathInfo", { path: path });
+      info.layer = mkLayer(info.layer);
+      info.property = new Property(path, "path", info.name);
+      return info;
+    },
     commands: {
       // Runs any registered BAE command (the same ones MCP tools and menus run).
       invoke: function (id, params) { return H("invoke", { id: String(id), params: params || {} }); },

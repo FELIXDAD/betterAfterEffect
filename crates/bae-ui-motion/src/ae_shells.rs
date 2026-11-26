@@ -113,6 +113,8 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
         ],
     ),
     ("libraries", "Libraries", &[Search("Search"), Area("")]),
+    // Review with Frame.io needs an Adobe account: its outline, greyed.
+    ("frame_io", "Review with Frame.io", &[Area("")]),
     (
         "wiggler",
         "Wiggler",
@@ -174,32 +176,6 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
             Line(&[Check("First Vertices Match", true)]),
             Sep,
             Line(&[Button("Apply")]),
-        ],
-    ),
-    (
-        "tracker",
-        "Tracker",
-        &[
-            Line(&[Button("Track Camera"), Button("Warp Stabilizer")]),
-            Line(&[Button("Track Motion"), Button("Stabilize Motion")]),
-            Pair("Motion Source:", Dropdown("None")),
-            Pair("Current Track:", Dropdown("None")),
-            Pair("Track Type:", Dropdown("Transform")),
-            Line(&[
-                Check("Position", true),
-                Check("Rotation", false),
-                Check("Scale", false),
-            ]),
-            Note("Motion Target:"),
-            Line(&[Button("Edit Target..."), Button("Options...")]),
-            Line(&[
-                Text("Analyze:"),
-                Button("◀|"),
-                Button("◀"),
-                Button("▶"),
-                Button("|▶"),
-            ]),
-            Line(&[Button("Reset"), Button("Apply")]),
         ],
     ),
     ("progress", "Progress", &[Area("")]),
@@ -464,6 +440,8 @@ mod tests {
                     | "audio"
                     | "character"
                     | "align"
+                    | "tracker"
+                    | "create_nulls_from_paths"
                     | "paragraph"
                     | "properties"
                     | "effects"
