@@ -12,6 +12,7 @@ struct Params {
     // Waveform type: 0 luma, 1 RGB, 2 YC.
     wave_mode: u32,
     parade: u32, // RGB, RGB white, YUV, YUV white.
+    space: u32,
 }
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -28,8 +29,10 @@ const CB: u32 = PEAK + 1u;
 const CR: u32 = CB + 65536u;
 const CHROMA: u32 = CR + 65536u;
 
-fn luma(c: vec3f) -> f32 {
-    return dot(c, vec3f(0.2126, 0.7152, 0.0722));
+fn weights() -> vec2f {
+    if p.space == 1u { return vec2f(0.299, 0.114); }
+    if p.space >= 3u { return vec2f(0.2627, 0.0593); }
+    return vec2f(0.2126, 0.0722);
 }
 
 fn level(v: f32) -> u32 {
@@ -42,9 +45,10 @@ fn accumulate(@builtin(global_invocation_id) id: vec3u) {
     if pos.x >= p.size.x || pos.y >= p.size.y {
         return;
     }
-    let c = textureLoad(src, vec2i(pos), 0).rgb;
+    let c = scope_color(textureLoad(src, vec2i(pos), 0).rgb, p.space);
     let col = pos.x * 256u / p.size.x;
-    let y = luma(c);
+    let rb = weights();
+    let y = dot(c, vec3f(rb.x, 1.0 - rb.x - rb.y, rb.y));
     atomicAdd(&bins[WAVE + (255u - level(y)) * 256u + col], 1u);
     let r = level(c.r);
     let g = level(c.g);
@@ -56,9 +60,9 @@ fn accumulate(@builtin(global_invocation_id) id: vec3u) {
     atomicAdd(&bins[HIST + 256u + g], 1u);
     atomicAdd(&bins[HIST + 512u + b], 1u);
     atomicAdd(&bins[HIST + 768u + level(y)], 1u);
-    // Rec. 709 Cb / Cr in -0.5 … 0.5: blue to the right, red up.
-    let cb = (c.b - y) / 1.8556;
-    let cr = (c.r - y) / 1.5748;
+    // Chroma in -0.5 … 0.5: blue to the right, red up.
+    let cb = (c.b - y) / (2.0 * (1.0-rb.y));
+    let cr = (c.r - y) / (2.0 * (1.0-rb.x));
     if p.wave_mode == 2u {
         let chroma = length(vec2f(cb, cr));
         atomicAdd(&bins[CHROMA + (255u - level(y - chroma)) * 256u + col], 1u);
@@ -144,8 +148,10 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
         let g = glow(atomicLoad(&bins[WAVE + at]));
         if p.wave_mode == 2u {
             rgb = vec3f(0.0, g, glow(atomicLoad(&bins[CHROMA + at])));
+        } else if p.wave_mode == 3u {
+            rgb = vec3f(0.0, g, 0.0);
         } else {
-            rgb = vec3f(g * 0.85, g, g * 0.85);
+            rgb = vec3f(g);
         }
     }
     textureStore(dst, vec2i(id.xy), vec4f(rgb, 1.0));

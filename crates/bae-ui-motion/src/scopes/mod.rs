@@ -65,6 +65,7 @@ impl Scope {
 enum Wave {
     Rgb,
     Yc,
+    YcNoChroma,
     #[default]
     Luma,
 }
@@ -74,7 +75,8 @@ impl Wave {
         match self {
             Wave::Rgb => "RGB",
             Wave::Yc => "YC",
-            Wave::Luma => "YC No Chroma",
+            Wave::Luma => "Luma",
+            Wave::YcNoChroma => "YC No Chroma",
         }
     }
 }
@@ -100,6 +102,9 @@ impl Parade {
         Self::ALL[self as usize].1
     }
 }
+
+mod settings;
+use settings::{PRESETS, Space};
 
 /// Brightness of the traces (AE: Bright, Normal, Dimmed).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,6 +141,7 @@ struct State {
     wave: Wave,
     parade: Parade,
     brightness: Brightness,
+    space: Space,
 }
 
 impl Default for State {
@@ -145,6 +151,7 @@ impl Default for State {
             wave: Wave::default(),
             parade: Parade::default(),
             brightness: Brightness::default(),
+            space: Space::Automatic,
         }
     }
 }
@@ -152,7 +159,10 @@ impl Default for State {
 impl State {
     /// What the scope image depends on besides the frame.
     fn key(&self) -> u64 {
-        (self.parade as u64) << 16 | (self.wave as u64) << 8 | self.brightness as u64
+        (self.space as u64) << 24
+            | (self.parade as u64) << 16
+            | (self.wave as u64) << 8
+            | self.brightness as u64
     }
 }
 
@@ -177,7 +187,7 @@ impl Gpu {
         let device = gpu.device();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae.scopes"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("scopes.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(settings::shader_source().into()),
         });
         let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
             binding,
@@ -313,9 +323,11 @@ impl Gpu {
             Wave::Luma => 0,
             Wave::Rgb => 1,
             Wave::Yc => 2,
+            Wave::YcNoChroma => 3,
         };
         params[16..20].copy_from_slice(&wave.to_le_bytes());
         params[20..24].copy_from_slice(&(state.parade as u32).to_le_bytes());
+        params[24..28].copy_from_slice(&(state.space as u32).to_le_bytes());
         let queue = self.gpu.queue();
         queue.write_buffer(&self.params, 0, &params);
         let device = self.gpu.device();
@@ -432,6 +444,7 @@ impl Panel for ScopesPanel {
         resp.context_menu(|ui| self.menu_items(ui));
         let p = ui.painter_at(full);
         p.rect_filled(full, 0.0, Color32::from_gray(18));
+        let space = self.state.space.resolve(cx.stage);
         let handle = frame.and_then(|(texture, key)| {
             let context = cx.resources.get::<Arc<GpuContext>>()?;
             let warm = cx.resources.get::<Arc<ScopesWarmUp>>()?;
@@ -439,7 +452,9 @@ impl Panel for ScopesPanel {
             let gpu = lock
                 .as_mut()
                 .filter(|g| Arc::ptr_eq(&g.gpu, context) && !context.is_lost())?;
-            gpu.update(&texture, key, &self.state)
+            let mut state = self.state.clone();
+            state.space = space;
+            gpu.update(&texture, key, &state)
         });
         let shown = self.state.shown.clone();
         if shown.is_empty() {
@@ -452,7 +467,7 @@ impl Panel for ScopesPanel {
         for (i, scope) in shown.iter().enumerate() {
             let min = full.min + vec2((i % cols) as f32 * cell.x, (i / cols) as f32 * cell.y);
             let r = Rect::from_min_size(min, cell).shrink(10.0);
-            draw_scope(&p, *scope, r, handle, self.state.parade);
+            draw_scope(&p, *scope, r, handle, self.state.parade, space);
         }
     }
 
@@ -468,6 +483,18 @@ impl Panel for ScopesPanel {
 impl ScopesPanel {
     /// The scope check items of AE's panel menu (the wrench / right-click menu).
     fn menu_items(&mut self, ui: &mut Ui) {
+        bae_ui::widgets::menu_button(ui, tr("Presets"), |ui| {
+            for preset in PRESETS {
+                if ui
+                    .radio(preset.matches(&self.state), tr(preset.title))
+                    .clicked()
+                {
+                    preset.apply(&mut self.state);
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
         for scope in Scope::ALL {
             let mut on = self.state.shown.contains(&scope);
             let title = match scope {
@@ -502,8 +529,18 @@ impl ScopesPanel {
             }
         });
         bae_ui::widgets::menu_button(ui, tr("Waveform Type"), |ui| {
-            for wave in [Wave::Rgb, Wave::Yc, Wave::Luma] {
+            for wave in [Wave::Rgb, Wave::Luma, Wave::Yc, Wave::YcNoChroma] {
                 ui.radio_value(&mut self.state.wave, wave, tr(wave.title()));
+            }
+        });
+        bae_ui::widgets::menu_button(ui, tr("Color Space"), |ui| {
+            for (space, title) in Space::ALL {
+                if ui
+                    .radio_value(&mut self.state.space, space, tr(title))
+                    .clicked()
+                {
+                    ui.close();
+                }
             }
         });
         bae_ui::widgets::menu_button(ui, tr("Brightness"), |ui| {
@@ -516,7 +553,14 @@ impl ScopesPanel {
 
 /// One scope: its tile of the scope image (a square for the vectorscope) and
 /// AE's graticule.
-fn draw_scope(p: &egui::Painter, scope: Scope, area: Rect, handle: Option<u64>, parade: Parade) {
+fn draw_scope(
+    p: &egui::Painter,
+    scope: Scope,
+    area: Rect,
+    handle: Option<u64>,
+    parade: Parade,
+    space: Space,
+) {
     let r = match scope {
         Scope::Vectorscope => {
             let s = area.width().min(area.height());
@@ -556,7 +600,7 @@ fn draw_scope(p: &egui::Painter, scope: Scope, area: Rect, handle: Option<u64>, 
                 ("G", [0.0, 0.75, 0.0]),
                 ("Yl", [0.75, 0.75, 0.0]),
             ] {
-                let [cb, cr] = cb_cr(rgb);
+                let [cb, cr] = cb_cr(rgb, space);
                 let at = pos2(
                     r.left() + (cb + 0.5) * r.width(),
                     r.top() + (0.5 - cr) * r.height(),
@@ -609,9 +653,13 @@ fn draw_scope(p: &egui::Painter, scope: Scope, area: Rect, handle: Option<u64>, 
 }
 
 /// Rec. 709 Cb, Cr of display RGB (as the shader bins them).
-fn cb_cr(rgb: [f32; 3]) -> [f32; 2] {
-    let y = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-    [(rgb[2] - y) / 1.8556, (rgb[0] - y) / 1.5748]
+fn cb_cr(rgb: [f32; 3], space: Space) -> [f32; 2] {
+    let [r, b] = space.weights();
+    let y = r * rgb[0] + (1.0 - r - b) * rgb[1] + b * rgb[2];
+    [
+        (rgb[2] - y) / (2.0 * (1.0 - b)),
+        (rgb[0] - y) / (2.0 * (1.0 - r)),
+    ]
 }
 
 /// Chinese for the panel (AE 26's zh_CN dictionary).
@@ -620,6 +668,23 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Histogram", "直方图"),
     ("Parade (RGB)", "分量 (RGB)"),
     ("Parade ({type})", "分量 ({type})"),
+    ("Luma", "明度"),
+    ("Color Space", "色彩空间"),
+    ("Presets", "预设"),
+    ("All Scopes RGB", "所有示波器 RGB"),
+    ("All Scopes YUV/YC", "所有示波器 YUV/YC"),
+    ("Parade RGB", "分量 RGB"),
+    ("Parade RGB/Waveform YC", "分量 RGB/波形 YC"),
+    ("Parade/Waveform RGB", "分量/波形 RGB"),
+    (
+        "Vectorscope YUV/Parade RGB/Waveform YC",
+        "矢量示波器 YUV/分量 RGB/波形 YC",
+    ),
+    (
+        "Vectorscope YUV/Parade YUV/Waveform YC",
+        "矢量示波器 YUV/分量 YUV/波形 YC",
+    ),
+    ("Waveform RGB", "波形 RGB"),
     ("Parade Type", "分量类型"),
     ("RGB-White", "RGB-白色"),
     ("YUV-White", "YUV-白色"),
@@ -662,14 +727,14 @@ mod tests {
     #[test]
     fn color_targets_sit_where_ae_draws_them() {
         // Red up-left of center, blue to the right, green down-left.
-        let [cb, cr] = cb_cr([0.75, 0.0, 0.0]);
+        let [cb, cr] = cb_cr([0.75, 0.0, 0.0], Space::Rec709);
         assert!(cb < 0.0 && cr > 0.0);
-        let [cb, _] = cb_cr([0.0, 0.0, 0.75]);
+        let [cb, _] = cb_cr([0.0, 0.0, 0.75], Space::Rec709);
         assert!(cb > 0.0);
-        let [cb, cr] = cb_cr([0.0, 0.75, 0.0]);
+        let [cb, cr] = cb_cr([0.0, 0.75, 0.0], Space::Rec709);
         assert!(cb < 0.0 && cr < 0.0);
         // Gray has no color.
-        let [cb, cr] = cb_cr([0.5, 0.5, 0.5]);
+        let [cb, cr] = cb_cr([0.5, 0.5, 0.5], Space::Rec709);
         assert!(cb.abs() < 1e-6 && cr.abs() < 1e-6);
     }
 
