@@ -60,7 +60,7 @@ pub fn timecode_base(rate: FrameRate) -> u32 {
 
 /// Whether drop-frame timecode can apply (29.97 / 59.94).
 pub fn is_ntsc(rate: FrameRate) -> bool {
-    rate.den == 1001
+    rate.den == 1001 && matches!(rate.num, 30_000 | 60_000)
 }
 
 /// SMPTE timecode `HH:MM:SS:FF` (`;` before the frames for drop-frame).
