@@ -102,6 +102,38 @@ impl Command for AddPin {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct DeletePinsParams {
+    pub pins: Vec<PrimPath>,
+}
+
+pub struct DeletePins;
+
+impl Command for DeletePins {
+    type Params = DeletePinsParams;
+    type Output = ();
+    const ID: &'static str = "puppet.delete_pins";
+    const TITLE: &'static str = "Remove Selected Puppet Parameters";
+    const DESCRIPTION: &'static str = "Remove puppet pins (AE: select pins with a Puppet \
+        tool and press Delete). The Puppet effect stays.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: DeletePinsParams) -> Result<(), CommandError> {
+        for pin in &p.pins {
+            let is_pin = tx
+                .stage()
+                .prim(pin)
+                .is_some_and(|v| v.is_a(&PrimType::PUPPET_PIN));
+            if !is_pin {
+                return Err(fail(format!("{pin} is not a puppet pin")));
+            }
+            if let Some(layer) = query::owning_layer(tx.stage(), pin) {
+                ensure_unlocked(tx.stage(), std::slice::from_ref(&layer))?;
+            }
+        }
+        crate::layer::delete_prims(tx, &p.pins, Time::ZERO)
+    }
+}
+
 /// The layer's Puppet effect, added at the bottom of its stack if missing.
 fn puppet_effect(
     tx: &mut Transaction<'_>,

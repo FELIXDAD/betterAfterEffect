@@ -138,6 +138,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(paint::AddStroke),
         r.register(puppet::AddPin),
+        r.register(puppet::DeletePins),
         r.register(tracker::CreateTracker),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),

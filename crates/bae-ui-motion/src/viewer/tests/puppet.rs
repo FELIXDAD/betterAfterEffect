@@ -58,4 +58,31 @@ fn puppet_pins_are_added_on_a_click_and_dragged_in_one_step() {
     let (first, props) = labels(&pin_rows[0]);
     assert_eq!(first, "Puppet Pin 1");
     assert_eq!(labels(&props[0]).0, "Position");
+    // Shift adds the second pin; a drag moves both; Delete removes both in
+    // one step (the effect stays).
+    let second = bae_motion::puppet::pins_of(&h.stage, &effects[0])[1].clone();
+    let pin_at = |h: &H, p: &PrimPath| {
+        let ev = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+        let v = ev.layer(&solid).unwrap().effects[0]
+            .children
+            .iter()
+            .find(|c| c.path == *p)
+            .and_then(|c| c.get("position").cloned());
+        vec2v(v)
+    };
+    let before = pin_at(&h, &second);
+    h.click(340.0, 190.0, Modifiers::NONE);
+    h.click(260.0, 160.0, Modifiers::SHIFT);
+    h.drag_to((340.0, 190.0), (350.0, 190.0), Modifiers::NONE);
+    let r = h.release((350.0, 190.0), Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "one undo step for both");
+    h.apply(&r);
+    let after = pin_at(&h, &second);
+    assert!(close(after, [before[0] + 10.0, before[1]]), "{after:?}");
+    let r = h.action_with(crate::actions::ids::DELETE, json!({}));
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "puppet.delete_pins");
+    h.apply(&r);
+    assert!(bae_motion::puppet::pins_of(&h.stage, &effects[0]).is_empty());
+    assert_eq!(bae_motion::effect::effects_of(&h.stage, &solid).len(), 1);
 }

@@ -622,6 +622,10 @@ impl Panel for CompositionViewer {
                 nudge_layers(cx, &session, p("dx"), p("dy"), mag);
                 true
             }
+            crate::actions::ids::DELETE if self.puppet.has_selection() => {
+                self.puppet.delete_selected(cx);
+                true
+            }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
                     self.delete_vertices(cx, &session, &info);
