@@ -43,7 +43,7 @@ impl Footage {
             Some(Value::String(s) | Value::Enum(s)) => s,
             _ => "footage".into(),
         };
-        if !matches!(kind.as_str(), "footage" | "sequence") {
+        if !matches!(kind.as_str(), "footage" | "sequence" | "solid") {
             return None;
         }
         let dim = |attr: &str| get(attr).and_then(|v| v.as_f64()).unwrap_or(0.0).max(0.0) as u32;
@@ -62,6 +62,14 @@ impl Footage {
             },
             kind,
         })
+    }
+
+    /// A solid's color (AE shows solids in the Footage panel too).
+    fn solid_color(&self, stage: &Stage) -> Option<[f32; 4]> {
+        (self.kind == "solid")
+            .then(|| bae_motion::solid::solid_info(stage, &self.asset))
+            .flatten()
+            .map(|s| s.color.map(|v| v as f32))
     }
 
     /// A movie or sequence (has a time ruler).
@@ -112,9 +120,13 @@ impl Gpu {
             let file = self.assets.file(&view).ok().flatten();
             let [w, h] = footage.size;
             let mut comp = RenderComp::new(footage.asset.clone(), w.max(1), h.max(1));
-            let mut layer = RenderLayer::new(
-                footage.asset.clone(),
-                LayerContent::Footage(FootageRef {
+            let content = match footage.solid_color(stage) {
+                Some(color) => LayerContent::Solid {
+                    color,
+                    width: w.max(1),
+                    height: h.max(1),
+                },
+                None => LayerContent::Footage(FootageRef {
                     asset: footage.asset.clone(),
                     file_revision: bae_model::asset::file_revision(&view),
                     psd_layer: bae_model::psd::LayerImage::from_asset(&view),
@@ -125,7 +137,8 @@ impl Gpu {
                     // The footage panel shows source frames as they are.
                     blend: None,
                 }),
-            );
+            };
+            let mut layer = RenderLayer::new(footage.asset.clone(), content);
             layer.resolve_photoshop_mask(stage);
             if let Ok(path) = footage.asset.child(bae_model::layer_styles::PRIM)
                 && let Some(style) = stage.prim(&path)
