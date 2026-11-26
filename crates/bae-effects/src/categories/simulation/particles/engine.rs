@@ -104,6 +104,7 @@ impl Engine {
             include_str!(concat!(env!("OUT_DIR"), "/playground_slots.wgsl")),
             include_str!("playground.wgsl"),
             include_str!("surfaces.wgsl"),
+            include_str!("classic.wgsl"),
             include_str!("draw.wgsl")
         );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -307,7 +308,7 @@ pub(super) fn render(
             _ => 0,
         };
     let advance = match kind {
-        Kind::World | Kind::Systems => 0,
+        Kind::World | Kind::Systems | Kind::Classic | Kind::ClassicLe => 0,
         Kind::Rain | Kind::Snow | Kind::Bubbles => 1,
         Kind::Drizzle | Kind::Foam => 2,
         Kind::Ball => 4,
