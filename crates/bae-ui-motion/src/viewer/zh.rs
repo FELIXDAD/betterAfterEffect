@@ -50,11 +50,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Custom...", "自定义..."),
     ("Horizontal", "水平"),
     ("Vertical", "垂直"),
-    (
-        "{w} x {h}, {mb} MB per 8bpc frame",
-        "{w} x {h}，{mb} MB（每 8bpc 帧）",
-    ),
-    ("is {tc} Base {n}", "是 {tc}  基础 {n}"),
     ("Start Timecode:", "开始时间码:"),
     ("Start Timecode", "开始时间码"),
     ("Duration:", "持续时间:"),
@@ -74,9 +69,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Bottom Right", "右下"),
     (
         "Preserve frame rate when nested or in render queue",
-        "嵌套时或在渲染队列中，保留帧速率",
+        "在嵌套时或在渲染队列中，保留帧速率",
     ),
-    ("Preserve resolution when nested", "嵌套时保留分辨率"),
+    ("Preserve resolution when nested", "在嵌套时保留分辨率"),
     ("Shutter Angle:", "快门角度:"),
     ("Shutter Angle", "快门角度"),
     ("Shutter Angle Value", "快门角度值"),

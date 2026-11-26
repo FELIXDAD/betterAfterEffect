@@ -260,7 +260,7 @@ fn space_with_nothing_focused_plays_and_stops() {
 fn space_on_a_focused_button_presses_it_and_does_not_play() {
     let mut h = comp_with_solid();
     // The Render Queue's "Remove" button gets keyboard focus (Tab), then Space.
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     queue_control(&h, 1, "Remove").expect("Remove").focus();
     settle(&mut h);
@@ -489,7 +489,7 @@ fn enter_renames_the_topmost_selected_layer() {
 #[test]
 fn enter_on_a_focused_button_does_not_start_a_rename() {
     let mut h = comp_with_solid();
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     h.state().session().lock().selected_layers = h.state().layers();
     queue_control(&h, 1, "Remove").expect("Remove").focus();

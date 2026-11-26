@@ -7,7 +7,9 @@ use common::*;
 fn rotation_wraps_each_eye_independently() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(64, 32);
-    let input = Pixels::new(rect, |x, y| [x as f32 / 64., f32::from(u8::from(y >= 16)), 0., 1.]);
+    let input = Pixels::new(rect, |x, y| {
+        [x as f32 / 64., f32::from(u8::from(y >= 16)), 0., 1.]
+    });
     let output = run(
         &gpu,
         F32,
