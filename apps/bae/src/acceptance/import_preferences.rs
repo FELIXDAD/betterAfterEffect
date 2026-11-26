@@ -68,7 +68,6 @@ fn sequence_import_reports_missing_and_unreadable_frames_separately() {
 #[test]
 fn dropping_multiple_files_uses_the_selected_import_mode() {
     use bae_motion::query;
-    use egui_kittest::kittest::Queryable as _;
 
     let dir = tempfile::tempdir().unwrap();
     let files = ["left.png", "right.png"].map(|name| dir.path().join(name));
@@ -85,21 +84,7 @@ fn dropping_multiple_files_uses_the_selected_import_mode() {
         let mut prefs = (*h.state().prefs.current()).clone();
         prefs.set("import.drag_import_multiple_items_as", mode);
         h.state().prefs.set(prefs).unwrap();
-        let viewer = h
-            .root()
-            .query_all_by_label("Composition")
-            .map(|n| n.rect())
-            .max_by(|a, b| a.area().total_cmp(&b.area()))
-            .unwrap();
-        send(&mut h, Event::PointerMoved(viewer.center()));
-        for file in &files {
-            h.input_mut()
-                .dropped_files
-                .push(std::sync::Arc::new(super::dialogs::DroppedFile(
-                    file.clone(),
-                )));
-        }
-        settle(&mut h);
+        drop_on_canvas(&mut h, &files);
         let layers = h.state().layers();
         let stage = h.state().stage();
         let footage = if nested {
@@ -117,5 +102,67 @@ fn dropping_multiple_files_uses_the_selected_import_mode() {
         assert_eq!(names, ["left.png", "right.png"], "{mode}");
         key(&mut h, Modifiers::COMMAND, Key::Z);
         assert!(h.state().layers().is_empty(), "{mode}");
+    }
+}
+
+fn drop_on_canvas(h: &mut Ui, files: &[PathBuf]) {
+    use egui_kittest::kittest::Queryable as _;
+    let viewer = h
+        .root()
+        .query_all_by_label("Composition")
+        .map(|n| n.rect())
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
+        .unwrap();
+    send(h, Event::PointerMoved(viewer.center()));
+    for file in files {
+        h.input_mut()
+            .dropped_files
+            .push(std::sync::Arc::new(super::dialogs::DroppedFile(
+                file.clone(),
+            )));
+    }
+    settle(h);
+}
+
+#[test]
+fn layered_drops_use_canvas_or_layer_size_from_preferences() {
+    use egui_kittest::kittest::Queryable as _;
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("overlay.png");
+    std::fs::write(&file, PNG).unwrap();
+    let psd = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/bae-interop-psd/tests/fixtures/art.psd");
+    for (mode, canvas) in [
+        ("composition", true),
+        ("composition_retain_layer_sizes", false),
+    ] {
+        let mut h = gui();
+        comp_with(&mut h, &[]);
+        let mut prefs = (*h.state().prefs.current()).clone();
+        prefs.set("import.drag_import_multiple_items_as", mode);
+        h.state().prefs.set(prefs).unwrap();
+        drop_on_canvas(&mut h, &[psd.clone(), file.clone()]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while find_text(&h, "Editable Layer Styles").is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "PSD composition dialog missing for {mode}"
+            );
+            frame(&mut h);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.get_by_label("OK").click();
+        settle(&mut h);
+        let stage = h.state().stage();
+        let layers: Vec<_> = stage
+            .traverse()
+            .into_iter()
+            .filter_map(|p| bae_model::psd::LayerImage::from_asset(&stage.prim(&p)?))
+            .collect();
+        assert!(
+            layers.iter().any(|l| l.canvas == canvas),
+            "{mode}: {layers:?}"
+        );
     }
 }
