@@ -11,12 +11,16 @@ fn playhead_has_priority_after_preview_stops() {
         return;
     };
     let mut h = super::Harness::new();
-    let (path, _, _) = h.comp_with_layers();
+    let (path, _, shape) = h.comp_with_layers();
+    h.run(
+        "attr.set_expression",
+        serde_json::json!({"path":shape, "attr":"transform:rotation", "source":"time*1000"}),
+    );
     let registry = Arc::new(ViewportTextureRegistry::new());
     let mut worker = PlaybackPreview::new(gpu, registry.clone());
     let rate = FrameRate::FPS_60;
     let range = TimeRange::new(Time::ZERO, rate.frame_to_time(60));
-    let get = |worker: &mut PlaybackPreview, frame, range, looping| {
+    let get = |worker: &mut PlaybackPreview, h: &super::Harness, frame, range, looping| {
         let time = rate.frame_to_time(frame);
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -25,7 +29,7 @@ fn playhead_has_priority_after_preview_stops() {
                     registry.set_display_handle(e.id, Some(e.id.raw()));
                 }
             }
-            if let Some((_, actual, _)) = worker.poll(
+            if let Some((image, actual, _)) = worker.poll(
                 &h.stage,
                 &h.resources,
                 &path,
@@ -41,20 +45,25 @@ fn playhead_has_priority_after_preview_stops() {
                     "stale frame {actual:?} at {time:?}"
                 );
                 if actual == time {
-                    return;
+                    return image.handle;
                 }
             }
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
         }
     };
-    get(&mut worker, 0, range, false);
+    let first = get(&mut worker, &h, 0, range, false);
     worker.stop();
-    get(&mut worker, 29, range, false);
-    get(&mut worker, 7, range, false);
+    get(&mut worker, &h, 29, range, false);
+    assert_eq!(get(&mut worker, &h, 0, range, false), first);
+    h.run("comp.create", serde_json::json!({"name":"Unrelated"}));
+    assert_eq!(get(&mut worker, &h, 0, range, false), first);
+    h.run("attr.set",serde_json::json!({"path":path,"attr":"bg_color","value":bae_model::Value::Color([0.1,0.2,0.3,1.0])}));
+    assert_ne!(get(&mut worker, &h, 0, range, false), first);
+    get(&mut worker, &h, 7, range, false);
     let short = TimeRange::new(rate.frame_to_time(5), rate.frame_to_time(8));
-    get(&mut worker, 7, short, true);
-    get(&mut worker, 5, short, true);
+    get(&mut worker, &h, 7, short, true);
+    get(&mut worker, &h, 5, short, true);
 }
 
 /// Consume consecutive worker frames as fast as possible. Shell registration is
@@ -121,8 +130,148 @@ fn playback_worker_4k() {
             "worker layers={layers} effects={effects} frames={n} ui_p95_ms={:.4} fps={fps:.2}",
             ui_times[ui_times.len() * 95 / 100].as_secs_f64() * 1000.
         );
+        let loop_start = n + 3 - n.min(8);
+        let cached = TimeRange::new(rate.frame_to_time(loop_start), range.end);
+        draw_cached(&gpu, &registry, |i| {
+            let time = rate.frame_to_time(loop_start + i % n.min(8));
+            let (image, actual, _) = worker
+                .poll(
+                    &h.stage,
+                    &h.resources,
+                    &path,
+                    time,
+                    rate,
+                    cached,
+                    true,
+                    1,
+                    &h.ctx,
+                )
+                .expect("warm frame");
+            assert_eq!(actual, time);
+            image.handle
+        });
+        for e in registry.snapshot() {
+            if e.texture.is_some() {
+                registry.set_display_handle(e.id, Some(e.id.raw()));
+            }
+        }
         measure_cadence(&h, &path, &gpu, &registry, &mut worker);
     }
+}
+
+/// Sample each cached texture with egui's real GPU pipeline and complete a
+/// full-resolution draw. Timestamp writes enclose only the textured pass.
+fn draw_cached(
+    gpu: &GpuContext,
+    registry: &ViewportTextureRegistry,
+    mut lookup: impl FnMut(i64) -> u64,
+) {
+    use bae_gpu::{timer::GpuTimer, wgpu};
+    let device = gpu.device();
+    let format = wgpu::TextureFormat::Bgra8Unorm;
+    let display = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("4K playback display"),
+        size: wgpu::Extent3d {
+            width: 3840,
+            height: 2160,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let target = display.create_view(&Default::default());
+    let mut renderer = egui_wgpu::Renderer::new(device, format, Default::default());
+    for e in registry.snapshot() {
+        if let Some(texture) = e.texture {
+            let egui::TextureId::User(handle) =
+                renderer.register_native_texture(device, &texture.view, texture.filter)
+            else {
+                unreachable!()
+            };
+            registry.set_display_handle(e.id, Some(handle));
+        }
+    }
+    let generation = registry.generation();
+    let screen = egui_wgpu::ScreenDescriptor {
+        size_in_pixels: [3840, 2160],
+        pixels_per_point: 1.,
+    };
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(3840., 2160.));
+    let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
+    const N: u32 = 240;
+    let mut timer = GpuTimer::new(gpu, N).unwrap();
+    let mut start = Instant::now();
+    for i in 0..=N {
+        if i == 1 {
+            gpu.wait_idle().unwrap();
+            start = Instant::now();
+        }
+        let mut mesh = egui::Mesh::with_texture(egui::TextureId::User(lookup(i64::from(i))));
+        mesh.add_rect_with_uv(rect, uv, egui::Color32::WHITE);
+        let jobs = [egui::ClippedPrimitive {
+            clip_rect: rect,
+            primitive: egui::epaint::Primitive::Mesh(mesh),
+        }];
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let mut commands =
+            renderer.update_buffers(device, gpu.queue(), &mut encoder, &jobs, &screen);
+        let scope = (i > 0).then(|| timer.scope("cached draw").unwrap());
+        {
+            let mut pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    timestamp_writes: scope.map(|s| timer.render_pass_writes(s)),
+                    ..Default::default()
+                })
+                .forget_lifetime();
+            renderer.render(&mut pass, &jobs, &screen);
+        }
+        if i == N {
+            timer.resolve(&mut encoder);
+        }
+        commands.push(encoder.finish());
+        gpu.queue().submit(commands);
+    }
+    gpu.wait_idle().unwrap();
+    let fps = f64::from(N) / start.elapsed().as_secs_f64();
+    let ms = timer
+        .read(gpu)
+        .unwrap()
+        .iter()
+        .map(|s| s.millis())
+        .sum::<f64>()
+        / f64::from(N);
+    assert_eq!(
+        registry.generation(),
+        generation,
+        "cache hits must reuse registered textures"
+    );
+    // The benchmark must actually sample the cached composition. Inspect the
+    // completed BGRA target once, outside both timing intervals.
+    let pixels = bae_gpu::transfer::read_texture(gpu, &display).unwrap();
+    let red = pixels
+        .data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|p| p[2] > 64 && p[2] > p[0].saturating_add(16) && p[3] != 0);
+    assert!(
+        red,
+        "display target did not contain any of the red shape pixels"
+    );
+    println!("cached 3840x2160 frames={N} gpu_pass_ms={ms:.4} completed_fps={fps:.2}");
 }
 
 /// Sample the viewer at composition deadlines. A new frame counts when its

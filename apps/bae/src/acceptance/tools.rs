@@ -270,6 +270,10 @@ fn space_drag_pans_and_does_not_play() {
     send(&mut h, Event::PointerMoved(c));
     key_down(&mut h, Modifiers::NONE, Key::Space, true);
     settle(&mut h);
+    // Playback runs on the wall clock: let it pass a frame (a loaded CI
+    // machine does) before the drag starts.
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    settle(&mut h);
     drag(&mut h, c, c + vec2(-90.0, 40.0), Modifiers::NONE);
     key_down(&mut h, Modifiers::NONE, Key::Space, false);
     settle(&mut h);

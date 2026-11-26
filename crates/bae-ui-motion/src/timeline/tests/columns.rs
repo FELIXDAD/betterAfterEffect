@@ -136,3 +136,36 @@ fn column_menu_shows_the_actual_out_frame_and_header_drag_changes_layout() {
     let restored = TimelinePanel::from_state(Some(&saved));
     assert_eq!(restored.save_state(), Some(saved));
 }
+
+/// #459: the bottom-left buttons show and hide the Layer Switches, Transfer
+/// Controls, In/Out/Duration/Stretch and Render Time panes (AE).
+#[test]
+fn bottom_left_pane_buttons_toggle_their_columns() {
+    use crate::timeline::Column::{Duration, In, Modes, Out, RenderTime, Stretch, Switches};
+    let mut h = H::new();
+    let mut tl = h.bars();
+    let panes: [&[crate::timeline::Column]; 4] = [
+        &[Switches],
+        &[Modes],
+        &[In, Out, Duration, Stretch],
+        &[RenderTime],
+    ];
+    for (i, cols) in panes.into_iter().enumerate() {
+        let before: Vec<bool> = cols.iter().map(|c| tl.column_visible(*c)).collect();
+        let at = tl.last_panes[i].expect("pane button drawn").center();
+        h.click(&mut tl, at, Modifiers::NONE);
+        let after: Vec<bool> = cols.iter().map(|c| tl.column_visible(*c)).collect();
+        let shown = !before.iter().any(|v| *v);
+        assert!(
+            after.iter().all(|v| *v == shown),
+            "pane {i}: {before:?} -> {after:?}"
+        );
+        h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+        let at = tl.last_panes[i].expect("pane button drawn").center();
+        h.click(&mut tl, at, Modifiers::NONE);
+        assert!(
+            cols.iter().all(|c| tl.column_visible(*c) == !shown),
+            "pane {i} toggles back"
+        );
+    }
+}
