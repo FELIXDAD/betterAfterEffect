@@ -12,10 +12,15 @@ pub const DEFAULT_VALUES_ZH: &[(&str, &str)] = &[("Solids", "纯色")];
 
 /// The Chinese text of `en`, if the tables have it.
 pub fn zh(en: &str) -> Option<&'static str> {
-    ZH.iter()
-        .chain(DEFAULT_VALUES_ZH)
-        .find(|(e, _)| *e == en)
-        .map(|(_, z)| *z)
+    ZH.binary_search_by_key(&en, |(e, _)| *e)
+        .map(|i| ZH[i].1)
+        .ok()
+        .or_else(|| {
+            DEFAULT_VALUES_ZH
+                .iter()
+                .find(|(e, _)| *e == en)
+                .map(|(_, z)| *z)
+        })
 }
 
 #[cfg(test)]
