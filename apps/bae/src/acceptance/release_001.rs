@@ -668,7 +668,7 @@ const SETTINGS_PAGES: &[&str] = &[
 
 fn new_ui_in_one_language(zh: bool) {
     crate::i18n::init_from_env();
-    let (mut h, extra_ok) = super::i18n_retest::gui_with_status();
+    let mut h = super::i18n_retest::gui_with_status();
     comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
     let solid = h.state().layers()[1].clone();
     let mut problems = Vec::new();
@@ -681,7 +681,7 @@ fn new_ui_in_one_language(zh: bool) {
             "settings scripting_expressions" => Some("px"),
             _ => None,
         };
-        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok, expected_zh_label) {
+        for p in super::i18n_retest::wrong_language(h, zh, expected_zh_label) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -854,7 +854,8 @@ fn new_layer_properties_survive_save_as_bae_and_baez() {
             continue;
         }
         settle(&mut h);
-        if dialog_open(&h) {
+        // A dialog, or Preferences (Edit ▸ Label ▸ Edit Label Colors…).
+        if dialog_open(&h) || h.state().workspace.modal_open(h.state().app.resources()) {
             key(&mut h, Modifiers::NONE, Key::Escape);
         }
         ran.push(format!("{} ▸ {}", item.path.join(" ▸ "), item.title));
@@ -1284,7 +1285,9 @@ fn render_queue_output_defaults_to_movies_on_macos() {
     comp_with(&mut h, &["motion.layer.new.solid"]);
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = h.state().render_queue();
-    let output = queue.lock().items().last().unwrap().output.clone();
+    let output = queue.lock().items().last().unwrap().outputs[0]
+        .output
+        .clone();
     let movies = bae_platform::dirs::home_dir().unwrap().join("Movies");
     assert!(
         std::path::Path::new(&output).starts_with(&movies),

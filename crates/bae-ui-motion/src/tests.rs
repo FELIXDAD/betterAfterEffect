@@ -63,8 +63,21 @@ impl Harness {
 
     /// One frame of `panel`; returns its requests.
     fn frame(&self, kind: &str, panel: &mut dyn Panel, events: Vec<Event>) -> PanelRequests {
+        self.frame_mods(kind, panel, events, egui::Modifiers::NONE)
+    }
+
+    /// [`Harness::frame`] with `modifiers` held.
+    fn frame_mods(
+        &self,
+        kind: &str,
+        panel: &mut dyn Panel,
+        events: Vec<Event>,
+        modifiers: egui::Modifiers,
+    ) -> PanelRequests {
         let mut requests = PanelRequests::default();
         let id = PanelId::new(kind);
+        let mut events = events;
+        events.insert(0, Event::ModifiersChanged(modifiers));
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
             events,
@@ -1338,8 +1351,8 @@ fn render_button_activates_with_space_and_enter() {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
-            item.set_format(bae_render::ExportFormat::Png);
-            item.output = dir
+            item.outputs[0].set_format(bae_render::ExportFormat::Png);
+            item.outputs[0].output = dir
                 .path()
                 .join(format!("k{n}/f_####.png"))
                 .to_string_lossy()
@@ -2543,7 +2556,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.comp.set_work_area_to_selection".into()]
+            vec!["motion.window.close_all".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2577,7 +2590,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.comp.set_work_area_to_selection")
+            .filter(|(_, a, _)| a == "motion.window.close_all")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2585,7 +2598,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Alt+B").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+W").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -3343,6 +3356,92 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
     assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
+/// Shift-drag continues the previous Brush stroke; Ctrl/Cmd-drag only sizes
+/// the brush (AE).
+#[test]
+fn shift_continues_the_last_stroke_and_command_sizes_the_brush() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::Brush);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = |x: f32, y: f32| pos2(320.0 + x, 195.0 + y);
+    let drag = |h: &mut Harness, panel: &mut crate::layer_panel::LayerPanel, from, to, m| {
+        let mut r = PanelRequests::default();
+        for (i, p) in [from, from, to, to].into_iter().enumerate() {
+            let mut evs = Vec::new();
+            pointer(
+                &mut evs,
+                p,
+                match i {
+                    1 => Some(true),
+                    3 => Some(false),
+                    _ => None,
+                },
+            );
+            r.invocations
+                .extend(h.frame_mods("layer", panel, evs, m).invocations);
+        }
+        let ids: Vec<String> = r.invocations.iter().map(|i| i.id.clone()).collect();
+        h.apply(r);
+        ids
+    };
+    let none = egui::Modifiers::NONE;
+    let r = drag(&mut h, &mut panel, at(10.0, 10.0), at(60.0, 10.0), none);
+    assert!(r.iter().any(|i| i == "paint.add_stroke"), "{r:?}");
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    let strokes = |h: &Harness| bae_motion::paint::strokes_of(&h.stage, &effects[0]);
+    let r = drag(
+        &mut h,
+        &mut panel,
+        at(60.0, 20.0),
+        at(100.0, 20.0),
+        egui::Modifiers::SHIFT,
+    );
+    assert!(r.iter().any(|i| i == "paint.extend_stroke"), "{r:?}");
+    assert_eq!(strokes(&h).len(), 1, "the same stroke, longer");
+    // Ctrl/Cmd-drag 30 points out: a 60 px brush, no stroke.
+    let r = drag(
+        &mut h,
+        &mut panel,
+        at(200.0, 100.0),
+        at(230.0, 100.0),
+        egui::Modifiers::COMMAND,
+    );
+    assert!(r.is_empty(), "{r:?}");
+    let d = tools.lock().options.paint.diameter;
+    assert!((d - 60.0).abs() < 1.0, "{d}");
+}
+
+/// The Paint panel's Clone presets recall their Clone Options.
+#[test]
+fn clone_presets_recall_their_options() {
+    let mut p = crate::tools::PaintOptions {
+        clone_offset: [10.0, 20.0],
+        ..Default::default()
+    };
+    p.choose_clone_preset(2);
+    assert_eq!(p.clone_offset, [0.0, 0.0], "preset 3 starts empty");
+    p.clone_offset = [5.0, 5.0];
+    p.choose_clone_preset(0);
+    assert_eq!(p.clone_offset, [10.0, 20.0]);
+    p.choose_clone_preset(2);
+    assert_eq!(p.clone_offset, [5.0, 5.0]);
+}
+
 /// #599: the Project panel starts renaming the item another panel asks for.
 #[test]
 fn project_panel_renames_the_item_another_panel_asks_for() {
@@ -3417,4 +3516,54 @@ fn new_folder_and_open_layer() {
     h.session().lock().selected_layers = vec![solid.clone()];
     h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
     assert_eq!(h.session().lock().layer_panel, Some(solid));
+}
+
+/// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label
+/// ▸ Edit Label Colors… and View ▸ Show Layer Controls.
+#[test]
+fn add_footage_separate_dimensions_and_layer_controls() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    // The comp item itself can't nest; another comp becomes a pre-comp layer.
+    let other = PrimPath::new(
+        h.run("comp.create", json!({"name": "Other"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().open_comp(&comp);
+    h.session().lock().selected_items = vec![other.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::ADD_FOOTAGE_TO_COMP));
+    assert_eq!(r.invocations[0].id, "layer.create");
+    assert_eq!(r.invocations[0].params["source"], json!(other));
+
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::SEPARATE_DIMENSIONS));
+    assert_eq!(r.invocations[0].id, "transform.separate_dimensions");
+    assert_eq!(r.invocations[0].params["separated"], true);
+    h.apply(r);
+    assert!(crate::actions::all_separated(
+        &h.stage,
+        std::slice::from_ref(&solid)
+    ));
+    let r = h.action(&mut viewer, Invocation::new(ids::SEPARATE_DIMENSIONS));
+    assert_eq!(r.invocations[0].params["separated"], false, "a toggle");
+
+    let r = h.action(&mut viewer, Invocation::new(ids::EDIT_LABEL_COLORS));
+    assert_eq!(r.invocations[0].id, bae_ui::settings::ACTION);
+    assert_eq!(r.invocations[0].params["page"], "labels");
+
+    let shown =
+        |h: &Harness| crate::viewer::view_options::shown_controls(&h.session().lock()).handles;
+    assert!(shown(&h));
+    // View ▸ Show Layer Controls off (the tools handler flips the option).
+    h.session().lock().view_options.layer_controls = false;
+    assert!(!shown(&h));
+    assert!(!crate::viewer::guides::checked(
+        &h.resources,
+        "motion.view.show_layer_controls"
+    ));
 }

@@ -645,15 +645,21 @@ pub(crate) fn bounds_quad(
     view: &View,
     outer: &Affine,
 ) -> Option<[Pos2; 4]> {
+    projected_bounds(layer, view, outer, is_3d(layer))
+}
+
+/// Project a nested layer with all ancestor transforms and the containing camera.
+pub(crate) fn projected_bounds(
+    layer: &EvaluatedLayer,
+    view: &View,
+    outer: &Affine,
+    three_d: bool,
+) -> Option<[Pos2; 4]> {
     let (min, max) = layer_bounds(layer)?;
     let c = [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)];
-    if is_3d(layer) {
-        let [a, b, c, d] =
-            c.map(|p| view.project(layer.world_matrix.transform_point3(p.extend(0.0)), true));
-        return Some([a?, b?, c?, d?]);
-    }
     let xf = outer.then(&layer.world_matrix);
-    Some(c.map(|p| view.to_screen(xf.apply(p))))
+    let [a, b, c, d] = c.map(|p| view.project(xf.m.transform_point3(p.extend(0.0)), three_d));
+    Some([a?, b?, c?, d?])
 }
 
 /// A 3D layer the camera sees (cameras and lights have no picture).

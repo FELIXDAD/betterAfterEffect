@@ -144,6 +144,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
         r.register(paint::AddStroke),
+        r.register(paint::ExtendStroke),
         r.register(tracker::CreateTracker),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
@@ -158,6 +159,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(ReplaceFile),
         r.register(CreateLayer),
         r.register(Precompose),
+        r.register(precompose::ReplaceWithPrecomp),
         r.register(SetSolidSettings),
         r.register(SetCameraSettings),
         r.register(SetLightSettings),

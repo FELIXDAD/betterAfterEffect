@@ -836,11 +836,11 @@ pub(crate) fn new_layer(
         return;
     };
     let mut params = json!({"comp": comp, "kind": kind, "name": name, "index": index});
-    // Preferences: the kind's default label; new layers start at the comp's
-    // start, or at the current time when that option is off.
-    let prefs = crate::prefs::current(cx.resources);
-    params["label"] = json!(crate::prefs::layer_label(&prefs, kind));
+    if let Some(info) = query::comp_info(stage, &comp) {
+        crate::prefs::apply_layer_defaults(cx.resources, session, &info, kind, &mut params);
+    }
     if matches!(kind, LayerKind::Solid | LayerKind::Adjustment) {
+        let prefs = crate::prefs::current(cx.resources);
         let name = prefs.str("project.new_project_solids_folder");
         let name = if name == "Solids" || name.trim().is_empty() {
             bae_ui::tr("Solids")
@@ -849,9 +849,6 @@ pub(crate) fn new_layer(
         };
         params["solids_folder_name"] = json!(name);
         params["solids_folder_label"] = json!(prefs.int("labels.label_default_folder"));
-    }
-    if !crate::prefs::layers_at_comp_start(&prefs) {
-        params["start"] = json!(session.lock().time(&comp));
     }
     if let (Some(p), serde_json::Value::Object(m)) = (params.as_object_mut(), extra) {
         p.extend(m);
