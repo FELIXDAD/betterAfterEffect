@@ -774,6 +774,7 @@ impl SettingsDialog {
                         .iter()
                         .map(|(id, name)| (id.as_str(), name.as_str())),
                 );
+                let available = choices.len();
                 let current = draft.str(p.key);
                 let mut selected = choices
                     .iter()
@@ -783,7 +784,14 @@ impl SettingsDialog {
                         choices.len() - 1
                     });
                 let labels: Vec<_> = choices.iter().map(|(_, name)| *name).collect();
-                if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0).changed() {
+                let source = |index| match index {
+                    0 => Some(crate::a11y::SYSTEM_OUTPUT),
+                    i if i < available => Some(crate::a11y::VERBATIM_VALUE),
+                    _ => None, // The unavailable-device fallback is UI text.
+                };
+                if widgets::dropdown_with_source(ui, p.key, &mut selected, &labels, 220.0, source)
+                    .changed()
+                {
                     self.set(p.key, choices[selected].0.to_owned());
                 }
             }
@@ -810,8 +818,15 @@ impl SettingsDialog {
                             selected = selected.min(names.len() - 1);
                             let labels: Vec<_> = names.iter().map(String::as_str).collect();
                             ui.add_enabled_ui(self.audio_channels > 0, |ui| {
-                                if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0)
-                                    .changed()
+                                if widgets::dropdown_with_source(
+                                    ui,
+                                    p.key,
+                                    &mut selected,
+                                    &labels,
+                                    220.0,
+                                    |_| Some(crate::a11y::VERBATIM_VALUE),
+                                )
+                                .changed()
                                 {
                                     self.set(p.key, options[selected].value);
                                 }
@@ -916,8 +931,10 @@ impl SettingsDialog {
             Kind::Path => {
                 let path = draft.str(p.key);
                 let path = if path.is_empty() { "—" } else { path };
-                ui.label(RichText::new(path).color(color::TEXT_DIM))
+                let response = ui
+                    .label(RichText::new(path).color(color::TEXT_DIM))
                     .on_hover_text(label);
+                crate::a11y::value_source(&response, crate::a11y::VERBATIM_VALUE);
             }
         }
     }
@@ -957,7 +974,8 @@ impl SettingsDialog {
             .inner_margin(6)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width() - 4.0);
-                ui.label(job);
+                let sample = ui.label(job);
+                crate::a11y::value_source(&sample, crate::a11y::VERBATIM_VALUE);
             });
     }
 }
