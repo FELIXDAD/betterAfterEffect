@@ -478,16 +478,18 @@ impl TimelinePanel {
             }
             f += step;
         }
-        // Green segments under the work area bar, one per cached run (AE-UI-064).
-        for span in session
-            .lock()
-            .cached_frames(&info.path, cx.stage.revision())
-        {
-            p.hline(
-                axis.x(span.start)..=axis.x(span.end),
-                wa_top + 8.0 + 2.0,
-                Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
-            );
+        if self.display.cache {
+            // Green segments under the work area bar, one per cached run (AE-UI-064).
+            for span in session
+                .lock()
+                .cached_frames(&info.path, cx.stage.revision())
+            {
+                p.hline(
+                    axis.x(span.start)..=axis.x(span.end),
+                    wa_top + 8.0 + 2.0,
+                    Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
+                );
+            }
         }
         // CTI handle.
         let x = axis.x(now);
@@ -569,10 +571,15 @@ impl TimelinePanel {
                     t = snap;
                 }
             }
-            session.lock().scrub_to(cx, info, t, sound);
+            let mut s = session.lock();
+            if !self.display.live && ruler_resp.dragged() && s.held_viewer_time.is_none() {
+                s.held_viewer_time = Some((info.path.clone(), now));
+            }
+            s.scrub_to(cx, info, t, sound);
             self.drag = Some(Drag::Cti);
         }
         if ruler_resp.drag_stopped() {
+            session.lock().held_viewer_time = None;
             session.lock().stop();
             self.drag = None;
         }

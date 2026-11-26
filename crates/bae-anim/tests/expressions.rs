@@ -794,6 +794,43 @@ fn to_comp_projects_3d_layers_through_the_default_camera() {
     assert_eq!(ec.layers[0].transform.opacity, 30.0);
 }
 
+/// fromComp on a 3D layer: a point given at depth 0 (or behind the camera)
+/// is taken at the comp plane, like a 2D point (no projection from the eye).
+#[test]
+fn from_comp_with_no_depth_uses_the_comp_plane() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "a", "null");
+        b.set(&l, "three_d", true)
+            .set(&l, "transform:position", [800.0, 400.0, 300.0])
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                "fromComp([10, 20, 0])[0] - fromComp([10, 20])[0]",
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 0.0);
+}
+
+/// key(index) takes a property for its index (e.g. a slider), as AE.
+#[test]
+fn key_takes_a_property_for_its_index() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "animated", "null");
+        b.set(&l, "transform:opacity", 2.0);
+        let mut spec = AttrSpec::default();
+        spec.keyframes.insert(secs(0.0), Keyframe::linear(0.0));
+        spec.keyframes.insert(secs(3.0), Keyframe::linear(300.0));
+        spec.expression = Some(Expression::new("thisProperty.key(transform.opacity).time"));
+        b.spec(&l, "transform:rotation", spec);
+    });
+    let ec = eval(&s, 1.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 3.0);
+}
+
 #[test]
 fn expression_controls_by_name_index_and_layer_reference() {
     let s = stage(|b| {
