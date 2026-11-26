@@ -42,6 +42,10 @@ pub struct CreateTextParams {
     #[serde(default)]
     pub box_size: Option<[f64; 2]>,
     #[serde(default)]
+    pub line_orientation: bae_model::LineOrientation,
+    #[serde(default)]
+    pub baseline_direction: bae_model::BaselineDirection,
+    #[serde(default)]
     pub font: Option<String>,
     #[serde(default)]
     pub font_size: Option<f64>,
@@ -106,6 +110,8 @@ impl Command for CreateText {
         )?;
         let mut doc =
             TextDocument::new(p.text, p.font.unwrap_or_else(|| DEFAULT_FONT.into()), size);
+        doc.line_orientation = p.line_orientation;
+        doc.style.baseline_direction = p.baseline_direction;
         if let Some(c) = p.fill_color {
             doc.style.fill_color = c;
         }
