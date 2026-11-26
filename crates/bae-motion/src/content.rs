@@ -225,3 +225,139 @@ impl Command for DeleteContent {
         crate::layer::delete_prims(tx, &p.prims, Time::ZERO)
     }
 }
+
+// ---------------------------------------------------------------------------
+
+/// `prims` in their parent's order; they must all be in one shape container
+/// (a shape layer's or group's contents).
+fn siblings(stage: &Stage, prims: &[PrimPath]) -> Result<(PrimPath, Vec<PrimPath>), CommandError> {
+    let parent = prims
+        .first()
+        .and_then(PrimPath::parent)
+        .ok_or_else(|| fail("give at least one shape"))?;
+    if parent.name() != query::CONTENTS
+        || prims.iter().any(|p| p.parent().as_ref() != Some(&parent))
+    {
+        return Err(fail("the shapes must be in the same group or layer"));
+    }
+    let ordered = stage
+        .children(&parent)
+        .into_iter()
+        .filter(|c| prims.contains(c))
+        .collect();
+    Ok((parent, ordered))
+}
+
+/// Move `trees` (name, tree) into `parent` from `index` on, keeping their names.
+fn move_in(
+    tx: &mut Transaction<'_>,
+    parent: &PrimPath,
+    trees: Vec<(String, PrimTree)>,
+    index: Option<usize>,
+) -> Result<Vec<PrimPath>, CommandError> {
+    let mut out = Vec::new();
+    tx.ensure_spec(parent)?;
+    for (k, (name, tree)) in trees.into_iter().enumerate() {
+        let path = child(parent, &query::unique_child_name(tx.stage(), parent, &name))?;
+        tx.apply(Op::RestorePrim {
+            path: path.clone(),
+            tree,
+            index: index.map(|i| i + k),
+        })?;
+        out.push(path);
+    }
+    Ok(out)
+}
+
+pub struct GroupShapes;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GroupShapesParams {
+    /// Shape groups and items of one shape layer's or group's contents.
+    pub items: Vec<PrimPath>,
+}
+
+impl Command for GroupShapes {
+    type Params = GroupShapesParams;
+    type Output = ContentOutput;
+    const ID: &'static str = "shape.group";
+    const TITLE: &'static str = "Group Shapes";
+    const DESCRIPTION: &'static str = "Layer > Group Shapes (Ctrl+G): put shape groups and items of one container into a new group (\"Group 1\") where the frontmost of them was, in their order.";
+
+    fn run(
+        &self,
+        tx: &mut Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<ContentOutput, CommandError> {
+        ensure_unlocked(tx.stage(), &p.items)?;
+        let (parent, items) = siblings(tx.stage(), &p.items)?;
+        let index = tx
+            .stage()
+            .children(&parent)
+            .iter()
+            .position(|c| items.contains(c));
+        let trees: Vec<(String, PrimTree)> = items
+            .iter()
+            .map(|i| (i.name().to_owned(), composed_tree(tx.stage(), i)))
+            .collect();
+        crate::layer::delete_prims(tx, &items, Time::ZERO)?;
+        let name = query::next_numbered_name(tx.stage(), &parent, crate::names::localized("Group"));
+        let group = child(
+            &parent,
+            &query::unique_child_name(tx.stage(), &parent, &name),
+        )?;
+        create(tx, &group, PrimType::SHAPE_GROUP, index)?;
+        set(tx, &group, "name", Value::String(name))?;
+        let inner = child(&group, query::CONTENTS)?;
+        create(tx, &inner, PrimType::FOLDER, None)?;
+        move_in(tx, &inner, trees, None)?;
+        Ok(ContentOutput { prims: vec![group] })
+    }
+}
+
+pub struct UngroupShapes;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UngroupShapesParams {
+    /// Shape groups.
+    pub groups: Vec<PrimPath>,
+}
+
+impl Command for UngroupShapes {
+    type Params = UngroupShapesParams;
+    type Output = ContentOutput;
+    const ID: &'static str = "shape.ungroup";
+    const TITLE: &'static str = "Ungroup Shapes";
+    const DESCRIPTION: &'static str = "Layer > Ungroup Shapes (Ctrl+Shift+G): replace shape groups with their contents, in place.";
+
+    fn run(
+        &self,
+        tx: &mut Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<ContentOutput, CommandError> {
+        ensure_unlocked(tx.stage(), &p.groups)?;
+        let mut out = Vec::new();
+        for group in &p.groups {
+            let stage = tx.stage();
+            if !stage
+                .prim(group)
+                .is_some_and(|v| v.is_a(&PrimType::SHAPE_GROUP))
+            {
+                return Err(fail(format!("{group} is not a shape group")));
+            }
+            let parent = group
+                .parent()
+                .ok_or_else(|| fail("a group needs a parent"))?;
+            let index = stage.children(&parent).iter().position(|c| c == group);
+            let inner = child(group, query::CONTENTS)?;
+            let trees: Vec<(String, PrimTree)> = stage
+                .children(&inner)
+                .iter()
+                .map(|c| (c.name().to_owned(), composed_tree(stage, c)))
+                .collect();
+            crate::layer::delete_prims(tx, std::slice::from_ref(group), Time::ZERO)?;
+            out.extend(move_in(tx, &parent, trees, index)?);
+        }
+        Ok(ContentOutput { prims: out })
+    }
+}

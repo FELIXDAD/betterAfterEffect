@@ -277,9 +277,9 @@
 | Mask ▸ Hide Locked Masks | 8519700 | `motion.layer.hide_locked_masks` |  |  |  | B | ⏸ |
 | Mask and Shape Path ▸ RotoBezier | 11010049 | `motion.layer.rotobezier` |  |  |  | A | ✅ |
 | Mask and Shape Path ▸ Closed | 11010050 | `motion.layer.path_closed` |  |  |  | A | ✅ |
-| Mask and Shape Path ▸ Convert To Bezier Path | 11010052 | `motion.layer.convert_to_bezier_path` |  |  |  | A | ☐ |
-| Mask and Shape Path ▸ Group Shapes | 11010054 | `motion.layer.group_shapes` |  | Ctrl+G | Cmd+G | A | ☐ |
-| Mask and Shape Path ▸ Ungroup Shapes | 11010055 | `motion.layer.ungroup_shapes` |  | Ctrl+Shift+G | Cmd+Shift+G | A | ☐ |
+| Mask and Shape Path ▸ Convert To Bezier Path | 11010052 | `motion.layer.convert_to_bezier_path` |  |  |  | A | ✅ |
+| Mask and Shape Path ▸ Group Shapes | 11010054 | `motion.layer.group_shapes` |  | Ctrl+G | Cmd+G | A | ✅ |
+| Mask and Shape Path ▸ Ungroup Shapes | 11010055 | `motion.layer.ungroup_shapes` |  | Ctrl+Shift+G | Cmd+Shift+G | A | ✅ |
 | Mask and Shape Path ▸ Set First Vertex | 11010057 | `motion.layer.set_first_vertex` |  |  |  | A | ✅ |
 | Mask and Shape Path ▸ Free Transform Points | 11010059 | `motion.layer.free_transform_points` |  | Ctrl+T | Cmd+T | A | ☐ |
 | Quality ▸ Best | 8585217 | `motion.layer.quality` | `{"quality":"best"}` | Ctrl+U | Cmd+U | B | ✅ |
