@@ -888,7 +888,7 @@ const ANIMATION: &[Node] = &[
             s(it(11075586, "Create Keyframes from Data", "motion.anim.create_keyframes_from_data", "", B, Later)),
             s(it(11075587, "Null Controllers for Positional Points", "motion.anim.null_controllers_for_positional_points", "", B, Later)),
             s(it(11075588, "Convert Expression to Keyframes", "motion.anim.convert_expression_to_keyframes", "", C, Later)),
-            s(it(11075589, "Convert Audio to Keyframes", "motion.anim.convert_audio_to_keyframes", "", B, Later)),
+            s(it(11075589, "Convert Audio to Keyframes", "motion.anim.convert_audio_to_keyframes", "", B, Done)),
             s(it(11075590, "Sequence Layers...", "motion.anim.sequence_layers", "", E, Later)),
             s(it(11075591, "Exponential Scale", "motion.anim.exponential_scale", "", B, Later)),
             s(it(11075592, "Time-Reverse Keyframes", "motion.reverse_keys", "", B, Done)),

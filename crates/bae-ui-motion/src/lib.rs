@@ -25,6 +25,7 @@ pub mod actions;
 pub mod ae_panels;
 mod ae_shells;
 mod assist;
+mod audio_analysis;
 pub mod catalog;
 mod common;
 mod context_menu;

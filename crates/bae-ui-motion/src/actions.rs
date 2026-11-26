@@ -228,6 +228,10 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::REVERSE_KEYS, "Time-Reverse Keyframes"),
     (ids::SELECT_ALL, "Select All"),
     (ids::DESELECT_ALL, "Deselect All"),
+    (
+        "motion.anim.convert_audio_to_keyframes",
+        "Convert Audio to Keyframes",
+    ),
     (ids::REVEAL, "Reveal Animated Properties"),
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
@@ -927,6 +931,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let Some(info) = common::active_comp(stage, session) else {
         return true;
     };
+    if id == "motion.anim.convert_audio_to_keyframes" {
+        crate::audio_analysis::convert(cx, &info);
+        return true;
+    }
     if id == ids::PLAY {
         session.retry_audio();
     }
