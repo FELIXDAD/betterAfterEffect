@@ -19,6 +19,7 @@ mod markers;
 mod menus;
 mod modes;
 pub(crate) mod navigation;
+mod panel_menu;
 mod rows;
 mod search;
 mod switches;
@@ -224,6 +225,7 @@ pub struct TimelinePanel {
     graph_mode: bool,
     /// Switches / Modes / Parent & Link columns shown (F4, Shift+F4).
     columns: Columns,
+    display: panel_menu::Display,
     /// Where a keyframe drag puts the keyframes this frame.
     key_plan: Option<keys::KeyPlan>,
     /// Modifiers held when the primary button last went down (AE decides drag
@@ -806,6 +808,7 @@ impl TimelinePanel {
         let mut panel = Self::default();
         if let Some(state) = state {
             panel.columns = Columns::load(state);
+            panel.display = serde_json::from_value(state["display"].clone()).unwrap_or_default();
             panel.zoom = state["zoom"].as_f64().unwrap_or_default().clamp(0.0, 1.0) as f32;
         }
         panel
@@ -850,6 +853,10 @@ const OTHER_TIMELINES: [(OtherTimelines, &str); 3] = [
 ];
 
 impl Panel for TimelinePanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        self.panel_menu(ui, cx);
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
         match common::active_comp(cx.stage, &common::session(cx.resources)) {
@@ -891,7 +898,7 @@ impl Panel for TimelinePanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(json!({"zoom": self.zoom, "columns":self.columns}))
+        Some(json!({"zoom": self.zoom, "columns":self.columns, "display": self.display}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -1300,6 +1307,7 @@ impl TimelinePanel {
                         &axis,
                         area,
                         color::TEXT_DIM.gamma_multiply(0.5),
+                        self.display.rectified,
                     );
                 },
             );
