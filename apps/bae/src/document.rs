@@ -347,7 +347,7 @@ impl Document {
     /// in; if anything fails, the existing project is left as it was. Files
     /// embedded in a `.baez` the project came from are extracted with it.
     pub fn save_as_replacing(&mut self, target: &Path) -> anyhow::Result<()> {
-        self.save_copy(target)?;
+        self.write_copy(target, true)?;
         let context = || target.display().to_string();
         self.project.save_as(target).with_context(context)?;
         self.saved = SavePoint::of(&self.project.stage);
@@ -355,20 +355,32 @@ impl Document {
         Ok(())
     }
 
-    /// Write an independent project copy, including packaged assets. Finish writing
-    /// the new directory before replacing a previous auto-save in the same slot.
+    /// Auto-save: a copy of the project's own files, written next to the
+    /// previous one and then swapped in. Files embedded in a `.baez` stay in
+    /// the package (AE's auto-save never copies footage): extracting them into
+    /// every version stalled the UI and multiplied the disk use.
     pub fn save_copy(&self, target: &Path) -> anyhow::Result<()> {
+        self.write_copy(target, false)
+    }
+
+    /// Writes an independent copy to `target` through a temporary folder next
+    /// to it, then replaces what was there; `with_package` also extracts the
+    /// files embedded in the `.baez` the project came from.
+    fn write_copy(&self, target: &Path, with_package: bool) -> anyhow::Result<()> {
         let context = || target.display().to_string();
         let tmp = sibling(target, "saving");
         let backup = sibling(target, "replaced");
         if let Some(parent) = tmp.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent).with_context(context)?;
         }
+        // Left over from an earlier attempt whose cleanup failed.
+        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&backup);
         fs::create_dir(&tmp).with_context(context)?;
         let written = (|| -> anyhow::Result<()> {
             let mut copy = self.detached_copy()?;
             copy.save_as(&tmp)?;
-            if let Some(pkg) = self.assets.package() {
+            if with_package && let Some(pkg) = self.assets.package() {
                 for entry in pkg.entries() {
                     pkg.extract_entry(&entry.name, &tmp.join(native(&entry.name)))?;
                 }
@@ -385,14 +397,16 @@ impl Document {
             return Err(anyhow::Error::new(error).context(context()));
         }
         if let Err(error) = fs::rename(&tmp, target) {
+            let _ = fs::remove_dir_all(&tmp);
             if replacing {
                 fs::rename(&backup, target).with_context(context)?;
             }
-            let _ = fs::remove_dir_all(&tmp);
             return Err(anyhow::Error::new(error).context(context()));
         }
-        if replacing {
-            fs::remove_dir_all(&backup).with_context(context)?;
+        // The new copy is in place: a backup that will not go away is only
+        // worth a log line, not a failed save.
+        if replacing && let Err(error) = fs::remove_dir_all(&backup) {
+            tracing::warn!("could not remove {}: {error}", backup.display());
         }
         Ok(())
     }
@@ -721,6 +735,19 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        // Auto-save copies the project files only; the footage stays in the
+        // package.
+        let auto = dir.path().join("Auto.bae");
+        again.save_copy(&auto).unwrap();
+        assert!(auto.join("project.json").is_file());
+        assert!(
+            !auto
+                .join("assets")
+                .join("footage")
+                .join("clip.mov")
+                .exists()
+        );
 
         // Save As another package and as a folder.
         let copy = dir.path().join("Copy.baez");
