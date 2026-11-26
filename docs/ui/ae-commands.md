@@ -221,7 +221,7 @@
 | Responsive Design — Time ▸ Create Intro | 2097153 | `motion.comp.create_intro` |  |  |  | B | ⏸ |
 | Responsive Design — Time ▸ Create Outro | 2097154 | `motion.comp.create_outro` |  |  |  | B | ⏸ |
 | Responsive Design — Time ▸ Create Protected Region from Work Area | 2097155 | `motion.comp.create_protected_region_from_work_area` |  |  |  | B | ⏸ |
-| Composition Flowchart | 327701 | `motion.comp.composition_flowchart` |  | Ctrl+Shift+F11 | Cmd+Shift+F11 | E | ⏸ |
+| Composition Flowchart | 327701 | `motion.comp.composition_flowchart` |  | Ctrl+Shift+F11 | Cmd+Shift+F11 | E | ✅ |
 | Composition Mini-Flowchart | 327702 | `motion.comp.composition_mini_flowchart` |  | Tab | Tab | E | ✅ |
 | VR ▸ Create VR Environment... | 328466433 | `motion.comp.create_vr_environment` |  |  |  | B | ⏸ |
 | VR ▸ Extract Cubemap... | 328466434 | `motion.comp.extract_cubemap` |  |  |  | B | ⏸ |
@@ -393,7 +393,7 @@
 | Reveal ▸ Reveal in Explorer | 23003137 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ☐ |
 | Reveal ▸ Reveal Layer in Project Flowchart | 23003139 | `motion.layer.reveal_layer_in_project_flowchart` |  |  |  | E | ⏸ |
-| Reveal ▸ Reveal Composition in Project | 23003140 | `motion.layer.reveal_composition_in_project` |  |  |  | B | ☐ |
+| Reveal ▸ Reveal Composition in Project | 23003140 | `motion.layer.reveal_composition_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Expression Errors | 23003141 | `motion.layer.reveal_expression_errors` |  |  |  | C | ⏸ |
 | Create ▸ Convert to Editable Text | 23068673 | `motion.layer.convert_to_editable_text` |  |  |  | B | ⏸ |
 | Create ▸ Create Shapes from Text | 23068674 | `motion.layer.create_shapes_from_text` |  |  |  | A | ⏸ |
