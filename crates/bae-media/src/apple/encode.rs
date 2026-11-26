@@ -98,6 +98,84 @@ fn is_mp4(path: &Path) -> bool {
         .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "mp4" | "m4v"))
 }
 
+/// Prepare the system codecs one at a time on the low-priority warm-up thread.
+pub struct EncoderWarmUp;
+
+impl bae_gpu::WarmUp for EncoderWarmUp {
+    fn name(&self) -> &str {
+        "QuickTime encoders"
+    }
+
+    fn run(&self, _: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        use objc2_core_media::{
+            kCMVideoCodecType_AppleProRes422, kCMVideoCodecType_AppleProRes422HQ,
+            kCMVideoCodecType_AppleProRes4444, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC,
+        };
+
+        let mut errors = Vec::new();
+        for codec in [
+            kCMVideoCodecType_H264,
+            kCMVideoCodecType_AppleProRes422,
+            kCMVideoCodecType_AppleProRes422HQ,
+            kCMVideoCodecType_AppleProRes4444,
+            kCMVideoCodecType_HEVC,
+        ] {
+            if let Err(error) = prepare_codec(codec) {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join(", "))
+        }
+    }
+}
+
+fn prepare_codec(codec: objc2_core_media::CMVideoCodecType) -> Result<(), String> {
+    use objc2_core_foundation::{CFBoolean, CFDictionary};
+    use objc2_video_toolbox::VTCompressionSession;
+
+    // SAFETY: the key is a process-lifetime VideoToolbox constant.
+    let hardware = CFDictionary::from_slices(
+        &[unsafe { kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder }],
+        &[CFBoolean::new(true)],
+    );
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: no frames or callbacks are scheduled. The session is owned by
+    // this worker and invalidated before preparing the next codec.
+    let status = unsafe {
+        let created = VTCompressionSession::create(
+            None,
+            128,
+            128,
+            codec,
+            Some(hardware.as_opaque()),
+            None,
+            None,
+            None,
+            std::ptr::null_mut(),
+            NonNull::from(&mut raw),
+        );
+        let Some(ptr) = NonNull::new(raw) else {
+            return Err(format!("VTCompressionSessionCreate({codec:#x}): {created}"));
+        };
+        let session = CFRetained::from_raw(ptr);
+        let status = if created == 0 {
+            session.prepare_to_encode_frames()
+        } else {
+            created
+        };
+        session.invalidate();
+        status
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("prepare encoder {codec:#x}: {status}"))
+    }
+}
+
 /// Encoder format for QuickTime / MPEG-4 movies through AVFoundation.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AvWriterFormat;
@@ -234,7 +312,16 @@ impl AvWriterEncoder {
         }
     }
 
-    fn pixel_buffer(&self, frame: &CpuFrame) -> Result<CFRetained<CVPixelBuffer>, MediaError> {
+    fn pixel_buffer(
+        &self,
+        bytes: &[u8],
+        source_stride: usize,
+    ) -> Result<CFRetained<CVPixelBuffer>, MediaError> {
+        let row = self.settings.width as usize * self.pixel_format.bytes_per_pixel() as usize;
+        let rows = self.settings.height as usize;
+        if source_stride < row || bytes.len() / source_stride < rows {
+            return Err(MediaError::Unsupported("invalid source row layout".into()));
+        }
         // SAFETY: the pool exists once writing started; the buffer is locked
         // while written, rows are `stride` apart and at least `row` bytes long.
         unsafe {
@@ -252,20 +339,47 @@ impl AvWriterEncoder {
                     framework: "CoreVideo",
                     message: format!("CVPixelBufferPoolCreatePixelBuffer failed ({status})"),
                 })?;
-            CVPixelBufferLockBaseAddress(&buffer, CVPixelBufferLockFlags(0));
+            if CVPixelBufferLockBaseAddress(&buffer, CVPixelBufferLockFlags(0)) != kCVReturnSuccess
+            {
+                return Err(writer_error(&self.writer, "cannot lock pixel buffer"));
+            }
             let base = CVPixelBufferGetBaseAddress(&buffer).cast::<u8>();
             let stride = CVPixelBufferGetBytesPerRow(&buffer);
-            let row = frame.bytes_per_row() as usize;
-            for y in 0..frame.height as usize {
-                std::ptr::copy_nonoverlapping(
-                    frame.data.as_ptr().add(y * row),
-                    base.add(y * stride),
-                    row,
-                );
+            if base.is_null() || stride < row {
+                CVPixelBufferUnlockBaseAddress(&buffer, CVPixelBufferLockFlags(0));
+                return Err(writer_error(&self.writer, "invalid pixel buffer layout"));
+            }
+            if stride == row && source_stride == row {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), base, row * rows);
+            } else {
+                for y in 0..rows {
+                    std::ptr::copy_nonoverlapping(
+                        bytes.as_ptr().add(y * source_stride),
+                        base.add(y * stride),
+                        row,
+                    );
+                }
             }
             CVPixelBufferUnlockBaseAddress(&buffer, CVPixelBufferLockFlags(0));
             Ok(buffer)
         }
+    }
+
+    fn append_rows(&mut self, bytes: &[u8], stride: usize) -> Result<(), MediaError> {
+        let buffer = self.pixel_buffer(bytes, stride)?;
+        self.wait_ready(&self.input)?;
+        let rate = self.settings.frame_rate;
+        // SAFETY: building a time and appending a pool buffer to a writing session.
+        let appended = unsafe {
+            let time = CMTime::new(self.frames as i64 * i64::from(rate.den), rate.num as i32);
+            self.adaptor
+                .appendPixelBuffer_withPresentationTime(&buffer, time)
+        };
+        if !appended {
+            return Err(writer_error(&self.writer, "cannot append a frame"));
+        }
+        self.frames += 1;
+        Ok(())
     }
 
     fn wait_ready(&self, input: &AVAssetWriterInput) -> Result<(), MediaError> {
@@ -435,20 +549,25 @@ impl Encoder for AvWriterEncoder {
             )));
         }
         let converted = convert_frame_cow(frame, self.pixel_format, self.frame_alpha);
-        let buffer = self.pixel_buffer(&converted)?;
-        self.wait_ready(&self.input)?;
-        let rate = self.settings.frame_rate;
-        // SAFETY: building a time and appending a pool buffer to a writing session.
-        let appended = unsafe {
-            let time = CMTime::new(self.frames as i64 * i64::from(rate.den), rate.num as i32);
-            self.adaptor
-                .appendPixelBuffer_withPresentationTime(&buffer, time)
-        };
-        if !appended {
-            return Err(writer_error(&self.writer, "cannot append a frame"));
+        self.append_rows(&converted.data, converted.bytes_per_row() as usize)
+    }
+
+    fn push_mapped_rows(
+        &mut self,
+        format: PixelFormat,
+        alpha: AlphaMode,
+        size: [u32; 2],
+        stride: usize,
+        bytes: &[u8],
+    ) -> Result<bool, MediaError> {
+        if format != self.pixel_format
+            || alpha != self.frame_alpha
+            || size != [self.settings.width, self.settings.height]
+        {
+            return Ok(false);
         }
-        self.frames += 1;
-        Ok(())
+        self.append_rows(bytes, stride)?;
+        Ok(true)
     }
 
     fn frames_written(&self) -> u64 {

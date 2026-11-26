@@ -49,7 +49,7 @@ use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use columns::Column;
 use columns::{Cols, Columns};
-pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
+pub(crate) use dialogs::{InterpolationDialog, KeyDialog, SequenceDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
 pub(crate) use markers::MarkerDialog;
@@ -383,6 +383,17 @@ fn label_of(stage: &Stage, path: &PrimPath) -> usize {
         .and_then(|v| query::static_value(&v, "label"))
         .and_then(|v| v.as_f64())
         .map_or(0, |v| v as usize)
+}
+
+impl TimelinePanel {
+    /// F4 (Switches / Modes columns) or Shift+F4 (Parent & Link column).
+    fn toggle_columns(&mut self, id: &str) {
+        match id {
+            actions::ids::TOGGLE_SWITCHES_MODES => self.columns.toggle_switches_modes(),
+            actions::ids::TOGGLE_PARENT_COLUMN => self.columns.toggle(Column::Parent),
+            _ => {}
+        }
+    }
 }
 
 impl TimelinePanel {
@@ -720,12 +731,8 @@ impl Panel for TimelinePanel {
                 }
                 true
             }
-            "motion.timeline.toggle_switches_modes" => {
-                self.columns.toggle_switches_modes();
-                true
-            }
-            "motion.timeline.toggle_parent_column" => {
-                self.columns.toggle(Column::Parent);
+            id @ (actions::ids::TOGGLE_SWITCHES_MODES | actions::ids::TOGGLE_PARENT_COLUMN) => {
+                self.toggle_columns(id);
                 true
             }
             // Edit ▸ Find (Ctrl+F): the search field.
@@ -738,6 +745,11 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        // F4 / Shift+F4 pressed with another panel in front.
+        let toggles = std::mem::take(&mut common::session(cx.resources).lock().timeline_toggles);
+        for id in toggles {
+            self.toggle_columns(id);
+        }
         let full = ui.available_rect_before_wrap();
         crate::import::drop_on_panel(ui, cx);
         let cols = self.columns.layout(ui, full);
@@ -749,6 +761,15 @@ impl TimelinePanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
+        if let Some(track) = session.lock().reveal_tracker.take()
+            && let Some(layer) = query::owning_layer(stage, &track)
+        {
+            self.expanded.extend([
+                layer.to_string(),
+                format!("{layer}#trackers"),
+                track.to_string(),
+            ]);
+        }
         let renaming_before = self.rename.is_some();
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, color::PANEL);

@@ -253,6 +253,7 @@ pub struct Session {
     /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
     /// mask, effect or text animator; [`group_prim`] gives the prim).
     pub selected_groups: Vec<String>,
+    pub(crate) reveal_tracker: Option<PrimPath>,
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
@@ -329,6 +330,9 @@ pub struct Session {
     pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// Timeline column toggles asked for while another panel had focus (F4
+    /// Switches / Modes, Shift+F4 Parent & Link): the Timeline applies them.
+    pub timeline_toggles: Vec<&'static str>,
     /// The frame the Composition viewer shows and its key (Lumetri Scopes).
     pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
     /// The footage item the Footage panel shows.

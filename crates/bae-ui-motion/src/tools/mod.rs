@@ -894,6 +894,7 @@ pub struct ToolState {
     last: HashMap<Group, Tool>,
     momentary: Option<Momentary>,
     pub options: ToolOptions,
+    pub(crate) brushes: crate::paint_panels::BrushLibrary,
     /// For the viewer (see [`ViewRequest`]).
     pub view_request: Option<ViewRequest>,
     /// A shape tool button was double-clicked: the viewer adds a layer- or
@@ -918,6 +919,7 @@ impl Default for ToolState {
             last: HashMap::new(),
             momentary: None,
             options: ToolOptions::default(),
+            brushes: Default::default(),
             view_request: None,
             fill_request: None,
             center_anchor_request: false,
@@ -935,6 +937,7 @@ struct Saved {
     tool: Option<Tool>,
     last: Vec<Tool>,
     options: ToolOptions,
+    brushes: crate::paint_panels::BrushLibrary,
 }
 
 impl ToolState {
@@ -1059,6 +1062,7 @@ impl ToolState {
             tool: Some(self.current),
             last: self.last.values().copied().collect(),
             options: self.options.clone(),
+            brushes: self.brushes.clone(),
         };
         serde_json::to_value(saved).unwrap_or_default()
     }
@@ -1074,6 +1078,7 @@ impl ToolState {
             self.set(t);
         }
         self.options = saved.options;
+        self.brushes = saved.brushes;
     }
 }
 
