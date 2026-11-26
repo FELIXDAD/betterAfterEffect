@@ -870,8 +870,16 @@ impl Panel for CompositionViewer {
             return;
         }
 
-        // Evaluate, with the value a panel drag has reached (live, uncommitted).
+        // Evaluate, with the value a panel drag has reached (live, uncommitted);
+        // sampleImage reads the pixels the GPU preview reads back.
         let eval = live_evaluator(&mut self.eval, cx, &session);
+        if let Some(g) = &self.gpu
+            && !eval
+                .image_samples()
+                .is_some_and(|s| std::sync::Arc::ptr_eq(s, g.samples()))
+        {
+            eval.set_image_samples(Some(g.samples().clone()));
+        }
         let mut comp = match eval.evaluate_comp(cx.stage, &info.path, time) {
             Ok(c) => c,
             Err(e) => {
@@ -995,6 +1003,13 @@ impl Panel for CompositionViewer {
             _ => image,
         };
         self.on_gpu = image.is_some();
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(GpuPreview::waiting_for_samples)
+        {
+            ui.ctx().request_repaint();
+        }
         if let Some(frame) = self.gpu.as_ref().and_then(|g| g.output()) {
             let mut s = session.lock();
             if s.scope_frame.as_ref().map(|f| f.1) != Some(frame.1) {
