@@ -1,6 +1,54 @@
 use super::*;
 
 #[test]
+fn expression_typing_honours_pairing_and_indentation_in_the_workbench() {
+    let mut h = gui();
+    new_comp(&mut h);
+    new_solid(&mut h);
+    let mut prefs = (*h.state().prefs.current()).clone();
+    prefs.set("scripting_expressions.expr_auto_complete", false);
+    prefs.set("scripting_expressions.expr_use_tabs", false);
+    prefs.set("scripting_expressions.expr_tab_width", 3);
+    h.state().prefs.set(prefs.clone()).unwrap();
+    let path = h.state().layers()[0].clone();
+    h.state_mut().workspace.focus_panel("timeline");
+    key(&mut h, Modifiers::NONE, Key::P);
+    h.state_mut().dispatch(Invocation::with_params(
+        "attr.set_expressions",
+        serde_json::json!({"items":[{"path":path,"attr":"transform:position","source":"value"}]}),
+    ));
+    settle(&mut h);
+    let field = find_text(&h, "value").unwrap();
+    click_at(&mut h, field.center());
+    let (mods, a) = cmd(Key::A);
+    key(&mut h, mods, a);
+    type_text(&mut h, "{");
+    assert!(find_text(&h, "{}").is_some());
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(find_text(&h, "{\n   \n}").is_some());
+    key(&mut h, Modifiers::NONE, Key::Backspace);
+    assert!(find_text(&h, "{\n\n}").is_some());
+    key(&mut h, Modifiers::NONE, Key::Tab);
+    send(&mut h, Event::Paste("[".into()));
+    settle(&mut h);
+    assert!(find_text(&h, "{\n   [\n}").is_some());
+    key(&mut h, mods, a);
+    key(&mut h, Modifiers::NONE, Key::Tab);
+    assert!(find_text(&h, "   {\n      [\n   }").is_some());
+    key(&mut h, Modifiers::SHIFT, Key::Tab);
+    assert!(find_text(&h, "{\n   [\n}").is_some());
+    prefs.set("scripting_expressions.expr_use_tabs", true);
+    prefs.set("scripting_expressions.expr_auto_insert_braces", false);
+    h.state().prefs.set(prefs).unwrap();
+    settle(&mut h);
+    key(&mut h, mods, a);
+    type_text(&mut h, "[");
+    key(&mut h, Modifiers::NONE, Key::Tab);
+    type_text(&mut h, "值");
+    assert!(find_text(&h, "[\t值").is_some());
+}
+
+#[test]
 fn expression_gutter_and_guides_follow_preferences_in_the_timeline() {
     let mut h = gui();
     new_comp(&mut h);
