@@ -56,7 +56,6 @@ pub(crate) use markers::MarkerDialog;
 #[cfg(test)]
 pub(crate) use markers::parse_timecode;
 pub(crate) use menus::keys_with_labels;
-pub(crate) use menus::layer_menu;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
@@ -646,8 +645,8 @@ impl OtherTimelines {
 }
 const OTHER_TIMELINES: [(OtherTimelines, &str); 3] = [
     (OtherTimelines::All, "Close Other Timeline Panels"),
-    (OtherTimelines::Left, "Close Timeline Panels to the Left"),
     (OtherTimelines::Right, "Close Timeline Panels to the Right"),
+    (OtherTimelines::Left, "Close Timeline Panels to the Left"),
 ];
 
 impl Panel for TimelinePanel {
@@ -668,6 +667,9 @@ impl Panel for TimelinePanel {
             .as_ref()
             .and_then(|c| session.open_comps.iter().position(|p| p == c));
         for (action, label) in OTHER_TIMELINES {
+            if matches!(action, OtherTimelines::Right) {
+                ui.separator();
+            }
             let targets: Vec<_> = session
                 .open_comps
                 .iter()
@@ -1195,8 +1197,8 @@ mod close_menu_tests {
     fn close_other_timeline_choices_keep_the_active_comp() {
         let zh = [
             "关闭其他时间轴面板",
-            "关闭左侧的时间轴面板",
             "关闭右侧的时间轴面板",
+            "关闭左侧的时间轴面板",
         ];
         for ((which, name), label) in OTHER_TIMELINES.into_iter().zip(zh) {
             assert!(ZH.contains(&(name, label)));

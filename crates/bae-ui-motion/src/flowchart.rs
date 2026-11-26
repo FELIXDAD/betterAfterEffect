@@ -35,13 +35,14 @@ struct Node {
     depth: usize,
     row: usize,
     parent: Option<usize>,
+    expandable: bool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 enum Direction {
-    #[default]
     Right,
     Left,
+    #[default]
     Down,
     Up,
 }
@@ -85,11 +86,11 @@ impl Default for Options {
         Self {
             footage: true,
             solids: true,
-            layers: false,
-            effects: false,
-            direction: Direction::Right,
-            curved: false,
-            justify: 0,
+            layers: true,
+            effects: true,
+            direction: Direction::Down,
+            curved: true,
+            justify: 1,
         }
     }
 }
@@ -103,25 +104,37 @@ fn push(nodes: &mut Vec<Node>, item: &PrimPath, kind: Kind, parent: Option<usize
         depth,
         row: 0,
         parent,
+        expandable: false,
     });
     index
 }
 
-fn chart(stage: &Stage, root: &PrimPath, options: &Options) -> Vec<Node> {
+fn chart(
+    stage: &Stage,
+    root: &PrimPath,
+    options: &Options,
+    expanded: &dyn Fn(&PrimPath) -> bool,
+) -> Vec<Node> {
     fn add_sources(
         stage: &Stage,
         comp: &PrimPath,
         index: usize,
         options: &Options,
+        expanded: &dyn Fn(&PrimPath) -> bool,
         ancestors: &mut Vec<PrimPath>,
         nodes: &mut Vec<Node>,
     ) {
         if ancestors.len() >= MAX_DEPTH || ancestors.contains(comp) {
             return;
         }
+        let layers = query::comp_layers(stage, comp);
+        nodes[index].expandable = !layers.is_empty();
+        if !expanded(comp) {
+            return;
+        }
         ancestors.push(comp.clone());
         let mut seen = std::collections::HashSet::new();
-        for layer in query::comp_layers(stage, comp) {
+        for layer in layers {
             let parent = if options.layers {
                 push(nodes, &layer, Kind::Layer, Some(index))
             } else {
@@ -147,14 +160,22 @@ fn chart(stage: &Stage, root: &PrimPath, options: &Options) -> Vec<Node> {
             };
             let child = push(nodes, &source, kind, Some(parent));
             if kind == Kind::Comp {
-                add_sources(stage, &source, child, options, ancestors, nodes);
+                add_sources(stage, &source, child, options, expanded, ancestors, nodes);
             }
         }
         ancestors.pop();
     }
     let mut out = Vec::new();
     let first = push(&mut out, root, Kind::Comp, None);
-    add_sources(stage, root, first, options, &mut Vec::new(), &mut out);
+    add_sources(
+        stage,
+        root,
+        first,
+        options,
+        expanded,
+        &mut Vec::new(),
+        &mut out,
+    );
     // Rows: a parent sits on the row of its first child (AE's compact layout).
     let mut row = 0;
     for (i, node) in out.iter_mut().enumerate() {
@@ -190,6 +211,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 pub struct FlowchartPanel {
     offset: egui::Vec2,
     options: Options,
+    expanded: std::collections::HashSet<PrimPath>,
     positions: HashMap<(PrimPath, Option<PrimPath>), egui::Vec2>,
     root: Option<PrimPath>,
     last_active: Option<PrimPath>,
@@ -219,35 +241,25 @@ const ZH: &[(&str, &str)] = &[
 ];
 impl FlowchartPanel {
     fn options_menu(&mut self, ui: &mut Ui, has_chart: bool) {
-        for (shown, label) in [
-            (&mut self.options.footage, "Show Footage"),
-            (&mut self.options.solids, "Show Solids"),
-            (&mut self.options.layers, "Show Layers"),
-            (&mut self.options.effects, "Show Effects"),
-        ] {
-            ui.checkbox(shown, tr(label));
+        if ui
+            .add_enabled(has_chart, egui::Button::new(tr("Clean Up")))
+            .clicked()
+        {
+            self.positions.clear();
+            self.offset = egui::Vec2::ZERO;
+            ui.close();
         }
         ui.separator();
-        common::submenu(ui, tr("Flow Direction"), &mut |ui| {
-            for (dir, label) in DIRECTIONS {
-                if ui
-                    .radio_value(&mut self.options.direction, dir, tr(label))
-                    .clicked()
-                {
-                    ui.close();
-                }
+        for (shown, label) in [
+            (&mut self.options.layers, "Show Layers"),
+            (&mut self.options.effects, "Show Effects"),
+            (&mut self.options.footage, "Show Footage"),
+            (&mut self.options.solids, "Show Solids"),
+        ] {
+            if ui.checkbox(shown, tr(label)).clicked() {
+                ui.close();
             }
-        });
-        common::submenu(ui, tr("Justification"), &mut |ui| {
-            for (i, label) in JUSTIFY.iter().enumerate() {
-                if ui
-                    .radio_value(&mut self.options.justify, i, tr(label))
-                    .clicked()
-                {
-                    ui.close();
-                }
-            }
-        });
+        }
         ui.separator();
         for (value, label) in [(false, "Straight Lines"), (true, "Curved Lines")] {
             if ui
@@ -258,12 +270,63 @@ impl FlowchartPanel {
             }
         }
         ui.separator();
+        for (value, label) in DIRECTIONS {
+            if ui
+                .radio_value(&mut self.options.direction, value, tr(label))
+                .clicked()
+            {
+                ui.close();
+            }
+        }
+        ui.separator();
+        for (value, label) in JUSTIFY.iter().enumerate() {
+            if ui
+                .radio_value(&mut self.options.justify, value, tr(label))
+                .clicked()
+            {
+                ui.close();
+            }
+        }
+    }
+
+    fn label_menu(&self, ui: &mut Ui, cx: &mut PanelContext<'_>, node: &Node, nodes: &[Node]) {
+        let project_item = matches!(node.kind, Kind::Comp | Kind::Footage | Kind::Solid);
+        let label = |n: &Node| {
+            cx.stage
+                .prim(&n.item)
+                .and_then(|p| query::static_value(&p, "label"))
+                .and_then(|v| v.as_f64())
+                .map_or(usize::from(n.kind == Kind::Comp), |v| v as usize)
+        };
+        let current = label(node);
         if ui
-            .add_enabled(has_chart, egui::Button::new(tr("Clean Up")))
+            .add_enabled(project_item, egui::Button::new(tr("Select Label Group")))
             .clicked()
         {
-            self.positions.clear();
-            self.offset = egui::Vec2::ZERO;
+            let mut items = Vec::new();
+            for n in nodes.iter().filter(|n| {
+                matches!(n.kind, Kind::Comp | Kind::Footage | Kind::Solid) && label(n) == current
+            }) {
+                if !items.contains(&n.item) {
+                    items.push(n.item.clone());
+                }
+            }
+            common::session(cx.resources).lock().selected_items = items;
+            ui.close();
+        }
+        ui.separator();
+        for (index, (name, _)) in theme::LABELS.iter().enumerate() {
+            if index == 1 {
+                ui.separator();
+            }
+            if ui.radio(current == index, tr(name)).clicked() {
+                cx.invoke_with("attr.set", serde_json::json!({"path":node.item,"attr":"label","value":{"type":"int","value":index}}));
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.button(tr("Edit Label Colors...")).clicked() {
+            cx.invoke_with("app.settings", serde_json::json!({"page":"labels"}));
             ui.close();
         }
     }
@@ -301,7 +364,30 @@ impl FlowchartPanel {
     fn icon_menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, n: &Node) {
         let session = common::session(cx.resources);
         let rename = match n.kind {
-            Kind::Layer => crate::timeline::layer_menu(ui, cx, &session, &n.item).is_some(),
+            Kind::Comp => {
+                use crate::context_menu as m;
+                for entry in m::VIEWER_BLANK {
+                    match entry {
+                        m::Entry::Menu("Composition/Composition Mini-Flowchart") => {
+                            ui.add_enabled(
+                                false,
+                                egui::Button::new(tr("Composition Mini-Flowchart")),
+                            );
+                        }
+                        m::Entry::Menu("Composition/Open in Essential Graphics") => {
+                            if ui.button(tr("Open in Essential Graphics")).clicked() {
+                                cx.open_panel("essential_graphics");
+                                ui.close();
+                            }
+                        }
+                        _ => {
+                            m::show(ui, cx, std::slice::from_ref(entry));
+                        }
+                    }
+                }
+                false
+            }
+            Kind::Layer => return,
             Kind::Effect => {
                 let now = session.lock().active_time();
                 crate::effects::controls::effect_menu(ui, cx, &n.item, now);
@@ -378,6 +464,7 @@ impl Panel for FlowchartPanel {
         if active != self.last_active || self.root.as_ref().is_some_and(|r| !cx.stage.has_prim(r)) {
             self.root.clone_from(&active);
             self.last_active = active;
+            self.expanded.clear();
             self.offset = egui::Vec2::ZERO;
             self.positions.clear();
             self.rename = None;
@@ -385,7 +472,9 @@ impl Panel for FlowchartPanel {
         let Some(root) = self.root.clone() else {
             return;
         };
-        let nodes = chart(cx.stage, &root, &self.options);
+        let nodes = chart(cx.stage, &root, &self.options, &|p| {
+            self.expanded.contains(p)
+        });
         let max_depth = nodes.iter().map(|n| n.depth).max().unwrap_or(0);
         let dir = self.options.direction;
         let sibling = if dir.vertical() {
@@ -463,7 +552,18 @@ impl Panel for FlowchartPanel {
                 continue;
             }
             let icon_rect = Rect::from_min_max(r.min, pos2(r.left() + 25.0, r.bottom()));
-            let title_rect = Rect::from_min_max(pos2(icon_rect.right(), r.top()), r.max);
+            let toggle = Rect::from_min_max(pos2(r.right() - 18.0, r.top()), r.max);
+            let title_rect = Rect::from_min_max(
+                pos2(icon_rect.right(), r.top()),
+                pos2(
+                    if n.expandable {
+                        toggle.left()
+                    } else {
+                        r.right()
+                    },
+                    r.bottom(),
+                ),
+            );
             let icon_resp = ui.interact(icon_rect, ui.id().with(("flow-icon", i)), Sense::click());
             let title = ui.interact(
                 title_rect,
@@ -500,6 +600,30 @@ impl Panel for FlowchartPanel {
                 icon,
                 color::ICON,
             );
+            if n.expandable {
+                let open = self.expanded.contains(&n.item);
+                p.text(
+                    toggle.center(),
+                    Align2::CENTER_CENTER,
+                    if open { "−" } else { "+" },
+                    theme::body(),
+                    color::TEXT,
+                );
+                if ui
+                    .interact(
+                        toggle,
+                        ui.id().with(("flow-expand", key_of(n))),
+                        Sense::click(),
+                    )
+                    .clicked()
+                {
+                    if open {
+                        self.expanded.remove(&n.item);
+                    } else {
+                        self.expanded.insert(n.item.clone());
+                    }
+                }
+            }
             let name = query::display_name_of(cx.stage, &n.item);
             if let Some((_, text)) = self.rename.as_mut().filter(|(path, _)| path == &n.item) {
                 if let Some(result) =
@@ -534,8 +658,10 @@ impl Panel for FlowchartPanel {
                 self.offset = egui::Vec2::ZERO;
                 self.positions.clear();
             }
-            common::context_menu(&icon_resp, &mut |ui| self.icon_menu(ui, cx, n));
-            common::context_menu(&title, &mut |ui| self.options_menu(ui, true));
+            if n.kind != Kind::Layer {
+                common::context_menu(&icon_resp, &mut |ui| self.icon_menu(ui, cx, n));
+            }
+            common::context_menu(&title, &mut |ui| self.label_menu(ui, cx, n, &nodes));
         }
     }
 }
@@ -574,7 +700,13 @@ mod tests {
             "layer.create",
             serde_json::json!({"comp": inner, "kind": "solid"}),
         );
-        let nodes = chart(&stage, &outer, &Options::default());
+        let compact = Options {
+            layers: false,
+            ..Default::default()
+        };
+        let collapsed = chart(&stage, &outer, &compact, &|_| false);
+        assert!(collapsed.len() == 1 && collapsed[0].expandable);
+        let nodes = chart(&stage, &outer, &compact, &|_| true);
         assert_eq!(nodes[0].item, outer);
         assert_eq!(nodes[1].item, inner);
         assert_eq!((nodes[1].depth, nodes[1].parent), (1, Some(0)));
@@ -586,8 +718,9 @@ mod tests {
             &outer,
             &Options {
                 solids: false,
-                ..Default::default()
+                ..compact
             },
+            &|_| true,
         );
         assert_eq!(hidden.len(), 2);
         let layered = chart(
@@ -597,6 +730,7 @@ mod tests {
                 layers: true,
                 ..Default::default()
             },
+            &|_| true,
         );
         assert_eq!(
             layered.iter().map(|n| n.kind).collect::<Vec<_>>(),
@@ -627,15 +761,65 @@ mod tests {
             for (en, zh, enabled) in [
                 ("Show Layers", "显示图层", true),
                 ("Curved Lines", "曲线", true),
+                ("Top to Bottom", "自上而下", true),
+                ("Left Center Justify", "左中对齐", true),
                 ("Clean Up", "清理", active),
             ] {
                 assert_eq!(i18n::translation(en), Some(zh));
                 assert!(
-                    update
-                        .nodes
-                        .iter()
-                        .any(|(_, n)| n.label() == Some(tr(en)) && n.is_disabled() != enabled),
+                    update.nodes.iter().any(|(_, n)| n.label() == Some(tr(en))
+                        && n.is_disabled() != enabled
+                        && (en == "Clean Up"
+                            || n.toggled() == Some(egui::accesskit::Toggled::True))),
                     "{en}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn node_names_show_label_colors_with_the_recorded_context_states() {
+        let mut app = bae_app::AppBuilder::new();
+        app.add_module(crate::MotionUiModule);
+        let _app = app.build();
+        let stage = Stage::new();
+        let author = bae_model::AuthorId::new("user:test").unwrap();
+        let resources = bae_app::Resources::new();
+        let id = bae_ui::PanelId::new("flowchart");
+        let mut requests = bae_ui::PanelRequests::default();
+        let mut cx =
+            PanelContext::new(&id, "Flowchart", &stage, &author, &resources, &mut requests);
+        for kind in [Kind::Comp, Kind::Layer] {
+            let mut nodes = Vec::new();
+            push(&mut nodes, &PrimPath::new("/comps/a").unwrap(), kind, None);
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            let mut out = ctx.run_ui(Default::default(), |ui| {
+                FlowchartPanel::default().label_menu(ui, &mut cx, &nodes[0], &nodes)
+            });
+            out.textures_delta.clear();
+            let update = out.platform_output.accesskit_update.unwrap();
+            for (key, zh, enabled, checked) in [
+                (
+                    "Select Label Group",
+                    "选择标签组",
+                    kind == Kind::Comp,
+                    false,
+                ),
+                ("Red", "红色", true, kind == Kind::Comp),
+                ("Edit Label Colors...", "编辑标签颜色...", true, false),
+            ] {
+                assert_eq!(bae_ui::i18n::translation(key), Some(zh));
+                let node = update
+                    .nodes
+                    .iter()
+                    .find(|(_, n)| n.label() == Some(tr(key)))
+                    .unwrap();
+                assert_eq!(
+                    (
+                        !node.1.is_disabled(),
+                        node.1.toggled() == Some(egui::accesskit::Toggled::True)
+                    ),
+                    (enabled, checked)
                 );
             }
         }
