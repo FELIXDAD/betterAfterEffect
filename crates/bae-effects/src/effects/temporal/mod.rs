@@ -16,6 +16,7 @@ use crate::{
 };
 
 use super::{image_grid, layer_input};
+use bae_render::effect::LayerStage;
 
 mod flow;
 mod timewarp;
@@ -642,6 +643,25 @@ fn frame_at(
         .cloned()
 }
 
+fn mixed_dependency(kind: Kind, v: Params<'_>, time: Time) -> Option<LayerDependency> {
+    let native_motion_blur = match kind {
+        Kind::WideTime => v.popup(3) == 1,
+        Kind::ForceBlur => v.popup(4) == 1,
+        _ => true,
+    };
+    if native_motion_blur && time == v.p.comp_time {
+        return None;
+    }
+    Some(LayerDependency {
+        layer: layer_input::own_layer(v.p)?,
+        time,
+        stage: LayerStage::BeforeEffect {
+            effect: v.p.effect.path.clone(),
+            native_motion_blur,
+        },
+    })
+}
+
 fn difference_target(p: &EffectParams<'_>, v: Params<'_>) -> Option<LayerDependency> {
     let mut dep = layer_input::dependency(p, 1, true)?;
     dep.time = local_offset(p, v.f(2));
@@ -739,8 +759,7 @@ impl Effect for Temporal {
             Kind::Timewarp => timewarp::dependencies(p, v),
             Kind::WideTime | Kind::ForceBlur => mixed_frames(self.kind, p, v)
                 .into_iter()
-                .filter(|&(time, _)| time != p.comp_time)
-                .filter_map(|(time, _)| before_effect(p, time))
+                .filter_map(|(time, _)| mixed_dependency(self.kind, v, time))
                 .collect(),
             Kind::Displacement => {
                 let Some(map) = layer_input::dependency(p, 1, true) else {
@@ -809,7 +828,12 @@ impl TargetEffect for Temporal {
             Kind::WideTime | Kind::ForceBlur => {
                 let mut out = None;
                 for (time, weight) in mixed_frames(self.kind, p, v) {
-                    if let Some(sample) = frame_at(&*target, p, input, time) {
+                    let sample = match mixed_dependency(self.kind, v, time) {
+                        Some(dep) => target.effect_layer(&dep),
+                        None => Some(input),
+                    }
+                    .cloned();
+                    if let Some(sample) = sample {
                         out = Some(accumulate(target, &pass, p, input, out, &sample, weight)?);
                     }
                 }
