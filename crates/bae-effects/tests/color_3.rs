@@ -34,16 +34,18 @@ fn embedded_luts_use_the_same_transform_as_bae_color() {
             transform.apply_premultiplied(std::slice::from_mut(&mut c));
             c
         });
-        let got = run(
-            &gpu,
-            Rgba32Float,
-            builtin("ADBE Apply Color LUT2"),
-            vec![(1, Value::Bytes(bytes))],
-            &input,
-            rect,
-            1.,
-        );
-        assert_close(&got, &expected, rect, 0.0001, name);
+        for identity in ["ADBE Apply Color LUT2", "ADBE Apply Color LUT"] {
+            let got = run(
+                &gpu,
+                Rgba32Float,
+                builtin(identity),
+                vec![(1, Value::Bytes(bytes.clone()))],
+                &input,
+                rect,
+                1.,
+            );
+            assert_close(&got, &expected, rect, 0.0001, name);
+        }
     }
 }
 
@@ -530,4 +532,42 @@ fn ocio_file_and_cdl_apply_embedded_grades_on_gpu() {
             assert!((actual - expected).abs() < 0.0001, "{name}: {actual}");
         }
     }
+}
+
+#[test]
+fn three_way_preserves_alpha_and_limits_saturation_to_the_selected_range() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(12, 7);
+    let input = Pixels::new(rect, |x, _| {
+        if x < 6 {
+            [0.1, 0.05, 0., 0.5]
+        } else {
+            [0.5, 0.45, 0.4, 0.5]
+        }
+    });
+    let fx = builtin("ADBE Three-Way Color Corrector");
+    let neutral = run(&gpu, Rgba32Float, fx, vec![], &input, rect, 1.);
+    assert_close(&neutral, &input, rect, 0.00001, "neutral correction");
+    let changed = run(
+        &gpu,
+        Rgba32Float,
+        fx,
+        vec![(41, Value::Float(0.))],
+        &input,
+        rect,
+        1.,
+    );
+    assert!(
+        (changed.data[0][0] - changed.data[0][2]).abs() < 0.00001,
+        "shadow pixel {:?}",
+        changed.data[0]
+    );
+    assert_eq!(changed.data[0][3], 0.5);
+    assert_close(
+        &changed,
+        &input,
+        IRect::new(6, 0, 12, 7),
+        0.00001,
+        "highlights",
+    );
 }
