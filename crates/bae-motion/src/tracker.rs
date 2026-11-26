@@ -124,6 +124,14 @@ fn require_tracker(stage: &Stage, tracker: &PrimPath) -> Result<(), CommandError
     ensure_unlocked(stage, [tracker])
 }
 
+/// The layer just above `layer` in its comp (AE's default motion target).
+pub fn layer_above(stage: &bae_model::Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let comp = query::owning_comp(stage, layer)?;
+    let layers = query::comp_layers(stage, &comp);
+    let index = layers.iter().position(|l| l == layer)?;
+    layers.get(index.checked_sub(1)?).cloned()
+}
+
 /// Half the width and height of the rectangle multi-point trackers start on.
 const POINT_SPREAD: [f64; 2] = [32.0, 24.0];
 
@@ -273,14 +281,11 @@ impl Command for CreateTracker {
         };
         set(tx, &path, "name", format!("{label} {i}"))?;
         set(tx, &path, "origin", Value::Vec2(p.center))?;
-        let target = query::owning_comp(tx.stage(), &p.layer)
-            .and_then(|comp| {
-                query::comp_layers(tx.stage(), &comp)
-                    .into_iter()
-                    .find(|l| l != &p.layer && !query::is_locked(tx.stage(), l))
-            })
-            .unwrap_or_else(|| p.layer.clone());
-        set(tx, &path, "target", Value::PrimRef(target))?;
+        // AE: the motion goes to the layer just above the source. The source
+        // itself would move twice; with no layer above, the user picks one.
+        if let Some(target) = layer_above(tx.stage(), &p.layer) {
+            set(tx, &path, "target", Value::PrimRef(target))?;
+        }
         if let Some((dest, attr)) = p.property_target {
             let layer = query::owning_layer(tx.stage(), &dest)
                 .ok_or_else(|| fail("expected a target layer"))?;

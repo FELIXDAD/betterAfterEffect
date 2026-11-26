@@ -527,7 +527,7 @@ pub(crate) fn live_evaluator<'a>(
         .as_ref()
         .map(|s| s.overrides(cx.stage))
         .unwrap_or_default();
-    let eval = eval.get(cx.resources);
+    let eval = eval.get(cx.stage);
     eval.set_overrides(overrides);
     eval
 }
@@ -1137,6 +1137,7 @@ impl Panel for CompositionViewer {
                 && let Some(g) = self.gpu.as_mut()
                 && let Some((texture, rect)) = g.playback.shown_texture()
             {
+                session.lock().channel_frame = g.playback.shown_channels();
                 g.show_cached(texture, rect);
             }
             completed
