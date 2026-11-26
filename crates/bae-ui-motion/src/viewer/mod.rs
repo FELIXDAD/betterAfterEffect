@@ -1349,6 +1349,23 @@ impl Panel for CompositionViewer {
         } else {
             tool
         };
+        if resp.double_clicked()
+            && effective.is_layer_paint()
+            && crate::prefs::current(cx.resources)
+                .bool("composition.double_click_paint_roto_opens_layer")
+            && let Some(layer) =
+                pointer.and_then(|pos| select_tool::hit_layer(cx.stage, &comp, &view, pos))
+        {
+            session.lock().selected_layers = vec![layer.clone()];
+            crate::layer_panel::open_clicked(
+                cx,
+                &session,
+                &layer,
+                ui.input(|i| i.modifiers.alt),
+                effective,
+                &mut self.eval,
+            );
+        }
         if hand && resp.drag_started_by(egui::PointerButton::Primary) {
             self.panning = true;
             // Space started playback when pressed; a Space-drag only pans:
@@ -1440,16 +1457,6 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
-        // The paint tools paint in the Layer panel: a double-click on a layer
-        // opens it there (AE).
-        if matches!(effective, Tool::Brush | Tool::CloneStamp | Tool::Eraser)
-            && resp.double_clicked()
-            && let Some(pos) = resp.interact_pointer_pos()
-            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, pos)
-        {
-            session.lock().selected_layers = vec![layer.clone()];
-            crate::layer_panel::open(cx, &session, &layer);
-        }
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.
@@ -1503,6 +1510,7 @@ impl Panel for CompositionViewer {
                 &view,
                 effective,
                 &painter,
+                &mut self.eval,
             ))
         };
         if resp.hovered()
