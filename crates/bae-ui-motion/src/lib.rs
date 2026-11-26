@@ -50,6 +50,7 @@ mod paint_panels;
 mod panels;
 mod path_nulls;
 mod playback;
+pub mod disk_frames;
 mod prefs;
 mod presets;
 pub use presets::register_preset_index;

@@ -278,6 +278,9 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => bae_prefs::PrefsStore::default(),
     });
     app.insert_resource(prefs.clone());
+    if let Some(dirs)=dirs.as_ref().filter(|_| global.smoke_test.is_none()) {
+        app.insert_resource(bae_ui_motion::disk_frames::DiskFrames::new(dirs.cache.clone(), &prefs));
+    }
     let project_file = bae_ui::files::ProjectFile::default();
     project_file.set(document.location().map(std::path::Path::to_owned));
     app.insert_resource(project_file);
@@ -472,11 +475,14 @@ impl Shell {
         // The UI thread never waits for the warm-up (see `warm_up`).
         bae_render::set_interactive_thread(true);
         {
-            let tasks = self
+            let mut tasks: Vec<Arc<dyn bae_gpu::WarmUp>> = self
                 .app
                 .get_registry::<dyn bae_gpu::WarmUp>()
                 .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
                 .unwrap_or_default();
+            if let Some(disk)=self.app.resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>() {
+                tasks.push(disk.clone());
+            }
             // Frames drawn without something still warming up are incomplete
             // (not remembered by the viewers): repaint when work finishes.
             let proxy = std::sync::Mutex::new(self.proxy.clone());
@@ -730,7 +736,18 @@ impl Shell {
     /// Buttons of the Preferences window that need the system.
     fn run_settings_requests(&mut self) {
         for request in self.workspace.take_settings_requests() {
-            if let Some((title, body)) =
+            if request == "disk.empty_disk_cache" {
+                if let Some(cache)=self.app.resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>() {
+                    let mut dialog=rfd::MessageDialog::new()
+                        .set_title(crate::i18n::tr("Empty Disk Cache"))
+                        .set_description(crate::i18n::tr("Delete cached preview frames from this folder?"))
+                        .set_buttons(rfd::MessageButtons::YesNo);
+                    if let Some(view)=&self.view {dialog=dialog.set_parent(&*view.window);}
+                    if dialog.show()==rfd::MessageDialogResult::Yes {
+                        cache.clear_folder(self.workspace.settings_dialog().draft());
+                    }
+                }
+            } else if let Some((title, body)) =
                 crate::ui::hardware_information(&request, self.app.resources())
             {
                 let mut dialog = rfd::MessageDialog::new()

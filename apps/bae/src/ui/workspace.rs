@@ -217,6 +217,7 @@ impl Workspace {
                     REVEAL_PREFERENCES,
                     MEMORY_DETAILS,
                     GPU_INFORMATION,
+                    "disk.empty_disk_cache",
                     "choose",
                 ]),
         }
