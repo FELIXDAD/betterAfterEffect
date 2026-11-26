@@ -326,6 +326,22 @@ const LAYER: &[AttrDef] = &[
     float("camera:focus_distance", 1777.8).kinds(&["camera"]),
     float("camera:aperture", 25.3).kinds(&["camera"]),
     float("camera:blur_level", 100.0).kinds(&["camera"]),
+    int("camera:iris_shape", 1)
+        .kinds(&["camera"])
+        .doc("AE's Iris Shape: 1 Fast Rectangle, 3–10 the polygon's blade count."),
+    float("camera:iris_rotation", 0.0)
+        .kinds(&["camera"])
+        .doc("Degrees."),
+    float("camera:iris_roundness", 0.0)
+        .kinds(&["camera"])
+        .doc("Percent."),
+    float("camera:iris_aspect_ratio", 1.0).kinds(&["camera"]),
+    float("camera:iris_diffraction_fringe", 0.0).kinds(&["camera"]),
+    float("camera:highlight_gain", 0.0).kinds(&["camera"]),
+    float("camera:highlight_threshold", 1.0)
+        .kinds(&["camera"])
+        .doc("0–1."),
+    float("camera:highlight_saturation", 0.0).kinds(&["camera"]),
     choice(
         "light:type",
         "spot",
@@ -347,8 +363,12 @@ const LAYER: &[AttrDef] = &[
     boolean("light:casts_shadows", false).kinds(&["light"]),
     float("light:shadow_darkness", 100.0).kinds(&["light"]),
     float("light:shadow_diffusion", 0.0).kinds(&["light"]),
-    boolean("material:casts_shadows", false).kinds(VISUAL),
-    boolean("material:accepts_shadows", true).kinds(VISUAL),
+    int("material:casts_shadows", 0)
+        .kinds(VISUAL)
+        .doc("AE's Casts Shadows: 0 Off, 1 On, 2 Only (casts, not drawn)."),
+    int("material:accepts_shadows", 1)
+        .kinds(VISUAL)
+        .doc("AE's Accepts Shadows: 0 Off, 1 On, 2 Only (shows only the shadows on it)."),
     boolean("material:accepts_lights", true).kinds(VISUAL),
     // Material Options reflectance (AE-CMP-441), percent.
     float("material:ambient", 100.0).kinds(VISUAL),
@@ -755,6 +775,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             string("cue_point_name"),
             int("label", 0),
             boolean("protected_region", false),
+            // Layer markers: Segmentation Marker instead of Comment Marker (AE 26).
+            boolean("segment", false),
         ],
     },
     PrimSchema {

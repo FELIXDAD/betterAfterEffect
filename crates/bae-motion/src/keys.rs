@@ -111,6 +111,9 @@ pub fn set_default_spatial_linear(on: bool) {
 /// A new keyframe of `attr` (keyframes `spec`): linear in time; spatially linear or
 /// Auto Bezier as the preference says.
 pub(crate) fn new_key(attr: &str, spec: &AttrSpec, value: Value) -> Keyframe {
+    if matches!(value, Value::TextDocument(_)) {
+        return Keyframe::hold(value);
+    }
     let mut k = Keyframe::linear(value);
     if !DEFAULT_SPATIAL_LINEAR.load(Ordering::Relaxed)
         && bae_anim::schema::curve_kind(attr, spec) == bae_anim::CurveKind::Spatial
@@ -197,6 +200,9 @@ pub struct SetAt;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SetAtParams {
+    /// Start a key track if this edit is animatable.
+    #[serde(default)]
+    pub auto_key: bool,
     pub path: PrimPath,
     pub attr: String,
     /// Keyframe time in flicks (layer time for layer attributes). Only used when the
@@ -216,7 +222,7 @@ impl Command for SetAt {
         ensure_unlocked(tx.stage(), [&p.path])?;
         tx.stage().require_prim(&p.path)?;
         check_value(tx, &p.path, &p.attr, &p.value)?;
-        let spec = spec_with_value_at(tx.stage(), &p.path, &p.attr, p.time, p.value);
+        let spec = spec_with_value_at(tx.stage(), &p.path, &p.attr, p.time, p.value, p.auto_key);
         write_attr(tx, &p.path, &p.attr, spec)
     }
 }
@@ -231,11 +237,12 @@ pub fn spec_with_value_at(
     attr: &str,
     time: Time,
     value: Value,
+    auto_key: bool,
 ) -> AttrSpec {
     let mut spec = query::attr_spec(stage, path, attr)
         .cloned()
         .unwrap_or_default();
-    if spec.is_animated() {
+    if spec.is_animated() || (auto_key && check_animatable(stage, path, attr).is_ok()) {
         match spec.keyframes.get_mut(&time) {
             Some(k) => k.value = value,
             None => {
@@ -266,6 +273,8 @@ pub struct ValueEdit {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SetManyParams {
+    #[serde(default)]
+    pub auto_key: bool,
     pub edits: Vec<ValueEdit>,
 }
 
@@ -282,6 +291,7 @@ impl Command for SetMany {
             SetAt.run(
                 tx,
                 SetAtParams {
+                    auto_key: p.auto_key,
                     path: e.path,
                     attr: e.attr,
                     time: e.time,

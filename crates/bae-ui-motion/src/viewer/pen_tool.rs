@@ -37,6 +37,8 @@ const DRAG_START: f32 = 2.0;
 pub(crate) struct PenPath {
     comp: PrimPath,
     target: Target,
+    /// Captured when starting a new layer. Adding paths to it later keeps its anchor.
+    center_new_anchor: bool,
     /// Path space (the target layer's space) → comp space.
     to_comp: DMat4,
     path: BezierPath,
@@ -479,9 +481,12 @@ fn start_vertex(
     let target = Target::of(cx.stage, &info.path, &selected, mask);
     let to_comp = shape_tool::target_matrix(info, comp, &target);
     let color = shape_tool::preview_color(cx.stage, &target);
+    let center_new_anchor = matches!(target, Target::NewLayer)
+        && super::prefs::ViewerPrefs::current(cx.resources).center_shape_anchor;
     let mut d = PenPath {
         comp: info.path.clone(),
         target,
+        center_new_anchor,
         to_comp,
         path: BezierPath {
             vertices: Vec::new(),
@@ -535,6 +540,21 @@ fn commit(
         d.path.clone()
     };
     if let Some(prim) = &d.prim {
+        if d.center_new_anchor
+            && let Some(layer) = d.layer(cx.stage)
+        {
+            // The path remains in its original coordinates. Move the anchor and
+            // compensate Position in the same undo step as each new vertex.
+            let [x, y] = bae_motion::path::drawing_center(&path);
+            let position = d.to_comp.transform_point3(DVec3::new(x, y, 0.0));
+            let time = query::to_key_time(cx.stage, prim, session.lock().time(&info.path));
+            cx.invoke_with("attr.set_many", json!({"edits": [
+                {"path": prim, "attr": bae_motion::path::PATH_ATTR, "time": time, "value": Value::Bezier(path)},
+                {"path": layer, "attr": "transform:anchor_point", "time": time, "value": Value::Vec3([x, y, 0.0])},
+                {"path": layer, "attr": "transform:position", "time": time, "value": Value::Vec3(position.to_array())}
+            ]}));
+            return;
+        }
         set_vertices(cx, session, info, prim, &path);
         return;
     }
