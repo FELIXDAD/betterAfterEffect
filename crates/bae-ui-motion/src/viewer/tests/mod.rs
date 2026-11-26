@@ -460,6 +460,7 @@ fn tool_action(h: &H, id: &str, params: serde_json::Value) -> PanelRequests {
 }
 
 mod context_menu;
+mod display;
 mod effect_points;
 mod free_transform;
 mod guides;
