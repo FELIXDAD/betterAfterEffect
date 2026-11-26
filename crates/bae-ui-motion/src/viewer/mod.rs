@@ -27,6 +27,7 @@ mod camera_tool;
 pub(crate) mod display;
 mod effect_points;
 pub(crate) mod errors;
+mod feather_tool;
 mod free_transform;
 mod gizmo3d;
 pub(crate) mod guides;
@@ -79,7 +80,7 @@ const ZOOM_STEPS: [f32; 13] = [
 pub(crate) const ZOOM_100: &str = "motion.viewer.zoom_100";
 
 /// The next zoom step above (`up`) or below `mag`.
-fn next_step(mag: f32, up: bool) -> Option<f32> {
+pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
     if up {
         ZOOM_STEPS.iter().copied().find(|m| *m > mag * 1.01)
     } else {
@@ -144,8 +145,8 @@ pub(crate) fn wheel(ui: &Ui) -> Wheel {
 }
 /// Magnification change per mouse-wheel notch, in and out (AE 26 Smooth Zoom:
 /// ×9/8 and ×7/8, R1).
-const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
-const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
+pub(crate) const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
+pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 
 #[derive(Default)]
 pub struct CompositionViewer {
@@ -192,6 +193,7 @@ pub struct CompositionViewer {
     shape: Option<shape_tool::ShapeDrag>,
     /// Pen tools: the open path being drawn, a Convert Vertex drag.
     pen: pen_tool::PenState,
+    feather: feather_tool::FeatherState,
     sketch: motion_sketch::SketchState,
     /// Selection, Rotation and Pan Behind tools: transform drags, marquee,
     /// selected mask vertices.
@@ -994,6 +996,12 @@ impl Panel for CompositionViewer {
             _ => image,
         };
         self.on_gpu = image.is_some();
+        if let Some(frame) = self.gpu.as_ref().and_then(|g| g.output()) {
+            let mut s = session.lock();
+            if s.scope_frame.as_ref().map(|f| f.1) != Some(frame.1) {
+                s.scope_frame = Some(frame);
+            }
+        }
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
         if let Some(h) = resp.hover_pos() {
@@ -1191,6 +1199,18 @@ impl Panel for CompositionViewer {
         }
         let pen = pen_tool::frame(
             &mut self.pen,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &comp,
+            &view,
+            effective,
+            &painter,
+        );
+        feather_tool::frame(
+            &mut self.feather,
             ui,
             &resp,
             cx,
