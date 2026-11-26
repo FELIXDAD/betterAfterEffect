@@ -233,6 +233,7 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) channel_frame: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     /// Last UI frame in which a visible timeline requested per-layer CPU timings.
     pub(crate) timing_column_frame: Option<u64>,
     pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
@@ -302,6 +303,7 @@ pub struct Session {
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
