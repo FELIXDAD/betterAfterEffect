@@ -225,6 +225,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "在当前时间添加或移除关键帧",
     ),
     ("Go to Previous Keyframe", "转到上一个关键帧"),
+    ("Waveform", "波形"),
+    ("Audio Levels", "音频电平"),
+    ("Reveal Audio Levels", "显示音频电平"),
+    (
+        "Add Audio Levels to Revealed Properties",
+        "同时显示音频电平",
+    ),
     ("Go to Next Keyframe", "转到下一个关键帧"),
     ("Reveal Animated Properties", "显示动画属性"),
     ("Reveal Modified Properties", "显示修改的属性"),
@@ -251,4 +258,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Open a composition from the Project panel, or create one.",
         "从项目面板打开合成，或新建一个合成。",
     ),
+    ("Composition Mini-Flowchart", "合成微型流程图"),
+    ("Select", "选择"),
+    ("Frame Mix", "帧混合"),
+    ("Pixel Motion", "像素运动"),
 ];

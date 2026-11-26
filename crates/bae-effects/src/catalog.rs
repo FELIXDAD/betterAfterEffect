@@ -219,6 +219,21 @@ impl DefBuilder {
         self
     }
 
+    /// Marks the last parameter as static, as for AE path selectors.
+    pub(crate) fn static_param(mut self) -> Self {
+        let flags = &mut self.def.params.last_mut().unwrap().flags;
+        flags.cannot_animate = true;
+        flags.cannot_time_vary = true;
+        self
+    }
+
+    /// Gives the last parameter AE's own matchName (for parameters AE does not
+    /// name `<effect>-NNNN`).
+    pub(crate) fn ae_match_name(mut self, name: &str) -> Self {
+        self.def.params.last_mut().unwrap().match_name = Some(name.to_owned());
+        self
+    }
+
     /// A same-comp layer reference. An unwritten default resolves to self.
     pub fn layer(mut self, id: u32, name: &str, zh: &str) -> Self {
         self.push(id, name, zh, ParamKind::Layer, None);
@@ -280,6 +295,7 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "Alpha 差值",
             "仅 Alpha 差值",
         ],
+        ("ADBE OFMotionBlur", 1) => &["手动", "自动"],
         ("ADBE Timewarp", 1) => &["全帧", "帧混合", "像素运动"],
         ("ADBE Timewarp", 2) => &["速度", "源帧"],
         ("ADBE Timewarp", 14) => &["正常", "极端"],
@@ -320,9 +336,12 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "关闭",
         ],
         _ => {
-            return crate::categories::noise_grain::grain::definitions::options(
-                match_name, param_id,
-            );
+            return crate::categories::keying::keyer::definitions::options(match_name, param_id)
+                .or_else(|| {
+                    crate::categories::noise_grain::grain::definitions::options(
+                        match_name, param_id,
+                    )
+                });
         }
     })
 }

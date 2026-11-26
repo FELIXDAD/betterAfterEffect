@@ -6,7 +6,12 @@ use super::*;
 fn f4_alternates_switches_and_modes() {
     let mut h = H::new();
     let mut tl = h.bars();
-    let p = |tl: &TimelinePanel| (tl.panes().switches, tl.panes().modes);
+    let p = |tl: &TimelinePanel| {
+        (
+            tl.column_visible(crate::timeline::Column::Switches),
+            tl.column_visible(crate::timeline::Column::Modes),
+        )
+    };
     assert_eq!(p(&tl), (true, false), "AE starts with Switches");
     let f4 = || Invocation::new(crate::actions::ids::TOGGLE_SWITCHES_MODES);
     h.action(&mut tl, f4());
@@ -17,7 +22,7 @@ fn f4_alternates_switches_and_modes() {
         &mut tl,
         Invocation::new(crate::actions::ids::TOGGLE_PARENT_COLUMN),
     );
-    assert!(!tl.panes().parent);
+    assert!(!tl.column_visible(crate::timeline::Column::Parent));
     // With Modes hidden no Modes cells are drawn.
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     assert!(tl.last_modes.is_empty());
@@ -164,11 +169,11 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     let rc = request(&h);
     assert!(rc.motion_blur.is_some());
     assert!(rc.layers.iter().any(|l| !l.motion_samples.is_empty()));
-    // Hide Shy Layers and Draft 3D are comp settings; Frame Blending is disabled.
+    // Draft 3D has no renderer. Frame Mix is available with its sampling backend.
     for (dx, attr, on) in [
-        (52.0, "frame_blending", false),
+        (52.0, "frame_blending", true),
         (78.0, "hide_shy_layers", true),
-        (104.0, "draft_3d", true),
+        (104.0, "draft_3d", false),
     ] {
         let r = h.click(&mut tl, ge - vec2(dx, 0.0), Modifiers::NONE);
         h.apply(&r);
@@ -183,11 +188,256 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     );
     h.apply(&r);
     assert!(request(&h).layers.iter().any(|l| l.matrix_3d.is_some()));
-    // Undo the comp switches one step at a time.
+    // Undo the 3D layer, Hide Shy and Frame Mix.
     h.undo();
     h.undo();
     h.undo();
     assert!(request(&h).motion_blur.is_some());
     h.undo();
     assert!(request(&h).motion_blur.is_none());
+}
+
+#[test]
+fn sweeping_a_switch_crosses_skipped_rows_and_backtracks_in_one_undo() {
+    let mut h = H::new();
+    for _ in 0..3 {
+        h.run("layer.create", json!({"comp": h.comp, "kind": "solid"}));
+    }
+    let mut tl = h.bars();
+    let mut rows = tl.last_bars.clone();
+    rows.sort_by(|a, b| a.1.center().y.total_cmp(&b.1.center().y));
+    assert_eq!(rows.len(), 4);
+    let point = |i: usize| pos2(12.0, rows[i].1.center().y);
+    let read = |h: &H| {
+        rows.iter()
+            .map(|(p, _)| {
+                query::static_value(&h.stage.prim(p).unwrap(), "enabled") == Some(Value::Bool(true))
+            })
+            .collect::<Vec<_>>()
+    };
+    h.run(
+        "layer.set_attr",
+        json!({"layers":[rows[1].0],"attr":"locked","value":{"type":"bool","value":true}}),
+    );
+    // The eye of a locked layer can be switched too (AE, #485).
+    for (initial, expected) in [(true, vec![false; 4]), (false, vec![true; 4])] {
+        for events in [
+            vec![Event::PointerMoved(point(0))],
+            vec![button(point(0), true, Modifiers::NONE)],
+            vec![Event::PointerMoved(point(3))],
+            vec![Event::PointerMoved(point(0))],
+            vec![Event::PointerMoved(point(0) + vec2(30.0, 0.0))],
+        ] {
+            assert!(
+                h.frame(&mut tl, events, Modifiers::NONE)
+                    .invocations
+                    .is_empty()
+            );
+        }
+        let r = h.frame(
+            &mut tl,
+            vec![button(point(0) + vec2(30.0, 0.0), false, Modifiers::NONE)],
+            Modifiers::NONE,
+        );
+        assert_eq!(r.invocations.len(), 1);
+        assert_eq!(
+            r.invocations[0].params["layers"].as_array().unwrap().len(),
+            4
+        );
+        h.apply(&r);
+        assert_eq!(read(&h), expected);
+        h.undo();
+        assert_eq!(read(&h)[0], initial);
+        h.apply(&r);
+        h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    }
+}
+
+#[test]
+fn locked_switches_preserve_selection_and_video_solo_follows_the_eye() {
+    let mut h = H::new();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let asset = path(
+        &h.run(
+            "item.import",
+            json!({"files":[{"path":file.path(), "attrs":{
+                "kind": Value::Enum("footage".into()), "has_audio": Value::Bool(true),
+                "duration": Value::Time(Time::from_seconds(2.0))
+            }}]}),
+        )["items"][0],
+    );
+    let mut make_layer = |name| {
+        path(
+            &h.run(
+                "layer.create",
+                json!({
+                    "kind":"footage", "comp":h.comp, "source":asset, "name":name
+                }),
+            )["path"],
+        )
+    };
+    let other = make_layer("Other");
+    let locked = make_layer("Locked");
+    h.run(
+        "attr.set",
+        json!({"path":locked,"attr":"locked","value":Value::Bool(true)}),
+    );
+    let mut tl = h.bars();
+    let y = |path: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(p, _)| p == path)
+            .unwrap()
+            .1
+            .center()
+            .y
+    };
+    let (y1, y2) = (y(&locked), y(&other));
+    let switches = tl.last_axis.unwrap().left - 2.0 - 120.0 - 134.0;
+    let point = |col: usize, y| pos2(5.0 + 15.0 * (col as f32 + 0.5), y);
+    let click = |h: &mut H, tl: &mut TimelinePanel, pos| {
+        let request = h.click(tl, pos, Modifiers::NONE);
+        h.apply(&request);
+        assert!(h.stage.is_layer_locked(&locked));
+        assert!(!h.session().lock().selected_layers.contains(&locked));
+    };
+    let check = |h: &H, shown: [bool; 2], audio_enabled: bool| {
+        let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, Time::ZERO).unwrap();
+        assert_eq!(
+            [
+                comp.layer(&locked).unwrap().visible,
+                comp.layer(&other).unwrap().visible
+            ],
+            shown
+        );
+        let audio = h
+            .stage
+            .prim(&locked)
+            .unwrap()
+            .value("audio_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        assert_eq!(audio, audio_enabled);
+    };
+    click(&mut h, &mut tl, pos2(switches - 60.0, y1)); // name stays unselected
+    check(&h, [true, true], true);
+    click(&mut h, &mut tl, point(2, y1)); // solo locked layer
+    check(&h, [true, false], true);
+    click(&mut h, &mut tl, point(0, y1)); // close its eye
+    check(&h, [false, true], true);
+    click(&mut h, &mut tl, point(1, y1)); // mute its audio
+    check(&h, [false, true], false);
+    click(&mut h, &mut tl, point(0, y1));
+    check(&h, [true, false], false);
+    click(&mut h, &mut tl, point(1, y1));
+    click(&mut h, &mut tl, point(2, y1));
+    click(&mut h, &mut tl, point(2, y2)); // now solo the unlocked layer
+    check(&h, [false, true], true);
+    for (col, attr) in [(0, "shy"), (5, "motion_blur")] {
+        for expected in [true, false] {
+            click(
+                &mut h,
+                &mut tl,
+                pos2(switches + 15.0 * (col as f32 + 0.5), y1),
+            );
+            assert_eq!(
+                h.stage
+                    .prim(&locked)
+                    .unwrap()
+                    .value(attr)
+                    .and_then(Value::as_bool),
+                Some(expected)
+            );
+        }
+    }
+}
+
+#[test]
+fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let imported = h.run(
+        "item.import",
+        json!({"files": [{
+            "path": file.path(),
+            "attrs": {
+                "kind": Value::Enum("sequence".into()),
+                "frame_rate": Value::FrameRate(bae_model::FrameRate::FPS_30),
+                "duration": Value::Time(Time::from_seconds(2.0))
+            }
+        }]}),
+    );
+    let asset = path(&imported["items"][0]);
+    let layer = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": comp,"kind":"footage","source":asset}),
+        )["path"],
+    );
+    let mut tl = h.bars();
+    let y = |p: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(path, _)| path == p)
+            .unwrap()
+            .1
+            .center()
+            .y
+    };
+    let right = tl.last_axis.unwrap().left - 2.0;
+    let x = right - 120.0 - 134.0 + 4.5 * 15.0;
+    let row = pos2(x, y(&layer));
+    let solid = pos2(x, y(&h.layer));
+    let master = pos2(right - 14.0 - 52.0, 39.0);
+    assert!(
+        h.click(&mut tl, solid, Modifiers::NONE)
+            .invocations
+            .is_empty()
+    );
+    let r = h.click(&mut tl, row, Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1);
+    h.apply(&r);
+    for expected in [true, false, true] {
+        let r = h.click(&mut tl, master, Modifiers::NONE);
+        h.apply(&r);
+        assert_eq!(
+            query::static_value(&h.stage.prim(&comp).unwrap(), "frame_blending"),
+            Some(Value::Bool(expected))
+        );
+        assert_eq!(
+            query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
+            Some(Value::Enum("frame_mix".into()))
+        );
+    }
+    // Without an interpolator, a second click goes straight back to Off.
+    let r = h.click(&mut tl, row, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(
+        query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
+        Some(Value::Enum("off".into()))
+    );
+
+    let mut app = bae_app::AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    let effects = app
+        .build()
+        .get_registry::<dyn bae_render::Effect>()
+        .unwrap();
+    let pixel_motion = effects.contains(super::super::FRAME_INTERPOLATOR_ID);
+    h.resources
+        .insert(crate::gpu_preview::PreviewEffects(effects));
+    let modes = ["frame_mix", "pixel_motion", "off"];
+    for expected in modes
+        .into_iter()
+        .filter(|mode| *mode != "pixel_motion" || pixel_motion)
+    {
+        let r = h.click(&mut tl, row, Modifiers::NONE);
+        assert_eq!(r.invocations.len(), 1, "one edit per click");
+        h.apply(&r);
+        assert_eq!(
+            query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
+            Some(Value::Enum(expected.into()))
+        );
+    }
 }

@@ -1,69 +1,14 @@
+use bae_model::{Time, Value};
+use bae_render::{LayerContent, RenderComp, RenderEffect, RenderLayer};
 use std::sync::Arc;
-
-use bae_model::{PrimPath, Time, Value};
-use bae_render::{
-    LayerContent, OutputAlpha, RenderComp, RenderEffect, RenderError, RenderLayer, RenderRequest,
-    Renderer, graph::CompFrames,
-};
-
 #[path = "ae/categories/mod.rs"]
 mod categories;
 #[path = "ae/harness.rs"]
 mod harness;
 
-const CLIP: &str = "/comps/main/layers/clip";
-
-fn path(s: &str) -> PrimPath {
-    PrimPath::new(s).unwrap()
-}
-
-fn effect(name: &str, match_name: &str, params: Vec<(u32, Value)>) -> RenderEffect {
-    RenderEffect {
-        path: path(&format!("{CLIP}/effects/{name}")),
-        enabled: true,
-        effect: match_name.into(),
-        params,
-    }
-}
-
-fn solid(prim: &str, width: u32, color: [f32; 4]) -> RenderLayer {
-    RenderLayer::new(
-        path(prim),
-        LayerContent::Solid {
-            color,
-            width,
-            height: 8,
-        },
-    )
-}
-
-struct Frames<F>(F);
-impl<F: Fn(Time) -> RenderComp> CompFrames for Frames<F> {
-    fn comp_at(&mut self, _comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
-        Ok(Some((self.0)(time)))
-    }
-}
-
-fn renderer() -> Option<Renderer> {
-    let mut renderer = Renderer::new(bae_gpu::testing::shared_context()?);
-    bae_effects::register(
-        &mut bae_model::EffectRegistry::new(),
-        renderer.effects_mut(),
-    );
-    Some(renderer)
-}
-
-fn pixels(renderer: &mut Renderer, scene: impl Fn(Time) -> RenderComp, t: f64) -> Vec<u8> {
-    let t = Time::from_seconds(t);
-    let comp = scene(t);
-    let frame = renderer
-        .render_frame_with(&comp, &RenderRequest::default(), Some(&mut Frames(scene)))
-        .unwrap();
-    renderer
-        .read_rgba8(&frame, OutputAlpha::Premultiplied)
-        .unwrap()
-        .data
-}
+#[path = "common/time_scene.rs"]
+mod time_scene;
+use time_scene::*;
 
 #[test]
 fn posterize_freezes_earlier_effects_in_layer_time() {
@@ -229,4 +174,59 @@ fn wide_time_averages_frames_and_time_difference_compares_them() {
         "{:?}",
         &difference[..4]
     );
+}
+
+/// A white 8 × 8 square on black moving 8 px right per frame (x = 4 at
+/// frame 0), inside a pre-comp layer carrying `effect`.
+fn moving_square(effect: RenderEffect) -> impl Fn(Time) -> RenderComp {
+    move |time: Time| {
+        let frame = (time.as_seconds() * 30.).round();
+        let mut inner = RenderComp::new(path("/comps/inner"), 48, 8);
+        inner.time = time;
+        let mut square = solid("/comps/inner/layers/square", 8, [1.; 4]);
+        square.transform = glam::DAffine2::from_translation(glam::DVec2::new(4. + 8. * frame, 0.));
+        inner.layers = vec![
+            square,
+            solid("/comps/inner/layers/bg", 48, [0., 0., 0., 1.]),
+        ];
+        let mut comp = RenderComp::new(path("/comps/main"), 48, 8);
+        comp.time = time;
+        let mut layer = RenderLayer::new(path(CLIP), LayerContent::Comp(Arc::new(inner)));
+        layer.time = time;
+        layer.effects.push(effect.clone());
+        comp.layers.push(layer);
+        comp
+    }
+}
+
+#[test]
+fn pixel_motion_tweens_and_blurs_along_the_optical_flow() {
+    let Some(mut r) = renderer() else { return };
+    let red = |image: &[u8], x: usize| image[(4 * 48 + x) * 4];
+    // Timewarp at 50 % shows source frame 0.5 at comp frame 1: Pixel Motion
+    // puts the square half way ([8, 16)); Frame Mix leaves two half images.
+    let tween = |method: i64| {
+        effect(
+            "warp",
+            "ADBE Timewarp",
+            vec![(1, Value::Int(method)), (6, Value::Float(100.))],
+        )
+    };
+    let motion = pixels(&mut r, moving_square(tween(3)), 1. / 30.);
+    assert!(red(&motion, 14) > 200 && red(&motion, 6) < 55, "{motion:?}");
+    let mix = pixels(&mut r, moving_square(tween(2)), 1. / 30.);
+    assert!(red(&mix, 14).abs_diff(128) < 10, "{mix:?}");
+    // Pixel Motion Blur at 180°: ±2 px of the 8 px motion, smeared outwards
+    // past the square's edges; its middle and the far background stay.
+    let blur = pixels(
+        &mut r,
+        moving_square(effect(
+            "blur",
+            "ADBE OFMotionBlur",
+            vec![(4, Value::Float(100.))],
+        )),
+        1. / 30.,
+    );
+    assert!((20..235).contains(&red(&blur, 11)), "{blur:?}");
+    assert!(red(&blur, 16) > 240 && red(&blur, 2) < 15, "{blur:?}");
 }

@@ -8,6 +8,24 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Project Settings", "项目设置"),
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
     // (#136). The command crate stays UI-free; its titles are translated here.
+    ("Waveform Audio (WAV)", "波形音频（WAV）"),
+    ("Stereo, 48 kHz, 24-bit PCM", "立体声，48 kHz，24 位 PCM"),
+    ("Convert Audio to Keyframes", "将音频转换为关键帧"),
+    ("Audio Amplitude", "音频振幅"),
+    ("Left Channel", "左声道"),
+    ("Right Channel", "右声道"),
+    ("Both Channels", "两个声道"),
+    ("Analyzing audio…", "正在分析音频…"),
+    ("Audio analysis stopped.", "音频分析已停止。"),
+    (
+        "The composition has no enabled audio layers.",
+        "合成中没有开启声音的图层。",
+    ),
+    ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
+    ("Apply Motion Tracker", "应用动态跟踪器"),
+    ("Edit Motion Tracker", "编辑动态跟踪器"),
+    ("Analyze Motion", "分析运动"),
+    ("Reset Tracker", "重置跟踪器"),
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
@@ -21,6 +39,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
+    // Composition viewer: an effect or the text renderer still warming up.
+    ("Preparing…", "正在准备…"),
     ("Time Stretch", "时间伸缩"),
     // Panel-scoped zoom shortcuts (timeline: = / -, viewer: . / , / ?)
     ("Zoom In Time", "放大时间"),
@@ -49,6 +69,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Out", "出"),
     ("Out Point", "出点"),
     ("Render Time", "渲染时间"),
+    ("ms", "毫秒"),
     ("Stretch", "伸缩"),
     ("Tape Name", "磁带名称"),
     ("Video Info", "视频信息"),
@@ -87,6 +108,7 @@ pub(crate) fn all() -> Vec<(&'static str, &'static str)> {
         crate::graph::ZH,
         crate::dialogs::ZH,
         crate::import::ZH,
+        crate::assist::ZH,
     ]
     .concat()
 }

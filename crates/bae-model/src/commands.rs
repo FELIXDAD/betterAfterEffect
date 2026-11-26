@@ -790,6 +790,7 @@ impl Command for SetAssetFile {
     type Params = SetAssetFileParams;
     type Output = ();
     const ID: &'static str = "asset.set_file";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Relink Asset";
     const DESCRIPTION: &'static str = "Set or relink the file an Asset prim points to.";
 

@@ -8,10 +8,16 @@ use winit::keyboard::KeyCode;
 
 /// The key standing for a numpad press, if AE's shortcuts use it. Only presses
 /// that type a character: with NumLock off (Windows) numpad 4 / 6 / 8 / 2 / 7 /
-/// 1 / 9 / 3 / 0 / . are arrows, Home, End, Page Up / Down, Insert and Delete
+/// 1 / 9 / 3 / . are arrows, Home, End, Page Up / Down and Delete
 /// and stay those keys.
 pub fn key(code: KeyCode, logical: &winit::keyboard::Key) -> Option<egui::Key> {
-    if !matches!(logical, winit::keyboard::Key::Character(_)) {
+    // AE binds both Num 0 and Num Insert to the same preview transport.
+    let pad_insert = code == KeyCode::Numpad0
+        && matches!(
+            logical,
+            winit::keyboard::Key::Named(winit::keyboard::NamedKey::Insert)
+        );
+    if !pad_insert && !matches!(logical, winit::keyboard::Key::Character(_)) {
         return None;
     }
     let name = match code {
@@ -36,6 +42,21 @@ pub fn key(code: KeyCode, logical: &winit::keyboard::Key) -> Option<egui::Key> {
         .iter()
         .find(|(n, ..)| *n == name)
         .map(|(_, k, _)| *k)
+}
+
+/// The modifiers held now: the latest change egui-winit queued since the last
+/// frame (`pending`), else the last frame's (`last_frame`). A change can come
+/// in with the press itself before any frame ran (Alt held, then numpad `*`,
+/// right after startup on Windows, #537); the last frame's would miss it.
+pub fn current_modifiers(pending: &[egui::Event], last_frame: egui::Modifiers) -> egui::Modifiers {
+    pending
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            egui::Event::ModifiersChanged(m) => Some(*m),
+            _ => None,
+        })
+        .unwrap_or(last_frame)
 }
 
 /// Replaces the key events egui-winit added for one numpad press (`events[from..]`)
@@ -71,6 +92,17 @@ pub fn rewrite(
 mod tests {
     use super::*;
 
+    /// Alt pressed after the last frame still counts for numpad `*` (#537).
+    #[test]
+    fn queued_modifier_changes_count() {
+        let pending = [
+            egui::Event::ModifiersChanged(egui::Modifiers::ALT),
+            egui::Event::Text("*".into()),
+        ];
+        assert!(current_modifiers(&pending, egui::Modifiers::NONE).alt);
+        assert!(!current_modifiers(&[], egui::Modifiers::NONE).alt);
+    }
+
     /// Numpad 1 is its own key (not the main 1) and still types "1".
     #[test]
     fn numpad_presses_become_their_own_keys() {
@@ -95,6 +127,12 @@ mod tests {
             egui::Event::Key { key, modifiers, .. } if key == pad1 && modifiers.alt
         ));
         assert!(key(KeyCode::Digit1, &ch("1")).is_none());
+        let insert = winit::keyboard::Key::Named(winit::keyboard::NamedKey::Insert);
+        assert_eq!(
+            key(KeyCode::Numpad0, &insert),
+            key(KeyCode::Numpad0, &ch("0"))
+        );
+        assert!(key(KeyCode::Digit0, &ch("0")).is_none());
         assert!(key(KeyCode::NumpadMultiply, &ch("*")).is_some());
         // NumLock off: numpad 4 is the left arrow, not Pad4.
         let left = winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft);
