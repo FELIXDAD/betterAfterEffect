@@ -139,3 +139,5 @@ Particle World 和 Particle Systems II 共用 GPU 粒子引擎。出生率的时
 ### OpenEXR 与 3D 通道（2026-11-26）
 
 复用现有 exr 解码器读取平面多通道及多部件素材。3D 通道提取、场深度、深度遮罩和雾 3D 直接读取素材通道。美术通道以外的通道在效果第一次用到时才上传到 GPU，半精度通道保持 16 位。GPU 内核接入统一预热。
+
+第二组增加 ID 遮罩、Cryptomatte、EXtractoR 和 IDentifier。查看器按显示帧点选物体后，把物体 ID 写入效果参数。通道选择来自已解码的素材帧。

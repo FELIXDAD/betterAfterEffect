@@ -416,6 +416,10 @@ fn param_row(
             ui.colored_label(color::TEXT_DISABLED, tr("Not available in BAE yet"));
         } else {
             ui.add_enabled_ui(!disabled, |ui| {
+                if let Some(channel_edit)=super::exr::control(ui,session,effect,&def.match_name,param.id,value.as_ref(),now) {
+                    edit=channel_edit;
+                    return;
+                }
                 if def.match_name=="ADBE MESH WARP" && param.id==4 {
                     let mut number=|id:u32|common::current_value(eval.get(cx.stage),stage,effect,&param_attr(id),now)
                         .or_else(||def.param(id).and_then(|p|p.default.clone())).and_then(|v|v.as_f64()).unwrap_or(0.);
@@ -470,7 +474,7 @@ fn param_row(
         && let Edit::Commit(Value::Color(sample)) = &edit
     {
         let edits = bae_effects::lumetri_key_edits(param.id, *sample, |id| {
-            common::current_value(eval.get(cx.resources), stage, effect, &param_attr(id), now)
+            common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
         });
         let time = query::to_key_time(stage, effect, now);
         let edits: Vec<_> = edits.into_iter().map(|(id, value)|
