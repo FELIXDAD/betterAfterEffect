@@ -24,6 +24,8 @@ pub(super) const ALLOWED: &[&str] = &[
     "HQ",
     // AE's Chinese output module keeps "RGB + Alpha".
     "Alpha",
+    // AE's zh_CN keeps it: "3D 位置 Gizmo", "向前循环 3D Gizmo 模式" (KB/S/Tools).
+    "Gizmo",
     // Frame rate unit: AE zh_CN keeps it ("社交媒体纵向 HD • 1080x1920 • 30 fps",
     // docs/reference/ae/preferences.json); the timeline shows "(30.00 fps)".
     "fps",

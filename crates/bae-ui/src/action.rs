@@ -171,6 +171,12 @@ pub mod ids {
     pub const CLOSE_PROJECT: &str = "file.close_project";
     pub const SAVE: &str = "file.save";
     pub const SAVE_AS: &str = "file.save_as";
+    /// Save a copy elsewhere; the open project keeps its location and stays
+    /// unsaved if it was (AE File > Save As > Save a Copy...).
+    pub const SAVE_A_COPY: &str = "file.save_a_copy";
+    /// Show the saved project file in Finder / Explorer (Project panel ▸
+    /// Reveal Project in Finder).
+    pub const REVEAL_PROJECT: &str = "file.reveal_project";
     /// Switch workspace; params `{"id": "<workspace id>"}`.
     pub const SWITCH_WORKSPACE: &str = "workspace.switch";
     /// Restore the active workspace's saved layout.
@@ -209,6 +215,8 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::CLOSE_PROJECT, "Close Project"),
     (ids::SAVE, "Save"),
     (ids::SAVE_AS, "Save As..."),
+    (ids::SAVE_A_COPY, "Save a Copy..."),
+    (ids::REVEAL_PROJECT, "Reveal Project"),
     (ids::SWITCH_WORKSPACE, "Switch Workspace"),
     (ids::RESET_WORKSPACE, "Reset to Saved Layout"),
     (ids::SAVE_WORKSPACE, "Save Changes to this Workspace"),

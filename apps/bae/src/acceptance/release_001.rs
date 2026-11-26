@@ -108,7 +108,7 @@ fn rich() -> Ui {
     h
 }
 
-const TIMELINE: (&str, egui::Vec2) = ("Layer Name", egui::vec2(700.0, 120.0));
+const TIMELINE: (&str, egui::Vec2) = ("Source Name", egui::vec2(700.0, 120.0));
 const VIEWER: (&str, egui::Vec2) = ("Fit", egui::vec2(300.0, -250.0));
 
 /// Enabled menu items that do nothing in the state of [`rich`] (a layer
@@ -715,7 +715,7 @@ fn new_ui_in_one_language(zh: bool) {
             .collect();
     // Keyframe dialogs are Timeline actions: focus it (the click clears the
     // selection, so select the keys afterwards).
-    focus(&mut h, bae_ui::tr("Layer Name"), TIMELINE.1);
+    focus(&mut h, bae_ui::tr("Source Name"), TIMELINE.1);
     for (step, m, k) in [
         (
             "keyframe interpolation",

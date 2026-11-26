@@ -11,6 +11,7 @@ use serde_json::json;
 use crate::session::SharedSession;
 use crate::{CompositionViewer, ProjectPanel, TimelinePanel};
 
+mod layer_panel;
 mod playback_4k;
 mod playback_worker;
 
@@ -200,6 +201,10 @@ fn module_registers_panels_shortcuts_and_commands() {
     b.add_module(bae_ui::UiModule)
         .add_module(crate::MotionUiModule);
     let mut app = b.build();
+    assert!(
+        app.registry::<dyn bae_gpu::WarmUp>()
+            .contains("bae.media/audio-output")
+    );
     let kinds = app.registry::<PanelKind>();
     for id in [
         "project",
@@ -208,6 +213,7 @@ fn module_registers_panels_shortcuts_and_commands() {
         "properties",
         "effect_controls",
         "preview",
+        "audio",
     ] {
         let entry = kinds.snapshot();
         let e = entry.entry(id).unwrap_or_else(|| panic!("{id}"));
@@ -515,14 +521,19 @@ fn gpu_preview_publishes_the_rendered_comp() {
         gpu.adapter_info().device_type
     );
     let mut h = Harness::new();
-    let (comp, _solid, _shape) = h.comp_with_layers();
+    let (comp, solid, _) = h.comp_with_layers();
+    // A mask produces a per-layer render pass even when solids batch together.
+    h.run(
+        "mask.create",
+        json!({"layer":solid,"kind":"rect","position":[320.0,180.0],"size":[640.0,360.0]}),
+    );
     let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
     let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
     let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
     // No display handle until the shell registers the texture.
     assert!(
         preview
-            .frame(&h.resources, &h.stage, &evaluated, 1, None)
+            .frame(&h.resources, &h.stage, &evaluated, 1, None, false)
             .is_none()
     );
     let published = registry.get(preview.viewport()).expect("published");
@@ -530,7 +541,7 @@ fn gpu_preview_publishes_the_rendered_comp() {
     assert_eq!(published.format, wgpu::TextureFormat::Rgba8Unorm);
     registry.set_display_handle(preview.viewport(), Some(7));
     let img = preview
-        .frame(&h.resources, &h.stage, &evaluated, 1, None)
+        .frame(&h.resources, &h.stage, &evaluated, 1, None, false)
         .expect("image");
     assert_eq!(img.handle, 7);
     assert_eq!(
@@ -538,7 +549,12 @@ fn gpu_preview_publishes_the_rendered_comp() {
         (640, 360)
     );
     // Half resolution publishes a half-size texture.
-    preview.frame(&h.resources, &h.stage, &evaluated, 2, None);
+    preview.frame(&h.resources, &h.stage, &evaluated, 2, None, true);
+    let samples = h.session().lock().layer_times.clone();
+    assert!(samples.contains_key(&solid));
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, true);
+    assert_eq!(h.session().lock().layer_times, samples);
+    preview.frame(&h.resources, &h.stage, &evaluated, 2, None, true);
     assert_eq!(registry.get(preview.viewport()).unwrap().size, [320, 180]);
     // The pixels: the full-comp red solid shows where the star is not.
     let mut anim = bae_render::AnimEvaluator::new(None);
@@ -840,13 +856,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.layer.arrange.front",
         "motion.animation.ease",
         "menu.edit.copy",
-        "menu.layer.time.time_reverse_layer",
+        "menu.layer.markers.lock_markers",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
     let handled: std::collections::HashSet<String> =
-        ["motion.layer.time_reverse_layer".to_owned()].into();
+        ["motion.layer.lock_markers".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -874,7 +890,7 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Time-Reverse Layer once handled.
+    // A selected layer: layer commands too; Lock Markers once handled.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -887,7 +903,7 @@ fn menu_items_grey_and_check_like_ae() {
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(6, "menu.layer.time.time_reverse_layer");
+    with_fit.insert(6, "menu.layer.markers.lock_markers");
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();
@@ -1813,6 +1829,55 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
         "{block:?}"
     );
     assert_eq!(block[1], [0.0; 2]);
+    let mut builder = AppBuilder::new();
+    builder.add_module(bae_effects::EffectsModule);
+    let defs = builder
+        .build()
+        .get_registry::<bae_model::EffectDef>()
+        .unwrap();
+    for name in [
+        "ADBE Aud Stereo Mixer",
+        "ADBE Aud Reverse",
+        "ADBE Aud HiLo",
+        "ADBE Param EQ",
+        "ADBE Aud BT",
+        "ADBE Aud Delay",
+        "ADBE Aud Reverb",
+    ] {
+        assert!(
+            defs.snapshot()
+                .iter()
+                .any(|entry| entry.item().match_name == name),
+            "{name}"
+        );
+    }
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    let effect = h.run(
+        "effect.apply",
+        json!({"layers":[tracks[0]],"match_name":"ADBE Aud Stereo Mixer"}),
+    )["effects"][0]
+        .clone();
+    h.run(
+        "attr.set",
+        json!({"path":effect,"attr":"param:0004","value":{"type":"float","value":-100.0}}),
+    );
+    let read = |h: &Harness| {
+        let mut sample = [[0.0; 2]];
+        bae_media::mix::AudioMix::from_stage(&h.stage, &comp)
+            .render(0, 8000, &mut sample)
+            .unwrap();
+        sample[0]
+    };
+    let pan = read(&h);
+    assert!(
+        (pan[0] - 1.5).abs() < 1e-5 && (pan[1] - 0.25).abs() < 1e-5,
+        "{pan:?}"
+    );
+    h.run(
+        "attr.set",
+        json!({"path":effect,"attr":"enabled","value":{"type":"bool","value":false}}),
+    );
+    assert_eq!(read(&h), block[0]);
 
     // Distinguish the two enabled sources, then toggle the switches independently.
     h.run(
@@ -1838,6 +1903,82 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
     switch(0, "enabled", false, 0.5); // eye does not mute sound
     switch(0, "audio_enabled", false, 0.25); // last audible solo muted
     switch(0, "audio_enabled", true, 0.5);
+}
+
+#[test]
+fn audio_assistant_creates_three_frame_sampled_sliders_in_one_undo() {
+    let mut h = Harness::new();
+    let mut builder = AppBuilder::new();
+    builder.add_module(bae_effects::EffectsModule);
+    let defs = builder
+        .build()
+        .get_registry::<bae_model::EffectDef>()
+        .unwrap();
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    let comp: PrimPath = serde_json::from_value(
+        h.run(
+            "comp.create",
+            json!({"width":32,"height":32,"duration":Time::ONE_SECOND}),
+        )["path"]
+            .clone(),
+    )
+    .unwrap();
+    h.session().lock().open_comp(&comp);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("amplitude.wav");
+    // Match the analysis rate so that even the first frame has an exact RMS.
+    let rate = 48_000_u32;
+    let byte_rate = 4 * rate;
+    let mut bytes = Vec::from(*b"RIFF");
+    bytes.extend((36 + byte_rate).to_le_bytes());
+    bytes.extend(b"WAVEfmt \x10\0\0\0\x01\0\x02\0");
+    bytes.extend(rate.to_le_bytes());
+    bytes.extend(byte_rate.to_le_bytes());
+    bytes.extend(b"\x04\0\x10\0data");
+    bytes.extend(byte_rate.to_le_bytes());
+    for _ in 0..rate {
+        bytes.extend(8192i16.to_le_bytes());
+        bytes.extend((-16384i16).to_le_bytes());
+    }
+    std::fs::write(&file, bytes).unwrap();
+    h.run("item.import",json!({"files":[{"path":file,"name":"amplitude.wav","attrs":{"has_audio":{"type":"bool","value":true}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())[0]
+        .clone();
+    h.run(
+        "layer.create",
+        json!({"comp":comp,"source":asset,"kind":"audio"}),
+    );
+    let mut timeline = TimelinePanel::default();
+    h.action(
+        &mut timeline,
+        Invocation::new("motion.anim.convert_audio_to_keyframes"),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let result = loop {
+        let req = h.dialog_frame(vec![]);
+        if let Some(inv) = req.invocations.into_iter().next() {
+            break inv;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "analysis did not finish"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(3));
+    };
+    let path: PrimPath =
+        serde_json::from_value(h.run(&result.id, result.params)["path"].clone()).unwrap();
+    let sliders = bae_motion::effect::effects_of(&h.stage, &path);
+    assert_eq!(sliders.len(), 3);
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    for (effect, expected) in sliders.iter().zip([25.0, 50.0, 37.5]) {
+        let attr = query::attr_spec(&h.stage, effect, &bae_model::effect::param_attr(1)).unwrap();
+        assert_eq!(attr.keyframes.len(), info.frame_count() as usize);
+        assert_eq!(attr.keyframes[&Time::ZERO].value, Value::Float(expected));
+    }
+    h.stage.undo(&h.author).unwrap();
+    assert!(h.stage.prim(&path).is_none());
 }
 
 #[test]
@@ -2138,7 +2279,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.layer.time_reverse_layer".into()]
+            vec!["motion.comp.set_work_area_to_selection".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2172,7 +2313,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.layer.time_reverse_layer")
+            .filter(|(_, a, _)| a == "motion.comp.set_work_area_to_selection")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2180,7 +2321,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Alt+R").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+B").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -2512,6 +2653,60 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// File ▸ Replace Footage ▸ File… and Reload Footage: the item takes the new
+/// file (and its name, unless it is reloaded); its layers stay.
+#[test]
+fn replace_footage_keeps_the_item_and_its_layers() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = import_fixture("replace");
+    let logo = dir.join("logo.png");
+    let other = dir.join("plates").join("shot_0001.png");
+    h.run(
+        "item.import",
+        json!({"files":[{"path":logo,"name":"logo.png"}]}),
+    );
+    let item = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "logo.png")
+        .unwrap();
+    let layer = h.run(
+        "layer.create",
+        json!({"kind":"footage","comp":comp,"source":item}),
+    )["path"]
+        .clone();
+    let original = |h: &Harness| {
+        bae_model::asset::AssetFile::from_prim(&h.stage.prim(&item).unwrap())
+            .unwrap()
+            .original
+    };
+    h.run(
+        "item.replace_file",
+        json!({"item":item,"file":{"path":other,"name":"shot_0001.png","attrs":{"width":{"type":"int","value":2}}}}),
+    );
+    assert_eq!(query::display_name_of(&h.stage, &item), "shot_0001.png");
+    assert!(original(&h).ends_with("shot_0001.png"));
+    let width = query::static_value(&h.stage.prim(&item).unwrap(), "width");
+    assert_eq!(width, Some(Value::Int(2)));
+    assert!(
+        h.stage
+            .has_prim(&PrimPath::new(layer.as_str().unwrap()).unwrap())
+    );
+    // Reload keeps the (renamed) item's name.
+    h.run(
+        "attr.set",
+        json!({"path":item,"attr":"name","value":{"type":"string","value":"Plate"}}),
+    );
+    h.run(
+        "item.replace_file",
+        json!({"item":item,"file":{"path":other,"name":"shot_0001.png"},"keep_name":true}),
+    );
+    assert_eq!(query::display_name_of(&h.stage, &item), "Plate");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Layer ▸ Transform ▸ Opacity… / Rotation…: the value dialog shows the first
 /// selected layer's value and OK sets it on every selected layer in one step.
 #[test]
@@ -2538,6 +2733,50 @@ fn transform_value_dialogs_set_every_selected_layer() {
     // Orientation is for 3D layers only.
     h.action(&mut viewer, open("orientation"));
     assert!(!h.dialogs().is_open());
+}
+
+/// Layer ▸ Time: Time-Reverse Layer, Enable Time Remapping (a toggle with a
+/// check mark) and Freeze Frame run on layers that have time (a pre-comp).
+#[test]
+fn layer_time_menu() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let inner = h.run("comp.create", json!({"name": "Inner"}))["path"].clone();
+    let pre = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "pre_comp", "source": inner}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    // A solid has no time to remap: nothing happens.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::TIME_REVERSE))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().selected_layers = vec![pre.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REVERSE));
+    assert_eq!(r.invocations[0].id, "layer.time_reverse");
+    h.apply(r);
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REMAP));
+    assert_eq!(r.invocations[0].params["enabled"], true);
+    h.apply(r);
+    assert!(crate::actions::switch_on(
+        &h.stage,
+        &pre,
+        "time_remap_enabled"
+    ));
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REMAP));
+    assert_eq!(r.invocations[0].params["enabled"], false, "a toggle");
+    let r = h.action(&mut viewer, Invocation::new(ids::FREEZE_FRAME));
+    assert_eq!(r.invocations[0].id, "layer.freeze_frame");
 }
 
 /// The Paint and Brushes panels edit the next stroke's settings; Clone Options
@@ -2570,5 +2809,67 @@ fn paint_and_brushes_panels_show_for_each_paint_tool() {
     assert_eq!(
         (p.opacity, p.diameter, p.duration.as_str()),
         (100.0, 21.0, "constant")
+    );
+}
+
+/// A Brush drag in the Layer panel is one `paint.add_stroke` in layer pixels,
+/// with the Paint and Brushes panels' settings.
+#[test]
+fn brush_drag_in_the_layer_panel_paints_one_stroke() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::Brush);
+    tools.lock().options.paint.diameter = 30.0;
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = |x: f32, y: f32| pos2(320.0 + x, 195.0 + y);
+    let mut r = PanelRequests::default();
+    for (i, (x, y)) in [
+        (10.0, 10.0),
+        (10.0, 10.0),
+        (40.0, 20.0),
+        (80.0, 30.0),
+        (80.0, 30.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut evs = Vec::new();
+        pointer(
+            &mut evs,
+            at(x, y),
+            match i {
+                1 => Some(true),
+                4 => Some(false),
+                _ => None,
+            },
+        );
+        r = h.frame("layer", &mut panel, evs);
+    }
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "paint.add_stroke")
+        .expect("a stroke");
+    assert_eq!(inv.params["points"][0], json!([10.0, 10.0]));
+    assert_eq!(inv.params["diameter"], json!(30.0));
+    h.apply(r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    assert_eq!(
+        bae_motion::paint::strokes_of(&h.stage, &effects[0]).len(),
+        1
     );
 }

@@ -214,19 +214,27 @@ impl<T> FrameCache<T> {
 /// Whether `change` can alter a frame built from `deps`.
 pub fn affects(change: &Change, deps: &[Dependency]) -> bool {
     match change {
-        Change::AttrChanged { path, range, .. } => {
+        Change::AttrChanged { path, attr, range } => {
             // The most specific dependencies covering `path` decide, in their own
-            // time base.
+            // time base; a layer that does not show in the frame only through
+            // the switches that could make it show.
+            let affected = |dep: &Dependency| {
+                if dep.time == Dependency::INACTIVE {
+                    dep.path == *path && Dependency::SWITCHES.contains(&attr.as_str())
+                } else {
+                    range.contains(dep.time)
+                }
+            };
             let mut best_depth = None;
             let mut hit = false;
             for dep in deps.iter().filter(|d| d.path.is_prefix_of(path)) {
                 let depth = dep.path.depth();
                 match best_depth {
                     Some(best) if depth < best => {}
-                    Some(best) if depth == best => hit |= range.contains(dep.time),
+                    Some(best) if depth == best => hit |= affected(dep),
                     _ => {
                         best_depth = Some(depth);
-                        hit = range.contains(dep.time);
+                        hit = affected(dep);
                     }
                 }
             }
@@ -297,6 +305,38 @@ mod tests {
             cache.insert(key(t), t as u32, 10, deps(t), 0);
         }
         cache
+    }
+
+    #[test]
+    fn inert_layers_depend_only_on_their_switches() {
+        // A layer shown only in the middle of the comp: frames outside its
+        // in/out points do not depend on its content.
+        let mut comp = crate::RenderComp::new(p("/comps/main"), 10, 10);
+        let mut shown = crate::RenderLayer::new(p("/comps/main/layers/a"), Default::default());
+        shown.time = Time::from_flicks(5);
+        let mut hidden = crate::RenderLayer::new(p("/comps/main/layers/b"), Default::default());
+        hidden.inert = true;
+        comp.layers = vec![shown, hidden];
+        let deps = comp.dependencies();
+        let set = |path: &str, attr: &str| Change::AttrChanged {
+            path: p(path),
+            attr: attr.into(),
+            range: TimeRange::ALL,
+        };
+        assert!(!affects(
+            &set("/comps/main/layers/b/contents/fill", "color"),
+            &deps
+        ));
+        assert!(!affects(
+            &set("/comps/main/layers/b", "transform:position"),
+            &deps
+        ));
+        assert!(affects(&set("/comps/main/layers/b", "in_point"), &deps));
+        assert!(affects(&set("/comps/main/layers/b", "enabled"), &deps));
+        assert!(affects(
+            &set("/comps/main/layers/a/contents/fill", "color"),
+            &deps
+        ));
     }
 
     #[test]
