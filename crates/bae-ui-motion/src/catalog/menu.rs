@@ -889,8 +889,8 @@ const ANIMATION: &[Node] = &[
             s(it(11075587, "Null Controllers for Positional Points", "motion.anim.null_controllers_for_positional_points", "", B, Later)),
             s(it(11075588, "Convert Expression to Keyframes", "motion.anim.convert_expression_to_keyframes", "", C, Later)),
             s(it(11075589, "Convert Audio to Keyframes", "motion.anim.convert_audio_to_keyframes", "", B, Done)),
-            s(it(11075590, "Sequence Layers...", "motion.anim.sequence_layers", "", E, Later)),
-            s(it(11075591, "Exponential Scale", "motion.anim.exponential_scale", "", B, Later)),
+            s(it(11075590, "Sequence Layers...", "motion.anim.sequence_layers", "", E, Done)),
+            s(it(11075591, "Exponential Scale", "motion.anim.exponential_scale", "", B, Done)),
             s(it(11075592, "Time-Reverse Keyframes", "motion.reverse_keys", "", B, Done)),
             s(it(11075593, "Null Tracing Along Path", "motion.anim.null_tracing_along_path", "", B, Later)),
             s(it(11075594, "Nulls Following Path Points", "motion.anim.nulls_following_path_points", "", B, Later)),
@@ -1176,7 +1176,7 @@ const WINDOW: &[Node] = &[
     s(it(524329, "Project", "window.panel", r#"{"id":"project","toggle":true}"#, B, Done)),
     SEP,
     win(it(524331, "Create Nulls From Paths.jsx", "window.panel", r#"{"id":"create_nulls_from_paths","toggle":true}"#, B, Done)),
-    win(it(524338, "VR Comp Editor.jsx", "motion.window.script_panel", r#"{"script":"VR Comp Editor.jsx"}"#, B, Later)),
+    win(it(524338, "VR Comp Editor.jsx", "window.panel", r#"{"id":"vr_comp_editor","toggle":true}"#, B, Done)),
 ];
 
 /// Help.
