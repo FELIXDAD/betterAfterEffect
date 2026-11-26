@@ -257,26 +257,83 @@ function noise(v) {
 function __compId() { return __env_c; }
 var __env_c = 0;
 function timeToFrames(t, fps, isDuration) {
-  var c = __h.compInfo(__env_c);
-  if (t === undefined) t = __now + c.displayStartTime;
-  if (fps === undefined) fps = 1 / c.frameDuration;
-  var f = t * fps;
-  return isDuration ? Math.round(f) : Math.floor(f + 1e-9);
+  if (t === undefined || fps === undefined) {
+    var c = __h.compInfo(__env_c);
+    if (t === undefined) t = __now + c.displayStartTime;
+    if (fps === undefined) fps = 1 / c.frameDuration;
+  }
+  var f = __val(t) * __val(fps);
+  var near = Math.round(f);
+  if (Math.abs(f - near) <= 4 * Number.EPSILON * Math.max(1, Math.abs(f))) f = near;
+  return isDuration && f > 0 ? Math.ceil(f) : Math.floor(f);
 }
 function framesToTime(frames, fps) {
   if (fps === undefined) fps = 1 / __h.compInfo(__env_c).frameDuration;
-  return frames / fps;
+  return __val(frames) / __val(fps);
 }
 function __pad(n, w) { var s = String(Math.floor(Math.abs(n))); while (s.length < w) s = "0" + s; return s; }
-function timeToTimecode(t, timecodeBase, isDuration) {
-  if (t === undefined) t = __now + __h.compInfo(__env_c).displayStartTime;
-  if (timecodeBase === undefined) timecodeBase = 30;
-  var neg = t < 0, total = Math.floor(Math.abs(t) * timecodeBase + 1e-9);
-  var fr = total % timecodeBase, s = Math.floor(total / timecodeBase);
-  return (neg ? "-" : "") + __pad(Math.floor(s / 3600), 1) + ":" + __pad(Math.floor(s / 60) % 60, 2) + ":" +
-    __pad(s % 60, 2) + ":" + __pad(fr, String(timecodeBase - 1).length);
+function __timecode(frames, base, drop) {
+  var total = Math.abs(frames);
+  // Skip two frame labels per minute at 29.97, four at 59.94, except each tenth minute.
+  var skip = drop && (base === 30 || base === 60) ? base / 15 : 0;
+  if (skip) {
+    var minute = 60 * base - skip, ten = 600 * base - 9 * skip;
+    total += 9 * skip * Math.floor(total / ten) + skip * Math.max(0, Math.floor((total % ten - skip) / minute));
+  }
+  var sep = skip ? ";" : ":", seconds = Math.floor(total / base);
+  return (frames < 0 ? "-" : "") + __pad(Math.floor(seconds / 3600), 2) + sep + __pad(Math.floor(seconds / 60) % 60, 2) +
+    sep + __pad(seconds % 60, 2) + sep + __pad(total % base, Math.max(2, String(base - 1).length));
 }
-function timeToCurrentFormat(t, fps, isDuration) { return timeToTimecode(t, fps, isDuration); }
+function timeToTimecode(t, timecodeBase, isDuration) {
+  if (timecodeBase === undefined) timecodeBase = 30;
+  return __timecode(timeToFrames(t, timecodeBase, isDuration), timecodeBase, false);
+}
+function timeToCurrentFormat(t, fps, isDuration, ntscDropFrame) {
+  if (fps === undefined || ntscDropFrame === undefined) {
+    var c = __h.compInfo(__env_c);
+    if (fps === undefined) fps = 1 / c.frameDuration;
+    if (ntscDropFrame === undefined) ntscDropFrame = c.ntscDropFrame;
+  }
+  var frames = timeToFrames(t, fps, isDuration);
+  if (__h.projectInfo().displayFrames) return String(frames);
+  var ntsc = Math.abs(fps - 29.97) < 0.01 || Math.abs(fps - 59.94) < 0.01;
+  return __timecode(frames, Math.round(fps), ntsc && ntscDropFrame);
+}
+function timeToNTSCTimecode(t, ntscDropFrame, isDuration) {
+  return __timecode(timeToFrames(t, 30000 / 1001, isDuration), 30, ntscDropFrame);
+}
+function timeToFeetAndFrames(t, fps, framesPerFoot, isDuration) {
+  if (framesPerFoot === undefined) framesPerFoot = 16;
+  var total = timeToFrames(t, fps, isDuration);
+  var feet = Math.trunc(total / framesPerFoot), frames = total % framesPerFoot;
+  var width = String(framesPerFoot - 1).length;
+  return (feet < 0 ? "-" : "") + __pad(feet, feet < 0 ? 3 : 4) + "+" +
+    (frames < 0 ? "-" : "") + __pad(frames, frames < 0 ? width - 1 : width);
+}
+
+// ---- project and footage (AE: thisProject, colorDepth, footage(name)) ----
+function __project() {
+  var p = __h.projectInfo();
+  return { fullPath: p.fullPath, bitsPerChannel: p.bitsPerChannel, linearBlending: p.linearBlending };
+}
+function Footage(f) {
+  this.name = f.name; this.width = f.width; this.height = f.height; this.duration = f.duration;
+  this.frameDuration = f.frameDuration; this.pixelAspect = f.pixelAspect; this.ntscDropFrame = f.ntscDropFrame;
+}
+Footage.prototype = {
+  // Data-driven footage (JSON / CSV) is not imported yet.
+  get sourceText() { throw new Error("Footage is not a text or data file"); },
+  get sourceData() { throw new Error("Footage is not a data file"); },
+  dataValue: function () { throw new Error("Footage is not a data file"); },
+  dataKeyCount: function () { throw new Error("Footage is not a data file"); },
+  dataKeyTimes: function () { throw new Error("Footage is not a data file"); },
+  dataKeyValues: function () { throw new Error("Footage is not a data file"); },
+};
+function footage(name) {
+  var f = __h.footage(String(name));
+  if (!f) throw new Error("Footage " + JSON.stringify(name) + " does not exist");
+  return new Footage(f);
+}
 
 // ---- evaluation entry (called from Rust) ----
 function __call(fn, c, l, prim, attr, t, seed) {
@@ -654,13 +711,17 @@ Layer.prototype = {
   },
   get enabled() { return this.__info.enabled; },
   get active() { return this.__info.enabled && __now >= Math.min(this.inPoint, this.outPoint) && __now < Math.max(this.inPoint, this.outPoint); },
-  get hasVideo() { return true; },
-  get hasAudio() { return false; },
+  get hasVideo() { return this.__info.hasVideo; },
+  get hasAudio() { return this.__info.hasAudio; },
+  get audioActive() { return this.hasAudio && this.active; },
   get width() { return this.__info.width; },
   get height() { return this.__info.height; },
+  // A precomp's comp, else the footage item (solids, footage).
   get source() {
-    if (this.__info.sourceComp < 0) throw new Error("Layer source is not a composition");
-    return new Comp(this.__info.sourceComp);
+    if (this.__info.sourceComp >= 0) return new Comp(this.__info.sourceComp);
+    var f = __h.layerFootage(this.__c, this.__l);
+    if (!f) throw new Error("Layer has no source");
+    return new Footage(f);
   },
   get transform() { return new __Transform(this); },
   get anchorPoint() { return this.transform.anchorPoint; },
@@ -691,6 +752,13 @@ Layer.prototype = {
   },
   get lightOption() { return __optionGroup(this, "Light Options", __LIGHT_OPTIONS); },
   get materialOption() { return __optionGroup(this, "Material Options", __MATERIAL_OPTIONS); },
+  get audioLevels() {
+    if (!this.hasAudio) {
+      throw new Error("property or method named 'audioLevels' in Class 'Layer' is missing or does not exist. " +
+        "It may have been renamed, moved, deleted, or the name may have been mistyped.");
+    }
+    return __prop(this.__c, this.__l, "", "audio:levels");
+  },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
@@ -737,6 +805,7 @@ Layer.prototype = {
   toCompVec: function (p, t) { return this.__xf(2, p, t); },
   fromCompVec: function (p, t) { return this.__xf(3, p, t); },
   toWorldVec: function (p, t) { return this.__xf(6, p, t); },
+  fromCompToSurface: function (p, t) { return this.__xf(8, p, t); },
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
@@ -846,6 +915,7 @@ Comp.prototype = {
   get frameDuration() { return this.__info.frameDuration; },
   get pixelAspect() { return this.__info.pixelAspect; },
   get numLayers() { return this.__info.numLayers; },
+  get ntscDropFrame() { return this.__info.ntscDropFrame; },
   get displayStartTime() { return this.__info.displayStartTime; },
   get bgColor() { return this.__info.bgColor; },
   get shutterAngle() { return this.__info.shutterAngle; },

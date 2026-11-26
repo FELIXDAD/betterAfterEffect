@@ -770,6 +770,8 @@ struct FrameScratch {
     input: AlignedBuf,
     output: AlignedBuf,
     upload: Vec<u8>,
+    /// The input readback's staging buffer, reused while large enough.
+    staging: Option<wgpu::Buffer>,
 }
 
 impl std::fmt::Debug for NativeEffect {
@@ -991,8 +993,15 @@ impl NativeEffect {
                 depth_or_array_layers: 1,
             },
         };
-        let readback = TextureReadback::record(&gpu, ctx.encoder, &input.texture, region)
-            .map_err(|e| failed(format!("input readback: {e}")))?;
+        let mut scratch = self.scratch.lock().pop().unwrap_or_default();
+        let readback = TextureReadback::record_reusing(
+            &gpu,
+            ctx.encoder,
+            &input.texture,
+            region,
+            scratch.staging.take(),
+        )
+        .map_err(|e| failed(format!("input readback: {e}")))?;
         let fresh = gpu
             .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1000,30 +1009,37 @@ impl NativeEffect {
             });
         let recorded = std::mem::replace(&mut *ctx.encoder, fresh);
         gpu.queue().submit([recorded.finish()]);
+        // Converted from the mapped staging rows straight into the plugin's
+        // (shared) input memory: no copy of the frame in between.
         let data = readback
             .map()
-            .wait(&gpu)
+            .wait_mapped(&gpu)
             .map_err(|e| failed(format!("input readback: {e}")))?;
 
         let frame = self.frame(params, s, request, input_rect);
-        let mut scratch = self.scratch.lock().pop().unwrap_or_default();
         let result = (|| {
             let FrameScratch {
                 input: input_buf,
                 output: output_buf,
                 upload,
+                ..
             } = &mut scratch;
             let fill = |dst: &mut [u8]| {
-                pixels::from_working(
-                    &data.data,
-                    data.bytes_per_row as usize,
-                    working,
-                    input.alpha,
-                    [tw, th],
-                    self.format,
-                    dst,
-                    pixels::row_bytes(self.format, tw),
-                );
+                let converted = data.with_rows(|rows, stride| {
+                    pixels::from_working(
+                        rows,
+                        stride,
+                        working,
+                        input.alpha,
+                        [tw, th],
+                        self.format,
+                        dst,
+                        pixels::row_bytes(self.format, tw),
+                    );
+                });
+                if let Err(e) = converted {
+                    tracing::warn!("native effect input readback: {e}");
+                }
             };
             let mut convert = |out, src: &[u8]| {
                 let RenderOut::Rendered(r) = out else {
@@ -1090,6 +1106,7 @@ impl NativeEffect {
             image.alpha = ImageAlpha::Premultiplied;
             Ok(image)
         })();
+        scratch.staging = Some(data.into_buffer());
         self.scratch.lock().push(scratch);
         result
     }
