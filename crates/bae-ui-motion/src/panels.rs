@@ -375,6 +375,19 @@ const PREVIEW_MIN_H: f32 = 56.0;
 const PREVIEW_OPTIONS_H: f32 = 240.0;
 
 impl Panel for PreviewPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let session = common::session(cx.resources);
+        if ui
+            .checkbox(
+                &mut session.lock().preview.favor_active_camera,
+                tr("Previews Favor Active Camera"),
+            )
+            .clicked()
+        {
+            ui.close();
+        }
+    }
+
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         // The transport row and the timecode line below it, never cut off.
         TabInfo::new(tr("Preview")).min_size(egui::vec2(PREVIEW_MIN_W, PREVIEW_MIN_H))
@@ -565,6 +578,7 @@ fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::Co
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Previews Favor Active Camera", "预览支持活动摄像机"),
     ("Audio Options", "音频选项"),
     ("Decibels (dB)", "分贝 (dB)"),
     ("Slider Minimum", "滑块最小值"),

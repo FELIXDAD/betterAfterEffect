@@ -63,10 +63,10 @@ impl Scope {
 /// Waveform Type in AE: RGB overlay, YC or luma alone.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 enum Wave {
+    #[default]
     Rgb,
     Yc,
     YcNoChroma,
-    #[default]
     Luma,
 }
 
@@ -93,13 +93,17 @@ enum Parade {
 impl Parade {
     const ALL: [(Self, &'static str); 4] = [
         (Self::Rgb, "RGB"),
-        (Self::RgbWhite, "RGB-White"),
         (Self::Yuv, "YUV"),
+        (Self::RgbWhite, "RGB-White"),
         (Self::YuvWhite, "YUV-White"),
     ];
 
     fn title(self) -> &'static str {
-        Self::ALL[self as usize].1
+        Self::ALL
+            .iter()
+            .find(|(value, _)| *value == self)
+            .unwrap()
+            .1
     }
 }
 
@@ -147,7 +151,7 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         State {
-            shown: Scope::ALL.to_vec(),
+            shown: vec![Scope::Waveform],
             wave: Wave::default(),
             parade: Parade::default(),
             brightness: Brightness::default(),
@@ -420,18 +424,19 @@ impl bae_gpu::WarmUp for ScopesWarmUp {
 }
 
 /// The Lumetri Scopes panel.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ScopesPanel {
+    #[serde(flatten)]
     state: State,
+    custom: Option<State>,
 }
 
 impl ScopesPanel {
     pub fn from_state(state: Option<&serde_json::Value>) -> Self {
-        ScopesPanel {
-            state: state
-                .and_then(|s| serde_json::from_value(s.clone()).ok())
-                .unwrap_or_default(),
-        }
+        state
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default()
     }
 }
 
@@ -439,7 +444,37 @@ impl Panel for ScopesPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         let frame = session.lock().scope_frame.clone();
-        let full = ui.max_rect();
+        let area = ui.max_rect();
+        let strip = Rect::from_min_max(
+            pos2(area.left(), (area.bottom() - 24.0).max(area.top())),
+            area.max,
+        );
+        let full = Rect::from_min_max(area.min, pos2(area.right(), strip.top()));
+        let button = Rect::from_min_size(strip.min, vec2(24.0, strip.height()));
+        let wrench = ui.interact(button, ui.id().with("scope_settings"), Sense::click());
+        let wrench = bae_ui::Accessible::labeled(wrench, egui::WidgetType::Button, tr("Settings"))
+            .on_hover_text(tr("Settings"));
+        let c = button.center();
+        let pen = Stroke::new(
+            2.2,
+            if wrench.hovered() {
+                Color32::WHITE
+            } else {
+                Color32::LIGHT_GRAY
+            },
+        );
+        let painter = ui.painter_at(button);
+        painter.line_segment([c + vec2(-5.0, 5.0), c + vec2(2.0, -2.0)], pen);
+        painter.add(egui::Shape::line(
+            vec![
+                c + vec2(1.0, -6.0),
+                c + vec2(0.0, -3.0),
+                c + vec2(3.0, 0.0),
+                c + vec2(6.0, -1.0),
+            ],
+            pen,
+        ));
+        egui::Popup::menu(&wrench).show(|ui| self.menu_items(ui));
         let resp = ui.allocate_rect(full, Sense::click());
         resp.context_menu(|ui| self.menu_items(ui));
         let p = ui.painter_at(full);
@@ -471,30 +506,14 @@ impl Panel for ScopesPanel {
         }
     }
 
-    fn menu(&mut self, ui: &mut Ui, _cx: &mut PanelContext<'_>) {
-        self.menu_items(ui);
-    }
-
     fn save_state(&self) -> Option<serde_json::Value> {
-        serde_json::to_value(&self.state).ok()
+        serde_json::to_value(self).ok()
     }
 }
 
 impl ScopesPanel {
     /// The scope check items of AE's panel menu (the wrench / right-click menu).
     fn menu_items(&mut self, ui: &mut Ui) {
-        bae_ui::widgets::menu_button(ui, tr("Presets"), |ui| {
-            for preset in PRESETS {
-                if ui
-                    .radio(preset.matches(&self.state), tr(preset.title))
-                    .clicked()
-                {
-                    preset.apply(&mut self.state);
-                    ui.close();
-                }
-            }
-        });
-        ui.separator();
         for scope in Scope::ALL {
             let mut on = self.state.shown.contains(&scope);
             let title = match scope {
@@ -507,6 +526,7 @@ impl ScopesPanel {
                 _ => tr(scope.title()).to_owned(),
             };
             if ui.checkbox(&mut on, title).changed() {
+                self.custom = None;
                 if on {
                     self.state.shown.push(scope);
                     self.state
@@ -518,21 +538,49 @@ impl ScopesPanel {
             }
         }
         ui.separator();
+        bae_ui::widgets::menu_button(ui, tr("Presets"), |ui| {
+            if ui.radio(self.custom.is_none(), tr("Custom")).clicked() {
+                if let Some(custom) = self.custom.take() {
+                    self.state = custom;
+                }
+                ui.close();
+            }
+            ui.separator();
+            for preset in PRESETS {
+                if ui
+                    .radio(preset.matches(&self.state), tr(preset.title))
+                    .clicked()
+                {
+                    self.custom.get_or_insert_with(|| self.state.clone());
+                    preset.apply(&mut self.state);
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
         bae_ui::widgets::menu_button(ui, tr("Parade Type"), |ui| {
             for (mode, name) in Parade::ALL {
                 if ui
                     .radio_value(&mut self.state.parade, mode, tr(name))
                     .clicked()
                 {
+                    self.custom = None;
                     ui.close();
                 }
             }
         });
         bae_ui::widgets::menu_button(ui, tr("Waveform Type"), |ui| {
             for wave in [Wave::Rgb, Wave::Luma, Wave::Yc, Wave::YcNoChroma] {
-                ui.radio_value(&mut self.state.wave, wave, tr(wave.title()));
+                if ui
+                    .radio_value(&mut self.state.wave, wave, tr(wave.title()))
+                    .clicked()
+                {
+                    self.custom = None;
+                    ui.close();
+                }
             }
         });
+        ui.separator();
         bae_ui::widgets::menu_button(ui, tr("Color Space"), |ui| {
             for (space, title) in Space::ALL {
                 if ui
@@ -543,6 +591,7 @@ impl ScopesPanel {
                 }
             }
         });
+        ui.separator();
         bae_ui::widgets::menu_button(ui, tr("Brightness"), |ui| {
             for b in [Brightness::Bright, Brightness::Normal, Brightness::Dimmed] {
                 ui.radio_value(&mut self.state.brightness, b, tr(b.title()));
@@ -685,6 +734,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "矢量示波器 YUV/分量 YUV/波形 YC",
     ),
     ("Waveform RGB", "波形 RGB"),
+    (
+        "Premiere 4 Scope YUV (Float, Unclamped)",
+        "Premiere 4 Scope YUV（浮动，不固定）",
+    ),
+    (
+        "SpeedGrade 4 Scope Luma/RGB (601 SD)",
+        "SpeedGrade 4 Scope Luma/RGB (601 SD)",
+    ),
     ("Parade Type", "分量类型"),
     ("RGB-White", "RGB-白色"),
     ("YUV-White", "YUV-白色"),
@@ -717,8 +774,8 @@ mod tests {
             choices,
             [
                 ("RGB", true),
-                ("RGB-白色", false),
                 ("YUV", false),
+                ("RGB-白色", false),
                 ("YUV-白色", false)
             ]
         );

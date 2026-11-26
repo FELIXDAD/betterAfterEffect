@@ -269,12 +269,6 @@ impl Views {
             .unwrap_or_else(|| ViewCamera::initial(view, size))
     }
 
-    /// The camera the viewer shows the current view with; `None` for Active
-    /// Camera (the comp's own).
-    pub fn camera(&self, size: DVec2) -> Option<Camera> {
-        self.camera_of(self.current, size)
-    }
-
     /// The camera `view` shows the comp with; `None` for Active Camera.
     pub fn camera_of(&self, view: View3d, size: DVec2) -> Option<Camera> {
         (view != View3d::Active).then(|| self.view_camera(view, size).camera(view))

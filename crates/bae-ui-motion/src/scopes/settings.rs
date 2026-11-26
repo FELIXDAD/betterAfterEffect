@@ -17,13 +17,11 @@ pub(super) enum Space {
 }
 
 impl Space {
-    pub(super) const ALL: [(Self, &str); 6] = [
+    pub(super) const ALL: [(Self, &str); 4] = [
         (Self::Automatic, "Automatic"),
         (Self::Rec601, "Rec. 601"),
         (Self::Rec709, "Rec. 709"),
         (Self::Rec2020, "Rec. 2020"),
-        (Self::Hlg, "Rec. 2100 HLG"),
-        (Self::Pq, "Rec. 2100 PQ"),
     ];
 
     pub(super) fn resolve(self, stage: &bae_model::Stage) -> Self {
@@ -125,6 +123,9 @@ impl Preset {
         state.shown = self.shown.to_vec();
         state.parade = self.parade;
         state.wave = self.wave;
+        if self.title == "SpeedGrade 4 Scope Luma/RGB (601 SD)" {
+            state.space = Space::Rec601;
+        }
     }
 }
 const fn preset(
@@ -142,23 +143,22 @@ const fn preset(
 }
 use Scope::{Histogram, Parade as Channels, Vectorscope, Waveform};
 pub(super) const PRESETS: &[Preset] = &[
-    preset("All Scopes RGB", &Scope::ALL, Parade::Rgb, Wave::Rgb),
-    preset("All Scopes YUV/YC", &Scope::ALL, Parade::Yuv, Wave::Yc),
-    preset("Histogram", &[Histogram], Parade::Rgb, Wave::Luma),
+    preset("Vectorscope YUV", &[Vectorscope], Parade::Rgb, Wave::Luma),
     preset("Parade RGB", &[Channels], Parade::Rgb, Wave::Luma),
-    preset(
-        "Parade RGB/Waveform YC",
-        &[Channels, Waveform],
-        Parade::Rgb,
-        Wave::Yc,
-    ),
+    preset("Waveform RGB", &[Waveform], Parade::Rgb, Wave::Rgb),
+    preset("Histogram", &[Histogram], Parade::Rgb, Wave::Luma),
     preset(
         "Parade/Waveform RGB",
         &[Channels, Waveform],
         Parade::Rgb,
         Wave::Rgb,
     ),
-    preset("Vectorscope YUV", &[Vectorscope], Parade::Rgb, Wave::Luma),
+    preset(
+        "Parade RGB/Waveform YC",
+        &[Channels, Waveform],
+        Parade::Rgb,
+        Wave::Yc,
+    ),
     preset(
         "Vectorscope YUV/Parade RGB/Waveform YC",
         &[Vectorscope, Channels, Waveform],
@@ -171,7 +171,20 @@ pub(super) const PRESETS: &[Preset] = &[
         Parade::Yuv,
         Wave::Yc,
     ),
-    preset("Waveform RGB", &[Waveform], Parade::Rgb, Wave::Rgb),
+    preset(
+        "Premiere 4 Scope YUV (Float, Unclamped)",
+        &[Vectorscope, Channels, Histogram, Waveform],
+        Parade::Yuv,
+        Wave::Yc,
+    ),
+    preset(
+        "SpeedGrade 4 Scope Luma/RGB (601 SD)",
+        &[Waveform, Vectorscope, Histogram, Channels],
+        Parade::Rgb,
+        Wave::Luma,
+    ),
+    preset("All Scopes RGB", &Scope::ALL, Parade::Rgb, Wave::Rgb),
+    preset("All Scopes YUV/YC", &Scope::ALL, Parade::Yuv, Wave::Yc),
 ];
 
 #[cfg(test)]
@@ -190,7 +203,7 @@ mod tests {
             );
         }
         assert_eq!(
-            bae_ui::i18n::translation(PRESETS[1].title),
+            bae_ui::i18n::translation(PRESETS.last().unwrap().title),
             Some("所有示波器 YUV/YC")
         );
         assert_eq!(
