@@ -747,6 +747,23 @@ fn gpu_preview_publishes_the_rendered_comp() {
         px[0] >= 250 && px[1] <= 3 && px[2] <= 3 && px[3] >= 250,
         "{px:?}"
     );
+    // #727: the Info panel's pixel reads back asynchronously; while a new
+    // texel is pending the previous reading stands in (no empty RGBA).
+    let ctx = egui::Context::default();
+    let mut read = None;
+    for _ in 0..200 {
+        read = preview.pixel([20.0, 20.0], &ctx);
+        if read.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let first = read.expect("the first pixel arrives");
+    assert_eq!(
+        preview.pixel([30.0, 30.0], &ctx),
+        Some(first),
+        "pending: last reading"
+    );
     let id = preview.viewport();
     drop(preview);
     assert!(registry.get(id).is_none(), "removed on drop");

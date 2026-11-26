@@ -750,7 +750,8 @@ impl GpuPreview {
 
     /// Straight (unpremultiplied) 8-bit RGBA of the published frame at comp
     /// point `p`, transparent outside the image. Starts at most one readback
-    /// at a time and requests a redraw when the requested texel is pending.
+    /// at a time and requests a redraw when the requested texel is pending;
+    /// until it arrives, the previous reading.
     pub fn pixel(&mut self, p: [f64; 2], repaint: &egui::Context) -> Option<[u8; 4]> {
         let (texture, rect) = match &self.cached {
             Some((texture, rect)) => (texture, *rect),
@@ -795,8 +796,11 @@ impl GpuPreview {
             return Some(c);
         }
         repaint.request_repaint_after(std::time::Duration::from_millis(8));
+        // While the new texel is read back, the last reading stands in (the
+        // Info panel and the pen's mask colour follow the moving pointer).
+        let last = self.sampled.map(|(_, c)| c);
         if self.pending_pixel.is_some() {
-            return None;
+            return last;
         }
         let region = bae_gpu::transfer::TextureRegion {
             mip_level: 0,
@@ -822,7 +826,7 @@ impl GpuPreview {
                 .ok()?;
         self.gpu.queue().submit([encoder.finish()]);
         self.pending_pixel = Some((texel, readback.map()));
-        None
+        last
     }
 
     #[cfg(test)]
