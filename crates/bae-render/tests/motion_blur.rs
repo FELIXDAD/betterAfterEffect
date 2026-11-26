@@ -59,6 +59,7 @@ fn solid(size: [u32; 2]) -> RenderLayer {
 fn comp_with_samples(n: usize) -> RenderComp {
     let mut comp = RenderComp::new(p("/comps/main"), 100, 40);
     comp.motion_blur = Some(Arc::new(CompMotionBlur {
+        lights: Vec::new(),
         times: (0..n as i64).map(Time::from_flicks).collect(),
         cameras: vec![None; n],
         adaptive_limit: 128,
@@ -158,6 +159,7 @@ fn camera_motion_blurs_3d_layers_with_fixed_samples() {
     // The camera pans 32 px to the left over the shutter; a static 3D layer at
     // z = 0 slides 32 px to the right in the frame.
     let mb = CompMotionBlur {
+        lights: Vec::new(),
         times: (0..n as i64).map(Time::from_flicks).collect(),
         cameras: (0..n)
             .map(|k| Some(cam(-32.0 * (k as f64 + 0.5) / n as f64)))

@@ -11,7 +11,7 @@ use bae_motion::markers::markers_of;
 use super::*;
 
 /// Snapping distance (points).
-const SNAP_PX: f32 = 8.0;
+pub(super) const SNAP_PX: f32 = 8.0;
 /// The pale slip-edit bar.
 const SOURCE_BAR: Color32 = Color32::from_rgba_premultiplied(70, 70, 70, 140);
 
@@ -24,7 +24,12 @@ pub(super) struct BarPlan {
 }
 
 /// Snap targets for bar edges: everything except the dragged layers.
-fn bar_targets(stage: &Stage, info: &CompInfo, now: Time, exclude: &[PrimPath]) -> Vec<Time> {
+pub(super) fn bar_targets(
+    stage: &Stage,
+    info: &CompInfo,
+    now: Time,
+    exclude: &[PrimPath],
+) -> Vec<Time> {
     let mut out = vec![
         now,
         Time::ZERO,

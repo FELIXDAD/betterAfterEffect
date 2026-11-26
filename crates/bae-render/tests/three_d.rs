@@ -493,3 +493,73 @@ fn cuts_leave_no_see_through_seams() {
         assert_eq!(img.px(x, 60), [255, 0, 0, 255], "x = {x}");
     }
 }
+
+/// Depth of field: a layer at the focus distance stays sharp; the same layer
+/// farther away blurs across its edges, and a tilted layer blurs more where
+/// it recedes.
+#[test]
+fn depth_of_field_blurs_layers_away_from_the_focus_plane() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let zoom = 200.0;
+    let comp_with = |z: f64, rotation: DVec3, dof: bool| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 100);
+        let mut camera = Camera::new(
+            DMat4::from_translation(DVec3::new(100.0, 50.0, -zoom)),
+            zoom,
+        );
+        camera.depth_of_field = dof;
+        camera.focus_distance = zoom;
+        camera.aperture = 20.0;
+        comp.camera = Some(camera);
+        comp.layers = vec![solid_3d(
+            "a",
+            RED,
+            [100, 60],
+            DVec3::new(100.0, 50.0, z),
+            rotation,
+        )];
+        comp
+    };
+    // Pixels of the middle row partly covered.
+    let soft = |img: &Image, xs: std::ops::Range<u32>| {
+        xs.filter(|&x| (9..247).contains(&img.px(x, img.h / 2)[3]))
+            .count()
+    };
+    let sharp = render(&mut r, &comp_with(0.0, DVec3::ZERO, true));
+    assert!(
+        soft(&sharp, 0..200) <= 4,
+        "in focus: {}",
+        soft(&sharp, 0..200)
+    );
+    // Twice the focus distance: a 10 px blur (20 px aperture, half of it).
+    let far = render(&mut r, &comp_with(200.0, DVec3::ZERO, true));
+    assert!(
+        soft(&far, 0..200) >= 10,
+        "out of focus: {}",
+        soft(&far, 0..200)
+    );
+    let off = render(&mut r, &comp_with(200.0, DVec3::ZERO, false));
+    assert!(soft(&off, 0..200) <= 4, "depth of field off");
+    // A wide aperture: a 25 px blur, gathered over a reduced copy.
+    let mut wide = comp_with(200.0, DVec3::ZERO, true);
+    wide.camera.as_mut().unwrap().aperture = 100.0;
+    let wide = render(&mut r, &wide);
+    assert!(
+        soft(&wide, 0..200) >= 30,
+        "wide aperture: {}",
+        soft(&wide, 0..200)
+    );
+    // Still red where it is not transparent (no dark fringe from the resolve).
+    let mid = wide.px(100, 50);
+    assert!(mid[0] > 240 && mid[1] < 10 && mid[2] < 10, "{mid:?}");
+    // Turned about y: the right edge recedes, the left comes closer than
+    // the focus plane but less so.
+    let tilted = render(&mut r, &comp_with(0.0, DVec3::new(0.0, 50.0, 0.0), true));
+    assert!(
+        soft(&tilted, 100..200) > soft(&tilted, 0..100),
+        "receding edge blurs more: {} vs {}",
+        soft(&tilted, 100..200),
+        soft(&tilted, 0..100)
+    );
+}
