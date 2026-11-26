@@ -117,6 +117,8 @@ def pref(page, c):
     elif t in ("dropdown", "radio_group", "theme_picker"):
         if c.get("optionsRef") == "labelPalette17":
             e = f"label({s(key)}, {s(label)}, {int(c.get('default', 0))})"
+        elif key == "audio.audio_default_output":
+            e = f"audio_output({s(key)}, {s(label)}, {s(c['default'])})"
         else:
             options = c.get("options") or [{"value": c.get("default"), "labelEn": "System Default", "labelZh": "系统默认值"}]
             style = {"dropdown": "Style::Dropdown", "radio_group": "Style::Radio", "theme_picker": "Style::Theme"}[t]
