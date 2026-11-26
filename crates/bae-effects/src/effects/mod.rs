@@ -15,6 +15,7 @@ pub(crate) mod color;
 pub(crate) mod compound;
 pub mod distort;
 pub mod liquify;
+pub mod puppet;
 pub mod spatial;
 pub(crate) mod temporal;
 

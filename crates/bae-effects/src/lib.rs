@@ -364,6 +364,11 @@ fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
                         .then(|| effects::liquify::options_zh(p.id))
                         .flatten()
                 })
+                .or_else(|| {
+                    (m == effects::puppet::MATCH_NAME)
+                        .then(|| effects::puppet::options_zh(p.id))
+                        .flatten()
+                })
                 .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
             Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
         })

@@ -41,6 +41,7 @@ mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+mod puppet_tool;
 mod scene_icons;
 mod select_tool;
 mod shape_tool;
@@ -218,6 +219,8 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    /// Puppet tools: the pin being dragged.
+    puppet: puppet_tool::PuppetState,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
     /// menu): Esc goes to it instead of switching to the last 3D view.
     esc_taken: bool,
@@ -459,6 +462,13 @@ fn apply_overrides(
             {
                 e.params
                     .insert(attr.trim_start_matches("param:").to_owned(), value.clone());
+            }
+            // A dragged effect child (a Puppet pin's Position).
+            if let Some(effect) = path.parent()
+                && let Some(e) = layer.effects.iter_mut().find(|e| e.path == effect)
+                && let Some(c) = e.children.iter_mut().find(|c| c.path == *path)
+            {
+                std::sync::Arc::make_mut(&mut c.attrs).insert(attr.to_owned(), value.clone());
             }
             if *path != layer.path {
                 continue;
@@ -1307,6 +1317,19 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
+        // Puppet tools: pins added and dragged.
+        let puppet = puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+            effective,
+            &painter,
+            time,
+        );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.
@@ -1344,7 +1367,9 @@ impl Panel for CompositionViewer {
             &opts,
             effective == Tool::Selection && !path.owns && !points.owns,
         );
-        let select_cursor = if points.owns {
+        let select_cursor = if puppet.owns {
+            puppet.cursor
+        } else if points.owns {
             points.cursor
         } else if path.owns || sketching || guide_busy {
             path.cursor

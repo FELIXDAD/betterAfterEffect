@@ -82,6 +82,7 @@ pub mod paint;
 pub mod path;
 pub mod precompose;
 pub mod project_settings;
+pub mod puppet;
 pub mod query;
 pub mod shape;
 pub mod solid;
@@ -136,6 +137,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
         r.register(paint::AddStroke),
+        r.register(puppet::AddPin),
         r.register(tracker::CreateTracker),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),

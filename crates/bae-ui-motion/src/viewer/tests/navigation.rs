@@ -89,7 +89,11 @@ fn fit_fills_the_panel_and_fit_up_to_100_stops_at_100() {
     assert!((mag(&h) - 1.0).abs() < 1e-4, "default: {}", mag(&h));
     assert!(h.action("viewer.fit"));
     h.frame(Vec::new(), Modifiers::NONE);
-    assert!(mag(&h) > 1.5, "a 640 × 360 comp fills the panel: {}", mag(&h));
+    assert!(
+        mag(&h) > 1.5,
+        "a 640 × 360 comp fills the panel: {}",
+        mag(&h)
+    );
     assert!(h.action(crate::viewer::FIT_UP_TO_100));
     h.frame(Vec::new(), Modifiers::NONE);
     assert!((mag(&h) - 1.0).abs() < 1e-4, "{}", mag(&h));

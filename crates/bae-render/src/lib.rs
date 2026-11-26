@@ -58,6 +58,7 @@ pub mod paint;
 mod parameter_track;
 pub mod png_out;
 pub mod pool;
+pub mod puppet;
 mod renderer;
 pub mod request;
 pub mod source;

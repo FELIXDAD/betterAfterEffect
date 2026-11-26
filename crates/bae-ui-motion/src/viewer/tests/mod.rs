@@ -471,6 +471,7 @@ mod motion_sketch;
 mod navigation;
 mod navigator;
 mod pen;
+mod puppet;
 mod resolution;
 mod selection;
 mod shape_tools;
