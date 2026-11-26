@@ -4,6 +4,7 @@
 
 use bae_model::PrimPath;
 use bae_motion::query;
+use bae_ui::Accessible as _;
 use bae_ui::theme::{self, color};
 use bae_ui::{Panel, PanelContext, TabInfo, tr, widgets};
 use egui::{Color32, Rect, Sense, Stroke, Ui, vec2};
@@ -224,6 +225,21 @@ impl Panel for PaintPanel {
                         .font(theme::small())
                         .color(color::TEXT_STRONG),
                 );
+                // The five presets (AE): each recalls its Clone Options.
+                row(ui, "Preset:", |ui| {
+                    for i in 0..5 {
+                        let on = p.clone_preset == i;
+                        let name = tr("Clone Preset {n}").replace("{n}", &(i + 1).to_string());
+                        if ui
+                            .selectable_label(on, (i + 1).to_string())
+                            .labeled_toggle(egui::WidgetType::RadioButton, &name, on)
+                            .on_hover_text(&name)
+                            .clicked()
+                        {
+                            p.choose_clone_preset(i);
+                        }
+                    }
+                });
                 row(ui, "Source:", |ui| {
                     let mut names = vec![tr("Current Layer").to_owned()];
                     names.extend(layers.iter().map(|(_, n)| n.clone()));
@@ -249,6 +265,18 @@ impl Panel for PaintPanel {
                             .speed(0.04)
                             .suffix(" s"),
                     );
+                });
+                // Clone Source Overlay and its opacity (AE).
+                ui.horizontal(|ui| {
+                    widgets::checkbox(ui, &mut p.clone_overlay, tr("Clone Source Overlay:"));
+                    ui.add_enabled(
+                        p.clone_overlay,
+                        egui::DragValue::new(&mut p.overlay_opacity)
+                            .range(0.0..=100.0)
+                            .speed(0.5)
+                            .suffix(" %"),
+                    )
+                    .labeled(egui::WidgetType::DragValue, tr("Clone Source Overlay:"));
                 });
             }
         });
@@ -351,6 +379,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Current Layer", "当前图层"),
     ("Aligned", "已对齐"),
     ("Lock Source Time", "锁定源时间"),
+    ("Clone Source Overlay:", "仿制源叠加:"),
+    ("Clone Preset {n}", "仿制预设 {n}"),
     ("Offset:", "偏移:"),
     ("Source Time Shift:", "源时间转移:"),
     ("Set background color", "设定背景颜色"),
