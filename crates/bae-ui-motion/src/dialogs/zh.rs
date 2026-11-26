@@ -318,14 +318,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Use Dimensions From", "使用尺寸来自"),
     ("Still Duration:", "静止持续时间 -"),
     ("Still Duration", "静止持续时间"),
-    ("Overlap", "重叠"),
-    ("Transition:", "过渡 -"),
     ("Transition", "过渡"),
-    ("Dissolve Front Layer", "溶解前景图层"),
-    (
-        "Cross Dissolve Front and Back Layers",
-        "交叉溶解前景与背景图层",
-    ),
     // The 3D Renderer and Advanced tabs' texts (AE 26's Chinese).
     (
         super::comp_settings::MOTION_BLUR_HELP,
