@@ -248,6 +248,13 @@ fn params(
     def: &EffectDef,
     now: Time,
 ) {
+    if def.match_name == "ADBE Deflicker" && ui.button(tr("Set Frame")).clicked() {
+        let local = query::to_key_time(cx.stage, effect, now);
+        cx.invoke_with(
+            "attr.set_at",
+            json!({"path":effect,"attr":param_attr(9001),"time":local,"value":Value::Time(local)}),
+        );
+    }
     let mut depth = 1usize;
     // Depth at which a closed group hides its contents.
     let mut hidden_from: Option<usize> = None;
