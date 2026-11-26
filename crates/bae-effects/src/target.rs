@@ -16,6 +16,12 @@ use bae_render::{EffectParams, EncodeContext, GpuImage, IRect, ImageAlpha, Rende
 
 /// GPU access while an effect is encoded.
 pub trait EffectTarget {
+    /// A reusable intermediate; targets without frame caching return none.
+    fn cached_image(&mut self, _key: bae_render::FrameKey) -> Option<GpuImage> {
+        None
+    }
+    /// Keep a derived image across renders on this target.
+    fn remember_image(&mut self, _key: bae_render::FrameKey, _image: GpuImage) {}
     /// Encode an existing declarative pass into this target and its texture pool.
     fn declarative(
         &mut self,
@@ -58,6 +64,12 @@ pub trait EffectTarget {
 }
 
 impl EffectTarget for EncodeContext<'_> {
+    fn cached_image(&mut self, key: bae_render::FrameKey) -> Option<GpuImage> {
+        EncodeContext::cached_image(self, key)
+    }
+    fn remember_image(&mut self, key: bae_render::FrameKey, image: GpuImage) {
+        EncodeContext::remember_image(self, key, image)
+    }
     fn declarative(
         &mut self,
         effect: &bae_plugin::DeclarativeEffect,

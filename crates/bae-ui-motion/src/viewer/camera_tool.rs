@@ -54,7 +54,21 @@ pub(super) struct CameraDrag {
     pivot: DVec3,
     origin: Pos2,
     pub now: ViewCamera,
+    /// A wheel dolly on a camera layer: notches add up into one gesture.
+    wheel: Option<Wheel>,
 }
+
+/// Where a wheel dolly started, how far it has gone and its last notch.
+#[derive(Clone, Copy, Debug)]
+struct Wheel {
+    at: Pos2,
+    distance: f32,
+    last: std::time::Instant,
+}
+
+/// A wheel dolly on a camera layer commits (one undo step) once the wheel
+/// has rested this long; high-resolution wheels split a notch into events.
+const WHEEL_REST: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// Position, point of interest and zoom of a perspective camera.
 fn rig(c: ViewCamera) -> Option<(DVec3, DVec3, f64)> {
@@ -154,6 +168,7 @@ impl CameraDrag {
             pivot,
             origin: pos,
             now: start,
+            wheel: None,
         })
     }
 
@@ -339,29 +354,46 @@ pub(super) fn frame(
     reverse_drag: bool,
 ) {
     if wheel_notches != 0.0
-        && drag.is_none()
         && let Some(pos) = resp.hover_pos()
     {
-        let mut s = session.lock();
-        let views = s.views3d.entry(comp_path.clone()).or_default();
-        if let Some(mut wheel) = CameraDrag::new(
-            Tool::DollyCursor,
-            PointerButton::Secondary,
-            views,
-            comp,
-            size,
-            view,
-            pos,
-        ) {
-            // One eighth-octave step, also continuous on high-resolution wheels.
-            let distance = (std::f64::consts::LN_2 / (8.0 * DOLLY_SPEED)) as f32 * wheel_notches;
-            wheel.update(pos + egui::vec2(0.0, distance), view, size, false);
-            match wheel.target {
-                Target::View(v) => views.set_camera(v, wheel.now),
-                Target::Layer { .. } => {
-                    let edits = wheel.commit(cx.stage, time);
-                    if !edits.is_empty() {
-                        cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+        // One eighth-octave step, also continuous on high-resolution wheels.
+        let step = (std::f64::consts::LN_2 / (8.0 * DOLLY_SPEED)) as f32 * wheel_notches;
+        let now = std::time::Instant::now();
+        match drag {
+            // The wheel keeps turning: the same gesture goes on.
+            Some(d) if d.wheel.is_some() => {
+                let mut w = d.wheel.expect("wheel gesture");
+                w.distance += step;
+                w.last = now;
+                d.wheel = Some(w);
+                d.update(w.at + egui::vec2(0.0, w.distance), view, size, false);
+            }
+            Some(_) => {}
+            None => {
+                let mut s = session.lock();
+                let views = s.views3d.entry(comp_path.clone()).or_default();
+                if let Some(mut wheel) = CameraDrag::new(
+                    Tool::DollyCursor,
+                    PointerButton::Secondary,
+                    views,
+                    comp,
+                    size,
+                    view,
+                    pos,
+                ) {
+                    wheel.update(pos + egui::vec2(0.0, step), view, size, false);
+                    match wheel.target {
+                        Target::View(v) => views.set_camera(v, wheel.now),
+                        // A camera layer previews through the gesture and
+                        // commits once the wheel rests.
+                        Target::Layer { .. } => {
+                            wheel.wheel = Some(Wheel {
+                                at: pos,
+                                distance: step,
+                                last: now,
+                            });
+                            *drag = Some(wheel);
+                        }
                     }
                 }
             }
@@ -385,6 +417,18 @@ pub(super) fn frame(
     let Some(d) = drag.as_mut() else {
         return;
     };
+    if let Some(w) = d.wheel {
+        if w.last.elapsed() >= WHEEL_REST {
+            let edits = d.commit(cx.stage, time);
+            if !edits.is_empty() {
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
+            *drag = None;
+        } else {
+            ui.ctx().request_repaint_after(WHEEL_REST);
+        }
+        return;
+    }
     if let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) {
         d.update(pos, view, size, reverse_drag);
     }

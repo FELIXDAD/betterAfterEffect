@@ -449,6 +449,9 @@ struct WindowView {
     offscreen: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Screenshot replies for the next frame's input (the eyedropper).
     screenshots: Vec<egui::Event>,
+    /// Shift held as of the last modifier change, and when it last went up
+    /// ([`numpad::restore_shift`]).
+    shift: (bool, Option<std::time::Instant>),
 }
 
 impl Drop for WindowView {
@@ -602,6 +605,7 @@ impl Shell {
             lost_subscription,
             offscreen: None,
             screenshots: Vec::new(),
+            shift: (false, None),
         })
     }
 
@@ -1443,8 +1447,27 @@ impl ApplicationHandler<UserEvent> for Shell {
                 .events
                 .push(egui::Event::PointerMoved(pos));
         }
+        if let WindowEvent::ModifiersChanged(m) = &event {
+            let held = m.state().shift_key();
+            if view.shift.0 && !held {
+                view.shift.1 = Some(std::time::Instant::now());
+            }
+            view.shift.0 = held;
+        }
         let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
+        // Shift+numpad navigation keys (Windows drops Shift around them, #468).
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
+        {
+            numpad::restore_shift(
+                &mut view.egui_state.egui_input_mut().events,
+                before,
+                code,
+                &key.logical_key,
+                view.shift.1,
+            );
+        }
         // Numpad keys are their own keys in AE's shortcuts (#261).
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
