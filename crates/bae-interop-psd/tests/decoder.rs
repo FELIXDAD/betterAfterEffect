@@ -51,7 +51,14 @@ fn layer_precision_alpha_and_bounds_survive_both_containers() {
         sel.canvas = true;
         let placed = decode(&file, Some(sel)).unwrap();
         assert_eq!(placed.rgba, vec![[0.; 4], raw.rgba[0]]);
-        assert_eq!(decode(&file, None).unwrap().width, 2);
+        // The composite (alpha 0.75) comes un-matted from white at 16 and 32 bit.
+        let merged = decode(&file, None).unwrap();
+        assert_eq!(merged.width, 2);
+        let unmatte = |v: f32| (v - 0.25) / 0.75;
+        let expected = [unmatte(red).max(0.), 0., unmatte(0.5), 0.75];
+        for (got, want) in merged.rgba[1].iter().zip(expected) {
+            assert!((got - want).abs() < 0.0001, "{:?}", merged.rgba[1]);
+        }
         assert!(resolve(&file, LayerKey::Id(12)).is_err());
     }
 }
