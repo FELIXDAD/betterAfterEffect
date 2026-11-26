@@ -126,6 +126,11 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             let source = fx_bilinear(src, u.input, point + u.offset, false);
             result = source * paint.a + base * (1.0 - paint.a);
         }
+        // The Clone Stamp from another layer or time.
+        case 8u: {
+            let source = fx_bilinear(restore_src, u.restore, point + u.offset, false);
+            result = source * paint.a + base * (1.0 - paint.a);
+        }
         // Eraser, Paint Only / Last Stroke Only: back to an earlier image.
         case 7u: {
             let back = fx_sample(restore_src, u.restore, point, false);

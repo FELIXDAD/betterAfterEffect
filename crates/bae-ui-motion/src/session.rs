@@ -274,6 +274,10 @@ pub struct Session {
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    /// The Composition Navigator's path: the active comp and the comps it was
+    /// opened through (double-clicking pre-comp layers), the containing comp
+    /// first.
+    pub(crate) comp_flow: Vec<PrimPath>,
     pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
@@ -683,7 +687,22 @@ impl Session {
         if !self.open_comps.contains(comp) {
             self.open_comps.push(comp.clone());
         }
+        // A comp on the navigator's path keeps the path; any other starts one.
+        if !self.comp_flow.contains(comp) {
+            self.comp_flow = vec![comp.clone()];
+        }
         self.active_comp = Some(comp.clone());
+    }
+
+    /// Open `comp` from a pre-comp layer in `parent`: the navigator's path runs
+    /// through `parent` to `comp`.
+    pub fn open_from(&mut self, parent: &PrimPath, comp: &PrimPath) {
+        match self.comp_flow.iter().position(|c| c == parent) {
+            Some(i) => self.comp_flow.truncate(i + 1),
+            None => self.comp_flow = vec![parent.clone()],
+        }
+        self.comp_flow.push(comp.clone());
+        self.open_comp(comp);
     }
 
     /// Close a timeline tab.

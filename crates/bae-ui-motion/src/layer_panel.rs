@@ -143,7 +143,12 @@ pub(crate) fn open_clicked(
                         }),
                     );
                 }
-                s.open_comp(&source);
+                // The Composition Navigator's path runs through the comp it
+                // was opened from.
+                match query::owning_comp(cx.stage, layer) {
+                    Some(parent) => s.open_from(&parent, &source),
+                    None => s.open_comp(&source),
+                }
                 drop(s);
                 cx.open_panel("composition");
                 cx.open_panel("timeline");
@@ -718,6 +723,8 @@ impl LayerPanel {
                 "clone_source": p.clone_source,
                 "clone_offset": [offset.x, offset.y],
                 "clone_time_shift": flicks(p.clone_time_shift),
+                "clone_lock_time": p.lock_source_time,
+                "clone_time": flicks(p.clone_source_time),
             });
             // Shift-drag continues the previous stroke of the same tool.
             match self

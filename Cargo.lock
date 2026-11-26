@@ -1015,6 +1015,7 @@ dependencies = [
  "bae-text",
  "bae-ui",
  "bae-vector",
+ "chrono",
  "egui",
  "egui-wgpu",
  "flate2",
