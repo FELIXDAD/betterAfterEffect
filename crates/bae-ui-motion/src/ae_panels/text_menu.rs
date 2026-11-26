@@ -174,7 +174,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut PanelContext<'_>, character: bool) {
             continue;
         }
         if key == "join" {
-            ui.menu_button(tr(title), |ui| {
+            bae_ui::widgets::menu_button(ui, tr(title), |ui| {
                 for (join, title) in [
                     (TextJoin::Miter, "Miter Join"),
                     (TextJoin::Round, "Round Join"),
