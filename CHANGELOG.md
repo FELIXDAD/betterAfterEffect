@@ -2,6 +2,10 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 0.1.0（发布准备中）
+
+新增效果与动画预设、音频预览与导出、粒子、图层绘画、运动跟踪和 3D 视图。时间轴、表达式和渲染队列也有更新。[完整发布说明](docs/release/0.1.0.md)
+
 ## [0.0.1] - 2026-11-22
 
 第一个可运行版本（技术预览）。完整说明：[docs/releases/0.0.1.md](docs/releases/0.0.1.md)。
