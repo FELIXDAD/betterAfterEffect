@@ -2,6 +2,7 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // The layer menu's Select ▸ (the layers under the pointer).
     // Viewer
     ("Magnification", "放大率"),
     ("Fit", "适合"),

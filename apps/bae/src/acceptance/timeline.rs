@@ -11,9 +11,9 @@ use super::*;
 
 const POSITION: &str = "transform:position";
 
-/// The timeline's "Layer Name" column header.
+/// The timeline's name column header ("Source Name" or "Layer Name").
 fn header(h: &Ui) -> Rect {
-    find_texts(h, |t| t == "Layer Name")
+    find_texts(h, |t| t == "Source Name" || t == "Layer Name")
         .into_iter()
         .next()
         .unwrap_or_else(|| panic!("no timeline header in {:?}", painted_texts(h)))
@@ -699,5 +699,61 @@ fn transport_keys_move_the_playhead_after_clicking_a_layer() {
     assert!(
         bae_motion::markers::markers_of(h.state().stage(), &comp).is_empty(),
         "Shift+PageDown set no comp marker"
+    );
+}
+
+fn right_click(h: &mut Ui, at: Pos2) {
+    pause(h);
+    send(h, Event::PointerMoved(at));
+    for pressed in [true, false] {
+        send(
+            h,
+            Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        );
+    }
+    settle(h);
+}
+
+/// Right-click in the timeline: under the layers AE's New menu, on the layer
+/// number and label columns the layer menu (#466).
+#[test]
+fn timeline_right_click_menus() {
+    let mut h = comp_with_solid();
+    let row = layer_row(&h, "Dark Gray Solid 1");
+    right_click(&mut h, pos2(row.x, row.y + 80.0));
+    let texts = painted_texts(&h);
+    assert!(
+        texts.iter().any(|t| t == "New"),
+        "New menu under the layers: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "Pre-compose..."),
+        "no layer menu: {texts:?}"
+    );
+    send(
+        &mut h,
+        Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    settle(&mut h);
+    let number = find_texts(&h, |t| t == "1")
+        .into_iter()
+        .find(|r| (r.center().y - row.y).abs() < 6.0)
+        .expect("layer number");
+    right_click(&mut h, number.center());
+    let texts = painted_texts(&h);
+    assert!(
+        texts.iter().any(|t| t == "Pre-compose..."),
+        "layer menu on #: {texts:?}"
     );
 }

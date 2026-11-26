@@ -622,6 +622,97 @@ fn property_index_and_length_read_its_value() {
     assert_eq!(ec.layers[0].transform.rotation.z, 122.0);
 }
 
+fn doc(text: &str) -> Value {
+    Value::TextDocument(Box::new(TextDocument::new(text, "ArialMT", 50.0)))
+}
+
+/// `text.sourceText` reads as a string with the property's methods; `value` on
+/// Source Text is the text; the AE 17.0+ style API reads and sets the style.
+#[test]
+fn source_text_strings_and_styles() {
+    let s = stage(|b| {
+        let a = b.layer(MAIN, "A", "text");
+        b.set(&a, "text:source", doc("Hello world"));
+        let c = b.layer(MAIN, "C", "text");
+        b.expr(
+            &c,
+            "text:source",
+            doc("x"),
+            r#"thisComp.layer("A").text.sourceText + "!""#,
+        );
+        let v = b.layer(MAIN, "V", "text");
+        b.expr(&v, "text:source", doc("Hi"), r#"value + " there""#);
+        let st = b.layer(MAIN, "S", "text");
+        b.expr(
+            &st,
+            "text:source",
+            doc("Styled"),
+            "text.sourceText.style.setFontSize(80).setFillColor([1, 0, 0]).setText(\"New\").setFauxBold(true)",
+        );
+        let n = b.layer(MAIN, "N", "null");
+        b.expr(
+            &n,
+            "transform:rotation",
+            0.0,
+            r#"var t = thisComp.layer("A").text.sourceText; t.length * 100 + t.split(" ").length * 10 + t.style.fontSize / 10"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let text = |i: usize| ec.layers[i].text.as_ref().unwrap();
+    assert_eq!(text(1).text, "Hello world!");
+    assert_eq!(text(2).text, "Hi there");
+    let styled = text(3);
+    assert_eq!(styled.text, "New");
+    assert_eq!(styled.font_size, 80.0);
+    assert_eq!(styled.fill_color[..3], [1.0, 0.0, 0.0]);
+    assert!(styled.faux_bold);
+    // 11 characters, 2 words, 50 pt.
+    assert_eq!(ec.layers[4].transform.rotation.z, 1100.0 + 20.0 + 5.0);
+}
+
+/// `sourceRectAtTime`: the measured text through the registered measurer, a
+/// solid's own size, a null's 100 × 100.
+#[test]
+fn source_rect_at_time() {
+    struct Fixed;
+    impl bae_anim::SourceBounds for Fixed {
+        fn text(&self, doc: &TextDocument, extents: bool) -> Option<bae_anim::SourceRect> {
+            let pad = if extents { 1.0 } else { 0.0 };
+            Some([
+                -10.0 - pad,
+                -20.0 - pad,
+                doc.text.len() as f64 * 10.0 + 2.0 * pad,
+                30.0,
+            ])
+        }
+        fn shapes(&self, _: &[bae_anim::EvaluatedPrim], _: bool) -> Option<bae_anim::SourceRect> {
+            None
+        }
+    }
+    bae_anim::set_source_bounds(std::sync::Arc::new(Fixed));
+    let s = stage(|b| {
+        let t = b.layer(MAIN, "T", "text");
+        b.set(&t, "text:source", doc("Hello"));
+        let n = b.layer(MAIN, "N", "null");
+        b.expr(
+            &n,
+            "transform:position",
+            Value::Vec3([0.0; 3]),
+            r#"var r = thisComp.layer("T").sourceRectAtTime(time, true); [r.left + r.width, r.top + r.height]"#,
+        );
+        b.expr(&n, "transform:rotation", 0.0, "sourceRectAtTime().width");
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let p = ec.layers[1].transform.position;
+    assert_eq!([p.x, p.y], [-11.0 + 52.0, -21.0 + 30.0]);
+    assert_eq!(
+        ec.layers[1].transform.rotation.z, 100.0,
+        "a null is 100 × 100"
+    );
+}
+
 /// `marker` / `thisComp.marker`: numKeys, key(index), key(comment), nearestKey and
 /// the MarkerKey fields; layer marker times are comp time (AE).
 #[test]
@@ -673,4 +764,228 @@ fn markers_in_expressions() {
         "{r}"
     );
     assert_eq!(ec.layers[0].transform.opacity, 50.0);
+}
+
+fn rect_path() -> Value {
+    Value::Bezier(bae_model::BezierPath {
+        vertices: vec![
+            [100.0, 100.0],
+            [300.0, 100.0],
+            [300.0, 200.0],
+            [100.0, 200.0],
+        ],
+        in_tangents: vec![[0.0; 2]; 4],
+        out_tangents: vec![[0.0; 2]; 4],
+        closed: true,
+        feather: Vec::new(),
+    })
+}
+
+/// Path properties: points / tangents / isClosed, pointOnPath at an arc-length
+/// percentage (AE 26: 174.9986, 100 on this rectangle), and a path expression
+/// returning createPath(…).
+#[test]
+fn path_property_methods_and_create_path() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "A", "solid");
+        b.prim(&format!("{l}/masks"), PrimType::FOLDER)
+            .prim(&format!("{l}/masks/m1"), PrimType::MASK)
+            .set(&format!("{l}/masks/m1"), "name", "Mask 1")
+            .set(&format!("{l}/masks/m1"), "path", rect_path())
+            .prim(&format!("{l}/masks/m2"), PrimType::MASK)
+            .set(&format!("{l}/masks/m2"), "name", "Mask 2")
+            .expr(
+                &format!("{l}/masks/m2"),
+                "path",
+                rect_path(),
+                r#"var p = mask("Mask 1").maskPath;
+                   createPath(p.points().map(function (v) { return [v[0] + 10, v[1]]; }),
+                              p.inTangents(), p.outTangents(), false)"#,
+            )
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var p = mask("Mask 1").maskPath; p.points()[1][0] + p.isClosed() * 1000 + p.tangentOnPath(0.875)[1]"#,
+            )
+            .expr(
+                &l,
+                "transform:position",
+                Value::Vec3([0.0; 3]),
+                r#"mask(1).maskPath.pointOnPath(0.125) + mask(1).maskPath.normalOnPath(0.125)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let l = &ec.layers[0];
+    assert_eq!(l.transform.rotation.z, 300.0 + 1000.0 - 1.0);
+    // (175, 100) plus the normal (0, 1).
+    assert!(
+        (l.transform.position.x - 175.0).abs() < 0.01,
+        "{:?}",
+        l.transform.position
+    );
+    assert!((l.transform.position.y - 101.0).abs() < 0.01);
+    let shifted = &l.masks[1].shape;
+    assert_eq!(shifted.vertices[0], [110.0, 100.0]);
+    assert!(!shifted.closed);
+}
+
+/// Shape layer contents: content(name / index) down to a path, a fill and the
+/// group's transform, with AE's property names.
+#[test]
+fn shape_contents_in_expressions() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "S", "shape");
+        let g = format!("{l}/contents/g");
+        b.prim(&format!("{l}/contents"), PrimType::FOLDER)
+            .prim(&g, PrimType::SHAPE_GROUP)
+            .set(&g, "name", "Group 1")
+            .set(&g, "transform:position", Value::Vec2([40.0, 50.0]))
+            .prim(&format!("{g}/contents"), PrimType::FOLDER)
+            .prim(&format!("{g}/contents/p"), PrimType::PATH)
+            .set(&format!("{g}/contents/p"), "name", "Path 1")
+            .set(&format!("{g}/contents/p"), "path", rect_path())
+            .prim(&format!("{g}/contents/f"), PrimType::FILL)
+            .set(&format!("{g}/contents/f"), "name", "Fill 1")
+            .set(&format!("{g}/contents/f"), "color", Value::Color([0.25, 0.5, 1.0, 1.0]))
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var g = content("Group 1");
+                   g.content("Path 1").path.points()[1][0] + g.transform.position[1] * 10
+                   + content(1).content(2).color[0] * 4 + (g.content(1).path.pointOnPath(0)[0] == 100)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 300.0 + 500.0 + 1.0 + 1.0);
+}
+
+/// Camera, light and material options, AE property names and property groups.
+#[test]
+fn camera_light_material_and_property_names() {
+    let s = stage(|b| {
+        let cam = b.layer(MAIN, "Cam", "camera");
+        b.set(&cam, "camera:zoom", 1500.0)
+            .set(&cam, "camera:depth_of_field", true);
+        let light = b.layer(MAIN, "Key", "light");
+        b.set(&light, "light:intensity", 80.0)
+            .set(&light, "light:casts_shadows", true);
+        let solid = b.layer(MAIN, "Plate", "solid");
+        b.set(&solid, "three_d", true)
+            .set(&solid, "material:accepts_lights", false)
+            .prim(&format!("{solid}/masks"), PrimType::FOLDER)
+            .prim(&format!("{solid}/masks/m"), PrimType::MASK)
+            .set(&format!("{solid}/masks/m"), "name", "Mask 1")
+            .set(
+                &format!("{solid}/masks/m"),
+                "path",
+                Value::Bezier(bae_model::BezierPath {
+                    vertices: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+                    in_tangents: vec![[0.0; 2]; 3],
+                    out_tangents: vec![[0.0; 2]; 3],
+                    closed: true,
+                    feather: Vec::new(),
+                }),
+            );
+        let t = b.layer(MAIN, "Names", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var c = thisComp.layer("Cam"), k = thisComp.layer("Key"), p = thisComp.layer("Plate");
+               [c.zoom.value, c.cameraOption.zoom.value, c.depthOfField.value, c.irisShape,
+                k.intensity.value, k.castsShadows.value, p.castsShadows.value, p.acceptsLights.value,
+                p.transform.position.name, p.transform.rotation.name, p.mask(1).maskPath.name,
+                p.transform.position.propertyGroup(1).name, p.transform.position.propertyGroup(2).name,
+                p.mask(1).maskPath.propertyGroup(1).name, p.mask(1).maskPath.propertyGroup(2).name].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "1500|1500|1|1|80|1|0|0|Position|Z Rotation|Mask Path|Transform|Plate|Mask 1|Masks"
+    );
+}
+
+/// footage(name), a footage layer's source, colorDepth / thisProject, NTSC and
+/// feet + frames timecode, and fromCompToSurface on a 2D layer.
+#[test]
+fn footage_project_and_timecodes() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT)
+            .set("/project", "bit_depth", Value::Enum("32".into()))
+            .prim("/assets", PrimType::FOLDER)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .set("/assets/clip", "kind", Value::Enum("footage".into()))
+            .set("/assets/clip", "width", 640.0)
+            .set("/assets/clip", "height", 360.0)
+            .set("/assets/clip", "duration", Value::Time(secs(4.0)));
+        let l = b.layer(MAIN, "Shot", "footage");
+        b.set(&l, "source", Value::AssetRef(p("/assets/clip")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var s = thisComp.layer("Shot");
+               [s.source.width, footage("Clip").duration, footage("Clip").name, colorDepth,
+                thisProject.bitsPerChannel, timeToNTSCTimecode(61, true), timeToNTSCTimecode(1),
+                timeToFeetAndFrames(1, 30), thisComp.ntscDropFrame,
+                fromCompToSurface([10, 20])[0] == fromComp([10, 20])[0]].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[1].text.as_ref().unwrap().text,
+        "640|4|Clip|32|32|00;01;01;00|00:00:00:29|0001+14|false|true"
+    );
+}
+
+/// hasVideo / hasAudio follow the layer's source (a pre-comp has audio when a
+/// layer inside it does), and audioLevels exists only on layers with audio.
+#[test]
+fn audio_levels_and_has_audio() {
+    let s = stage(|b| {
+        b.prim("/assets", PrimType::FOLDER)
+            .prim("/assets/song", PrimType::ASSET)
+            .set("/assets/song", "name", "Song")
+            .set("/assets/song", "has_video", false)
+            .set("/assets/song", "has_audio", true)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .comp("/comps/other", "Other");
+        let a = b.layer("/comps/other", "Music", "audio");
+        b.set(&a, "source", Value::AssetRef(p("/assets/song")));
+        let music = b.layer(MAIN, "Music", "audio");
+        b.set(&music, "source", Value::AssetRef(p("/assets/song")))
+            .set(&music, "audio:levels", Value::Vec2([-6.0, -3.0]));
+        let clip = b.layer(MAIN, "Clip", "footage");
+        b.set(&clip, "source", Value::AssetRef(p("/assets/clip")));
+        let pre = b.layer(MAIN, "Pre", "pre_comp");
+        b.set(&pre, "source", Value::PrimRef(p("/comps/other")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var m = thisComp.layer("Music"), c = thisComp.layer("Clip"), p = thisComp.layer("Pre");
+               var e = "";
+               try { c.audioLevels; } catch (err) { e = err.message.split(".")[0]; }
+               [m.audioLevels.value.join(","), m.hasAudio, m.hasVideo, m.audioActive, c.hasAudio,
+                c.hasVideo, p.hasAudio, p.audioLevels.value.join(","), e].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "-6,-3|true|false|true|false|true|true|0,0|\
+         property or method named 'audioLevels' in Class 'Layer' is missing or does not exist"
+    );
 }
