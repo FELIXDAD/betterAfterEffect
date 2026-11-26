@@ -175,3 +175,29 @@ fn right_clicking_a_motion_path_keyframe_opens_the_keyframe_menu() {
     assert_eq!(keys.len(), 1);
     assert_eq!(keys[0].time, bae_model::Time(sec));
 }
+
+/// AE's snapping radius: 13.3 points (13 snaps, 14 does not).
+#[test]
+fn snapping_reaches_13_points_not_14() {
+    let mut h = H::new();
+    // B's right midpoint: (150, 180).
+    let _b = h.solid([100.0, 100.0], [100.0, 180.0]);
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.tools().lock().set(Tool::Selection);
+    h.tools().lock().options.snapping = true;
+    let scale = h.viewer.last_view.unwrap().scale * h.ctx.pixels_per_point();
+    assert!((scale - 1.0).abs() < 1e-4, "100 %: {scale}");
+    // A's left midpoint (220, 180) dropped `gap` points right of 150.
+    let drop = |h: &mut H, gap: f64| {
+        let r = h.drag((228.0, 180.0), (158.0 + gap, 180.0), Modifiers::NONE);
+        h.apply(&r);
+        let x = h.v3(&a, "transform:position")[0];
+        h.stage.undo(&h.author).unwrap();
+        x
+    };
+    assert!((drop(&mut h, 13.0) - 250.0).abs() < 1e-6, "13 points snaps");
+    assert!(
+        (drop(&mut h, 14.0) - 264.0).abs() < 1e-6,
+        "14 points does not"
+    );
+}
