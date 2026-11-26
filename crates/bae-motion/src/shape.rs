@@ -203,10 +203,7 @@ pub struct AddShapeParams {
     /// New layer: position in the layer stack, 0 = top (default 0).
     #[serde(default)]
     pub index: Option<usize>,
-    /// New layer with a parametric shape: put the layer's Anchor Point at the
-    /// shape's center and Position there in the comp, so the shape stays put (AE
-    /// preference "Center Anchor Point in New Shape Layers"; default false: the
-    /// anchor stays at the comp center, as AE's tutorials show).
+    /// Center the anchor on the first shape in a new layer (AE preference).
     #[serde(default)]
     pub center_anchor: Option<bool>,
     #[serde(flatten)]
@@ -250,6 +247,7 @@ impl Command for AddShape {
         // Check the geometry before creating anything.
         let outline = p.geometry.to_path([0.0, 0.0])?;
         let parametric = p.geometry.kind != ShapeKind::Path && !p.bezier;
+        let mut group_position = p.geometry.position;
         let layer = match &p.layer {
             Some(layer) => {
                 if query::layer_kind(tx.stage(), layer).as_deref() != Some("shape") {
@@ -265,6 +263,23 @@ impl Command for AddShape {
                     .ok_or_else(|| fail("give `layer` or `comp`"))?;
                 let info = query::comp_info(tx.stage(), &comp)
                     .ok_or_else(|| fail(format!("{comp} is not a comp")))?;
+                let mut path_anchor = None;
+                let mut position = None;
+                if p.center_anchor.unwrap_or(false) {
+                    let [x, y] = if p.geometry.kind == ShapeKind::Path {
+                        // Pen vertices keep their original layer coordinates.
+                        let center = crate::path::drawing_center(&outline);
+                        path_anchor = Some(center);
+                        center
+                    } else {
+                        group_position = [0.0; 2];
+                        p.geometry.position
+                    };
+                    position = Some([
+                        f64::from(info.width) / 2.0 + x,
+                        f64::from(info.height) / 2.0 + y,
+                    ]);
+                }
                 let out = CreateLayer.run(
                     tx,
                     CreateLayerParams {
@@ -278,11 +293,8 @@ impl Command for AddShape {
                         text: None,
                         font_size: None,
                         shape: None,
-                        position: None,
-                        defaults: crate::layer::NewLayerDefaults {
-                            separate_position: false,
-                            ..p.defaults
-                        },
+                        position,
+                        defaults: p.defaults,
                         pixel_aspect: None,
                         camera: None,
                         light: None,
@@ -291,23 +303,14 @@ impl Command for AddShape {
                         point_of_interest: None,
                     },
                 )?;
-                let center = [f64::from(info.width) / 2.0, f64::from(info.height) / 2.0];
-                if p.center_anchor.unwrap_or(false) && p.geometry.kind != ShapeKind::Path {
-                    let [x, y] = p.geometry.position;
+                if let Some([x, y]) = path_anchor {
                     set(
                         tx,
                         &out.path,
                         "transform:anchor_point",
                         Value::Vec3([x, y, 0.0]),
                     )?;
-                    set(
-                        tx,
-                        &out.path,
-                        "transform:position",
-                        Value::Vec3([center[0] + x, center[1] + y, 0.0]),
-                    )?;
                 }
-                p.defaults.split_position(tx, &out.path)?;
                 out.path
             }
         };
@@ -329,7 +332,7 @@ impl Command for AddShape {
         create(tx, &group, PrimType::SHAPE_GROUP, Some(0))?;
         set(tx, &group, "name", Value::String(group_name))?;
         if p.geometry.kind != ShapeKind::Path {
-            let [x, y] = p.geometry.position;
+            let [x, y] = group_position;
             set(tx, &group, "transform:position", Value::Vec2([x, y]))?;
         }
         let inner = child(&group, query::CONTENTS)?;
