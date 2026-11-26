@@ -2517,9 +2517,9 @@ fn gpu_preview_keeps_blurred_solids_in_their_box() {
     // returns the comp-pixel box of texels more than half opaque.
     let mut shown = |h: &Harness, resolution: u32| {
         let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
-        preview.frame(&h.resources, &h.stage, &evaluated, resolution, None);
+        preview.frame(&h.resources, &h.stage, &evaluated, resolution, None, false);
         let img = preview
-            .frame(&h.resources, &h.stage, &evaluated, resolution, None)
+            .frame(&h.resources, &h.stage, &evaluated, resolution, None, false)
             .expect("image");
         let rc = bae_render::AnimEvaluator::new(None)
             .with_purpose(bae_render::RenderPurpose::Preview)
