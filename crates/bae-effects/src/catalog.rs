@@ -227,6 +227,13 @@ impl DefBuilder {
         self
     }
 
+    /// Gives the last parameter AE's own matchName (for parameters AE does not
+    /// name `<effect>-NNNN`).
+    pub(crate) fn ae_match_name(mut self, name: &str) -> Self {
+        self.def.params.last_mut().unwrap().match_name = Some(name.to_owned());
+        self
+    }
+
     /// A same-comp layer reference. An unwritten default resolves to self.
     pub fn layer(mut self, id: u32, name: &str, zh: &str) -> Self {
         self.push(id, name, zh, ParamKind::Layer, None);

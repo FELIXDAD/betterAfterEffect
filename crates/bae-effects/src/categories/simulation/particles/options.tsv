@@ -73,3 +73,59 @@ Carpenter 轮	Carpenter Wheel
 颜色 + 不透明度	Color + Opacity
 图层 + 不透明度	Layer + Opacity
 着色图层 + 不透明度	Tinted Layer + Opacity
+发射	Cannon
+网格	Grid
+图层爆炸	Layer Exploder
+粒子爆炸	Particle Exploder
+发射或网格	Cannon or Grid
+发射或图层爆炸	Cannon or Layer Exploder
+发射或粒子爆炸	Cannon or Particle Exploder
+网格或图层爆炸	Grid or Layer Exploder
+网格或粒子爆炸	Grid or Particle Exploder
+图层爆炸或粒子爆炸	Layer Exploder or Particle Exploder
+发射或网格或图层爆炸	Cannon or Grid or Layer Exploder
+发射或网格或粒子爆炸	Cannon or Grid or Particle Exploder
+发射或图层爆炸或粒子爆炸	Cannon or Layer Exploder or Particle Exploder
+网格或图层爆炸或粒子爆炸	Grid or Layer Exploder or Particle Exploder
+所选文字 1	Selected Text 1
+所选文字 2	Selected Text 2
+所选文字 3	Selected Text 3
+相对	Relative
+绝对	Absolute
+相对随机	Relative Random
+绝对随机	Absolute Random
+红	Red
+绿	Green
+蓝	Blue
+动态摩擦	Kinetic Friction
+静态摩擦	Static Friction
+角度	Angle
+角速度	Angular Velocity
+扭矩	Torque
+缩放	Scale
+X缩放	X Scale
+Y缩放	Y Scale
+渐变速度	Gradient Velocity
+X速度	X Velocity
+Y速度	Y Velocity
+梯度力	Gradient Force
+X力	X Force
+Y力	Y Force
+质量	Mass
+寿命	Lifespan
+字符	Character
+字体大小	Font Size
+时间偏移	Time Offset
+缩放速度	Scale Speed
+比例	Scale
+X 比例	X Scale
+Y 比例	Y Scale
+X 速度	X Velocity
+Y 速度	Y Velocity
+设置	Set
+相加	Add
+差值	Difference
+相减	Subtract
+相乘	Multiply
+最小值	Min
+最大值	Max

@@ -15,6 +15,7 @@ struct Control {
 enum ControlKind {
     GroupStart,
     GroupEnd,
+    Mask,
     Layer,
     Color([f64; 4]),
     Point([f64; 2]),
@@ -48,6 +49,10 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
             "CC Particle Systems II"
         ),
 
+        Kind::Playground => reference!("ADBE Playgnd", "Particle Playground", "粒子运动场"),
+        Kind::Ball => reference!("CC Ball Action", "CC Ball Action", "CC Ball Action"),
+        Kind::Mercury => reference!("CC Mr. Mercury", "CC Mr. Mercury", "CC Mr. Mercury"),
+        Kind::Hair => reference!("CC Hair", "CC Hair", "CC Hair"),
         Kind::Rain => reference!("CSRainfall", "CC Rainfall", "CC Rainfall"),
         Kind::Snow => reference!("CSSnowfall", "CC Snowfall", "CC Snowfall"),
         Kind::Bubbles => reference!("CC Bubbles", "CC Bubbles", "CC Bubbles"),
@@ -65,6 +70,7 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
         let (kind, value) = match c.kind {
             GroupStart => (ParamKind::GroupStart, None),
             GroupEnd => (ParamKind::GroupEnd, None),
+            Mask => (ParamKind::Path, None),
             Layer => (ParamKind::Layer, None),
             Color(v) => (ParamKind::Color, Some(Value::Color(v))),
             Point(v) => (ParamKind::Point, Some(Value::Vec2(v))),
@@ -88,10 +94,19 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
                 Some(Value::Float(v)),
             ),
         };
+        let layer = matches!(kind, ParamKind::Layer);
         builder.push(c.id, c.en, c.zh, kind, value);
+        if layer && matches!(id, "ADBE Playgnd" | "CC Hair") {
+            builder = builder.layer_stage(c.id);
+        }
     }
     let (mut def, names) = builder.reference_points().build();
-    for (param, control) in def.params.iter_mut().zip(controls) {
+    for (param, control) in def
+        .params
+        .iter_mut()
+        .filter(|c| c.match_name.is_some())
+        .zip(controls)
+    {
         param.flags.cannot_animate = !control.varies;
         param.flags.cannot_time_vary = !control.varies;
     }

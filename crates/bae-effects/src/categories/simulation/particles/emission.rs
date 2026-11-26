@@ -82,6 +82,10 @@ pub(super) fn batches(kind: Kind, scene: &Scene<'_>) -> Vec<Batch> {
         Kind::World => (4, 5, 1000.),
         Kind::Systems => (1, 2, 1000.),
         Kind::Drizzle => (1, 2, 16.),
+        Kind::Mercury => (6, 7, 48.),
+        // The cannon keeps every particle (no lifetime). One slot per child of
+        // Explode Particles: children are born within one birth of their parent.
+        Kind::Playground => (103, 0, scene.playground_children()),
         _ => {
             return vec![Batch {
                 count: scene.count(kind),
@@ -100,7 +104,14 @@ pub(super) fn batches(kind: Kind, scene: &Scene<'_>) -> Vec<Batch> {
         value: scene.p.f(id).max(0.),
     };
     let rate = control(rate_id);
-    let life = control(life_id);
+    let life = if life_id == 0 {
+        Control {
+            track: None,
+            value: 1e9,
+        }
+    } else {
+        control(life_id)
+    };
     let end = scene.p.p.time.as_seconds().max(0.);
     let start = (end - life.track.map_or(life.value, |c| c.maximum_through(end))).max(0.);
     let mut times = vec![start, end];
@@ -134,6 +145,21 @@ pub(super) fn batches(kind: Kind, scene: &Scene<'_>) -> Vec<Batch> {
             life: l0,
             life_slope: (l1 - l0) / (b - a),
         });
+    }
+    if kind == Kind::Playground {
+        // Grid and exploded-layer particles come first; cannon IDs follow them.
+        let fixed = scene.count(kind);
+        batches.retain(|b| b.count > 0);
+        for b in &mut batches {
+            b.first += u64::from(fixed);
+        }
+        batches.insert(
+            0,
+            Batch {
+                count: fixed,
+                ..Default::default()
+            },
+        );
     }
     if batches.is_empty() {
         batches.push(Batch::default());

@@ -12,6 +12,8 @@ use bae_ui::PanelContext;
 use egui::{Color32, Painter, Pos2, Rect, Stroke};
 use serde_json::json;
 
+use bae_render::Camera;
+
 use crate::render::{self, Affine, View};
 use crate::session::SharedSession;
 
@@ -42,7 +44,8 @@ impl LayerEdit {
             parent: l
                 .parent
                 .map_or(DMat4::IDENTITY, |i| comp.layers[i].world_matrix),
-            three_d: l.switches.three_d,
+            // Cameras and lights are always 3D.
+            three_d: l.switches.three_d || matches!(l.kind, LayerKind::Camera | LayerKind::Light),
         }
     }
 
@@ -89,10 +92,11 @@ pub(super) fn handles(l: &EvaluatedLayer, view: &View) -> Option<[Pos2; 8]> {
     Some(out)
 }
 
-/// The anchor point of a layer on screen.
+/// The anchor point of a layer on screen (far off screen behind the camera).
 pub(super) fn anchor_screen(l: &EvaluatedLayer, view: &View) -> Pos2 {
     let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-    view.to_screen(DVec2::new(a.x, a.y))
+    view.project(a, render::is_3d(l))
+        .unwrap_or(Pos2::new(f32::MAX, f32::MAX))
 }
 
 /// What a drag does.
@@ -118,6 +122,45 @@ pub(crate) enum Kind {
         /// otherwise the content pans behind the anchor.
         compensate: bool,
     },
+    /// A 3D layer's axis arrow: Position along `dir` (comp space, unit).
+    Axis {
+        axis: usize,
+        origin: DVec3,
+        dir: DVec3,
+        camera: Box<Camera>,
+        size: DVec2,
+        /// Where along the axis the drag started.
+        start: f64,
+    },
+    /// A 3D layer's scale arrow: Scale `axis` by how far along `dir` the
+    /// pointer is from `origin`, relative to where it started.
+    AxisScale {
+        axis: usize,
+        origin: DVec3,
+        dir: DVec3,
+        camera: Box<Camera>,
+        size: DVec2,
+        start: f64,
+    },
+    /// A 3D layer's rotation ring: X / Y / Z Rotation (or Orientation) `axis`.
+    Spin {
+        axis: usize,
+        center: DVec2,
+        start: DVec2,
+        last: f64,
+        /// +1 or −1: a clockwise drag turns this way about the axis.
+        sign: f64,
+        orientation: bool,
+    },
+}
+
+/// The plane a 3D layer moves in when dragged: parallel to the view at the
+/// grabbed layer's depth.
+#[derive(Clone, Copy)]
+pub(crate) struct ViewPlane {
+    pub camera: Camera,
+    pub size: DVec2,
+    pub depth: f64,
 }
 
 /// The point that snaps and what it snaps to (comp space).
@@ -159,6 +202,8 @@ pub(crate) struct TransformDrag {
     /// Guides / Grid): `(vertical, at)` comp pixels, within `line_snap`.
     lines: Vec<(bool, f64)>,
     line_snap: f64,
+    /// 3D layers move in this plane (Move).
+    plane: Option<ViewPlane>,
 }
 
 impl TransformDrag {
@@ -177,6 +222,7 @@ impl TransformDrag {
             guide: None,
             lines: Vec::new(),
             line_snap: 0.0,
+            plane: None,
         }
     }
 
@@ -184,6 +230,12 @@ impl TransformDrag {
     pub fn with_lines(mut self, lines: Vec<(bool, f64)>, distance: f64) -> Self {
         self.lines = lines;
         self.line_snap = distance;
+        self
+    }
+
+    /// 3D layers move parallel to the view (through `plane`'s camera).
+    pub fn with_plane(mut self, plane: Option<ViewPlane>) -> Self {
+        self.plane = plane;
         self
     }
 
@@ -277,10 +329,88 @@ impl TransformDrag {
             _ => DVec2::ZERO,
         };
         match &mut self.kind {
-            Kind::Move { .. } => {
+            Kind::Move { start } => {
                 let d = offset;
+                let start = *start;
+                let world = self.plane.map(|v| {
+                    v.camera.unproject(start + d, v.depth, v.size)
+                        - v.camera.unproject(start, v.depth, v.size)
+                });
                 for e in &mut self.edits {
-                    e.now.position = e.start.position + e.to_parent(d);
+                    e.now.position = e.start.position
+                        + match world {
+                            Some(w) if e.three_d => e.parent.inverse().transform_vector3(w),
+                            _ => e.to_parent(d),
+                        };
+                }
+            }
+            Kind::Axis {
+                origin,
+                dir,
+                camera,
+                size,
+                start,
+                ..
+            } => {
+                let Some(t) = super::gizmo3d::along(camera, *size, p, *origin, *dir) else {
+                    return;
+                };
+                let w = *dir * (t - *start);
+                for e in &mut self.edits {
+                    e.now.position = e.start.position + e.parent.inverse().transform_vector3(w);
+                }
+            }
+            Kind::AxisScale {
+                axis,
+                origin,
+                dir,
+                camera,
+                size,
+                start,
+            } => {
+                let Some(t) = super::gizmo3d::along(camera, *size, p, *origin, *dir) else {
+                    return;
+                };
+                if start.abs() < 1e-6 {
+                    return;
+                }
+                let ratio = t / *start;
+                for e in &mut self.edits {
+                    e.now.scale[*axis] = e.start.scale[*axis] * ratio;
+                }
+            }
+            Kind::Spin {
+                axis,
+                center,
+                start,
+                last,
+                sign,
+                orientation,
+            } => {
+                let a0 = (*start - *center).to_angle().to_degrees();
+                let a1 = (p - *center).to_angle().to_degrees();
+                let mut delta = a1 - a0;
+                delta += ((*last - delta) / 360.0).round() * 360.0;
+                *last = delta;
+                delta *= *sign;
+                let i = *axis;
+                let pick = |t: &Transform| {
+                    if *orientation {
+                        t.orientation[i]
+                    } else {
+                        t.rotation[i]
+                    }
+                };
+                if shift && let Some(e0) = self.edits.first() {
+                    let r0 = pick(&e0.start);
+                    delta = ((r0 + delta) / 45.0).round() * 45.0 - r0;
+                }
+                for e in &mut self.edits {
+                    if *orientation {
+                        e.now.orientation[i] = e.start.orientation[i] + delta;
+                    } else {
+                        e.now.rotation[i] = e.start.rotation[i] + delta;
+                    }
                 }
             }
             Kind::Scale { handle, bounds } => {
@@ -408,6 +538,16 @@ impl TransformDrag {
         }
     }
 
+    /// The gizmo axis an axis or ring drag uses.
+    pub fn axis(&self) -> Option<usize> {
+        match self.kind {
+            Kind::Axis { axis, .. } | Kind::AxisScale { axis, .. } | Kind::Spin { axis, .. } => {
+                Some(axis)
+            }
+            _ => None,
+        }
+    }
+
     /// Whether anything changed.
     pub fn changed(&self) -> bool {
         self.edits.iter().any(|e| e.now != e.start)
@@ -430,6 +570,12 @@ impl TransformDrag {
             }
             if e.now.scale != e.start.scale {
                 push("transform:scale", v3(e.now.scale));
+            }
+            if e.now.rotation.x != e.start.rotation.x {
+                push("transform:rotation_x", Value::Float(e.now.rotation.x));
+            }
+            if e.now.rotation.y != e.start.rotation.y {
+                push("transform:rotation_y", Value::Float(e.now.rotation.y));
             }
             if e.now.rotation.z != e.start.rotation.z {
                 push("transform:rotation", Value::Float(e.now.rotation.z));

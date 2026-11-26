@@ -44,6 +44,11 @@ pub struct AnimEvaluator {
     assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
+    /// Shape and text layers' content of the previous conversion, by layer:
+    /// reused while what the provider draws is unchanged, so a layer that only
+    /// moves costs no deep clone, hash or JSON per frame. Swept after each
+    /// top-level conversion.
+    customs: rustc_hash::FxHashMap<PrimPath, (CustomContent, bool)>,
 }
 
 impl AnimEvaluator {
@@ -56,6 +61,7 @@ impl AnimEvaluator {
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
+            customs: rustc_hash::FxHashMap::default(),
         }
     }
 
@@ -153,6 +159,9 @@ impl AnimEvaluator {
                 out.motion_samples = std::mem::take(s).into();
             }
             rc.layers.push(out);
+        }
+        if depth == 0 {
+            self.customs.retain(|_, (_, used)| std::mem::take(used));
         }
         Ok(rc)
     }
@@ -273,19 +282,48 @@ impl AnimEvaluator {
                 .effects
                 .iter()
                 .filter(|_| l.switches.effects)
-                .map(|e| RenderEffect {
-                    path: e.path.clone(),
-                    effect: e.match_name.clone(),
-                    enabled: e.enabled,
-                    params: e
+                .map(|e| {
+                    let mut params: Vec<(u32, bae_model::Value)> = e
                         .params
                         .iter()
                         .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
-                        .collect(),
+                        .collect();
+                    // The Paint effect's strokes visible at this frame.
+                    if e.match_name == crate::paint::PAINT_EFFECT {
+                        let strokes = crate::paint::strokes(&e.children, l.layer_time);
+                        params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
+                    }
+                    RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: e.enabled,
+                        params,
+                    }
                 })
                 .collect();
         }
         Ok(out)
+    }
+
+    /// The previous conversion's content of shape or text layer `l` while what
+    /// its provider draws is unchanged; otherwise `make`'s (remembered).
+    fn reuse(
+        &mut self,
+        l: &EvaluatedLayer,
+        make: impl FnOnce(&EvaluatedLayer) -> LayerContent,
+    ) -> LayerContent {
+        if let Some((content, used)) = self.customs.get_mut(&l.path)
+            && let Some(prev) = content.data.downcast_ref::<EvaluatedLayer>()
+            && same_drawing(prev, l)
+        {
+            *used = true;
+            return LayerContent::Custom(content.clone());
+        }
+        let content = make(l);
+        if let LayerContent::Custom(c) = &content {
+            self.customs.insert(l.path.clone(), (c.clone(), true));
+        }
+        content
     }
 
     fn content(
@@ -304,24 +342,28 @@ impl AnimEvaluator {
         match &l.source {
             // Shape and text layers are drawn by 05's providers from the
             // evaluated layer (contents, source text, animators).
-            LayerSource::None if l.kind == LayerKind::Shape => Ok(custom(SHAPE_PROVIDER, l, |h| {
-                hash_prims(&l.contents, h);
-                if has_wiggle(&l.contents) {
-                    l.layer_time.hash(h);
-                }
-            })),
-            LayerSource::None if l.kind == LayerKind::Text => Ok(custom(TEXT_PROVIDER, l, |h| {
-                if let Some(doc) = &l.text {
-                    serde_json::to_vec(doc).unwrap_or_default().hash(h);
-                }
-                hash_prims(&l.text_animators, h);
-                // Text on a path: its options and the mask's shape.
-                if let Some(tp) = &l.text_path {
-                    serde_json::to_vec(tp).unwrap_or_default().hash(h);
-                    if let Some(m) = l.masks.iter().find(|m| m.path == tp.mask) {
-                        serde_json::to_vec(&m.shape).unwrap_or_default().hash(h);
+            LayerSource::None if l.kind == LayerKind::Shape => Ok(self.reuse(l, |l| {
+                custom(SHAPE_PROVIDER, l, |h| {
+                    hash_prims(&l.contents, h);
+                    if has_wiggle(&l.contents) {
+                        l.layer_time.hash(h);
                     }
-                }
+                })
+            })),
+            LayerSource::None if l.kind == LayerKind::Text => Ok(self.reuse(l, |l| {
+                custom(TEXT_PROVIDER, l, |h| {
+                    if let Some(doc) = &l.text {
+                        serde_json::to_vec(doc).unwrap_or_default().hash(h);
+                    }
+                    hash_prims(&l.text_animators, h);
+                    // Text on a path: its options and the mask's shape.
+                    if let Some(tp) = &l.text_path {
+                        serde_json::to_vec(tp).unwrap_or_default().hash(h);
+                        if let Some(m) = l.masks.iter().find(|m| m.path == tp.mask) {
+                            serde_json::to_vec(&m.shape).unwrap_or_default().hash(h);
+                        }
+                    }
+                })
             })),
             LayerSource::None => Ok(LayerContent::None),
             LayerSource::Comp { comp, nested, .. } => match nested {
@@ -433,6 +475,25 @@ fn custom(provider: &str, l: &EvaluatedLayer, hash: impl FnOnce(&mut FxHasher)) 
     })
 }
 
+/// Whether a shape or text provider draws `a` and `b` the same (what the
+/// custom content hashes; the transform does not matter).
+fn same_drawing(a: &EvaluatedLayer, b: &EvaluatedLayer) -> bool {
+    a.kind == b.kind
+        && match b.kind {
+            LayerKind::Shape => {
+                a.contents == b.contents
+                    && (a.layer_time == b.layer_time || !has_wiggle(&b.contents))
+            }
+            LayerKind::Text => {
+                a.text == b.text
+                    && a.text_animators == b.text_animators
+                    && a.text_path == b.text_path
+                    && (b.text_path.is_none() || a.masks == b.masks)
+            }
+            _ => false,
+        }
+}
+
 fn has_wiggle(prims: &[EvaluatedPrim]) -> bool {
     prims.iter().any(|p| {
         matches!(
@@ -454,7 +515,7 @@ fn hash_prims(prims: &[EvaluatedPrim], h: &mut FxHasher) {
         p.path.hash(h);
         p.prim_type.hash(h);
         p.attrs.len().hash(h);
-        for (name, value) in &p.attrs {
+        for (name, value) in p.attrs.iter() {
             name.hash(h);
             hash_value(value, h);
         }
