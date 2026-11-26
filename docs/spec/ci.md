@@ -1,19 +1,18 @@
 # CI 分档
 
-负责：01 `core/foundation`。CI 分快、全两档。快检查每次推送都跑，几分钟出结果；全量只在合并前和 dev/main 上跑。合并脚本（`tools/merge-train`）按下面的检查名判断能不能合并。
+负责：01 `core/foundation`。CI 分快、全两档。PR 更新时运行快检查。dev、main 和版本标签触发完整检查。合并脚本（`tools/merge-train`）按下面的检查名判断能不能合并。
 
 ## 检查名和触发条件
 
 | 检查名（GitHub check run 的 `name`） | 工作流 | 什么时候跑 |
 |---|---|---|
 | `fast / Windows x64`（macOS 只在 full 里跑） | `.github/workflows/ci-fast.yml` | PR 的 opened、synchronize（推送、update-branch）、reopened。加标签不触发 |
-| `full / macOS arm64`、`full / Windows x64` | `.github/workflows/ci.yml` | 推送到 dev 或 main；PR 带 `merge-ready` 标签时的 labeled（加的就是这个标签）、synchronize、opened、reopened |
+| `full / macOS arm64`、`full / Windows x64` | `.github/workflows/ci.yml` | 推送到 dev、main 或 `v*` 标签，或手动运行完整检查 |
+| `package / macOS arm64`、`package / Windows x64` | `.github/workflows/ci.yml` | 手动运行并选择 `packages_only`。生成 DMG 与 Windows ZIP，供发布前复测 |
 
 - 快检查每次都会出结论：没有改到任何 crate 的 PR（纯文档等）也会跑这个 job，只是跳过编译，结论是 success，不会是 skipped。
-- PR 没有 `merge-ready` 标签时，full job 被跳过（结论 skipped），名字是没展开的 `full / ${{ matrix.name }}`，和 `full / macOS arm64` 这些名字不同，按名字取最新一条时不会被它盖住。
-- 合并脚本对每个检查名取 PR 当前 head 上最新的一条 check run（id 最大），**只认 success**；skipped、cancelled、没有记录都算不通过。同一个 head 上可能先有一条 skipped，加标签后再有一条 success。
-- 同一个 PR 推了新提交，旧的运行会被取消（cancelled）。没带标签而被跳过的 full 运行不会取消正在跑的 full。dev/main 上的 full 不取消，每次都跑完并保存构建缓存。
-- 合并脚本 update-branch 以后，PR 带着标签，synchronize 会自动重跑快检查和全量。
+- 合并脚本以 PR 当前 head 的最新快检查为准，只有 success 才进入合并队列。新推送或 update-branch 会触发新的快检查，取代上一次运行。
+- 合入 dev 后，合并脚本检查完整 CI。dev/main 的完整检查写入构建缓存。
 - PR 有合并冲突时 GitHub 不触发 pull_request 运行，head 上就没有检查。
 
 ## 快检查（目标约 5 分钟）

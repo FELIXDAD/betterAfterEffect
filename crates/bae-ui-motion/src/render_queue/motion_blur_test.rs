@@ -55,17 +55,14 @@ fn motion_blur_preview_and_export() {
         scene.set(path, "motion_blur", Value::Bool(true)).unwrap();
     }
     let mut stage = scene.into_stage();
-    let history = Arc::new(bae_ui::history::HistoryLog::new());
-    let mut resources = Resources::new();
-    resources.insert(history.clone());
-    stage.subscribe(move |event| history.record(event));
+    let resources = Resources::new();
     let registry = Arc::new(ViewportTextureRegistry::new());
     let mut preview = GpuPreview::with(gpu.clone(), registry.clone());
     registry.set_display_handle(preview.viewport(), Some(1));
     let mut eval = EvalCache::default();
     let mut preview_alpha = |stage: &Stage, frame| {
         let ec = eval
-            .get(&resources)
+            .get(stage)
             .evaluate_comp(stage, &comp, rate.frame_to_time(frame))
             .unwrap();
         preview
