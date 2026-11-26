@@ -206,9 +206,11 @@ fn secondary(mut b: DefBuilder) -> DefBuilder {
     color(&mut b, 71, "Add Color", "添加颜色", [0., 0., 0., 1.]);
     color(&mut b, 72, "Remove Color", "移除颜色", [0., 0., 0., 1.]);
     opaque(&mut b, 73, "HSL Sliders", "HSL 滑块");
-    b = scalar(b, 1006, "Hue Range", "色相范围", 18., 0., 180.);
-    b = scalar(b, 1007, "Saturation Range", "饱和度范围", 5., 0., 100.);
-    b = scalar(b, 1008, "Lightness Range", "亮度范围", 5., 0., 100.);
+    let [hue, sat, light] = super::key::DEFAULT_WIDTHS;
+    b = scalar(b, 1006, "Hue Range", "色相范围", hue, 0., 180.);
+    b = scalar(b, 1007, "Saturation Range", "饱和度范围", sat, 0., 100.);
+    b = scalar(b, 1008, "Lightness Range", "亮度范围", light, 0., 100.);
+    b = b.checkbox(1017, "Has Key Selection", "已有键选区", true);
     b = scalar(b, 1009, "Falloff", "衰减", 5., 0., 100.);
     b = b.checkbox(74, "Show Mask", "显示蒙版", false);
     b = b.popup(75, " ", " ", 1, menus::MASK);
@@ -312,6 +314,7 @@ pub(super) fn definition() -> (EffectDef, Vec<(u32, String)>) {
     for p in &mut def.params {
         if p.id >= 1000 {
             p.match_name = None;
+            p.flags.hidden = p.id == 1017;
             continue;
         }
         p.flags.cannot_animate = !matches!(p.id,7..=8 | 11..=16 | 20 | 26 | 28..=33 |

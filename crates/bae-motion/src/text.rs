@@ -83,6 +83,8 @@ impl Command for CreateText {
                 source: None,
                 index: p.index,
                 color: None,
+                solids_folder_name: None,
+                solids_folder_label: None,
                 size: None,
                 text: Some(p.text.clone()),
                 font_size: Some(size),
@@ -214,6 +216,7 @@ impl Command for SetText {
         SetAt.run(
             tx,
             SetAtParams {
+                auto_key: false,
                 path: p.layer,
                 attr: SOURCE.into(),
                 time,
@@ -390,6 +393,7 @@ impl Command for SetTextStyle {
             SetAt.run(
                 tx,
                 SetAtParams {
+                    auto_key: false,
                     path: layer,
                     attr: SOURCE.into(),
                     time,

@@ -34,6 +34,7 @@ mod files_flow;
 mod i18n_retest;
 #[cfg(target_os = "macos")]
 mod i18n_scan;
+mod import_preferences;
 #[cfg(target_os = "macos")]
 mod layers;
 #[cfg(target_os = "macos")]
@@ -43,12 +44,14 @@ mod memory_preferences;
 mod menus;
 mod preference_controls;
 mod preview_switches;
+mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
 #[cfg(target_os = "macos")]
 mod render_queue;
 #[cfg(target_os = "macos")]
 mod settings;
+mod shape_anchor;
 mod shortcut_sweep;
 #[cfg(target_os = "macos")]
 mod shortcuts_dialog;
@@ -262,7 +265,12 @@ impl Gui {
         };
         match inv.id.as_str() {
             ids::QUIT => {
-                if crate::view_state::confirm_quit(&self.app, &mut self.doc, &mut self.dialogs) {
+                if crate::view_state::confirm_quit(
+                    &self.app,
+                    &mut self.doc,
+                    &self.workspace,
+                    &mut self.dialogs,
+                ) {
                     self.quit = true;
                 }
             }
@@ -275,6 +283,7 @@ impl Gui {
                 crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.doc,
+                    &mut self.workspace,
                     &mut self.dialogs,
                     &inv,
                 );

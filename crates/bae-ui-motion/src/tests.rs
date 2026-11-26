@@ -592,6 +592,7 @@ fn gpu_preview_renders_a_value_drag_in_the_background() {
     preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
     let own = shown(&registry, &preview);
     h.session().lock().scrub = Some(crate::session::Scrub {
+        auto_key: false,
         path: solid.clone(),
         attr: "transform:opacity".into(),
         value: Value::Float(0.0),
@@ -641,6 +642,7 @@ fn value_drag_reads_samples_on_the_live_thread() {
     let mut eval = bae_anim::Evaluator::new();
     eval.set_image_samples(Some(preview.samples().clone()));
     h.session().lock().scrub = Some(crate::session::Scrub {
+        auto_key: false,
         path: solid.clone(),
         attr: "transform:opacity".into(),
         value: Value::Float(50.0),
@@ -821,11 +823,35 @@ fn catalog_lines() -> Vec<String> {
                     sort_run(&mut level, &mut run);
                     level.push(format!("{prefix} > {} ▸", sub.title));
                     let mut inner = Vec::new();
-                    walk(
-                        &format!("{prefix} > {}", sub.title),
-                        sub.children,
-                        &mut inner,
-                    );
+                    if sub.title == "Layer Styles" {
+                        let path = format!("{prefix} > {}", sub.title);
+                        // Both captured menu bars have an empty dynamic submenu.
+                        // The layer context-menu capture supplies its populated order.
+                        for title in [
+                            "Convert to Editable Styles",
+                            "Show All",
+                            "Remove All",
+                            "---",
+                            "Blending Options",
+                            "Drop Shadow",
+                            "Inner Shadow",
+                            "Outer Glow",
+                            "Inner Glow",
+                            "Bevel and Emboss",
+                            "Satin",
+                            "Color Overlay",
+                            "Gradient Overlay",
+                            "Stroke",
+                        ] {
+                            inner.push(format!("{path} > {title}"));
+                        }
+                    } else {
+                        walk(
+                            &format!("{prefix} > {}", sub.title),
+                            sub.children,
+                            &mut inner,
+                        );
+                    }
                     level.extend(inner);
                 }
                 Node::Effects => {
@@ -3279,6 +3305,20 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
         bae_motion::paint::strokes_of(&h.stage, &effects[0]).len(),
         1
     );
+    // The Timeline shows Paint ▸ Brush 1 ▸ Path, Stroke Options, Transform.
+    let label = |n: &crate::props::Node| match n {
+        crate::props::Node::Group {
+            label, children, ..
+        } => (label.clone(), children.clone()),
+        crate::props::Node::Prop { label, .. } => (label.clone(), Vec::new()),
+    };
+    let fx = crate::props::effect_nodes(&h.stage, &solid);
+    let (_, rows) = label(&fx[0]);
+    let (brush, parts) = label(rows.last().unwrap());
+    assert_eq!(brush, "Brush 1");
+    let names: Vec<String> = parts.iter().map(|n| label(n).0).collect();
+    assert_eq!(names, ["Path", "Stroke Options", "Transform: Brush 1"]);
+    assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
 /// #599: the Project panel starts renaming the item another panel asks for.
