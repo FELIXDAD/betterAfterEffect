@@ -25,6 +25,8 @@ const REMOVE: Shader = Shader {
         include_str!("remove.wgsl")
     ),
 };
+/// Remove Grain fills a workgroup tile before the non-local means loop.
+const REMOVE_ENTRY: &str = "remove_main";
 const PROFILE: Shader = Shader {
     label: "bae.effects.grain-patches",
     source: concat!(
@@ -43,9 +45,10 @@ pub(crate) fn prewarm(
     rt: &crate::gpu::Runtime,
     format: bae_gpu::wgpu::TextureFormat,
 ) -> Result<(), RenderError> {
-    for shader in [MATCH, REMOVE, PROFILE, REDUCE] {
+    for shader in [MATCH, PROFILE, REDUCE] {
         shader.kernel(rt, format)?;
     }
+    REMOVE.kernel_at(rt, format, REMOVE_ENTRY)?;
     Ok(())
 }
 
@@ -131,7 +134,11 @@ impl TargetEffect for Grain {
         if self.matching && reference.is_none() {
             return Ok(input.clone());
         }
-        let shader = if self.matching { &MATCH } else { &REMOVE };
+        let (shader, entry) = if self.matching {
+            (&MATCH, "main")
+        } else {
+            (&REMOVE, REMOVE_ENTRY)
+        };
         let count = v
             .f(if self.matching { 10 } else { 3 })
             .round()
@@ -153,7 +160,8 @@ impl TargetEffect for Grain {
             [Some(&patches), None, None],
             [0, count],
         )?;
-        shader.dispatch(
+        shader.dispatch_at(
+            entry,
             target,
             v,
             roi,
@@ -168,6 +176,7 @@ impl TargetEffect for Grain {
                 },
             ],
             [0, 0],
+            |_, _| {},
         )
     }
 }

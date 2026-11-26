@@ -25,6 +25,9 @@ impl Effect for Blobbylize {
     fn def(&self) -> &EffectDef {
         self.0.def()
     }
+    fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        self.0.uses_scene(p)
+    }
     fn prepare_scene(&self, instance: &mut RenderEffect, comp: &RenderComp, layer: &RenderLayer) {
         self.0.prepare_scene(instance, comp, layer);
     }

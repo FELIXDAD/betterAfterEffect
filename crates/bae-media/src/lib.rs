@@ -48,6 +48,7 @@
 #[cfg(target_vendor = "apple")]
 pub mod apple;
 pub mod audio;
+mod audio_fx;
 mod cache;
 pub mod export;
 mod frame;
@@ -56,13 +57,16 @@ mod library;
 #[cfg(windows)]
 pub mod media_foundation;
 mod meta;
+pub mod mix;
 mod module;
 mod mp4;
+pub mod playback;
 pub mod sequence;
 mod source;
 pub mod still;
 pub mod time;
 pub mod trim;
+pub mod wav;
 
 use std::sync::Arc;
 
@@ -81,6 +85,7 @@ pub use source::{MediaError, MediaFormat, MediaFormats, MediaSource, OpenOptions
 pub use time::{FrameRate, Time, Timecode};
 
 pub use audio::{AudioBuffer, AudioSource, FileAudio, MemoryAudio, Waveform};
+pub use audio_fx::eq_band_response_db;
 pub use export::{
     CancelToken, EncodeOutput, EncodeSettings, EncodeStats, Encoder, EncoderFormat, ExrCompression,
     FrameProducer, FrameReadback, MediaEncoders, PngCompression, ProResProfile, ProducedFrame,

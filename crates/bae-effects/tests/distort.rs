@@ -328,3 +328,16 @@ fn blobbylize_keeps_the_layer_alpha_inside_its_edges() {
     }
     assert_eq!(out.get(4, 4)[3], 0.);
 }
+
+#[test]
+fn blobbylize_requests_scene_data_only_for_comp_lights() {
+    let fx = builtin("CC Blobbylize");
+    for (using, expected) in [(1, false), (2, true)] {
+        let instance = instance("CC Blobbylize", vec![(22, Value::Int(using))]);
+        assert_eq!(
+            fx.effect()
+                .uses_scene(&bae_render::EffectParams::new(&instance)),
+            expected
+        );
+    }
+}

@@ -39,6 +39,7 @@ pub struct Document {
     /// the embedded files (`bae-package`).
     assets: AssetLocator,
     commands: CommandRegistry,
+    module_commands: Option<Arc<bae_app::Registry<dyn bae_model::DynCommand>>>,
     author: AuthorId,
     /// Sublayer versions when the project was last opened or saved.
     saved: SavePoint,
@@ -95,6 +96,7 @@ impl Document {
                 commands
             },
             author: local_author(),
+            module_commands: None,
             history,
             variants: None,
             undo_limit: bae_model::DEFAULT_UNDO_LIMIT,
@@ -107,20 +109,21 @@ impl Document {
     /// command crates such as `bae-motion`). Built-in ids are kept.
     pub fn add_module_commands(&mut self, app: &bae_app::App) {
         self.variants = app.get_registry::<bae_ui::CommandVariant>();
-        let Some(registry) = app.get_registry::<dyn bae_model::DynCommand>() else {
-            return;
-        };
-        for entry in registry.snapshot().iter() {
-            if self.commands.get(entry.id()).is_none() {
-                let _ = self.commands.register_dyn(entry.item().clone());
-            }
-        }
+        self.module_commands = app.get_registry::<dyn bae_model::DynCommand>();
     }
 
     /// `(id, English title)` of every model command (for the shortcut editor).
     pub fn command_titles(&self) -> Vec<(String, String)> {
+        let modules = self.module_commands.as_ref().map(|r| r.snapshot());
         self.commands
             .infos()
+            .chain(
+                modules
+                    .iter()
+                    .flat_map(|s| s.iter())
+                    .filter(|e| self.commands.get(e.id()).is_none())
+                    .map(|e| e.item().info()),
+            )
             .map(|i| (i.id.clone(), i.title.clone()))
             .collect()
     }
@@ -213,7 +216,12 @@ impl Document {
                 stage.redo(&self.author).is_some()
             }
             id => {
-                let Some(cmd) = self.commands.get(id).cloned() else {
+                let Some(cmd) = self
+                    .commands
+                    .get(id)
+                    .cloned()
+                    .or_else(|| self.module_commands.as_ref()?.get(id))
+                else {
                     return Outcome::Unknown;
                 };
                 let params = if inv.params.is_null() {
@@ -315,6 +323,23 @@ impl Document {
     /// has that extension, otherwise a `.bae` folder.
     pub fn save_as(&mut self, path: &Path) -> anyhow::Result<()> {
         self.write(path)
+    }
+
+    /// Save a Copy: write the project to `path` (a `.bae` folder, or `.baez`)
+    /// without changing its location or unsaved state. Files embedded in a
+    /// `.baez` the project came from go with a `.bae` copy.
+    pub fn save_a_copy(&self, path: &Path) -> anyhow::Result<()> {
+        let mut copy = self.detached_copy()?;
+        copy.save_as(path)
+            .with_context(|| path.display().to_string())?;
+        if path.is_dir()
+            && let Some(pkg) = self.assets.package()
+        {
+            for entry in pkg.entries() {
+                pkg.extract_entry(&entry.name, &path.join(native(&entry.name)))?;
+            }
+        }
+        Ok(())
     }
 
     /// Save As over another existing `.bae` project folder (issue #126): the
