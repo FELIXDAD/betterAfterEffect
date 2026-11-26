@@ -7,6 +7,10 @@
 //! picture is the layer's: its in and out points (drag an end to trim the
 //! layer; the { and } buttons set them to the current time) and the current
 //! time, with AE's In, Out and Duration readouts.
+//!
+//! The Brush, Clone Stamp and Eraser paint here: a drag becomes one stroke on
+//! the layer's Paint effect (`paint.add_stroke`, one undo step) with the Paint
+//! and Brushes panels' settings; Alt/Option-click sets the Clone Stamp source.
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
@@ -40,6 +44,10 @@ pub struct LayerPanel {
     pub(crate) show: Show,
     /// Render: the picture includes the effects up to the shown one.
     pub(crate) render: bool,
+    /// The stroke being painted: layer pixels, when it started.
+    stroke: Option<(Vec<DVec2>, std::time::Instant)>,
+    /// Clone Stamp: the source point (Alt/Option-click), layer pixels.
+    clone_point: Option<DVec2>,
     /// An end of the layer being dragged on the ruler: the in point (`true`)
     /// or the out point, and where it would go.
     trim: Option<(bool, Time)>,
@@ -168,7 +176,8 @@ impl Panel for LayerPanel {
             _ => 0,
         };
         if let Some((one, min)) = alone(&comp, &layer, effects) {
-            self.picture(ui, cx, area, &one, min, evaluated);
+            let view = self.picture(ui, cx, area, &one, min, evaluated);
+            self.paint(ui, cx, area, &view, min, evaluated);
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
         if let Some(edit) = self.time_ruler(ui, &session, &info, ruler, time, in_out) {
@@ -209,7 +218,7 @@ impl LayerPanel {
         one: &EvaluatedComp,
         min: DVec2,
         layer: &bae_anim::EvaluatedLayer,
-    ) {
+    ) -> View {
         let ppp = ui.ctx().pixels_per_point();
         let (w, h) = (one.width as f32, one.height as f32);
         let scale = ((area.width() - 24.0) / w)
@@ -269,6 +278,141 @@ impl LayerPanel {
                     &m.shape, &to_panel, &view, stroke,
                 ));
             }
+        }
+        view
+    }
+
+    /// The paint tools: drag to paint a stroke; Alt/Option-click with the
+    /// Clone Stamp sets its source.
+    fn paint(
+        &mut self,
+        ui: &Ui,
+        cx: &mut PanelContext<'_>,
+        area: Rect,
+        view: &View,
+        min: DVec2,
+        layer: &bae_anim::EvaluatedLayer,
+    ) {
+        use crate::tools::Tool;
+        let shared = crate::tools::shared(cx.resources);
+        let (tool, p) = {
+            let t = shared.lock();
+            (t.current(), t.options.paint.clone())
+        };
+        if !matches!(tool, Tool::Brush | Tool::CloneStamp | Tool::Eraser) {
+            self.stroke = None;
+            return;
+        }
+        let resp = ui.interact(area, ui.id().with("paint"), Sense::click_and_drag());
+        let to_layer = |pos: egui::Pos2| view.to_comp(pos) + min;
+        let to_screen = |q: DVec2| view.to_screen(q - min);
+        let alt = ui.input(|i| i.modifiers.alt);
+        if tool == Tool::CloneStamp
+            && alt
+            && resp.clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+        {
+            self.clone_point = Some(to_layer(pos));
+            return;
+        }
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(pos) = ui.input(|i| i.pointer.press_origin())
+        {
+            self.stroke = Some((vec![to_layer(pos)], std::time::Instant::now()));
+        }
+        if let Some((points, _)) = &mut self.stroke
+            && let Some(pos) = resp.interact_pointer_pos()
+        {
+            let q = to_layer(pos);
+            if points.last().is_none_or(|l| l.distance(q) >= 1.0) {
+                points.push(q);
+            }
+        }
+        // The brush outline at the pointer, the stroke so far.
+        let painter = ui.painter_at(area);
+        let radius = (p.diameter / 2.0) as f32 * view.scale;
+        if let Some(pos) = resp.hover_pos() {
+            painter.circle_stroke(
+                pos,
+                radius.max(1.0),
+                Stroke::new(1.0, Color32::from_gray(200)),
+            );
+        }
+        if let Some(c) = self.clone_point.filter(|_| tool == Tool::CloneStamp) {
+            let s = to_screen(c);
+            painter.line_segment(
+                [s - vec2(6.0, 0.0), s + vec2(6.0, 0.0)],
+                Stroke::new(1.0, color::ACCENT),
+            );
+            painter.line_segment(
+                [s - vec2(0.0, 6.0), s + vec2(0.0, 6.0)],
+                Stroke::new(1.0, color::ACCENT),
+            );
+        }
+        if let Some((points, _)) = &self.stroke {
+            let to = |v: f64| (v.clamp(0.0, 1.0) * 255.0) as u8;
+            let c = match tool {
+                Tool::Brush => Color32::from_rgb(
+                    to(p.foreground[0]),
+                    to(p.foreground[1]),
+                    to(p.foreground[2]),
+                ),
+                _ => Color32::from_white_alpha(120),
+            };
+            let line: Vec<egui::Pos2> = points.iter().map(|q| to_screen(*q)).collect();
+            painter.add(egui::Shape::line(
+                line,
+                Stroke::new((2.0 * radius).max(1.0), c),
+            ));
+        }
+        if !ui.input(|i| i.pointer.primary_down())
+            && let Some((points, started)) = self.stroke.take()
+        {
+            let first = points[0];
+            let offset = match (tool, self.clone_point) {
+                (Tool::CloneStamp, Some(c)) => {
+                    let o = c - first;
+                    // Aligned: later strokes keep this offset.
+                    if p.aligned {
+                        self.clone_point = None;
+                        shared.lock().options.paint.clone_offset = [o.x, o.y];
+                    }
+                    o
+                }
+                _ => DVec2::from_array(p.clone_offset),
+            };
+            let flicks = |s: f64| Time::from_seconds(s).0;
+            let params = serde_json::json!({
+                "layer": layer.path,
+                "tool": match tool { Tool::CloneStamp => "clone", Tool::Eraser => "eraser", _ => "brush" },
+                "points": points.iter().map(|q| [q.x, q.y]).collect::<Vec<_>>(),
+                "time": layer.layer_time.0,
+                "duration": p.duration,
+                "frames": p.frames,
+                "draw_time": flicks(started.elapsed().as_secs_f64()),
+                "color": [p.foreground[0], p.foreground[1], p.foreground[2], 1.0],
+                "diameter": p.diameter,
+                "angle": p.angle,
+                "hardness": p.hardness,
+                "roundness": p.roundness,
+                "spacing": p.spacing,
+                "opacity": p.opacity,
+                "flow": p.flow,
+                "channels": p.channels,
+                "mode": p.mode,
+                "erase": (tool == Tool::Eraser).then_some(&p.erase),
+                "clone_source": p.clone_source,
+                "clone_offset": [offset.x, offset.y],
+                "clone_time_shift": flicks(p.clone_time_shift),
+            });
+            cx.invoke_with("paint.add_stroke", params);
+            // AE shows the Paint effect once there is paint.
+            let paint = layer
+                .effects
+                .iter()
+                .position(|e| e.match_name == "ADBE Paint")
+                .unwrap_or(layer.effects.len());
+            self.show = Show::Effect(paint);
         }
     }
 

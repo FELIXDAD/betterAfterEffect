@@ -117,7 +117,7 @@
 | License... | 131108 | `motion.file.license` |  |  |  | B | Ⓐ |
 | Reveal in Explorer | 131109 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
 | Reveal in Bridge | 131110 | `motion.file.reveal_in_bridge` |  |  |  | B | Ⓐ |
-| Project Settings... | 131112 | `motion.file.project_settings` |  | Ctrl+Alt+Shift+K | Cmd+Opt+Shift+K | E | ☐ |
+| Project Settings... | 131112 | `motion.file.project_settings` |  | Ctrl+Alt+Shift+K | Cmd+Opt+Shift+K | E | ✅ |
 | Exit（仅 Windows） | 131114 | `app.quit` |  | Ctrl+Q | Cmd+Q | B | ✅ |
 
 ### Edit
@@ -315,10 +315,10 @@
 | Transform ▸ Fit to Comp | 8912911 | `motion.layer.fit_to_comp` |  | Ctrl+Alt+F | Cmd+Opt+F | B | ✅ |
 | Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ✅ |
 | Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ✅ |
-| Transform ▸ Auto-Orient... | 8912915 | `motion.layer.auto_orient` |  | Ctrl+Alt+O | Cmd+Opt+O | E | ☐ |
+| Transform ▸ Auto-Orient... | 8912915 | `motion.layer.auto_orient` |  | Ctrl+Alt+O | Cmd+Opt+O | E | ✅ |
 | Time ▸ Enable Time Remapping | 1966081 | `motion.layer.enable_time_remapping` |  | Ctrl+Alt+T | Cmd+Opt+T | B | ☐ |
 | Time ▸ Time-Reverse Layer | 1966082 | `motion.layer.time_reverse_layer` |  | Ctrl+Alt+R | Cmd+Opt+R | B | ☐ |
-| Time ▸ Time Stretch... | 1966083 | `motion.layer.time_stretch` |  |  |  | E | ☐ |
+| Time ▸ Time Stretch... | 1966083 | `motion.layer.time_stretch` |  |  |  | E | ✅ |
 | Time ▸ Freeze Frame | 1966084 | `motion.layer.freeze_frame` |  |  |  | B | ☐ |
 | Time ▸ Freeze On Last Frame | 1966085 | `motion.layer.freeze_on_last_frame` |  |  |  | B | ☐ |
 | Time ▸ Align Video to Data | 1966086 | `motion.layer.align_video_to_data` |  |  |  | B | ⏸ |
@@ -565,7 +565,7 @@
 | Switch to Last 3D View | 589857 | `motion.view.switch_to_last_3d_view` |  | Esc | Esc | A | ⏸ |
 | Look at Selected Layers | 589858 | `motion.view.look_at_selected_layers` |  | Ctrl+Alt+Shift+\\ / F | Cmd+Opt+Shift+\\ / F | A | ⏸ |
 | Look at All Layers | 589859 | `motion.view.look_at_all_layers` |  | Ctrl+Shift+F | Cmd+Shift+F | A | ⏸ |
-| Go to Time... | 589861 | `motion.view.go_to_time` |  | Alt+Shift+J | Opt+Shift+J | B | ☐ |
+| Go to Time... | 589861 | `motion.view.go_to_time` |  | Alt+Shift+J | Opt+Shift+J | B | ✅ |
 
 ### Window
 
