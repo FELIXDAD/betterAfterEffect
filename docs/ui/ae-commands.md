@@ -629,7 +629,7 @@
 | Render Queue | 524327 | `window.panel` | `{"id":"render_queue","toggle":true}` | Ctrl+Alt+0 | Cmd+Opt+0 | B | ✅ |
 | Footage | 524328 | `window.panel` | `{"id":"footage","toggle":true}` |  |  | E | ⏸ |
 | Project | 524329 | `window.panel` | `{"id":"project","toggle":true}` | Ctrl+0 | Cmd+0 | B | ✅ |
-| Create Nulls From Paths.jsx（仅 Windows） | 524331 | `motion.window.script_panel` | `{"script":"Create Nulls From Paths.jsx"}` |  |  | B | ⏸ |
+| Create Nulls From Paths.jsx（仅 Windows） | 524331 | `window.panel` | `{"id":"create_nulls_from_paths","toggle":true}` |  |  | B | ✅ |
 | VR Comp Editor.jsx（仅 Windows） | 524338 | `motion.window.script_panel` | `{"script":"VR Comp Editor.jsx"}` |  |  | B | ⏸ |
 
 ### Help
