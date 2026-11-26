@@ -284,6 +284,14 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
                 tracing::info!("opened {}", path.display());
                 crate::view_state::restore(&mut app, &document);
             }
+            // A missing template at startup: the blank project, without a
+            // dialog on every launch (File > New Project says why).
+            Err(error) if global.open.is_empty() && global.smoke_test.is_none() => {
+                tracing::warn!(
+                    "project template not loaded: {}",
+                    crate::file_error::describe_open(path, &error)
+                );
+            }
             Err(error) if global.smoke_test.is_some() => {
                 eprintln!(
                     "{}: {}",

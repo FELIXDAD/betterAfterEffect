@@ -202,6 +202,90 @@ fn moving_square(effect: RenderEffect) -> impl Fn(Time) -> RenderComp {
 }
 
 #[test]
+fn cc_time_effects_respect_nested_motion_blur_on_the_current_sample() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    for (name, popup, settings) in [
+        (
+            "CC Wide Time",
+            3,
+            vec![(1, Value::Int(0)), (2, Value::Int(0))],
+        ),
+        ("CC Force Motion Blur", 4, vec![(3, Value::Float(0.))]),
+    ] {
+        let mut draw = |mode| {
+            let mut params = settings.clone();
+            params.push((popup, Value::Int(mode)));
+            let scene = moving_square(effect("time", name, params));
+            pixels(
+                &mut renderer,
+                |time| {
+                    let mut comp = scene(time);
+                    let LayerContent::Comp(inner) = &mut comp.layers[0].content else {
+                        unreachable!()
+                    };
+                    let square = &mut Arc::make_mut(inner).layers[0];
+                    square.motion_samples = [0., 8.]
+                        .map(|offset| bae_render::LayerSample {
+                            transform: square.transform
+                                * glam::DAffine2::from_translation(glam::DVec2::new(offset, 0.)),
+                            matrix_3d: None,
+                        })
+                        .into();
+                    comp
+                },
+                0.,
+            )
+        };
+        let off = draw(2);
+        let on = draw(1);
+        let edge = (4 * 48 + 13) * 4;
+        assert_eq!(off[edge], 0, "{name}");
+        assert!(on[edge] > 20, "{name}");
+    }
+}
+
+#[test]
+fn force_motion_blur_samples_the_backdrop_on_an_adjustment_layer() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let image = pixels(
+        &mut renderer,
+        |time| {
+            let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+            comp.time = time;
+            let mut adjustment = RenderLayer::new(path(CLIP), LayerContent::None);
+            adjustment.adjustment = true;
+            adjustment.time = time;
+            adjustment.effects.push(effect(
+                "blur",
+                "CC Force Motion Blur",
+                vec![
+                    (1, Value::Int(2)),
+                    (3, Value::Float(360.)),
+                    (5, Value::Float(-180.)),
+                ],
+            ));
+            let color = if time.as_seconds() < 1. {
+                [1., 0., 0., 1.]
+            } else {
+                [0., 0., 1., 1.]
+            };
+            comp.layers = vec![adjustment, solid("/comps/main/layers/bg", 16, color)];
+            comp
+        },
+        1.,
+    );
+    assert!(
+        image[0].abs_diff(128) <= 1 && image[2].abs_diff(128) <= 1,
+        "{:?}",
+        &image[..4]
+    );
+}
+
+#[test]
 fn pixel_motion_tweens_and_blurs_along_the_optical_flow() {
     let Some(mut r) = renderer() else { return };
     let red = |image: &[u8], x: usize| image[(4 * 48 + x) * 4];
