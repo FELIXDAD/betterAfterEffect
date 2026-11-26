@@ -104,7 +104,7 @@ fn assemble_modules(mut builder: AppBuilder) -> AppBuilder {
     ) {
         tracing::warn!("shape layer source not registered: {error}");
     }
-    let text = std::sync::Arc::new(bae_text::render::TextProvider::new());
+    let text = bae_text::render::TextProvider::shared();
     // Expressions' `sourceRectAtTime` measures text and shapes with it.
     text.measure_expressions();
     if let Err(error) = builder
