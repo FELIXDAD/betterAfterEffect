@@ -214,7 +214,7 @@ function __numberSeed(x) {
   __seedBits.setFloat64(0, x);
   return __hash(__seedBits.getUint32(0), __seedBits.getUint32(4));
 }
-function __offsetSeed(seed) { return __offset === 0 ? seed : __hash(seed, __offset); }
+function __offsetSeed(seed) { return __offset === 0 ? seed >>> 0 : __hash(seed, __offset); }
 function __resetRandom(seed) { __rngBase = seed >>> 0; __offset = 0; __timeless = false; __rng = null; }
 function __R() { if (__rng === null) __reseed(); return __rng; }
 function __reseed() {
