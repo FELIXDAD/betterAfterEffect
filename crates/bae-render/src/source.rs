@@ -194,7 +194,17 @@ impl EncodeContext<'_> {
     /// or overwrite all of `rect`). The texture comes from the renderer's pool
     /// and returns there when every clone of the image is dropped.
     pub fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
-        self.allocator.allocate(rect, pixel_scale)
+        self.allocate_format(rect, pixel_scale, self.format)
+    }
+
+    /// A pooled intermediate with the attachment format required by the effect.
+    pub fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
+        self.allocator.allocate(rect, pixel_scale, format)
     }
 }
 
@@ -208,7 +218,12 @@ impl fmt::Debug for EncodeContext<'_> {
 
 /// Hands out pooled working images (implemented by the renderer).
 pub(crate) trait ImageAllocator {
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError>;
+    fn allocate(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError>;
 }
 
 /// Pixels of a layer (footage, shapes, text, generators).

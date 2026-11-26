@@ -14,7 +14,7 @@ fn type_tool_click_and_type_makes_point_text() {
     // Typing keys go to the field, not to tool shortcuts (V, H …).
     h.type_text(vec![Event::Text("V".into())]);
     assert_eq!(h.tools().lock().current(), Tool::TypeHorizontal);
-    let r = h.escape();
+    let r = h.commit_text();
     let p = one(&r, "text.create");
     assert_eq!(p["text"], "HiV");
     assert_eq!(p["position"], json!([100.0, 200.0]));
@@ -38,9 +38,15 @@ fn type_tool_click_and_type_makes_point_text() {
     // One undo step.
     h.stage.undo(&h.author).unwrap();
     assert!(query::comp_layers(&h.stage, &h.comp).is_empty());
+    // Esc cancels (AE, #573): no new text layer.
+    h.click(300.0, 200.0, Modifiers::NONE);
+    h.type_text(vec![Event::Text("Gone".into())]);
+    let r = h.escape();
+    assert!(r.invocations.is_empty(), "{:?}", r.invocations);
+    assert!(h.viewer.type_tool.editing.is_none());
     // Committing without typing still makes an (empty) text layer (AE 26).
     h.click(300.0, 200.0, Modifiers::NONE);
-    let r = h.escape();
+    let r = h.commit_text();
     let p = one(&r, "text.create");
     assert_eq!(p["text"], "");
     assert_eq!(p["name"], "<empty text layer>");
@@ -83,7 +89,7 @@ fn type_tool_takes_input_method_composition() {
         preedit(""),
         Event::Ime(ImeEvent::Commit("你好".into())),
     ]);
-    let r = h.escape();
+    let r = h.commit_text();
     assert_eq!(one(&r, "text.create")["text"], "你好");
 }
 
@@ -135,7 +141,7 @@ fn type_tool_edits_an_existing_text_layer() {
         std::slice::from_ref(&layer)
     );
     h.type_text(vec![Event::Text("!".into())]);
-    let r = h.escape();
+    let r = h.commit_text();
     let p = one(&r, "text.set_text");
     assert_eq!(p["layer"], json!(layer));
     let text = p["text"].as_str().unwrap().to_owned();
@@ -148,7 +154,7 @@ fn type_tool_edits_an_existing_text_layer() {
     // Past the end of the text: the caret goes to the end.
     h.click(295.0, 180.0, Modifiers::NONE);
     h.type_text(vec![Event::Text("?".into())]);
-    let r = h.escape();
+    let r = h.commit_text();
     assert_eq!(one(&r, "text.set_text")["text"], "Hello?");
     // Layer > New > Text (E) asks the viewer to edit a layer.
     h.tools().lock().set(Tool::Selection);

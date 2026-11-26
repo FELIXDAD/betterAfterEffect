@@ -547,6 +547,7 @@ dependencies = [
  "bae-plugin",
  "bae-prefs",
  "bae-render",
+ "bae-script",
  "bae-text",
  "bae-ui",
  "bae-ui-motion",
@@ -603,6 +604,7 @@ dependencies = [
  "bae-model",
  "glam",
  "rquickjs",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -661,12 +663,15 @@ dependencies = [
  "chrono",
  "glam",
  "half",
+ "kurbo",
  "parking_lot",
  "png",
  "pollster 0.4.0",
+ "roxmltree",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "toml",
  "tracing",
@@ -678,6 +683,7 @@ version = "0.0.2"
 dependencies = [
  "bae-app",
  "bae-platform",
+ "libc",
  "parking_lot",
  "pollster 0.4.0",
  "serde",
@@ -740,6 +746,8 @@ dependencies = [
  "image",
  "objc2 0.6.5",
  "objc2-av-foundation",
+ "objc2-avf-audio",
+ "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-core-media",
  "objc2-core-video",
@@ -827,9 +835,11 @@ dependencies = [
  "bae-app",
  "bae-gpu",
  "bae-model",
+ "bae-motion",
  "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
+ "bae-script",
  "cc",
  "clap",
  "half",
@@ -838,6 +848,7 @@ dependencies = [
  "memmap2",
  "naga",
  "parking_lot",
+ "rayon",
  "rustc-hash 2.1.3",
  "rustix 1.1.6",
  "semver",
@@ -889,6 +900,21 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "bae-script"
+version = "0.0.2"
+dependencies = [
+ "bae-anim",
+ "bae-app",
+ "bae-model",
+ "bae-motion",
+ "rquickjs",
+ "schemars",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -964,6 +990,7 @@ dependencies = [
  "bae-platform",
  "bae-prefs",
  "bae-render",
+ "bae-script",
  "bae-ui",
  "bae-vector",
  "egui",
@@ -1461,6 +1488,25 @@ name = "crossbeam-channel"
 version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98b0cc327b5bc766e7fda9c9260cc0fa81b43a8e240440422dff70788e3f9ef1"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-deque"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -4499,6 +4545,26 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
+]
+
+[[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
 ]
 
 [[package]]

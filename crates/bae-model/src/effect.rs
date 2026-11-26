@@ -131,6 +131,37 @@ pub struct ParamFlags {
     pub reference_point_default: bool,
 }
 
+/// Coordinate units of an unauthored effect point. Authored points use layer pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointDefaultSpace {
+    Pixels,
+    LayerFraction,
+    AeReference,
+}
+
+impl ParamFlags {
+    pub fn point_default_space(self) -> PointDefaultSpace {
+        if self.relative_default {
+            PointDefaultSpace::LayerFraction
+        } else if self.reference_point_default {
+            PointDefaultSpace::AeReference
+        } else {
+            PointDefaultSpace::Pixels
+        }
+    }
+}
+
+impl PointDefaultSpace {
+    /// Resolve the default in layer pixels, relative to the layer's origin.
+    pub fn layer_pixels(self, [x, y]: [f64; 2], [w, h]: [f64; 2]) -> [f64; 2] {
+        match self {
+            Self::Pixels => [x, y],
+            Self::LayerFraction => [x * w, y * h],
+            Self::AeReference => [x * w * (1. / 640.), y * h * (1. / 360.)],
+        }
+    }
+}
+
 /// One parameter of an effect definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EffectParamDef {

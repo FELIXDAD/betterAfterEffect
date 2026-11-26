@@ -1,11 +1,19 @@
+mod cc;
+mod filters;
 use super::packages;
 use crate::Registry;
 use crate::effects::spatial;
 
 pub(crate) fn register(registry: &mut Registry) {
+    cc::register(registry);
+    registry.effects.extend(filters::entries());
+    registry.prewarm.push(filters::prewarm);
     packages(
         registry,
-        &[embedded!("bevel-alpha", ["shaders/bevel_alpha.wgsl"])],
+        &[
+            embedded!("bevel-edges", ["shaders/bevel_edges.wgsl"]),
+            embedded!("bevel-alpha", ["shaders/bevel_alpha.wgsl"]),
+        ],
     );
     registry.effects.push(spatial::definitions::perspective());
     registry

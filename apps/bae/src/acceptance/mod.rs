@@ -21,6 +21,7 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
 #[cfg(target_os = "macos")]
@@ -486,6 +487,16 @@ pub(crate) fn settle(h: &mut Ui) {
     }
 }
 
+/// Brings `panel` to the front of its frame (as clicking its tab does): Add to
+/// Render Queue opens the Render Queue in front of the Timeline (AE).
+pub(crate) fn to_front(h: &mut Ui, panel: &str) {
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::action::ids::OPEN_PANEL,
+        serde_json::json!({ "id": panel }),
+    ));
+    settle(h);
+}
+
 /// One input event in its own frame, then the dispatch: what the shell does
 /// for an event that arrives on its own (`about_to_wait` after each redraw).
 pub(crate) fn send(h: &mut Ui, event: Event) {
@@ -562,6 +573,36 @@ pub(crate) fn ime_compose(h: &mut Ui, preedit: &[&str], commit: &str) {
     settle(h);
 }
 
+/// Press the primary button, drag across six frames and release.
+pub(crate) fn drag(h: &mut Ui, from: Pos2, to: Pos2, modifiers: Modifiers) {
+    send(h, Event::PointerMoved(from));
+    send(h, Event::ModifiersChanged(modifiers));
+    send(
+        h,
+        Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers,
+        },
+    );
+    for i in 1..=6 {
+        let t = i as f32 / 6.0;
+        send(h, Event::PointerMoved(from + (to - from) * t));
+    }
+    send(
+        h,
+        Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers,
+        },
+    );
+    send(h, Event::ModifiersChanged(Modifiers::NONE));
+    settle(h);
+}
+
 /// Pointer click at `pos` (move, press, release).
 pub(crate) fn click_at(h: &mut Ui, pos: Pos2) {
     click_at_mods(h, pos, Modifiers::NONE);
@@ -629,6 +670,12 @@ pub(crate) fn queue_control<'a>(
 
 /// Where the text `text` was painted in the last frame (first match, inside its
 /// clip rect). Finds rows the panels paint themselves (timeline layer names).
+/// The Timeline's name column header: "Source Name" (AE's default) or
+/// "Layer Name" (after clicking it).
+pub(crate) fn timeline_header(h: &Ui) -> Option<Rect> {
+    find_text(h, "Source Name").or_else(|| find_text(h, "Layer Name"))
+}
+
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }
