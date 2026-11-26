@@ -2,6 +2,7 @@
 mod catalog;
 mod emission;
 mod engine;
+pub(crate) mod projection;
 pub(crate) use engine::{Engine, prewarm};
 mod scatter;
 mod surface;
@@ -42,6 +43,18 @@ struct Simulation {
     kind: Kind,
 }
 
+// Every birth stays in one fixed layer-time bucket throughout the particle's
+// life. Four adjacent buckets cover the live population at the requested time.
+fn texture_times(now: f64, life: f64, at_birth: bool) -> [f64; 4] {
+    let step = life.max(0.001) / 3.;
+    let first = if at_birth {
+        (now / step).floor() - 3.
+    } else {
+        0.
+    };
+    [0., 1., 2., 3.].map(|i| ((first + i) * step).max(0.))
+}
+
 fn max_lifetime(p: Params<'_>, id: u32) -> f64 {
     p.p.tracks.iter().find(|(n, _)| *n == id).map_or_else(
         || p.f(id),
@@ -69,12 +82,10 @@ impl Simulation {
                 return vec![Some(texture)];
             }
             let t = p.time.as_seconds();
-            let duration = max_lifetime(v, 5);
-            let start = if v.popup(47) == 1 { t - duration } else { 0. };
-            return (0..4)
-                .map(|i| {
+            return texture_times(t, max_lifetime(v, 5), v.popup(47) == 1)
+                .into_iter()
+                .map(|local| {
                     let mut dep = texture.clone();
-                    let local = (start + duration * f64::from(i) / 3.).max(0.);
                     dep.time = p.comp_time
                         + bae_model::Time::from_seconds((local - t) * p.layer_time_scale);
                     Some(dep)
@@ -264,7 +275,14 @@ impl Scene<'_> {
             }
         }
         for (index, sample) in samples.iter().take(64).enumerate() {
-            let value = |id| sample.values.iter().find(|(k, _)| *k == id).map(|(_, v)| v);
+            let value = |id| {
+                sample
+                    .values
+                    .iter()
+                    .find(|(k, _)| *k == id)
+                    .map(|(_, v)| v)
+                    .or_else(|| self.p.p.value(id))
+            };
             let position = if kind == Kind::World {
                 let component =
                     |id| value(id).and_then(Value::as_f64).unwrap_or(0.) as f32 * self.size[0];
