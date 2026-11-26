@@ -177,3 +177,141 @@ fn expressions_per_frame() {
         t.elapsed() / frames as u32
     );
 }
+
+/// The 4K shapes benchmark's evaluation (#386): 1000 layers, each spinning with
+/// the expression `time*1000` on Rotation. Target: ≤ 3 ms per frame on a 5090
+/// host. `cargo test --release -p bae-anim --test perf thousand_expression -- --nocapture`.
+#[test]
+fn thousand_expression_layers_per_frame() {
+    let mut stage = build(1000);
+    stage
+        .transact(&AuthorId::new("user:test").unwrap(), "exprs", |tx| {
+            for i in 0..1000 {
+                tx.apply(Op::SetExpression {
+                    path: p(&format!("/comps/main/layers/l{i}")),
+                    attr: "transform:rotation".into(),
+                    expression: Some(bae_model::Expression::new("time*1000")),
+                })?;
+            }
+            Ok::<_, bae_model::ModelError>(())
+        })
+        .unwrap();
+    let comp = p("/comps/main");
+    let mut ev = Evaluator::new();
+    ev.evaluate_comp(&stage, &comp, Time::ZERO).unwrap();
+    let frames = 60;
+    let t = Instant::now();
+    for f in 0..frames {
+        let ec = ev
+            .evaluate_comp(&stage, &comp, bae_model::FrameRate::FPS_30.frame_to_time(f))
+            .unwrap();
+        assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    }
+    println!(
+        "1000 layers × time*1000: {:?} per frame",
+        t.elapsed() / frames as u32
+    );
+}
+
+/// The evaluation half of the 4K shapes benchmark (`bae-vector/benches/shapes.rs`):
+/// 1000 shape layers, each a group with a rectangle or star and a fill, spinning
+/// with `time*1000`.
+/// `cargo test --release -p bae-anim --test perf thousand_shape_layers -- --nocapture`.
+#[test]
+fn thousand_shape_layers_per_frame() {
+    let n = 1000;
+    let mut stage = Stage::new();
+    stage
+        .transact(&AuthorId::new("user:test").unwrap(), "build", |tx| {
+            let mut create = |path: &str, t: PrimType| {
+                tx.apply(Op::CreatePrim {
+                    path: p(path),
+                    specifier: Default::default(),
+                    prim_type: Some(t),
+                    index: None,
+                })
+            };
+            create("/comps", PrimType::FOLDER)?;
+            create("/comps/main", PrimType::COMP)?;
+            create("/comps/main/layers", PrimType::FOLDER)?;
+            for i in 0..n {
+                let l = format!("/comps/main/layers/l{i}");
+                create(&l, PrimType::LAYER)?;
+                create(&format!("{l}/contents"), PrimType::FOLDER)?;
+                create(&format!("{l}/contents/group"), PrimType::SHAPE_GROUP)?;
+                if i % 2 == 0 {
+                    create(&format!("{l}/contents/group/rect"), PrimType::RECT)?;
+                } else {
+                    create(&format!("{l}/contents/group/star"), PrimType::STAR)?;
+                }
+                create(&format!("{l}/contents/group/fill"), PrimType::FILL)?;
+            }
+            for i in 0..n {
+                let l = format!("/comps/main/layers/l{i}");
+                let mut set = |path: &str, attr: &str, spec: AttrSpec| {
+                    tx.apply(Op::SetAttr {
+                        path: p(path),
+                        attr: attr.into(),
+                        spec: Some(spec),
+                    })
+                };
+                set(
+                    &l,
+                    "kind",
+                    AttrSpec::with_value(Value::Enum("shape".into())),
+                )?;
+                let o = i as f64;
+                set(
+                    &l,
+                    "transform:position",
+                    AttrSpec::with_value(Value::Vec3([
+                        o % 40.0 * 96.0,
+                        (o / 40.0).floor() * 86.0,
+                        0.0,
+                    ])),
+                )?;
+                set(
+                    &l,
+                    "transform:rotation",
+                    AttrSpec {
+                        value: Some(Value::Float(0.0)),
+                        expression: Some(bae_model::Expression::new("time*1000")),
+                        ..Default::default()
+                    },
+                )?;
+                if i % 2 == 0 {
+                    set(
+                        &format!("{l}/contents/group/rect"),
+                        "size",
+                        AttrSpec::with_value(Value::Vec2([80.0, 50.0])),
+                    )?;
+                }
+                let c = o / n as f64;
+                set(
+                    &format!("{l}/contents/group/fill"),
+                    "color",
+                    AttrSpec::with_value(Value::Color([c, 1.0 - c, 0.5, 1.0])),
+                )?;
+            }
+            Ok::<_, bae_model::ModelError>(())
+        })
+        .unwrap();
+    let comp = p("/comps/main");
+    let mut ev = Evaluator::new();
+    ev.evaluate_comp(&stage, &comp, Time::ZERO).unwrap();
+    let frames: i64 = std::env::var("FRAMES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(120);
+    let t = Instant::now();
+    for f in 0..frames {
+        let ec = ev
+            .evaluate_comp(&stage, &comp, bae_model::FrameRate::FPS_30.frame_to_time(f))
+            .unwrap();
+        assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    }
+    println!(
+        "1000 shape layers × time*1000: {:?} per frame",
+        t.elapsed() / frames as u32
+    );
+}

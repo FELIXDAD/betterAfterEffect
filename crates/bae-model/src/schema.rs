@@ -252,6 +252,7 @@ const LAYER: &[AttrDef] = &[
     choice("kind", "solid", LAYER_KINDS).doc("Layer kind; required."),
     prim_ref("source").doc("Comp (pre-comp) or Asset (footage, solid) providing the pixels/audio."),
     int("label", 1),
+    string("comment"),
     time("start_time", 0).doc("Comp time of layer time 0."),
     time("in_point", 0).doc("Comp time."),
     time_none("out_point").doc("Comp time; none = end of the comp."),
@@ -410,6 +411,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             time("work_area_start", 0),
             time_none("work_area_duration").doc("None = to the end."),
             time("display_start_time", 0),
+            AttrDef::new("guides", ValueType::FloatList, DefaultValue::None, false)
+                .doc("Viewer guides: pairs of (0 horizontal / 1 vertical, comp pixels)."),
             boolean("motion_blur", false),
             boolean("frame_blending", false).doc("AE Enable Frame Blending (comp switch)."),
             AttrDef::new(
