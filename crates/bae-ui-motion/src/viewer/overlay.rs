@@ -11,6 +11,45 @@ use egui::{Color32, Painter, Pos2, Shape, Stroke};
 
 use crate::render::View;
 
+/// Draw the wireframes of visible component layers in a collapsed composition.
+pub(super) fn precomp_bounds(
+    painter: &Painter,
+    layer: &bae_anim::EvaluatedLayer,
+    view: &View,
+    outer: &crate::render::Affine,
+    parent_3d: bool,
+    color: Color32,
+) {
+    if !layer.switches.collapse_transformation {
+        return;
+    }
+    let bae_anim::LayerSource::Comp {
+        nested: Some(comp), ..
+    } = &layer.source
+    else {
+        return;
+    };
+    let outer = outer.then(&layer.world_matrix);
+    let project_3d = parent_3d || crate::render::is_3d(layer);
+    for child in comp.layers.iter().filter(|l| {
+        l.visible
+            && !matches!(
+                l.kind,
+                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+            )
+    }) {
+        if let Some(quad) = crate::render::projected_bounds(
+            child,
+            view,
+            &outer,
+            project_3d || crate::render::is_3d(child),
+        ) {
+            painter.add(Shape::closed_line(quad.to_vec(), Stroke::new(1.0, color)));
+        }
+        precomp_bounds(painter, child, view, &outer, project_3d, color);
+    }
+}
+
 /// Screen position of a point in a layer's space.
 pub(super) fn to_screen(view: &View, m: &DMat4, p: [f64; 2]) -> Pos2 {
     let w = m.transform_point3(DVec3::new(p[0], p[1], 0.0));

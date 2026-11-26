@@ -202,6 +202,90 @@ fn moving_square(effect: RenderEffect) -> impl Fn(Time) -> RenderComp {
 }
 
 #[test]
+fn cc_time_effects_respect_nested_motion_blur_on_the_current_sample() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    for (name, popup, settings) in [
+        (
+            "CC Wide Time",
+            3,
+            vec![(1, Value::Int(0)), (2, Value::Int(0))],
+        ),
+        ("CC Force Motion Blur", 4, vec![(3, Value::Float(0.))]),
+    ] {
+        let mut draw = |mode| {
+            let mut params = settings.clone();
+            params.push((popup, Value::Int(mode)));
+            let scene = moving_square(effect("time", name, params));
+            pixels(
+                &mut renderer,
+                |time| {
+                    let mut comp = scene(time);
+                    let LayerContent::Comp(inner) = &mut comp.layers[0].content else {
+                        unreachable!()
+                    };
+                    let square = &mut Arc::make_mut(inner).layers[0];
+                    square.motion_samples = [0., 8.]
+                        .map(|offset| bae_render::LayerSample {
+                            transform: square.transform
+                                * glam::DAffine2::from_translation(glam::DVec2::new(offset, 0.)),
+                            matrix_3d: None,
+                        })
+                        .into();
+                    comp
+                },
+                0.,
+            )
+        };
+        let off = draw(2);
+        let on = draw(1);
+        let edge = (4 * 48 + 13) * 4;
+        assert_eq!(off[edge], 0, "{name}");
+        assert!(on[edge] > 20, "{name}");
+    }
+}
+
+#[test]
+fn force_motion_blur_samples_the_backdrop_on_an_adjustment_layer() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let image = pixels(
+        &mut renderer,
+        |time| {
+            let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+            comp.time = time;
+            let mut adjustment = RenderLayer::new(path(CLIP), LayerContent::None);
+            adjustment.adjustment = true;
+            adjustment.time = time;
+            adjustment.effects.push(effect(
+                "blur",
+                "CC Force Motion Blur",
+                vec![
+                    (1, Value::Int(2)),
+                    (3, Value::Float(360.)),
+                    (5, Value::Float(-180.)),
+                ],
+            ));
+            let color = if time.as_seconds() < 1. {
+                [1., 0., 0., 1.]
+            } else {
+                [0., 0., 1., 1.]
+            };
+            comp.layers = vec![adjustment, solid("/comps/main/layers/bg", 16, color)];
+            comp
+        },
+        1.,
+    );
+    assert!(
+        image[0].abs_diff(128) <= 1 && image[2].abs_diff(128) <= 1,
+        "{:?}",
+        &image[..4]
+    );
+}
+
+#[test]
 fn pixel_motion_tweens_and_blurs_along_the_optical_flow() {
     let Some(mut r) = renderer() else { return };
     let red = |image: &[u8], x: usize| image[(4 * 48 + x) * 4];
@@ -231,6 +315,99 @@ fn pixel_motion_tweens_and_blurs_along_the_optical_flow() {
     );
     assert!((20..235).contains(&red(&blur, 11)), "{blur:?}");
     assert!(red(&blur, 16) > 240 && red(&blur, 2) < 15, "{blur:?}");
+}
+
+#[test]
+fn timewarp_reuses_vectors_on_a_seek_and_recomputes_after_source_edits() {
+    let Some(mut r) = renderer() else { return };
+    let draw = |r: &mut Renderer, phase: f64, shift: f64| {
+        let scene = moving_square(effect(
+            "warp",
+            "ADBE Timewarp",
+            vec![
+                (2, Value::Int(2)),
+                (4, Value::Float(phase)),
+                (6, Value::Float(100.)),
+            ],
+        ));
+        pixels(
+            r,
+            |t| {
+                let mut comp = scene(t);
+                let LayerContent::Comp(inner) = &mut comp.layers[0].content else {
+                    unreachable!()
+                };
+                Arc::make_mut(inner).layers[0].transform.translation.x += shift;
+                comp
+            },
+            2. / 30.,
+        )
+    };
+    let first = draw(&mut r, 0.25, 0.);
+    let before = r.frame_cache().stats();
+    let second = draw(&mut r, 0.75, 0.);
+    assert_ne!(first, second);
+    assert_eq!(
+        r.frame_cache().stats().hits - before.hits,
+        2,
+        "both directions reused"
+    );
+    let before_edit = r.frame_cache().stats();
+    let changed = draw(&mut r, 0.75, 8.);
+    assert_ne!(second, changed);
+    assert_eq!(
+        r.frame_cache().stats().hits,
+        before_edit.hits,
+        "edited plates require new vectors"
+    );
+    r.set_frame_cache_budget(0);
+    assert_eq!(changed, draw(&mut r, 0.75, 8.));
+    assert_eq!(r.frame_cache().stats().entries, 0);
+}
+
+#[test]
+fn timewarp_reads_the_matte_at_source_time_and_repeats_the_crop_edge() {
+    let Some(mut r) = renderer() else { return };
+    let render = |r: &mut Renderer, show, channel, left| {
+        pixels(
+            r,
+            |t| {
+                let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+                comp.time = t;
+                let matte_path = "/comps/main/layers/matte";
+                let mut matte = solid(matte_path, 8, [1.; 4]);
+                matte.visible = false;
+                let mut layer = solid(CLIP, 16, [1., 0., 0., 1.]);
+                layer.time = t;
+                layer.effects.push(effect(
+                    "warp",
+                    "ADBE Timewarp",
+                    vec![
+                        (1, Value::Int(1)),
+                        (2, Value::Int(2)),
+                        (4, Value::Float(0.)),
+                        (29, Value::PrimRef(path(matte_path))),
+                        (30, Value::Int(channel)),
+                        (32, Value::Int(show)),
+                        (34, Value::Float(left)),
+                    ],
+                ));
+                if t != Time::ZERO {
+                    matte.content = LayerContent::None;
+                }
+                comp.layers = vec![layer, matte];
+                comp
+            },
+            2. / 30.,
+        )
+    };
+    let matte = render(&mut r, 2, 3, 0.);
+    assert_eq!(
+        (&matte[..4], &matte[48..52]),
+        (&[255; 4][..], &[0, 0, 0, 255][..])
+    );
+    let cropped = render(&mut r, 3, 4, 60.);
+    assert_eq!(&cropped[..4], &[255, 0, 0, 255]);
 }
 
 #[test]

@@ -41,8 +41,8 @@ pub use error::EvalError;
 pub use eval::{AttrOverride, Evaluator, layer_timing};
 pub use evaluated::{
     AssetInfo, AttrError, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer,
-    EvaluatedMask, EvaluatedPrim, FrameBlending, Iris, LayerSource, LayerSwitches, LightFalloff,
-    LightState, LightType, MaterialState, TextPathOptions, TrackMatte,
+    EvaluatedMask, EvaluatedPrim, FrameBlending, Iris, LayerQuality, LayerSource, LayerSwitches,
+    LightFalloff, LightState, LightType, MaterialState, TextPathOptions, TrackMatte,
 };
 pub use expr::prewarm as prewarm_expressions;
 pub use expr::rewrite::{ExpressionToken, expression_tokens};
