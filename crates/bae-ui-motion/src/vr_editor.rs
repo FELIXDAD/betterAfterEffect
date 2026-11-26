@@ -19,6 +19,7 @@ pub(crate) fn register(app: &mut AppBuilder) {
                 commands: commands.clone(),
                 revision: None,
                 comps: Vec::new(),
+                members: None,
                 form: None,
                 pending: None,
             })
@@ -148,18 +149,21 @@ impl Form {
         Some(args)
     }
 }
+/// A labelled AE-style dropdown over `items` (index `selected`).
+fn dropdown(ui: &mut egui::Ui, label: &str, selected: &mut usize, items: &[&str]) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(tr(label));
+        bae_ui::widgets::dropdown(ui, label, selected, items, 160.).changed()
+    })
+    .inner
+}
+
 fn choices(ui: &mut egui::Ui, label: &str, value: &mut usize, options: &[(usize, &str)]) {
-    egui::ComboBox::from_label(tr(label))
-        .selected_text(tr(options
-            .iter()
-            .find(|(i, _)| i == value)
-            .unwrap_or(&options[0])
-            .1))
-        .show_ui(ui, |ui| {
-            for &(i, name) in options {
-                ui.selectable_value(value, i, tr(name));
-            }
-        });
+    let names: Vec<&str> = options.iter().map(|(_, n)| tr(n)).collect();
+    let mut i = options.iter().position(|(v, _)| v == value).unwrap_or(0);
+    if dropdown(ui, label, &mut i, &names) {
+        *value = options[i].0;
+    }
 }
 fn field(ui: &mut egui::Ui, label: &str, text: &mut String) {
     ui.horizontal(|ui| {
@@ -168,10 +172,47 @@ fn field(ui: &mut egui::Ui, label: &str, text: &mut String) {
     });
 }
 
+/// What the panel reads of a comp, gathered once per stage revision (the
+/// panel draws every frame while it is open).
+struct VrComp {
+    path: PrimPath,
+    name: String,
+    role: String,
+    master: Option<PrimPath>,
+    atlas: Option<PrimPath>,
+    face: Option<String>,
+}
+
+impl VrComp {
+    fn read(stage: &Stage, path: PrimPath) -> Self {
+        let prim_ref = |key| value(stage, &path, key).and_then(|v| v.as_prim_ref().cloned());
+        Self {
+            name: query::display_name_of(stage, &path),
+            role: role(stage, &path),
+            master: prim_ref("vr:master"),
+            atlas: prim_ref("vr:atlas"),
+            face: value(stage, &path, "vr:face").and_then(|v| v.as_str().map(str::to_owned)),
+            path,
+        }
+    }
+    /// A comp an edit or cubemap can start from.
+    fn is_source(&self) -> bool {
+        matches!(self.role.as_str(), "" | "master3d")
+    }
+}
+
+/// The comp widths the editor offers.
+const WIDTHS: [u32; 10] = [256, 512, 640, 1024, 1920, 2048, 3840, 4096, 7680, 8192];
+const WIDTH_NAMES: [&str; 10] = [
+    "256", "512", "640", "1024", "1920", "2048", "3840", "4096", "7680", "8192",
+];
+
 struct Editor {
     commands: Arc<Registry<dyn DynCommand>>,
     revision: Option<u64>,
-    comps: Vec<PrimPath>,
+    comps: Vec<VrComp>,
+    /// The master the panel shows and its members (indices into `comps`).
+    members: Option<(PrimPath, Vec<usize>)>,
     form: Option<Form>,
     pending: Option<(&'static str, Option<PrimPath>, Vec<PrimPath>)>,
 }
@@ -181,79 +222,76 @@ impl Panel for Editor {
         let session = crate::common::session(cx.resources);
         let stage = cx.stage;
         if self.revision != Some(stage.revision()) {
-            self.comps = query::comps(stage);
+            self.comps = query::comps(stage)
+                .into_iter()
+                .map(|p| VrComp::read(stage, p))
+                .collect();
+            self.members = None;
             self.revision = Some(stage.revision());
         }
-        let comps = &self.comps;
         if let Some((wanted, master, before)) = self.pending.take()
-            && let Some(path) = comps.iter().find(|p| {
-                role(stage, p) == wanted
-                    && !before.contains(p)
-                    && (master.is_none()
-                        || value(stage, p, "vr:master")
-                            .as_ref()
-                            .and_then(Value::as_prim_ref)
-                            == master.as_ref())
+            && let Some(c) = self.comps.iter().find(|c| {
+                c.role == wanted
+                    && !before.contains(&c.path)
+                    && (master.is_none() || c.master == master)
             })
         {
-            session.lock().open_comp(path);
+            session.lock().open_comp(&c.path);
         }
         let active = session.lock().active_comp.clone();
-        let root = active
-            .as_ref()
-            .and_then(|p| value(stage, p, "vr:master"))
-            .and_then(|v| v.as_prim_ref().cloned())
-            .or(active)
-            .filter(|p| comps.contains(p));
-        let members: Vec<_> = comps
-            .iter()
-            .filter(|p| {
-                root.is_some()
-                    && value(stage, p, "vr:master")
-                        .as_ref()
-                        .and_then(Value::as_prim_ref)
-                        == root.as_ref()
-            })
-            .collect();
-        let output = members.iter().copied().find(|p| role(stage, p) == "output");
+        let root = active.and_then(|a| {
+            let c = self.comps.iter().find(|c| c.path == a)?;
+            let root = c.master.clone().unwrap_or(a);
+            self.comps.iter().any(|c| c.path == root).then_some(root)
+        });
+        if self.members.as_ref().map(|(r, _)| r) != root.as_ref() {
+            self.members = root.as_ref().map(|root| {
+                let of_root = self.comps.iter().enumerate();
+                let ids = of_root
+                    .filter(|(_, c)| c.master.as_ref() == Some(root))
+                    .map(|(i, _)| i)
+                    .collect();
+                (root.clone(), ids)
+            });
+        }
+        let comps = &self.comps;
+        let members: &[usize] = self.members.as_ref().map_or(&[], |(_, m)| m.as_slice());
+        let member = |role: &str| {
+            members
+                .iter()
+                .map(|&i| &comps[i])
+                .find(|c| c.role == role)
+                .map(|c| &c.path)
+        };
+        let output = member("output");
         ui.add_enabled_ui(self.commands.get(COMMAND).is_some(), |ui| {
             if let Some(f) = &mut self.form {
                 ui.label(tr(f.title()));
                 if matches!(f.action, "edit2d" | "edit3d" | "cube") {
-                    egui::ComboBox::from_label(tr("Composition"))
-                        .selected_text(
-                            f.master
-                                .as_ref()
-                                .map(|p| query::display_name_of(stage, p))
-                                .unwrap_or_default(),
-                        )
-                        .show_ui(ui, |ui| {
-                            for p in comps
-                                .iter()
-                                .filter(|p| matches!(role(stage, p).as_str(), "" | "master3d"))
-                            {
-                                ui.selectable_value(
-                                    &mut f.master,
-                                    Some(p.clone()),
-                                    query::display_name_of(stage, p),
-                                );
-                            }
-                        });
+                    let sources: Vec<&VrComp> = comps.iter().filter(|c| c.is_source()).collect();
+                    let names: Vec<&str> = sources.iter().map(|c| c.name.as_str()).collect();
+                    let mut i = sources
+                        .iter()
+                        .position(|c| Some(&c.path) == f.master.as_ref())
+                        .unwrap_or(usize::MAX);
+                    if dropdown(ui, "Composition", &mut i, &names) {
+                        f.master = sources.get(i).map(|c| c.path.clone());
+                    }
                 }
-                egui::ComboBox::from_label(tr(if f.action == "cube" {
+                let label = if f.action == "cube" {
                     "Conversion Resolution"
                 } else {
                     "Comp Width"
-                }))
-                .selected_text(f.width.to_string())
-                .show_ui(ui, |ui| {
-                    for w in [256, 512, 640, 1024, 1920, 2048, 3840, 4096, 7680, 8192] {
-                        if f.action == "cube" && w > 4096 {
-                            continue;
-                        }
-                        ui.selectable_value(&mut f.width, w, w.to_string());
-                    }
-                });
+                };
+                // Cubemaps convert at up to 4096.
+                let count = if f.action == "cube" { 8 } else { WIDTHS.len() };
+                let mut i = WIDTHS
+                    .iter()
+                    .position(|w| *w == f.width)
+                    .unwrap_or(usize::MAX);
+                if dropdown(ui, label, &mut i, &WIDTH_NAMES[..count]) {
+                    f.width = WIDTHS[i];
+                }
                 match f.action {
                     "master" => {
                         field(ui, "Frame Rate", &mut f.fps);
@@ -303,7 +341,7 @@ impl Panel for Editor {
                             if target == "cubemap" {
                                 Vec::new()
                             } else {
-                                comps.clone()
+                                comps.iter().map(|c| c.path.clone()).collect()
                             },
                         ));
                     }
@@ -323,11 +361,9 @@ impl Panel for Editor {
                 }
                 return;
             }
-            let source = root.as_ref().or_else(|| {
-                comps
-                    .iter()
-                    .find(|p| matches!(role(stage, p).as_str(), "" | "master3d"))
-            });
+            let source = root
+                .as_ref()
+                .or_else(|| comps.iter().find(|c| c.is_source()).map(|c| &c.path));
             ui.horizontal_wrapped(|ui| {
                 for (title, action) in [
                     ("Add 2D Edit", "edit2d"),
@@ -350,17 +386,22 @@ impl Panel for Editor {
                 }
             });
             let Some(master) = &root else { return };
-            if ui.button(query::display_name_of(stage, master)).clicked() {
+            let master_name = comps
+                .iter()
+                .find(|c| &c.path == master)
+                .map_or("", |c| c.name.as_str());
+            if ui.button(master_name).clicked() {
                 session.lock().open_comp(master);
             }
-            for edit in members
+            for c in members
                 .iter()
-                .copied()
-                .filter(|p| matches!(role(stage, p).as_str(), "edit2d" | "edit3d"))
+                .map(|&i| &comps[i])
+                .filter(|c| matches!(c.role.as_str(), "edit2d" | "edit3d"))
             {
+                let edit = &c.path;
                 ui.push_id(edit.as_str(), |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        if ui.button(query::display_name_of(stage, edit)).clicked() {
+                        if ui.button(&c.name).clicked() {
                             session.lock().open_comp(edit);
                         }
                         if ui.button(tr("Properties")).clicked() {
@@ -389,7 +430,8 @@ impl Panel for Editor {
                     if let Some(path) = output {
                         session.lock().open_comp(path);
                     } else {
-                        self.pending = Some(("output", root.clone(), comps.clone()));
+                        let before = comps.iter().map(|c| c.path.clone()).collect();
+                        self.pending = Some(("output", root.clone(), before));
                     }
                 }
                 if ui.button(tr("Output Settings")).clicked() {
@@ -405,22 +447,17 @@ impl Panel for Editor {
                     self.form = Some(f);
                 }
             });
-            if let Some(atlas) = members
-                .iter()
-                .copied()
-                .find(|p| role(stage, p) == "cubemap")
-            {
+            if let Some(atlas) = member("cubemap") {
                 ui.horizontal_wrapped(|ui| {
-                    for face in members.iter().copied().filter(|p| {
-                        value(stage, p, "vr:atlas")
-                            .as_ref()
-                            .and_then(Value::as_prim_ref)
-                            == Some(atlas)
-                    }) {
-                        if let Some(Value::String(name)) = value(stage, face, "vr:face")
+                    for face in members
+                        .iter()
+                        .map(|&i| &comps[i])
+                        .filter(|c| c.atlas.as_ref() == Some(atlas))
+                    {
+                        if let Some(name) = &face.face
                             && ui.button(tr(&format!("{name} View"))).clicked()
                         {
-                            session.lock().open_comp(face);
+                            session.lock().open_comp(&face.path);
                         }
                     }
                 });
