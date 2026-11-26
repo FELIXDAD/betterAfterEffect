@@ -39,6 +39,13 @@ mod imp {
             ))
         }
 
+        pub fn channels(
+            &self,
+            _: &crate::input::FootageRef,
+        ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+            None
+        }
+
         pub fn clear(&self) {}
     }
 }
@@ -209,6 +216,21 @@ mod imp {
                 .map_err(|e| e.to_string());
             self.sources.insert(key, entry.clone());
             entry.map(|s| s as Arc<dyn LayerSource>)
+        }
+
+        pub fn channels(
+            &self,
+            footage: &crate::input::FootageRef,
+        ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+            let path = footage.file.as_ref()?;
+            let source = self
+                .sources
+                .get(&(path.clone(), footage.sequence))?
+                .as_ref()
+                .ok()?;
+            source
+                .library
+                .cached_channels(path, &source.open, &source.request, footage.source_time)
         }
 
         /// Forgets open files (they changed on disk or were relinked).

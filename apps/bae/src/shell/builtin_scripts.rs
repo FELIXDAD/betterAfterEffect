@@ -48,8 +48,10 @@ pub(crate) fn load(runtime: &PluginRuntime) -> Result<(), String> {
                 )
         };
     }
-    runtime
-        .load(&package!("path-nulls"), Scope::Bundled)
-        .map_err(|e| e.to_string())?;
+    for package in [package!("path-nulls"), package!("vr-editor")] {
+        runtime
+            .load(&package, Scope::Bundled)
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }

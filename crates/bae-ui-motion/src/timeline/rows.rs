@@ -37,6 +37,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
+        last_visible: bool,
         switch_input: switches::SwitchInput,
         layers: &super::TimelineLayers,
         parent_items: &[&str],
@@ -669,6 +670,7 @@ impl TimelinePanel {
                     layer,
                     &layer_ctx,
                     (*line, *lines),
+                    last_visible,
                 );
             }
         }
@@ -751,7 +753,7 @@ impl TimelinePanel {
                             json!({"keys": [KeyRef::new(path.clone(), attr, key_now)]}),
                         );
                     } else if let Some(v) =
-                        common::current_value(self.eval.get(cx.resources), stage, path, attr, now)
+                        common::current_value(self.eval.get(cx.stage), stage, path, attr, now)
                     {
                         cx.invoke_with(
                             "attr.set_at",
@@ -895,7 +897,7 @@ impl TimelinePanel {
             .as_ref()
             .and_then(|s| s.value_for(path, attr))
             .cloned()
-            .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
+            .or_else(|| common::current_value(self.eval.get(cx.stage), stage, path, attr, now));
         if attr == "text:path" {
             // Path Options > Path: a popup of the layer's masks, even when unset.
             let vr = Rect::from_min_max(
@@ -1038,6 +1040,7 @@ impl TimelinePanel {
         layer: &PrimPath,
         layer_ctx: &str,
         (line, lines): (usize, usize),
+        last_visible: bool,
     ) {
         let stage = cx.stage;
         let Some(expr) = query::attr_spec(stage, path, attr).and_then(|s| s.expression.clone())
@@ -1164,14 +1167,15 @@ impl TimelinePanel {
                     ));
             }
         }
-        if line + 1 < lines {
+        if line + 1 < lines && !last_visible {
             return;
         }
         let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
+        let top = rect.top() - line as f32 * ROW_H;
         let field = Rect::from_min_max(
-            pos2(axis.left + 4.0, rect.bottom() - lines as f32 * ROW_H + 1.0),
-            pos2(rect.right() - 4.0, rect.bottom() - 1.0),
+            pos2(axis.left + 4.0, top),
+            pos2(rect.right() - 4.0, top + lines as f32 * ROW_H),
         );
         let mut buf = match &self.expr_edit {
             Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),

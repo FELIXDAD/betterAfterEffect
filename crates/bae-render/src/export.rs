@@ -976,7 +976,7 @@ pub fn has_frame_run(pattern: &Path) -> bool {
 /// `pattern` with an explicit `####` run when its file name has none, so
 /// bae-media numbers files exactly like [`frame_file`].
 #[cfg_attr(not(feature = "media"), allow(dead_code))]
-pub(crate) fn explicit_pattern(pattern: &Path) -> PathBuf {
+pub fn explicit_pattern(pattern: &Path) -> PathBuf {
     if has_frame_run(pattern) {
         return pattern.to_owned();
     }
