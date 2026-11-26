@@ -327,7 +327,7 @@ impl Command for CreateLayer {
                 let text = p.text.clone().filter(|t| !t.is_empty()).unwrap_or(name);
                 let mut doc = TextDocument::new(text, "Arial", p.font_size.unwrap_or(72.0));
                 if let Some(c) = p.color {
-                    doc.fill_color = c;
+                    doc.style.fill_color = c;
                 }
                 set(tx, &path, "text:source", Value::TextDocument(Box::new(doc)))?;
             }

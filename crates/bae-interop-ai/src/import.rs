@@ -844,14 +844,14 @@ impl Planner<'_, '_> {
             t.size,
         );
         match t.fill {
-            Some(c) => doc.fill_color = c,
-            None => doc.fill_color = [0.0, 0.0, 0.0, 0.0],
+            Some(c) => doc.style.fill_color = c,
+            None => doc.style.fill_color = [0.0, 0.0, 0.0, 0.0],
         }
         if let Some((c, w)) = t.stroke {
-            doc.stroke_color = Some(c);
-            doc.stroke_width = w;
+            doc.style.stroke_color = Some(c);
+            doc.style.stroke_width = w;
         }
-        doc.justification = match t.justification.as_str() {
+        doc.paragraph.justification = match t.justification.as_str() {
             "center" | "right" => t.justification.clone(),
             _ => "left".to_owned(),
         };

@@ -76,6 +76,7 @@ pub mod expressions;
 pub mod import;
 pub mod keys;
 pub mod layer;
+pub mod layer_styles;
 pub mod markers;
 pub mod matte;
 pub mod names;
@@ -140,6 +141,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(paint::AddStroke),
         r.register(tracker::CreateTracker),
+        r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
         r.register(tracker::ResetTracker),
@@ -167,6 +169,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(DeleteItems),
         r.register(SetParent),
         r.register(SetLayerAttr),
+        r.register(layer_styles::EditStyles),
         r.register(SetAnimated),
         r.register(SetAt),
         r.register(SetMany),

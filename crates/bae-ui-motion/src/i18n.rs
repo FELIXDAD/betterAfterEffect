@@ -24,6 +24,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "合成中没有开启声音的图层。",
     ),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
+    ("Set Frame", "设置帧"),
     ("Track Motion", "跟踪运动"),
     ("Apply Motion Tracker", "应用动态跟踪器"),
     ("Edit Motion Tracker", "编辑动态跟踪器"),
@@ -92,6 +93,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers the common strings (`MotionUiModule::build`).
 pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(crate::expr_menu::assist::ZH);
 }
 
 /// Every module's table, common words first (what was one table): tests check
@@ -113,6 +115,7 @@ pub(crate) fn all() -> Vec<(&'static str, &'static str)> {
         crate::dialogs::ZH,
         crate::import::ZH,
         crate::assist::ZH,
+        crate::expr_menu::assist::ZH,
     ]
     .concat()
 }
