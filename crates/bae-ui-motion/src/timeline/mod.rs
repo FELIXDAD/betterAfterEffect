@@ -50,7 +50,7 @@ use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use columns::Column;
 use columns::{Cols, Columns};
-pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
+pub(crate) use dialogs::{InterpolationDialog, KeyDialog, SequenceDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
 pub(crate) use markers::MarkerDialog;
