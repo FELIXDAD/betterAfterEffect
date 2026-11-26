@@ -50,6 +50,8 @@
 //! that affects its pixels, rect, scale) – the `(Prim, time, parameter hash)` key
 //! of ARCHITECTURE §5. Identical subgraphs within a frame are shared.
 
+pub mod layer_styles;
+
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -820,6 +822,25 @@ impl Builder<'_, '_> {
                     continue;
                 }
                 let mut visiting = vec![index];
+                if let Some(styles) = &layer.layer_styles
+                    && styles.enabled
+                    && let Some(effect) = self.effects.get(&styles.effect).cloned()
+                {
+                    self.owned(comp, index, depth, |b| {
+                        b.styled_layer(
+                            comp,
+                            index,
+                            rect,
+                            scale,
+                            depth,
+                            &mut visiting,
+                            effect,
+                            styles,
+                            &mut ops,
+                        )
+                    })?;
+                    continue;
+                }
                 if let Some(op) = self.layer_op(comp, index, rect, scale, depth, &mut visiting)? {
                     ops.push(op);
                 } else if layer.blend_mode.is_stencil()
@@ -1107,10 +1128,30 @@ impl Builder<'_, '_> {
         visiting: &mut Vec<usize>,
     ) -> Result<Option<LayerOp>, RenderError> {
         self.owned(comp, index, depth, |b| {
-            b.plan_layer(comp, index, canvas, scale, depth, visiting)
+            let layer = &comp.layers[index];
+            if let Some(styles) = &layer.layer_styles
+                && styles.enabled
+                && let Some(effect) = b.effects.get(&styles.effect).cloned()
+            {
+                let mut isolated = Vec::new();
+                b.styled_layer(
+                    comp,
+                    index,
+                    canvas,
+                    scale,
+                    depth,
+                    visiting,
+                    effect,
+                    styles,
+                    &mut isolated,
+                )?;
+                return Ok(isolated.pop());
+            }
+            b.plan_layer(comp, index, canvas, scale, depth, visiting, true)
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn plan_layer(
         &mut self,
         comp: &RenderComp,
@@ -1119,6 +1160,7 @@ impl Builder<'_, '_> {
         scale: f64,
         depth: usize,
         visiting: &mut Vec<usize>,
+        apply_matte: bool,
     ) -> Result<Option<LayerOp>, RenderError> {
         let layer = &comp.layers[index];
         let flat = layer.matrix_3d.is_none() && layer.motion_samples.is_empty();
@@ -1239,7 +1281,7 @@ impl Builder<'_, '_> {
             return Ok(None);
         }
 
-        let matte = match layer.track_matte {
+        let matte = match layer.track_matte.filter(|_| apply_matte) {
             None => None,
             Some(tm) => match self.matte(comp, tm.layer, bounds, scale, depth, visiting)? {
                 Some(node) => Some(MatteRef {
