@@ -858,7 +858,7 @@ const EFFECT: &[Node] = &[
     it(458754, "Last Effect", "motion.effect.last_effect", "", B, Done),
     it(458755, "Remove All", "motion.effect.remove_all", "", B, Done),
     SEP,
-    it(458757, "Manage Effects...", "motion.effect.manage_effects", "", E, Later),
+    it(458757, "Manage Effects...", "motion.effect.manage_effects", "", E, Done),
     SEP,
     EFFECTS,
 ];
@@ -875,7 +875,7 @@ const ANIMATION: &[Node] = &[
             it(11599873, "(recent presets)", "motion.anim.recent_animation_preset", "", E, Dynamic),
         ],
     ),
-    it(851973, "Browse Presets...", "motion.anim.browse_presets", "", E, Later),
+    it(851973, "Browse Presets...", "motion.anim.browse_presets", "", E, Partial),
     SEP,
     it(851975, "Set Keyframe", "motion.anim.set_keyframe", "", B, Todo),
     it(851976, "Toggle Hold Keyframe", "motion.toggle_hold", "", B, Done),

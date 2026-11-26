@@ -10,6 +10,7 @@ pub(crate) mod browser;
 pub(crate) mod controls;
 mod eq_response;
 mod lumetri_curve;
+pub mod manager;
 mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
@@ -387,8 +388,8 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "effects",
-        bae_ui::PanelKind::new("Effects & Presets", |_| {
-            Box::new(browser::EffectsPanel::default())
+        bae_ui::PanelKind::new("Effects & Presets", |spawn| {
+            Box::new(browser::EffectsPanel::restore(spawn.state))
         }),
     );
 }
