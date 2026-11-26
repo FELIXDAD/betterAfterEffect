@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use bae_gpu::wgpu::{self, util::DeviceExt};
+use bae_gpu::wgpu;
 use bae_model::{EffectDef, ParamKind, Value};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
 use glam::DVec2;
@@ -22,6 +22,8 @@ use crate::{Builtin, EffectTarget, TargetEffect, catalog::DefBuilder, params::Pa
 pub const MATCH_NAME: &str = "ADBE LIQUIFY";
 /// Parameter: the brush tool (1-based index into [`TOOLS`]).
 pub const TOOL: u32 = 1;
+/// Layer-view grid density and color. Applied only to the preview copy.
+pub const VIEW_GRID: u32 = u32::MAX;
 /// Parameter: brush size in pixels.
 pub const BRUSH_SIZE: u32 = 3;
 /// Parameter: brush pressure in percent.
@@ -255,6 +257,17 @@ impl Effect for Liquify {
 
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         let v = Params::new(&self.def, p);
+        let handles = brush::ticket(v.value(MESH));
+        if handles.is_some() {
+            let b = p.layer_bounds;
+            let x = |n| f64::from(n) * p.scale;
+            return roi.union(&IRect::new(
+                x(b.x0).floor() as i32,
+                x(b.y0).floor() as i32,
+                x(b.x1).ceil() as i32,
+                x(b.y1).ceil() as i32,
+            ));
+        }
         let Some(mesh) = self.mesh(p) else {
             return roi;
         };
@@ -283,12 +296,10 @@ impl TargetEffect for Liquify {
     ) -> Result<GpuImage, RenderError> {
         let v = Params::new(&self.def, p);
         let percent = v.f(PERCENT) / 100.0;
-        let Some(mesh) = self.mesh(p).filter(|m| m.reach() > 0.0 && percent != 0.0) else {
-            return Ok(input.clone());
-        };
         if roi.is_empty() {
             return Ok(input.clone());
-        }
+        };
+
         let grid = image_grid::grid_scale(p, input);
         let offset = match v.value(MESH_OFFSET) {
             Some(Value::Vec2(o)) => DVec2::from_array(*o),
@@ -296,54 +307,104 @@ impl TargetEffect for Liquify {
         };
         let rt = gpu::runtime(target.gpu());
         let pipeline = kernel(&rt, target.format())?;
-        // The offsets as a cols × rows float texture.
-        let limit = rt.device.limits().max_texture_dimension_2d;
-        let (w, h) = (mesh.cols as u32, mesh.rows as u32);
-        if w.max(h) > limit {
-            return Err(RenderError::TooLarge {
-                width: w,
-                height: h,
-                limit,
-            });
-        }
-        let data: Vec<u8> = mesh
-            .offsets
-            .iter()
-            .flat_map(|o| [o.x as f32, o.y as f32, 0.0, 0.0])
-            .flat_map(f32::to_le_bytes)
-            .collect();
-        let texture = rt.device.create_texture_with_data(
-            &rt.queue,
-            &wgpu::TextureDescriptor {
-                label: Some(LABEL),
-                size: wgpu::Extent3d {
-                    width: w,
-                    height: h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba32Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            },
-            wgpu::util::TextureDataOrder::LayerMajor,
-            &data,
-        );
-        let mesh_view = texture.create_view(&Default::default());
+        let ticket = brush::ticket(v.value(MESH));
+        // Keep the upload texture leased through the dispatch on 32-bpc targets.
+        let grid_image;
+        let has_live_buffer = ticket.is_some();
+        let data = if let Some(id) = ticket {
+            brush::preview(&rt, id)
+        } else if let Some(mesh) = self.mesh(p).filter(|m| m.reach() > 0.0 && percent != 0.) {
+            let (w, h) = (mesh.cols as u32, mesh.rows as u32);
+            grid_image = target.allocate_format(
+                IRect::new(0, 0, w as i32, h as i32),
+                1.,
+                wgpu::TextureFormat::Rgba32Float,
+            )?;
+            let row_bytes = (w * 16).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+            {
+                let mut belt = upload_belt(&rt).lock();
+                let size = wgpu::BufferSize::new(u64::from(row_bytes) * u64::from(h)).unwrap();
+                let slice = belt.allocate(
+                    size,
+                    wgpu::BufferSize::new(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT.into()).unwrap(),
+                );
+                {
+                    let mut data = slice
+                        .get_mapped_range_mut()
+                        .map_err(|err| RenderError::Other(err.to_string()))?;
+                    let mut row = vec![0; mesh.cols * 16];
+                    for (y, offsets) in mesh.offsets.chunks_exact(mesh.cols).enumerate() {
+                        for (pixel, v) in row.as_chunks_mut::<16>().0.iter_mut().zip(offsets) {
+                            pixel[..4].copy_from_slice(&(v.x as f32).to_le_bytes());
+                            pixel[4..8].copy_from_slice(&(v.y as f32).to_le_bytes());
+                        }
+                        let at = y * row_bytes as usize;
+                        data.slice(at..at + row.len()).copy_from_slice(&row);
+                    }
+                }
+                target.encoder().copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: slice.buffer(),
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: slice.offset(),
+                            bytes_per_row: Some(row_bytes),
+                            rows_per_image: None,
+                        },
+                    },
+                    grid_image.texture.as_image_copy(),
+                    wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                belt.finish_and_recall_on_submit(target.encoder());
+            }
+            let mesh_view = grid_image.view.clone();
+            Some((mesh_view, mesh.origin, mesh.cell, [w, h]))
+        } else {
+            None
+        };
+        let display = match v.value(VIEW_GRID) {
+            Some(Value::Int(v)) => (*v).clamp(0, 70) as u32,
+            _ => 0,
+        };
+        let percent = if has_live_buffer || data.is_some() {
+            percent
+        } else {
+            0.
+        };
+        let (mesh_view, origin, cell, size) = match data {
+            Some(grid) => grid,
+            None if display >= 8 => {
+                let b = p.layer_bounds;
+                let size = [
+                    ((b.x1 - b.x0).max(0) as u32).div_ceil(CELL as u32) + 1,
+                    ((b.y1 - b.y0).max(0) as u32).div_ceil(CELL as u32) + 1,
+                ];
+                (
+                    input.view.clone(),
+                    DVec2::new(f64::from(b.x0), f64::from(b.y0)),
+                    CELL,
+                    size,
+                )
+            }
+            None => return Ok(input.clone()),
+        };
         let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let mut u = UniformWriter::with_size(UNIFORM_SIZE as usize);
         image_grid::image_coords(&mut u, 0, input, grid);
         // The shader works in render-grid pixels (`grid` layer pixels each).
-        let origin = (mesh.origin + offset) / grid;
+        let origin = (origin + offset) / grid;
         u.i32s(32, &image_grid::rect4(roi))
             .f32(48, origin.x as f32)
             .f32(52, origin.y as f32)
-            .f32(56, (mesh.cell / grid) as f32)
+            .f32(56, (cell / grid) as f32)
             .f32(60, (percent / grid) as f32)
-            .u32(64, mesh.cols as u32)
-            .u32(68, mesh.rows as u32);
+            .u32(64, size[0])
+            .u32(68, size[1])
+            .u32(72, display / 8)
+            .u32(76, display % 8);
         let at = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &pipeline,
@@ -365,8 +426,26 @@ impl TargetEffect for Liquify {
     }
 }
 
+/// The transfer for saved meshes lives on the rendering device. Uploaded rows
+/// and their consumer share an encoder. GPU completion recycles the upload pages.
+fn upload_belt(rt: &gpu::Runtime) -> &parking_lot::Mutex<wgpu::util::StagingBelt> {
+    rt.mesh_upload.get_or_init(|| {
+        let size = 1 << 20;
+        let mut belt = wgpu::util::StagingBelt::new(rt.device.clone(), size);
+        belt.allocate(
+            wgpu::BufferSize::new(size).unwrap(),
+            wgpu::BufferSize::new(256).unwrap(),
+        );
+        let warmup = rt.device.create_command_encoder(&Default::default());
+        belt.finish_and_recall_on_submit(&warmup);
+        rt.queue.submit([warmup.finish()]);
+        parking_lot::Mutex::new(belt)
+    })
+}
+
 /// Compile the kernel ahead of first use (the effects' background warm-up).
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    upload_belt(rt);
     brush::kernel(rt)?;
     kernel(rt, format).map(|_| ())
 }

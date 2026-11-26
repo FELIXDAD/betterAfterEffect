@@ -423,13 +423,10 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
     }
     let start = std::time::Instant::now();
     loop {
-        if session
-            .lock()
-            .scrub
-            .as_ref()
-            .and_then(|s| bae_effects::effects::liquify::Mesh::from_value(&s.value))
-            .is_some_and(|m| m.reach() > 1.)
-        {
+        if session.lock().scrub.as_ref().is_some_and(|s| {
+            s.attr == "param:0014"
+                && matches!(s.value, Value::Vec2([surface,rev]) if surface>0. && rev>0.)
+        }) {
             break;
         }
         assert!(

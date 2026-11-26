@@ -7,7 +7,11 @@ use bae_model::Value;
 use bae_render::RenderError;
 use glam::DVec2;
 use gpu::{Binding, Kernel, KernelKey, KernelSource, Resource, UniformWriter};
-use std::sync::{Arc, mpsc};
+use std::sync::{
+    Arc, Weak,
+    atomic::{AtomicU32, Ordering},
+    mpsc,
+};
 
 const LABEL: &str = "bae.effects.liquify.brush";
 
@@ -55,6 +59,43 @@ pub struct Brush {
     pub reconstruction: u32,
 }
 
+// Only the layer viewer carries this ticket. Documents contain vertex positions.
+struct ActivePreview {
+    id: u32,
+    device: Weak<gpu::Runtime>,
+    view: wgpu::TextureView,
+    pub(super) origin: DVec2,
+    cell: f64,
+    size: [u32; 2],
+}
+
+static ACTIVE: parking_lot::Mutex<Vec<ActivePreview>> = parking_lot::Mutex::new(Vec::new());
+static TICKET: AtomicU32 = AtomicU32::new(1);
+
+fn row_vertices(cols: usize) -> usize {
+    let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize / 16;
+    cols.next_multiple_of(alignment)
+}
+
+// During a drag the shared viewer override holds a device surface ID and its revision.
+pub(super) fn ticket(value: Option<&Value>) -> Option<u32> {
+    let Some(Value::Vec2([id, _])) = value else {
+        return None;
+    };
+    Some(*id as u32)
+}
+
+pub(super) fn preview(
+    rt: &Arc<gpu::Runtime>,
+    id: u32,
+) -> Option<(wgpu::TextureView, DVec2, f64, [u32; 2])> {
+    let entries = ACTIVE.lock();
+    let p = entries
+        .iter()
+        .find(|p| p.id == id && p.device.ptr_eq(&Arc::downgrade(rt)))?;
+    Some((p.view.clone(), p.origin, p.cell, p.size))
+}
+
 /// Working mesh for one gesture. Clone and reconstruction read the mesh as it
 /// was on pointer-down. Only completed readbacks reach the document editor.
 pub struct BrushStroke {
@@ -66,7 +107,9 @@ pub struct BrushStroke {
     next: wgpu::Buffer,
     staging: wgpu::Buffer,
     pending: Option<mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
-    dirty: bool,
+    texture: wgpu::Texture,
+    ticket: u32,
+    revision: u32,
 }
 
 impl BrushStroke {
@@ -78,18 +121,32 @@ impl BrushStroke {
     ) -> Result<Self, RenderError> {
         let rt = gpu::runtime(gpu);
         let kernel = kernel(&rt)?;
-        let data: Vec<u8> = mesh
-            .offsets
-            .iter()
-            .enumerate()
-            .flat_map(|(i, o)| {
-                let point = mesh.origin
-                    + mesh.cell * DVec2::new((i % mesh.cols) as f64, (i / mesh.cols) as f64);
-                [o.x as f32, o.y as f32, weight(point), 0.0]
-                    .into_iter()
-                    .flat_map(f32::to_le_bytes)
-            })
-            .collect();
+        let stride = row_vertices(mesh.cols);
+        let width = mesh.cols as u32;
+        let height = mesh.rows as u32;
+        let extent = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = rt.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(LABEL),
+            size: extent,
+            dimension: wgpu::TextureDimension::D2,
+            mip_level_count: 1,
+            sample_count: 1,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let mut data = vec![0; mesh.rows * stride * 16];
+        for (i, o) in mesh.offsets.iter().enumerate() {
+            let (x, y) = (i % mesh.cols, i / mesh.cols);
+            let weight = weight(mesh.origin + mesh.cell * DVec2::new(x as f64, y as f64));
+            let at = (y * stride + x) * 16;
+            let bytes = [o.x as f32, o.y as f32, weight, 0.].map(f32::to_le_bytes);
+            data[at..at + 16].copy_from_slice(bytes.as_flattened());
+        }
         let storage = wgpu::BufferUsages::STORAGE;
         let original = rt
             .device
@@ -121,7 +178,9 @@ impl BrushStroke {
             next,
             staging,
             pending: None,
-            dirty: false,
+            texture,
+            ticket: 0,
+            revision: 0,
         })
     }
 
@@ -163,14 +222,44 @@ impl BrushStroke {
                 [self.mesh.cols as u32, self.mesh.rows as u32],
             );
         }
+        let stride = row_vertices(self.mesh.cols) as u32;
+        enc.copy_buffer_to_texture(
+            wgpu::TexelCopyBufferInfo {
+                buffer: &self.next,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(stride * 16),
+                    rows_per_image: None,
+                },
+            },
+            self.texture.as_image_copy(),
+            self.texture.size(),
+        );
         self.rt.queue.submit([enc.finish()]);
         std::mem::swap(&mut self.current, &mut self.next);
-        self.dirty = true;
+        if self.ticket == 0 {
+            let id = TICKET.fetch_add(1, Ordering::Relaxed).max(1);
+            ACTIVE.lock().push(ActivePreview {
+                id,
+                device: Arc::downgrade(&self.rt),
+                origin: self.mesh.origin,
+                cell: self.mesh.cell,
+                size: [self.mesh.cols as u32, self.mesh.rows as u32],
+                view: self.texture.create_view(&Default::default()),
+            });
+            self.ticket = id;
+        }
+        self.revision += 1;
     }
 
-    /// Returns the newest completed mesh, and whether it includes all submitted samples.
-    pub fn poll(&mut self) -> Result<Option<(Value, bool)>, String> {
-        let mut result = None;
+    /// Identify this stroke's GPU surface in an evaluated viewer frame.
+    /// The revision invalidates a cached frame when the same brush paints another dab.
+    pub fn preview_value(&self) -> Option<Value> {
+        (self.ticket != 0).then_some(Value::Vec2([self.ticket.into(), self.revision.into()]))
+    }
+
+    /// Poll the single snapshot taken after pointer release.
+    pub fn committed(&mut self) -> Result<Option<Value>, String> {
         if let Some(rx) = &self.pending {
             self.rt
                 .device
@@ -186,7 +275,10 @@ impl BrushStroke {
                     .staging
                     .get_mapped_range(..)
                     .map_err(|e| e.to_string())?;
-                for (offset, v) in self.mesh.offsets.iter_mut().zip(bytes.as_chunks::<16>().0) {
+                let stride = row_vertices(self.mesh.cols);
+                for (i, offset) in self.mesh.offsets.iter_mut().enumerate() {
+                    let at = (i / self.mesh.cols * stride + i % self.mesh.cols) * 16;
+                    let v = &bytes[at..at + 16];
                     *offset = DVec2::new(
                         f32::from_le_bytes(v[0..4].try_into().unwrap()) as f64,
                         f32::from_le_bytes(v[4..8].try_into().unwrap()) as f64,
@@ -195,9 +287,9 @@ impl BrushStroke {
             }
             self.staging.unmap();
             self.pending = None;
-            result = Some((self.mesh.to_value(), !self.dirty));
+            return Ok(Some(self.mesh.to_value()));
         }
-        if self.dirty {
+        {
             let mut enc = self.rt.device.create_command_encoder(&Default::default());
             enc.copy_buffer_to_buffer(&self.current, 0, &self.staging, 0, self.current.size());
             self.rt.queue.submit([enc.finish()]);
@@ -206,9 +298,14 @@ impl BrushStroke {
                 let _ = tx.send(r);
             });
             self.pending = Some(rx);
-            self.dirty = false;
         }
-        Ok(result)
+        Ok(None)
+    }
+}
+
+impl Drop for BrushStroke {
+    fn drop(&mut self) {
+        ACTIVE.lock().retain(|p| p.id != self.ticket);
     }
 }
 

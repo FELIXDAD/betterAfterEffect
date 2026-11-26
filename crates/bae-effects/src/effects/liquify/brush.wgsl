@@ -8,18 +8,23 @@ struct Brush {
 @group(0) @binding(2) var<storage, read> previous: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> next_mesh: array<vec4f>;
 
+fn index_of(p: vec2u) -> u32 {
+    let stride = ((b.size.x + 15u) / 16u) * 16u;
+    return p.y * stride + p.x;
+}
+
 fn initial(p: vec2f) -> vec2f {
     let g = clamp((p-b.origin)/b.cell, vec2f(0.), vec2f(b.size-1u));
     let lo = vec2u(g);
     let hi = min(lo+1u, b.size-1u);
     let f = fract(g);
-    return mix(mix(original[lo.y*b.size.x+lo.x].xy, original[lo.y*b.size.x+hi.x].xy, f.x),
-               mix(original[hi.y*b.size.x+lo.x].xy, original[hi.y*b.size.x+hi.x].xy, f.x), f.y);
+    return mix(mix(original[index_of(vec2u(lo.x,lo.y))].xy, original[index_of(vec2u(hi.x,lo.y))].xy, f.x),
+               mix(original[index_of(vec2u(lo.x,hi.y))].xy, original[index_of(vec2u(hi.x,hi.y))].xy, f.x), f.y);
 }
 @compute @workgroup_size(8,8)
 fn brush(@builtin(global_invocation_id) gid: vec3u) {
     if any(gid.xy >= b.size) { return; }
-    let i = gid.y*b.size.x+gid.x;
+    let i = index_of(gid.xy);
     let old = previous[i];
     let q = b.origin + vec2f(gid.xy)*b.cell;
     let start = b.center-b.drag;

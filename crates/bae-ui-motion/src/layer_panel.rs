@@ -173,7 +173,7 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
-        self.liquify.update(ui, cx, &session);
+
         let eval = crate::viewer::live_evaluator(&mut self.eval, cx, &session);
         if let Some(g) = &self.gpu
             && !eval
@@ -198,7 +198,12 @@ impl Panel for LayerPanel {
             (Show::Effect(i), true) => i + 1,
             _ => 0,
         };
-        if let Some((one, min)) = alone(&comp, &layer, effects) {
+        if let Some((mut one, min)) = alone(&comp, &layer, effects) {
+            if let (Show::Effect(index), true) = (self.show, self.render)
+                && let Some(e) = one.layers[0].effects.get_mut(index)
+            {
+                liquify::Editor::preview_overlay(e);
+            }
             let size = vec2(one.width as f32, one.height as f32);
             let panning = self.navigate(ui, cx, area, size);
             let view = self.picture(ui, cx, area, &one, min, evaluated);
@@ -214,6 +219,7 @@ impl Panel for LayerPanel {
                     .show(ui, cx, &session, area, &view, min, evaluated, fx, time);
             }
         }
+        self.liquify.update(ui, cx, &session);
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
         if let Some(edit) = self.time_ruler(ui, &session, &info, ruler, time, in_out) {
             trim(cx, &layer, edit);

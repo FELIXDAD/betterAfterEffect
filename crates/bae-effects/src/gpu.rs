@@ -118,6 +118,7 @@ pub(crate) struct Runtime {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub particles: OnceLock<Result<crate::categories::simulation::Engine, String>>,
+    pub mesh_upload: OnceLock<Mutex<wgpu::util::StagingBelt>>,
     ring: UniformRing,
     placeholder: wgpu::TextureView,
     kernels: Mutex<FxHashMap<KernelKey, Arc<Kernel>>>,
@@ -188,6 +189,7 @@ impl Runtime {
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
         Self {
+            mesh_upload: OnceLock::new(),
             device,
             queue,
             particles: OnceLock::new(),

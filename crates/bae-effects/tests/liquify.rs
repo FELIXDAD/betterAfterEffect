@@ -14,6 +14,10 @@ fn path(s: &str) -> PrimPath {
 
 /// Alpha along row 16 of a 32 × 32 red solid in a 48 × 32 comp, liquified by `mesh`.
 fn row(mesh: Option<&Mesh>) -> Option<Vec<u8>> {
+    row_value(mesh.map(Mesh::to_value), 16)
+}
+
+fn row_value(value: Option<Value>, y: usize) -> Option<Vec<u8>> {
     let mut renderer = Renderer::new(bae_gpu::testing::shared_context()?);
     bae_effects::register(
         &mut bae_model::EffectRegistry::new(),
@@ -28,12 +32,12 @@ fn row(mesh: Option<&Mesh>) -> Option<Vec<u8>> {
             height: 32,
         },
     );
-    if let Some(m) = mesh {
+    if let Some(mesh) = value {
         layer.effects = vec![RenderEffect {
             path: path("/comps/main/layers/solid/effects/Liquify"),
             enabled: true,
             effect: MATCH_NAME.into(),
-            params: vec![(MESH, m.to_value()), (PERCENT, Value::Float(100.0))],
+            params: vec![(MESH, mesh), (PERCENT, Value::Float(100.0))],
         }];
     }
     comp.layers.push(layer);
@@ -44,7 +48,7 @@ fn row(mesh: Option<&Mesh>) -> Option<Vec<u8>> {
         .read_rgba8(&frame, OutputAlpha::Premultiplied)
         .ok()?
         .data;
-    Some((0..48).map(|x| px[(16 * 48 + x) * 4 + 3]).collect())
+    Some((0..48).map(|x| px[(y * 48 + x) * 4 + 3]).collect())
 }
 
 #[test]
@@ -79,19 +83,27 @@ fn brushes_deform_the_gpu_mesh_and_leave_frozen_vertices_in_place() {
             center,
             radius: 24.,
             pressure: 1.,
-            drag: DVec2::new(8., 0.),
+            drag: DVec2::new(-8., 0.),
             source: DVec2::splat(16.),
             jitter: 0.7,
             reconstruction: 0,
         });
+        let preview = (tool == 0).then(|| {
+            let live = stroke.preview_value().expect("live brush");
+            row_value(Some(live), 30).expect("live render")
+        });
         let start = std::time::Instant::now();
         let value = loop {
-            if let Some((v, true)) = stroke.poll().unwrap() {
+            if let Some(v) = stroke.committed().unwrap() {
                 break v;
             }
             assert!(start.elapsed().as_secs() < 10);
             std::thread::yield_now();
         };
+        if let Some(live) = preview {
+            assert_ne!(live, row_value(None, 30).unwrap());
+            assert_eq!(row_value(Some(value.clone()), 30).unwrap(), live);
+        }
         let changed = Mesh::from_value(&value).unwrap();
         assert_ne!(changed.offsets, mesh.offsets, "tool {tool}");
         assert_eq!(
