@@ -770,6 +770,8 @@ impl Panel for TimelinePanel {
 impl TimelinePanel {
     fn contents(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, cols: &Cols) {
         let session = common::session(cx.resources);
+        self.expanded
+            .extend(session.lock().reveal_style_groups.drain(..));
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         if let Some(track) = session.lock().reveal_tracker.take()

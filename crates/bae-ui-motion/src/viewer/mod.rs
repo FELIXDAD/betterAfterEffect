@@ -30,6 +30,7 @@ pub(crate) mod errors;
 mod feather_tool;
 mod free_transform;
 mod gizmo3d;
+mod group_edit;
 pub(crate) mod guides;
 mod layout;
 mod look_at;
@@ -1044,6 +1045,12 @@ impl Panel for CompositionViewer {
             }
         }
         apply_overrides(&mut comp, self.select.drag.as_ref());
+        // A shape group being dragged.
+        if let Some(d) = &self.select.group_drag
+            && let Some(l) = comp.layers.iter_mut().find(|l| l.path == d.layer)
+        {
+            d.preview(l);
+        }
         // A mask or shape path being edited shows in the picture, not only as
         // its outline (#593).
         if let Some((prim, path)) = self
