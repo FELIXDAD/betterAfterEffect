@@ -25,7 +25,6 @@ mod appearance_preferences;
 mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
-mod camera_preferences;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
@@ -65,6 +64,7 @@ mod stress;
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod window_workspaces;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
