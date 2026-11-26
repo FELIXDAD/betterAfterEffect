@@ -36,7 +36,7 @@ pub const REMOVE_ALL: &str = "motion.effect.remove_all";
 
 pub use crate::catalog::AeEffect;
 
-/// Every AE 26 effect of the Effect menu (299 in 22 categories; from the
+/// Every AE 26 effect of the Effect menu (including the legacy entries in 22 categories; from the
 /// command catalog).
 pub fn directory() -> &'static [AeEffect] {
     crate::catalog::ae_effects()
@@ -367,7 +367,7 @@ mod directory_tests {
     #[test]
     fn directory_matches_ae_menu() {
         let list = directory();
-        assert_eq!(list.len(), 299);
+        assert_eq!(list.len(), 306);
         let categories: std::collections::BTreeSet<&str> =
             list.iter().map(|e| e.category).collect();
         let mut want = crate::catalog::effect_categories().to_vec();

@@ -205,6 +205,13 @@ Noise & Grain	ADBE Noise HLS2	Noise HLS	杂色 HLS	8
 Noise & Grain	ADBE Noise HLS Auto2	Noise HLS Auto	杂色 HLS 自动	8
 Noise & Grain	VISINF Grain Removal	Remove Grain	移除颗粒	8,16
 Noise & Grain	ADBE AIF Perlin Noise 3D	Turbulent Noise	湍流杂色	8,16,32
+Obsolete	ADBE PSL Bevel Emboss	Photoshop Bevel and Emboss	Photoshop 斜面和浮雕	8
+Obsolete	ADBE PSL Drop Shadow	Photoshop Drop Shadow	Photoshop 投影	8
+Obsolete	ADBE PSL Inner Glow	Photoshop Inner Glow	Photoshop 内发光	8
+Obsolete	ADBE PSL Inner Shadow	Photoshop Inner Shadow	Photoshop 内阴影	8
+Obsolete	ADBE PSL Outer Glow	Photoshop Outer Glow	Photoshop 外发光	8
+Obsolete	CC PS Classic	CC PS Classic (obsolete)	CC PS Classic (obsolete)	8
+Obsolete	CC PS LE Classic	CC PS LE Classic (obsolete)	CC PS LE Classic (obsolete)	8
 Obsolete	ADBE Basic 3D	Basic 3D	基本 3D	8
 Obsolete	ADBE Basic Text2	Basic Text	基本文字	8
 Obsolete	ADBE Color Key	Color Key	颜色键	8,16

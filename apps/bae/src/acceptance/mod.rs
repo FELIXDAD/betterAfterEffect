@@ -23,6 +23,7 @@
 
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
+mod classic_effects;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
