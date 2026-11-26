@@ -86,6 +86,32 @@ fn tools_follow_the_preferences() {
         h.v3(&layer, "transform:position"),
         [200.0, 100.0, 0.0]
     ));
+    // #679: the Pen with Separate Dimensions on centres the anchor through
+    // X / Y Position (the layer evaluates those), not the combined value.
+    h.select(&[]);
+    h.tools().lock().set(Tool::Pen);
+    let r = h.click(100.0, 100.0, Modifiers::NONE);
+    h.apply(&r);
+    let pen = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let r = h.click(300.0, 100.0, Modifiers::NONE);
+    let edits = &one(&r, "attr.set_many")["edits"];
+    let attrs: Vec<_> = edits
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["path"] == json!(pen))
+        .map(|e| e["attr"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        attrs,
+        [
+            "transform:anchor_point",
+            "transform:position_x",
+            "transform:position_y"
+        ]
+    );
+    h.tools().lock().set(Tool::Selection);
+    h.frame(Vec::new(), Modifiers::NONE);
     // Appearance > Cycle Mask Colors off.
     let solid = h.layer("solid");
     h.select(&[&solid]);
