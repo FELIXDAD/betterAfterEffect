@@ -84,6 +84,8 @@ enum Task {
 }
 
 pub struct DiskFrames {
+    #[cfg(test)]
+    pub(crate) restored: std::sync::atomic::AtomicUsize,
     base: PathBuf,
     state: Arc<Mutex<State>>,
     binary_stamp: OnceLock<u64>,
@@ -96,6 +98,8 @@ impl DiskFrames {
     pub fn new(base:PathBuf, prefs:&PrefsStore)->Arc<Self> {
         let (tx,rx)=mpsc::channel();
         let cache=Arc::new(Self {
+            #[cfg(test)]
+            restored:Default::default(),
             base:base.clone(),
             state: Arc::new(Mutex::new(State{cfg:Config::new(&base,&prefs.current()),epoch:0,index:None})),
             binary_stamp:OnceLock::new(),
@@ -137,6 +141,8 @@ impl DiskFrames {
         let target=OutputTarget::new(gpu.device(),[w,h]);
         let tex=target.view().texture();
         transfer::upload_texture(gpu,tex,transfer::TextureRegion::full(tex),&data).ok()?;
+        #[cfg(test)]
+        self.restored.fetch_add(1, Ordering::Release);
         Some((target,rect))
     }
     pub(crate) fn save(&self,key:u64,texture:wgpu::Texture,rect:IRect,hold:Arc<dyn Send+Sync>) {
