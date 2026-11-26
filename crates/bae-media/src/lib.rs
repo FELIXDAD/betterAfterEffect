@@ -61,6 +61,7 @@ pub mod mix;
 mod module;
 mod mp4;
 pub mod playback;
+pub mod psd;
 pub mod sequence;
 mod source;
 pub mod still;
@@ -99,6 +100,7 @@ pub use trim::{TimeRange, TrimMode, TrimPlan, TrimRequest, TrimResult, Trimmer, 
 pub fn builtin_formats() -> Vec<Arc<dyn MediaFormat>> {
     #[allow(unused_mut)]
     let mut formats = still::formats();
+    formats.push(Arc::new(psd::Photoshop));
     #[cfg(target_vendor = "apple")]
     formats.push(Arc::new(apple::AvFoundationFormat));
     #[cfg(windows)]
