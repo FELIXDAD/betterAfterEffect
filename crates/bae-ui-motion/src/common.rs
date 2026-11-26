@@ -5,10 +5,9 @@ use std::sync::Arc;
 
 use bae_anim::Evaluator;
 use bae_app::Resources;
-use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
+use bae_model::{LayerKind, PrimPath, PrimType, Stage, StageEvent, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
-use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
@@ -47,7 +46,7 @@ pub(crate) fn expression_style(
     let rgb = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
     match resources.get::<Arc<bae_prefs::PrefsStore>>() {
         Some(store) => {
-            let p = store.current();
+            let p = store.display();
             (
                 egui::FontId::monospace(p.int(bae_prefs::keys::EXPR_FONT_SIZE).clamp(6, 72) as f32),
                 rgb(p.color("scripting_expressions.expr_color_default")),
@@ -75,33 +74,48 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
         })
 }
 
-/// An [`Evaluator`] whose compiled comps are dropped whenever the stage changed
-/// (detected through the shell's history log; without one, every frame).
+/// A panel evaluator that invalidates only the compositions touched by an edit.
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
     changes: StageChanges,
 }
 
-/// Panels observe the same committed edits, undo/redo and project replacements.
 #[derive(Default)]
 pub(crate) struct StageChanges {
-    seq: Option<u64>,
+    revision: Option<u64>,
 }
 
 impl StageChanges {
-    pub(crate) fn changed(&mut self, resources: &Resources) -> bool {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        let previous = std::mem::replace(&mut self.seq, seq);
-        seq.is_none() || seq != previous
+    /// Visit new edits once. A missing event means the project was replaced or
+    /// the consumer fell behind the stage's retained history.
+    pub(crate) fn sync(
+        &mut self,
+        stage: &Stage,
+        mut apply: impl FnMut(Option<&StageEvent>),
+    ) -> bool {
+        let revision = stage.revision();
+        if self.revision == Some(revision) {
+            return false;
+        }
+        let previous = self.revision.replace(revision).unwrap_or(revision);
+        if let Some(events) = stage.changes_since(previous) {
+            for event in events {
+                apply(Some(event));
+            }
+        } else {
+            apply(None);
+        }
+        true
     }
 }
 
 impl EvalCache {
-    pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        if self.changes.changed(resources) {
-            self.eval.clear();
-        }
+    pub(crate) fn get(&mut self, stage: &Stage) -> &mut Evaluator {
+        self.changes.sync(stage, |event| match event {
+            Some(event) => self.eval.invalidate(event),
+            None => self.eval.clear(),
+        });
         &mut self.eval
     }
 }
@@ -502,7 +516,9 @@ pub(crate) fn apply_edit(
         Edit::Live(value) => {
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value,
@@ -521,7 +537,9 @@ pub(crate) fn apply_edit(
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
             // Shown as committed until the command has run.
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value: value.clone(),
@@ -818,12 +836,19 @@ pub(crate) fn new_layer(
         return;
     };
     let mut params = json!({"comp": comp, "kind": kind, "name": name, "index": index});
-    // Preferences: the kind's default label; new layers start at the comp's
-    // start, or at the current time when that option is off.
-    let prefs = crate::prefs::current(cx.resources);
-    params["label"] = json!(crate::prefs::layer_label(&prefs, kind));
-    if !crate::prefs::layers_at_comp_start(&prefs) {
-        params["start"] = json!(session.lock().time(&comp));
+    if let Some(info) = query::comp_info(stage, &comp) {
+        crate::prefs::apply_layer_defaults(cx.resources, session, &info, kind, &mut params);
+    }
+    if matches!(kind, LayerKind::Solid | LayerKind::Adjustment) {
+        let prefs = crate::prefs::current(cx.resources);
+        let name = prefs.str("project.new_project_solids_folder");
+        let name = if name == "Solids" || name.trim().is_empty() {
+            bae_ui::tr("Solids")
+        } else {
+            name
+        };
+        params["solids_folder_name"] = json!(name);
+        params["solids_folder_label"] = json!(prefs.int("labels.label_default_folder"));
     }
     if let (Some(p), serde_json::Value::Object(m)) = (params.as_object_mut(), extra) {
         p.extend(m);
@@ -838,6 +863,25 @@ pub(crate) fn new_layer(
 pub(crate) fn active_comp(stage: &Stage, session: &SharedSession) -> Option<CompInfo> {
     let comp = session.lock().active_comp.clone()?;
     query::comp_info(stage, &comp)
+}
+
+/// A viewer tab uses the same swatch as its project item or layer.
+pub(crate) fn related_tab(
+    cx: &PanelContext<'_>,
+    panel: &str,
+    path: &PrimPath,
+    name: &str,
+) -> bae_ui::TabInfo {
+    let tab = bae_ui::TabInfo::new(format!("{} {name}", tr(panel)));
+    if !crate::prefs::current(cx.resources).bool("appearance.use_label_color_for_related_tabs") {
+        return tab;
+    }
+    let label = crate::actions::label_of(cx.stage, path);
+    if (1..=16).contains(&label) {
+        tab.label(theme::label_color(label as usize))
+    } else {
+        tab
+    }
 }
 
 /// Whether a layer is 3D (`three_d` switch; cameras and lights always are).

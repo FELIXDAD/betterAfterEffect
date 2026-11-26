@@ -9,7 +9,10 @@
 pub(crate) mod browser;
 pub(crate) mod controls;
 mod eq_response;
+mod exr;
 mod lumetri_curve;
+pub(crate) mod lut;
+pub mod manager;
 mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
@@ -268,7 +271,12 @@ pub(crate) struct EffectActions;
 
 impl ActionHandler for EffectActions {
     fn actions(&self) -> Vec<String> {
-        vec![APPLY.into(), LAST_EFFECT.into(), REMOVE_ALL.into()]
+        vec![
+            APPLY.into(),
+            LAST_EFFECT.into(),
+            REMOVE_ALL.into(),
+            lut::BROWSE.into(),
+        ]
     }
 
     fn workspace(&self) -> Option<&str> {
@@ -278,6 +286,10 @@ impl ActionHandler for EffectActions {
     fn handle(&self, inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let layers = selected_layers(cx);
         match inv.id.as_str() {
+            lut::BROWSE => {
+                lut::browse(inv, cx);
+                true
+            }
             APPLY => {
                 if let Some(m) = inv.params.get("match_name").and_then(|v| v.as_str()) {
                     apply(cx, &layers, m);
@@ -387,8 +399,8 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "effects",
-        bae_ui::PanelKind::new("Effects & Presets", |_| {
-            Box::new(browser::EffectsPanel::default())
+        bae_ui::PanelKind::new("Effects & Presets", |spawn| {
+            Box::new(browser::EffectsPanel::restore(spawn.state))
         }),
     );
 }

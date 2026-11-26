@@ -122,6 +122,12 @@ impl TimelinePanel {
                 if let Some(p) = pointer {
                     ui.painter()
                         .line_segment([origin, p], Stroke::new(1.5, color::ACCENT));
+                    // The layer it would parent to is outlined (AE).
+                    if let Some((r, target)) = layer_rows.iter().find(|(r, _)| r.contains(p))
+                        && !layers.contains(target)
+                    {
+                        outline(ui, *r);
+                    }
                 }
                 if released {
                     self.drag = None;
@@ -130,9 +136,10 @@ impl TimelinePanel {
                         && !layers.contains(target)
                     {
                         let now = session.lock().time(&info.path);
+                        let mods = ui.input(|i| i.modifiers);
                         cx.invoke_with(
                             "layer.set_parent",
-                            json!({"layers": layers, "parent": target, "time": now}),
+                            super::rows::parent_params(&layers, Some(target), now, mods),
                         );
                     }
                 }
@@ -141,16 +148,25 @@ impl TimelinePanel {
                 if let Some(p) = pointer {
                     ui.painter()
                         .line_segment([origin, p], Stroke::new(1.5, color::ACCENT));
+                    if let Some(r) = prop_rows
+                        .iter()
+                        .map(|(r, ..)| r)
+                        .chain(layer_rows.iter().map(|(r, _)| r))
+                        .find(|r| r.contains(p))
+                    {
+                        outline(ui, *r);
+                    }
                 }
                 if released {
                     self.drag = None;
                     let now = session.lock().time(&info.path);
-                    let eval = self.eval.get(cx.resources);
+                    let eval = self.eval.get(cx.stage);
                     if let Some(p) = pointer {
                         if let Some((_, path, attr)) =
                             prop_rows.iter().find(|(r, ..)| r.contains(p))
                         {
-                            crate::expr::link(cx, eval, &whip, path, Some(attr), now);
+                            let attr = (!attr.is_empty()).then_some(attr.as_str());
+                            crate::expr::link(cx, eval, &whip, path, attr, now);
                         } else if let Some((_, layer)) =
                             layer_rows.iter().find(|(r, _)| r.contains(p))
                         {
@@ -212,4 +228,14 @@ impl TimelinePanel {
             _ => {}
         }
     }
+}
+
+/// The row a pick whip is over.
+fn outline(ui: &Ui, r: Rect) {
+    ui.painter().rect_stroke(
+        r.shrink(1.0),
+        0.0,
+        Stroke::new(1.0, color::ACCENT),
+        egui::StrokeKind::Inside,
+    );
 }

@@ -17,6 +17,7 @@ use crate::timeline::{invert_layer_selection, select_children};
 /// pointer, topmost first, while the menu is open.
 pub(super) fn frame(
     under: &mut Vec<PrimPath>,
+    key: Option<&bae_motion::KeyRef>,
     resp: &Response,
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
@@ -24,6 +25,7 @@ pub(super) fn frame(
     view: &View,
 ) {
     if resp.secondary_clicked()
+        && key.is_none()
         && let Some(pos) = resp.interact_pointer_pos()
     {
         *under = super::select_tool::layers_at(cx.stage, comp, view, pos).collect();
@@ -37,6 +39,11 @@ pub(super) fn frame(
         }
     }
     common::context_menu(resp, &mut |ui| {
+        // A keyframe square on a motion path: AE's keyframe menu.
+        if let Some(k) = key {
+            crate::timeline::key_menu(ui, cx, session, k);
+            return;
+        }
         let Some(top) = under.first().cloned() else {
             context_menu::show(ui, cx, VIEWER_BLANK);
             return;

@@ -139,7 +139,11 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "edit.paste" => return Paste,
         "motion.select_all" | "motion.deselect_all" => return Comp,
         "motion.duplicate" | "motion.split" | "motion.order" => return Layers,
-        "motion.ease" | "motion.toggle_hold" | "motion.reverse_keys" => return Keys,
+        "motion.ease"
+        | "motion.toggle_hold"
+        | "motion.reverse_keys"
+        | "motion.anim.exponential_scale" => return Keys,
+        "motion.anim.sequence_layers" => return Layers,
         "motion.new_comp" => return Nothing,
         "motion.new_layer"
         | "motion.trim_comp"
@@ -339,7 +343,11 @@ impl Builder {
                     path.push(sub.title);
                     let mut at = levels.to_vec();
                     at.push(pos);
-                    if sub.children.is_empty() {
+                    if sub.title == "Layer Styles" {
+                        for (id, spec) in crate::layer_styles::menu(&at) {
+                            self.push(id, spec);
+                        }
+                    } else if sub.children.is_empty() {
                         // AE shows the submenu (History, Team Project) greyed.
                         self.placeholder(path, &at);
                     } else {
@@ -445,6 +453,11 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 crate::viewer::view_options::background_checked(cx.resources, &key)
             })
         }
+        actions::ids::SEPARATE_DIMENSIONS => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let layers = session.lock().selected_layers.clone();
+            actions::all_separated(cx.stage, &layers)
+        }),
         crate::viewer::view3d::ids::CREATE_CAMERA => {
             spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
         }

@@ -269,6 +269,15 @@ impl Editing {
                 if let Some((_, b)) = self.text_box {
                     params["box_size"] = json!(b);
                 }
+                if let Some(info) = query::comp_info(stage, &self.comp) {
+                    crate::prefs::apply_layer_defaults(
+                        cx.resources,
+                        session,
+                        &info,
+                        bae_model::LayerKind::Text,
+                        &mut params,
+                    );
+                }
                 if let Some(d) = session.lock().text_defaults.clone() {
                     params["baseline_direction"] = json!(d.style.baseline_direction);
                     params["font"] = json!(d.style.font);

@@ -11,7 +11,7 @@ use bae_motion::markers::markers_of;
 use super::*;
 
 /// Snapping distance (points).
-const SNAP_PX: f32 = 8.0;
+pub(super) const SNAP_PX: f32 = 8.0;
 /// The pale slip-edit bar.
 const SOURCE_BAR: Color32 = Color32::from_rgba_premultiplied(70, 70, 70, 140);
 
@@ -24,7 +24,12 @@ pub(super) struct BarPlan {
 }
 
 /// Snap targets for bar edges: everything except the dragged layers.
-fn bar_targets(stage: &Stage, info: &CompInfo, now: Time, exclude: &[PrimPath]) -> Vec<Time> {
+pub(super) fn bar_targets(
+    stage: &Stage,
+    info: &CompInfo,
+    now: Time,
+    exclude: &[PrimPath],
+) -> Vec<Time> {
     let mut out = vec![
         now,
         Time::ZERO,
@@ -311,11 +316,14 @@ impl TimelinePanel {
             select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
         if resp.double_clicked() {
-            // A precomp opens its comp at the matching time, any other layer the
-            // Layer panel (AE).
-            if !self.open_precomp(cx, session, layer) {
-                crate::layer_panel::open(cx, session, layer);
-            }
+            crate::layer_panel::open_clicked(
+                cx,
+                session,
+                layer,
+                ui.input(|i| i.modifiers.alt),
+                crate::tools::shared(cx.resources).current(),
+                &mut self.eval,
+            );
         }
         // Right-click: the layer context menu (as on the layer name).
         let mut menu_out = None;
