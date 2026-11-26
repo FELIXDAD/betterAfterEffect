@@ -1718,6 +1718,40 @@ fn import_creates_footage_items_in_one_step() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Files dropped on the Composition or Timeline panel (AE): imported and added
+/// to the comp as layers, the first on top, in the same undo step.
+#[test]
+fn import_into_a_comp_adds_layers_in_the_same_step() {
+    let dir = std::env::temp_dir().join(format!("bae-import-comp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (clip, music) = (dir.join("clip.png"), dir.join("music.wav"));
+    std::fs::write(&clip, b"clip").unwrap();
+    std::fs::write(&music, b"music").unwrap();
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let out = fx.run(
+        "item.import",
+        json!({"comp": comp, "files": [
+            {"path": clip},
+            {"path": music, "attrs": {
+                "has_video": {"type": "bool", "value": false},
+                "has_audio": {"type": "bool", "value": true}}},
+        ]}),
+    );
+    let layers = query::comp_layers(&fx.stage, &comp);
+    assert_eq!(out["layers"], json!(layers));
+    let kinds: Vec<_> = layers
+        .iter()
+        .map(|l| query::layer_kind(&fx.stage, l).unwrap())
+        .collect();
+    assert_eq!(kinds, ["footage", "audio"]);
+    assert_eq!(query::display_name_of(&fx.stage, &layers[0]), "clip.png");
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(query::comp_layers(&fx.stage, &comp).is_empty());
+    assert!(!fx.stage.has_prim(&p(out["items"][0].as_str().unwrap())));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `layer.set_attr`: one undo step for several layers; only switches, quality
 /// and label.
 #[test]
