@@ -153,9 +153,9 @@ pub(crate) struct Executed {
     pub incomplete: bool,
     /// CPU time encoding each node (by node index), when timed.
     pub node_times: Vec<std::time::Duration>,
-    /// The frame converted into a new RGBA8 texture (when asked for),
+    /// The frame converted into the requested RGBA8 target (when asked for),
     /// recorded in the frame's own submission.
-    pub output: Option<wgpu::Texture>,
+    pub output: Option<crate::OutputTarget>,
 }
 
 struct PoolAllocator<'a> {
@@ -191,7 +191,7 @@ pub(crate) struct Timing<'a> {
 }
 
 /// Executes `graph` and submits it once. Returns the output node's image,
-/// with `output` its conversion into a new RGBA8 texture recorded before the
+/// with `output` its conversion into the requested RGBA8 target recorded before the
 /// same submission (the viewer path: one submit per frame), and, when
 /// `timed`, the CPU time of every node.
 #[allow(clippy::too_many_arguments)]
@@ -205,7 +205,7 @@ pub(crate) fn execute(
     format: wgpu::TextureFormat,
     mut tiles: Option<TileCache<'_>>,
     timing: Timing<'_>,
-    output: Option<crate::OutputAlpha>,
+    output: Option<crate::renderer::DisplayOutput>,
 ) -> Result<Executed, RenderError> {
     let timed = timing.cpu;
     let mut gpu_timer = timing.gpu;
@@ -464,43 +464,9 @@ pub(crate) fn execute(
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;
-    let output = output.map(|alpha| {
-        let [w, h] = image.texel_size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bae-render.output"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.output"),
-            size: crate::renderer::OUTPUT_PARAMS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        gpu.queue()
-            .write_buffer(&uniform, 0, &crate::renderer::output_params(alpha, false));
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        record_output_pass(
-            device,
-            ctx.pipelines,
-            &mut encoder,
-            &image,
-            &view,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &uniform,
-        );
-        target
+    let output = output.map(|out| {
+        let incomplete = graph.incomplete || incomplete;
+        out.record(device, ctx.pipelines, &mut encoder, &image, incomplete)
     });
     gpu.queue().submit([encoder.finish()]);
     ctx.pipelines.end_frame();
@@ -699,19 +665,36 @@ impl ExecCtx<'_> {
             if bounds.is_empty() {
                 continue;
             }
+            let variant = if op.motion.is_some() {
+                Variant::Motion
+            } else if op.lighting.is_some() {
+                Variant::Lit
+            } else {
+                Variant::Plain
+            };
+            // Metal can supply the affine image parameters from the vertex
+            // stage rather than fetching the full draw record for each fragment.
+            #[cfg(target_os = "macos")]
+            let variant = if self.gpu.adapter_info().backend == wgpu::Backend::Metal
+                && variant == Variant::Plain
+                && kind == BlendKind::Normal
+                && fl & !(flags::STRAIGHT | flags::CLAMP) == flags::TEXTURE
+                && data.extra[0] == 0
+            {
+                // Batching uses one hardware scissor. Keep each instance's
+                // original region in the unused matte slot.
+                data.matte = [bounds.x0, bounds.y0, bounds.x1, bounds.y1].map(|v| v as f32);
+                Variant::AffineImage
+            } else {
+                variant
+            };
             planned.push(Planned {
                 data,
                 kind,
                 textures,
                 bounds,
                 backdrop,
-                variant: if op.motion.is_some() {
-                    Variant::Motion
-                } else if op.lighting.is_some() {
-                    Variant::Lit
-                } else {
-                    Variant::Plain
-                },
+                variant,
             });
             drawn_any = true;
         }
@@ -816,11 +799,22 @@ impl ExecCtx<'_> {
                     pass.set_pipeline(pipeline);
                     current = Some((p.kind, p.variant));
                 }
-                // Batch a run of plain solids with the same pipeline.
+                // Adjacent affine images can instance the same bound texture
+                // in painter's order, just as solids share the dummy texture.
+                let batchable = p.textures.is_none();
+                #[cfg(target_os = "macos")]
+                let batchable = batchable || p.variant == Variant::AffineImage;
+                let same_textures = |next: &Planned| {
+                    #[cfg(target_os = "macos")]
+                    if p.variant == Variant::AffineImage {
+                        return next.textures == p.textures;
+                    }
+                    next.textures.is_none()
+                };
                 let mut end = i + 1;
-                if p.textures.is_none() && !p.backdrop {
+                if batchable && !p.backdrop {
                     while end < planned.len()
-                        && planned[end].textures.is_none()
+                        && same_textures(&planned[end])
                         && !planned[end].backdrop
                         && planned[end].kind == p.kind
                         && planned[end].variant == p.variant

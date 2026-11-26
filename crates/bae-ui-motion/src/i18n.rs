@@ -4,6 +4,10 @@
 //! table (`<module>::ZH` / `<module>/zh.rs`); only common words stay here.
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Command title (`layer.auto_orient`).
+    ("Auto-Orient", "自动定向"),
+    // Command title (`project.set_settings`).
+    ("Project Settings", "项目设置"),
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
     // (#136). The command crate stays UI-free; its titles are translated here.
     ("Waveform Audio (WAV)", "波形音频（WAV）"),
@@ -20,6 +24,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "合成中没有开启声音的图层。",
     ),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
+    ("Track Motion", "跟踪运动"),
     ("Apply Motion Tracker", "应用动态跟踪器"),
     ("Edit Motion Tracker", "编辑动态跟踪器"),
     ("Analyze Motion", "分析运动"),
@@ -30,6 +35,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Delete Keyframes", "删除关键帧"),
     ("Move Keyframes", "移动关键帧"),
     ("Paste Keyframes", "粘贴关键帧"),
+    ("Dropped frames", "丢帧"),
     ("New Layer", "新建图层"),
     ("Delete Layers", "删除图层"),
     ("Reorder Layers", "排列图层"),
