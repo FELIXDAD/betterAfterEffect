@@ -459,7 +459,12 @@ impl Panel for ProjectPanel {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (i, row) in rows.iter().enumerate() {
-                    let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click_and_drag());
+                    let (id, rect) = ui.allocate_space(vec2(width, ROW_H));
+                    let visible = rect.intersect(ui.clip_rect()).intersect(panel_rect);
+                    if !visible.is_positive() {
+                        continue;
+                    }
+                    let resp = ui.interact(visible, id, Sense::click_and_drag());
                     if row.kind == ItemKind::Folder {
                         folder_rows.push((rect, row.path.clone()));
                     }
