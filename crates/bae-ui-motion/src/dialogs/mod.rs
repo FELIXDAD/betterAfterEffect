@@ -479,6 +479,7 @@ impl bae_ui::DialogHost for MotionDialogs {
     }
 
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
+        crate::import::auto_reload::on_focus(ctx, cx);
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
         let open = {

@@ -20,6 +20,7 @@ pub(crate) struct LiveScene {
     /// Stage revision and the sources' and effects' registry generations.
     pub key: (u64, Option<u64>, Option<u64>),
     pub snapshot: PreviewSnapshot,
+    pub footage_generation: u64,
     pub sources: Option<PreviewSources>,
     pub effects: Option<PreviewEffects>,
 }
@@ -130,7 +131,10 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
                 state = shared.wake.wait(state).unwrap();
             }
         };
-        if scene.as_ref().is_none_or(|(s, _)| s.key != job.scene.key) {
+        if scene.as_ref().is_some_and(|(s, _)| s.footage_generation != job.scene.footage_generation) {
+            engine.renderer.reload_footage();
+        }
+        if scene.as_ref().is_none_or(|(s, _)| s.key != job.scene.key || s.footage_generation != job.scene.footage_generation) {
             let Ok(stage) = job.scene.snapshot.restore() else {
                 continue;
             };

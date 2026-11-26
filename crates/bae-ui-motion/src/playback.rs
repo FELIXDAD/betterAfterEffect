@@ -27,6 +27,7 @@ const DEPTH: usize = 3;
 #[derive(Clone, PartialEq, Eq)]
 struct SceneKey {
     revision: u64,
+    footage_generation: u64,
     path: PrimPath,
     resolution: u32,
     sources: Option<u64>,
@@ -43,7 +44,7 @@ impl SceneKey {
     }
 
     fn same_view(&self, other: &Self) -> bool {
-        self.path == other.path
+        self.footage_generation == other.footage_generation && self.path == other.path
             && self.resolution == other.resolution
             && self.sources == other.sources
             && self.effects == other.effects
@@ -318,6 +319,7 @@ impl PlaybackPreview {
         let effects = resources.get::<PreviewEffects>();
         let key = SceneKey {
             revision: stage.revision(),
+            footage_generation: crate::import::auto_reload::generation(resources),
             path: path.clone(),
             resolution,
             sources: sources.map(|s| s.0.generation()),
@@ -675,6 +677,7 @@ fn render_worker(
     // remembered vector images survive edits); sources and effects are
     // registered again when their registries changed.
     let mut engine = RenderEngine::new(gpu.clone(), 0);
+    let mut footage_generation = 0;
     let mut synced: Option<(Option<u64>, Option<u64>)> = None;
     let mut in_flight = false;
     let spares: Arc<Mutex<Spares>> = Arc::default();
@@ -711,6 +714,10 @@ fn render_worker(
         // Superseded by a seek, an edit or a stop while it waited.
         if shared.state.lock().unwrap().epoch != job.epoch {
             continue;
+        }
+        if footage_generation != job.scene.key.footage_generation {
+            footage_generation = job.scene.key.footage_generation;
+            engine.renderer.reload_footage();
         }
         let generations = (job.scene.key.sources, job.scene.key.effects);
         if synced != Some(generations) {

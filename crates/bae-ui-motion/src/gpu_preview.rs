@@ -216,6 +216,7 @@ pub(crate) struct GpuPreview {
     pub(super) playback: super::playback::PlaybackPreview,
     changes: StageChanges,
     sources_gen: Option<u64>,
+    footage_generation: u64,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
@@ -281,6 +282,7 @@ impl GpuPreview {
             playback,
             changes: StageChanges::default(),
             sources_gen: None,
+            footage_generation: 0,
             last: None,
             rect: None,
             target: None,
@@ -359,6 +361,15 @@ impl GpuPreview {
         measure_layer_times: bool,
     ) -> Option<PreviewImage> {
         if self.cached.take().is_some() {
+            self.sampled = None;
+        }
+        let generation = crate::import::auto_reload::generation(resources);
+        if self.footage_generation != generation {
+            self.footage_generation = generation;
+            self.engine.renderer.reload_footage();
+            self.last = None;
+            self.live_sent = None;
+            self.live_scene = None;
             self.sampled = None;
         }
         self.sync_sources(resources);
@@ -590,6 +601,7 @@ impl GpuPreview {
             _ => {
                 let scene = Arc::new(crate::live_preview::LiveScene {
                     key: scene_key,
+                    footage_generation: self.footage_generation,
                     snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
                     sources: sources.cloned(),
                     effects: effects.cloned(),

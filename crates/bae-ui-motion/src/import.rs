@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+pub(crate) mod auto_reload;
 mod verify;
 pub(crate) use verify::FrameChecks;
 
@@ -403,6 +404,11 @@ fn selected_footage(cx: &PanelContext<'_>, session: &SharedSession) -> Vec<PrimP
         .collect()
 }
 
+fn apply_reload(cx: &mut PanelContext<'_>, item: PrimPath, file: ImportFile) {
+    auto_reload::invalidate(cx.resources);
+    cx.invoke_with("item.replace_file", json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }));
+}
+
 /// File > Reload Footage (Cmd/Ctrl+Alt+L): the selected items read their
 /// files again (a file changed on disk); they keep their names.
 pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -413,10 +419,7 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         };
         let mut probed = probe(&[path], &defaults);
         if let Some(file) = probed.files.pop() {
-            cx.invoke_with(
-                "item.replace_file",
-                json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }),
-            );
+            apply_reload(cx, item, file);
         }
         verify::report(cx, tr("Reload Footage"), probed);
     }
@@ -450,6 +453,7 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
     let mut probed = probe(&[path], &defaults);
     if let Some(file) = probed.files.pop() {
+        auto_reload::invalidate(cx.resources);
         let keep = crate::prefs::current(cx.resources)
             .str("import.footage_interpretation_on_replace")
             == "remember";
@@ -502,6 +506,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    let watcher = Arc::new(auto_reload::FocusReload::default());
+    app.insert_resource(watcher.clone());
+    let _ = app.register_arc::<dyn bae_gpu::WarmUp>("bae.media/focus-reload", watcher);
     let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
         "bae.media/import-formats",
         Arc::new(verify::FormatWarmUp),

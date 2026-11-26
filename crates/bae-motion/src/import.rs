@@ -229,8 +229,12 @@ impl Command for ReplaceFile {
             return Err(fail(format!("{} is not a footage item", p.item)));
         }
         let path = Path::new(&p.file.path);
-        let file = AssetFile::from_path(path, None, false)
+        let mut file = AssetFile::from_path(path, None, false)
             .map_err(|e| fail(format!("cannot use {}: {e}", p.file.path)))?;
+        if p.keep_name && let Some(old) = AssetFile::from_prim(&view)
+            && old.file_name() == file.file_name() {
+            file.relative = old.relative;
+        }
         if let Some(bad) = p.file.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
             return Err(fail(format!("{bad} is not a footage attribute")));
         }

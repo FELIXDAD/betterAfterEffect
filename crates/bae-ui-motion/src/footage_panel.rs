@@ -91,6 +91,7 @@ struct Gpu {
     renderer: Renderer,
     assets: AssetFiles,
     last: Option<(PrimPath, Time)>,
+    generation: u64,
 }
 
 impl Gpu {
@@ -110,11 +111,17 @@ impl Gpu {
             renderer,
             assets: AssetFiles::new(None),
             last: None,
+            generation: 0,
         }
     }
 
     /// The frame of `footage` at `time` (rendered when it changed); its egui handle.
-    fn frame(&mut self, stage: &Stage, footage: &Footage, time: Time) -> Option<u64> {
+    fn frame(&mut self, stage: &Stage, footage: &Footage, time: Time, generation: u64) -> Option<u64> {
+        if self.generation != generation {
+            self.renderer.reload_footage();
+            self.generation = generation;
+            self.last = None;
+        }
         let key = (footage.asset.clone(), time);
         if self.last.as_ref() != Some(&key) {
             let view = stage.prim(&footage.asset)?;
@@ -243,7 +250,8 @@ impl Panel for FootagePanel {
         if let Some(f) = &footage {
             let stage = cx.stage;
             let time = self.time;
-            if let Some(handle) = self.gpu(cx).and_then(|g| g.frame(stage, f, time)) {
+            let generation = crate::import::auto_reload::generation(cx.resources);
+            if let Some(handle) = self.gpu(cx).and_then(|g| g.frame(stage, f, time, generation)) {
                 let [w, h] = f.size.map(|v| v.max(1) as f32);
                 let w = w * self.display.aspect(stage, Some(&f.asset));
                 // Fit (AE's default magnification for the Footage panel), never
