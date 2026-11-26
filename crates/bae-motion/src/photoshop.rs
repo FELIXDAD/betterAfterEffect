@@ -40,6 +40,8 @@ pub struct Params {
     pub replace: Option<PrimPath>,
     #[serde(default)]
     pub keep_name: bool,
+    #[serde(default)]
+    pub keep_interpretation: bool,
     /// In compositions copy the source style onto each instance; otherwise let the
     /// instance inherit the source style (AE's merged-styles footage).
     pub editable: bool,
@@ -172,6 +174,7 @@ fn footage(
                 item: item.clone(),
                 file,
                 keep_name: p.keep_name,
+                keep_interpretation: p.keep_interpretation,
             },
         )?;
         item.clone()

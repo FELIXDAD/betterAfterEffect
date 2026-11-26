@@ -37,6 +37,7 @@ mod look_at;
 mod menu;
 mod motion_path;
 mod motion_sketch;
+mod navigator;
 mod overlay;
 mod particle_guides;
 mod path_edit;
@@ -695,6 +696,18 @@ impl Panel for CompositionViewer {
                 self.display.shortcut(&action.params);
                 true
             }
+            display::FAST_PREVIEWS => {
+                // Draft 3D is the 3D renderer's switch (not here yet).
+                if let Some(f) = action
+                    .params
+                    .get("mode")
+                    .and_then(|m| m.as_str())
+                    .and_then(display::Fast::parse)
+                {
+                    self.display.fast = f;
+                }
+                true
+            }
             display::TAKE_SNAPSHOT | display::SHOW_SNAPSHOT | display::PURGE_SNAPSHOT => {
                 let slot = action
                     .params
@@ -780,7 +793,12 @@ impl Panel for CompositionViewer {
 
         let full = ui.available_rect_before_wrap();
         let bar_h = 28.0;
-        let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
+        // The Composition Navigator along the top.
+        let nav = Rect::from_min_max(full.min, pos2(full.right(), full.top() + navigator::HEIGHT));
+        let area = Rect::from_min_max(
+            pos2(full.left(), nav.bottom()),
+            pos2(full.right(), full.bottom() - bar_h),
+        );
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
         // View layout: the active view is the viewer, the others are drawn below.
         let (panes, active) = {
@@ -805,6 +823,7 @@ impl Panel for CompositionViewer {
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
+        navigator::bar(ui, cx, &session, nav);
         if std::mem::take(&mut self.escape) {
             ui.input_mut(|i| {
                 i.events.push(egui::Event::Key {
@@ -915,7 +934,7 @@ impl Panel for CompositionViewer {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources, ui.ctx());
         }
-        let resolution = {
+        let mut resolution = {
             let s = session.lock();
             // Preview ▸ Resolution overrides the viewer's while playing.
             match s.preview.resolution.filter(|_| s.is_playing()) {
@@ -923,6 +942,12 @@ impl Panel for CompositionViewer {
                 None => render_factor(cx.stage, &info.path, s.auto_resolution, mag),
             }
         };
+        // Fast Previews while something is dragged.
+        let interacting = resp.dragged() || self.select.busy() || session.lock().scrub.is_some();
+        if interacting && self.display.fast == display::Fast::Adaptive {
+            resolution = resolution.max(4);
+        }
+        let wireframe = interacting && self.display.fast == display::Fast::Wireframe;
         self.render_factor = resolution;
         // Paint.
         let painter = ui.painter_at(area);
@@ -1184,13 +1209,15 @@ impl Panel for CompositionViewer {
         // Live edits, other 3D views than the active camera, the Render Time
         // column (it times this render), Show Channel / Exposure and a region
         // of interest render here; otherwise the frame comes from the
-        // background renderer and its cache.
+        // background renderer and its cache. Wireframe draws no picture.
         let direct = editing
             || view_camera.is_some()
             || measure
             || self.display.render() != bae_render::Display::default()
             || self.display.roi().is_some();
-        let image = if direct {
+        let image = if wireframe {
+            None
+        } else if direct {
             self.gpu.as_mut().and_then(|g| {
                 g.frame(
                     cx.resources,
@@ -1290,6 +1317,22 @@ impl Panel for CompositionViewer {
             }
             vector = std::borrow::Cow::Owned(text_only);
         }
+        if wireframe {
+            // Wireframe: the layers' outlines only.
+            let outer = Affine::new(DMat4::IDENTITY);
+            for l in comp.layers.iter().filter(|l| l.visible) {
+                if let Some(q) = render::bounds_quad(l, &view, &outer) {
+                    clip.add(egui::Shape::closed_line(
+                        q.to_vec(),
+                        Stroke::new(1.0, Color32::WHITE),
+                    ));
+                }
+            }
+            vector = std::borrow::Cow::Owned(EvaluatedComp {
+                layers: Vec::new(),
+                ..comp.clone()
+            });
+        }
         // Something is still warming up (an effect pipeline, the text
         // renderer): the last complete frame stays (none yet: nothing, not the
         // simplified drawing) with a small hint, like AE's render progress.
@@ -1325,6 +1368,9 @@ impl Panel for CompositionViewer {
         // layer's label color).
         let selected = session.lock().selected_layers.clone();
         let outer = Affine::new(DMat4::IDENTITY);
+        // View ▸ Show Layer Controls off: the tools still work, unseen.
+        let hidden = painter.with_clip_rect(Rect::NOTHING);
+        let painter = if opts.layer_controls { painter } else { hidden };
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
             let label = cx
                 .stage
@@ -1365,7 +1411,8 @@ impl Panel for CompositionViewer {
             );
         }
 
-        if controls.masks {
+        // View Options' masks and the bar's Toggle Mask and Shape Path Visibility.
+        if controls.masks && opts.paths {
             overlay::masks(&painter, cx.stage, &comp, &view, &selected);
         }
         particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected, view_camera);
@@ -1791,6 +1838,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
     bae_ui::i18n::register(view_options::ZH);
     bae_ui::i18n::register(display::ZH);
+    bae_ui::i18n::register(navigator::ZH);
     crate::register_panel(
         app,
         "composition",
