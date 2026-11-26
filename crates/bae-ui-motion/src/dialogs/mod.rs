@@ -100,6 +100,7 @@ pub struct Dialogs {
     pub open: Option<Dialog>,
     pending_fonts: Vec<String>,
     recent_fonts: Vec<String>,
+    pub(crate) frame_checks: crate::import::FrameChecks,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
@@ -487,15 +488,15 @@ impl bae_ui::DialogHost for MotionDialogs {
         crate::ae_panels::character::font_menu::upload(ctx);
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
-        let next = {
+        let open = {
             let mut d = dialogs.lock();
+            d.frame_checks.repaint_while_running(ctx);
             d.open
                 .take()
+                .or_else(|| d.frame_checks.next_notice())
                 .or_else(|| project_fonts::warning(&mut d.pending_fonts))
         };
-        let Some(mut open) = next else {
-            return;
-        };
+        let Some(mut open) = open else { return };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),

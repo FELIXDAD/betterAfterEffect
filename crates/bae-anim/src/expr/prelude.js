@@ -401,6 +401,7 @@ Property.prototype = {
     return __h.keys(this.__c, this.__l, this.__p, this.__a);
   },
   key: function (i) {
+    i = __val(i);
     var ks = this.__keys();
     if (!Number.isInteger(i) || i < 1 || i > ks.length) throw new Error("Key index " + i + " out of range");
     var k = ks[i - 1];
@@ -898,6 +899,7 @@ MarkerProperty.prototype = {
       for (var i = 0; i < ks.length; i++) if (ks[i].comment === k) return ks[i];
       throw new Error("Marker key " + JSON.stringify(k) + " does not exist");
     }
+    k = __val(k);
     if (k < 1 || k > ks.length) throw new Error("Key index " + k + " out of range");
     return ks[k - 1];
   },
