@@ -141,6 +141,37 @@ pub mod ids {
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
     /// Layer ▸ Track Matte ▸ … (params `{"matte": "alpha", "source": "above"}`).
     pub const TRACK_MATTE: &str = "motion.layer.track_matte";
+    /// Ctrl+Down / Ctrl+Up (Shift adds): the next layer down / up the stack.
+    pub const SELECT_NEXT_LAYER: &str = "motion.layer.select_next";
+    pub const SELECT_PREV_LAYER: &str = "motion.layer.select_previous";
+    /// Numpad 1–9 (Shift toggles): layer number N.
+    pub const SELECT_LAYER_N: &str = "motion.timeline.select_layer";
+    /// Alt+PageUp / PageDown (Shift ×10): the selected layers a frame earlier
+    /// / later.
+    pub const NUDGE_TIME: &str = "motion.layer.nudge_time";
+    /// Alt+Left / Right (Shift ×10): the selected keyframes a frame earlier /
+    /// later.
+    pub const NUDGE_KEYS: &str = "motion.timeline.nudge_keyframes";
+    /// Numpad + / − with no modifier, Ctrl or Alt, Ctrl+Alt (Shift ×10):
+    /// rotation, scale, opacity of the selected layers by `delta`.
+    pub const NUDGE_ROTATION: &str = "motion.layer.nudge_rotation";
+    pub const NUDGE_SCALE: &str = "motion.layer.nudge_scale";
+    pub const NUDGE_OPACITY: &str = "motion.layer.nudge_opacity";
+    /// Ctrl+Alt+B: the work area spans the selected layers.
+    pub const WORK_AREA_TO_SELECTION: &str = "motion.comp.set_work_area_to_selection";
+    /// Shift+Home / Shift+End: the CTI to the work area's first / last frame.
+    pub const GO_WORK_AREA_START: &str = "motion.comp.go_to_work_area_start";
+    pub const GO_WORK_AREA_END: &str = "motion.comp.go_to_work_area_end";
+    /// Ctrl+Alt+Shift+Left / Right: the previous / next layer in or out point.
+    pub const GO_PREV_IN_OUT: &str = "motion.comp.go_to_previous_in_or_out_point";
+    pub const GO_NEXT_IN_OUT: &str = "motion.comp.go_to_next_in_or_out_point";
+    /// Alt+Home / Alt+End: the selected layers' in point to the comp start, out
+    /// point to the comp end.
+    pub const IN_TO_COMP_START: &str = "motion.layer.move_in_point_to_comp_start";
+    pub const OUT_TO_COMP_END: &str = "motion.layer.move_out_point_to_comp_end";
+    /// Ctrl+Shift+, / Ctrl+Alt+,: stretch the in / out point to the CTI.
+    pub const STRETCH_IN: &str = "motion.timeline.stretch_in_point_to_current_time";
+    pub const STRETCH_OUT: &str = "motion.timeline.stretch_out_point_to_current_time";
     /// Ctrl+Alt+A: every keyframe and property the Timeline shows.
     pub const SELECT_VISIBLE_KEYS: &str = "motion.timeline.select_all_visible_keyframes";
     /// Shift+F2, Ctrl+Alt+Shift+A: no keyframe or property selected (layers stay).
@@ -330,6 +361,24 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ),
     (ids::TOGGLE_PARENT_COLUMN, "Show / Hide Parent Column"),
     (
+        ids::WORK_AREA_TO_SELECTION,
+        "Set Work Area to Selected Layers",
+    ),
+    (ids::GO_WORK_AREA_START, "Go to Work Area Start"),
+    (ids::GO_WORK_AREA_END, "Go to Work Area End"),
+    (ids::GO_PREV_IN_OUT, "Go to Previous Layer In or Out Point"),
+    (ids::GO_NEXT_IN_OUT, "Go to Next Layer In or Out Point"),
+    (
+        ids::IN_TO_COMP_START,
+        "Align Selected Layers' In Points to Composition Start",
+    ),
+    (
+        ids::OUT_TO_COMP_END,
+        "Align Selected Layers' Out Points to Composition End",
+    ),
+    (ids::STRETCH_IN, "Stretch Layer In Point to Current Time"),
+    (ids::STRETCH_OUT, "Stretch Layer Out Point to Current Time"),
+    (
         ids::SELECT_VISIBLE_KEYS,
         "Select All Visible Keyframes and Revealed Properties",
     ),
@@ -469,6 +518,130 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         "Add Animated Properties to Revealed Properties",
     ),
     (
+        ids::MOVE_IN,
+        r#"{"relative":true}"#,
+        "Set Layer In Point (Relative to Selection)",
+    ),
+    (
+        ids::SELECT_NEXT_LAYER,
+        r#"{"add":false}"#,
+        "Select Next Layer",
+    ),
+    (
+        ids::SELECT_NEXT_LAYER,
+        r#"{"add":true}"#,
+        "Extend Selection to Next Layer",
+    ),
+    (
+        ids::SELECT_PREV_LAYER,
+        r#"{"add":false}"#,
+        "Select Previous Layer",
+    ),
+    (
+        ids::SELECT_PREV_LAYER,
+        r#"{"add":true}"#,
+        "Extend Selection to Previous Layer",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":-1}"#,
+        "Move Layer 1 Frame Earlier",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":-10}"#,
+        "Move Layer 10 Frames Earlier",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":1}"#,
+        "Move Layer 1 Frame Later",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":10}"#,
+        "Move Layer 10 Frames Later",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":-1}"#,
+        "Move Selected Keyframes 1 Frame Earlier",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":-10}"#,
+        "Move Selected Keyframes 10 Frames Earlier",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":1}"#,
+        "Move Selected Keyframes 1 Frame Later",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":10}"#,
+        "Move Selected Keyframes 10 Frames Later",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":1}"#,
+        "Rotate Layer 1 Degree Clockwise",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":10}"#,
+        "Rotate Layer 10 Degrees Clockwise",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":-1}"#,
+        "Rotate Layer 1 Degree Counterclockwise",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":-10}"#,
+        "Rotate Layer 10 Degrees Counterclockwise",
+    ),
+    (ids::NUDGE_SCALE, r#"{"delta":1}"#, "Scale Layer Up 1%"),
+    (ids::NUDGE_SCALE, r#"{"delta":10}"#, "Scale Layer Up 10%"),
+    (ids::NUDGE_SCALE, r#"{"delta":-1}"#, "Scale Layer Down 1%"),
+    (ids::NUDGE_SCALE, r#"{"delta":-10}"#, "Scale Layer Down 10%"),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":1}"#,
+        "Increase Layer Opacity 1%",
+    ),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":10}"#,
+        "Increase Layer Opacity 10%",
+    ),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":-1}"#,
+        "Decrease Layer Opacity 1%",
+    ),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":-10}"#,
+        "Decrease Layer Opacity 10%",
+    ),
+    (
+        ids::MOVE_OUT,
+        r#"{"relative":true}"#,
+        "Set Layer Out Point (Relative to Selection)",
+    ),
+    (
+        ids::TRIM_IN,
+        r#"{"relative":true}"#,
+        "Trim Layer In Point (Relative to Selection)",
+    ),
+    (
+        ids::TRIM_OUT,
+        r#"{"relative":true}"#,
+        "Trim Layer Out Point (Relative to Selection)",
+    ),
+    (
         ids::REVEAL,
         r#"{"what":"mask_path","add":false}"#,
         "Reveal Mask Path",
@@ -531,6 +704,19 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
     let parse = |json: &str| serde_json::from_str(json).expect("variant parameters are JSON");
     for (command, params, title) in VARIANTS {
         add(command, parse(params), (*title).to_owned());
+    }
+    // Numpad 1–9: select (Shift: toggle) layer number N.
+    for n in 1..10 {
+        add(
+            ids::SELECT_LAYER_N,
+            json!({ "index": n }),
+            format!("Select Layer by Number: {n}"),
+        );
+        add(
+            ids::SELECT_LAYER_N,
+            json!({ "index": n, "toggle": true }),
+            format!("Toggle Layer Selection by Number: {n}"),
+        );
     }
     // Numbered comp markers (Shift+0–9, 0–9): one row per number.
     for n in 0..10 {
@@ -1475,6 +1661,222 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             );
             drop(queue);
             cx.open_panel("render_queue");
+        }
+        ids::SELECT_NEXT_LAYER | ids::SELECT_PREV_LAYER => {
+            let all = query::comp_layers(stage, &info.path);
+            let add = inv.params.get("add").and_then(|v| v.as_bool()) == Some(true);
+            let at: Vec<usize> = s
+                .selected_layers
+                .iter()
+                .filter_map(|l| all.iter().position(|x| x == l))
+                .collect();
+            let next = if id == ids::SELECT_NEXT_LAYER {
+                at.iter()
+                    .max()
+                    .map_or(0, |i| (i + 1).min(all.len().saturating_sub(1)))
+            } else {
+                at.iter().min().map_or(0, |i| i.saturating_sub(1))
+            };
+            if let Some(l) = all.get(next).cloned() {
+                if add {
+                    if !s.selected_layers.contains(&l) {
+                        s.selected_layers.push(l);
+                    }
+                } else {
+                    s.selected_layers = vec![l];
+                }
+                s.selected_keys.clear();
+            }
+        }
+        ids::SELECT_LAYER_N => {
+            let all = query::comp_layers(stage, &info.path);
+            let n = inv
+                .params
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1) as usize;
+            if let Some(l) = n.checked_sub(1).and_then(|i| all.get(i)).cloned() {
+                if inv.params.get("toggle").and_then(|v| v.as_bool()) == Some(true) {
+                    if let Some(i) = s.selected_layers.iter().position(|x| *x == l) {
+                        s.selected_layers.remove(i);
+                    } else {
+                        s.selected_layers.push(l);
+                    }
+                } else {
+                    s.selected_layers = vec![l];
+                }
+            }
+        }
+        ids::NUDGE_TIME | ids::NUDGE_KEYS => {
+            let frames = inv
+                .params
+                .get("frames")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1);
+            let delta = Time(frame.0 * frames);
+            if id == ids::NUDGE_TIME {
+                if !layers.is_empty() {
+                    cx.invoke_with(
+                        "layer.shift_time",
+                        json!({"layers": layers, "delta": delta}),
+                    );
+                }
+            } else if !keys.is_empty() {
+                cx.invoke_with("key.move", json!({"keys": keys, "delta": delta}));
+                // The selection names where the keys land.
+                let moved: Vec<KeyRef> = keys
+                    .iter()
+                    .map(|k| KeyRef::new(k.path.clone(), &k.attr, k.time + delta))
+                    .collect();
+                s.selected_keys = moved.clone();
+                s.expect(Pending::Keys(moved));
+            }
+        }
+        ids::NUDGE_ROTATION | ids::NUDGE_SCALE | ids::NUDGE_OPACITY if !layers.is_empty() => {
+            let delta = inv
+                .params
+                .get("delta")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let attr = match id {
+                ids::NUDGE_ROTATION => "transform:rotation",
+                ids::NUDGE_SCALE => "transform:scale",
+                _ => "transform:opacity",
+            };
+            let mut edits = Vec::new();
+            for l in &layers {
+                let kt = query::to_key_time(stage, l, now);
+                let Some(v) = query::sample_attr(stage, l, attr, kt) else {
+                    continue;
+                };
+                let three_d = common::is_3d(stage, l);
+                let value = match v {
+                    bae_model::Value::Float(x) if attr == "transform:opacity" => {
+                        bae_model::Value::Float((x + delta).clamp(0.0, 100.0))
+                    }
+                    bae_model::Value::Float(x) => bae_model::Value::Float(x + delta),
+                    bae_model::Value::Vec3([x, y, z]) => bae_model::Value::Vec3([
+                        x + delta,
+                        y + delta,
+                        if three_d { z + delta } else { z },
+                    ]),
+                    bae_model::Value::Vec2([x, y]) => {
+                        bae_model::Value::Vec2([x + delta, y + delta])
+                    }
+                    other => other,
+                };
+                edits.push(json!({"path": l, "attr": attr, "time": kt, "value": value}));
+            }
+            if !edits.is_empty() {
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
+        }
+        // Relative to the selection (Shift / Alt+Shift+[ ]): the earliest in
+        // point (latest out point) goes to the CTI and the others keep their
+        // offsets from it (AE).
+        ids::MOVE_IN | ids::MOVE_OUT | ids::TRIM_IN | ids::TRIM_OUT
+            if inv.params.get("relative").and_then(|v| v.as_bool()) == Some(true)
+                && !layers.is_empty() =>
+        {
+            let spans: Vec<(PrimPath, Time, Time)> = layers
+                .iter()
+                .map(|l| {
+                    let t = query::layer_timing(stage, l);
+                    (
+                        l.clone(),
+                        t.in_point.min(t.out_point),
+                        t.in_point.max(t.out_point),
+                    )
+                })
+                .collect();
+            let first = spans.iter().map(|(_, a, _)| *a).min().unwrap_or(now);
+            let last = spans.iter().map(|(_, _, b)| *b).max().unwrap_or(now);
+            let ins = id == ids::MOVE_IN || id == ids::TRIM_IN;
+            let delta = if ins { now - first } else { now + frame - last };
+            if delta != Time::ZERO {
+                if id == ids::MOVE_IN || id == ids::MOVE_OUT {
+                    cx.invoke_with(
+                        "layer.shift_time",
+                        json!({"layers": layers, "delta": delta}),
+                    );
+                } else {
+                    for (l, a, b) in spans {
+                        let field = if ins {
+                            json!({"layers": [l], "in_point": (a + delta).min(b - frame)})
+                        } else {
+                            json!({"layers": [l], "out_point": (b + delta).max(a + frame)})
+                        };
+                        cx.invoke_with("layer.trim", field);
+                    }
+                }
+            }
+        }
+        ids::WORK_AREA_TO_SELECTION if !layers.is_empty() => {
+            let (mut start, mut end) = (Time::MAX, Time::MIN);
+            for l in &layers {
+                let t = query::layer_timing(stage, l);
+                start = start.min(t.in_point.min(t.out_point));
+                end = end.max(t.in_point.max(t.out_point));
+            }
+            let (start, end) = (start.max(Time::ZERO), end.min(info.duration));
+            if end > start {
+                cx.invoke_with(
+                    "comp.set_work_area",
+                    json!({"comp": info.path, "start": start, "end": end}),
+                );
+            }
+        }
+        ids::GO_WORK_AREA_START => s.set_time(&info, info.work_area.start),
+        ids::GO_WORK_AREA_END => {
+            s.set_time(&info, (info.work_area.end - frame).max(Time::ZERO));
+        }
+        ids::GO_PREV_IN_OUT | ids::GO_NEXT_IN_OUT => {
+            let mut times = Vec::new();
+            for l in query::comp_layers(stage, &info.path) {
+                let t = query::layer_timing(stage, &l);
+                let (a, b) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
+                times.push(info.frame_rate.snap(a));
+                times.push(info.frame_rate.snap(b - frame));
+            }
+            let times = times.into_iter();
+            let pick = if id == ids::GO_NEXT_IN_OUT {
+                times.filter(|t| *t > now).min()
+            } else {
+                times.filter(|t| *t < now).max()
+            };
+            if let Some(t) = pick {
+                s.set_time(&info, t.clamp(Time::ZERO, info.duration));
+            }
+        }
+        ids::IN_TO_COMP_START | ids::OUT_TO_COMP_END => {
+            for l in &layers {
+                let t = query::layer_timing(stage, l);
+                let delta = if id == ids::IN_TO_COMP_START {
+                    Time::ZERO - t.in_point.min(t.out_point)
+                } else {
+                    info.duration - t.in_point.max(t.out_point)
+                };
+                if delta != Time::ZERO {
+                    cx.invoke_with("layer.shift_time", json!({"layers": [l], "delta": delta}));
+                }
+            }
+        }
+        ids::STRETCH_IN | ids::STRETCH_OUT => {
+            for l in &layers {
+                let t = query::layer_timing(stage, l);
+                let (a, b) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
+                let (duration, hold) = if id == ids::STRETCH_IN {
+                    (b - now, "out_point")
+                } else {
+                    (now + frame - a, "in_point")
+                };
+                if duration > Time::ZERO {
+                    cx.invoke_with(
+                        "layer.time_stretch",
+                        json!({"layers": [l], "new_duration": duration, "hold": hold}),
+                    );
+                }
+            }
         }
         ids::TRIM_IN if !layers.is_empty() => {
             cx.invoke_with("layer.trim", json!({"layers": layers, "in_point": now}));

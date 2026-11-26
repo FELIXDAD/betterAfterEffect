@@ -313,6 +313,21 @@ const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300)
 const PREFETCH_FRAMES: i64 = 6;
 
 impl CompositionViewer {
+    fn has_3d_layers(&mut self, stage: &bae_model::Stage, path: &bae_model::PrimPath) -> bool {
+        let revision = stage.revision();
+        if let Some((comp, rev, result)) = &self.preview_3d
+            && comp == path
+            && *rev == revision
+        {
+            return *result;
+        }
+        let result = query::comp_layers(stage, path)
+            .iter()
+            .any(|layer| common::is_3d(stage, layer));
+        self.preview_3d = Some((path.clone(), revision, result));
+        result
+    }
+
     pub fn new(state: Option<&serde_json::Value>) -> Self {
         let mut v = CompositionViewer::default();
         if let Some(s) = state {
@@ -762,27 +777,7 @@ impl Panel for CompositionViewer {
                         &panes,
                         v.active(),
                         s.is_playing() && s.preview.favor_active_camera,
-                        || {
-                            let revision = cx.stage.revision();
-                            if let Some((comp, rev, result)) = &self.preview_3d
-                                && comp == &info.path
-                                && *rev == revision
-                            {
-                                return *result;
-                            }
-                            let result =
-                                query::comp_layers(cx.stage, &info.path)
-                                    .iter()
-                                    .any(|layer| {
-                                        cx.stage
-                                            .prim(layer)
-                                            .and_then(|p| query::static_value(&p, "three_d"))
-                                            .and_then(|v| v.as_bool())
-                                            .unwrap_or(false)
-                                    });
-                            self.preview_3d = Some((info.path.clone(), revision, result));
-                            result
-                        },
+                        || self.has_3d_layers(cx.stage, &info.path),
                     );
                     (panes, active)
                 })
@@ -830,6 +825,7 @@ impl Panel for CompositionViewer {
         // Wheel (AE-UI-011): a mouse wheel zooms around the pointer (Alt/Option:
         // around the view's center; Shift: scrolls sideways); trackpad scrolling
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
+        let mut dolly_notches = 0.0;
         if resp.hovered() && self.shape.is_none() {
             let m = Magnification::of(cx.resources);
             let w = wheel(ui, m);
@@ -844,7 +840,12 @@ impl Panel for CompositionViewer {
             } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
-                if w.notches != 0.0 {
+                if w.notches != 0.0
+                    && self.prefs.dolly_wheel != 0.0
+                    && self.has_3d_layers(cx.stage, &info.path)
+                {
+                    dolly_notches = w.notches * self.prefs.dolly_wheel;
+                } else if w.notches != 0.0 {
                     let around = if m.follows_pointer(w.alt) {
                         resp.hover_pos()
                     } else {
@@ -860,10 +861,21 @@ impl Panel for CompositionViewer {
             }
         }
         // With a camera tool these drags pan and dolly the camera.
-        let camera_tool = crate::tools::shared(cx.resources).lock().current();
+        let selected_tool = crate::tools::shared(cx.resources).lock().current();
+        let alt_drag = self.prefs.alt_camera_navigation
+            && resp.dragged()
+            && ui.input(|i| i.modifiers.alt && !i.key_down(egui::Key::Space))
+            && self.has_3d_layers(cx.stage, &info.path);
+        let navigating = alt_drag || self.camera_drag.is_some();
+        let camera_tool = if alt_drag || (navigating && !selected_tool.is_camera()) {
+            Tool::OrbitCursor
+        } else {
+            selected_tool
+        };
         if (resp.dragged_by(egui::PointerButton::Middle)
             || resp.dragged_by(egui::PointerButton::Secondary))
             && !camera_tool.is_camera()
+            && !navigating
         {
             self.pan += resp.drag_delta();
         }
@@ -1088,7 +1100,7 @@ impl Panel for CompositionViewer {
         }
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
-        if camera_tool.is_camera() || self.camera_drag.is_some() {
+        if camera_tool.is_camera() || self.camera_drag.is_some() || dolly_notches != 0.0 {
             camera_tool::frame(
                 &mut self.camera_drag,
                 &resp,
@@ -1101,6 +1113,8 @@ impl Panel for CompositionViewer {
                 &view,
                 camera_tool,
                 time,
+                dolly_notches,
+                self.prefs.reverse_dolly_drag,
             );
         }
         let layer_camera = self.camera_drag.as_ref().and_then(|d| d.layer_camera());
@@ -1344,6 +1358,14 @@ impl Panel for CompositionViewer {
             &selected,
             through.as_ref(),
         );
+        if let Some(drag) = &self.camera_drag {
+            drag.paint_point(
+                &painter,
+                &view,
+                self.prefs.camera_point,
+                resp.interact_pointer_pos(),
+            );
+        }
 
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
@@ -1364,10 +1386,14 @@ impl Panel for CompositionViewer {
         // Region of interest on without a region: a drag draws it, with any
         // tool (the tools wait).
         let roi_busy = self.roi_frame(ui, &resp, &view, &painter, &info);
-        let hand = !roi_busy && (tool == Tool::Hand || self.space_hold.is_some() || self.panning);
+        let hand = !roi_busy
+            && !navigating
+            && (tool == Tool::Hand || self.space_hold.is_some() || self.panning);
         // Cmd/Ctrl makes the pen tools the Selection tool while held (AE-SHP-044).
         let command = ui.input(|i| i.modifiers.command);
-        let effective = if roi_busy || hand {
+        let effective = if navigating {
+            camera_tool
+        } else if roi_busy || hand {
             Tool::Hand
         } else if tool.is_pen() && command && !self.pen.busy() {
             Tool::Selection
