@@ -3,6 +3,8 @@
 //! every language.
 
 pub(crate) mod assist;
+mod field;
+pub(crate) use field::height as field_height;
 
 use egui::Ui;
 
