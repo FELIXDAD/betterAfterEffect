@@ -7,10 +7,10 @@
 //! The same code runs in the host (in-process mode) and in the runner
 //! (out-of-process mode, [`super::runner`]): only the transport differs.
 
+use rayon::prelude::*;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use bae_plugin_sdk::abi::*;
 use parking_lot::Mutex;
@@ -1082,33 +1082,22 @@ unsafe extern "C" fn render_alloc_cpu_image(
 }
 
 struct ParallelJob {
-    f: BaeParallelFn,
+    f: unsafe extern "C" fn(*mut c_void, u32, u32) -> BaeStatus,
     user: *mut c_void,
-    next: AtomicU32,
-    count: u32,
-    error: AtomicU32,
 }
 
-// SAFETY: the plugin asked for `f(user, …)` to be called from several threads.
+// SAFETY: the plugin supplies a callback and context for concurrent invocation
+// and keeps both live until parallel_for returns.
 unsafe impl Sync for ParallelJob {}
 
 impl ParallelJob {
-    fn run(&self, thread: u32) {
-        loop {
-            let i = self.next.fetch_add(1, Ordering::Relaxed);
-            if i >= self.count || self.error.load(Ordering::Relaxed) != 0 {
-                break;
-            }
-            // SAFETY: the plugin's callback with its own user pointer.
-            let status = unsafe { (self.f)(self.user, i, thread) };
-            if status != BAE_OK {
-                let _ = self.error.compare_exchange(
-                    0,
-                    status as u32,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                );
-            }
+    fn run(&self, i: u32, thread: u32) -> Result<(), BaeStatus> {
+        // SAFETY: the plugin owns user and provided this function for the job.
+        let status = unsafe { (self.f)(self.user, i, thread) };
+        if status == BAE_OK {
+            Ok(())
+        } else {
+            Err(status)
         }
     }
 }
@@ -1119,23 +1108,36 @@ unsafe extern "C" fn render_parallel_for(
     f: BaeParallelFn,
     user: *mut c_void,
 ) -> BaeStatus {
-    let job = ParallelJob {
-        f,
-        user,
-        next: AtomicU32::new(0),
-        count,
-        error: AtomicU32::new(0),
+    let Some(f) = f else {
+        return BAE_ERR_INVALID_ARGUMENT;
     };
-    let threads = std::thread::available_parallelism()
-        .map_or(4, |n| n.get())
-        .min(count as usize)
-        .max(1);
-    let job = &job;
-    std::thread::scope(|s| {
-        for t in 1..threads {
-            s.spawn(move || job.run(t as u32));
-        }
-        job.run(0);
-    });
-    job.error.load(Ordering::Relaxed) as i32
+    let job = ParallelJob { f, user };
+    // Small jobs have one logical lane per index. For larger jobs, use the
+    // worker's stable slot so plugin scratch indexed by thread stays bounded.
+    let small = (count as usize) < rayon::current_num_threads();
+    (0..count)
+        .into_par_iter()
+        .try_for_each(|i| {
+            let thread = if small {
+                i
+            } else {
+                rayon::current_thread_index().unwrap_or(0) as u32
+            };
+            job.run(i, thread)
+        })
+        .err()
+        .unwrap_or(BAE_OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallel_for_requires_a_callback() {
+        // SAFETY: no callback is installed and no context is accessed.
+        let status =
+            unsafe { render_parallel_for(std::ptr::null_mut(), 1, None, std::ptr::null_mut()) };
+        assert_eq!(status, BAE_ERR_INVALID_ARGUMENT);
+    }
 }

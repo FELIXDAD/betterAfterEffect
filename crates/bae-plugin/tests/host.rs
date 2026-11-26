@@ -174,6 +174,8 @@ fn official_examples_load_through_the_host() {
         [
             "com.example.align-to-grid",
             "com.example.box-blur",
+            "com.example.composition-report",
+            "com.example.fade-selected",
             "com.example.posterize",
             "com.example.vignette"
         ]
@@ -184,13 +186,10 @@ fn official_examples_load_through_the_host() {
             .get("com.example.vignette/vignette")
             .is_some()
     );
-    // The script plugin loads (validated) with a warning that it does not run yet.
     assert!(
-        !host
-            .get("com.example.align-to-grid")
-            .unwrap()
-            .warnings
-            .is_empty()
+        host.commands()
+            .get("plugin.com.example.align-to-grid.align-to-grid")
+            .is_some()
     );
 }
 
