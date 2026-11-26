@@ -247,7 +247,11 @@ impl AppModule for MotionUiModule {
             "Open Script Editor...",
             "motion.file.script_editor",
         )
-        .workspace(menus::WORKSPACE);
+        .workspace(menus::WORKSPACE)
+        .at(vec![
+            bae_ui::menu::MenuPos::new(i32::MAX, i32::MAX),
+            bae_ui::menu::MenuPos::new(0, 3),
+        ]);
         let _ = app.register("motion.file.script_editor", editor);
         let recent = scripts::RecentScripts::load(
             app.resource::<bae_platform::AppDirs>()

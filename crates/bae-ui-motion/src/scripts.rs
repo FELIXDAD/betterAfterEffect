@@ -222,7 +222,7 @@ pub(crate) fn editor_panel() -> bae_ui::PanelKind {
 fn run_source(cx: &mut PanelContext<'_>, source: &str, name: &str) {
     let session = common::session(cx.resources);
     let s = session.lock();
-    let params = json!({"source": source, "name": name, "active_comp": s.active_comp,
+    let params = json!({"source": source, "interactive": true, "name": name, "active_comp": s.active_comp,
         "selected_layers": s.selected_layers, "time": s.active_time().as_seconds()});
     drop(s);
     if let Some(console) = cx.resources.get::<ScriptConsole>() {
