@@ -199,16 +199,14 @@ impl AudioOutput {
     /// Open the selected endpoint with a buffer supported by the device.
     pub fn open_with(request: &OutputConfig) -> Result<Self, String> {
         let host = cpal::default_host();
-        let device = if request.device_id == "system_default" {
-            host.default_output_device()
-        } else {
-            request
-                .device_id
-                .parse()
-                .ok()
-                .and_then(|id| host.device_by_id(&id))
-        }
-        .ok_or("Audio output device unavailable")?;
+        // A saved device that is gone (unplugged, renamed) plays on the
+        // system's default output instead of going silent.
+        let device = (request.device_id != "system_default")
+            .then(|| request.device_id.parse().ok())
+            .flatten()
+            .and_then(|id| host.device_by_id(&id))
+            .or_else(|| host.default_output_device())
+            .ok_or("Audio output device unavailable")?;
         let config = device.default_output_config().map_err(|e| e.to_string())?;
         let rate = config.sample_rate();
         let channels = config.channels();

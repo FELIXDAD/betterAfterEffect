@@ -48,7 +48,6 @@ impl FrameChecks {
             .pop_front()
             .map(|(title, message)| Dialog::Alert { title, message })
     }
-
 }
 
 pub(super) fn report(cx: &PanelContext<'_>, title: &str, mut result: Probed) {
