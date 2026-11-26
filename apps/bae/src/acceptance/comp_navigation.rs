@@ -103,9 +103,17 @@ fn composition_preferences_choose_the_pen_and_double_click_destination() {
     prefs.set("composition.pen_shortcut_toggles_mask_feather", false);
     h.state().prefs.set(prefs).unwrap();
     let tools = h.state().app.resource::<SharedTools>().unwrap().clone();
-    key(&mut h, Modifiers::NONE, Key::G);
-    key(&mut h, Modifiers::NONE, Key::G);
-    assert_eq!(tools.current(), Tool::Pen);
+    for expected in [
+        Tool::Pen,
+        Tool::AddVertex,
+        Tool::DeleteVertex,
+        Tool::ConvertVertex,
+        Tool::MaskFeather,
+        Tool::Pen,
+    ] {
+        key(&mut h, Modifiers::NONE, Key::G);
+        assert_eq!(tools.current(), expected);
+    }
     key(&mut h, Modifiers::NONE, Key::V);
     let at = row(&h, "Child").center();
     double_click_at(&mut h, at);

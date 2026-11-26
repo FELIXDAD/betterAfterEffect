@@ -968,12 +968,17 @@ impl ToolState {
         }
     }
 
-    fn apply(&self, shortcut: Shortcut) -> Tool {
+    fn apply(&self, shortcut: Shortcut, toggle_pen: bool) -> Tool {
         match shortcut {
             Shortcut::Tool(t) => t,
             Shortcut::Group { group, cycle } => {
                 if cycle && self.current.group() == group {
-                    self.next_in_group(group, false)
+                    self.next_in_group(group, group == Group::Pen && !toggle_pen)
+                } else if group == Group::Pen
+                    && toggle_pen
+                    && !group.cycle().contains(&self.shown(group))
+                {
+                    Tool::Pen
                 } else {
                     self.shown(group)
                 }
@@ -1014,11 +1019,7 @@ impl ToolState {
             return true;
         }
         let previous = self.momentary.as_ref().map_or(self.current, |m| m.previous);
-        let tool = if matches!(action, ids::PEN | ids::PEN_CYCLE) && !toggle_pen {
-            Tool::Pen
-        } else {
-            self.apply(*what)
-        };
+        let tool = self.apply(*what, toggle_pen);
         self.set(tool);
         self.momentary = Some(Momentary {
             action: action.to_owned(),
