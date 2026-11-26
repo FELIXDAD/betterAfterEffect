@@ -429,7 +429,7 @@ impl Panel for ProjectPanel {
         let mut delete: Vec<PrimPath> = Vec::new();
         // Folder rows, for files dropped from Finder / Explorer.
         let mut folder_rows: Vec<(Rect, PrimPath)> = Vec::new();
-        egui::ScrollArea::horizontal().id_salt("project_columns").auto_shrink([false, true]).show(ui, |ui| {
+        let scroll = egui::ScrollArea::horizontal().id_salt("project_columns").auto_shrink([false, true]).show(ui, |ui| {
         // The label chip precedes the name in the list, as in AE.
         let mut x = 2.0;
         let mut cells = Vec::new();
@@ -449,8 +449,13 @@ impl Panel for ProjectPanel {
             } else {
                 ui.painter().text(r.left_center()+vec2(4.0,0.0), Align2::LEFT_CENTER, tr(col.title), theme::small(), color::TEXT);
             }
-            let resp = ui.interact(r, ui.id().with(col.title), Sense::click());
-            common::context_menu(&resp, &mut |ui| self.columns.header_menu(ui, COLUMNS, col));
+            let visible = r.intersect(ui.clip_rect()).intersect(panel_rect);
+            if visible.is_positive() {
+                let name = bae_ui::a11y::context(&[tr("Project Columns"), tr(col.title)]);
+                let resp = ui.interact(visible, ui.id().with(col.title), Sense::click())
+                    .labeled(egui::WidgetType::Button, &name);
+                common::context_menu(&resp, &mut |ui| self.columns.header_menu(ui, COLUMNS, col));
+            }
         }
         let name_left = cells.iter().find(|(col,_)| col.title == "Name").unwrap().1;
         let name_right = name_left + COLUMNS[0].width;
@@ -600,6 +605,11 @@ impl Panel for ProjectPanel {
             });
 
         });
+
+        // egui identifies its native scroll bars by axis (horizontal is zero).
+        if let Some(bar) = ui.ctx().read_response(scroll.id.with(0_usize)) {
+            bar.labeled(egui::WidgetType::ScrollBar, tr("Scroll Project Columns"));
+        }
 
         // Footer: item count and buttons (AE: interpret, new folder, new comp, delete).
         let (foot, _) = ui.allocate_exact_size(vec2(width, footer_h), Sense::hover());
