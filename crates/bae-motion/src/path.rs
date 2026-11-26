@@ -371,6 +371,7 @@ impl Command for SetVertices {
         SetAt.run(
             tx,
             SetAtParams {
+                auto_key: false,
                 path: p.path,
                 attr: PATH_ATTR.into(),
                 time: p.time.unwrap_or(Time::ZERO),
