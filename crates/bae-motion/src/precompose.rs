@@ -329,6 +329,7 @@ impl Command for Precompose {
                             parent: None,
                             keep_transform: true,
                             time,
+                            move_to_parent: false,
                         },
                     )
                 })?;
