@@ -6,7 +6,10 @@
 //! chosen one; paint is drawn on the Paint effect. The time ruler under the
 //! picture is the layer's: its in and out points (drag an end to trim the
 //! layer; the { and } buttons set them to the current time) and the current
-//! time, with AE's In, Out and Duration readouts.
+//! time, with AE's In, Out and Duration readouts. The picture zooms and pans
+//! like the Composition viewer: the bar's magnification popup, the mouse
+//! wheel or a pinch around the pointer, trackpad scrolling, the Hand tool,
+//! Space-drag or a middle drag, and Zoom tool clicks.
 //!
 //! The Brush, Clone Stamp and Eraser paint here: a drag becomes one stroke on
 //! the layer's Paint effect (`paint.add_stroke`, one undo step) with the Paint
@@ -41,8 +44,6 @@ pub struct LayerPanel {
     eval: EvalCache,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
-    zoom: Option<f32>,
-    pan: egui::Vec2,
     pub(crate) show: Show,
     /// Render: the picture includes the effects up to the shown one.
     pub(crate) render: bool,
@@ -53,6 +54,10 @@ pub struct LayerPanel {
     /// An end of the layer being dragged on the ruler: the in point (`true`)
     /// or the out point, and where it would go.
     trim: Option<(bool, Time)>,
+    /// Magnification (1 = 100 %); `None` = Fit up to 100 %.
+    pub(crate) zoom: Option<f32>,
+    /// The picture's offset from centred, in points.
+    pan: egui::Vec2,
 }
 
 /// Double-clicking a layer (AE): a pre-comp layer opens its composition, any
@@ -160,9 +165,7 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
-        let Ok(comp) = self
-            .eval
-            .get(cx.resources)
+        let Ok(comp) = crate::viewer::live_evaluator(&mut self.eval, cx, &session)
             .evaluate_comp(cx.stage, &info.path, time)
         else {
             return;
@@ -175,8 +178,13 @@ impl Panel for LayerPanel {
             _ => 0,
         };
         if let Some((one, min)) = alone(&comp, &layer, effects) {
+            let size = vec2(one.width as f32, one.height as f32);
+            let panning = self.navigate(ui, cx, area, size);
             let view = self.picture(ui, cx, area, &one, min, evaluated);
-            self.paint(ui, cx, area, &view, min, evaluated);
+            // Space pans whatever the tool (AE).
+            if !panning {
+                self.paint(ui, cx, area, &view, min, evaluated);
+            }
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
         if let Some(edit) = self.time_ruler(ui, &session, &info, ruler, time, in_out) {
@@ -208,6 +216,90 @@ impl LayerPanel {
         }
     }
 
+    /// The picture's view of a `size` layer in `area`, and the magnification
+    /// (AE: Fit up to 100 % until zoomed).
+    fn view(&self, area: Rect, size: egui::Vec2, ppp: f32) -> (View, f32) {
+        let fit = ((area.width() - 24.0) / size.x)
+            .min((area.height() - 24.0) / size.y)
+            .max(0.01)
+            .min(1.0 / ppp);
+        let scale = self.zoom.map_or(fit, |m| m / ppp);
+        let view = View {
+            origin: area.center() - size * scale / 2.0 + self.pan,
+            scale,
+            point: 6.0,
+            camera: None,
+        };
+        (view, scale * ppp)
+    }
+
+    /// Zoom by `factor` keeping the layer point under `around` in place.
+    fn zoom_by(&mut self, factor: f32, around: egui::Pos2, area: Rect, size: egui::Vec2, ppp: f32) {
+        let (view, mag) = self.view(area, size, ppp);
+        let at = view.to_comp(around);
+        self.zoom = Some((mag * factor).clamp(0.02, 32.0));
+        let (moved, _) = self.view(area, size, ppp);
+        self.pan += around - moved.to_screen(at);
+    }
+
+    /// Zoom and pan from the pointer, the wheel and the tools; `true` while
+    /// Space is held (the picture pans instead of the tool working).
+    fn navigate(&mut self, ui: &Ui, cx: &PanelContext<'_>, area: Rect, size: egui::Vec2) -> bool {
+        use crate::viewer::{WHEEL_ZOOM_IN, WHEEL_ZOOM_OUT};
+        let ppp = ui.ctx().pixels_per_point();
+        let resp = ui.interact(
+            area,
+            ui.id().with("layer_navigate"),
+            Sense::click_and_drag(),
+        );
+        // The viewer's wheel rules (#571): one shared reading.
+        if let Some(pointer) = resp.hover_pos() {
+            let w = crate::viewer::wheel(ui);
+            let around = if w.alt { area.center() } else { pointer };
+            if cfg!(target_os = "macos") && crate::viewer::smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = egui::Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, size, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), pointer, area, size, ppp);
+                }
+            } else if w.pinch != 1.0 {
+                self.zoom_by(w.pinch, pointer, area, size, ppp);
+            } else if w.notches != 0.0 {
+                let step = if w.notches > 0.0 {
+                    WHEEL_ZOOM_IN
+                } else {
+                    WHEEL_ZOOM_OUT
+                };
+                self.zoom_by(step.powf(w.notches.abs()), around, area, size, ppp);
+            }
+            self.pan += w.pan;
+        }
+        let tool = crate::tools::shared(cx.resources).lock().current();
+        let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
+        let hand = tool == crate::tools::Tool::Hand || space;
+        if resp.dragged_by(egui::PointerButton::Middle)
+            || (hand && resp.dragged_by(egui::PointerButton::Primary))
+        {
+            self.pan += resp.drag_delta();
+        }
+        if tool == crate::tools::Tool::Zoom
+            && !space
+            && resp.clicked()
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let (_, mag) = self.view(area, size, ppp);
+            let out = ui.input(|i| i.modifiers.alt);
+            // The viewer's steps: powers of two (#570).
+            let next = crate::viewer::next_step(mag, !out);
+            if let Some(m) = next {
+                self.zoom_by(m / mag, p, area, size, ppp);
+            }
+        }
+        space
+    }
+
     /// The layer's picture, fitted in `area`, and the masks in Masks view.
     fn picture(
         &mut self,
@@ -219,44 +311,7 @@ impl LayerPanel {
         layer: &bae_anim::EvaluatedLayer,
     ) -> View {
         let ppp = ui.ctx().pixels_per_point();
-        let (w, h) = (one.width as f32, one.height as f32);
-        let fit = ((area.width() - 24.0) / w)
-            .min((area.height() - 24.0) / h)
-            .clamp(0.01, 1.0 / ppp);
-        let mut scale = self.zoom.map_or(fit, |z| z / ppp);
-        if cfg!(target_os = "macos")
-            && ui.rect_contains_pointer(area)
-            && let Some(anchor) = ui.input(|i| i.pointer.hover_pos())
-        {
-            let wheel = crate::viewer::wheel(ui);
-            let smart = crate::viewer::smart_zoom(ui.ctx());
-            if smart && self.zoom.is_some() {
-                self.zoom = None;
-                self.pan = egui::Vec2::ZERO;
-                scale = fit;
-            } else {
-                let factor = if smart {
-                    (1.0 / (fit * ppp)).max(2.0)
-                } else {
-                    wheel.pinch
-                };
-                if factor != 1.0 {
-                    let mag = (scale * ppp * factor).clamp(0.02, 32.0);
-                    let next = mag / ppp;
-                    self.pan += (anchor - area.center() - self.pan) * (1.0 - next / scale);
-                    self.zoom = Some(mag);
-                    scale = next;
-                } else {
-                    self.pan += wheel.pan;
-                }
-            }
-        }
-        let view = View {
-            origin: area.center() - vec2(w, h) * scale / 2.0 + self.pan,
-            scale,
-            point: 6.0,
-            camera: None,
-        };
+        let (view, _) = self.view(area, vec2(one.width as f32, one.height as f32), ppp);
         let frame = render::comp_rect(&view, one.width, one.height);
         let painter = ui.painter_at(area);
         if self.gpu.is_none() && !self.gpu_tried {
@@ -461,6 +516,35 @@ impl LayerPanel {
         );
         let ui = &mut child;
         ui.spacing_mut().item_spacing.x = 6.0;
+        // Magnification (as in the Composition viewer).
+        let mags = crate::viewer::MAGNIFICATIONS;
+        let mut labels: Vec<String> = vec![tr("Fit").to_owned()];
+        labels.extend(mags.iter().map(|(_, label)| (*label).to_owned()));
+        let items: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let mut sel = match self.zoom {
+            None => 0,
+            Some(z) => mags
+                .iter()
+                .position(|(m, _)| (m - z).abs() < 1e-3)
+                .map_or(usize::MAX, |i| i + 1),
+        };
+        if widgets::dropdown(ui, "layer_mag", &mut sel, &items, 74.0)
+            .on_hover_text(tr("Magnification"))
+            .changed()
+        {
+            self.pan = egui::Vec2::ZERO;
+            self.zoom = (sel > 0).then(|| mags[sel - 1].0);
+        }
+        if let Some(z) = self
+            .zoom
+            .filter(|z| !mags.iter().any(|(m, _)| (m - z).abs() < 1e-3))
+        {
+            ui.label(
+                egui::RichText::new(format!("{:.1}%", z * 100.0))
+                    .font(theme::small())
+                    .color(color::TEXT),
+            );
+        }
         ui.label(
             egui::RichText::new(tr("View:"))
                 .font(theme::small())
