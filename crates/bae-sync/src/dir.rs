@@ -181,7 +181,8 @@ impl DirTransport {
     ///
     /// Takes an advisory lock on `updates/<client>.lock` so two sessions on one
     /// machine cannot share a client ID ([`SyncError::ClientIdInUse`]). File
-    /// systems without locking are accepted as they are.
+    /// systems without locking are accepted as they are. With the lock held,
+    /// removes the temporary files a dead earlier session with this ID left.
     pub fn open(
         project: impl AsRef<Path>,
         client: ClientId,
@@ -202,11 +203,11 @@ impl DirTransport {
             .write(true)
             .open(&lock_path)
             .map_err(SyncError::io(&lock_path))?;
-        match lock.try_lock() {
-            Ok(()) | Err(fs::TryLockError::Error(_)) => {}
+        let locked = match lock.try_lock() {
+            Ok(()) => true,
+            Err(fs::TryLockError::Error(_)) => false,
             Err(fs::TryLockError::WouldBlock) => return Err(SyncError::ClientIdInUse(client)),
-        }
-        #[allow(unused_mut)]
+        };
         let mut t = DirTransport {
             root,
             client,
@@ -227,11 +228,32 @@ impl DirTransport {
             #[cfg(feature = "watch")]
             _watcher: None,
         };
+        if locked {
+            t.remove_leftovers();
+        }
         #[cfg(feature = "watch")]
         if t.config.watch {
             t.start_watcher();
         }
         Ok(t)
+    }
+
+    /// Delete the temporary files an earlier session with our client ID left
+    /// when its process died between writing and renaming them (a compaction,
+    /// a presence heartbeat): nobody else ever removes them, so every crash at
+    /// the wrong moment would leave one more for good. Only done while we hold
+    /// the client ID's lock, so no live session of ours is writing them.
+    fn remove_leftovers(&mut self) {
+        let prefix = format!("{}.tmp-", self.client);
+        let mut found = Vec::new();
+        for dir in [self.root.join(UPDATES), self.root.join(PRESENCE)] {
+            temp_files(&dir, &prefix, 0, &mut found);
+        }
+        for path in found {
+            if let Err(e) = fs::remove_file(&path) {
+                self.last_error = Some(format!("remove {}: {e}", path.display()));
+            }
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -935,6 +957,30 @@ fn walk(
             && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
         {
             out.push((rel.clone(), stem.to_owned(), path.clone()));
+        }
+    }
+}
+
+/// Files under `dir` whose name starts with `prefix` (our temporary files).
+fn temp_files(dir: &Path, prefix: &str, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            temp_files(&entry.path(), prefix, depth + 1, out);
+        } else if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(prefix))
+        {
+            out.push(entry.path());
         }
     }
 }

@@ -67,6 +67,12 @@
   - `HubTransport::close` 等对方确认关闭；`ThreadedTransport::close` 会关闭内层传输（原来只等队列交出去，`HubTransport` 缓冲区里剩下的随丢弃一起丢掉，`close` 却返回成功）；`DirTransport::close` 在日志落后时报错（spec 2.6、3.1、4.3）。
   - 快照请求的退避：每次翻倍（原来重写失败时又翻一倍，实际每轮 4 倍），起点不超过 60 秒，每次 `recv` 都检查（原来只在轮询目录时检查，轮询间隔 1 小时就要等 1 小时）。
 
+- 同一台机器上的多进程回环测试（epic #737 子任务 7 第一部分，`collab/sync-multiprocess-tests`）：客户端是测试程序自己再启动一次，不另外发布程序。
+  - Hub 模式（`services/bae-hub/tests/multiprocess.rs`）：真实的 `bae-hub` 进程，杀掉后在同一个数据目录和端口重启；客户端进程被杀后用同一个 `ClientId` 从保存的状态或从头重启；一个会断线、会延迟的代理。
+  - 共享目录（`crates/bae-sync/tests/multiprocess_dir.rs`）：4 个进程，写到一半时被杀（半条记录、没释放的锁），同一个 `ClientId` 重启后继续；目录大小不超过压缩阈值。
+  - 默认测试各约 3 秒，长时间测试在 `--ignored` 里。说明见 spec 3.1、4.6。
+  - 测出的问题：进程在压缩（或写在线状态心跳）时写完临时文件、改名之前被杀，临时文件永远留在目录里，每次在这个时候崩溃就多一个（macOS 上压缩的 `F_FULLFSYNC` 慢，这个窗口不小）。现在 `DirTransport::open` 拿到锁之后删除自己的 `<client-id>.tmp-*`（spec 4.3，回归测试 `temporary_files_of_a_dead_session_are_removed`）。Hub 的工程目录用的是同一份代码。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 10 hub-nas（2026-11-20）
