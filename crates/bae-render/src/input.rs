@@ -114,29 +114,36 @@ impl RenderComp {
     /// its own source time or content hash).
     pub fn content_hash(&self) -> u64 {
         let mut h = FxHasher::default();
-        self.hash_content(&mut h);
+        self.hash_content(&mut h, None);
         h.finish()
     }
 
-    pub(crate) fn hash_content(&self, h: &mut impl Hasher) {
+    pub(crate) fn hash_content(&self, h: &mut impl Hasher, effects: Option<&crate::EffectLibrary>) {
         self.path.hash(h);
         self.width.hash(h);
         self.height.hash(h);
         self.pixel_aspect.to_bits().hash(h);
         self.layers.len().hash(h);
-        let mut any_3d = false;
+        let mut scene_used = false;
+        let has_scene = self.camera.is_some() || !self.lights.is_empty();
         let mut any_blur = false;
         for layer in &self.layers {
-            layer.hash_composite(h);
+            layer.hash_composite(h, effects);
             if layer.blend_mode == BlendMode::DancingDissolve {
                 self.frame_rate.time_to_frame(self.time).hash(h);
             }
-            any_3d |= layer.matrix_3d.is_some();
+            scene_used |= layer.matrix_3d.is_some()
+                || (has_scene
+                    && !scene_used
+                    && effects.is_some_and(|lib| {
+                        layer.effects.iter().filter(|fx| fx.enabled).any(|fx| {
+                            lib.get(&fx.effect)
+                                .is_some_and(|e| e.uses_scene(&crate::EffectParams::new(fx)))
+                        })
+                    }));
             any_blur |= !layer.motion_samples.is_empty();
         }
-        // The camera only matters to 3D layers, the sample cameras only to
-        // blurred 3D layers.
-        if any_3d {
+        if scene_used {
             hash_camera(&self.camera, h);
             self.lights.len().hash(h);
             for l in &self.lights {
@@ -170,6 +177,13 @@ impl RenderComp {
             time: self.time,
         });
         for layer in &self.layers {
+            if layer.inert {
+                out.push(Dependency {
+                    path: layer.path.clone(),
+                    time: Dependency::INACTIVE,
+                });
+                continue;
+            }
             out.push(Dependency {
                 path: layer.path.clone(),
                 time: layer.time,
@@ -195,8 +209,29 @@ impl RenderComp {
 pub struct Dependency {
     /// The prim (its whole subtree counts unless a deeper dependency covers it).
     pub path: PrimPath,
-    /// The time the prim was evaluated at, in the prim's own time base.
+    /// The time the prim was evaluated at, in the prim's own time base, or
+    /// [`Dependency::INACTIVE`].
     pub time: Time,
+}
+
+impl Dependency {
+    /// The time of a layer that does not show in the frame
+    /// ([`RenderLayer::inert`]): only changes to its timing and visibility
+    /// switches ([`Dependency::SWITCHES`]) can affect the frame.
+    pub const INACTIVE: Time = Time::MIN;
+
+    /// The layer attributes that can make an inert layer show.
+    pub const SWITCHES: &[&str] = &[
+        "in_point",
+        "out_point",
+        "start_time",
+        "stretch",
+        "time_remap_enabled",
+        "time_remap",
+        "enabled",
+        "solo",
+        "guide",
+    ];
 }
 
 /// One evaluated layer.
@@ -208,6 +243,10 @@ pub struct RenderLayer {
     /// layer's own keyframes (and those of its masks, effects and contents) are in
     /// layer time (data-model.md §10), so cache invalidation uses it.
     pub time: Time,
+    /// Composition time corresponding to zero on the layer clock.
+    pub start_time: Time,
+    /// Earliest comp time at which this layer is active.
+    pub in_point: Time,
     /// Comp-time seconds per layer-time second (AE time stretch).
     pub time_scale: f64,
     /// What the layer draws.
@@ -229,6 +268,11 @@ pub struct RenderLayer {
     /// The comp time is within the layer's in/out range (and solo does not
     /// exclude it). An inactive layer draws nothing, also not as a matte.
     pub active: bool,
+    /// Nothing of the layer can show in this frame: not active and visible,
+    /// and neither a parent nor an active layer's track matte. The frame then
+    /// depends only on the switches that could make it show
+    /// ([`Dependency::INACTIVE`]), not on its content.
+    pub inert: bool,
     /// Adjustment layer: not drawn itself; its effects apply to the layers
     /// below, mixed back by its own pixels' coverage (see `graph`).
     pub adjustment: bool,
@@ -255,7 +299,9 @@ impl RenderLayer {
         Self {
             path,
             time: Time::ZERO,
+            start_time: Time::ZERO,
             time_scale: 1.0,
+            in_point: Time::ZERO,
             content,
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
@@ -264,6 +310,7 @@ impl RenderLayer {
             track_matte: None,
             visible: true,
             active: true,
+            inert: false,
             adjustment: false,
             masks: Vec::new(),
             effects: Vec::new(),
@@ -277,12 +324,13 @@ impl RenderLayer {
     /// independent of transform, opacity and blending.
     pub fn content_hash(&self) -> u64 {
         let mut h = FxHasher::default();
-        self.hash_content(&mut h);
+        self.hash_content(&mut h, None);
         h.finish()
     }
 
-    fn hash_content(&self, h: &mut impl Hasher) {
-        self.content.hash_into(h);
+    fn hash_content(&self, h: &mut impl Hasher, effects: Option<&crate::EffectLibrary>) {
+        self.in_point.hash(h);
+        self.content.hash_into(h, effects);
         self.masks.len().hash(h);
         for m in &self.masks {
             m.hash_into(h);
@@ -293,9 +341,9 @@ impl RenderLayer {
         }
     }
 
-    fn hash_composite(&self, h: &mut impl Hasher) {
+    fn hash_composite(&self, h: &mut impl Hasher, effects: Option<&crate::EffectLibrary>) {
         self.path.hash(h);
-        self.hash_content(h);
+        self.hash_content(h, effects);
         for v in self.transform.to_cols_array() {
             v.to_bits().hash(h);
         }
@@ -343,7 +391,7 @@ fn hash_mat4(m: &DMat4, h: &mut impl Hasher) {
     }
 }
 
-fn hash_light(l: &Light, h: &mut impl Hasher) {
+pub(crate) fn hash_light(l: &Light, h: &mut impl Hasher) {
     (l.kind, l.falloff, l.casts_shadows, l.scope_below).hash(h);
     hash_mat4(&l.world, h);
     l.point_of_interest.to_array().map(f64::to_bits).hash(h);
@@ -361,7 +409,7 @@ fn hash_light(l: &Light, h: &mut impl Hasher) {
     .hash(h);
 }
 
-fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
+pub(crate) fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
     c.is_some().hash(h);
     if let Some(c) = c {
         hash_mat4(&c.world, h);
@@ -417,7 +465,7 @@ impl LayerContent {
         }
     }
 
-    fn hash_into(&self, h: &mut impl Hasher) {
+    fn hash_into(&self, h: &mut impl Hasher, effects: Option<&crate::EffectLibrary>) {
         std::mem::discriminant(self).hash(h);
         match self {
             LayerContent::None => {}
@@ -437,7 +485,7 @@ impl LayerContent {
                 f.sequence.hash(h);
                 f.blend.hash(h);
             }
-            LayerContent::Comp(c) => c.hash_content(h),
+            LayerContent::Comp(c) => c.hash_content(h, effects),
             LayerContent::Custom(c) => {
                 c.provider.hash(h);
                 c.prim.hash(h);
@@ -555,7 +603,7 @@ impl RenderEffect {
         self.params.iter().find(|(n, _)| *n == id).map(|(_, v)| v)
     }
 
-    fn hash_into(&self, h: &mut impl Hasher) {
+    pub(crate) fn hash_into(&self, h: &mut impl Hasher) {
         self.path.hash(h);
         self.effect.hash(h);
         self.enabled.hash(h);

@@ -108,7 +108,7 @@ fn rich() -> Ui {
     h
 }
 
-const TIMELINE: (&str, egui::Vec2) = ("Layer Name", egui::vec2(700.0, 120.0));
+const TIMELINE: (&str, egui::Vec2) = ("Source Name", egui::vec2(700.0, 120.0));
 const VIEWER: (&str, egui::Vec2) = ("Fit", egui::vec2(300.0, -250.0));
 
 /// Enabled menu items that do nothing in the state of [`rich`] (a layer
@@ -715,7 +715,7 @@ fn new_ui_in_one_language(zh: bool) {
             .collect();
     // Keyframe dialogs are Timeline actions: focus it (the click clears the
     // selection, so select the keys afterwards).
-    focus(&mut h, bae_ui::tr("Layer Name"), TIMELINE.1);
+    focus(&mut h, bae_ui::tr("Source Name"), TIMELINE.1);
     for (step, m, k) in [
         (
             "keyframe interpolation",
@@ -1254,7 +1254,7 @@ fn close_project_leaves_no_old_comp_name_in_the_panels() {
 fn render_queue_output_defaults_to_movies_on_macos() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = h.state().render_queue();
     let output = queue.lock().items().last().unwrap().output.clone();
     let movies = bae_platform::dirs::home_dir().unwrap().join("Movies");

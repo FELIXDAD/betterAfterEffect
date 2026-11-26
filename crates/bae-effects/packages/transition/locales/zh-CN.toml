@@ -1,0 +1,96 @@
+[effect.iris-wipe]
+name = "光圈擦除"
+keywords = ["光圈"]
+
+[effect.iris-wipe.params]
+iris_center = "光圈中心"
+iris_points = "点光圈"
+outer_radius = "外径"
+use_inner_radius = "使用内径"
+inner_radius = "内径"
+rotation = "旋转"
+feather = "羽化"
+
+[effect.cc-grid-wipe]
+name = "CC Grid Wipe"
+keywords = ["网格"]
+
+[effect.cc-grid-wipe.params]
+completion = "Completion"
+center = "Center"
+rotation = "Rotation"
+border = "Border"
+tiles = "Tiles"
+shape = "Shape"
+reverse_transition = "Reverse Transition"
+
+[effect.cc-grid-wipe.choices.shape]
+1 = "Doors"
+2 = "Radial"
+3 = "Rectangular"
+
+[effect.cc-light-wipe]
+name = "CC Light Wipe"
+keywords = ["光照"]
+
+[effect.cc-light-wipe.params]
+completion = "Completion"
+center = "Center"
+intensity = "Intensity"
+shape = "Shape"
+direction = "Direction"
+color_from_source = "Color from Source"
+color = "Color"
+reverse_transition = "Reverse Transition"
+
+[effect.cc-light-wipe.choices.shape]
+1 = "Doors"
+2 = "Round"
+3 = "Square"
+
+[effect.cc-radial-scalewipe]
+name = "CC Radial ScaleWipe"
+keywords = ["径向"]
+
+[effect.cc-radial-scalewipe.params]
+completion = "Completion"
+center = "Center"
+reverse_transition = "Reverse Transition"
+
+[effect.cc-scale-wipe]
+name = "CC Scale Wipe"
+keywords = ["伸缩"]
+
+[effect.cc-scale-wipe.params]
+stretch = "Stretch"
+center = "Center"
+direction = "Direction"
+
+[effect.cc-jaws]
+name = "CC Jaws"
+keywords = ["过渡"]
+
+[effect.cc-jaws.params]
+completion = "Completion"
+center = "Center"
+direction = "Direction"
+height = "Height"
+width = "Width"
+shape = "Shape"
+
+[effect.cc-jaws.choices.shape]
+1 = "Spikes"
+2 = "RoboJaw"
+3 = "Block"
+4 = "Waves"
+
+[effect.cc-line-sweep]
+name = "CC Line Sweep"
+keywords = ["过渡"]
+
+[effect.cc-line-sweep.params]
+completion = "Completion"
+direction = "Direction"
+thickness = "Thickness"
+slant = "Slant"
+flip_direction = "Flip Direction"

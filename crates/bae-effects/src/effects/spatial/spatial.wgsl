@@ -57,7 +57,13 @@ fn directional(@builtin(global_invocation_id) id: vec3<u32>) {
         let x = f32(i) * step_px;
         let w = exp(-0.5 * x * x / (sigma * sigma));
         let d = x * f.arg[0].xy;
-        sum += w * (bilinear(src,f.src,vec2<f32>(p)-d) + bilinear(src,f.src,vec2<f32>(p)+d));
+        var a=vec2f(p)-d;
+        var b=vec2f(p)+d;
+        if f.arg[0].w>0.0 {
+            a=clamp(a,vec2f(f.src.xy),vec2f(f.src.zw-1));
+            b=clamp(b,vec2f(f.src.xy),vec2f(f.src.zw-1));
+        }
+        sum+=w*(bilinear(src,f.src,a)+bilinear(src,f.src,b));
         norm += 2.0 * w;
     }
     store(p,sum/norm);
@@ -71,20 +77,29 @@ fn radial(@builtin(global_invocation_id) id:vec3<u32>) {
     let v=vec2<f32>(p)-center;
     let spin=f.arg[0].w==1.0;
     let span=select(f.arg[0].z/200.0,radians(f.arg[0].z),spin);
-    let density=select(0.5,1.0,f.arg[1].x==2.0);
-    let n=clamp(i32(ceil(length(v)*span*density)),1,256);
-    let phase=select(0.5,random(p,u32(f.arg[1].y)),f.arg[1].y!=0.0);
-    var sum=vec4<f32>(0);
+    let kind=u32(f.arg[1].w);
+    let density=select(select(0.5,1.0,f.arg[1].x==2.0),f.arg[1].z,kind!=0u);
+    let n=clamp(i32(ceil(length(v)*abs(span)*density)),1,256);
+    let phase=select(0.5,random(p,u32(f.arg[1].y)),f.arg[1].y!=0.0 || kind==6u);
+    let blend=u32(f.arg[2].x);
+    var sum=vec4f(0);
+    var norm=0.0;
     for(var i=0;i<n;i++){
         let t=(f32(i)+phase)/f32(n);
-        var ray=v*(1.0+span*(t-0.5));
+        var offset=t-0.5;
+        if kind==1u || kind==2u {offset=-t;}
+        var ray=v*(1.0+span*offset);
         if spin{
-            let a=(t-0.5)*span;
-            ray=vec2<f32>(v.x*cos(a)-v.y*sin(a),v.x*sin(a)+v.y*cos(a));
+            let a=offset*span;
+            ray=vec2f(v.x*cos(a)-v.y*sin(a),v.x*sin(a)+v.y*cos(a));
         }
-        sum+=bilinear(src,f.src,clamp(center+ray, vec2<f32>(f.src.xy), vec2<f32>(f.src.zw-1)));
+        let c=bilinear(src,f.src,clamp(center+ray, vec2f(f.src.xy), vec2f(f.src.zw-1)));
+        let weight=select(1.0,1.0-t,kind==2u || kind==7u);
+        if blend==2u {sum=max(sum,c);}
+        else if blend==3u {sum=select(min(sum,c),c,i==0);}
+        else {sum+=c*weight;norm+=weight;}
     }
-    store(p,sum/f32(n));
+    store(p,sum/select(max(norm,1e-6),1.0,blend==2u || blend==3u));
 }
 
 // Integrate fractional coverage on each axis before expanding the block grid.
@@ -320,7 +335,10 @@ fn matte_choke(@builtin(global_invocation_id) id:vec3<u32>) {
     let b=sum/norm;
     if !vertical {store(p,b); return;}
     let width=clamp(2.0*floor(255.0*args.z),1.0,255.0);
-    let alpha=saturate((b.a*255.0-127.0-255.0*args.y)/width+0.5);
+    // The full-width ramp passes continuous alpha through. Narrow ramps use
+    // the integer threshold center of the matte levels control.
+    let threshold=(b.a*255.0-127.0-255.0*args.y)/width+0.5;
+    let alpha=saturate(select(threshold,b.a-args.y,width==255.0));
     let original=load(aux,f.aux,p);
     store(p,vec4<f32>(select(straight(b),straight(original),original.a>0.0)*alpha,alpha));
 }

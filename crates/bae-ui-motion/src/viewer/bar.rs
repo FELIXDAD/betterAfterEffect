@@ -35,17 +35,13 @@ pub(super) fn bottom_bar(
 
     // Magnification.
     let mut labels: Vec<String> = vec![tr("Fit").to_owned()];
-    labels.extend(
-        MAGNIFICATIONS
-            .iter()
-            .map(|m| format!("{:.1}%", m * 100.0).replace(".0%", "%")),
-    );
+    labels.extend(MAGNIFICATIONS.iter().map(|(_, label)| (*label).to_owned()));
     let items: Vec<&str> = labels.iter().map(String::as_str).collect();
     let current = match v.zoom {
         None => 0,
         Some(z) => MAGNIFICATIONS
             .iter()
-            .position(|m| (m - z).abs() < 1e-3)
+            .position(|(m, _)| (m - z).abs() < 1e-3)
             .map_or(usize::MAX, |i| i + 1),
     };
     let mut sel = current;
@@ -62,7 +58,7 @@ pub(super) fn bottom_bar(
         v.zoom = if sel == 0 {
             None
         } else {
-            Some(MAGNIFICATIONS[sel - 1])
+            Some(MAGNIFICATIONS[sel - 1].0)
         };
     }
     if !shown.is_empty() {
@@ -82,13 +78,20 @@ pub(super) fn bottom_bar(
         tr("Third"),
         tr("Quarter"),
     ];
-    if factor > 4 {
-        res.push(tr("Custom"));
-    }
+    // AE lists Custom… last; a custom resolution shows as Custom.
+    let steps = super::comp_steps(cx.stage, &info.path);
+    let custom = steps[0] != steps[1] || factor > 4;
+    res.push(if custom {
+        tr("Custom")
+    } else {
+        tr("Custom...")
+    });
     let mut r = if session.lock().auto_resolution {
         0
+    } else if custom {
+        5
     } else {
-        (factor as usize).min(5)
+        factor as usize
     };
     if widgets::dropdown(ui, "res", &mut r, &res, 84.0)
         .on_hover_text(tr("Resolution"))
@@ -96,23 +99,134 @@ pub(super) fn bottom_bar(
     {
         match r {
             0 => session.lock().auto_resolution = true,
-            1..=4 => super::set_resolution(cx, session, r as u32, false),
-            _ => {}
+            1..=4 => super::set_resolution(cx, session, [r as u32; 2], false),
+            _ => crate::dialogs::open(
+                cx.resources,
+                crate::dialogs::Dialog::CustomResolution {
+                    steps,
+                    nested: false,
+                },
+            ),
         }
     }
 
-    for (on, icon, tip) in [
-        (&mut v.checker, Icon::TransparencyGrid, "Transparency Grid"),
-        (&mut v.safe, Icon::RegionOfInterest, "Title/Action Safe"),
-        (&mut v.grid, Icon::Guides, "Grid"),
-    ] {
-        if icons::button(ui, icon, 20.0, *on)
-            .labeled_toggle(egui::WidgetType::Checkbox, tr(tip), *on)
-            .on_hover_text(tr(tip))
+    // AE hides the bar's controls that do not fit; the 3D View popup and the
+    // time stay.
+    // The 3D View popup, the view layout popup and the time stay.
+    let reserve = if v.on_gpu { 300.0 } else { 330.0 };
+    let room = |ui: &Ui, w: f32| ui.available_width() >= w + reserve;
+    // Choose grid and guide options (AE's popup).
+    let mut opts = session.lock().view_options;
+    let on = opts.safe || opts.grid || opts.proportional || opts.rulers;
+    let resp = icons::button(ui, Icon::Guides, 20.0, on)
+        .labeled(
+            egui::WidgetType::Button,
+            tr("Choose grid and guide options"),
+        )
+        .on_hover_text(tr("Choose grid and guide options"));
+    common::popup_menu(&resp, &mut |ui| {
+        for (flag, label) in [
+            (&mut opts.safe, "Title/Action Safe"),
+            (&mut opts.proportional, "Proportional Grid"),
+            (&mut opts.grid, "Grid"),
+            (&mut opts.guides, "Guides"),
+            (&mut opts.rulers, "Rulers"),
+        ] {
+            if ui.checkbox(flag, tr(label)).clicked() {
+                ui.close();
+            }
+        }
+    });
+    session.lock().view_options = opts;
+    if room(ui, 48.0) {
+        // Region of Interest (Alt/Option-click: draw a new one).
+        let d = &mut v.display;
+        let resp = icons::button(ui, Icon::RegionOfInterest, 20.0, d.roi_on)
+            .labeled_toggle(
+                egui::WidgetType::Checkbox,
+                tr("Region of Interest"),
+                d.roi_on,
+            )
+            .on_hover_text(tr("Region of Interest"));
+        if resp.clicked() {
+            if ui.input(|i| i.modifiers.alt) {
+                d.roi = None;
+                d.roi_on = true;
+            } else {
+                d.roi_on = !d.roi_on;
+            }
+        }
+        if icons::button(ui, Icon::TransparencyGrid, 20.0, v.checker)
+            .labeled_toggle(
+                egui::WidgetType::Checkbox,
+                tr("Transparency Grid"),
+                v.checker,
+            )
+            .on_hover_text(tr("Transparency Grid"))
             .clicked()
         {
-            *on = !*on;
+            v.checker = !v.checker;
         }
+    }
+    if room(ui, 24.0) {
+        // Show Channel and Colorize.
+        let d = &mut v.display;
+        let resp = icons::button(ui, Icon::Channels, 20.0, d.channel != 0)
+            .labeled(
+                egui::WidgetType::Button,
+                tr("Show Channel and Color Management Settings"),
+            )
+            .on_hover_text(tr("Show Channel and Color Management Settings"));
+        common::popup_menu(&resp, &mut |ui| {
+            for (i, name) in super::display::CHANNELS.iter().enumerate() {
+                if ui.radio(d.channel == i as u32, tr(name)).clicked() {
+                    d.channel = i as u32;
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.checkbox(&mut d.colorize, tr("Colorize")).clicked() {
+                ui.close();
+            }
+        });
+    }
+    if room(ui, 48.0) {
+        // Take Snapshot / Show Snapshot (held).
+        if icons::button(ui, Icon::Snapshot, 20.0, false)
+            .labeled(egui::WidgetType::Button, tr("Take Snapshot"))
+            .on_hover_text(tr("Take Snapshot"))
+            .clicked()
+            && let Some(g) = v.gpu.as_mut()
+        {
+            g.take_snapshot(0);
+        }
+        let held = icons::button(ui, Icon::ShowSnapshot, 20.0, false)
+            .labeled(egui::WidgetType::Button, tr("Show Snapshot"))
+            .on_hover_text(tr("Show Snapshot"))
+            .is_pointer_button_down_on();
+        v.snapshot_button = held;
+        if held {
+            v.snapshot_shown = Some(0);
+        }
+    }
+    // Exposure: the button resets it.
+    if room(ui, 80.0) {
+        let d = &mut v.display;
+        if icons::button(ui, Icon::Exposure, 20.0, d.exposure != 0.0)
+            .labeled(egui::WidgetType::Button, tr("Reset Exposure"))
+            .on_hover_text(tr("Reset Exposure"))
+            .clicked()
+        {
+            d.exposure = 0.0;
+        }
+        ui.add(
+            egui::DragValue::new(&mut d.exposure)
+                .speed(0.05)
+                .range(-40.0..=40.0)
+                .fixed_decimals(1),
+        )
+        .labeled(egui::WidgetType::DragValue, tr("Adjust Exposure"))
+        .on_hover_text(tr("Adjust Exposure"));
     }
     // 3D View popup.
     let views = super::view3d::View3d::ALL;
@@ -133,12 +247,38 @@ pub(super) fn bottom_bar(
             .or_default()
             .switch(views[i]);
     }
+    // Select View Layout (AE hides bar controls that do not fit).
+    if ui.available_width() > 170.0 {
+        let layouts = [tr("1 View"), tr("2 Views"), tr("4 Views")];
+        let n = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .map_or(1, super::view3d::Views::layout);
+        let mut k = match n {
+            2 => 1,
+            4 => 2,
+            _ => 0,
+        };
+        if widgets::dropdown(ui, "layout", &mut k, &layouts, 70.0)
+            .on_hover_text(tr("Select View Layout"))
+            .changed()
+        {
+            session
+                .lock()
+                .views3d
+                .entry(info.path.clone())
+                .or_default()
+                .set_layout([1, 2, 4][k]);
+        }
+    }
     ui.label(
         egui::RichText::new(common::timecode(info, time))
             .font(theme::body())
             .color(color::ACCENT),
     );
-    if !v.on_gpu {
+    // BAE's own hint (no GPU): only when it fits.
+    if !v.on_gpu && ui.available_width() > 120.0 {
         ui.label(
             egui::RichText::new(tr("Preview (simplified)"))
                 .font(theme::small())

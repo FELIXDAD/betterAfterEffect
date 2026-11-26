@@ -49,6 +49,83 @@ pub struct EvaluatorFrames<'a> {
 }
 
 impl crate::graph::CompFrames for EvaluatorFrames<'_> {
+    fn animated_controls(&self, effect: &PrimPath, ids: &[u32]) -> bool {
+        ids.is_empty()
+            || self.stage.prim(effect).is_some_and(|fx| {
+                ids.iter().any(|id| {
+                    fx.attr(&bae_model::effect::param_attr(*id))
+                        .is_some_and(|a| a.is_animated() || a.expression.is_some())
+                })
+            })
+    }
+
+    fn parameters_at(
+        &mut self,
+        instance: &RenderEffect,
+        ids: &[u32],
+        frame: &crate::graph::EffectFrame,
+        times: &[Time],
+    ) -> Vec<crate::effect::ParameterSample> {
+        if times.is_empty() {
+            return Vec::new();
+        }
+        let Some(view) = self.stage.prim(&instance.path) else {
+            return Vec::new();
+        };
+        let mut samples: Vec<_> = times
+            .iter()
+            .map(|&time| crate::effect::ParameterSample {
+                time,
+                values: Vec::new(),
+            })
+            .collect();
+        for (id, current) in &instance.params {
+            if !ids.is_empty() && !ids.contains(id) {
+                continue;
+            }
+            let name = bae_model::effect::param_attr(*id);
+            let Some(attr) = view.attr(&name) else {
+                continue;
+            };
+            if !attr.is_animated() && attr.expression.is_none() {
+                continue;
+            }
+            let curve =
+                bae_anim::Curve::new(&attr.keyframes, bae_anim::schema::curve_kind(&name, attr));
+            for sample in &mut samples {
+                let value = if attr.expression.is_some() {
+                    self.evaluator.attribute(
+                        self.stage,
+                        &instance.path,
+                        &name,
+                        frame.comp_at(sample.time),
+                    )
+                } else {
+                    curve.as_ref().map(|curve| curve.sample(sample.time))
+                };
+                sample
+                    .values
+                    .push((*id, value.unwrap_or_else(|| current.clone())));
+            }
+        }
+        samples
+    }
+
+    fn scalar_track(
+        &mut self,
+        effect: &PrimPath,
+        id: u32,
+        frame: &crate::graph::EffectFrame,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let name = bae_model::effect::param_attr(id);
+        let attr = self.stage.prim(effect)?.attr(&name)?;
+        if !attr.is_animated() && attr.expression.is_none() {
+            return None;
+        }
+        self.evaluator
+            .integral(self.stage, effect, &name, frame, attr)
+    }
+
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
         self.evaluator.evaluate(self.stage, comp, time).map(Some)
     }
@@ -68,6 +145,33 @@ pub trait CompEvaluator {
         time: Time,
     ) -> Result<RenderComp, RenderError>;
 
+    /// Evaluate a single effect attribute at composition time.
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<Value> {
+        bae_anim::Evaluator::new()
+            .evaluate_attribute(stage, path, name, time)
+            .ok()
+    }
+
+    /// Cumulative scalar samples for effects that integrate a parameter over time.
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        crate::parameter_track::prepare(&mut Default::default(), attr, frame, |t| {
+            Some((self.attribute(stage, path, name, t)?.as_f64()?, Vec::new()))
+        })
+    }
+
     /// Drops whatever `event` makes stale. Default: nothing is cached.
     fn invalidate(&mut self, _event: &StageEvent) {}
 
@@ -75,6 +179,10 @@ pub trait CompEvaluator {
     fn take_warnings(&mut self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Serves `sampleImage` expressions from `samples` (filled by
+    /// [`crate::Renderer::read_samples`]). Default: no expressions.
+    fn set_image_samples(&mut self, _samples: Option<std::sync::Arc<bae_anim::ImageSamples>>) {}
 }
 
 /// Evaluates a [`Stage`] with static values and linear keyframes.
@@ -206,7 +314,9 @@ impl<'a> MockPass<'a> {
 
             let mut out = RenderLayer::new(layer.path().clone(), LayerContent::None);
             out.time = local;
+            out.start_time = start;
             out.time_scale = if stretch == 0.0 { 1.0 } else { stretch / 100.0 };
+            out.in_point = in_point;
             out.active = in_point <= time && time < out_point && solo_ok && guide_ok;
             out.visible = boolean(layer, "enabled", local).unwrap_or(true);
             out.adjustment =
@@ -382,9 +492,25 @@ impl<'a> MockPass<'a> {
                         Some((id, sample(&fx, name, local)?))
                     })
                     .collect();
+                let effect = string(&fx, "match_name", local).unwrap_or_default();
+                if effect == "CC Ripple Pulse"
+                    && fx
+                        .attr("param:0002")
+                        .is_some_and(|p| !p.keyframes.is_empty())
+                {
+                    let span = sample(&fx, "param:0003", local)
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(1.0);
+                    let profile = bae_anim::effect_history::ripple_profile(local, span, |t| {
+                        sample(&fx, "param:0002", t)
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(100.0)
+                    });
+                    params.push((bae_anim::effect_history::HISTORY_PARAM, profile));
+                }
                 params.sort_by_key(|(id, _)| *id);
                 Some(RenderEffect {
-                    effect: string(&fx, "match_name", local).unwrap_or_default(),
+                    effect,
                     enabled: boolean(&fx, "enabled", local).unwrap_or(true),
                     params,
                     path,

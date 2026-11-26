@@ -69,6 +69,7 @@ bae-ui = { path = "crates/bae-ui" }
 bae-color = { path = "crates/bae-color" }
 bae-plugin = { path = "crates/bae-plugin" }
 bae-plugin-sdk = { path = "crates/bae-plugin-sdk" }
+bae-script = { path = "crates/bae-script" }
 bae-package = { path = "crates/bae-package" }
 bae-motion = { path = "crates/bae-motion" }
 bae-vector = { path = "crates/bae-vector" }
@@ -151,6 +152,7 @@ tiff = { version = "0.11.3", default-features = false, features = ["deflate", "j
 zune-jpeg = "0.5.15"
 symphonia = { version = "0.6.1", default-features = false }
 cpal = "0.18.2"
+rtrb = "0.4.1"
 
 # ---- platform bindings ----
 objc2 = "0.6.5"
@@ -160,7 +162,9 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
 objc2-metal = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-av-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-core-video = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-audio-types = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-core-media = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-video-toolbox = { version = "0.3.2", default-features = false, features = ["std"] }
 # windows 0.62 is the line wgpu-hal and fontique use; windows-sys 0.61 the one muda uses.
@@ -262,6 +266,9 @@ opt-level = "s"
 [profile.release.package.bae-ui-motion]
 opt-level = "s"
 [profile.release.package.bae-motion]
+opt-level = "s"
+# Scripts: one run per user action, never in the frame path.
+[profile.release.package.bae-script]
 opt-level = "s"
 # Effects: the CPU side only plans passes and writes uniforms (the GPU runs them).
 [profile.release.package.bae-effects]

@@ -160,7 +160,10 @@ impl Differences {
             ParamKind::Layer => "LAYER_INDEX",
             ParamKind::Path => "MASK_INDEX",
             ParamKind::CurvePoints | ParamKind::ArbitraryData => "CUSTOM_VALUE",
-            ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Button => "NO_VALUE",
+            ParamKind::GroupStart
+            | ParamKind::GroupEnd
+            | ParamKind::Button
+            | ParamKind::Display => "NO_VALUE",
         };
         self.field(id, "type", prop["propertyValueType"].clone(), json!(ty));
         let expected = &prop["defaultValue"];

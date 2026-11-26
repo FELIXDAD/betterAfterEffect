@@ -441,3 +441,33 @@ fn legacy_corrections_clip_straight_hdr_before_premultiplying() {
     );
     assert_close(&actual, &white, rect, 1e-5, "broadcast white");
 }
+
+#[test]
+fn ocio_file_and_cdl_apply_embedded_grades_on_gpu() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(4, 4);
+    let pixels = Pixels::new(rect, |_, _| [0.15, 0.1, 0.05, 0.5]);
+    let cdl =
+        b"test.cc\0<ColorCorrection><SOPNode><Slope>2 1 1</Slope></SOPNode></ColorCorrection>"
+            .to_vec();
+    let cube = b"test.cube\0LUT_1D_SIZE 2\n0 0 0\n2 1 1\n".to_vec();
+    for (name, id, bytes) in [
+        ("ADBE OCIO CDL Transform", 6, cdl),
+        ("ADBE OCIO FILE Transform", 5, cube),
+    ] {
+        let out = run(
+            &gpu,
+            F32,
+            builtin(name),
+            vec![(id, Value::Bytes(bytes))],
+            &pixels,
+            rect,
+            1.,
+        );
+        for (actual, expected) in out.get(2, 2).into_iter().zip([0.3, 0.1, 0.05, 0.5]) {
+            assert!((actual - expected).abs() < 0.0001, "{name}: {actual}");
+        }
+    }
+}

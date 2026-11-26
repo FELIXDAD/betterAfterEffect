@@ -192,17 +192,7 @@ pub struct Permissions {
     pub render: bool,
 }
 
-/// Project access level.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProjectAccess {
-    /// No access.
-    None,
-    /// Read only.
-    Read,
-    /// Read and write (through commands).
-    Write,
-}
+pub use bae_script::ProjectAccess;
 
 /// One `[dependencies]` entry.
 #[derive(Clone, Debug, Deserialize)]
@@ -462,6 +452,12 @@ impl EffectDecl {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoiDecl {
+    /// Read the complete upstream image (e.g. a spherical reprojection).
+    #[serde(default)]
+    pub whole_input: bool,
+    /// Output width and height expressions in full-resolution pixels.
+    #[serde(default)]
+    pub size: Option<[String; 2]>,
     /// Extent of the result.
     #[serde(default)]
     pub extent: Option<RoiExtent>,
@@ -1083,6 +1079,9 @@ impl Validator {
         }
         for a in &m.automations {
             unique(self, "automation", &a.id);
+            if a.entry.trim().is_empty() {
+                self.err("automation scripts need an exported function name");
+            }
             if m.script.is_none() {
                 self.err("automation scripts need a [script] table with the entry module");
             }
@@ -1205,7 +1204,7 @@ impl Validator {
     fn command(&mut self, c: &CommandDecl) {
         match c.implementation.as_str() {
             "script" => {
-                if c.entry.is_none() {
+                if c.entry.as_deref().is_none_or(|name| name.trim().is_empty()) {
                     self.err("script commands need `entry` (the exported function)");
                 }
             }
@@ -1540,7 +1539,13 @@ impl Validator {
                     expr(self, name, src);
                 }
             }
-            if style == ShaderStyle::Pixel && roi.margin_sources().iter().any(Option::is_some) {
+            if let Some([w, h]) = &roi.size {
+                expr(self, "output width", w);
+                expr(self, "output height", h);
+            }
+            if style == ShaderStyle::Pixel
+                && (roi.whole_input || roi.margin_sources().iter().any(Option::is_some))
+            {
                 self.err("pixel-style effects read only their own pixel; remove the read margins or use style = \"compute\"");
             }
         }

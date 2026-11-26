@@ -67,7 +67,9 @@ pub(crate) struct GraphSettings {
     pub show_set: bool,
     pub graph_type: GraphType,
     pub show_reference: bool,
+    pub show_waveforms: bool,
     pub show_in_out: bool,
+    pub show_markers: bool,
     pub show_tooltips: bool,
     pub show_expression_editor: bool,
     pub allow_between_frames: bool,
@@ -84,7 +86,9 @@ impl Default for GraphSettings {
             show_set: false,
             graph_type: GraphType::Auto,
             show_reference: true,
+            show_waveforms: true,
             show_in_out: true,
+            show_markers: true,
             show_tooltips: true,
             show_expression_editor: false,
             allow_between_frames: false,
@@ -181,6 +185,8 @@ pub(crate) struct TestGeometry {
     pub selection_box: Option<Rect>,
     pub vaxes: Vec<((PrimPath, String), VAxis)>,
     pub buttons: Vec<(String, Rect)>,
+    /// Layer markers drawn (x).
+    pub markers: Vec<f32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -644,7 +650,10 @@ fn data_range(pieces: &[Piece], extra: impl Iterator<Item = f64>) -> Option<(f64
 /// A range with room around the data (and never empty).
 fn padded((lo, hi): (f64, f64)) -> (f64, f64) {
     let span = hi - lo;
-    if span.abs() < 1e-9 {
+    // Flat when the spread is rounding noise next to the values (a linear
+    // segment's speed samples differ by ~1e-9): fitting it would blow the noise
+    // up to the full height (#552).
+    if span.abs() <= 1e-9 * lo.abs().max(hi.abs()).max(1.0) {
         let m = lo.abs().max(1.0) * 0.1;
         (lo - m, hi + m)
     } else {
@@ -1521,6 +1530,7 @@ impl GraphEditor {
         axis: &TimeAxis,
         rect: Rect,
         now: Time,
+        waveform: &mut dyn FnMut(&Ui, &PrimPath, Rect),
     ) -> GraphOut {
         let mut out = GraphOut::default();
         let stage = cx.stage;
@@ -1638,7 +1648,11 @@ impl GraphEditor {
         self.ranges.retain(|k, _| shown.contains(k));
         self.cache.retain(|_, e| e.used);
 
-        self.paint(ui, stage, &frame, axis, area, &selected);
+        let _markers = self.paint(ui, stage, &frame, axis, area, &selected, waveform);
+        #[cfg(test)]
+        {
+            self.last.markers = _markers;
+        }
         let p = ui.painter().with_clip_rect(area);
         if let Some(x) = vline {
             p.vline(x, area.y_range(), Stroke::new(1.0, SNAP));
@@ -1776,9 +1790,11 @@ impl GraphEditor {
         // Right-click on a keyframe: the keyframe menu; elsewhere the Keyframe
         // Assistant and Toggle Hold items for the selection.
         let menu_key = self.menu_key.clone();
+        let settings = &mut self.settings;
         crate::common::context_menu(&resp, &mut |ui| match &menu_key {
             Some(k) => crate::timeline::key_menu(ui, cx, session, k),
-            None => crate::timeline::keyframe_menu(ui, cx, session),
+            // Empty graph space: AE's view options.
+            None => area_menu(ui, settings),
         });
 
         // Drag start.
@@ -1898,6 +1914,12 @@ impl GraphEditor {
                     k.time = *t;
                 }
             }
+            // Panels drawn before the edit runs keep the moved keys selected.
+            let landing: Vec<KeyRef> = moved
+                .iter()
+                .map(|(k, t)| KeyRef::new(k.path.clone(), k.attr.clone(), *t))
+                .collect();
+            s.expect(crate::session::Pending::Keys(landing));
             self.sel_dims = self
                 .sel_dims
                 .drain()
@@ -2041,6 +2063,8 @@ impl GraphEditor {
         f
     }
 
+    /// Draws the graphs; returns the x of the layer markers drawn.
+    #[allow(clippy::too_many_arguments)]
     fn paint(
         &self,
         ui: &Ui,
@@ -2049,7 +2073,20 @@ impl GraphEditor {
         axis: &TimeAxis,
         area: Rect,
         selected: &[KeyRef],
-    ) {
+        waveform: &mut dyn FnMut(&Ui, &PrimPath, Rect),
+    ) -> Vec<f32> {
+        let mut layers: Vec<&PrimPath> = Vec::new();
+        for prop in &f.props {
+            if !layers.contains(&&prop.layer) {
+                layers.push(&prop.layer);
+            }
+        }
+        // Audio waveforms of the shown layers, behind everything (AE).
+        if self.settings.show_waveforms {
+            for layer in &layers {
+                waveform(ui, layer, area);
+            }
+        }
         let p = ui.painter().with_clip_rect(area);
         let focus = f
             .props
@@ -2106,6 +2143,22 @@ impl GraphEditor {
                         theme::font(16.0),
                         color::TEXT_DIM,
                     );
+                }
+            }
+        }
+        // Layer markers along the bottom (AE).
+        let mut marker_xs = Vec::new();
+        if self.settings.show_markers {
+            for layer in &layers {
+                for (m, t) in bae_motion::markers::markers_of(stage, layer) {
+                    let x = axis.x(query::to_comp_time(stage, &m, t));
+                    let b = area.bottom() - 2.0;
+                    p.add(egui::Shape::convex_polygon(
+                        vec![pos2(x, b - 7.0), pos2(x + 4.0, b), pos2(x - 4.0, b)],
+                        color::TEXT_DIM,
+                        Stroke::NONE,
+                    ));
+                    marker_xs.push(x);
                 }
             }
         }
@@ -2192,6 +2245,7 @@ impl GraphEditor {
                 color::TEXT_DIM,
             );
         }
+        marker_xs
     }
 }
 
@@ -2441,15 +2495,70 @@ fn bar_button(
     resp.on_hover_text(label)
 }
 
-fn menu_check(ui: &mut Ui, on: &mut bool, label: &str) -> bool {
-    widgets::checkbox(ui, on, label).clicked()
+/// Right-click on the graph's empty space (AE 26, 14 entries; `None` is a
+/// separator).
+pub(crate) const AREA_MENU: [Option<&str>; 17] = [
+    Some("Auto-Zoom Graph Height"),
+    Some("Show Selected Properties"),
+    None,
+    Some("Show Animated Properties"),
+    Some("Show Graph Editor Set"),
+    Some("Auto-Select Graph Type"),
+    Some("Edit Value Graph"),
+    None,
+    Some("Edit Speed Graph"),
+    Some("Show Reference Graph"),
+    Some("Snap"),
+    Some("Show Audio Waveforms"),
+    Some("Show Layer In/Out Points"),
+    None,
+    Some("Show Layer Markers"),
+    Some("Show Graph Tool Tips"),
+    Some("Show Expression Editor"),
+];
+
+fn area_menu(ui: &mut Ui, s: &mut GraphSettings) {
+    ui.set_min_width(240.0);
+    for entry in AREA_MENU {
+        let Some(title) = entry else {
+            ui.separator();
+            continue;
+        };
+        let label = tr(title);
+        let graph_type = match title {
+            "Auto-Select Graph Type" => Some(GraphType::Auto),
+            "Edit Value Graph" => Some(GraphType::Value),
+            "Edit Speed Graph" => Some(GraphType::Speed),
+            _ => None,
+        };
+        if let Some(t) = graph_type {
+            if ui.radio(s.graph_type == t, label).clicked() {
+                s.graph_type = t;
+                ui.close();
+            }
+            continue;
+        }
+        let on = match title {
+            "Auto-Zoom Graph Height" => &mut s.auto_zoom,
+            "Show Selected Properties" => &mut s.show_selected,
+            "Show Animated Properties" => &mut s.show_animated,
+            "Show Graph Editor Set" => &mut s.show_set,
+            "Show Reference Graph" => &mut s.show_reference,
+            "Snap" => &mut s.snap,
+            "Show Audio Waveforms" => &mut s.show_waveforms,
+            "Show Layer In/Out Points" => &mut s.show_in_out,
+            "Show Layer Markers" => &mut s.show_markers,
+            "Show Graph Tool Tips" => &mut s.show_tooltips,
+            _ => &mut s.show_expression_editor,
+        };
+        if menu_check(ui, on, label) {
+            ui.close();
+        }
+    }
 }
 
-fn menu_check_disabled(ui: &mut Ui, label: &str) {
-    ui.add_enabled_ui(false, |ui| {
-        let mut off = false;
-        widgets::checkbox(ui, &mut off, label);
-    });
+fn menu_check(ui: &mut Ui, on: &mut bool, label: &str) -> bool {
+    widgets::checkbox(ui, on, label).clicked()
 }
 
 const POSITION_FAMILY: [&str; 4] = [
@@ -2558,9 +2667,9 @@ impl GraphEditor {
             }
             ui.separator();
             menu_check(ui, &mut s.show_reference, tr("Show Reference Graph"));
-            menu_check_disabled(ui, tr("Show Audio Waveforms"));
+            menu_check(ui, &mut s.show_waveforms, tr("Show Audio Waveforms"));
             menu_check(ui, &mut s.show_in_out, tr("Show Layer In/Out Points"));
-            menu_check_disabled(ui, tr("Show Layer Markers"));
+            menu_check(ui, &mut s.show_markers, tr("Show Layer Markers"));
             menu_check(ui, &mut s.show_tooltips, tr("Show Graph Tool Tips"));
             menu_check(
                 ui,
@@ -3070,6 +3179,42 @@ mod tests {
         for (_, v) in &pieces[0].pts {
             assert!((v - 500.0).abs() < 1e-3, "{v}");
         }
+    }
+
+    /// #552: a linear segment's constant speed draws as a level line, not as its
+    /// rounding noise fitted to the full height.
+    #[test]
+    fn constant_speed_draws_level() {
+        let lin = prop(
+            "transform:position",
+            vec![
+                (62.0 / 30.0, Keyframe::linear([960.0, 540.0, 0.0])),
+                (242.0 / 30.0, Keyframe::linear([1500.0, 540.0, 0.0])),
+            ],
+            true,
+            true,
+        );
+        let axis = TimeAxis {
+            left: 0.0,
+            width: 1500.0,
+            start: Time::ZERO,
+            span: Time::from_seconds(10.0),
+        };
+        let c = lin.curve().unwrap();
+        let data = Sampled::new(
+            sample(&lin, &c, &axis, 0.0, 1500.0, true),
+            key_values(&lin, &c, true),
+        );
+        let va = VAxis::new(
+            padded(data.range.unwrap()),
+            Rect::from_min_size(Pos2::ZERO, vec2(1500.0, 300.0)),
+        );
+        let ys: Vec<f32> = data.pieces[0].pts.iter().map(|(_, v)| va.y(*v)).collect();
+        let (lo, hi) = ys
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(*y), b.max(*y)));
+        assert!(hi - lo < 0.5, "a level line, not spikes: {lo}..{hi}");
+        assert!((va.v(lo) - 90.0).abs() < 1e-6);
     }
 
     #[test]

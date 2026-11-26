@@ -57,6 +57,7 @@ pub mod layer {
     pub const QUALITY: &str = "quality";
     pub const TIME_REMAP_ENABLED: &str = "time_remap_enabled";
     pub const TIME_REMAP: &str = "time_remap";
+    pub const AUDIO_LEVELS: &str = "audio:levels";
     pub const PRESERVE_TRANSPARENCY: &str = "preserve_transparency";
     pub const TEXT_SOURCE: &str = "text:source";
     pub const TEXT_PATH: &str = "text:path";
@@ -81,6 +82,8 @@ pub mod asset {
     pub const FRAME_RATE: &str = "frame_rate";
     pub const DURATION: &str = "duration";
     pub const SOLID_COLOR: &str = "solid_color";
+    pub const HAS_VIDEO: &str = "has_video";
+    pub const HAS_AUDIO: &str = "has_audio";
 }
 
 /// Layer transform group.
