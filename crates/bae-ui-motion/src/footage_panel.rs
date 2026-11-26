@@ -240,8 +240,10 @@ impl Panel for FootagePanel {
 
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Footage <name>", "Footage (none)" when empty.
-        let name = Self::footage(cx).map_or_else(|| tr("(none)").to_owned(), |f| f.name);
-        TabInfo::new(format!("{} {name}", tr("Footage")))
+        match Self::footage(cx) {
+            Some(f) => common::related_tab(cx, "Footage", &f.asset, &f.name),
+            None => TabInfo::new(format!("{} {}", tr("Footage"), tr("(none)"))),
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
