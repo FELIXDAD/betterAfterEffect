@@ -53,6 +53,55 @@ pub(crate) const CHANNEL_SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 pub(crate) const SHOW_CHANNEL: &str = "motion.viewer.show_channel";
+/// `{"mode": "off" | "adaptive_resolution" | "wireframe" | "draft_3d"}`.
+pub(crate) const FAST_PREVIEWS: &str = "motion.viewer.fast_previews";
+
+/// Fast Previews (AE's viewer bar): what the viewer does while something is
+/// dragged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Fast {
+    /// Off (Final Quality).
+    #[default]
+    Off,
+    /// A lower resolution while dragging (at most ¼).
+    Adaptive,
+    /// Layer outlines while dragging.
+    Wireframe,
+}
+
+impl Fast {
+    pub const ALL: [(Fast, &'static str); 3] = [
+        (Fast::Off, "Off (Final Quality)"),
+        (Fast::Adaptive, "Adaptive Resolution"),
+        (Fast::Wireframe, "Wireframe"),
+    ];
+
+    pub fn parse(mode: &str) -> Option<Fast> {
+        Some(match mode {
+            "off" => Fast::Off,
+            "adaptive_resolution" => Fast::Adaptive,
+            "wireframe" => Fast::Wireframe,
+            _ => return None,
+        })
+    }
+}
+
+/// The Fast Previews shortcuts' names (AE's).
+pub(crate) const FAST_SHORTCUTS: &[(&str, &str)] = &[
+    (
+        r#"{"mode":"off"}"#,
+        "Switch Fast Previews to Off (Final Quality)",
+    ),
+    (
+        r#"{"mode":"adaptive_resolution"}"#,
+        "Switch Fast Previews to Adaptive Resolution",
+    ),
+    (r#"{"mode":"draft_3d"}"#, "Enable Draft 3D"),
+    (
+        r#"{"mode":"wireframe"}"#,
+        "Switch Fast Previews to Wireframe",
+    ),
+];
 pub(crate) const TAKE_SNAPSHOT: &str = "motion.viewer.take_snapshot";
 pub(crate) const SHOW_SNAPSHOT: &str = "motion.viewer.show_snapshot";
 pub(crate) const PURGE_SNAPSHOT: &str = "motion.viewer.purge_snapshot";
@@ -95,6 +144,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Adjust Exposure", "调整曝光度"),
     ("Reset Exposure", "重置曝光度"),
     ("Region of Interest", "目标区域"),
+    (
+        "Toggle Mask and Shape Path Visibility",
+        "切换蒙版和形状路径可见性",
+    ),
     ("Choose grid and guide options", "选择网格和参考线选项"),
     ("Proportional Grid", "对称网格"),
     ("Rulers", "标尺"),
@@ -143,6 +196,21 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Purge Snapshot 3", "清理快照 3"),
     ("Purge Snapshot 4", "清理快照 4"),
     ("Purge Snapshot", "清理快照"),
+    ("Fast Previews", "快速预览"),
+    ("Off (Final Quality)", "关（最终品质）"),
+    ("Adaptive Resolution", "自适应分辨率"),
+    ("Wireframe", "线框"),
+    (
+        "Switch Fast Previews to Off (Final Quality)",
+        "关闭快速预览（最终质量）",
+    ),
+    (
+        "Switch Fast Previews to Adaptive Resolution",
+        "将快速预览切换为自适应分辨率",
+    ),
+    ("Switch Fast Previews to Wireframe", "将快速预览切换为线框"),
+    ("Enable Draft 3D", "启用草图 3D"),
+    ("Show Layer Controls", "显示图层控件"),
     ("Toggle Alpha Boundary", "切换 Alpha 边界"),
     ("Toggle Alpha Overlay", "切换 Alpha 叠加"),
 ];
@@ -152,6 +220,7 @@ pub(super) const CHANNELS: [&str; 6] = ["RGB", "Red", "Green", "Blue", "Alpha", 
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Display {
+    pub fast: Fast,
     /// Index into [`CHANNELS`].
     pub channel: u32,
     pub colorize: bool,

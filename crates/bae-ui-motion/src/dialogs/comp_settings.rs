@@ -464,6 +464,13 @@ impl CompSettings {
 
     fn body(&mut self, ui: &mut Ui, id: Id) -> Outcome {
         ui.set_width(520.0);
+        // The name accepts the dialog's default button. The other text
+        // editors in this form commit a number or timecode first.
+        let editing_number = self.naming.is_none()
+            && self.custom_resolution.is_none()
+            && ui.memory(|m| m.focused()).is_some_and(|focus| {
+                focus != id.with("name") && egui::TextEdit::load_state(ui.ctx(), focus).is_some()
+            });
         ui.horizontal(|ui| {
             ui.label(tr("Composition Name:"));
             fields::name_field(
@@ -492,6 +499,9 @@ impl CompSettings {
         // Sub-dialogs first: they take Enter and Esc before this dialog.
         self.choose_name(ui.ctx(), id);
         self.custom_resolution(ui.ctx(), id);
+        if editing_number {
+            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        }
         let mut out = Outcome::None;
         ui.horizontal(|ui| {
             // Live preview of edits is not implemented yet: shown like AE, off.
