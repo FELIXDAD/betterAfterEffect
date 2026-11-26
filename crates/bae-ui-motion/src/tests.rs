@@ -750,13 +750,18 @@ fn gpu_preview_publishes_the_rendered_comp() {
     // #727: the Info panel's pixel reads back asynchronously; while a new
     // texel is pending the previous reading stands in (no empty RGBA).
     let ctx = egui::Context::default();
+    let device = bae_gpu::testing::shared_context().expect("context");
     let mut read = None;
-    for _ in 0..200 {
+    for _ in 0..100 {
         read = preview.pixel([20.0, 20.0], &ctx);
         if read.is_some() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        // Slow adapters (WARP on CI) finish the readback only when waited on.
+        let _ = device
+            .device()
+            .poll(bae_gpu::wgpu::PollType::wait_indefinitely());
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
     let first = read.expect("the first pixel arrives");
     assert_eq!(
