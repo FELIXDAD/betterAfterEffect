@@ -680,6 +680,20 @@ pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }
 
+/// A panel's anchor text: [`FITTED`] finds the Composition viewer's fitted
+/// magnification ("(50%)"), anything else is [`find_text`].
+pub(crate) fn find_anchor(h: &Ui, anchor: &str) -> Option<Rect> {
+    if anchor == FITTED {
+        return find_texts(h, |t| t.starts_with('(') && t.ends_with("%)"))
+            .into_iter()
+            .next();
+    }
+    find_text(h, anchor)
+}
+
+/// The Composition viewer's anchor: its magnification popup while fitted.
+pub(crate) const FITTED: &str = "(%)";
+
 /// Every painted text matching `pred`, as visible rects.
 pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {
     fn walk(shape: &egui::Shape, clip: Rect, pred: &dyn Fn(&str) -> bool, out: &mut Vec<Rect>) {

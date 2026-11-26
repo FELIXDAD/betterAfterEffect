@@ -521,6 +521,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
             (crate::viewer::ZOOM_100, "Zoom to 100%"),
+            (crate::viewer::FIT_UP_TO_100, "Fit up to 100%"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
@@ -864,6 +865,8 @@ pub enum ViewRequest {
     Center,
     /// Double-click Zoom: magnification 100%.
     Actual,
+    /// View ▸ Fit up to 100% (Alt/Option+/).
+    FitUpTo100,
 }
 
 /// A double-click on a shape tool button (AE-SHP-054), applied by the viewer.
@@ -1137,6 +1140,10 @@ impl ActionHandler for ToolActions {
         }
         if inv.id == crate::viewer::ZOOM_100 {
             shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
+            return true;
+        }
+        if inv.id == crate::viewer::FIT_UP_TO_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::FitUpTo100);
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {

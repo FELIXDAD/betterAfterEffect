@@ -38,6 +38,10 @@ pub(crate) struct ViewOptions {
     /// The bar's Toggle Mask and Shape Path Visibility: mask and shape paths
     /// are drawn (and their vertices can be picked).
     pub paths: bool,
+    /// Choose grid and guide options ▸ 3D Reference Axes: the world axes'
+    /// directions in the viewer's lower-left corner when the comp has 3D
+    /// layers.
+    pub axes: bool,
 }
 
 impl Default for ViewOptions {
@@ -53,6 +57,7 @@ impl Default for ViewOptions {
             safe: false,
             layer_controls: true,
             paths: true,
+            axes: true,
         }
     }
 }

@@ -111,6 +111,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Preset:", "预设:"),
     ("Preset", "预设"),
     ("Custom", "自定义"),
+    // Custom Resolution (`dialogs::custom_resolution`).
+    ("Custom Resolution", "自定义分辨率"),
+    ("Render every", "渲染每"),
+    ("pixels horizontally.", "个像素（水平）。"),
+    ("pixels vertically.", "个像素（垂直）。"),
     // Solid Settings (`dialogs::solid_settings`). Color names make a new
     // solid's default name ("深灰色 纯色 1").
     ("Solid Settings", "纯色设置"),

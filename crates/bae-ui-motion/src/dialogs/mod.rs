@@ -7,6 +7,7 @@
 
 mod camera_settings;
 mod comp_settings;
+mod custom_resolution;
 pub(crate) mod fields;
 mod go_to_time;
 mod layer_time;
@@ -56,6 +57,8 @@ pub enum Dialog {
     AutoOrient(Box<layer_time::AutoOrient>),
     /// View > Go to Time (Alt+Shift+J).
     GoToTime(Box<go_to_time::GoToTime>),
+    /// The Composition viewer's Resolution popup ▸ Custom….
+    CustomResolution(Box<custom_resolution::CustomResolution>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
@@ -289,6 +292,17 @@ pub(crate) fn go_to_time(cx: &PanelContext<'_>, session: &SharedSession) {
     }
 }
 
+/// Open Custom Resolution for the active comp.
+pub(crate) fn custom_resolution(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(c) = custom_resolution::CustomResolution::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::CustomResolution(Box::new(c)));
+    }
+}
+
 /// Open Project Settings.
 pub(crate) fn project_settings(cx: &PanelContext<'_>) {
     let dialogs = shared(cx.resources);
@@ -385,6 +399,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         precompose::STRINGS,
         layer_time::STRINGS,
         go_to_time::STRINGS,
+        custom_resolution::STRINGS,
         project_settings::STRINGS,
         transform_value::STRINGS,
         render_output::STRINGS,
@@ -418,6 +433,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::TimeStretch(d) => d.ui(ctx, cx),
             Dialog::AutoOrient(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
+            Dialog::CustomResolution(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
