@@ -207,8 +207,9 @@ fn a_large_update_is_sent_once_while_hellos_arrive() {
 }
 
 /// A first sync of 12 documents of 1 MiB each: the sender queues the next one
-/// only when the queue is under `SessionConfig::max_backlog`, so it never holds
-/// more than one, and sends each once.
+/// only when the queue is not over `SessionConfig::max_backlog`, so it holds at
+/// most about that plus one document (about 1.75 MiB here, not 12 MiB), and
+/// sends each once.
 #[test]
 fn a_first_sync_goes_out_one_document_at_a_time() {
     let mut a = MemDocs::new();
