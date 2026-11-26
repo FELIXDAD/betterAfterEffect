@@ -109,6 +109,7 @@ fn names(a: &Assembled) -> BTreeMap<String, String> {
 pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     "BAE",
     "After Effects",
+    "Photoshop",
     "Agent",
     "3D",
     "CPU",

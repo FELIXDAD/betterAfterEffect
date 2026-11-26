@@ -22,6 +22,62 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Exponential Scale", "指数比例"),
+    ("Set Work Area to Selected Layers", "将工作区域设为所选图层"),
+    ("Go to Work Area Start", "转到工作区域的开头"),
+    ("Go to Work Area End", "转到工作区域的结尾"),
+    (
+        "Go to Previous Layer In or Out Point",
+        "转到上一图层入点或出点",
+    ),
+    ("Go to Next Layer In or Out Point", "转到下一图层入点或出点"),
+    (
+        "Align Selected Layers' In Points to Composition Start",
+        "将所选图层的入点对齐到合成开头",
+    ),
+    (
+        "Align Selected Layers' Out Points to Composition End",
+        "将所选图层的出点对齐到合成末端",
+    ),
+    (
+        "Stretch Layer In Point to Current Time",
+        "将图层入点拉伸到当前时间",
+    ),
+    (
+        "Stretch Layer Out Point to Current Time",
+        "将图层出点拉伸到当前时间",
+    ),
+    (
+        "Set Layer In Point (Relative to Selection)",
+        "设置图层入点（相对于选区）",
+    ),
+    (
+        "Set Layer Out Point (Relative to Selection)",
+        "设置图层出点（相对于选区）",
+    ),
+    (
+        "Trim Layer In Point (Relative to Selection)",
+        "修剪图层入点（相对于选区）",
+    ),
+    (
+        "Trim Layer Out Point (Relative to Selection)",
+        "修剪图层出点（相对于选区）",
+    ),
+    (
+        "Select All Visible Keyframes and Revealed Properties",
+        "选择全部可见的关键帧和显示的属性",
+    ),
+    (
+        "Deselect All Keyframes and Properties",
+        "取消选择全部关键帧和属性",
+    ),
+    (
+        "Go to Previous Keyframe on Selected Layers/Properties",
+        "转到“选定图层/属性”上的“上一个关键帧”",
+    ),
+    (
+        "Go to Next Keyframe on Selected Layers/Properties",
+        "转到“选定图层/属性”上的“下一个关键帧”",
+    ),
     ("Sequence Layers...", "序列图层..."),
     ("Set Expressions", "设置多个表达式"),
     (
@@ -211,6 +267,16 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Animator", "动画制作工具"),
     ("Based On", "依据"),
     ("Amount", "数量"),
+    // A Paint effect's strokes (`props::paint_strokes`, AE 26's words).
+    ("Brush", "画笔"),
+    ("Clone", "仿制"),
+    ("Eraser", "橡皮擦"),
+    ("Diameter", "直径"),
+    ("Angle", "角度"),
+    ("Hardness", "硬度"),
+    ("Spacing", "间距"),
+    ("Flow", "流量"),
+    ("Transform:", "变换:"),
     ("Smoothness", "平滑度"),
     ("Ease High", "缓和高"),
     ("Ease Low", "缓和低"),
@@ -279,6 +345,29 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Go to Next Keyframe", "转到下一个关键帧"),
     ("Reveal Animated Properties", "显示动画属性"),
+    (
+        "Add Animated Properties to Revealed Properties",
+        "同时显示动画属性",
+    ),
+    ("Reveal Mask Path", "显示蒙版路径"),
+    ("Add Mask Path to Revealed Properties", "同时显示蒙版路径"),
+    ("Reveal Mask Feather", "显示蒙版羽化"),
+    (
+        "Add Mask Feather to Revealed Properties",
+        "同时显示蒙版羽化",
+    ),
+    (
+        "Mask Path: Add or Remove Keyframe",
+        "蒙版路径：添加或移除关键帧",
+    ),
+    (
+        "Mask Feather: Add or Remove Keyframe",
+        "蒙版羽化：添加或移除关键帧",
+    ),
+    (
+        "Audio Levels: Add or Remove Keyframe",
+        "音频电平：添加或移除关键帧",
+    ),
     ("Reveal Modified Properties", "显示修改的属性"),
     // Timeline
     ("Layer Name", "图层名称"),

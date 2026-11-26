@@ -251,6 +251,7 @@ fn fade(
                 attr: attr.to_owned(),
                 time,
                 value: Value::Float(value),
+                auto_key: false,
             },
         )?;
     }
