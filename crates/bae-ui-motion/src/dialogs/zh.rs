@@ -2,6 +2,35 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Interpret Footage (docs/reference/ae/ui/dialogs/interpret-footage.json).
+    ("Interpret Footage", "解释素材"),
+    ("Alpha", "Alpha"),
+    ("Main Options", "主要选项"),
+    ("Ignore", "忽略"),
+    ("Straight - Unmatted", "直接 - 无遮罩"),
+    ("Premultiplied - Matted With Color:", "预乘 - 有彩色遮罩:"),
+    ("Invert Alpha", "反转 Alpha"),
+    ("Guess", "猜测"),
+    ("Use frame rate from file:", "使用文件中的帧速率:"),
+    ("Assume this frame rate:", "假定此帧速率:"),
+    ("Use Source Timecode from File:", "使用文件中的源时间码:"),
+    ("Override Start Timecode:", "覆盖开始时间码:"),
+    ("Fields and Pulldown", "场和 Pulldown"),
+    ("Separate Fields:", "分离场:"),
+    (
+        "Preserve Edges (Best Quality Only)",
+        "保留边缘（仅最佳品质）",
+    ),
+    ("Remove Pulldown:", "移除 Pulldown:"),
+    ("Other Options", "其他选项"),
+    ("Loop:", "循环:"),
+    ("Times", "次"),
+    (
+        "Preserve RGB (Disable Color Management Conversions for This Item)",
+        "保留 RGB（禁用此项的颜色管理转换）",
+    ),
+    ("Interpret As Linear Light:", "解释为线性光："),
+    ("On for 32 bpc", "对 32 bpc 启用"),
     // Time Stretch and Auto-Orientation (docs/reference/ae/ui/dialogs).
     ("Original Duration:", "原持续时间:"),
     ("Stretch Factor:", "拉伸因数:"),
@@ -45,6 +74,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "补偿场景引用的配置文件",
     ),
     ("Sample Rate:", "采样率:"),
+    ("Expressions", "表达式"),
     ("Expressions Engine:", "表达式引擎:"),
     ("Legacy ExtendScript", "旧版 ExtendScript"),
     (

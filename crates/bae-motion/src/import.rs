@@ -66,6 +66,10 @@ pub struct ImportOutput {
 
 /// The Asset attributes an importer may set.
 const ATTRS: &[&str] = &[
+    bae_model::psd::LayerImage::KEY,
+    bae_model::psd::LayerImage::CANVAS,
+    "psd:ignore_styles",
+    "psd:layer_name",
     "kind",
     "width",
     "height",
@@ -84,7 +88,7 @@ const ATTRS: &[&str] = &[
 
 /// The folder `rel` (`a/b`) under `parent`, created as needed (matched by
 /// display name, like the Project panel shows it).
-fn folder_path(
+pub(crate) fn folder_path(
     tx: &mut Transaction<'_>,
     parent: &PrimPath,
     rel: &str,
@@ -186,15 +190,23 @@ impl Command for ImportItems {
                 } else {
                     LayerKind::Footage
                 };
-                let mut params = CreateLayerParams::with_source(&comp, kind, &item, Time::ZERO);
-                params.name = Some(query::display_name_of(tx.stage(), &item));
-                params.index = Some(0);
-                let out = CreateLayer.run(tx, params)?;
-                layers.insert(0, out.path);
+                layers.insert(0, add_imported_layer(tx, &comp, kind, &item)?);
             }
         }
         Ok(ImportOutput { items, layers })
     }
+}
+
+pub(crate) fn add_imported_layer(
+    tx: &mut Transaction<'_>,
+    comp: &PrimPath,
+    kind: LayerKind,
+    item: &PrimPath,
+) -> Result<PrimPath, CommandError> {
+    let mut params = CreateLayerParams::with_source(comp, kind, item, Time::ZERO);
+    params.name = Some(query::display_name_of(tx.stage(), item));
+    params.index = Some(0);
+    Ok(CreateLayer.run(tx, params)?.path)
 }
 
 /// File ▸ Replace Footage ▸ File… (Cmd/Ctrl+H): a footage or placeholder item
@@ -226,6 +238,10 @@ impl Command for ReplaceFile {
             .unwrap_or_default();
         if !view.is_a(&PrimType::ASSET) || kind == "solid" {
             return Err(fail(format!("{} is not a footage item", p.item)));
+        }
+        if bae_model::psd::LayerImage::from_asset(&view).is_some() {
+            let styles = child(&p.item, bae_model::layer_styles::PRIM)?;
+            crate::effect::delete_all(tx, &[styles, child(&p.item, "masks")?])?;
         }
         let path = Path::new(&p.file.path);
         let file = AssetFile::from_path(path, None, false)
@@ -259,6 +275,12 @@ impl Command for ReplaceFile {
         for (attr, value) in p.file.attrs {
             set(tx, &p.item, &attr, value)?;
         }
+        set(
+            tx,
+            &p.item,
+            bae_model::asset::FILE_REVISION,
+            Value::Int(tx.stage().revision() as i64 + 1),
+        )?;
         for op in file.to_ops(&p.item) {
             tx.apply(op)?;
         }

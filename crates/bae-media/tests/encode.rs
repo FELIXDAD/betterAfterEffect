@@ -79,7 +79,7 @@ fn check_frames(source: &mut dyn MediaSource, frames: u32) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_vendor = "apple", target_arch = "aarch64"))]
 #[test]
 fn quicktime_codecs_prepare_on_apple_silicon() {
     use bae_gpu::WarmUp;

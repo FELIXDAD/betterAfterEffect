@@ -484,6 +484,8 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
         p("/comps/main/layers/img"),
         LayerContent::Footage(bae_render::FootageRef {
             asset: p("/assets/img"),
+            psd_layer: None,
+            file_revision: 0,
             file: Some(path),
             size: None,
             source_time: Time::ZERO,
@@ -507,6 +509,76 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
         img.px(5, 2)
     );
     assert_eq!(img.px(1, 1), [0, 0, 0, 0]);
+}
+
+#[cfg(feature = "media")]
+#[test]
+fn photoshop_masks_reach_the_frame_cache_and_gpu() {
+    use bae_model::psd::{LayerImage, LayerKey, PixelMask};
+    let Some(gpu) = gpu() else { return };
+    let mut renderer = Renderer::new(gpu);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bae-interop-psd/tests/fixtures/art.psd");
+    let comp_path = p("/comps/art");
+    let mut comp = RenderComp::new(comp_path, 3, 2);
+    let footage = |id, mask| {
+        LayerContent::Footage(bae_render::FootageRef {
+            asset: p("/assets/art"),
+            file: Some(path.clone()),
+            size: Some([3, 2]),
+            source_time: Time::ZERO,
+            sequence: None,
+            file_revision: 0,
+            psd_layer: Some(LayerImage {
+                key: LayerKey::Id(id),
+                canvas: false,
+                mask,
+            }),
+            blend: None,
+        })
+    };
+    comp.layers.push(RenderLayer::new(
+        p("/comps/art/base"),
+        footage(2, PixelMask::Disabled),
+    ));
+    let raw = render(
+        &mut renderer,
+        &comp,
+        &RenderRequest::full(),
+        OutputAlpha::Straight,
+    );
+    assert!(raw.px(1, 0)[3].abs_diff(230) <= 1);
+    comp.layers[0].content = footage(2, PixelMask::AsSaved);
+    let masked = render(
+        &mut renderer,
+        &comp,
+        &RenderRequest::full(),
+        OutputAlpha::Straight,
+    );
+    assert_eq!(masked.px(0, 0)[3], 0);
+    assert!(masked.px(1, 0)[3].abs_diff(115) <= 1);
+    let mut group_mask = RenderLayer::new(
+        p("/comps/art/group_mask"),
+        footage(
+            4,
+            PixelMask::Group {
+                origin: [1, 1],
+                size: [3, 2],
+                inverted: false,
+                density: 65535,
+            },
+        ),
+    );
+    group_mask.blend_mode = BlendMode::StencilAlpha;
+    comp.layers.insert(0, group_mask);
+    let group = render(
+        &mut renderer,
+        &comp,
+        &RenderRequest::full(),
+        OutputAlpha::Straight,
+    );
+    assert_eq!(group.px(1, 1)[3], 0);
+    assert!(group.px(1, 0)[3].abs_diff(115) <= 1);
 }
 
 #[cfg(feature = "media")]
@@ -535,6 +607,8 @@ fn frame_mix_blends_neighbouring_sequence_frames() {
     let footage = |blend| {
         LayerContent::Footage(bae_render::FootageRef {
             asset: p("/assets/seq"),
+            psd_layer: None,
+            file_revision: 0,
             file: Some(dir.path().join("seq_0000.png")),
             size: None,
             source_time: fps.frame_to_time(1),

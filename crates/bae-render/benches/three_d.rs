@@ -9,7 +9,8 @@
 //! * `mb_3d`: the 3D scene with the orbiting camera motion-blurred (16 samples).
 //!
 //! `cargo bench -p bae-render --bench three_d`. Environment: `BAE_BENCH_FRAMES`
-//! (default 120), `BAE_BENCH_OUT` (JSON report directory, default `target/bench`).
+//! (default 120), `BAE_BENCH_OUT` (JSON report directory, default `target/bench`),
+//! `BAE_BENCH_4K` (3840 × 2160).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,8 +26,15 @@ use bae_render::{
 };
 use glam::{DAffine2, DMat4, DVec2, DVec3};
 
-const W: u32 = 1920;
-const H: u32 = 1080;
+/// The comp size: 1920 × 1080, or 3840 × 2160 with `BAE_BENCH_4K` (the 3D
+/// scene framed the same: the camera's zoom follows the width).
+fn size() -> (u32, u32) {
+    if std::env::var_os("BAE_BENCH_4K").is_some() {
+        (3840, 2160)
+    } else {
+        (1920, 1080)
+    }
+}
 const LAYERS: usize = 50;
 const SAMPLES: usize = 16;
 
@@ -70,14 +78,16 @@ fn flatten(m: &DMat4) -> DAffine2 {
 
 /// The orbiting two-node camera at time `t` (seconds).
 fn camera(t: f64) -> Camera {
-    let zoom = bae_render::camera::default_zoom(W);
+    // The 1080p dolly; at 4K only the lens zooms in (the same framing).
+    let base = bae_render::camera::default_zoom(1920);
+    let zoom = base * f64::from(size().0) / 1920.0;
     let a = t * 1.5;
     let poi = DVec3::new(960.0, 540.0, 600.0);
     let position = poi
         + DVec3::new(
             a.sin() * 900.0,
             -200.0,
-            -(zoom + 600.0) * a.cos().abs().max(0.6),
+            -(base + 600.0) * a.cos().abs().max(0.6),
         );
     Camera::from_transform(
         DMat4::IDENTITY,
@@ -111,7 +121,8 @@ fn main() {
         .collect();
     let frame_s = 1.0 / 30.0;
     let base = |f: usize| {
-        let mut c = RenderComp::new(PrimPath::new("/comps/bench").unwrap(), W, H);
+        let (w, h) = size();
+        let mut c = RenderComp::new(PrimPath::new("/comps/bench").unwrap(), w, h);
         c.time = Time::from_seconds(f as f64 * frame_s);
         c
     };
@@ -298,6 +309,22 @@ fn main() {
         fps(
             "3d_shadows full",
             &|f| shadows(lit(scene_3d(f, false))),
+            &full,
+        ),
+        fps(
+            "3d_shadows half",
+            &|f| shadows(lit(scene_3d(f, false))),
+            &half,
+        ),
+        // A light moving every frame: the shadows are tested per pixel.
+        fps(
+            "3d_shadows moving_light",
+            &|f| {
+                let mut c = shadows(lit(scene_3d(f, false)));
+                let shift = DMat4::from_translation(DVec3::new(f as f64 * 15.0, 0.0, 0.0));
+                c.lights[0].world = shift * c.lights[0].world;
+                c
+            },
             &full,
         ),
     ];

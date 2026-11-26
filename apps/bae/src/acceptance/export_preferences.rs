@@ -1,6 +1,6 @@
 use super::*;
 use bae_ui_motion::render_queue::ItemStatus;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::Queryable as _;
 
 #[test]
 fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
@@ -35,7 +35,8 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
         item.start = 7;
         item.end = 11;
     }
-    h.get_by_label("Render").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+        .click();
     settle(&mut h);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while queue.lock().is_running() {
