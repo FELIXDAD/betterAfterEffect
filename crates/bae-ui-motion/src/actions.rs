@@ -57,6 +57,8 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const MANAGE_EFFECTS: &str = "motion.effect.manage_effects";
+    pub const BROWSE_PRESETS: &str = "motion.anim.browse_presets";
     pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
     pub const APPLY_PRESET: &str = "motion.anim.apply_animation_preset";
     pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
@@ -229,6 +231,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::MANAGE_EFFECTS, "Manage Effects..."),
+    (ids::BROWSE_PRESETS, "Browse Presets..."),
     (ids::SAVE_PRESET, "Save Animation Preset..."),
     (ids::APPLY_PRESET, "Apply Animation Preset..."),
     (ids::TIME_STRETCH, "Time Stretch..."),
@@ -1064,6 +1068,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::MANAGE_EFFECTS => {
+            crate::effects::manager::open(cx);
+            return true;
+        }
+        ids::BROWSE_PRESETS => {
+            crate::presets::browse(cx);
             return true;
         }
         // F4 / Shift+F4 with another panel in front: the Timeline toggles its
@@ -2000,6 +2012,8 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Manage Effects...", "管理效果..."),
+    ("Browse Presets...", "浏览预设..."),
     ("Save Animation Preset...", "保存动画预设..."),
     ("Apply Animation Preset...", "应用动画预设..."),
     // Layer ▸ Time and switches (AE 26's Chinese).
