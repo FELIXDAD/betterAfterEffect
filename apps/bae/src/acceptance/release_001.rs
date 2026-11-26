@@ -109,7 +109,7 @@ fn rich() -> Ui {
 }
 
 const TIMELINE: (&str, egui::Vec2) = ("Source Name", egui::vec2(700.0, 120.0));
-const VIEWER: (&str, egui::Vec2) = ("Fit", egui::vec2(300.0, -250.0));
+const VIEWER: (&str, egui::Vec2) = (FITTED, egui::vec2(300.0, -250.0));
 
 /// Enabled menu items that do nothing in the state of [`rich`] (a layer
 /// selected, no keyframe selected), with their issue. Remove when fixed.
@@ -118,7 +118,7 @@ const KNOWN_NOOPS: &[(&str, &str)] = &[];
 /// Clicks an empty part of the panel whose header shows `anchor`.
 fn focus(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
     let at =
-        find_text(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
+        find_anchor(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
     click_at(h, at.center() + offset);
 }
 
