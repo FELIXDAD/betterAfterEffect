@@ -93,12 +93,13 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
     key(&mut h, Modifiers::COMMAND, Key::M);
     assert_eq!(items(&h).len(), 1);
     let first = &items(&h)[0];
-    assert_eq!(first.format, ExportFormat::Png);
-    assert!(
-        first.output.ends_with("Comp 1_[####].png"),
-        "{}",
-        first.output
-    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(first.format, ExportFormat::H264);
+        assert!(first.output.ends_with("Comp 1.mp4"));
+    } else {
+        assert_eq!(first.format, ExportFormat::Png);
+        assert!(first.output.ends_with("Comp 1_[####].png"));
+    }
     assert_eq!(
         (first.start, first.end),
         (0, 299),

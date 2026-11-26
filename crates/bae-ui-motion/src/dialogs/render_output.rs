@@ -199,6 +199,7 @@ pub struct OutputModule {
     format: ExportFormat,
     channels: Channels,
     bit_rate: f64,
+    pcm_audio: bool,
 }
 
 impl OutputModule {
@@ -210,6 +211,7 @@ impl OutputModule {
             format: it.format,
             channels: it.channels,
             bit_rate: it.bit_rate_mbps,
+            pcm_audio: it.pcm_audio,
         })
     }
 
@@ -230,6 +232,7 @@ impl OutputModule {
                     } else {
                         Channels::Rgb
                     };
+                    it.pcm_audio = self.pcm_audio;
                     it.bit_rate_mbps = self.bit_rate;
                 }
                 false
@@ -244,7 +247,8 @@ impl OutputModule {
         ui.set_width(520.0);
         dialog::row(ui, LW, tr("Format:"), |ui| {
             let available: Vec<ExportFormat> = FORMATS
-                .into_iter()
+                .iter()
+                .copied()
                 .filter(|f| render_queue::format_available(*f))
                 .collect();
             let names: Vec<&str> = available
@@ -257,6 +261,7 @@ impl OutputModule {
                 .unwrap_or(0);
             if bae_ui::widgets::dropdown(ui, "om-format", &mut i, &names, 220.0).changed() {
                 self.format = available[i];
+                self.channels = render_queue::default_channels(self.format);
             }
         });
         fixed(ui, "Post-Render Action:", "None");
@@ -301,8 +306,25 @@ impl OutputModule {
             let mut off = false;
             bae_ui::widgets::checkbox(ui, &mut off, tr("Resize"));
             bae_ui::widgets::checkbox(ui, &mut off, tr("Crop"));
-            fixed(ui, "Audio Output", "Audio Output Auto");
         });
+        if self.format.is_quicktime() {
+            dialog::row(ui, LW, tr("Audio Output"), |ui| {
+                let mut i = usize::from(!self.pcm_audio);
+                if bae_ui::widgets::dropdown(
+                    ui,
+                    "om-audio-codec",
+                    &mut i,
+                    &["PCM (24-bit)", "AAC"],
+                    170.0,
+                )
+                .changed()
+                {
+                    self.pcm_audio = i == 0;
+                }
+            });
+        } else {
+            fixed(ui, "Audio Output", "Audio Output Auto");
+        }
         ui.add_space(6.0);
         dialog::buttons(ui, true)
     }
