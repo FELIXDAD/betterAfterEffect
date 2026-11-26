@@ -234,6 +234,99 @@ fn pixel_motion_tweens_and_blurs_along_the_optical_flow() {
 }
 
 #[test]
+fn timewarp_reuses_vectors_on_a_seek_and_recomputes_after_source_edits() {
+    let Some(mut r) = renderer() else { return };
+    let draw = |r: &mut Renderer, phase: f64, shift: f64| {
+        let scene = moving_square(effect(
+            "warp",
+            "ADBE Timewarp",
+            vec![
+                (2, Value::Int(2)),
+                (4, Value::Float(phase)),
+                (6, Value::Float(100.)),
+            ],
+        ));
+        pixels(
+            r,
+            |t| {
+                let mut comp = scene(t);
+                let LayerContent::Comp(inner) = &mut comp.layers[0].content else {
+                    unreachable!()
+                };
+                Arc::make_mut(inner).layers[0].transform.translation.x += shift;
+                comp
+            },
+            2. / 30.,
+        )
+    };
+    let first = draw(&mut r, 0.25, 0.);
+    let before = r.frame_cache().stats();
+    let second = draw(&mut r, 0.75, 0.);
+    assert_ne!(first, second);
+    assert_eq!(
+        r.frame_cache().stats().hits - before.hits,
+        2,
+        "both directions reused"
+    );
+    let before_edit = r.frame_cache().stats();
+    let changed = draw(&mut r, 0.75, 8.);
+    assert_ne!(second, changed);
+    assert_eq!(
+        r.frame_cache().stats().hits,
+        before_edit.hits,
+        "edited plates require new vectors"
+    );
+    r.set_frame_cache_budget(0);
+    assert_eq!(changed, draw(&mut r, 0.75, 8.));
+    assert_eq!(r.frame_cache().stats().entries, 0);
+}
+
+#[test]
+fn timewarp_reads_the_matte_at_source_time_and_repeats_the_crop_edge() {
+    let Some(mut r) = renderer() else { return };
+    let render = |r: &mut Renderer, show, channel, left| {
+        pixels(
+            r,
+            |t| {
+                let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+                comp.time = t;
+                let matte_path = "/comps/main/layers/matte";
+                let mut matte = solid(matte_path, 8, [1.; 4]);
+                matte.visible = false;
+                let mut layer = solid(CLIP, 16, [1., 0., 0., 1.]);
+                layer.time = t;
+                layer.effects.push(effect(
+                    "warp",
+                    "ADBE Timewarp",
+                    vec![
+                        (1, Value::Int(1)),
+                        (2, Value::Int(2)),
+                        (4, Value::Float(0.)),
+                        (29, Value::PrimRef(path(matte_path))),
+                        (30, Value::Int(channel)),
+                        (32, Value::Int(show)),
+                        (34, Value::Float(left)),
+                    ],
+                ));
+                if t != Time::ZERO {
+                    matte.content = LayerContent::None;
+                }
+                comp.layers = vec![layer, matte];
+                comp
+            },
+            2. / 30.,
+        )
+    };
+    let matte = render(&mut r, 2, 3, 0.);
+    assert_eq!(
+        (&matte[..4], &matte[48..52]),
+        (&[255; 4][..], &[0, 0, 0, 255][..])
+    );
+    let cropped = render(&mut r, 3, 4, 60.);
+    assert_eq!(&cropped[..4], &[255, 0, 0, 255]);
+}
+
+#[test]
 fn footage_pixel_motion_uses_the_app_interpolator() {
     use bae_model::FrameRate;
     use bae_render::fixture::SceneBuilder;
