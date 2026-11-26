@@ -45,8 +45,8 @@ windows = { workspace = true, features = [
 # line as wgpu-hal.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2.workspace = true
-objc2-core-audio-types = { version = "0.3.2", default-features = false, features = ["CoreAudioBaseTypes"] }
-objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["AVAudioSettings"] }
+objc2-core-audio-types = { workspace = true, features = ["CoreAudioBaseTypes"] }
+objc2-avf-audio = { workspace = true, features = ["AVAudioSettings"] }
 objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSError", "NSString", "NSURL", "NSValue"] }
 objc2-core-foundation = { workspace = true, features = ["CFBase", "CFDictionary", "CFNumber", "CFString"] }
 objc2-av-foundation = { workspace = true, features = ["AVAsset", "AVAssetReader", "AVAssetReaderOutput", "AVAssetTrack", "AVAssetTrackSegment", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVSampleCursor", "AVTime", "AVVideoSettings", "objc2-core-media", "objc2-core-video"] }

@@ -177,6 +177,14 @@ impl Command for CreateTracker {
         };
         set(tx, &path, "name", format!("{label} {i}"))?;
         set(tx, &path, "origin", Value::Vec2(p.center))?;
+        let target = query::owning_comp(tx.stage(), &p.layer)
+            .and_then(|comp| {
+                query::comp_layers(tx.stage(), &comp)
+                    .into_iter()
+                    .find(|l| l != &p.layer && !query::is_locked(tx.stage(), l))
+            })
+            .unwrap_or_else(|| p.layer.clone());
+        set(tx, &path, "target", Value::PrimRef(target))?;
         if p.stabilize {
             set(tx, &path, "track_type", Value::Enum("stabilize".into()))?;
         }
@@ -209,6 +217,15 @@ impl Command for ConfigureTracker {
                 return Err(fail("threshold must be a percentage"));
             }
             set(tx, &p.tracker, &key, val)?;
+        }
+        if matches!(
+            mode(tx.stage(), &p.tracker).as_str(),
+            "parallel" | "perspective"
+        ) && let Some(Value::PrimRef(target)) = setting(tx.stage(), &p.tracker, "target")
+            && let Some(layer) = crate::effect::layer_of_effect(&target)
+        {
+            set(tx, &p.tracker, "target", Value::PrimRef(layer))?;
+            set(tx, &p.tracker, "target_property", String::new())?;
         }
         sync_points(tx, &p.tracker, false)
     }

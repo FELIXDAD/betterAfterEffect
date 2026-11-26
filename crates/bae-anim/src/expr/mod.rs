@@ -166,6 +166,8 @@ pub(crate) struct ProjectInfo {
 pub(crate) struct Scope {
     comps: Vec<Arc<CompiledComp>>,
     project: Arc<ProjectInfo>,
+    /// Layer pixels for `sampleImage` (none: transparent black).
+    samples: Option<Arc<crate::ImageSamples>>,
     by_path: HashMap<PrimPath, usize>,
     by_name: HashMap<String, usize>,
     memo: Memo,
@@ -201,6 +203,7 @@ impl Scope {
         Scope {
             comps,
             project: Arc::default(),
+            samples: None,
             by_path,
             by_name,
             memo: MEMO_POOL.with(|p| std::mem::take(&mut *p.borrow_mut())),
@@ -220,6 +223,11 @@ impl Scope {
 
     pub(crate) fn with_project(mut self, project: Arc<ProjectInfo>) -> Scope {
         self.project = project;
+        self
+    }
+
+    pub(crate) fn with_samples(mut self, samples: Option<Arc<crate::ImageSamples>>) -> Scope {
+        self.samples = samples;
         self
     }
 
@@ -279,6 +287,10 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
 /// Comp id of `path` in the active scope.
 pub(crate) fn scope_comp_id(path: &PrimPath) -> Option<usize> {
     SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.comp_id(path)))
+}
+
+fn scope_samples() -> Option<Arc<crate::ImageSamples>> {
+    SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.samples.clone()))
 }
 
 fn scope_project() -> Arc<ProjectInfo> {
@@ -514,7 +526,7 @@ fn eval_fast(f: &fast::Fast, cx: &Cx<'_, '_>, e: &ExprProp, pre: &Value) -> Opti
         flat: !layer.switches.three_d
             && e.prim == layer.path
             && matches!(&*e.attr, tr::POSITION | tr::ANCHOR_POINT | tr::SCALE),
-        seed: seed_of(e, cx.comp, cx.layer),
+        seed: e.seed,
     };
     let comps = f.eval(&env)?;
     // Errors (non-finite results) are reported by the JS path.
@@ -735,6 +747,7 @@ const LOCALS: &[(&str, &str)] = &[
     ("pointOfInterest", "thisLayer.pointOfInterest"),
     ("timeRemap", "thisLayer.timeRemap"),
     ("audioLevels", "thisLayer.audioLevels"),
+    ("sampleImage", "thisLayer.sampleImage.bind(thisLayer)"),
     ("effect", "thisLayer.effect.bind(thisLayer)"),
     ("mask", "thisLayer.mask.bind(thisLayer)"),
     ("toComp", "thisLayer.toComp.bind(thisLayer)"),
@@ -834,7 +847,7 @@ fn call<'js>(
     e: &ExprProp,
 ) -> Result<rquickjs::Value<'js>, String> {
     let call: Function<'js> = ctx.globals().get("__call").map_err(|e| e.to_string())?;
-    let seed = seed_of(e, cx.comp, cx.layer);
+    let seed = e.seed;
     call.call((
         func.clone(),
         cx.comp as i32,
@@ -1288,9 +1301,7 @@ fn components(v: &Value) -> Vec<f64> {
     }
 }
 
-// The property's random seed: FNV-1a over its identity (prim, 0, attr, comp
-// id, layer index), stable across runs and machines. The prim and attr part is
-// hashed once when the comp compiles ([`seed_prefix`]).
+// A property's absolute prim path and attribute identify it independently of layer order.
 
 fn fnv(mut h: u32, bytes: impl IntoIterator<Item = u8>) -> u32 {
     for b in bytes {
@@ -1300,23 +1311,9 @@ fn fnv(mut h: u32, bytes: impl IntoIterator<Item = u8>) -> u32 {
     h
 }
 
-/// The FNV-1a state after the property's prim and attr.
+/// Seed shared by the compiled expression and reads of the same property.
 pub(crate) fn seed_prefix(prim: &str, attr: &str) -> u32 {
     fnv(0x811c_9dc5, prim.bytes().chain([0]).chain(attr.bytes()))
-}
-
-fn seed_of(e: &ExprProp, comp: usize, layer: usize) -> u32 {
-    seed_with(e.seed, comp, layer)
-}
-
-fn seed_with(prefix: u32, comp: usize, layer: usize) -> u32 {
-    fnv(
-        prefix,
-        (comp as u32)
-            .to_le_bytes()
-            .into_iter()
-            .chain((layer as u32).to_le_bytes()),
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2016,6 +2013,33 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         )?,
     )?;
 
+    // sampleImage: args are [x, y, radius x, radius y, post effect (0/1), t]. A
+    // sample that is not read back yet is transparent black (see `samples`).
+    h.set(
+        "sampleImage",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32, l: i32, a: Vec<f64>| {
+            let comp = comp_or_throw(&ctx, c)?;
+            let li = layer_or_throw(&ctx, &comp, l)?;
+            note_dependency(c as usize, li);
+            let arg = |i: usize, d: f64| a.get(i).copied().filter(|v| v.is_finite()).unwrap_or(d);
+            let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
+            let t = Time::from_seconds((arg(5, 0.0) / tick).round() * tick);
+            let key = crate::SampleKey::new(
+                comp.path.clone(),
+                comp.layers[li].path.clone(),
+                t,
+                [arg(0, 0.0), arg(1, 0.0)],
+                [arg(2, 0.5), arg(3, 0.5)],
+                arg(4, 1.0) != 0.0,
+            );
+            note_read(|| ExprRead::prim(key.layer.clone(), ReadKind::Subtree, Some(key.time)));
+            let rgba = scope_samples()
+                .and_then(|s| s.get(&key))
+                .unwrap_or_default();
+            Ok::<_, rquickjs::Error>(rgba.map(f64::from).to_vec())
+        })?,
+    )?;
+
     h.set(
         "xform",
         Function::new(
@@ -2139,15 +2163,15 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
-                Ok::<_, rquickjs::Error>(seed_with(
-                    seed_prefix(own(&prim, &comp.layers[li]), &attr),
-                    c as usize,
-                    li,
-                ))
+                Ok::<_, rquickjs::Error>(seed_prefix(own(&prim, &comp.layers[li]), &attr))
             },
         )?,
     )?;
 
+    h.set(
+        "wiggleNoise",
+        Function::new(ctx.clone(), fast::wiggle_noise)?,
+    )?;
     ctx.globals().set("__h", h)?;
     Ok(())
 }
