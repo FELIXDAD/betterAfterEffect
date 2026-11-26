@@ -136,6 +136,9 @@ def pref(page, c):
         e += f".unit({s(unit)})"
     if "enabledWhen" in c:
         e += f".when({when(c['enabledWhen'], page)})"
+    elif ":" in c.get("inlineWith", ""):
+        parent, value = c["inlineWith"].split(":", 1)
+        e += f".when(When::Is({s(page + '.' + parent)}, {s(value)}))"
     if c.get("indented"):
         e += ".indent()"
     if c.get("inlineWith") or t == "radio_group":
@@ -234,7 +237,7 @@ def group_items(page, g):
 
 
 def main():
-    data = json.loads(SRC.read_text())
+    data = json.loads(SRC.read_text(encoding="utf-8"))
     tr(data["dialog"]["titleEn"], data["dialog"]["titleZh"])
     for b in data["dialog"]["buttons"]:
         tr(b["labelEn"], b["labelZh"])
@@ -291,7 +294,7 @@ def main():
         "];",
         "",
     ]
-    OUT.write_text("\n".join(rs))
+    OUT.write_text("\n".join(rs), encoding="utf-8", newline="\n")
     for en, a, b in conflicts:
         print(f"note: {en!r} is {a!r} and also {b!r}; kept the first", file=sys.stderr)
     print(f"wrote {OUT.relative_to(ROOT)}: {len(pages)} pages, {len(zh)} strings")

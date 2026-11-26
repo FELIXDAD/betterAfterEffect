@@ -146,7 +146,7 @@ fn segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 }
 
 /// The pointer's ray through comp pixel `p`: origin and unit direction.
-fn ray(camera: &Camera, size: DVec2, p: DVec2) -> (DVec3, DVec3) {
+pub(super) fn ray(camera: &Camera, size: DVec2, p: DVec2) -> (DVec3, DVec3) {
     match camera.projection {
         Projection::Perspective => {
             let eye = camera.position();
