@@ -740,7 +740,7 @@ impl TimelinePanel {
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
         let switch_input = ui.input(switches::SwitchInput::read);
-        egui::ScrollArea::vertical()
+        let scrolled = egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
@@ -793,6 +793,27 @@ impl TimelinePanel {
                     }
                 }
             });
+        // Empty outline space below the layers (both modes): a click deselects
+        // everything, as in AE.
+        let rows_bottom =
+            scrolled.inner_rect.top() + rows.len() as f32 * ROW_H - scrolled.state.offset.y;
+        let outline_bg = Rect::from_min_max(
+            pos2(body.left(), rows_bottom.max(body.top())),
+            // The outline only, kept clear of egui's pointer slop (about 5 points)
+            // around the time graph, whose background owns presses near its edge.
+            pos2(body.left() + cols.end - 8.0, body.bottom()),
+        );
+        if outline_bg.height() > 0.0
+            && ui
+                .interact(outline_bg, ui.id().with("outline_bg"), Sense::click())
+                .clicked()
+        {
+            let mut s = session.lock();
+            s.selected_keys.clear();
+            s.selected_layers.clear();
+            s.selected_props.clear();
+            s.selected_groups.clear();
+        }
 
         if let Some((item, pointer)) = project_drop {
             let (index, y) = drop_slot.unwrap_or((comp_layers.len(), last_row_bottom));

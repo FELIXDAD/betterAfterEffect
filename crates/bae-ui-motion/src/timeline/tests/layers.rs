@@ -274,3 +274,31 @@ fn group_names_select_contents_for_duplicate_copy_paste_and_delete() {
     h.apply(&h.action(&mut tl, Invocation::new(ids::PASTE)));
     assert_eq!(masks(&h, &layer), ["Mask 1"]);
 }
+
+#[test]
+fn empty_outline_space_and_deselect_all_clear_the_selection() {
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (1.0, float(90.0))]);
+    let layer = h.layer.clone();
+    let mut tl = h.bars();
+    let select = |h: &H| {
+        let s = h.session();
+        let mut s = s.lock();
+        s.selected_layers = vec![layer.clone()];
+        s.selected_props = vec![(layer.clone(), ROT.to_owned())];
+    };
+    // A click in the outline below the last row (AE: deselects everything).
+    select(&h);
+    h.click(&mut tl, pos2(40.0, 700.0), Modifiers::NONE);
+    {
+        let s = h.session();
+        let s = s.lock();
+        assert!(s.selected_layers.is_empty() && s.selected_props.is_empty());
+    }
+    // Edit > Deselect All (F2, Cmd/Ctrl+Shift+A) clears properties too.
+    select(&h);
+    h.action(&mut tl, Invocation::new(crate::actions::ids::DESELECT_ALL));
+    let s = h.session();
+    let s = s.lock();
+    assert!(s.selected_layers.is_empty() && s.selected_props.is_empty());
+}
