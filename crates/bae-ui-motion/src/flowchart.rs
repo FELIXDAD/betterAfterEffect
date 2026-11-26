@@ -213,7 +213,6 @@ pub struct FlowchartPanel {
     options: Options,
     expanded: std::collections::HashSet<PrimPath>,
     positions: HashMap<(PrimPath, Option<PrimPath>), egui::Vec2>,
-    root: Option<PrimPath>,
     last_active: Option<PrimPath>,
     selected: Option<PrimPath>,
     rename: Option<(PrimPath, String)>,
@@ -404,10 +403,9 @@ impl FlowchartPanel {
 impl Panel for FlowchartPanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Flowchart <comp>".
-        let comp = self
-            .root
-            .clone()
-            .or_else(|| common::session(cx.resources).lock().active_comp.clone());
+        let session = common::session(cx.resources);
+        let s = session.lock();
+        let comp = s.flowchart_root.clone().or_else(|| s.active_comp.clone());
         let name = comp.map_or_else(
             || tr("(none)").to_owned(),
             |c| bae_motion::query::display_name_of(cx.stage, &c),
@@ -454,16 +452,20 @@ impl Panel for FlowchartPanel {
         let p = ui.painter_at(full);
         p.rect_filled(full, 0.0, Color32::from_gray(35));
         let session = common::session(cx.resources);
-        let active = session.lock().active_comp.clone();
-        if active != self.last_active || self.root.as_ref().is_some_and(|r| !cx.stage.has_prim(r)) {
-            self.root.clone_from(&active);
+        let (active, mut root) = {
+            let s = session.lock();
+            (s.active_comp.clone(), s.flowchart_root.clone())
+        };
+        if active != self.last_active || root.as_ref().is_some_and(|r| !cx.stage.has_prim(r)) {
+            root.clone_from(&active);
+            session.lock().flowchart_root.clone_from(&root);
             self.last_active = active;
             self.expanded.clear();
             self.offset = egui::Vec2::ZERO;
             self.positions.clear();
             self.rename = None;
         }
-        let Some(root) = self.root.clone() else {
+        let Some(root) = root else {
             return;
         };
         let nodes = chart(cx.stage, &root, &self.options, &|p| {
@@ -648,7 +650,7 @@ impl Panel for FlowchartPanel {
                 self.select(cx, n);
             }
             if (title.double_clicked() || icon_resp.double_clicked()) && n.kind == Kind::Comp {
-                self.root = Some(n.item.clone());
+                session.lock().flowchart_root = Some(n.item.clone());
                 self.offset = egui::Vec2::ZERO;
                 self.positions.clear();
             }

@@ -1001,6 +1001,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "flate2",
+ "roxmltree",
  "serde",
  "serde_json",
  "tempfile",

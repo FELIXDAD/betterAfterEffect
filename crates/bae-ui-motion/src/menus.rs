@@ -531,6 +531,16 @@ fn panel_label(cx: &MenuContext<'_>, title: &str, panel: &str) -> String {
     let session = common::session(cx.resources);
     let shown = match panel {
         "composition" | "timeline" => common::active_comp(cx.stage, &session).map(|c| c.name),
+        "footage" | "flowchart" => {
+            let s = session.lock();
+            let path = if panel == "footage" {
+                s.footage_view.as_ref()
+            } else {
+                s.flowchart_root.as_ref().or(s.active_comp.as_ref())
+            };
+            path.filter(|p| cx.stage.has_prim(p))
+                .map(|p| bae_motion::query::display_name_of(cx.stage, p))
+        }
         "effect_controls" | "layer" => session
             .lock()
             .selected_layers

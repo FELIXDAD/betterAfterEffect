@@ -22,7 +22,7 @@ use serde_json::json;
 
 use crate::session::SharedSession;
 
-fn formats() -> &'static MediaFormats {
+pub(crate) fn formats() -> &'static MediaFormats {
     static FORMATS: OnceLock<MediaFormats> = OnceLock::new();
     FORMATS.get_or_init(MediaFormats::builtin)
 }
@@ -136,6 +136,7 @@ fn probe_file(
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v))
                 .collect();
+            crate::progress_metadata::import_xmp(path, &mut attrs);
             use bae_media::MediaKind;
             if info.kind == MediaKind::Still
                 && let Some(d) = defaults.still_duration

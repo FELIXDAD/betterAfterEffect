@@ -14,6 +14,7 @@ use bae_render::{
     AssetFiles, FootageRef, LayerContent, OutputAlpha, RenderComp, RenderLayer, RenderPurpose,
     RenderRequest, Renderer, RendererConfig,
 };
+use bae_ui::Accessible as _;
 use bae_ui::theme::{self, color};
 use bae_ui::{Panel, PanelContext, PanelKind, TabInfo, tr};
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
@@ -33,6 +34,7 @@ struct Footage {
     size: [u32; 2],
     frame_rate: Option<FrameRate>,
     duration: Option<Time>,
+    marks: (Time, Time),
 }
 
 impl Footage {
@@ -47,6 +49,7 @@ impl Footage {
             return None;
         }
         let dim = |attr: &str| get(attr).and_then(|v| v.as_f64()).unwrap_or(0.0).max(0.0) as u32;
+        let duration = get("duration").and_then(|v| v.as_time());
         Some(Footage {
             asset: asset.clone(),
             name: bae_motion::query::display_name_of(stage, asset),
@@ -56,10 +59,8 @@ impl Footage {
                 Some(v) => v.as_f64().filter(|f| *f > 0.0).map(FrameRate::from_fps),
                 None => None,
             },
-            duration: match get("duration") {
-                Some(Value::Time(t)) => Some(t),
-                _ => None,
-            },
+            duration,
+            marks: bae_motion::query::footage_range(stage, asset, duration.unwrap_or(Time::ZERO)),
             kind,
         })
     }
@@ -211,6 +212,11 @@ impl Panel for FootagePanel {
         let timed = footage.as_ref().is_some_and(Footage::timed);
         let bottom = BAR + if timed { RULER } else { 0.0 };
         let view = Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - bottom));
+        if timed && let Some(f) = &footage {
+            let ruler =
+                Rect::from_min_size(pos2(full.min.x, view.max.y), vec2(full.width(), RULER));
+            self.ruler(ui, ruler, f);
+        }
         let p = ui.painter_at(full);
         p.rect_filled(view, 0.0, Color32::from_gray(35));
         let mut zoom = None;
@@ -234,13 +240,8 @@ impl Panel for FootagePanel {
                 zoom = Some(scale);
             }
         }
-        if timed && let Some(f) = &footage {
-            let ruler =
-                Rect::from_min_size(pos2(full.min.x, view.max.y), vec2(full.width(), RULER));
-            self.ruler(ui, ruler, f);
-        }
         let bar = Rect::from_min_max(pos2(full.min.x, full.max.y - BAR), full.max);
-        self.bar(ui, bar, footage.as_ref(), zoom);
+        self.bar(ui, cx, bar, footage.as_ref(), zoom);
     }
 }
 
@@ -255,6 +256,18 @@ impl FootagePanel {
         let rate = f.rate();
         let duration = f.duration.unwrap_or(Time::ZERO);
         let last = rate.time_to_frame(duration).max(1) - 1;
+        let xpos = |t: Time| {
+            track.left()
+                + track.width() * (t.as_seconds() / duration.as_seconds()).clamp(0.0, 1.0) as f32
+        };
+        p.rect_filled(
+            Rect::from_min_max(
+                pos2(xpos(f.marks.0), track.bottom() - 3.0),
+                pos2(xpos(f.marks.1), track.bottom()),
+            ),
+            0.0,
+            color::ACCENT_DIM,
+        );
         if let Some(pos) = resp.interact_pointer_pos() {
             let t = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
             let frame = (t * last as f32).round() as i64;
@@ -290,7 +303,14 @@ impl FootagePanel {
     }
 
     /// The bottom bar: magnification and, for movies, the current time.
-    fn bar(&self, ui: &Ui, r: Rect, f: Option<&Footage>, zoom: Option<f32>) {
+    fn bar(
+        &self,
+        ui: &mut Ui,
+        cx: &mut PanelContext<'_>,
+        r: Rect,
+        f: Option<&Footage>,
+        zoom: Option<f32>,
+    ) {
         let p = ui.painter_at(r);
         p.rect_filled(r, 0.0, color::PANEL);
         let font = theme::body();
@@ -316,8 +336,49 @@ impl FootagePanel {
                 font.clone(),
                 color::ACCENT,
             );
+            let mut controls = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(Rect::from_min_max(
+                        pos2((r.left() + 148.0).min(r.right()), r.top()),
+                        r.max,
+                    ))
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            let step = rate.frame_to_time(1);
+            let (first, end) = f.marks;
+            for (button, tip, attr, value, enabled, shown) in [
+                (
+                    "{",
+                    "Set In Point to Current Time",
+                    "footage:in",
+                    self.time,
+                    self.time < end,
+                    first,
+                ),
+                (
+                    "}",
+                    "Set Out Point to Current Time",
+                    "footage:out",
+                    (self.time + step).min(f.duration.unwrap_or(end)),
+                    self.time >= first,
+                    (end - step).max(first),
+                ),
+            ] {
+                if controls
+                    .add_enabled(enabled, egui::Button::new(button).small())
+                    .labeled(egui::WidgetType::Button, tr(tip))
+                    .on_hover_text(tr(tip))
+                    .clicked()
+                {
+                    cx.invoke_with("attr.set", serde_json::json!({"path": f.asset, "attr": attr, "value": Value::Time(value)}));
+                }
+                controls.small(bae_ui::widgets::timecode(
+                    rate.time_to_frame(shown),
+                    rate.as_f64(),
+                ));
+            }
         }
-        if let Some(f) = f {
+        if let Some(f) = f.filter(|f| !f.timed() || r.width() >= 460.0) {
             let info = format!("{} × {}", f.size[0], f.size[1]);
             p.text(
                 pos2(r.right() - 8.0, y),
