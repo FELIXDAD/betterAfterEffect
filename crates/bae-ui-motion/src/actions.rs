@@ -182,6 +182,18 @@ pub mod ids {
     /// Layer ▸ Open Layer Source (Alt+Enter): a pre-comp's composition, footage
     /// in the Footage panel.
     pub const OPEN_LAYER_SOURCE: &str = "motion.layer.open_layer_source";
+    /// File ▸ Add Footage to Comp (Cmd/Ctrl+/): the selected Project items as
+    /// layers of the active comp.
+    pub const ADD_FOOTAGE_TO_COMP: &str = "motion.file.add_footage_to_comp";
+    /// Edit ▸ Edit Original (Cmd/Ctrl+E).
+    pub const EDIT_ORIGINAL: &str = "motion.edit.edit_original";
+    /// Edit ▸ Label ▸ Edit Label Colors…: Preferences ▸ Labels.
+    pub const EDIT_LABEL_COLORS: &str = "motion.edit.edit_label_colors";
+    /// Animation ▸ Separate Dimensions (Position of the selected layers).
+    pub const SEPARATE_DIMENSIONS: &str = "motion.anim.separate_dimensions";
+    /// Layer ▸ Camera ▸ Camera Settings… (and View ▸): the selected camera, else
+    /// the comp's active camera.
+    pub const CAMERA_SETTINGS: &str = "motion.layer.camera_settings";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -361,6 +373,11 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_FOLDER, "New Folder"),
     (ids::OPEN_LAYER, "Open Layer"),
     (ids::OPEN_LAYER_SOURCE, "Open Layer Source"),
+    (ids::ADD_FOOTAGE_TO_COMP, "Add Footage to Comp"),
+    (ids::EDIT_ORIGINAL, "Edit Original..."),
+    (ids::EDIT_LABEL_COLORS, "Edit Label Colors..."),
+    (ids::SEPARATE_DIMENSIONS, "Separate Dimensions"),
+    (ids::CAMERA_SETTINGS, "Camera Settings..."),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -926,6 +943,44 @@ fn transform_edits(
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
+/// File ▸ Add Footage to Comp: the selected Project items (not folders) as
+/// layers of the active comp, the first one on top (AE).
+fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
+    use crate::project::{DropPlacement, ItemDrag, ItemKind, item_kind};
+    let items: Vec<PrimPath> = session
+        .lock()
+        .selected_items
+        .iter()
+        .filter(|p| matches!(item_kind(cx.stage, p), Some(k) if k != ItemKind::Folder))
+        .cloned()
+        .collect();
+    for item in items.into_iter().rev() {
+        ItemDrag(item).add_as_layer(cx, session, DropPlacement::Viewer(None));
+    }
+}
+
+/// Whether every one of `layers` has its Position separated (Animation ▸
+/// Separate Dimensions is checked).
+pub(crate) fn all_separated(stage: &bae_model::Stage, layers: &[PrimPath]) -> bool {
+    !layers.is_empty()
+        && layers
+            .iter()
+            .all(|l| bae_motion::dimensions::is_separated(stage, l))
+}
+
+/// The camera Camera Settings edits: the selected camera layer, else the
+/// topmost camera of the active comp (AE's active camera).
+fn camera_settings_target(stage: &bae_model::Stage, session: &SharedSession) -> Option<PrimPath> {
+    let is_camera = |l: &PrimPath| query::layer_kind(stage, l).as_deref() == Some("camera");
+    let s = session.lock();
+    if let Some(layer) = s.selected_layers.iter().find(|l| is_camera(l)) {
+        return Some(layer.clone());
+    }
+    let comp = s.active_comp.clone()?;
+    drop(s);
+    query::comp_layers(stage, &comp).into_iter().find(is_camera)
+}
+
 /// File ▸ New ▸ New Folder: an “Untitled N” folder in the folder selected in
 /// the Project panel, else at the top level (AE).
 pub(crate) fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -1030,6 +1085,35 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::NEW_FOLDER => {
             new_folder(cx, session);
+            return true;
+        }
+        ids::ADD_FOOTAGE_TO_COMP => {
+            add_footage_to_comp(cx, session);
+            return true;
+        }
+        ids::EDIT_ORIGINAL => {
+            crate::import::edit_original(cx, session);
+            return true;
+        }
+        ids::EDIT_LABEL_COLORS => {
+            cx.invoke_with(bae_ui::settings::ACTION, json!({"page": "labels"}));
+            return true;
+        }
+        ids::SEPARATE_DIMENSIONS => {
+            let layers = target_layers(stage, &session.lock());
+            if !layers.is_empty() {
+                let separated = !all_separated(stage, &layers);
+                cx.invoke_with(
+                    "transform.separate_dimensions",
+                    json!({"layers": layers, "separated": separated}),
+                );
+            }
+            return true;
+        }
+        ids::CAMERA_SETTINGS => {
+            if let Some(camera) = camera_settings_target(stage, session) {
+                crate::dialogs::layer_settings(cx, session, &camera);
+            }
             return true;
         }
         ids::OPEN_LAYER | ids::OPEN_LAYER_SOURCE => {
@@ -2319,6 +2403,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Find", "查找"),
     ("Open Layer", "打开图层"),
     ("Open Layer Source", "打开图层源"),
+    ("Add Footage to Comp", "将素材添加到合成"),
+    ("Edit Original...", "编辑原稿..."),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
