@@ -112,3 +112,49 @@ fn provider_rejects_unknown_data() {
     };
     assert!(provider.source(&content).is_err());
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn overlapping_affine_images_keep_their_coverage_in_one_draw() {
+    use bae_render::{OutputAlpha, Renderer};
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    if gpu.adapter_info().backend != bae_gpu::wgpu::Backend::Metal {
+        return;
+    }
+    let mut renderer = Renderer::new(gpu);
+    renderer
+        .providers_mut()
+        .register(Arc::new(ShapeProvider::new()));
+    let path = PrimPath::new("/comps/main").unwrap();
+    let mut comp = RenderComp::new(path, 180, 140);
+    for (index, x) in [(0, 45.), (1, 125.)] {
+        let path = PrimPath::new(&format!("/comps/main/layers/shape_{index}")).unwrap();
+        let content = CustomContent {
+            provider: SHAPE_PROVIDER.into(),
+            prim: path.clone(),
+            size: None,
+            hash: index,
+            data: Arc::new(square_scene()),
+        };
+        let mut layer = RenderLayer::new(path, LayerContent::Custom(content));
+        layer.transform =
+            DAffine2::from_translation(glam::DVec2::new(x, 70.)) * DAffine2::from_angle(0.1);
+        layer.opacity = 0.5;
+        comp.layers.push(layer);
+    }
+    let frame = renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    assert_eq!(frame.stats.draw_calls, 1);
+    let image = renderer
+        .read_rgba8(&frame, OutputAlpha::Premultiplied)
+        .unwrap();
+    for (x, y, alpha) in [(0, 0, 0), (30, 70, 128), (85, 70, 191), (145, 70, 128)] {
+        assert!(
+            image.pixel(x, y)[3].abs_diff(alpha) <= 1,
+            "pixel ({x}, {y})"
+        );
+    }
+}

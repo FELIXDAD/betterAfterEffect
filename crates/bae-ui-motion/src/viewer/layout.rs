@@ -15,6 +15,23 @@ use super::{CompositionViewer, GpuPreview};
 use crate::render::{self, View};
 use crate::session::SharedSession;
 
+pub(super) fn preview_pane(
+    panes: &[View3d],
+    active: usize,
+    prefer_camera: bool,
+    has_3d: impl FnOnce() -> bool,
+) -> usize {
+    if prefer_camera
+        && panes.len() > 1
+        && panes[active] != View3d::Active
+        && let Some(camera) = panes.iter().position(|p| *p == View3d::Active)
+        && has_3d()
+    {
+        return camera;
+    }
+    active
+}
+
 /// The views' rectangles in `area`: one; two side by side; four in a grid.
 pub(super) fn rects(area: Rect, n: usize) -> Vec<Rect> {
     let gap = 2.0;
@@ -152,5 +169,22 @@ impl CompositionViewer {
                 Stroke::NONE,
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+    #[test]
+    fn preview_prefers_an_open_camera_only_for_three_dimensional_playback() {
+        let panes = [View3d::Custom(1), View3d::Active];
+        assert_eq!(preview_pane(&panes, 0, true, || true), 1);
+        assert_eq!(preview_pane(&panes, 0, true, || false), 0);
+        assert_eq!(preview_pane(&panes, 0, false, || panic!()), 0);
+        assert_eq!(preview_pane(&panes[..1], 0, true, || panic!()), 0);
+        assert!(crate::session::PreviewOptions::default().favor_active_camera);
+        assert!(
+            crate::panels::ZH.contains(&("Previews Favor Active Camera", "预览支持活动摄像机"))
+        );
     }
 }
