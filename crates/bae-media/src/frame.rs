@@ -155,6 +155,8 @@ impl CpuFrame {
 /// [`FrameCache`](crate::FrameCache) hands out clones.
 #[derive(Clone, Debug)]
 pub struct GpuFrame {
+    /// Original auxiliary footage channels, before color or alpha conversion.
+    pub channels: Option<std::sync::Arc<bae_gpu::channels::FootageChannels>>,
     /// `Rgba16Float`, usage `TEXTURE_BINDING | STORAGE_BINDING | COPY_SRC | COPY_DST`.
     pub texture: wgpu::Texture,
     /// Alpha of the texture: [`AlphaMode::Premultiplied`] (default),
@@ -186,6 +188,7 @@ impl GpuFrame {
     /// GPU memory used by the texture, in bytes (for cache budgeting).
     pub fn byte_size(&self) -> u64 {
         u64::from(self.width()) * u64::from(self.height()) * 8
+            + self.channels.as_ref().map_or(0, |c| c.byte_size())
     }
 }
 
