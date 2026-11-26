@@ -26,7 +26,8 @@
 //! A comp without enabled lights, a 2D layer, Accepts Lights off, or a layer
 //! no light reaches (lights with the Adjustment Layer switch light only the
 //! layers below them): unlit.
-//! Shadows are not rendered yet (casts / accepts shadows are data only).
+//! Shadows: casters in the same 3D group, tested per pixel (`shadow` in
+//! `composite.wgsl`).
 
 use std::sync::Arc;
 
@@ -130,6 +131,20 @@ pub struct Lighting {
     /// The other layers of its 3D group that cast shadows on it (empty when it
     /// does not accept shadows or no light casts shadows).
     pub casters: Arc<[ShadowCaster]>,
+    /// Motion blur: the layer, its lights and the eye at every sample (empty:
+    /// every sample is lit as the frame).
+    pub samples: Arc<[LightingSample]>,
+}
+
+/// A motion-blur sample of a lit layer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LightingSample {
+    /// Layer pixels → comp space at the sample time.
+    pub matrix: DMat4,
+    /// The lights that reach the layer then (as many as at the frame time).
+    pub lights: Arc<[Light]>,
+    /// Where the layer is seen from then.
+    pub eye: DVec3,
 }
 
 /// A 3D layer casting shadows (Casts Shadows on, AE-CMP-440).
@@ -169,9 +184,11 @@ pub(crate) const LIGHT_VEC4S: usize = 5;
 pub(crate) const CASTER_VEC4S: usize = 8;
 
 impl Lighting {
-    /// Vec4s of the GPU record.
+    /// Vec4s of the GPU records (one per motion-blur sample when sampled).
     pub(crate) fn record_len(&self) -> usize {
-        HEADER_VEC4S + LIGHT_VEC4S * self.lights.len() + CASTER_VEC4S * self.casters.len()
+        let one =
+            HEADER_VEC4S + LIGHT_VEC4S * self.lights.len() + CASTER_VEC4S * self.casters.len();
+        one * self.samples.len().max(1)
     }
 
     /// Appends the record for input texels `from_texel` (input texel → layer
@@ -209,7 +226,9 @@ impl Lighting {
         ]);
         // Casters are counted after packing (missing images are skipped).
         let header = out.len();
-        out.push([mat.metal / 100.0, 0.0, 0.0, 0.0]);
+        // w: Accepts Shadows Only (the layer shows only the shadows on it).
+        let shadows_only = f32::from(u8::from(mat.accepts_shadows == ShadowMode::Only));
+        out.push([mat.metal / 100.0, 0.0, 0.0, shadows_only]);
         for l in self.lights.iter() {
             let kind = match l.kind {
                 LightKind::Ambient | LightKind::Environment => 0.0,

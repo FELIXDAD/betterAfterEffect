@@ -17,7 +17,6 @@ use egui::{Color32, Key, RichText, Ui, vec2};
 use serde_json::Value;
 
 use crate::a11y::Accessible as _;
-use crate::i18n::tr;
 use crate::theme::color;
 use crate::widgets;
 
@@ -33,6 +32,20 @@ const LIST_ROW: f32 = 24.0;
 const CONTENT_W: f32 = 593.0;
 const BUTTON: egui::Vec2 = vec2(60.0, 24.0);
 const BUTTON_GAP: f32 = 8.0;
+
+/// Several AE 26 group titles stay in English in the Chinese Preferences dialog.
+fn tr(en: &str) -> &str {
+    if crate::i18n::lang() == crate::Lang::En {
+        return en;
+    }
+    if let Some(text) = bae_prefs::i18n::zh(en) {
+        return text;
+    }
+    if bae_prefs::pages::SAME_IN_ZH.binary_search(&en).is_ok() {
+        return en;
+    }
+    crate::i18n::tr(en)
+}
 
 /// Window title: "Preferences" on both platforms. On macOS the app menu item reads
 /// "Settings…" (the system renames AE's Preferences item since macOS 13), but the
@@ -84,9 +97,8 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     crate::i18n::register(&names);
     let bindings = crate::KeymapBindings::new(
         crate::presets::AE_KEYMAP,
+        // AE has no Cmd+, (Settings live in the app menu's Settings ▸).
         vec![
-            #[cfg(target_os = "macos")]
-            crate::Binding::new("Cmd+,", ACTION),
             crate::Binding::new("Cmd+Alt+;", ACTION)
                 .params(serde_json::json!({"page": "startup_repair"})),
         ],
@@ -173,7 +185,7 @@ impl GridGuides {
     /// The current values from the app's `Arc<PrefsStore>` (defaults without one).
     pub fn current(resources: &bae_app::Resources) -> Self {
         match resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
-            Some(store) => Self::from_prefs(&store.current()),
+            Some(store) => Self::from_prefs(&store.display()),
             None => Self::from_prefs(&Preferences::default()),
         }
     }
@@ -297,7 +309,10 @@ pub type Request = String;
 /// The Preferences window.
 #[derive(Default)]
 pub struct SettingsDialog {
+    installed_ram: Option<u64>,
     open: bool,
+    confirm_reset: bool,
+    display_changed: bool,
     page: usize,
     draft: Preferences,
     requests: Vec<Request>,
@@ -317,6 +332,11 @@ impl SettingsDialog {
         self
     }
 
+    pub fn with_installed_ram(mut self, bytes: Option<u64>) -> Self {
+        self.installed_ram = bytes;
+        self
+    }
+
     /// Opens on `page` (an id like `grids_guides`; unknown or `None`: the first
     /// page, Startup & Repair) with a copy of `current`.
     pub fn open(&mut self, page: Option<&str>, current: &Preferences) {
@@ -325,6 +345,8 @@ impl SettingsDialog {
             .unwrap_or(0);
         self.draft = current.clone();
         self.open = true;
+        self.confirm_reset = false;
+        self.display_changed = false;
         self.lang_at_open = Some((
             crate::i18n::lang(),
             current.str(bae_prefs::keys::LANGUAGE).to_owned(),
@@ -347,7 +369,12 @@ impl SettingsDialog {
 
     /// Sets a draft value (host answers to Choose…, tests).
     pub fn set(&mut self, key: &str, value: impl Into<Value>) {
-        self.draft.set(key, value);
+        self.display_changed |= self.draft.set(key, value) && visual_setting(key);
+    }
+
+    /// New display values from this frame, including an in-progress number drag.
+    pub fn take_display_preview(&mut self) -> Option<&Preferences> {
+        std::mem::take(&mut self.display_changed).then_some(&self.draft)
     }
 
     /// Buttons pressed since the last call that the host has to run.
@@ -381,6 +408,25 @@ impl SettingsDialog {
             .fixed_size(SIZE)
             .default_pos(screen.center() - SIZE / 2.0)
             .show(ctx, |ui| outcome = self.contents(ui));
+        if self.confirm_reset {
+            egui::Modal::new(egui::Id::new("reset-all-preferences")).show(ctx, |ui| {
+                ui.label(tr("Reset All Preferences to Default..."));
+                ui.horizontal(|ui| {
+                    if ui.button(tr("OK")).clicked() || enter {
+                        self.draft = Preferences::default();
+                        self.display_changed = true;
+                        self.confirm_reset = false;
+                    }
+                    if ui.button(tr("Cancel")).clicked()
+                        || ctx.input(|i| i.key_pressed(Key::Escape))
+                    {
+                        self.confirm_reset = false;
+                    }
+                });
+            });
+            self.preview_language(false);
+            return Outcome::None;
+        }
         let typing = ctx.egui_wants_keyboard_input();
         if !window_open || (!typing && ctx.input(|i| i.key_pressed(Key::Escape))) {
             outcome = Outcome::Cancel;
@@ -497,18 +543,26 @@ impl SettingsDialog {
             }
             Item::Group(title, list) => {
                 ui.add_space(4.0);
-                ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
-                egui::Frame::new()
-                    .stroke(egui::Stroke::new(1.0, color::DIVIDER))
-                    .corner_radius(3)
-                    .inner_margin(8)
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width() - 4.0);
-                        self.items(ui, list);
-                    });
+                ui.add_enabled_ui(*title != "Mercury Transmit", |ui| {
+                    ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
+                    egui::Frame::new()
+                        .stroke(egui::Stroke::new(1.0, color::DIVIDER))
+                        .corner_radius(3)
+                        .inner_margin(8)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width() - 4.0);
+                            self.items(ui, list);
+                        });
+                });
                 ui.add_space(4.0);
             }
             Item::Button(id, label) => {
+                if *id == "startup_repair.reset_all_preferences" {
+                    if ui.button(tr(label)).clicked() {
+                        self.confirm_reset = true;
+                    }
+                    return;
+                }
                 if ui
                     .add_enabled(self.handles(id), egui::Button::new(tr(label)))
                     .clicked()
@@ -519,10 +573,33 @@ impl SettingsDialog {
             Item::Info(label, value) => {
                 ui.horizontal(|ui| {
                     if !label.is_empty() {
+                        let label = if *value == "<InstalledRAM - ReservedRAM> GB" {
+                            "RAM Available for BAE:"
+                        } else {
+                            label
+                        };
                         ui.label(tr(label));
                     }
-                    // `<…>` values come from the machine (installed RAM, …).
-                    let shown = if value.contains('<') { "—" } else { value };
+                    let bytes = match *value {
+                        "<InstalledRAM> GB" => self.installed_ram,
+                        "<InstalledRAM - ReservedRAM> GB" => self.installed_ram.map(|n| {
+                            n.saturating_sub(
+                                (self.draft.int("memory_cpu.ram_reserved_for_other_apps_gb")
+                                    as u64)
+                                    << 30,
+                            )
+                        }),
+                        _ => None,
+                    };
+                    let formatted;
+                    let shown: &str = if let Some(n) = bytes {
+                        formatted = format!("{:.1} GB", n as f64 / (1_u64 << 30) as f64);
+                        &formatted
+                    } else if value.contains('<') {
+                        "—"
+                    } else {
+                        value
+                    };
                     if !shown.is_empty() {
                         ui.label(RichText::new(shown).color(color::TEXT_DIM));
                     }
@@ -568,7 +645,10 @@ impl SettingsDialog {
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
-        let enabled = self.draft.enabled(p);
+        let enabled = !matches!(
+            p.key,
+            "project.dynamic_link_highest_number" | "export.preview_output_during_render_queue"
+        ) && self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 if p.indent {
@@ -583,12 +663,12 @@ impl SettingsDialog {
         let label = tr(p.label);
         let shown = if p.quiet { "" } else { label };
         let unit = tr(p.unit);
-        let draft = &mut self.draft;
+        let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = draft.bool(p.key);
+                let mut v = p.key != "video.enable_mercury_transmit" && draft.bool(p.key);
                 if widgets::checkbox(ui, &mut v, label).changed() {
-                    draft.set(p.key, v);
+                    self.set(p.key, v);
                 }
             }
             Kind::Int { min, max } => {
@@ -601,7 +681,7 @@ impl SettingsDialog {
                         .speed(if max - min > 1000 { 10.0 } else { 1.0 }),
                 );
                 if r.changed() {
-                    draft.set(p.key, v.round() as i64);
+                    self.set(p.key, v.round() as i64);
                 }
                 field_label(ui, unit);
             }
@@ -616,7 +696,7 @@ impl SettingsDialog {
                         .speed(if decimals > 0 { 0.1 } else { 1.0 }),
                 );
                 if r.changed() {
-                    draft.set(p.key, v);
+                    self.set(p.key, v);
                 }
                 field_label(ui, unit);
             }
@@ -635,7 +715,7 @@ impl SettingsDialog {
                         .show_value(false),
                 );
                 if r.on_hover_text(a11y_name(p)).changed() {
-                    draft.set(p.key, v);
+                    self.set(p.key, v);
                 }
                 ui.label(RichText::new(tr(right)).color(color::TEXT_DIM));
             }
@@ -647,7 +727,7 @@ impl SettingsDialog {
                         let names: Vec<&str> = options.iter().map(|o| tr(o.label)).collect();
                         let mut i = options.iter().position(|o| o.value == current).unwrap_or(0);
                         if widgets::dropdown(ui, p.key, &mut i, &names, 220.0).changed() {
-                            draft.set(p.key, options[i].value);
+                            self.set(p.key, options[i].value);
                         }
                     }
                     Style::Radio => {
@@ -655,7 +735,7 @@ impl SettingsDialog {
                             field_label(ui, shown);
                             for o in options {
                                 if ui.radio(current == o.value, tr(o.label)).clicked() {
-                                    draft.set(p.key, o.value);
+                                    self.set(p.key, o.value);
                                 }
                             }
                         });
@@ -666,7 +746,7 @@ impl SettingsDialog {
                             ui.horizontal(|ui| {
                                 for o in options {
                                     if theme_card(ui, o.value, tr(o.label), current == o.value) {
-                                        draft.set(p.key, o.value);
+                                        self.set(p.key, o.value);
                                     }
                                 }
                             });
@@ -682,14 +762,14 @@ impl SettingsDialog {
                 let names: Vec<&str> = names.iter().map(String::as_str).collect();
                 let mut i = index;
                 if widgets::dropdown(ui, p.key, &mut i, &names, 140.0).changed() {
-                    draft.set(p.key, i as i64);
+                    self.set(p.key, i as i64);
                 }
             }
             Kind::Color => {
                 field_label(ui, shown);
                 let mut rgb = draft.color(p.key);
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
-                    draft.set(p.key, bae_prefs::format_color(rgb));
+                    self.set(p.key, bae_prefs::format_color(rgb));
                 }
             }
             Kind::Text => {
@@ -710,7 +790,7 @@ impl SettingsDialog {
                         .hint_text(a11y_name(p)),
                 );
                 if r.changed() {
-                    draft.set(p.key, s);
+                    self.set(p.key, s);
                 }
             }
             Kind::Timecode => {
@@ -722,7 +802,7 @@ impl SettingsDialog {
                     .unwrap_or_else(|| draft.str(p.key).to_owned());
                 let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(90.0));
                 if r.changed() && parse_timecode(&s).is_some() {
-                    draft.set(p.key, s.clone());
+                    self.set(p.key, s.clone());
                 }
                 if r.has_focus() {
                     ui.data_mut(|d| d.insert_temp(id, s));
@@ -772,6 +852,13 @@ impl SettingsDialog {
                 ui.label(job);
             });
     }
+}
+
+fn visual_setting(key: &str) -> bool {
+    key.starts_with("grids_guides.")
+        || key.starts_with("appearance.")
+        || key.starts_with("labels.")
+        || key.starts_with("scripting_expressions.expr_")
 }
 
 fn field_label(ui: &mut Ui, label: &str) {

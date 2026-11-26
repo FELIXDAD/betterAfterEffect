@@ -139,7 +139,11 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "edit.paste" => return Paste,
         "motion.select_all" | "motion.deselect_all" => return Comp,
         "motion.duplicate" | "motion.split" | "motion.order" => return Layers,
-        "motion.ease" | "motion.toggle_hold" | "motion.reverse_keys" => return Keys,
+        "motion.ease"
+        | "motion.toggle_hold"
+        | "motion.reverse_keys"
+        | "motion.anim.exponential_scale" => return Keys,
+        "motion.anim.sequence_layers" => return Layers,
         "motion.new_comp" => return Nothing,
         "motion.new_layer"
         | "motion.trim_comp"
@@ -339,7 +343,11 @@ impl Builder {
                     path.push(sub.title);
                     let mut at = levels.to_vec();
                     at.push(pos);
-                    if sub.children.is_empty() {
+                    if sub.title == "Layer Styles" {
+                        for (id, spec) in crate::layer_styles::menu(&at) {
+                            self.push(id, spec);
+                        }
+                    } else if sub.children.is_empty() {
                         // AE shows the submenu (History, Team Project) greyed.
                         self.placeholder(path, &at);
                     } else {
@@ -473,6 +481,27 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         crate::viewer::view3d::ids::SWITCH => {
             let view = spec_param(item.params, "view").unwrap_or_default();
             spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
+        }
+        crate::masks::ids::MASK_MODE => {
+            let mode = spec_param(item.params, "mode").unwrap_or_default();
+            spec.checked_when(move |cx| {
+                let session = common::session(cx.resources);
+                crate::masks::first_target(cx.stage, &session)
+                    .is_some_and(|m| crate::masks::mode(cx.stage, &m) == mode)
+            })
+        }
+        crate::masks::ids::MASK_INVERTED | crate::masks::ids::MASK_LOCKED => {
+            let locked = item.action == crate::masks::ids::MASK_LOCKED;
+            spec.checked_when(move |cx| {
+                let session = common::session(cx.resources);
+                crate::masks::first_target(cx.stage, &session).is_some_and(|m| {
+                    if locked {
+                        crate::masks::locked(cx.stage, &m)
+                    } else {
+                        crate::masks::inverted(cx.stage, &m)
+                    }
+                })
+            })
         }
         actions::ids::TIME_REMAP => spec.checked_when(|cx| {
             let session = common::session(cx.resources);

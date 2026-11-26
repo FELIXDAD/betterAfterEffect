@@ -23,6 +23,7 @@ struct Prepared {
 pub struct PhotoshopDialog {
     path: PathBuf,
     parent: Option<PrimPath>,
+    comp: Option<PrimPath>,
     folder: Option<String>,
     defaults: ImportDefaults,
     replace: Option<(PrimPath, Option<LayerImage>, Option<String>, bool)>,
@@ -37,12 +38,14 @@ impl PhotoshopDialog {
     pub(crate) fn new(
         path: PathBuf,
         parent: Option<PrimPath>,
+        comp: Option<PrimPath>,
         folder: Option<String>,
         defaults: ImportDefaults,
     ) -> Self {
         Self {
             path,
             parent,
+            comp,
             folder,
             defaults,
             replace: None,
@@ -236,7 +239,7 @@ impl PhotoshopDialog {
     ) {
         cx.invoke_with("item.import_photoshop", serde_json::json!({
             "file": self.path, "document": doc, "kind": self.kind, "selection": selection,
-            "parent": self.parent, "folder": self.folder, "replace": replace, "keep_name": reload,
+            "parent": self.parent, "comp": self.comp, "folder": self.folder, "replace": replace, "keep_name": reload,
             "editable": self.editable, "ignore_styles": self.kind == ImportKind::Footage && self.ignore,
             "fps": self.defaults.sequence_fps, "duration": self.defaults.still_duration,
             "label": self.defaults.labels.map(|labels| labels[0])

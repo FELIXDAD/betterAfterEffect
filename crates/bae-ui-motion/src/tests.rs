@@ -196,6 +196,66 @@ fn pointer(events: &mut Vec<Event>, pos: Pos2, pressed: Option<bool>) {
 }
 
 #[test]
+fn preview_observes_edits_without_a_shell_history_log() {
+    let mut h = Harness::new();
+    let mut changes = crate::common::StageChanges::default();
+    assert!(changes.sync(&h.stage, |_| panic!("new evaluator already has no plans")));
+    assert!(!changes.sync(&h.stage, |_| panic!("steady frame invalidated")));
+    let comp = h.run("comp.create", json!({"name": "Main"}));
+    let mut edits = Vec::new();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    h.stage.undo(&h.author).unwrap();
+    h.stage.redo(&h.author).unwrap();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    assert_eq!(
+        edits,
+        [
+            bae_model::EventOrigin::Local,
+            bae_model::EventOrigin::Undo,
+            bae_model::EventOrigin::Redo
+        ]
+    );
+    // An inactive panel can miss the entire retained history.
+    for i in 0..65 {
+        h.run(
+            "attr.set",
+            json!({"path":comp["path"],"attr":"name","value":Value::String(i.to_string())}),
+        );
+    }
+    let mut missed = false;
+    changes.sync(&h.stage, |event| missed = event.is_none());
+    assert!(missed);
+    let mut reset = false;
+    changes.sync(&Stage::new(), |event| reset = event.is_none());
+    assert!(reset);
+}
+
+#[test]
+fn preview_follows_a_solid_color_change() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    let mut cache = crate::common::EvalCache::default();
+    let color = |h: &Harness, cache: &mut crate::common::EvalCache| {
+        let ec = cache
+            .get(&h.stage)
+            .evaluate_comp(&h.stage, &comp, Time::ZERO)
+            .unwrap();
+        let layer = ec.layers.iter().find(|l| l.path == solid).unwrap();
+        match &layer.source {
+            bae_anim::LayerSource::Asset { info, .. } => info.solid_color,
+            _ => None,
+        }
+    };
+    assert_eq!(color(&h, &mut cache), Some([1.0, 0.0, 0.0, 1.0]));
+    // Solid Settings writes only the solid item, not the layer or comp.
+    h.run(
+        "solid.set_settings",
+        json!({"target": solid, "color": [0.0, 0.0, 1.0, 1.0]}),
+    );
+    assert_eq!(color(&h, &mut cache), Some([0.0, 0.0, 1.0, 1.0]));
+}
+
+#[test]
 fn module_registers_panels_shortcuts_and_commands() {
     let mut b = AppBuilder::new();
     b.add_module(bae_ui::UiModule)
@@ -761,11 +821,35 @@ fn catalog_lines() -> Vec<String> {
                     sort_run(&mut level, &mut run);
                     level.push(format!("{prefix} > {} ▸", sub.title));
                     let mut inner = Vec::new();
-                    walk(
-                        &format!("{prefix} > {}", sub.title),
-                        sub.children,
-                        &mut inner,
-                    );
+                    if sub.title == "Layer Styles" {
+                        let path = format!("{prefix} > {}", sub.title);
+                        // Both captured menu bars have an empty dynamic submenu.
+                        // The layer context-menu capture supplies its populated order.
+                        for title in [
+                            "Convert to Editable Styles",
+                            "Show All",
+                            "Remove All",
+                            "---",
+                            "Blending Options",
+                            "Drop Shadow",
+                            "Inner Shadow",
+                            "Outer Glow",
+                            "Inner Glow",
+                            "Bevel and Emboss",
+                            "Satin",
+                            "Color Overlay",
+                            "Gradient Overlay",
+                            "Stroke",
+                        ] {
+                            inner.push(format!("{path} > {title}"));
+                        }
+                    } else {
+                        walk(
+                            &format!("{prefix} > {}", sub.title),
+                            sub.children,
+                            &mut inner,
+                        );
+                    }
                     level.extend(inner);
                 }
                 Node::Effects => {
@@ -1230,6 +1314,7 @@ fn render_button_activates_with_space_and_enter() {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
+            item.set_format(bae_render::ExportFormat::Png);
             item.output = dir
                 .path()
                 .join(format!("k{n}/f_####.png"))
@@ -3052,6 +3137,35 @@ fn transform_value_dialogs_set_every_selected_layer() {
     assert!(!h.dialogs().is_open());
 }
 
+/// Layer ▸ Mask: New Mask fills the layer, Mask Feather… and Inverted change
+/// the masks of the selected layer, Remove All Masks deletes them.
+#[test]
+fn layer_mask_menu() {
+    use crate::masks::ids;
+    let mut h = Harness::new();
+    let (_comp, solid, _shape) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::NEW_MASK));
+    assert_eq!(r.invocations[0].id, "mask.create");
+    h.apply(r);
+    let masks = crate::masks::masks_of(&h.stage, &solid);
+    assert_eq!(masks.len(), 1);
+    h.action(&mut viewer, Invocation::new(ids::MASK_FEATHER));
+    assert!(h.dialogs().is_open(), "Mask Feather… opened no dialog");
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    assert_eq!(r.invocations[0].params["edits"][0]["attr"], "feather");
+    let r = h.action(&mut viewer, Invocation::new(ids::MASK_INVERTED));
+    h.apply(r);
+    assert!(crate::masks::inverted(&h.stage, &masks[0]));
+    let r = h.action(&mut viewer, Invocation::new(ids::REMOVE_ALL_MASKS));
+    assert_eq!(r.invocations[0].id, "item.delete");
+    h.apply(r);
+    assert!(crate::masks::masks_of(&h.stage, &solid).is_empty());
+}
+
 /// Layer ▸ Time: Time-Reverse Layer, Enable Time Remapping (a toggle with a
 /// check mark) and Freeze Frame run on layers that have time (a pre-comp).
 #[test]
@@ -3118,7 +3232,7 @@ fn paint_and_brushes_panels_show_for_each_paint_tool() {
         h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
         h.frame(
             "brushes",
-            &mut crate::paint_panels::BrushesPanel,
+            &mut crate::paint_panels::BrushesPanel::default(),
             Vec::new(),
         );
     }

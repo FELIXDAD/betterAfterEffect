@@ -57,6 +57,9 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const INTERPRET_FOOTAGE: &str = "motion.file.interpret_footage_main";
+    pub const MANAGE_EFFECTS: &str = "motion.effect.manage_effects";
+    pub const BROWSE_PRESETS: &str = "motion.anim.browse_presets";
     pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
     pub const APPLY_PRESET: &str = "motion.anim.apply_animation_preset";
     pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
@@ -94,6 +97,10 @@ pub mod ids {
     pub const REVEAL_EXPRESSION_ERRORS: &str = "motion.layer.reveal_expression_errors";
     /// Animation > Keyframe Assistant > Convert Expression to Keyframes.
     pub const CONVERT_EXPRESSION: &str = "motion.anim.convert_expression_to_keyframes";
+    /// Animation > Keyframe Assistant > Exponential Scale (two Scale keys).
+    pub const EXPONENTIAL_SCALE: &str = "motion.anim.exponential_scale";
+    /// Animation > Keyframe Assistant > Sequence Layers… (its dialog).
+    pub const SEQUENCE_LAYERS: &str = "motion.anim.sequence_layers";
     /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
     pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
     /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
@@ -229,6 +236,9 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::INTERPRET_FOOTAGE, "Interpret Footage: Main..."),
+    (ids::MANAGE_EFFECTS, "Manage Effects..."),
+    (ids::BROWSE_PRESETS, "Browse Presets..."),
     (ids::SAVE_PRESET, "Save Animation Preset..."),
     (ids::APPLY_PRESET, "Apply Animation Preset..."),
     (ids::TIME_STRETCH, "Time Stretch..."),
@@ -240,6 +250,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
     (ids::REVEAL_EXPRESSION_ERRORS, "Reveal Expression Errors"),
     (ids::CONVERT_EXPRESSION, "Convert Expression to Keyframes"),
+    (ids::EXPONENTIAL_SCALE, "Exponential Scale"),
+    (ids::SEQUENCE_LAYERS, "Sequence Layers..."),
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
@@ -305,6 +317,19 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LABEL, "Label"),
     (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
     (ids::TRANSFORM_DIALOG, "Transform"),
+    (crate::masks::ids::NEW_MASK, "New Mask"),
+    (crate::masks::ids::MASK_SHAPE, "Mask Shape..."),
+    (crate::masks::ids::MASK_FEATHER, "Mask Feather..."),
+    (crate::masks::ids::MASK_OPACITY, "Mask Opacity..."),
+    (crate::masks::ids::MASK_EXPANSION, "Mask Expansion..."),
+    (crate::masks::ids::RESET_MASK, "Reset Mask"),
+    (crate::masks::ids::REMOVE_MASK, "Remove Mask"),
+    (crate::masks::ids::REMOVE_ALL_MASKS, "Remove All Masks"),
+    (crate::masks::ids::MASK_MODE, "Mask Mode"),
+    (crate::masks::ids::MASK_INVERTED, "Inverted"),
+    (crate::masks::ids::MASK_LOCKED, "Mask Locked"),
+    (crate::masks::ids::UNLOCK_ALL_MASKS, "Unlock All Masks"),
+    (crate::masks::ids::LOCK_OTHER_MASKS, "Lock Other Masks"),
     (ids::RESET_TRANSFORM, "Reset"),
     (ids::TIME_REMAP, "Enable Time Remapping"),
     (ids::TIME_REVERSE, "Time-Reverse Layer"),
@@ -1053,6 +1078,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::import::import_multiple(cx, session);
             return true;
         }
+        ids::INTERPRET_FOOTAGE => {
+            crate::dialogs::interpret_footage(cx, session);
+            return true;
+        }
+        ids::MANAGE_EFFECTS => {
+            crate::effects::manager::open(cx);
+            return true;
+        }
+        ids::BROWSE_PRESETS => {
+            crate::presets::browse(cx);
+            return true;
+        }
         // F4 / Shift+F4 with another panel in front: the Timeline toggles its
         // columns on its next frame (AE: they work whatever panel is active).
         ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN => {
@@ -1112,6 +1149,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let Some(info) = common::active_comp(stage, session) else {
         return true;
     };
+    // Layer ▸ Mask (they read the selection themselves).
+    if crate::masks::is_mask_action(id) {
+        let (now, layers) = {
+            let s = session.lock();
+            (s.time(&info.path), target_layers(stage, &s))
+        };
+        crate::masks::handle(id, &inv.params, cx, session, &info.path, &layers, now);
+        return true;
+    }
     if id == "motion.anim.convert_audio_to_keyframes" {
         crate::audio_analysis::convert(cx, &info);
         return true;
@@ -1225,19 +1271,19 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::TRIM_COMP => {
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
-        ids::ADD_TO_RENDER_QUEUE => {
-            crate::render_queue::shared(cx.resources)
-                .lock()
-                .add(&info, &crate::render_queue::default_output_dir());
-            cx.open_panel("render_queue");
-        }
-        ids::SAVE_FRAME_AS => {
-            let frame = info.frame_rate.time_to_frame(now);
-            crate::render_queue::shared(cx.resources).lock().add_frame(
-                &info,
-                &crate::render_queue::default_output_dir(),
-                frame,
+        ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
+            let queue = crate::render_queue::shared(cx.resources);
+            let dir = crate::render_queue::default_output_dir();
+            let mut queue = queue.lock();
+            if id == ids::SAVE_FRAME_AS {
+                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
+            } else {
+                queue.add(&info, &dir);
+            }
+            queue.assign_output(
+                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
             );
+            drop(queue);
             cx.open_panel("render_queue");
         }
         ids::TRIM_IN if !layers.is_empty() => {
@@ -1349,6 +1395,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::KEY_INTERPOLATION if !keys.is_empty() => {
             s.key_dialog = Some(crate::timeline::KeyDialog::Interpolation(
                 crate::timeline::InterpolationDialog::new(keys),
+            ));
+        }
+        ids::EXPONENTIAL_SCALE => {
+            // Two Scale keyframes of one layer (AE does nothing otherwise).
+            let scale: Vec<&KeyRef> = keys
+                .iter()
+                .filter(|k| k.attr == "transform:scale")
+                .collect();
+            if let [a, b] = scale.as_slice()
+                && a.path == b.path
+                && a.time != b.time
+            {
+                cx.invoke_with("key.exponential_scale", json!({"keys": [a, b]}));
+            }
+        }
+        // In the selection order, as AE sequences them.
+        ids::SEQUENCE_LAYERS if layers.len() > 1 => {
+            s.key_dialog = Some(crate::timeline::KeyDialog::Sequence(
+                crate::timeline::SequenceDialog::new(layers.clone(), info.clone()),
             ));
         }
         ids::KEY_VELOCITY if !keys.is_empty() => {
@@ -1978,6 +2043,9 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Interpret Footage: Main...", "解释素材：主要..."),
+    ("Manage Effects...", "管理效果..."),
+    ("Browse Presets...", "浏览预设..."),
     ("Save Animation Preset...", "保存动画预设..."),
     ("Apply Animation Preset...", "应用动画预设..."),
     // Layer ▸ Time and switches (AE 26's Chinese).
@@ -2013,6 +2081,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Draft Quality", "草图品质"),
     ("Wireframe Quality", "线框品质"),
     ("Show Position", "显示位置"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Add Position to Shown Properties", "将位置添加到显示的属性"),
     ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),
     ("Show Scale", "显示缩放"),
@@ -2065,8 +2135,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp", "适合复合"),
     ("Fit to Comp Width", "适合复合宽度"),
     ("Fit to Comp Height", "适合复合高度"),
-    ("Show Effects", "显示效果"),
-    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Find", "查找"),
     ("Open Layer", "打开图层"),
     ("Open Layer Source", "打开图层源"),

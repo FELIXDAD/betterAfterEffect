@@ -34,6 +34,8 @@ pub struct Params {
     pub kind: ImportKind,
     pub selection: Option<LayerImage>,
     pub parent: Option<PrimPath>,
+    /// Composition or Timeline drop destination.
+    pub comp: Option<PrimPath>,
     pub folder: Option<String>,
     pub replace: Option<PrimPath>,
     #[serde(default)]
@@ -71,7 +73,7 @@ impl Command for ImportPhotoshop {
         if let Some(rel) = &p.folder {
             parent = crate::import::folder_path(tx, &parent, rel)?;
         }
-        if p.kind == ImportKind::Footage {
+        let (item, kind) = if p.kind == ImportKind::Footage {
             let layer = if let Some(sel) = p.selection {
                 Some(
                     p.document
@@ -84,20 +86,31 @@ impl Command for ImportPhotoshop {
             if layer.is_none() && !p.document.merged {
                 return Err(fail("document has no saved composite"));
             }
-            return footage(tx, &p, &parent, layer, p.selection);
+            (
+                footage(tx, &p, &parent, layer, p.selection)?,
+                LayerKind::Footage,
+            )
+        } else {
+            let root = comp(tx, &p, &parent, stem, p.document.size)?;
+            let folder = CreateFolder
+                .run(
+                    tx,
+                    CreateFolderParams {
+                        name: Some(format!("{stem} {}", crate::names::localized("Layers"))),
+                        parent: Some(parent),
+                    },
+                )?
+                .path;
+            stack(tx, &p, &root, &folder, &p.document.layers, [0, 0])?;
+            (root, LayerKind::PreComp)
+        };
+        if p.folder.is_none()
+            && p.replace.is_none()
+            && let Some(target) = &p.comp
+        {
+            crate::import::add_imported_layer(tx, target, kind, &item)?;
         }
-        let root = comp(tx, &p, &parent, stem, p.document.size)?;
-        let folder = CreateFolder
-            .run(
-                tx,
-                CreateFolderParams {
-                    name: Some(format!("{stem} {}", crate::names::localized("Layers"))),
-                    parent: Some(parent),
-                },
-            )?
-            .path;
-        stack(tx, &p, &root, &folder, &p.document.layers, [0, 0])?;
-        Ok(root)
+        Ok(item)
     }
 }
 fn comp(
@@ -166,6 +179,7 @@ fn footage(
                 tx,
                 ImportParams {
                     parent: Some(parent.clone()),
+                    comp: None,
                     files: vec![file],
                 },
             )?

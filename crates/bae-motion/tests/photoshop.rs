@@ -75,16 +75,34 @@ fn import_preserves_stack_masks_type_and_source_styles_and_undoes_once() {
     let mut registry = CommandRegistry::with_builtins();
     bae_motion::register_commands(&mut registry);
     let author = AuthorId::new("test:psd").unwrap();
+    let target = registry
+        .execute(&mut stage, &author, "comp.create", json!({}))
+        .unwrap()
+        .output["path"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let target_layers = PrimPath::new(&target).unwrap().child("layers").unwrap();
     let result = registry
         .execute(
             &mut stage,
             &author,
             "item.import_photoshop",
-            json!({"file":file,"document":doc,
+            json!({"file":file,"document":doc,"comp":target,
         "kind":"retain_size","editable":true,"ignore_styles":false,"fps":30.0}),
         )
         .unwrap();
     let comp = PrimPath::new(result.output.as_str().unwrap()).unwrap();
+    let dropped = stage.children(&target_layers);
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(
+        stage
+            .prim(&dropped[0])
+            .unwrap()
+            .value("source")
+            .and_then(Value::as_prim_ref),
+        Some(&comp)
+    );
     let layers = stage.children(&comp.child("layers").unwrap());
     assert_eq!(layers.len(), 2);
     let title = stage.prim(&layers[0]).unwrap();
@@ -92,7 +110,11 @@ fn import_preserves_stack_masks_type_and_source_styles_and_undoes_once() {
         panic!("expected an editable point text layer")
     };
     assert_eq!(
-        (text.text.as_str(), text.style.font.as_str(), text.style.font_size),
+        (
+            text.text.as_str(),
+            text.style.font.as_str(),
+            text.style.font_size
+        ),
         ("Hello", "TestPS", 18.)
     );
     let group = stage.prim(&layers[1]).unwrap();
@@ -125,4 +147,5 @@ fn import_preserves_stack_masks_type_and_source_styles_and_undoes_once() {
     }
     assert!(stage.undo(&author).is_some());
     assert!(!stage.has_prim(&comp));
+    assert!(stage.children(&target_layers).is_empty());
 }

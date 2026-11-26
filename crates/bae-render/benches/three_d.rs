@@ -125,6 +125,7 @@ fn main() {
                 .map(|k| t - frame_s / 4.0 + frame_s / 2.0 * k as f64 / SAMPLES as f64)
                 .collect();
             c.motion_blur = Some(Arc::new(CompMotionBlur {
+                lights: Vec::new(),
                 times: times.iter().map(|s| Time::from_seconds(*s)).collect(),
                 cameras: times.iter().map(|s| Some(camera(*s))).collect(),
                 adaptive_limit: 128,
@@ -165,6 +166,7 @@ fn main() {
         let mut c = base(f);
         if blur {
             c.motion_blur = Some(Arc::new(CompMotionBlur {
+                lights: Vec::new(),
                 times: (0..SAMPLES).map(|k| Time::from_flicks(k as i64)).collect(),
                 cameras: vec![None; SAMPLES],
                 adaptive_limit: 128,

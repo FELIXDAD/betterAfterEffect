@@ -786,6 +786,28 @@ class AutoResumeTest(Base):
         send.assert_not_called()
 
 
+
+class LabelActorTest(Base):
+    def raw(self, num, actor):
+        return {"number": num, "labels": {"nodes": [{"name": "merge-ready"}]},
+                "timelineItems": {"nodes": [
+                    {"createdAt": "2026-11-26T10:00:00Z", "actor": {"login": "FELIXDAD"}, "label": {"name": "merge-ready"}},
+                    {"createdAt": "2026-11-26T11:00:00Z", "actor": {"login": actor}, "label": {"name": "merge-ready"}},
+                    {"createdAt": "2026-11-26T12:00:00Z", "actor": {"login": "someone"}, "label": {"name": "bug"}}]}}
+
+    def test_latest_queue_label_actor_recorded(self):
+        p = mt._norm_pr(self.raw(1, "colleague"))
+        self.assertEqual(p["queued_by"], "colleague")
+        self.assertEqual(p["queued_at"], "2026-11-26T11:00:00Z")
+
+    def test_only_leader_label_queues(self):
+        prs = [mt._norm_pr(self.raw(1, "FELIXDAD")), mt._norm_pr(self.raw(2, "colleague"))]
+        calls = []
+        with mock.patch.object(mt, "sh", side_effect=lambda cmd, **k: calls.append(cmd) or (0, "", "")):
+            kept = mt.drop_unauthorized(prs)
+        self.assertEqual([p["number"] for p in kept], [1])
+        self.assertIn(["gh", "pr", "edit", "2", "--repo", mt.CFG["repo"], "--remove-label", "merge-ready"], calls)
+
 if __name__ == "__main__":
     unittest.main()
 

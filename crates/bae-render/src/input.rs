@@ -170,6 +170,12 @@ impl RenderComp {
                 for c in &mb.cameras {
                     hash_camera(c, h);
                 }
+                for lights in &mb.lights {
+                    lights.len().hash(h);
+                    for l in lights.iter() {
+                        hash_light(l, h);
+                    }
+                }
             }
         }
         if any_blur && let Some(mb) = &self.motion_blur {
@@ -297,6 +303,8 @@ pub struct RenderLayer {
     pub masks: Vec<RenderMask>,
     /// Effects in stack order (applied through the effect registry).
     pub effects: Vec<RenderEffect>,
+    /// Photoshop styles applied in composition space before the matte and blend.
+    pub layer_styles: Option<RenderEffect>,
     /// 3D layer (AE-CMP-400): layer space → comp space as a 4×4 matrix (anchor,
     /// scale, X/Y/Z rotation, orientation, position, parents). The layer is a
     /// plane seen through [`RenderComp::camera`] and depth sorted with the
@@ -447,6 +455,7 @@ impl RenderLayer {
             adjustment: false,
             masks: Vec::new(),
             effects: Vec::new(),
+            layer_styles: None,
             matrix_3d: None,
             motion_samples: Arc::new([]),
             material: Material::default(),
@@ -468,13 +477,20 @@ impl RenderLayer {
         for m in &self.masks {
             m.hash_into(h);
         }
+        if let Some(styles) = &self.layer_styles {
+            styles.hash_into(h);
+        }
         self.effects.len().hash(h);
         for e in &self.effects {
             e.hash_into(h);
         }
     }
 
-    fn hash_composite(&self, h: &mut impl Hasher, effects: Option<&crate::EffectLibrary>) {
+    pub(crate) fn hash_composite(
+        &self,
+        h: &mut impl Hasher,
+        effects: Option<&crate::EffectLibrary>,
+    ) {
         self.path.hash(h);
         self.hash_content(h, effects);
         for v in self.transform.to_cols_array() {
@@ -549,6 +565,26 @@ pub(crate) fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
         c.zoom.to_bits().hash(h);
         if let crate::camera::Projection::Orthographic { scale } = c.projection {
             scale.to_bits().hash(h);
+        }
+        // Depth of field changes the pixels of 3D layers.
+        c.depth_of_field.hash(h);
+        if c.depth_of_field {
+            let i = &c.iris;
+            for v in [
+                c.focus_distance,
+                c.aperture,
+                c.blur_level,
+                i.rotation,
+                i.roundness,
+                i.aspect_ratio,
+                i.diffraction_fringe,
+                i.highlight_gain,
+                i.highlight_threshold,
+                i.highlight_saturation,
+            ] {
+                v.to_bits().hash(h);
+            }
+            i.shape.hash(h);
         }
     }
 }

@@ -177,7 +177,15 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "footage",
-        PanelKind::new("Footage", |_| Box::new(FootagePanel::default())),
+        PanelKind::new("Footage", |spawn| {
+            Box::new(FootagePanel {
+                display: spawn
+                    .state
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default(),
+                ..Default::default()
+            })
+        }),
     );
 }
 
@@ -185,6 +193,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 #[derive(Default)]
 pub struct FootagePanel {
     gpu: Option<Gpu>,
+    display: crate::source_view_menu::SourceView,
     /// Time inside the footage.
     time: Time,
     /// The footage the time belongs to.
@@ -221,6 +230,14 @@ impl FootagePanel {
 }
 
 impl Panel for FootagePanel {
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        self.display.menu(ui);
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(&self.display).ok()
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Footage <name>", "Footage (none)" when empty.
         let name = Self::footage(cx).map_or_else(|| tr("(none)").to_owned(), |f| f.name);
@@ -239,19 +256,23 @@ impl Panel for FootagePanel {
         let bottom = BAR + if timed { RULER } else { 0.0 };
         let view = Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - bottom));
         let p = ui.painter_at(full);
-        p.rect_filled(view, 0.0, Color32::from_gray(35));
+        p.rect_filled(view, 0.0, self.display.background(ui));
         let mut zoom = None;
         if let Some(f) = &footage {
             let stage = cx.stage;
             let time = self.time;
             if let Some(handle) = self.gpu(cx).and_then(|g| g.frame(stage, f, time)) {
                 let [w, h] = f.size.map(|v| v.max(1) as f32);
+                let w = w * self.display.aspect(stage, Some(&f.asset));
                 // Fit (AE's default magnification for the Footage panel), never
                 // above 100 %.
                 let scale = ((view.width() - 20.0) / w)
                     .min((view.height() - 20.0) / h)
                     .clamp(0.01, 1.0);
                 let r = Rect::from_center_size(view.center(), vec2(w, h) * scale);
+                if self.display.grid {
+                    crate::viewer::checkerboard(&p, r.intersect(view));
+                }
                 p.image(
                     egui::TextureId::User(handle),
                     r,
