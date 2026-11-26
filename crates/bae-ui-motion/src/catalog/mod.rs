@@ -62,7 +62,7 @@ pub fn menu_zh() -> &'static [(&'static str, &'static str)] {
     blob::tables().zh
 }
 
-/// AE 26's effects by category (the Effect menu lists them, greying the
+/// AE 26's effects by category (299; the Effect menu lists them, greying the
 /// ones no effect module implements).
 pub fn ae_effects() -> &'static [AeEffect] {
     blob::tables().effects

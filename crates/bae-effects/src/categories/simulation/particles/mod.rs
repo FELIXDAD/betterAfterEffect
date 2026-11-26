@@ -36,8 +36,9 @@ pub(crate) enum Kind {
     Foam = 15,
     Wave = 16,
     Caustics = 17,
-    Classic,
-    ClassicLe,
+    // `classic.wgsl` names these two.
+    Classic = 18,
+    ClassicLe = 19,
 }
 
 pub(crate) fn builtin(kind: Kind) -> Builtin {

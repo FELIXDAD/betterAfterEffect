@@ -133,7 +133,7 @@ Particle World 和 Particle Systems II 共用 GPU 粒子引擎。出生率的时
 
 ### 旧版粒子和 Photoshop 样式
 
-效果菜单的“旧版”分类提供两个 CC PS Classic 粒子效果和五个 Photoshop 样式。粒子共用现有 GPU 发射与绘制流程，按旧版 Animation 选项近似轨迹与形状。五个样式沿用 #625 的 GPU 着色实现。
+两个 CC PS Classic 粒子效果和五个 Photoshop 样式都已注册，但和 AE 26 一样不出现在效果菜单里（AE 把它们放在隐藏的 `_Obsolete` 类别）；旧工程和脚本可以按 matchName 添加。粒子共用现有 GPU 发射与绘制流程，按旧版 Animation 选项近似轨迹与形状。五个样式沿用 #625 的 GPU 着色实现。
 
 ### 后放效果第一批（2026-11-26）
 
