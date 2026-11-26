@@ -264,6 +264,9 @@ pub struct Session {
     pub playback: Option<Playback>,
     pub(crate) playback_stats: PlaybackStats,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    output_config: bae_media::playback::OutputConfig,
+    output_devices: Arc<bae_media::playback::OutputDevices>,
+    refreshing_devices: bool,
     audio_mapping: (bool, bool),
     pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
@@ -371,6 +374,9 @@ impl SharedSession {
         s.stop();
         let fresh = Session {
             output: s.output.take(),
+            output_config: std::mem::take(&mut s.output_config),
+            output_devices: std::mem::take(&mut s.output_devices),
+            refreshing_devices: s.refreshing_devices,
             audio_mapping: s.audio_mapping,
             retry_audio_after: s.retry_audio_after.take(),
             opening_audio: s.opening_audio,
@@ -381,25 +387,82 @@ impl SharedSession {
     }
 
     /// Called on a background thread. Device negotiation may block in the OS.
-    pub(crate) fn open_audio(&self) -> Result<(), String> {
-        let device = bae_media::playback::AudioOutput::open();
-        let mut s = self.lock();
-        s.opening_audio = false;
-        match device {
-            Ok(output) => {
-                output.set_channel_mapping(s.audio_mapping.0, s.audio_mapping.1);
-                output.set_gain(10.0_f32.powf(s.master_db / 20.0));
-                let previous = s.output.replace(output);
-                s.mix_revision = None;
-                s.retry_audio_after = None;
+    fn open_audio(&self) -> Result<(), String> {
+        bae_gpu::warm_up::lower_priority();
+        let devices = bae_media::playback::OutputDevices::enumerate();
+        self.lock().output_devices = Arc::new(devices);
+        loop {
+            let config = self.lock().output_config.clone();
+            let device = bae_media::playback::AudioOutput::open_with(&config);
+            let mut s = self.lock();
+            if s.output_config != config {
                 drop(s);
-                drop(previous);
-                Ok(())
+                continue;
             }
-            Err(error) => {
-                s.retry_audio_after = Some(Instant::now() + std::time::Duration::from_secs(2));
-                Err(error)
-            }
+            s.opening_audio = false;
+            return match device {
+                Ok(output) => {
+                    output.set_channel_mapping(s.audio_mapping.0, s.audio_mapping.1);
+                    output.set_gain(10.0_f32.powf(s.master_db / 20.0));
+                    let previous = s.output.replace(output);
+                    s.mix_revision = None;
+                    s.retry_audio_after = None;
+                    drop(s);
+                    drop(previous);
+                    Ok(())
+                }
+                Err(error) => {
+                    let previous = s.output.take();
+                    s.audio_clock = false;
+                    s.mix_revision = None;
+                    s.retry_audio_after = Some(Instant::now() + std::time::Duration::from_secs(2));
+                    drop(s);
+                    drop(previous);
+                    Err(error)
+                }
+            };
+        }
+    }
+
+    /// Reconnect when committed audio preferences change. Keep driver calls off the UI thread.
+    pub fn configure_output(&self, device_id: &str, latency_ms: u32) {
+        let mut s = self.lock();
+        if s.output_config.device_id == device_id && s.output_config.latency_ms == latency_ms {
+            return;
+        }
+        s.output_config = bae_media::playback::OutputConfig {
+            device_id: device_id.to_owned(),
+            latency_ms,
+        };
+        if s.opening_audio {
+            return;
+        }
+        s.opening_audio = true;
+        drop(s);
+        self.spawn_audio_worker();
+    }
+
+    /// Refresh the device picker when opened after a device was plugged in.
+    pub fn refresh_output_devices(&self) {
+        let mut s = self.lock();
+        if s.refreshing_devices || s.opening_audio {
+            return;
+        }
+        s.refreshing_devices = true;
+        drop(s);
+        let session = self.clone();
+        if std::thread::Builder::new()
+            .name("bae-audio-endpoints".into())
+            .spawn(move || {
+                bae_gpu::warm_up::lower_priority();
+                let devices = Arc::new(bae_media::playback::OutputDevices::enumerate());
+                let mut s = session.lock();
+                s.output_devices = devices;
+                s.refreshing_devices = false;
+            })
+            .is_err()
+        {
+            self.lock().refreshing_devices = false;
         }
     }
 
@@ -417,6 +480,10 @@ impl SharedSession {
             }
             s.opening_audio = true;
         }
+        self.spawn_audio_worker();
+    }
+
+    fn spawn_audio_worker(&self) {
         let session = self.clone();
         if let Err(error) = std::thread::Builder::new()
             .name("bae-audio-device".into())
@@ -472,6 +539,19 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    /// The latest background enumeration for the audio preferences.
+    pub fn output_devices(&self) -> &bae_media::playback::OutputDevices {
+        &self.output_devices
+    }
+    /// The device worker will publish an updated stream or picker.
+    pub fn audio_device_pending(&self) -> bool {
+        self.opening_audio || self.refreshing_devices
+    }
+    /// Device-reported buffer duration of the active output stream.
+    pub fn audio_buffer_ms(&self) -> Option<f64> {
+        let output = self.output.as_ref().filter(|o| !o.device_lost())?;
+        Some(1000.0 * f64::from(output.buffer_frames()?) / f64::from(output.sample_rate()))
+    }
     /// Apply the channel mapping to the active stream and any replacement device.
     pub fn set_audio_mapping(&mut self, left_to_second: bool, right_to_first: bool) {
         self.audio_mapping = (left_to_second, right_to_first);

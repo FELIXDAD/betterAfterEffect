@@ -53,7 +53,11 @@ pub fn register(app: &mut bae_app::AppBuilder) {
         .filter(|(en, _)| !crate::i18n::has_translation(en))
         .collect();
     crate::i18n::register(&new);
-    crate::i18n::register(&[("System Default", "系统默认值")]);
+    crate::i18n::register(&[
+        ("System Default", "系统默认值"),
+        ("Output device unavailable", "输出设备不可用"),
+        ("Current device buffer", "当前设备缓冲区"),
+    ]);
     let zh = |en: &'static str| bae_prefs::i18n::zh(en).unwrap_or(en);
     let owner = app.current_owner();
     let actions = app.registry::<crate::ActionInfo>();
@@ -304,8 +308,11 @@ pub struct SettingsDialog {
     draft: Preferences,
     requests: Vec<Request>,
     audio_device: String,
+    system_output: String,
+    audio_outputs: std::sync::Arc<[(String, String)]>,
     audio_channels: u16,
     audio_rate: u32,
+    audio_buffer_ms: Option<f64>,
     /// Buttons the host implements (others are drawn disabled); `choose` stands
     /// for every Choose… button.
     host_buttons: Vec<String>,
@@ -316,13 +323,24 @@ pub struct SettingsDialog {
 
 impl SettingsDialog {
     /// Update the Audio page from the already-open preview stream.
-    pub fn set_audio_output(&mut self, output: Option<(&str, u16, u32)>) {
+    pub fn set_audio_output(
+        &mut self,
+        output: Option<(&str, u16, u32)>,
+        buffer_ms: Option<f64>,
+        system_output: &str,
+        outputs: std::sync::Arc<[(String, String)]>,
+    ) {
+        if self.system_output != system_output {
+            system_output.clone_into(&mut self.system_output);
+        }
+        self.audio_outputs = outputs;
         let (name, channels, rate) = output.unwrap_or(("", 0, 0));
         if self.audio_device != name {
             name.clone_into(&mut self.audio_device);
         }
         self.audio_channels = channels;
         self.audio_rate = rate;
+        self.audio_buffer_ms = buffer_ms;
     }
 
     /// Buttons the host handles from [`Self::take_requests`]; every other button
@@ -691,17 +709,39 @@ impl SettingsDialog {
                 }
                 ui.label(RichText::new(tr(right)).color(color::TEXT_DIM));
             }
+            Kind::AudioOutput => {
+                field_label(ui, shown);
+                let device = if self.system_output.is_empty() {
+                    "—"
+                } else {
+                    &self.system_output
+                };
+                let system = format!("{} - {device}", tr("System Default"));
+                let mut choices = vec![("system_default", system.as_str())];
+                choices.extend(
+                    self.audio_outputs
+                        .iter()
+                        .map(|(id, name)| (id.as_str(), name.as_str())),
+                );
+                let current = draft.str(p.key);
+                let mut selected = choices
+                    .iter()
+                    .position(|(id, _)| *id == current)
+                    .unwrap_or_else(|| {
+                        choices.push((current, tr("Output device unavailable")));
+                        choices.len() - 1
+                    });
+                let labels: Vec<_> = choices.iter().map(|(_, name)| *name).collect();
+                if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0).changed() {
+                    draft.set(p.key, choices[selected].0.to_owned());
+                }
+            }
             Kind::Choice { options, style } => {
                 let current = draft.str(p.key).to_owned();
                 match style {
                     Style::Dropdown => {
                         field_label(ui, shown);
-                        if matches!(
-                            p.key,
-                            "audio.audio_default_output"
-                                | "audio.audio_map_left"
-                                | "audio.audio_map_right"
-                        ) {
+                        if matches!(p.key, "audio.audio_map_left" | "audio.audio_map_right") {
                             let device = if self.audio_device.is_empty() {
                                 "—"
                             } else {
@@ -709,9 +749,7 @@ impl SettingsDialog {
                             };
                             let mut selected =
                                 options.iter().position(|o| o.value == current).unwrap_or(0);
-                            let names = if p.key == "audio.audio_default_output" {
-                                vec![format!("{} - {device}", tr("System Default"))]
-                            } else if self.audio_channels == 0 {
+                            let names = if self.audio_channels == 0 {
                                 vec!["—".to_owned()]
                             } else {
                                 (1..=self.audio_channels.clamp(1, 2))
@@ -731,7 +769,16 @@ impl SettingsDialog {
                         }
                         let names: Vec<&str> = options.iter().map(|o| tr(o.label)).collect();
                         let mut i = options.iter().position(|o| o.value == current).unwrap_or(0);
-                        if widgets::dropdown(ui, p.key, &mut i, &names, 220.0).changed() {
+                        let response = widgets::dropdown(ui, p.key, &mut i, &names, 220.0);
+                        if p.key == "audio.audio_latency_ms"
+                            && let Some(ms) = self.audio_buffer_ms
+                        {
+                            response.clone().on_hover_text(format!(
+                                "{}: {ms:.1} ms",
+                                tr("Current device buffer")
+                            ));
+                        }
+                        if response.changed() {
                             draft.set(p.key, options[i].value);
                         }
                     }
