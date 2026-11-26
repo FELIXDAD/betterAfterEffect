@@ -449,7 +449,10 @@ impl Panel for FlowchartPanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let full = ui.max_rect();
+        if let Some(progress) = crate::render_queue::panel_progress(cx.resources, cx.stage) {
+            ui.label(progress);
+        }
+        let full = ui.available_rect_before_wrap();
         let canvas = ui.allocate_rect(full, Sense::click_and_drag());
         let p = ui.painter_at(full);
         p.rect_filled(full, 0.0, Color32::from_gray(35));

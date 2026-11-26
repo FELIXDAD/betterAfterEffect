@@ -124,6 +124,7 @@ pub fn apply(prefs: &Preferences) {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
+    crate::theme::set_accessible_contrast(prefs.bool("appearance.accessibility_color_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
     ));
