@@ -446,6 +446,22 @@ impl Workspace {
         self.workbench.keymap()
     }
 
+    /// Remember the workspace independently of project edits and undo.
+    pub fn remember_project_workspace(&self, doc: &mut Document) {
+        doc.set_manifest_field("workspace", Some(self.active_workspace().into()));
+    }
+
+    pub fn restore_project_workspace(&mut self, doc: &Document) {
+        if !self
+            .prefs
+            .current()
+            .bool("project.preserve_current_workspace_on_open")
+            && let Some(id) = doc.manifest_field("workspace").and_then(|v| v.as_str())
+        {
+            self.workbench.switch_workspace(id);
+        }
+    }
+
     /// Id of the active workspace.
     pub fn active_workspace(&self) -> &str {
         self.workbench.active_workspace()

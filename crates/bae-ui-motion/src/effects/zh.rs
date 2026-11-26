@@ -49,4 +49,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("New Text", "新建文本"),
     ("Edit Text", "编辑文本"),
     ("Change Path", "更改路径"),
+    ("Browse...", "浏览..."),
+    ("Load your own LUT", "需要自行加载 LUT"),
+    ("Loading LUT…", "正在加载 LUT…"),
 ];

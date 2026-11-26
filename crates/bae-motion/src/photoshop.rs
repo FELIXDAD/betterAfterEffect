@@ -50,6 +50,7 @@ pub struct Params {
     pub fps: f64,
     pub duration: Option<Time>,
     pub label: Option<i64>,
+    pub folder_label: Option<i64>,
 }
 pub struct ImportPhotoshop;
 impl Command for ImportPhotoshop {
@@ -100,6 +101,7 @@ impl Command for ImportPhotoshop {
                     CreateFolderParams {
                         name: Some(format!("{stem} {}", crate::names::localized("Layers"))),
                         parent: Some(parent),
+                        label: p.folder_label,
                     },
                 )?
                 .path;
