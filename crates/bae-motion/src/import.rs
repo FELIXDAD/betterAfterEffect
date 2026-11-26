@@ -44,6 +44,9 @@ pub struct ImportFile {
 #[derive(Deserialize, JsonSchema)]
 pub struct ImportParams {
     pub files: Vec<ImportFile>,
+    /// Label of newly created folders in a directory import.
+    #[serde(default)]
+    pub folder_label: Option<i64>,
     /// Project folder to import into (default the assets folder).
     #[serde(default)]
     pub parent: Option<PrimPath>,
@@ -87,6 +90,8 @@ const ATTRS: &[&str] = &[
     "loop",
     "label",
     "color_space",
+    "timecode:start_frame",
+    "timecode:drop_frame",
 ];
 
 /// The folder `rel` (`a/b`) under `parent`, created as needed (matched by
@@ -95,6 +100,7 @@ pub(crate) fn folder_path(
     tx: &mut Transaction<'_>,
     parent: &PrimPath,
     rel: &str,
+    label: Option<i64>,
 ) -> Result<PrimPath, CommandError> {
     let mut cur = parent.clone();
     for part in rel.split('/').map(str::trim).filter(|p| !p.is_empty()) {
@@ -106,12 +112,7 @@ pub(crate) fn folder_path(
         });
         cur = match existing {
             Some(c) => c,
-            None => {
-                let path = child(&cur, &query::unique_child_name(tx.stage(), &cur, part))?;
-                create(tx, &path, PrimType::FOLDER, None)?;
-                set(tx, &path, "name", Value::String(part.to_owned()))?;
-                path
-            }
+            None => crate::comp::create_project_folder(tx, &cur, part.to_owned(), label)?,
         };
     }
     Ok(cur)
@@ -170,7 +171,7 @@ impl Command for ImportItems {
                 return Err(fail(format!("{bad} is not a footage attribute")));
             }
             let folder = match f.folder.as_deref() {
-                Some(rel) => folder_path(tx, &parent, rel)?,
+                Some(rel) => folder_path(tx, &parent, rel, p.folder_label)?,
                 None => parent.clone(),
             };
             let name = f
@@ -241,6 +242,9 @@ pub struct ReplaceFileParams {
     /// Keep the item's name (File > Reload Footage reads the same file again).
     #[serde(default)]
     pub keep_name: bool,
+    /// Reapply the current interpretation to the replacement file.
+    #[serde(default)]
+    pub keep_interpretation: bool,
 }
 
 impl Command for ReplaceFile {
@@ -258,15 +262,29 @@ impl Command for ReplaceFile {
         if !view.is_a(&PrimType::ASSET) || kind == "solid" {
             return Err(fail(format!("{} is not a footage item", p.item)));
         }
-        if bae_model::psd::LayerImage::from_asset(&view).is_some() {
-            let styles = child(&p.item, bae_model::layer_styles::PRIM)?;
-            crate::effect::delete_all(tx, &[styles, child(&p.item, "masks")?])?;
-        }
         let path = Path::new(&p.file.path);
         let file = AssetFile::from_path(path, None, false)
             .map_err(|e| fail(format!("cannot use {}: {e}", p.file.path)))?;
         if let Some(bad) = p.file.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
             return Err(fail(format!("{bad} is not a footage attribute")));
+        }
+        let mut attrs = p.file.attrs;
+        // An item's label belongs to the project. Imported labels only initialize new items.
+        attrs.remove("label");
+        let original_rate = attrs.get("frame_rate").cloned();
+        let mut stored_file_rate = None;
+        if p.keep_interpretation {
+            for key in ["alpha_mode", "pixel_aspect", "loop", "color_space"] {
+                if let Some(value) = view.value(key) {
+                    attrs.insert(key.to_owned(), value.clone());
+                }
+            }
+            if view.value(crate::interpret::FILE_FRAME_RATE).is_some()
+                && let (Some(rate), Some(assumed)) = (original_rate, view.value("frame_rate"))
+            {
+                attrs.insert("frame_rate".into(), assumed.clone());
+                stored_file_rate = Some(rate);
+            }
         }
         let name = p
             .file
@@ -274,13 +292,17 @@ impl Command for ReplaceFile {
             .filter(|n| !n.trim().is_empty())
             .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "Footage".to_owned());
+        if bae_model::psd::LayerImage::from_asset(&view).is_some() {
+            let styles = child(&p.item, bae_model::layer_styles::PRIM)?;
+            crate::effect::delete_all(tx, &[styles, child(&p.item, "masks")?])?;
+        }
         if !p.keep_name {
             set(tx, &p.item, "name", Value::String(name))?;
         }
         // What the old file had and the new one does not say goes back to its
         // default (a sequence pattern, a duration of a movie …); the label stays.
         for attr in ATTRS.iter().filter(|a| **a != "label" && **a != "kind") {
-            if !p.file.attrs.contains_key(*attr) {
+            if !attrs.contains_key(*attr) {
                 tx.apply(bae_model::Op::SetValue {
                     path: p.item.clone(),
                     attr: (*attr).to_owned(),
@@ -288,10 +310,22 @@ impl Command for ReplaceFile {
                 })?;
             }
         }
-        if !p.file.attrs.contains_key("kind") {
+        tx.apply(bae_model::Op::SetValue {
+            path: p.item.clone(),
+            attr: crate::interpret::FILE_FRAME_RATE.into(),
+            value: stored_file_rate,
+        })?;
+        if !p.keep_interpretation {
+            tx.apply(bae_model::Op::SetValue {
+                path: p.item.clone(),
+                attr: "premultiply_color".into(),
+                value: None,
+            })?;
+        }
+        if !attrs.contains_key("kind") {
             set(tx, &p.item, "kind", Value::Enum("footage".into()))?;
         }
-        for (attr, value) in p.file.attrs {
+        for (attr, value) in attrs {
             set(tx, &p.item, &attr, value)?;
         }
         set(

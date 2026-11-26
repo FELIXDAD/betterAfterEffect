@@ -331,6 +331,8 @@ impl<'a> MockPass<'a> {
                 }),
                 None => BlendMode::Normal,
             };
+            out.quality =
+                bae_anim::LayerQuality::from_token(string(layer, "quality", local).as_deref());
             out.preserve_transparency =
                 boolean(layer, "preserve_transparency", local).unwrap_or(false);
             out.track_matte = string(layer, "track_matte", local)

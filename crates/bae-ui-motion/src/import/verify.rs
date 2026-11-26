@@ -49,12 +49,6 @@ impl FrameChecks {
             .pop_front()
             .map(|(title, message)| Dialog::Alert { title, message })
     }
-
-    pub(crate) fn repaint_while_running(&self, ctx: &egui::Context) {
-        if self.running {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        }
-    }
 }
 
 pub(super) fn report(cx: &PanelContext<'_>, title: &str, mut result: Probed) {
@@ -107,13 +101,23 @@ pub(super) fn report(cx: &PanelContext<'_>, title: &str, mut result: Probed) {
     }
 }
 
+/// Clears `running` however the worker ends (a decoder panic on a damaged
+/// frame included), so later imports are checked again.
+struct Running<'a>(&'a SharedDialogs);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.lock().frame_checks.running = false;
+    }
+}
+
 fn run(dialogs: &SharedDialogs) {
     bae_gpu::warm_up::lower_priority();
+    let _running = Running(dialogs);
     loop {
         let (title, path, name, mode) = {
             let mut d = dialogs.lock();
             let Some(job) = d.frame_checks.pending.pop_front() else {
-                d.frame_checks.running = false;
                 return;
             };
             job
@@ -124,6 +128,9 @@ fn run(dialogs: &SharedDialogs) {
                 .frame_checks
                 .notices
                 .push_back((title, message));
+            // The dialog host shows it on the next frame: wake the UI then,
+            // not on a timer while the check runs.
+            bae_gpu::warm_up::request_redraw();
         }
     }
 }

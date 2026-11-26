@@ -136,6 +136,46 @@ impl KeyPlan {
         let ct = query::to_comp_time(stage, &k.path, k.time);
         query::to_key_time(stage, &k.path, self.map(ct))
     }
+
+    /// The dragged properties as the release will leave them, for the live
+    /// preview (#593).
+    pub(super) fn preview(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        let mut out: Vec<bae_anim::AttrOverride> = Vec::new();
+        let mut groups: Vec<(&PrimPath, &str)> = Vec::new();
+        for k in &self.keys {
+            if !groups.iter().any(|(p, a)| *p == &k.path && *a == k.attr) {
+                groups.push((&k.path, &k.attr));
+            }
+        }
+        for (path, attr) in groups {
+            let Some(spec) = query::attr_spec(stage, path, attr) else {
+                continue;
+            };
+            let edits: Vec<KeyEdit> = self
+                .keys
+                .iter()
+                .filter(|k| k.path == *path && k.attr == attr)
+                .filter_map(|k| {
+                    let nt = self.key_time(stage, k);
+                    (nt != k.time).then(|| {
+                        let mut e = KeyEdit::new(k.clone());
+                        e.time = Some(nt);
+                        e
+                    })
+                })
+                .collect();
+            if edits.is_empty() {
+                continue;
+            }
+            let mine: Vec<&KeyEdit> = edits.iter().collect();
+            out.push(bae_anim::AttrOverride {
+                prim: path.clone(),
+                attr: attr.to_owned(),
+                spec: bae_motion::apply_key_edits(attr, spec, &mine).0,
+            });
+        }
+        out
+    }
 }
 
 impl TimelinePanel {
@@ -409,6 +449,9 @@ impl TimelinePanel {
                 .collect()
         };
         let mut s = session.lock();
+        if let Some(k) = s.key_preview.as_mut().filter(|k| k.owner == "bars") {
+            k.committed = Some((stage.revision(), std::time::Instant::now()));
+        }
         s.expect(crate::session::Pending::Keys(moved.clone()));
         s.selected_keys = moved;
     }

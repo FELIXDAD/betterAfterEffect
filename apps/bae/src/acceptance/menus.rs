@@ -621,7 +621,7 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
     g.workspace.show_role_picker();
     let mut h = gui_with(g);
     settle(&mut h);
-    // `Workspace::modal_open` is what the shell checks for native menu commands.
+    // The first-run role picker is modal for native menu commands and keyboard events.
     assert!(h.state().workspace.modal_open(h.state().app.resources()));
     for (m, k) in [
         (Modifiers::COMMAND, Key::N),

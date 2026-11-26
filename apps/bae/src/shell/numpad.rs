@@ -92,9 +92,93 @@ pub fn rewrite(
     });
 }
 
+/// Windows lets go of Shift for a moment around a numpad key pressed with
+/// NumLock on (a fake Shift up, the key as its navigation key, a fake Shift
+/// down), so Shift+numpad 3 (or Shift+Page Down sent with the numpad's scan
+/// code) arrives as a bare Page Down. AE still reads Shift+Page Down (10
+/// frames, #468): a navigation key from the numpad right after Shift went up
+/// keeps Shift.
+pub fn restore_shift(
+    events: &mut [egui::Event],
+    from: usize,
+    code: KeyCode,
+    logical: &winit::keyboard::Key,
+    shift_up: Option<std::time::Instant>,
+) {
+    use winit::keyboard::{Key, NamedKey};
+    let numpad = matches!(
+        code,
+        KeyCode::Numpad0
+            | KeyCode::Numpad1
+            | KeyCode::Numpad2
+            | KeyCode::Numpad3
+            | KeyCode::Numpad4
+            | KeyCode::Numpad5
+            | KeyCode::Numpad6
+            | KeyCode::Numpad7
+            | KeyCode::Numpad8
+            | KeyCode::Numpad9
+            | KeyCode::NumpadDecimal
+    );
+    let navigation = matches!(
+        logical,
+        Key::Named(
+            NamedKey::PageUp
+                | NamedKey::PageDown
+                | NamedKey::Home
+                | NamedKey::End
+                | NamedKey::ArrowUp
+                | NamedKey::ArrowDown
+                | NamedKey::ArrowLeft
+                | NamedKey::ArrowRight
+                | NamedKey::Insert
+                | NamedKey::Delete
+        )
+    );
+    let just_up = shift_up.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(50));
+    if !(cfg!(windows) && numpad && navigation && just_up) {
+        return;
+    }
+    for e in events.iter_mut().skip(from) {
+        if let egui::Event::Key { modifiers, .. } = e {
+            modifiers.shift = true;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shift+Page Down from the numpad on Windows: Shift released a moment
+    /// before the key still counts (#468); a Page Down long after does not.
+    #[test]
+    #[cfg(windows)]
+    fn numpad_navigation_keeps_a_just_released_shift() {
+        use winit::keyboard::{Key, NamedKey};
+        let page_down = || egui::Event::Key {
+            key: egui::Key::PageDown,
+            physical_key: Some(egui::Key::Num3),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let shifted =
+            |e: &egui::Event| matches!(e, egui::Event::Key { modifiers, .. } if modifiers.shift);
+        let logical = Key::Named(NamedKey::PageDown);
+        let mut events = vec![page_down()];
+        let now = std::time::Instant::now();
+        restore_shift(&mut events, 0, KeyCode::Numpad3, &logical, Some(now));
+        assert!(shifted(&events[0]));
+        let mut events = vec![page_down()];
+        let long_ago = now.checked_sub(std::time::Duration::from_secs(1));
+        restore_shift(&mut events, 0, KeyCode::Numpad3, &logical, long_ago);
+        assert!(!shifted(&events[0]));
+        // The dedicated Page Down key is left alone.
+        let mut events = vec![page_down()];
+        restore_shift(&mut events, 0, KeyCode::PageDown, &logical, Some(now));
+        assert!(!shifted(&events[0]));
+    }
 
     /// Alt pressed after the last frame still counts for numpad `*` (#537).
     #[test]

@@ -11,9 +11,11 @@ fn rulers_guides_and_snapping_to_guides() {
     tool_action(&h, "motion.view.show_rulers", json!({}));
     assert!(h.session().lock().view_options.rulers);
     h.frame(Vec::new(), Modifiers::NONE);
-    // Out of the top ruler (y 0–16) to comp y ≈ 100.
+    // Out of the top ruler (16 points under the Composition Navigator) to
+    // comp y ≈ 100.
+    let ruler = crate::viewer::navigator::HEIGHT + 8.0;
     let to = h.screen(320.0, 100.0);
-    let from = egui::pos2(to.x, 8.0);
+    let from = egui::pos2(to.x, ruler);
     h.move_to(from, Modifiers::NONE, Vec::new());
     h.pointer_button(from, true, Modifiers::NONE);
     for i in 1..=4 {
@@ -45,12 +47,12 @@ fn rulers_guides_and_snapping_to_guides() {
     h.pointer_button(on, true, Modifiers::NONE);
     for i in 1..=4 {
         h.move_to(
-            on + (egui::pos2(on.x, 8.0) - on) * (i as f32 / 4.0),
+            on + (egui::pos2(on.x, ruler) - on) * (i as f32 / 4.0),
             Modifiers::NONE,
             Vec::new(),
         );
     }
-    let r = h.pointer_button(egui::pos2(on.x, 8.0), false, Modifiers::NONE);
+    let r = h.pointer_button(egui::pos2(on.x, ruler), false, Modifiers::NONE);
     h.apply(&r);
     assert!(crate::viewer::guides::guides_of(&h.stage, &h.comp).is_empty());
 }

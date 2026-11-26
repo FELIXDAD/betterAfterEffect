@@ -238,11 +238,13 @@ impl PhotoshopDialog {
         replace: Option<&PrimPath>,
         reload: bool,
     ) {
-        let folder_label = crate::prefs::current(cx.resources).int("labels.label_default_folder");
+        let prefs = crate::prefs::current(cx.resources);
+        let keep = reload || prefs.str("import.footage_interpretation_on_replace") == "remember";
+        let folder_label = prefs.int("labels.label_default_folder");
         cx.invoke_with("item.import_photoshop", serde_json::json!({
             "folder_label": folder_label,
             "file": self.path, "document": doc, "kind": self.kind, "selection": selection,
-            "parent": self.parent, "comp": self.comp, "folder": self.folder, "replace": replace, "keep_name": reload,
+            "parent": self.parent, "comp": self.comp, "folder": self.folder, "replace": replace, "keep_name": reload, "keep_interpretation": keep,
             "editable": self.editable, "ignore_styles": self.kind == ImportKind::Footage && self.ignore,
             "fps": self.defaults.sequence_fps, "duration": self.defaults.still_duration,
             "label": self.defaults.labels.map(|labels| labels[0])
