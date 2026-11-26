@@ -264,6 +264,30 @@ fn params(
         if param.flags.hidden || hidden_from.is_some_and(|d| depth >= d) {
             continue;
         }
+        if def.match_name == "ADBE Param EQ" && param.kind == ParamKind::Display {
+            ui.label(super::param_label(&def.match_name, param));
+            let rate = session
+                .lock()
+                .output
+                .as_ref()
+                .map_or(48_000, |output| output.sample_rate());
+            super::eq_response::show(ui, rate, |id| {
+                common::current_value(
+                    eval.get(cx.resources),
+                    cx.stage,
+                    effect,
+                    &param_attr(id),
+                    now,
+                )
+                .or_else(|| def.param(id)?.default.clone())
+                .and_then(|v| {
+                    v.as_f64()
+                        .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
+                })
+                .unwrap_or_default()
+            });
+            continue;
+        }
         param_row(ui, cx, session, eval, state, effect, def, param, depth, now);
     }
 }
@@ -295,8 +319,8 @@ fn param_row(
         .lock()
         .scrub
         .as_ref()
-        .filter(|s| s.path == *effect && s.attr == attr)
-        .map(|s| s.value.clone())
+        .and_then(|s| s.value_for(effect, &attr))
+        .cloned()
         .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
         .or_else(|| {
             let layer = super::layer_of(effect)?;
@@ -346,6 +370,26 @@ fn param_row(
             color::TEXT,
             r.width(),
         );
+        if def.match_name.starts_with("ADBE OCIO ") {
+            if param.id==1 && matches!(param.kind,ParamKind::Button){
+                let is_cdl=def.match_name=="ADBE OCIO CDL Transform";
+                let data_id=if is_cdl{6}else{5};
+                let stored=common::current_value(eval.get(cx.resources),stage,effect,&param_attr(data_id),now);
+                let filename=stored.as_ref().and_then(|v|match v{Value::Bytes(data)=>data.split(|b|*b==0).next().and_then(|s|std::str::from_utf8(s).ok()),_=>None});
+                if ui.button(filename.unwrap_or(tr("Open..."))).clicked(){
+                    cx.invoke_with("motion.effect.open_color_file",json!({"path":effect,"time":query::to_key_time(stage,effect,now),"cdl":is_cdl}));
+                }
+                return;
+            }
+            if param.name=="Reset Controls" {
+                if ui.button(tr("Reset")).clicked(){reset(cx,effect,now);}
+                return;
+            }
+            if param.name=="Information"{
+                ui.label(if super::chinese(){"OCIO 配置"}else{"OCIO config"}).on_hover_text(std::env::var("OCIO").unwrap_or_else(|_|"BAE".to_owned()));
+                return;
+            }
+        }
         let disabled = param.flags.disabled;
         if disabled && matches!(param.kind, ParamKind::Layer | ParamKind::Path) {
             // Layer / mask inputs the renderer does not feed yet.
@@ -453,7 +497,13 @@ fn value_control(
         }
         ParamKind::Popup { .. } => {
             let options = super::option_labels(&def.match_name, param);
-            let current = popup_index(value).clamp(1, options.len().max(1) as i64);
+            let raw = popup_index(value);
+            let current = if def.match_name.starts_with("ADBE OCIO ") && raw > options.len() as i64
+            {
+                1
+            } else {
+                raw.clamp(1, options.len().max(1) as i64)
+            };
             let shown = options
                 .get(current as usize - 1)
                 .cloned()
@@ -496,14 +546,19 @@ fn value_control(
         ParamKind::Layer => layer_picker(ui, cx, effect, id, value),
         ParamKind::Path => mask_picker(ui, cx, effect, id, value),
         ParamKind::Button => {
-            ui.add_enabled(false, egui::Button::new(label));
+            let caption = if label.is_empty() {
+                tr(&param.name)
+            } else {
+                label
+            };
+            ui.add_enabled(false, egui::Button::new(caption));
             Edit::None
         }
         ParamKind::ArbitraryData | ParamKind::CurvePoints => {
             ui.colored_label(color::TEXT_DISABLED, "—");
             Edit::None
         }
-        ParamKind::GroupStart | ParamKind::GroupEnd => Edit::None,
+        ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Display => Edit::None,
     }
 }
 
