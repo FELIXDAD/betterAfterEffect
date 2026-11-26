@@ -851,6 +851,7 @@ Layer.prototype = {
       }
     }
     return Object.defineProperties(mask, {
+      name: { value: typeof nameOrIndex === "string" ? nameOrIndex : "", writable: true, configurable: true },
       maskPath: { get: function () { return __prop(c, l, p, "path"); } },
       maskFeather: { get: function () { return __prop(c, l, p, "feather"); } },
       maskOpacity: { get: function () { return __prop(c, l, p, "opacity"); } },
