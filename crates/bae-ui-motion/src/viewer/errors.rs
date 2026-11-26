@@ -65,7 +65,11 @@ impl Banner {
         area: Rect,
     ) {
         let errors = session.lock().expr_errors.clone();
-        if errors.is_empty() || self.closed.as_ref() == Some(&errors) {
+        if errors.is_empty()
+            || self.closed.as_ref() == Some(&errors)
+            || !crate::prefs::current(cx.resources)
+                .bool("scripting_expressions.show_expression_error_warning_banner")
+        {
             return;
         }
         self.closed = None;
