@@ -885,7 +885,7 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         return match template {
             Value::TextDocument(doc) => {
                 let mut doc = doc.clone();
-                doc.text = s;
+                doc.set_text(&s);
                 Ok(Value::TextDocument(doc))
             }
             Value::String(_) => Ok(Value::String(s)),
@@ -905,12 +905,27 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         if let Some(o) = js.as_object()
             && o.get::<_, bool>("__style").unwrap_or(false)
         {
-            let changes: Object<'_> = o.get("changes").map_err(|e| e.to_string())?;
-            apply_style(&mut doc, &changes);
+            let changes: Array<'_> = o.get("changes").map_err(|e| e.to_string())?;
+            for change in changes.iter::<Object<'_>>() {
+                let change = change.map_err(|e| e.to_string())?;
+                if let Ok(Some(text)) = change.get::<_, Option<String>>("text") {
+                    doc.set_text(&text);
+                    continue;
+                }
+                let start = change.get::<_, f64>("start").unwrap_or(0.) as usize;
+                let count = change.get::<_, Option<f64>>("count").ok().flatten();
+                let from = char_index(&doc.text, start);
+                let to = count.map_or(usize::MAX, |n| {
+                    char_index(&doc.text, start.saturating_add(n as usize))
+                });
+                if count != Some(0.) {
+                    doc.edit_styles(from..to, |style| apply_style(style, &change));
+                }
+            }
             return Ok(Value::TextDocument(doc));
         }
         // Numbers on Source Text show as text, as in AE.
-        doc.text = js_display(&js);
+        doc.set_text(&js_display(&js));
         return Ok(Value::TextDocument(doc));
     }
     let comps: Vec<f64> = if let Some(n) = js.as_number() {
@@ -1167,7 +1182,7 @@ fn path_from_js(
 }
 
 /// The changes a text style carries (its `set…` calls) applied to `doc`.
-fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
+fn apply_style(doc: &mut bae_model::TextStyle, c: &Object<'_>) {
     let num = |k: &str| c.get::<_, Option<f64>>(k).ok().flatten();
     let flag = |k: &str| c.get::<_, Option<bool>>(k).ok().flatten();
     let rgb = |k: &str| {
@@ -1176,8 +1191,12 @@ fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
             .flatten()
             .filter(|v| v.len() >= 3)
     };
-    if let Ok(Some(text)) = c.get::<_, Option<String>>("text") {
-        doc.text = text;
+    if let Ok(mode) = c.get::<_, String>("baselineOption") {
+        doc.baseline_option = match mode.as_str() {
+            "superScript" => bae_model::BaselineOption::Superscript,
+            "subScript" => bae_model::BaselineOption::Subscript,
+            _ => bae_model::BaselineOption::Normal,
+        };
     }
     if let Ok(Some(font)) = c.get::<_, Option<String>>("font") {
         doc.font = font;
@@ -1225,10 +1244,28 @@ fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
     }
 }
 
+/// JavaScript string offsets count UTF-16 code units.
+fn char_index(text: &str, utf16: usize) -> usize {
+    let mut offset = 0;
+    text.chars()
+        .take_while(|c| {
+            offset += c.len_utf16();
+            offset <= utf16
+        })
+        .count()
+}
+
 /// A text document's style as the expression `TextStyle` reads it.
-fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextDocument) -> rquickjs::Result<Object<'js>> {
+fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextStyle) -> rquickjs::Result<Object<'js>> {
     let o = Object::new(ctx.clone())?;
-    o.set("text", doc.text.as_str())?;
+    o.set(
+        "baselineOption",
+        match doc.baseline_option {
+            bae_model::BaselineOption::Normal => "default",
+            bae_model::BaselineOption::Superscript => "superScript",
+            bae_model::BaselineOption::Subscript => "subScript",
+        },
+    )?;
     o.set("font", doc.font.as_str())?;
     o.set("fontSize", doc.font_size)?;
     o.set("fillColor", doc.fill_color[..3].to_vec())?;
@@ -1561,7 +1598,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         "textStyle",
         Function::new(
             ctx.clone(),
-            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, t: f64| {
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, t: f64, index: f64| {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
@@ -1579,7 +1616,9 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     js: Some(&ctx),
                 };
                 match prop.sample(&cx) {
-                    Value::TextDocument(doc) => text_style(&ctx, &doc),
+                    Value::TextDocument(doc) => {
+                        text_style(&ctx, doc.style_at(char_index(&doc.text, index as usize)))
+                    }
                     _ => throw(&ctx, "style is only available on Source Text"),
                 }
             },
