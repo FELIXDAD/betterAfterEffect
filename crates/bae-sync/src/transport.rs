@@ -18,6 +18,15 @@ pub trait Transport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError>;
     /// The next received message, or `None` if nothing is waiting.
     fn recv(&mut self) -> Result<Option<Message>, SyncError>;
+    /// Finish delivering what was sent, then close the link: the place to see
+    /// whether the last messages arrived when `send` only queues them (as in
+    /// [`crate::ThreadedTransport`], whose thread writes them later). Returns the
+    /// first error the transport hit that [`recv`](Self::recv) has not returned
+    /// yet. May block until the I/O is done; the transport is unusable after.
+    /// The default does nothing (`send` delivered already).
+    fn close(&mut self) -> Result<(), SyncError> {
+        Ok(())
+    }
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
@@ -26,6 +35,9 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {
         (**self).recv()
+    }
+    fn close(&mut self) -> Result<(), SyncError> {
+        (**self).close()
     }
 }
 

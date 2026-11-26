@@ -182,6 +182,117 @@ fn restart_recovers_unsaved_edits_and_repairs_a_torn_log() {
     settle(&mut clients);
 }
 
+/// One small edit: `opacity` of the title layer in the root sublayer.
+fn set_opacity(c: &mut Client, value: f64) {
+    c.stage.set_edit_target(&SublayerId::root()).unwrap();
+    c.stage
+        .transact(&c.who, "edit", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: "opacity".into(),
+                value: Some(Value::Float(value)),
+            })
+        })
+        .unwrap();
+}
+
+/// The share stalls: writes to `log` fail (it is a directory for now) until
+/// [`unstall`] puts the file back as it was.
+fn stall(log: &Path) -> PathBuf {
+    let aside = log.with_extension("aside");
+    fs::rename(log, &aside).unwrap();
+    fs::create_dir(log).unwrap();
+    fs::write(log.join("x"), b"x").unwrap();
+    aside
+}
+
+fn unstall(log: &Path, aside: &Path) {
+    fs::remove_dir_all(log).unwrap();
+    fs::rename(aside, log).unwrap();
+}
+
+/// A write to our own log fails, later ones would work again. Nothing may be
+/// appended after the gap: a record's version covers everything before it, so
+/// the folder's `Hello` would claim the lost edit and no session would ever send
+/// it again (spec 4.3). The transport asks for a snapshot instead; if the session
+/// goes away before answering (the hub dropping its store after the error), the
+/// log claims only what it holds, and the next session on the folder writes the
+/// rest.
+#[test]
+fn a_failed_append_leaves_no_gap_for_the_next_session() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let aside = stall(&log);
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    unstall(&log, &aside);
+    // The next update was already on its way (`ThreadedTransport` queues it
+    // before the session sees the error, or a final flush sends it).
+    set_opacity(&mut a, 3.0);
+    a.session.flush(&a.stage, &mut a.dir).unwrap();
+    // Reattach: a new transport and session for the same documents.
+    let Client {
+        stage,
+        session: old_session,
+        dir: old_dir,
+        who,
+        rng,
+        n,
+        tag,
+    } = a;
+    drop((old_session, old_dir));
+    let mut a = Client {
+        stage,
+        session: session("alice"),
+        dir: DirTransport::open(&dir, ClientId::new("alice").unwrap(), fast()).unwrap(),
+        who,
+        rng,
+        n,
+        tag,
+    };
+    a.pump();
+    a.pump();
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
+/// As above, but the session stays: it answers the snapshot request and the log
+/// is rewritten whole. A failed rewrite asks again.
+#[test]
+fn a_failed_append_is_repaired_with_a_snapshot() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let aside = stall(&log);
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    // Still stalled: the snapshot cannot be written either.
+    set_opacity(&mut a, 3.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    unstall(&log, &aside);
+    set_opacity(&mut a, 4.0);
+    a.pump();
+    assert_eq!(a.dir.stats().compactions, 1);
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+    // Appending works again afterwards.
+    set_opacity(&mut a, 5.0);
+    a.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
 #[test]
 fn own_log_is_compacted_and_growth_stays_bounded() {
     let (_tmp, dir) = project_dir();

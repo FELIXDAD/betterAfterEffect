@@ -17,6 +17,11 @@ type Notify = Box<dyn Fn() + Send>;
 /// The worker polls the inner transport every `tick`, and calls `on_receive`
 /// after queuing new messages: hook it to "request a repaint" or "pump soon" so the
 /// stage thread picks them up.
+///
+/// A failed `send` of the inner transport surfaces through a later `recv`.
+/// [`Transport::close`] (and dropping) waits until everything queued was handed
+/// to the inner transport; `close` also returns the first error that `recv` did
+/// not report yet, so a last write that failed is not lost silently.
 pub struct ThreadedTransport {
     tx: Option<Sender<Message>>,
     rx: Receiver<Result<Message, SyncError>>,
@@ -45,6 +50,28 @@ impl ThreadedTransport {
             tx: Some(out_tx),
             rx: in_rx,
             worker: Some(worker),
+        }
+    }
+
+    /// Stop the worker once it handled everything queued; the first error it
+    /// reported that `recv` has not returned yet.
+    fn finish(&mut self) -> Result<(), SyncError> {
+        // Dropping the sender ends the worker after it sent what was queued.
+        self.tx = None;
+        let Some(worker) = self.worker.take() else {
+            return Ok(());
+        };
+        let panicked = worker.join().is_err();
+        let mut first = None;
+        while let Ok(r) = self.rx.try_recv() {
+            if let Err(e) = r {
+                first.get_or_insert(e);
+            }
+        }
+        match first {
+            Some(e) => Err(e),
+            None if panicked => Err(SyncError::Closed),
+            None => Ok(()),
         }
     }
 }
@@ -116,14 +143,14 @@ impl Transport for ThreadedTransport {
             Err(TryRecvError::Disconnected) => Err(SyncError::Closed),
         }
     }
+
+    fn close(&mut self) -> Result<(), SyncError> {
+        self.finish()
+    }
 }
 
 impl Drop for ThreadedTransport {
     fn drop(&mut self) {
-        // Dropping the sender ends the worker after it flushed what was queued.
-        self.tx = None;
-        if let Some(w) = self.worker.take() {
-            let _ = w.join();
-        }
+        let _ = self.finish();
     }
 }

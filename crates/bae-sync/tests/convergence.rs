@@ -532,3 +532,73 @@ fn a_peer_with_its_own_session_settings() {
     assert_eq!(drain(&mut store, "hub"), (0, 0));
     assert_eq!(drain(&mut link, "hub").0, 1);
 }
+
+/// Writes that block until `gate` closes, then fail: a store whose disk fails
+/// while the relay is shutting down.
+struct FailingDisk {
+    gate: std::sync::mpsc::Receiver<()>,
+}
+
+impl bae_sync::Transport for FailingDisk {
+    fn send(&mut self, _: bae_sync::Message) -> Result<(), bae_sync::SyncError> {
+        let _ = self.gate.recv();
+        Err(bae_sync::SyncError::Hub("disk full".into()))
+    }
+
+    fn recv(&mut self) -> Result<Option<bae_sync::Message>, bae_sync::SyncError> {
+        Ok(None)
+    }
+}
+
+/// A `ThreadedTransport`'s `send` only queues, so a write that fails after the
+/// last pump is never seen by the session. `Transport::close` waits for
+/// everything queued and reports it; `Relay::close_peer` closes one peer so.
+#[test]
+fn closing_a_threaded_peer_reports_its_last_writes() {
+    use bae_sync::{MemoryTransport, Message, SyncError, ThreadedTransport, Transport};
+
+    let hour = Duration::from_secs(3600);
+    // Everything queued is delivered before `close` returns.
+    let (inner, mut far) = MemoryTransport::pair();
+    let mut t = ThreadedTransport::spawn(inner, hour, || {});
+    for _ in 0..3 {
+        t.send(Message::SnapshotRequest {
+            doc: DocKey::History,
+        })
+        .unwrap();
+    }
+    t.close().unwrap();
+    let mut delivered = 0;
+    // `Closed` once the three are read: the worker dropped its end.
+    while let Ok(Some(_)) = far.recv() {
+        delivered += 1;
+    }
+    assert_eq!(delivered, 3);
+    assert!(matches!(far.recv(), Err(SyncError::Closed)));
+    assert!(matches!(
+        t.send(Message::SnapshotRequest {
+            doc: DocKey::History
+        }),
+        Err(SyncError::Closed)
+    ));
+
+    // A failed write after the relay's last pump.
+    let mut relay = Relay::new(ClientId::new("hub").unwrap());
+    let (gate, rx) = std::sync::mpsc::channel();
+    let store = relay.connect(Box::new(ThreadedTransport::spawn(
+        FailingDisk { gate: rx },
+        hour,
+        || {},
+    )));
+    // The hello is queued; its write has not failed yet.
+    let out = relay.pump();
+    assert!(out.disconnected.is_empty());
+    drop(gate);
+    let closed = relay.close_peer(store);
+    assert!(
+        matches!(closed, Some(Err(SyncError::Hub(ref e))) if e == "disk full"),
+        "{closed:?}"
+    );
+    assert!(relay.peers().is_empty());
+    assert!(relay.close_peer(store).is_none());
+}

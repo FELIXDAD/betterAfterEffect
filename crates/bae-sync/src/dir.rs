@@ -7,7 +7,7 @@
 //! A client compacts only its own log (rewrite as one snapshot, then rename), so
 //! concurrent compactions never interfere.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -136,6 +136,10 @@ pub struct DirTransport {
     sources: BTreeMap<PathBuf, Source>,
     /// Union of the versions of everything read from or written to the folder.
     folder: BTreeMap<DocKey, VersionVector>,
+    /// Documents whose own log lacks ops the session counts as written, because
+    /// a write failed. Nothing is appended to them until the session's snapshot
+    /// rewrites the log (see [`DirTransport::fell_behind`]).
+    behind: BTreeSet<DocKey>,
     inbox: VecDeque<Message>,
     scanned: bool,
     poll_now: bool,
@@ -198,6 +202,7 @@ impl DirTransport {
             own: BTreeMap::new(),
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
+            behind: BTreeSet::new(),
             inbox: VecDeque::new(),
             scanned: false,
             poll_now: true,
@@ -644,6 +649,21 @@ impl DirTransport {
         Ok(())
     }
 
+    /// A write to our log for `doc` failed. The session already counts those ops
+    /// as written (it cannot tell), so its next update for `doc` starts after
+    /// them. Appending that would leave a gap the folder never admits to: a
+    /// record's version covers everything before it, and our `Hello` reports the
+    /// union, so no session would send the lost ops again. Instead nothing more
+    /// is written for `doc` until a snapshot replaces the whole log; ask the
+    /// session for one (again after every failure, a failed rewrite included).
+    /// If the session goes away before answering, the log still claims only what
+    /// it holds, and the next session on the folder writes what is missing.
+    fn fell_behind(&mut self, doc: &DocKey) {
+        self.behind.insert(doc.clone());
+        self.inbox
+            .push_back(Message::SnapshotRequest { doc: doc.clone() });
+    }
+
     fn request_snapshot(&mut self, doc: &DocKey) {
         if let Some(own) = self.own.get_mut(doc)
             && !own.snapshot_requested
@@ -717,10 +737,26 @@ impl Transport for DirTransport {
         match &msg {
             Message::Hello { versions, .. } => self.on_hello(versions.clone()),
             Message::Updates { doc, version, .. } => {
-                self.append(&doc.clone(), &version.clone(), &msg)
+                let doc = doc.clone();
+                if self.behind.contains(&doc) {
+                    // The snapshot we asked for covers this too.
+                    return Ok(());
+                }
+                let r = self.append(&doc, &version.clone(), &msg);
+                if r.is_err() {
+                    self.fell_behind(&doc);
+                }
+                r
             }
             Message::Snapshot { doc, version, .. } => {
-                self.compact(&doc.clone(), &version.clone(), &msg)
+                let doc = doc.clone();
+                let r = self.compact(&doc, &version.clone(), &msg);
+                if r.is_ok() {
+                    self.behind.remove(&doc);
+                } else {
+                    self.fell_behind(&doc);
+                }
+                r
             }
             Message::SnapshotRequest { .. } => Ok(()),
             Message::Presence { .. } => self.write_presence(&msg),

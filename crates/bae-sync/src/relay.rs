@@ -107,7 +107,8 @@ impl Relay {
     /// Connect a peer with its own session settings, e.g. a store that should be
     /// written at most every few hundred milliseconds (`min_send_interval`) and
     /// needs no periodic `Hello`. A peer with a `min_send_interval` may have
-    /// sends pending: [`flush`](Self::flush) before dropping the relay.
+    /// sends pending: [`flush`](Self::flush) before dropping the relay (and
+    /// [`close_peer`](Self::close_peer) it to learn whether they arrived).
     ///
     /// `config.client` is ignored and replaced by the relay's own ID: the relay is
     /// one client to everyone it talks to, and its sessions drop presence that
@@ -151,6 +152,19 @@ impl Relay {
             }
         }
         true
+    }
+
+    /// Like [`disconnect`](Self::disconnect), but first let the peer's transport
+    /// finish delivering what was sent ([`Transport::close`]; blocks until it
+    /// did) and return what went wrong. For a store whose `send` only queues
+    /// (a [`crate::ThreadedTransport`]), this is where the writes of the last
+    /// [`flush`](Self::flush) happen and where their failure shows. `None` if
+    /// there is no such peer.
+    pub fn close_peer(&mut self, handle: PeerHandle) -> Option<Result<(), SyncError>> {
+        let peer = self.peers.iter_mut().find(|p| p.handle == handle)?;
+        let closed = peer.transport.close();
+        self.disconnect(handle);
+        Some(closed)
     }
 
     /// Connected peers and the client IDs they announced.

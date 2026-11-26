@@ -6,7 +6,10 @@
 //! into a snapshot when it grows. On start the relay reads it back through the
 //! same transport, so loading, saving and crash repair are `bae-sync`'s code.
 //! Like any shared-folder peer it is written at most every few hundred
-//! milliseconds ([`STORE_SEND_INTERVAL`]), and flushed before the relay closes.
+//! milliseconds (`HubConfig::store_send_interval`, 300 ms). While clients are
+//! connected that is what a crash can lose beyond what was already written
+//! (they upload it again when they reconnect); what was held back is written as
+//! soon as the last client leaves, and before the relay closes.
 //!
 //! Client connections are non-blocking WebSockets ([`bae_sync::HubTransport`]);
 //! the relay thread polls them. It polls every `active_tick` (1 ms) right after
@@ -42,13 +45,6 @@ const STORE_POLL: Duration = Duration::from_secs(60);
 const STORE_TICK: Duration = Duration::from_millis(250);
 /// Wait this long before reopening a project directory that failed.
 const STORE_RETRY: Duration = Duration::from_secs(5);
-/// The relay writes to the project directory at most this often (spec 4.5: a
-/// few hundred milliseconds for shared-folder peers), so a drag that reaches the
-/// hub as dozens of updates per second becomes a few appends per second. Clients
-/// still get every update at once. What is held back is forced out before the
-/// relay closes ([`Relay::flush`]); a crash loses at most this much more than
-/// before, which clients upload again when they reconnect.
-const STORE_SEND_INTERVAL: Duration = Duration::from_millis(300);
 
 /// Identifies a project on the hub; also its directory name. 1-64 ASCII letters,
 /// digits, `_` and `-`.
@@ -180,6 +176,7 @@ impl Project {
                 quiet: config.quiet_tick.max(config.active_tick),
                 empty: config.empty_tick,
             },
+            store_send_interval: config.store_send_interval,
             rx,
             waker,
             status: status.clone(),
@@ -256,6 +253,7 @@ struct RelayThread {
     id: ProjectId,
     dir: PathBuf,
     ticks: Ticks,
+    store_send_interval: Duration,
     rx: mpsc::Receiver<Event>,
     waker: Waker,
     status: Arc<Mutex<ProjectStatus>>,
@@ -279,9 +277,9 @@ fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError>
 }
 
 /// Session settings for the project directory as a relay peer.
-fn store_config(relay: &Relay) -> SessionConfig {
+fn store_config(relay: &Relay, send_interval: Duration) -> SessionConfig {
     let mut config = relay.peer_config();
-    config.min_send_interval = STORE_SEND_INTERVAL;
+    config.min_send_interval = send_interval;
     // The directory never loses what it was given, so no periodic `Hello` is
     // needed to repair it (spec 4.5). The first one still goes out at once, and
     // `load` waits for the directory's answer.
@@ -306,7 +304,10 @@ impl RelayThread {
                 return;
             }
         };
-        let store_handle = relay.connect_with(Box::new(store), store_config(&relay));
+        let store_handle = relay.connect_with(
+            Box::new(store),
+            store_config(&relay, self.store_send_interval),
+        );
         let started = Instant::now();
         match self.load(&mut relay, store_handle) {
             Load::Done => tracing::info!(
@@ -408,9 +409,7 @@ impl RelayThread {
             sent += out.sent as u64;
             for (handle, e) in out.disconnected {
                 if Some(handle) == store {
-                    tracing::error!(project = %self.id, error = %e, "project directory failed; edits are not being saved");
-                    store = None;
-                    retry_store_at = Some(Instant::now() + STORE_RETRY);
+                    self.store_failed(&e, &mut store, &mut retry_store_at);
                 } else if let Some(info) = peers.remove(&handle) {
                     tracing::info!(project = %self.id, peer = ?handle, addr = %info.addr, reason = %e, "client disconnected");
                 }
@@ -418,14 +417,31 @@ impl RelayThread {
             for (handle, e) in out.errors {
                 tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
             }
+            // Nobody is editing, so holding writes back gains nothing, and the
+            // next pump may be a whole empty tick away: write what the store's
+            // interval held back (e.g. the last steps of a drag right before the
+            // client quit) now. Cheap when there is nothing to write.
+            if peers.is_empty() && store.is_some() {
+                let out = relay.flush();
+                sent += out.sent as u64;
+                if let Some((_, e)) = out
+                    .disconnected
+                    .into_iter()
+                    .find(|(h, _)| Some(*h) == store)
+                {
+                    self.store_failed(&e, &mut store, &mut retry_store_at);
+                }
+            }
             // The old store was only dropped because its link failed, so nothing
-            // could be flushed to it. The new session sends everything the
-            // directory lacks as soon as the directory said hello (its first send
-            // is never held back).
+            // could be flushed to it. Its directory claims only what it holds
+            // (`DirTransport` writes nothing after a failed write), and the new
+            // session sends everything it lacks as soon as it said hello (its
+            // first send is never held back).
             if store.is_none() && retry_store_at.is_some_and(|t| Instant::now() >= t) {
                 match open_store(&self.dir, &self.waker) {
                     Ok(t) => {
-                        store = Some(relay.connect_with(Box::new(t), store_config(&relay)));
+                        let config = store_config(&relay, self.store_send_interval);
+                        store = Some(relay.connect_with(Box::new(t), config));
                         retry_store_at = None;
                         tracing::info!(project = %self.id, "project directory reattached");
                     }
@@ -453,20 +469,39 @@ impl RelayThread {
                 break;
             }
         }
-        // Final pump, then force out what the project directory's send interval
-        // held back (unload and shutdown both end here; without the flush the
-        // last edits would never reach the disk). Dropping the relay closes
-        // every connection and drops the store transport, which writes
-        // everything still queued before its thread ends.
-        relay.pump();
-        let out = relay.flush();
-        for (handle, e) in out.disconnected {
+        // Unload and shutdown both end here. A final pump, then force out what
+        // the store's interval held back (with clients still connected, the
+        // last edits would otherwise never reach the disk), then wait until
+        // the store's thread wrote it: its `send` only queues, so this is the
+        // only place a failed last write shows. Dropping the relay closes every
+        // connection.
+        let out = relay.pump();
+        let flushed = relay.flush();
+        for (handle, e) in out.disconnected.into_iter().chain(flushed.disconnected) {
             if Some(handle) == store {
-                tracing::error!(project = %self.id, error = %e, "project directory failed; the last edits were not saved");
+                tracing::error!(project = %self.id, error = %e, "project directory failed while closing; the last edits may not be saved");
+                store = None;
             }
+        }
+        if let Some(handle) = store
+            && let Some(Err(e)) = relay.close_peer(handle)
+        {
+            tracing::error!(project = %self.id, error = %e, "project directory failed while closing; the last edits may not be saved");
         }
         drop(relay);
         tracing::info!(project = %self.id, "project closed");
+    }
+
+    /// The project directory's link failed: stop using it, reopen it later.
+    fn store_failed(
+        &self,
+        e: &SyncError,
+        store: &mut Option<PeerHandle>,
+        retry_at: &mut Option<Instant>,
+    ) {
+        tracing::error!(project = %self.id, error = %e, "project directory failed; edits are not being saved");
+        *store = None;
+        *retry_at = Some(Instant::now() + STORE_RETRY);
     }
 
     fn publish_status(

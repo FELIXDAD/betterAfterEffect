@@ -87,8 +87,9 @@
 ### 2026-11-26（zjzcoder，C 多人协作）
 
 - 上面前三条已在 09 侧解决（`collab/sync-hub-requests`）：会话出错前先导入；`HubLimits` 默认单条消息 256 MiB、对方不读时最多积压 16 MiB 后断开。`PeerLink` 的"晚一次报错"绕行已去掉，`idle_projects_are_unloaded_and_reloaded` 照常通过。
-- 第 4 条也已解决：工程目录用 `Relay::connect_with` 接上，`min_send_interval` 300 ms（`STORE_SEND_INTERVAL`）、`hello_interval = None`；客户端之间照常立即转发。关闭工程（卸载、退出）时先最后 `pump` 一次，再 `Relay::flush()` 把被推迟的写出去。
-  - 新测试：拖动 100 步，`hub.log` 只有 3 条记录（不设间隔时 101 条）；拖动后立即退出 Hub、立即卸载工程，重新加载后每一步都在。去掉 `flush` 这两个测试都会失败。
+- 第 4 条也已解决：工程目录用 `Relay::connect_with` 接上，`min_send_interval` 默认 300 ms（`HubConfig::store_send_interval`）、`hello_interval = None`；客户端之间照常立即转发。最后一个客户端断开时立即 `Relay::flush()`（否则要等 500 ms 的空闲轮询）。关闭工程（卸载、退出）时先最后 `pump` 一次，再 `flush`，再 `Relay::close_peer` 等存盘线程写完；最后几次写盘失败会记进日志。
+  - 新测试：拖动 100 步，`hub.log` 只有 3 条记录（不设间隔时 101 条）。另外三个测试把写盘间隔设成 1 分钟，拖动只能靠 `flush` 写出：拖动后立即退出 Hub（客户端还连着）、最后一个客户端断开（工程不卸载）、工程被卸载，重新加载后每一步都在。去掉退出时的 `flush`，第一个失败；去掉客户端走光时的 `flush`，第二个失败；两个都去掉，卸载的测试也失败。
+  - 评审后还修了 09 侧的一个老问题：`DirTransport` 写日志失败后不再接着追加（否则日志里有空洞而目录的 `Hello` 不承认，重新挂上的存盘连接不会补写），改为请求快照重写（spec 4.3）。
 
 ## 请求（其他工作流在这里留言）
 

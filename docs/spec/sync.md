@@ -76,6 +76,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 `SyncSession::pump` 在持有 `Stage` 的线程上调用，不做阻塞 I/O。共享目录、网络的 I/O 由传输层放在后台线程里做，通过队列交给会话：`ThreadedTransport::spawn(内层传输, tick, on_receive)` 把任何会阻塞的传输搬到后台线程，收到消息后调用 `on_receive`（接到"请求重绘 / 尽快 pump"上）。
 
+`ThreadedTransport` 的 `send` 只是放进队列，内层传输发送失败要等之后的 `recv` 才报告。`Transport::close()`（默认什么都不做）等后台线程把队列里的消息都交给内层传输，再返回 `recv` 还没报告的第一个错误；丢弃时同样会等，只是看不到错误。关闭前想知道最后几条有没有写成功，就调用 `close`。
+
 同一轮 `pump` 里同一个文档收到的多条数据合并成一批导入（`DocSet::import_batch`），`Stage` 只重建一次镜像、只发一个事件。
 
 ## 3. Hub 中继（`Relay`）
@@ -85,9 +87,9 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - Hub 用 `MemDocs::load` 恢复持久化的快照，用 `docs().export_snapshot` 保存。Hub 重启丢了数据也没关系：客户端重连后对方 `Hello` 里版本变小，客户端会把缺的重新上传。
 - 传输出错的连接会被断开（`RelayOutcome::disconnected`）。
 - **按连接设置会话**：`Relay::connect` 给每个连接同样的设置（`Relay::peer_config()`：Relay 自己的 `ClientId` 和 `hello_interval`，其他为默认值）。`Relay::connect_with(transport, config)` 给某个连接单独设置，一般从 `peer_config()` 改起。`config.client` 一律换成 Relay 自己的 ID（Relay 对所有连接都是同一个客户端，各会话也靠它认出自己的在线状态）。
-  - Hub（10）用它接工程目录（`DirTransport`）：`min_send_interval` 300 ms、`hello_interval = None`（4.5 的推荐设置）。客户端照常每次 `pump` 立即收到修改，只是写盘合并了：测试里 100 步的拖动，`hub.log` 从 101 条记录降到 3 条。
-  - 有连接设了 `min_send_interval` 时，丢弃 Relay 之前要先 `pump` 再 `Relay::flush()`（对每个连接调用 `SyncSession::flush`），否则被推迟的最后几次修改永远发不出去。Hub 卸载工程、退出时都这样做。
-  - 验证：`tests/convergence.rs` 的 `a_peer_with_its_own_session_settings`（单独的发送间隔和 `Hello` 间隔生效、`flush` 立即发出、`ClientId` 用 Relay 的）；`services/bae-hub/tests/hub.rs` 里拖动之后立即退出 Hub、立即卸载工程，重新加载后每一步都在。
+  - Hub（10）用它接工程目录（`DirTransport`）：`min_send_interval` 默认 300 ms（`HubConfig::store_send_interval`）、`hello_interval = None`（4.5 的推荐设置）。客户端照常每次 `pump` 立即收到修改，只是写盘合并了：测试里 100 步的拖动，`hub.log` 从 101 条记录降到 3 条。最后一个客户端断开时 Hub 立即 `Relay::flush()`：没人在编辑，合并没有意义，而没有连接时的轮询间隔（500 ms）比写盘间隔长。
+  - 有连接设了 `min_send_interval` 时，丢弃 Relay 之前要先 `pump` 再 `Relay::flush()`（对每个连接调用 `SyncSession::flush`），否则被推迟的最后几次修改永远发不出去。`Relay::close_peer(handle)` 先让这个连接的传输把已经发出的消息交付完（`Transport::close`，见 2.6）并返回出错情况，再断开它。Hub 卸载工程、退出时都这样做：`pump`、`flush`、对工程目录 `close_peer`，最后几次写盘失败会记进日志。
+  - 验证：`tests/convergence.rs` 的 `a_peer_with_its_own_session_settings`（单独的发送间隔和 `Hello` 间隔生效、`flush` 立即发出、`ClientId` 用 Relay 的）和 `closing_a_threaded_peer_reports_its_last_writes`（`close` 返回前队列里的消息都已交付；最后一次 `pump` 之后才失败的写由 `close_peer` 报告）；`services/bae-hub/tests/hub.rs` 里把写盘间隔设成 1 分钟，拖动只能靠 `flush` 写出：拖动后立即退出 Hub（客户端还连着）、最后一个客户端断开（工程不卸载）、工程被卸载，三种情况重新加载后每一步都在。
 
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 
@@ -138,6 +140,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 ### 4.3 写（只有日志的主人写）
 
 - 追加：整条记录一次 `write` 写入，然后关闭文件（不逐条 `fsync`：关闭时数据交给 SMB 服务器；崩溃留下的半条记录下次启动时截掉；修改本身还在会话的文档里）。压缩重写的新文件先 `fsync` 再改名。写之前检查文件长度是否等于自己记的长度：更长且文件头没变，说明上次写了一半，先截掉；文件不见了或文件头变了，就重写整个文件。
+- **写失败之后**：会话分不出一次写是否真的成功（`ThreadedTransport` 的 `send` 只是排队），已经把这些操作算作目录有了，下一条增量从它们之后开始。接着追加就会留下空洞：每条记录的版本覆盖它之前的一切，目录的 `Hello` 报的是并集，谁都不会再补发缺的部分。所以某个文档的日志写失败（追加或压缩）后，传输层不再给它追加任何东西，而是发 `SnapshotRequest`，等会话发来的快照把整个日志重写（和压缩一样）；重写也失败就再要一次。会话没来得及回答就断开了（Hub 出错后丢掉存盘连接）也不要紧：日志声称的版本就是它真有的，下一个打开目录的会话会把缺的写进去。
 - 启动时主人也像读别人的日志一样读一遍自己的日志（里面可能有还没存进 `sublayers/*.loro` 的修改），并截掉末尾写了一半的记录。文件头都读不出来的日志改名为 `<client-id>.corrupt-<随机>` 留着排查，下次写入时新建。
 - **压缩**：日志超过阈值（默认 `max(1 MiB, 上次压缩结果 × 4)`）时，传输层向会话发 `SnapshotRequest`，拿到快照后写一个新文件（新 `generation`，文件头 + 一条 `Snapshot`），再改名覆盖旧日志。每个客户端只压缩自己的日志，所以多个客户端同时压缩不会互相破坏；目录总大小约为"客户端数 × 快照大小"，不随编辑次数增长。快照覆盖了旧日志的全部内容，因为会话的文档包含自己写过的一切。
 
@@ -164,6 +167,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 一小时连续编辑（3600 次修改，大多是拖动同一个属性）：自己的日志最大 33 KB（压缩阈值 32 KB），压缩 29 次，`updates/` 总共 26 KB。
 - 3 个客户端频繁同时压缩，不丢数据，新客户端读到的结果一致。
 - 同一个 ClientId 不能同时开两个会话（文件锁）。
+- 一次追加失败（日志暂时变成目录）、之后的写又能成功时，日志里不留空洞：会话还在，就回答快照请求、整个日志重写（快照也写失败就再要一次）；会话没回答就换了新会话（Hub 重新挂上存盘连接），目录只声称自己真有的，新会话把缺的补写进去。两种情况下另一个客户端读到的都和写的人一致（`a_failed_append_*`）。
 - **模拟 SMB 延迟**：每个客户端用自己的目录副本，后台线程把别人的日志延迟 1–3 秒复制过来，30% 的情况先给一个截断的前缀（模拟没传完的追加），覆盖写也不是原子的；客户端用 `ThreadedTransport`。默认测试把延迟缩小 10 倍（100–300 ms，停止编辑后 0.3 秒收敛）；`--ignored` 跑真实 1–3 秒（停止编辑后 3.0 秒收敛）。
 - `watch` feature：轮询间隔设成 1 小时，文件事件仍能在 0.4 秒内唤醒读取。
 
