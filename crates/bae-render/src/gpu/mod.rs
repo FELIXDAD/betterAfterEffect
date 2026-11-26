@@ -976,6 +976,9 @@ pub(crate) struct EdgeData {
     pub xmax: f32,
     pub chan: u32,
     pub size: [f32; 2],
+    /// Winding contribution (1; 1/N for variable-width feather contours).
+    pub weight: f32,
+    pub _pad: f32,
 }
 
 /// One full-screen mask pass, laid out like `struct Pass` in `mask.wgsl`.
@@ -1230,7 +1233,7 @@ mod tests {
         // 21 vec4s: the WGSL struct stride.
         assert_eq!(std::mem::size_of::<DrawData>(), 336);
         assert_eq!(std::mem::size_of::<SampleData>(), 48);
-        assert_eq!(std::mem::size_of::<EdgeData>(), 32);
+        assert_eq!(std::mem::size_of::<EdgeData>(), 40);
         assert_eq!(std::mem::size_of::<MaskPassData>(), 112);
     }
 

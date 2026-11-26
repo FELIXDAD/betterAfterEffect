@@ -461,15 +461,20 @@ impl CompEvaluator for AnimEvaluator {
     ) -> Option<Arc<crate::effect::ScalarTrack>> {
         let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
         crate::parameter_track::prepare(slot, attr, frame, |t| {
-            self.inner
-                .evaluate_attribute(stage, path, name, t)
-                .ok()?
-                .as_f64()
+            let (value, reads) = self
+                .inner
+                .evaluate_attribute_traced(stage, path, name, t)
+                .ok()?;
+            Some((value.as_f64()?, reads))
         })
     }
 
     fn invalidate(&mut self, event: &StageEvent) {
         self.inner.invalidate(event);
+    }
+
+    fn set_image_samples(&mut self, samples: Option<Arc<bae_anim::ImageSamples>>) {
+        self.inner.set_image_samples(samples);
     }
 
     fn take_warnings(&mut self) -> Vec<String> {
