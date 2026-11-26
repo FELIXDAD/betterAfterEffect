@@ -344,6 +344,29 @@ impl egui::TextBuffer for EditBuffer<'_> {
             self.deleted = true;
         }
     }
+    /// Undo and redo hand over the whole text: record only the part between
+    /// the common prefix and suffix (like `TextDocument::set_text`), so the
+    /// untouched characters keep their styles.
+    fn replace_with(&mut self, text: &str) {
+        let old: Vec<char> = self.text.chars().collect();
+        let new: Vec<char> = text.chars().collect();
+        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let suffix = old[prefix..]
+            .iter()
+            .rev()
+            .zip(new[prefix..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        if prefix == old.len() && prefix == new.len() {
+            return;
+        }
+        self.edits.push(TextReplacement {
+            range: prefix..old.len() - suffix,
+            text: new[prefix..new.len() - suffix].iter().collect(),
+        });
+        text.clone_into(self.text);
+        self.deleted = false;
+    }
 }
 
 /// Type tool input and the text field for one viewer frame.
@@ -615,5 +638,30 @@ pub(super) fn frame(
             e.selection = None;
         }
         e.commit(cx, session);
+    }
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+    use egui::TextBuffer as _;
+
+    #[test]
+    fn undo_replacements_keep_the_unchanged_characters() {
+        let mut text = String::from("Hello brave world");
+        let mut edits = Vec::new();
+        let mut buffer = EditBuffer {
+            text: &mut text,
+            edits: &mut edits,
+            deleted: false,
+        };
+        // What egui's undo hands over: the whole earlier text.
+        buffer.replace_with("Hello world");
+        assert_eq!(text, "Hello world");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(
+            (edits[0].range.clone(), edits[0].text.as_str()),
+            (6..12, "")
+        );
     }
 }

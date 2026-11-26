@@ -198,8 +198,12 @@ impl Command for SetText {
             for edit in p.edits {
                 doc.replace_range(edit.range, &edit.text);
             }
+            // The edits were made on what the editor showed (an expression's
+            // result can differ from the stored text): keep the typing as a
+            // whole-text change instead of dropping it.
             if doc.text != p.text {
-                return Err(fail("Source Text changed during editing"));
+                doc = original.clone();
+                doc.set_text(&p.text);
             }
         }
         if doc == original {
