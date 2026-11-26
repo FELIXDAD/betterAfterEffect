@@ -364,14 +364,33 @@ fn two_writers(
         c.iter().all(|c| c.session.is_connected()) && records_now(&log) + records_now(&anim_log) > 0
     });
     // The store's thread writes one document after the other: wait until the
-    // rest of that write (if any) is on disk too.
+    // rest of that write (if any) is on disk too. Each new log is written to a
+    // temporary file that is synced before it is renamed into place, and
+    // `File::sync_all` is a full device flush on macOS (`F_FULLFSYNC`) and
+    // Windows (`FlushFileBuffers`): tens of milliseconds or more on a busy CI
+    // machine. So do not assume it lands within a few milliseconds: wait while a
+    // temporary file is there, and until the root log stayed the same for half a
+    // second (nothing else reaches the disk for a minute, see `slow_store`).
+    let root_dir = log.parent().expect("a directory").to_owned();
+    let writing = || {
+        std::fs::read_dir(&root_dir).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().contains(".tmp-"))
+        })
+    };
+    let start = Instant::now();
     let mut records = records_now(&log);
     loop {
-        pump_for(&mut clients, Duration::from_millis(50));
+        pump_for(&mut clients, Duration::from_millis(500));
         let now = records_now(&log);
-        if now == records {
+        if now == records && !writing() {
             return (clients, records);
         }
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "the store's first write did not finish"
+        );
         records = now;
     }
 }

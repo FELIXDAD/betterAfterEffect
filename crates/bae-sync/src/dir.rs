@@ -1500,7 +1500,15 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
         if !same {
             return Ok(false);
         }
-        f.set_len(own.len).map_err(SyncError::io(&path))?;
+        // Cut through a handle of its own: on Windows an append handle lacks
+        // FILE_WRITE_DATA, which setting the end of the file needs, so
+        // `f.set_len` fails there with access denied. `f` then appends at the new
+        // end of the file.
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .and_then(|w| w.set_len(own.len))
+            .map_err(SyncError::io(&path))?;
     }
     #[cfg(test)]
     seam::hit(seam::Point::AppendOpened, &path);

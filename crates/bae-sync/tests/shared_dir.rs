@@ -187,6 +187,33 @@ fn restart_recovers_unsaved_edits_and_repairs_a_torn_log() {
     settle(&mut clients);
 }
 
+/// Our log grew while we are running, under our own header (another writer with
+/// our ID, on a share that does not pass the lock on): the extra bytes are cut
+/// off before the next append, which is not a failed write. The cut needs its
+/// own handle on Windows, where an append handle may not change the file's
+/// length.
+#[test]
+fn a_log_that_grew_under_our_header_is_cut_back_before_the_next_append() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let mut bytes = fs::read(&log).unwrap();
+    bytes.extend_from_slice(&[200, 0, 0, 0, 1, 2, 3]);
+    fs::write(&log, &bytes).unwrap();
+
+    set_opacity(&mut a, 2.0);
+    a.pump();
+    assert_eq!((a.dir.stats().repairs, a.dir.stats().compactions), (0, 0));
+    // Others read the new record (it is not stuck behind the cut-off bytes).
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
 /// One small edit: `opacity` of the title layer in the root sublayer.
 fn set_opacity(c: &mut Client, value: f64) {
     c.stage.set_edit_target(&SublayerId::root()).unwrap();
