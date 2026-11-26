@@ -21,8 +21,11 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_preferences;
+mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
+mod camera_preferences;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
@@ -35,6 +38,7 @@ mod i18n_retest;
 #[cfg(target_os = "macos")]
 mod i18n_scan;
 mod import_preferences;
+mod layer_creation_preferences;
 #[cfg(target_os = "macos")]
 mod layers;
 #[cfg(target_os = "macos")]
@@ -48,7 +52,6 @@ mod project_preferences;
 mod release_001;
 #[cfg(target_os = "macos")]
 mod render_queue;
-#[cfg(target_os = "macos")]
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;
@@ -101,7 +104,7 @@ pub(crate) fn build_app() -> App {
     );
     let _ = builder.register_arc::<dyn bae_render::SourceProvider>(
         bae_text::TEXT_PROVIDER,
-        Arc::new(bae_text::render::TextProvider::new()),
+        bae_text::render::TextProvider::shared(),
     );
     builder.build()
 }
@@ -740,17 +743,28 @@ pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {
 /// Every painted text of the last frame (debugging aid for failures).
 pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     let mut out = Vec::new();
-    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+    visit_painted_text(h, |_, text| out.push(text.galley.text().to_owned()));
+    out
+}
+
+fn visit_painted_text<State>(
+    h: &Harness<'_, State>,
+    mut visit: impl FnMut(Rect, &egui::epaint::TextShape),
+) {
+    fn walk(
+        shape: &egui::Shape,
+        clip: Rect,
+        visit: &mut impl FnMut(Rect, &egui::epaint::TextShape),
+    ) {
         match shape {
-            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Text(t) => visit(clip, t),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, visit)),
             _ => {}
         }
     }
     for clipped in &h.output().shapes {
-        walk(&clipped.shape, &mut out);
+        walk(&clipped.shape, clipped.clip_rect, &mut visit);
     }
-    out
 }
 
 /// The process-wide GPU for tests (`None` without an adapter), shared with every
