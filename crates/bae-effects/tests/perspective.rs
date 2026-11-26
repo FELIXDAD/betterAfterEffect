@@ -124,3 +124,23 @@ fn input_region_matches_the_sampling_operation() {
         );
     }
 }
+
+#[test]
+fn basic_3d_back_face_mirrors_the_layer_without_losing_alpha() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(20, 10);
+    let input = Pixels::new(rect, |x, _| [x as f32 / 40., 0., 0., 0.5]);
+    let flipped = run(
+        &gpu,
+        F32,
+        builtin("ADBE Basic 3D"),
+        vec![(1, Value::Float(180.))],
+        &input,
+        rect,
+        1.,
+    );
+    for (actual, expected) in flipped.data[..20].iter().zip(input.data[..20].iter().rev()) {
+        assert!((actual[0] - expected[0]).abs() < 0.00001);
+        assert!((actual[3] - expected[3]).abs() < 0.00001);
+    }
+}
