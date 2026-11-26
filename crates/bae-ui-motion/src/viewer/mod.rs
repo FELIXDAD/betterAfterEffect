@@ -727,7 +727,8 @@ impl Panel for CompositionViewer {
         let ppp = ui.ctx().pixels_per_point();
 
         let full = ui.available_rect_before_wrap();
-        let bar_h = 28.0;
+        let fullscreen = session.lock().fullscreen_preview();
+        let bar_h = if fullscreen { 0.0 } else { 28.0 };
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
         // View layout: the active view is the viewer, the others are drawn below.
@@ -769,7 +770,7 @@ impl Panel for CompositionViewer {
         let pane_rects = layout::rects(area, panes.len());
         let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
-        let (rulers, area) = guides::layout(area, opts.rulers);
+        let (rulers, area) = guides::layout(area, opts.rulers && !fullscreen);
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
@@ -846,7 +847,13 @@ impl Panel for CompositionViewer {
         {
             self.pan += resp.drag_delta();
         }
-        let (view, mag) = self.view(area, &info, ppp);
+        let (mut view, mut mag) = self.view(area, &info, ppp);
+        if fullscreen {
+            let size = vec2(info.width as f32, info.height as f32);
+            view.scale = (area.width() / size.x).min(area.height() / size.y);
+            view.origin = area.center() - size * view.scale * 0.5;
+            mag = ppp * view.scale;
+        }
         self.last_view = Some(view);
         if self.mag != mag {
             self.mag = mag;
@@ -869,12 +876,24 @@ impl Panel for CompositionViewer {
         let resolution = {
             let s = session.lock();
             // Preview ▸ Resolution overrides the viewer's while playing.
-            match s.preview.resolution.filter(|_| s.is_playing()) {
+            match s.preview_options().resolution.filter(|_| s.is_playing()) {
                 Some(r) => r,
                 None => render_factor(cx.stage, &info.path, s.auto_resolution, mag),
             }
         };
         self.render_factor = resolution;
+        let audio_only = {
+            let s = session.lock();
+            s.is_playing() && !s.preview_options().video
+        };
+        if audio_only {
+            if let Some(gpu) = self.gpu.as_mut() {
+                gpu.playback.stop();
+            }
+            ui.painter().rect_filled(area, 0.0, Color32::BLACK);
+            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+            return;
+        }
         // Paint.
         let painter = ui.painter_at(area);
         let controls = session.lock().layer_controls;
@@ -938,15 +957,29 @@ impl Panel for CompositionViewer {
                     ),
                     |pb| pb.range,
                 );
-                let looping = playback.is_some() && session.lock().loop_playback;
+                let caching = playback.as_ref().and_then(|pb| pb.caching.as_ref());
+                let frame_time = caching.map_or(time, |p| info.frame_rate.frame_to_time(p.first));
+                let poll_range = if caching.is_some() {
+                    bae_model::TimeRange::new(frame_time, frame_time + info.frame_duration())
+                } else {
+                    range
+                };
+                let looping = playback.is_some()
+                    && caching.is_none()
+                    && session.lock().preview_options().repeat;
                 if let Some((image, actual, errors)) = gpu.playback.poll(
                     cx.stage,
                     cx.resources,
                     &info.path,
-                    time,
+                    frame_time,
                     info.frame_rate,
-                    range,
+                    poll_range,
                     looping,
+                    if playback.is_some() {
+                        session.lock().preview_options().skip
+                    } else {
+                        0
+                    },
                     resolution,
                     ui.ctx(),
                 ) {
@@ -960,6 +993,22 @@ impl Panel for CompositionViewer {
                             s.expr_errors = errors.to_vec();
                         }
                     }
+                }
+                if let Some(pass) = caching {
+                    let mut pass = pass.clone();
+                    let bytes = u64::from(info.width.div_ceil(resolution))
+                        * u64::from(info.height.div_ceil(resolution))
+                        * 4;
+                    let done = gpu.playback.fill_cache(&mut pass, info.frame_rate, bytes);
+                    let mut s = session.lock();
+                    if let Some(pb) = s.playback.as_mut() {
+                        pb.caching = Some(pass);
+                    }
+                    if done {
+                        s.finish_cache(&info, true);
+                    }
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(25));
                 }
                 // Idle (the current time still for a moment): prepare the first
                 // frames playback would show, so pressing play shows them at
@@ -990,10 +1039,16 @@ impl Panel for CompositionViewer {
                 gpu.playback.publish_ranges(&session, info.frame_rate);
             }
         }
+        if self.gpu.is_none() && playback.as_ref().is_some_and(|pb| pb.caching.is_some()) {
+            session.lock().finish_cache(&info, false);
+        }
         if playback.is_some() && self.gpu.is_some() && !editing {
             self.on_gpu = completed.is_some();
             if let Some(image) = completed {
                 paint_image(&clip, &view, image);
+            }
+            if fullscreen {
+                return;
             }
             Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
             let (fps, dropped) = {

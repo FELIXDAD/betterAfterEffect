@@ -499,7 +499,7 @@ fn panels_render_a_project() {
     let mut viewer = CompositionViewer::new(None);
     let mut props = crate::PropertiesPanel::default();
     let mut fx = crate::EffectControlsPanel::default();
-    let mut preview = crate::PreviewPanel;
+    let mut preview = crate::PreviewPanel::default();
     h.session().lock().selected_layers = vec![shape.clone()];
     for _ in 0..2 {
         assert!(

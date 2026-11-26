@@ -213,8 +213,19 @@ impl Panel for PropertiesPanel {
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        if let Some(v)=crate::ae_panels::character::number(ui,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size")) {
-                            change["font_size"]=json!(v);
+                        let edit_range = range.clone().unwrap_or(0..usize::MAX);
+                        let size = selected.character(|s| s.font_size);
+                        let live = session.lock().scrub.as_ref().and_then(|s| s.value_for(&layer, "text:source")).and_then(|v| {
+                            if let Value::TextDocument(doc) = v { Some(doc.style_at(edit_range.start).font_size) } else { None }
+                        });
+                        let mut v = live.or(size).unwrap_or_default();
+                        let r = ui.add(widgets::HotNumber::new(&mut v).mixed(live.is_none() && size.is_none()).range(0.1..=1296.).decimals(1).suffix(tr("px")).label(tr("Font Size")));
+                        if r.changed() || r.drag_stopped() {
+                            let mut changed = doc.clone();
+                            bae_motion::text::TextStyleChange { font_size:Some(v), ..Default::default() }.apply(&mut changed,edit_range);
+                            let value = Value::TextDocument(changed);
+                            let edit = if r.dragged() { common::Edit::Live(value) } else { common::Edit::Commit(value) };
+                            common::apply_edit(cx,&session,&layer,"text:source",now,edit);
                         }
                     });
                     ui.horizontal(|ui| {
@@ -249,15 +260,32 @@ impl Panel for PropertiesPanel {
                     }
                 }
             }
-            // Shape contents: fills and strokes of the layer's groups.
+            if query::layer_kind(stage, &layer).as_deref() == Some("shape") {
+                ui.horizontal(|ui| {
+                    section_title(ui, tr("Quick Actions"));
+                    let options = crate::tools::shared(cx.resources).lock().options.clone();
+                    crate::tools::toolbar::add_menu(ui, cx, &options);
+                });
+            }
+            // Show each shape's geometry, fill and stroke alongside the layer transform.
             let tree = props::layer_tree(stage, &layer);
             if let Some(Node::Group { children, .. }) = tree.iter().find(|n| matches!(n, Node::Group { id, .. } if id.ends_with("#contents"))) {
                 section(ui, tr("Layer Contents"));
                 let mut flat = Vec::new();
                 collect_props(children, &mut flat);
-                for (path, attr, label) in flat.into_iter().filter(|(_, a, _)| a == "color" || a == "size" || a == "width") {
+                for (path, attr, label) in flat.into_iter().filter(|(_, a, _)| !a.starts_with("transform:")) {
                     let owner = query::display_name_of(stage, &path);
-                    prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &format!("{owner} · {label}"), now, 2);
+                    if attr == "path" {
+                        ui.horizontal(|ui| {
+                            ui.label(&owner);
+                            if widgets::link(ui, tr("Path...")).clicked()
+                                && let Some(comp) = query::owning_comp(stage, &layer) {
+                                crate::dialogs::mask_value(cx, &comp, &[path], now, crate::dialogs::MaskKind::ShapePath);
+                            }
+                        });
+                    } else {
+                        prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &format!("{owner} · {label}"), now, 2);
+                    }
                 }
             }
             // Effects: each effect's controls, in stacking order (AE).
@@ -414,7 +442,9 @@ impl Panel for EffectControlsPanel {
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-pub struct PreviewPanel;
+pub struct PreviewPanel {
+    session: SharedSession,
+}
 
 /// Content size the Preview panel needs (transport row with Loop, timecode).
 const PREVIEW_MIN_W: f32 = 210.0;
@@ -423,6 +453,10 @@ const PREVIEW_MIN_H: f32 = 56.0;
 const PREVIEW_OPTIONS_H: f32 = 240.0;
 
 impl Panel for PreviewPanel {
+    fn save_state(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(&self.session.lock().preview).ok()
+    }
+
     fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         if ui
@@ -472,7 +506,7 @@ impl Panel for PreviewPanel {
                 (
                     if playing { Icon::Pause } else { Icon::Play },
                     "Play/Stop",
-                    Invocation::new(ids::PLAY),
+                    Invocation::with_params(ids::PLAY, json!({"preview":"panel"})),
                 ),
                 (
                     Icon::NextFrame,
@@ -491,50 +525,56 @@ impl Panel for PreviewPanel {
                 }
             }
             ui.add_space(8.0);
-            let mut l = session.lock().loop_playback;
-            if widgets::checkbox(ui, &mut l, tr("Loop")).changed() {
-                session.lock().loop_playback = l;
-            }
+            let mut s = session.lock();
+            let selected = s.preview.selected as usize;
+            widgets::checkbox(ui, &mut s.preview.profiles[selected].repeat, tr("Loop"));
         });
         // The options below the transport row show when the panel has room for
         // them (AE's Default workspace shows the transport row only).
         if ui.available_height() >= PREVIEW_OPTIONS_H {
-            preview_options(ui, &session, info.as_ref());
+            egui::ScrollArea::vertical()
+                .id_salt("preview-options")
+                .show(ui, |ui| preview_options(ui, &session, info.as_ref()));
         }
         let _ = Rect::NOTHING;
     }
 }
 
-/// AE's Preview panel options under the transport row: Shortcut, Include,
-/// Cache Before Playback, Range, Play From, Frame Rate, Skip, Resolution,
-/// Full Screen and what Spacebar does on stop. Range, Play From, Frame Rate,
-/// Skip, Resolution and Move Time To Preview Time drive playback; the others
-/// show AE's values, greyed.
+/// Each shortcut has its own playback settings.
 fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::CompInfo>) {
-    use crate::session::PreviewRange;
+    use crate::session::{PreviewRange, PreviewShortcut};
     const RATES: [f64; 12] = [
         8.0, 10.0, 12.0, 15.0, 23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0,
     ];
-    let mut o = session.lock().preview.clone();
-    let before = o.clone();
     let lw = 82.0;
+    let mut shortcut = session.lock().preview.selected;
     ui.add_space(4.0);
-    ui.add_enabled_ui(false, |ui| {
-        bae_ui::dialog::row(ui, lw, tr("Shortcut"), |ui| {
-            let mut i = 0;
-            widgets::dropdown(ui, "preview-shortcut", &mut i, &[tr("Spacebar")], 120.0);
-        });
-        bae_ui::dialog::row(ui, lw, tr("Include:"), |ui| {
-            for (icon, tip) in [
-                (Icon::Eye, "Include Video"),
-                (Icon::Speaker, "Include Audio"),
-            ] {
-                icons::button(ui, icon, 18.0, true).on_hover_text(tr(tip));
-            }
-        });
-        let mut cache = false;
-        widgets::checkbox(ui, &mut cache, tr("Cache Before Playback"));
+    bae_ui::dialog::row(ui, lw, tr("Shortcut"), |ui| {
+        let mut i = shortcut as usize;
+        let names = PreviewShortcut::ALL.map(|s| tr(s.name()));
+        if widgets::dropdown(ui, "preview-shortcut", &mut i, &names, 145.0).changed() {
+            shortcut = PreviewShortcut::ALL[i];
+            session.lock().preview.selected = shortcut;
+        }
     });
+    let mut o = session.lock().preview.profiles[shortcut as usize].clone();
+    let before = o.clone();
+    bae_ui::dialog::row(ui, lw, tr("Include:"), |ui| {
+        for (icon, name, on) in [
+            (Icon::Eye, "Include Video", &mut o.video),
+            (Icon::Speaker, "Include Audio", &mut o.audio),
+        ] {
+            if icons::button(ui, icon, 18.0, *on)
+                .labeled_toggle(egui::WidgetType::Checkbox, tr(name), *on)
+                .on_hover_text(tr(name))
+                .clicked()
+            {
+                *on = !*on;
+            }
+        }
+    });
+    widgets::checkbox(ui, &mut o.cache_before, tr("Cache Before Playback"));
+    widgets::checkbox(ui, &mut o.cache_from_current, tr("Cache From Current Time"));
     bae_ui::dialog::row(ui, lw, tr("Range"), |ui| {
         let names = [
             tr("Work Area"),
@@ -604,21 +644,18 @@ fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::Co
             }
         });
     });
-    ui.add_enabled_ui(false, |ui| {
-        let mut full = false;
-        widgets::checkbox(ui, &mut full, tr("Full Screen"));
-    });
+    widgets::checkbox(ui, &mut o.fullscreen, tr("Full Screen"));
     ui.add_space(2.0);
-    ui.label(tr("On (Spacebar) Stop:"));
+    ui.label(tr("On ({shortcut}) Stop:").replace("{shortcut}", tr(shortcut.name())));
     ui.indent("preview-stop", |ui| {
-        ui.add_enabled_ui(false, |ui| {
-            let mut cached = true;
-            widgets::checkbox(ui, &mut cached, tr("If caching, play cached frames"));
-        });
+        widgets::checkbox(ui, &mut o.play_cached, tr("If caching, play cached frames"));
         widgets::checkbox(ui, &mut o.move_time, tr("Move time to preview time"));
     });
+    if ui.button(tr("Reset")).clicked() {
+        o = shortcut.defaults();
+    }
     if o != before {
-        session.lock().preview = o;
+        session.lock().apply_preview_options(shortcut, o, info);
     }
 }
 
@@ -645,13 +682,18 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Start of Range", "范围开头"),
     ("Skip", "跳过"),
     ("Full Screen", "全屏"),
-    ("On (Spacebar) Stop:", "点击 (空格键) 停止："),
+    ("On ({shortcut}) Stop:", "点击 ({shortcut}) 停止："),
+    ("Numpad 0", "小键盘 0"),
+    ("Shift + Numpad 0", "Shift + 小键盘 0"),
+    ("Cache From Current Time", "从当前时间缓存"),
     ("If caching, play cached frames", "如果缓存，则播放缓存的帧"),
     ("Move time to preview time", "将时间移到预览时间"),
     // Properties
     ("Transform", "变换"),
     ("Layer Transform", "图层变换"),
     ("Layer Contents", "图层内容"),
+    ("Quick Actions", "快速操作"),
+    ("Path...", "路径..."),
     ("Contents", "内容"),
     ("Masks", "蒙版"),
     ("Effects", "效果"),
@@ -753,6 +795,15 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "preview",
-        bae_ui::PanelKind::new("Preview", |_| Box::new(PreviewPanel)),
+        bae_ui::PanelKind::new("Preview", |spawn| {
+            let session = common::session(spawn.resources);
+            if let Some(saved) = spawn
+                .state
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+            {
+                session.lock().preview = saved;
+            }
+            Box::new(PreviewPanel { session })
+        }),
     );
 }

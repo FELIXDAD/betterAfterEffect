@@ -55,6 +55,8 @@ pub fn group_prim(id: &str) -> Option<PrimPath> {
 #[derive(Clone, Debug)]
 pub struct Playback {
     pub comp: PrimPath,
+    pub(crate) shortcut: PreviewShortcut,
+    pub(crate) caching: Option<CachePass>,
     started: Instant,
     /// The frame shown and the frame this run started from (comp frames).
     frame: i64,
@@ -103,7 +105,7 @@ pub(crate) struct PlaybackStats {
 }
 
 /// Preview panel ▸ Range (AE's choices for the Spacebar shortcut).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PreviewRange {
     WorkArea,
     #[default]
@@ -111,11 +113,83 @@ pub enum PreviewRange {
     EntireDuration,
 }
 
-/// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
-#[derive(Clone, Debug, PartialEq)]
-pub struct PreviewOptions {
-    /// Prefer an open Active Camera view when previewing a 3D composition.
+/// The three independently configurable Preview panel shortcuts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PreviewShortcut {
+    #[default]
+    Space,
+    Numpad,
+    ShiftNumpad,
+}
+
+impl PreviewShortcut {
+    pub(crate) const ALL: [Self; 3] = [Self::Space, Self::Numpad, Self::ShiftNumpad];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Space => "Spacebar",
+            Self::Numpad => "Numpad 0",
+            Self::ShiftNumpad => "Shift + Numpad 0",
+        }
+    }
+
+    pub(crate) fn defaults(self) -> PreviewOptions {
+        let mut options = PreviewOptions::default();
+        if self != Self::Space {
+            options.range = PreviewRange::WorkArea;
+            options.from_current = false;
+            options.cache_before = true;
+        }
+        if self == Self::ShiftNumpad {
+            options.skip = 1;
+        }
+        options
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CachePass {
+    /// Frame numbers in composition time. The last cached frame is next - step.
+    pub first: i64,
+    pub next: i64,
+    pub step: i64,
+    pub base: i64,
+    pub frames: i64,
+}
+
+impl CachePass {
+    pub fn frame(&self, cursor: i64) -> i64 {
+        self.base + (cursor - self.base).rem_euclid(self.frames)
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PreviewProfiles {
+    pub selected: PreviewShortcut,
     pub favor_active_camera: bool,
+    pub profiles: [PreviewOptions; 3],
+}
+
+impl Default for PreviewProfiles {
+    fn default() -> Self {
+        Self {
+            selected: PreviewShortcut::Space,
+            favor_active_camera: true,
+            profiles: PreviewShortcut::ALL.map(PreviewShortcut::defaults),
+        }
+    }
+}
+
+/// Settings applied when this shortcut starts a preview.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PreviewOptions {
+    pub video: bool,
+    pub audio: bool,
+    pub cache_before: bool,
+    pub cache_from_current: bool,
+    pub play_cached: bool,
+    pub fullscreen: bool,
+    pub repeat: bool,
     pub range: PreviewRange,
     /// Play From: the current time (else the start of the range).
     pub from_current: bool,
@@ -133,7 +207,13 @@ pub struct PreviewOptions {
 impl Default for PreviewOptions {
     fn default() -> Self {
         PreviewOptions {
-            favor_active_camera: true,
+            video: true,
+            audio: true,
+            cache_before: false,
+            cache_from_current: false,
+            play_cached: true,
+            fullscreen: false,
+            repeat: true,
             range: PreviewRange::default(),
             from_current: true,
             fps: None,
@@ -273,9 +353,9 @@ pub struct Session {
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
     /// Loop playback (Preview panel).
-    pub loop_playback: bool,
+
     /// Preview panel options (range, play from, frame rate, skip …).
-    pub preview: PreviewOptions,
+    pub preview: PreviewProfiles,
     /// The viewer's resolution is on Auto: it follows the magnification. The
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
@@ -351,10 +431,7 @@ pub struct SharedSession(Arc<Mutex<Session>>);
 
 impl Default for SharedSession {
     fn default() -> Self {
-        SharedSession(Arc::new(Mutex::new(Session {
-            loop_playback: true,
-            ..Session::default()
-        })))
+        SharedSession(Arc::new(Mutex::new(Session::default())))
     }
 }
 
@@ -374,7 +451,7 @@ impl SharedSession {
             output: s.output.take(),
             retry_audio_after: s.retry_audio_after.take(),
             opening_audio: s.opening_audio,
-            loop_playback: s.loop_playback,
+            preview: s.preview.clone(),
             ..Session::default()
         };
         *s = fresh;
@@ -503,7 +580,7 @@ impl Session {
             Some(range) if range.contains(at) => {
                 self.restart_clock(at);
                 if self.audio_clock {
-                    self.audio_clock = self.sound(at, range, self.loop_playback);
+                    self.audio_clock = self.sound(at, range, self.preview_options().repeat);
                 }
             }
             Some(_) => self.stop(),
@@ -711,6 +788,46 @@ impl Session {
                 .is_some_and(|output| !output.finished())
     }
 
+    pub(crate) fn apply_preview_options(
+        &mut self,
+        shortcut: PreviewShortcut,
+        options: PreviewOptions,
+        info: Option<&CompInfo>,
+    ) {
+        let audio_changed = self.preview.profiles[shortcut as usize].audio != options.audio;
+        self.preview.profiles[shortcut as usize] = options;
+        if self
+            .playback
+            .as_ref()
+            .is_some_and(|pb| pb.shortcut == shortcut && pb.caching.is_none())
+            && audio_changed
+            && let Some(info) = info
+        {
+            let pb = self.playback.as_ref().unwrap();
+            let (at, range) = (self.time(&info.path), pb.range);
+            self.restart_clock(at);
+            if !self.preview_options().audio
+                && let Some(output) = &self.output
+            {
+                output.stop();
+            }
+            self.audio_clock =
+                self.sound_clocks(info) && self.sound(at, range, self.preview_options().repeat);
+        }
+    }
+
+    pub fn preview_options(&self) -> &PreviewOptions {
+        let shortcut = self
+            .playback
+            .as_ref()
+            .map_or(self.preview.selected, |p| p.shortcut);
+        &self.preview.profiles[shortcut as usize]
+    }
+
+    pub fn fullscreen_preview(&self) -> bool {
+        self.is_playing() && self.preview_options().fullscreen && self.preview_options().video
+    }
+
     pub fn is_playing(&self) -> bool {
         self.playback.is_some()
     }
@@ -730,7 +847,7 @@ impl Session {
     /// The range Preview ▸ Range plays for the current time `now`.
     pub fn preview_range(&self, info: &CompInfo, now: Time) -> TimeRange {
         let wa = info.work_area;
-        match self.preview.range {
+        match self.preview_options().range {
             PreviewRange::WorkArea => wa,
             // The work area, grown to take in the current time (AE).
             PreviewRange::WorkAreaExtended => {
@@ -753,7 +870,7 @@ impl Session {
     pub fn play_start(&self, info: &CompInfo) -> (Time, TimeRange) {
         let now = self.time(&info.path);
         let range = self.preview_range(info, now);
-        let from = if self.preview.from_current
+        let from = if self.preview_options().from_current
             && range.contains(now)
             && now + info.frame_duration() < range.end
         {
@@ -773,13 +890,15 @@ impl Session {
         self.times.insert(info.path.clone(), from);
         let frame = info.frame_rate.time_to_frame(from);
         self.playback = Some(Playback {
+            shortcut: self.preview.selected,
+            caching: None,
             comp: info.path.clone(),
             started,
             frame,
             start: frame,
             rate: info.frame_rate,
             fps: self
-                .preview
+                .preview_options()
                 .fps
                 .unwrap_or_else(|| info.frame_rate.as_f64())
                 .max(1e-3),
@@ -798,9 +917,11 @@ impl Session {
     /// Another preview frame rate plays at another speed: the sound does not
     /// drive the clock then (AE plays it only at the comp's rate).
     fn sound_clocks(&self, info: &CompInfo) -> bool {
-        self.preview
-            .fps
-            .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3)
+        self.preview_options().audio
+            && self
+                .preview_options()
+                .fps
+                .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3)
     }
 
     /// Refresh the producer's snapshot once per composition edit. Timeline seeks
@@ -840,9 +961,36 @@ impl Session {
     pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
         self.prepare_mix(cx, info);
         self.play(info);
+        let options = self.preview_options().clone();
+        if options.video
+            && options.cache_before
+            && cx.resources.get::<Arc<bae_gpu::GpuContext>>().is_some()
+        {
+            let pb = self.playback.as_mut().unwrap();
+            let first = if options.cache_from_current && pb.range.contains(pb.before) {
+                pb.rate.time_to_frame(pb.before)
+            } else {
+                pb.rate.time_to_frame(pb.range.start)
+            };
+            let base = pb.rate.time_to_frame(pb.range.start);
+            let step = i64::from(options.skip) + 1;
+            let first = first - (first - base).rem_euclid(step);
+            let count = pb.rate.time_to_frame(Time(pb.range.end.0 - 1)) - base + 1;
+            let frames = ((count.max(1) - 1) / step + 1) * step;
+            pb.caching = Some(CachePass {
+                first,
+                next: first,
+                step,
+                base,
+                frames,
+            });
+            self.audio_clock = false;
+            return;
+        }
         let pb = self.playback.as_ref().unwrap();
         let at = pb.rate.frame_to_time(pb.frame);
-        self.audio_clock = self.sound_clocks(info) && self.sound(at, pb.range, self.loop_playback);
+        self.audio_clock =
+            self.sound_clocks(info) && self.sound(at, pb.range, self.preview_options().repeat);
     }
 
     pub(crate) fn scrub_to(
@@ -883,23 +1031,60 @@ impl Session {
     pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
         if self.prepare_mix(cx, info)
             && let Some(pb) = &self.playback
+            && pb.caching.is_none()
         {
             let (from, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
             self.restart_clock(from);
             self.audio_clock =
-                self.sound_clocks(info) && self.sound(from, range, self.loop_playback);
+                self.sound_clocks(info) && self.sound(from, range, self.preview_options().repeat);
         }
     }
 
     /// Stop playing (Spacebar): the current time stays on the last frame shown,
     /// or goes back when Move Time To Preview Time is off.
     pub fn stop_preview(&mut self, info: &CompInfo) {
-        if let Some(pb) = self.playback.take()
-            && !self.preview.move_time
-            && pb.comp == info.path
+        let move_time = self.preview_options().move_time;
+        if self.preview_options().play_cached
+            && self
+                .playback
+                .as_ref()
+                .and_then(|p| p.caching.as_ref())
+                .is_some_and(|pass| pass.next > pass.first)
         {
-            self.set_time(info, pb.before);
+            self.finish_cache(info, true);
+            return;
         }
+        let before = self
+            .playback
+            .as_ref()
+            .filter(|p| p.comp == info.path)
+            .map(|p| p.before);
+        self.stop();
+        if !move_time && let Some(time) = before {
+            self.set_time(info, time);
+        }
+    }
+
+    pub(crate) fn finish_cache(&mut self, info: &CompInfo, limit_to_cached: bool) {
+        let repeat = self.preview_options().repeat;
+        let Some(pb) = self.playback.as_mut() else {
+            return;
+        };
+        let Some(pass) = pb.caching.take() else {
+            return;
+        };
+        if limit_to_cached && pass.next > pass.first && pass.next - pass.first < pass.frames {
+            pb.range = TimeRange::new(
+                pb.rate.frame_to_time(pass.first),
+                pb.rate.frame_to_time(pass.next).min(pb.range.end),
+            );
+        }
+        let range = pb.range;
+        let at = pb.rate.frame_to_time(pb.start);
+        let at = if range.contains(at) { at } else { range.start };
+        self.times.insert(info.path.clone(), at);
+        self.restart_clock(at);
+        self.audio_clock = self.sound_clocks(info) && self.sound(at, range, repeat);
     }
 
     /// Edits to the work area or frame rate take effect without restarting the
@@ -917,19 +1102,27 @@ impl Session {
             return;
         };
         if pb.work_area != info.work_area || pb.rate != info.frame_rate {
+            let shortcut = pb.shortcut;
+            let editing = self.preview.selected;
+            self.preview.selected = shortcut;
+            self.playback = None;
             self.play(&info);
+            self.preview.selected = editing;
             if let Some(pb) = self.playback.as_mut() {
                 pb.revision = Some(stage.revision());
                 let (at, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
                 if self.audio_clock {
-                    self.audio_clock = self.sound(at, range, self.loop_playback);
+                    self.audio_clock = self.sound(at, range, self.preview_options().repeat);
                 }
             }
         }
     }
 
     pub fn playback_deadline(&self) -> Option<Instant> {
-        self.playback.as_ref().map(Playback::deadline)
+        self.playback
+            .as_ref()
+            .filter(|p| p.caching.is_none())
+            .map(Playback::deadline)
     }
 
     /// Advance once before building the workspace. Ordinals count scheduled
@@ -937,12 +1130,17 @@ impl Session {
     /// While the device plays the mix it is the clock: the wall clock start is
     /// re-anchored to its elapsed time, so deadlines follow the audio too.
     pub fn tick(&mut self, now: Instant) {
+        let repeat = self.preview_options().repeat;
+        let skip = self.preview_options().skip;
         let Some(pb) = self.playback.as_mut() else {
             return;
         };
+        if pb.caching.is_some() {
+            return;
+        }
         let mut finished = false;
         if let Some(output) = self.output.as_ref().filter(|_| self.audio_clock) {
-            output.set_loop(self.loop_playback);
+            output.set_loop(repeat);
             finished = output.finished();
             let elapsed = Duration::from_secs_f64(output.elapsed().as_seconds().max(0.));
             pb.started = now.checked_sub(elapsed).unwrap_or(now);
@@ -959,14 +1157,14 @@ impl Session {
         let previous_ordinal = pb.ordinal;
         pb.ordinal = ordinal;
         // The device stops by itself at the end of a range it does not loop.
-        let ended = finished || (!self.loop_playback && delta >= until_end);
+        let ended = finished || (!repeat && delta >= until_end);
         pb.frame = if ended {
             last
         } else {
             first + (pb.frame - first + delta as i64).rem_euclid(last - first + 1)
         };
         // Skip: only every (skip + 1)th frame is shown.
-        let step = i64::from(self.preview.skip) + 1;
+        let step = i64::from(skip) + 1;
         let shown = pb.frame - (pb.frame - pb.start).rem_euclid(step);
         self.times
             .insert(pb.comp.clone(), pb.rate.frame_to_time(shown.max(first)));
@@ -1037,18 +1235,18 @@ mod tests {
         let r = s.preview_range(&info, now);
         assert_eq!(r.start, Time::from_seconds(0.5));
         assert!(r.end > now);
-        s.preview.range = PreviewRange::WorkArea;
+        s.preview.profiles[0].range = PreviewRange::WorkArea;
         assert_eq!(s.preview_range(&info, now), info.work_area);
-        s.preview.range = PreviewRange::EntireDuration;
+        s.preview.profiles[0].range = PreviewRange::EntireDuration;
         assert_eq!(s.preview_range(&info, now).end, info.duration);
         // Play From: Start of Range.
-        s.preview.range = PreviewRange::WorkArea;
-        s.preview.from_current = false;
+        s.preview.profiles[0].range = PreviewRange::WorkArea;
+        s.preview.profiles[0].from_current = false;
         s.set_time(&info, Time::from_seconds(0.7));
         s.play(&info);
         assert_eq!(s.time(&info.path), Time::from_seconds(0.5));
         // Move time to preview time off: Spacebar goes back to where it was.
-        s.preview.move_time = false;
+        s.preview.profiles[0].move_time = false;
         s.stop_preview(&info);
         assert!(!s.is_playing());
         assert_eq!(
@@ -1074,7 +1272,7 @@ mod tests {
         let mut s = Session::default();
         let mut i = info();
         i.work_area = TimeRange::new(Time::from_seconds(1.0), Time::from_seconds(2.0));
-        s.preview.range = PreviewRange::WorkArea;
+        s.preview.profiles[0].range = PreviewRange::WorkArea;
         s.play(&i);
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
@@ -1092,7 +1290,6 @@ mod tests {
         let time = |f| i.frame_rate.frame_to_time(f);
         i.work_area = TimeRange::new(Time::ZERO, time(3));
         let mut s = Session {
-            loop_playback: true,
             ..Default::default()
         };
         s.play(&i);
@@ -1117,7 +1314,7 @@ mod tests {
         s.drew_preview(time(1));
         s.frame_presented(seek);
         assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (1, 0));
-        s.loop_playback = false;
+        s.preview.profiles[0].repeat = false;
         s.tick(seek + Duration::from_secs(1));
         assert!(!s.is_playing());
         assert_eq!(s.time(&i.path), time(2));

@@ -209,7 +209,7 @@ mod tests {
 
         let (mut app, mut doc) = app_and_doc();
         let held = app.resource::<SharedSession>().unwrap().clone();
-        held.lock().loop_playback = false;
+        held.lock().preview.profiles[0].repeat = false;
         doc.open(&path).unwrap();
         restore(&mut app, &doc);
         let s = held.lock();
@@ -217,7 +217,7 @@ mod tests {
             s.active_comp.as_ref().map(ToString::to_string).as_deref(),
             Some("/comps/Main")
         );
-        assert!(!s.loop_playback, "loop is the user's setting");
+        assert!(!s.preview.profiles[0].repeat, "loop is the user's setting");
         drop(s);
         assert_eq!(active(&app).as_deref(), Some("/comps/Main"));
     }

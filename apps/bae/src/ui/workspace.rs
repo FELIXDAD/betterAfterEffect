@@ -189,6 +189,7 @@ pub(crate) fn hardware_information(
 /// The workbench plus shell-owned windows.
 pub struct Workspace {
     workbench: Workbench,
+    fullscreen_before_preview: Option<bool>,
     show_about: bool,
     /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
     prefs: Arc<bae_prefs::PrefsStore>,
@@ -209,6 +210,7 @@ impl Workspace {
         );
         Self {
             workbench,
+            fullscreen_before_preview: None,
             show_about: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
@@ -313,10 +315,27 @@ impl Workspace {
         doc: &Document,
         resources: &Resources,
     ) -> Vec<Invocation> {
-        if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
-            let mut s = session.lock();
-            s.sync_playback(doc.stage());
-            s.tick(std::time::Instant::now());
+        let fullscreen = resources
+            .get::<bae_ui_motion::SharedSession>()
+            .is_some_and(|session| {
+                let mut s = session.lock();
+                s.sync_playback(doc.stage());
+                s.tick(std::time::Instant::now());
+                if s.fullscreen_preview()
+                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                {
+                    s.stop();
+                }
+                s.fullscreen_preview()
+            });
+        if fullscreen && self.fullscreen_before_preview.is_none() {
+            self.fullscreen_before_preview =
+                Some(ui.input(|i| i.viewport().fullscreen.unwrap_or(false)));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        } else if !fullscreen && let Some(previous) = self.fullscreen_before_preview.take() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(previous));
         }
         let title = doc.title();
         let cx = WorkbenchContext {
@@ -326,6 +345,11 @@ impl Workspace {
             title: &title,
             dirty: doc.is_dirty(),
         };
+        if fullscreen {
+            return self
+                .workbench
+                .present_panel(ui, &cx, bae_ui::PanelId::new("composition"));
+        }
         self.workbench.set_external_modal(self.settings.is_open());
         let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
         if self.settings.is_open() {
