@@ -822,6 +822,16 @@ pub(crate) fn new_layer(
     // start, or at the current time when that option is off.
     let prefs = crate::prefs::current(cx.resources);
     params["label"] = json!(crate::prefs::layer_label(&prefs, kind));
+    if matches!(kind, LayerKind::Solid | LayerKind::Adjustment) {
+        let name = prefs.str("project.new_project_solids_folder");
+        let name = if name == "Solids" || name.trim().is_empty() {
+            bae_ui::tr("Solids")
+        } else {
+            name
+        };
+        params["solids_folder_name"] = json!(name);
+        params["solids_folder_label"] = json!(prefs.int("labels.label_default_folder"));
+    }
     if !crate::prefs::layers_at_comp_start(&prefs) {
         params["start"] = json!(session.lock().time(&comp));
     }
