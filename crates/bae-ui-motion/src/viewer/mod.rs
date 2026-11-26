@@ -227,6 +227,8 @@ pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    /// CC Particle World producer paths (expressions evaluated once per time).
+    particle_paths: particle_guides::PathCache,
     preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
@@ -1107,6 +1109,7 @@ impl Panel for CompositionViewer {
                     |pb| pb.range,
                 );
                 let looping = playback.is_some() && session.lock().loop_playback;
+                let mut shown_now = false;
                 if let Some((image, actual, errors)) = gpu.playback.poll(
                     cx.stage,
                     cx.resources,
@@ -1119,6 +1122,7 @@ impl Panel for CompositionViewer {
                     ui.ctx(),
                 ) {
                     completed = Some(image);
+                    shown_now = actual == time;
                     if actual == time || playback.is_some() {
                         let mut s = session.lock();
                         if playback.is_some() {
@@ -1128,6 +1132,10 @@ impl Panel for CompositionViewer {
                             s.expr_errors = errors.to_vec();
                         }
                     }
+                }
+                // A cold start: the clock waits for playback's first frame.
+                if playback.is_some() {
+                    session.lock().hold_first_frame(shown_now);
                 }
                 // Idle (the current time still for a moment): prepare the first
                 // frames playback would show, so pressing play shows them at
@@ -1535,7 +1543,16 @@ impl Panel for CompositionViewer {
         if controls.masks && opts.paths {
             overlay::masks(&painter, cx.stage, &comp, &view, &selected);
         }
-        particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected, view_camera);
+        particle_guides::paint(
+            &clip,
+            cx.stage,
+            eval,
+            &comp,
+            &view,
+            &selected,
+            view_camera,
+            &mut self.particle_paths,
+        );
         // Cameras and lights in the 3D views (not the camera looked through).
         let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
             None | Some(view3d::View3d::Active) => comp.camera.map(|i| comp.layers[i].path.clone()),

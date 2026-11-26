@@ -137,6 +137,27 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 }
 
 /// English label of a property (displayed through `tr`).
+/// Integer properties AE shows as a dropdown: their values and names.
+pub(crate) fn int_choices(attr: &str) -> Option<&'static [(i64, &'static str)]> {
+    match attr {
+        "material:casts_shadows" | "material:accepts_shadows" => {
+            Some(&[(0, "Off"), (1, "On"), (2, "Only")])
+        }
+        "camera:iris_shape" => Some(&[
+            (1, "Fast Rectangle"),
+            (3, "Triangle"),
+            (4, "Square"),
+            (5, "Pentagon"),
+            (6, "Hexagon"),
+            (7, "Heptagon"),
+            (8, "Octagon"),
+            (9, "Nonagon"),
+            (10, "Decagon"),
+        ]),
+        _ => None,
+    }
+}
+
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
         "audio:levels" => "Audio Levels",
@@ -213,8 +234,42 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "feather" => "Mask Feather",
         "expansion" => "Mask Expansion",
         "camera:zoom" => "Zoom",
+        "camera:depth_of_field" => "Depth of Field",
+        "camera:focus_distance" => "Focus Distance",
+        "camera:aperture" => "Aperture",
+        "camera:blur_level" => "Blur Level",
+        "camera:iris_shape" => "Iris Shape",
+        "camera:iris_rotation" => "Iris Rotation",
+        "camera:iris_roundness" => "Iris Roundness",
+        "camera:iris_aspect_ratio" => "Iris Aspect Ratio",
+        "camera:iris_diffraction_fringe" => "Iris Diffraction Fringe",
+        "camera:highlight_gain" => "Highlight Gain",
+        "camera:highlight_threshold" => "Highlight Threshold",
+        "camera:highlight_saturation" => "Highlight Saturation",
         "light:intensity" => "Intensity",
         "light:color" => "Color",
+        "light:cone_angle" => "Cone Angle",
+        "light:cone_feather" => "Cone Feather",
+        "light:falloff" => "Falloff",
+        "light:radius" => "Radius",
+        "light:falloff_distance" => "Falloff Distance",
+        "light:casts_shadows" | "material:casts_shadows" => "Casts Shadows",
+        "light:shadow_darkness" => "Shadow Darkness",
+        "light:shadow_diffusion" => "Shadow Diffusion",
+        "material:light_transmission" => "Light Transmission",
+        "material:accepts_shadows" => "Accepts Shadows",
+        "material:accepts_lights" => "Accepts Lights",
+        // AE's Chinese UI calls the material's Ambient 周围 (the light type is 环境).
+        "material:ambient" => {
+            return match bae_ui::i18n::lang() {
+                bae_ui::i18n::Lang::Zh => "周围".into(),
+                _ => "Ambient".into(),
+            };
+        }
+        "material:diffuse" => "Diffuse",
+        "material:specular_intensity" => "Specular Intensity",
+        "material:specular_shininess" => "Specular Shininess",
+        "material:metal" => "Metal",
         other => {
             // Effect parameters and unknown attributes: a readable form of the name.
             let s = other.rsplit(':').next().unwrap_or(other).replace('_', " ");

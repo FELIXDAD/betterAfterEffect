@@ -252,6 +252,14 @@ fn menus_show_the_ae_shortcuts() {
 /// (the document answers "unknown"), and none may panic.
 #[test]
 fn every_enabled_menu_item_does_something() {
+    // Last Effect remembers effects applied across projects in the same process.
+    // Start this fresh-launch menu check without another test's effect history.
+    if !in_child(
+        "acceptance::release_001::every_enabled_menu_item_does_something",
+        &[],
+    ) {
+        return;
+    }
     let items = rich().state().menu_items();
     let mut problems = Vec::new();
     let mut ran = 0;
@@ -524,8 +532,7 @@ fn type_into(h: &mut Ui, label: &str, text: &str) {
     key(h, Modifiers::NONE, Key::Tab);
 }
 
-/// Cmd+N, `field` set to `text`, Enter straight from the field (OK): the new
-/// comp's settings (Tab then Enter: `enter_is_ok_after_tab_to_a_swatch`).
+/// Edit a numeric field, commit it, then accept the composition settings.
 fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::CompInfo {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
@@ -538,6 +545,8 @@ fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::Comp
     } else {
         type_text(h, text);
     }
+    key(h, Modifiers::NONE, Key::Enter);
+    assert!(dialog_open(h), "{field} should commit before closing");
     key(h, Modifiers::NONE, Key::Enter);
     assert!(
         !dialog_open(h),

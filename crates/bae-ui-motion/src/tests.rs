@@ -3042,6 +3042,54 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// File ▸ New Comp from Selection…: the dialog opens for the selected items;
+/// one comp with them as layers, in sequence with a cross dissolve, or one comp
+/// per item.
+#[test]
+fn new_comp_from_selection() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let solid_item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    // The dialog asks first.
+    h.session().lock().selected_items = vec![solid_item.clone(), comp.clone()];
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::NEW_COMP_FROM_SELECTION),
+    );
+    assert!(h.dialogs().is_open());
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "comp.create_from_items");
+    let before = query::comps(&h.stage).len();
+    let out = h.run(
+        "comp.create_from_items",
+        json!({
+            "items": [solid_item, comp],
+            "sequence": true,
+            "overlap": Time::from_seconds(1.0),
+            "transition": "cross_dissolve",
+            "still_duration": Time::from_seconds(5.0),
+        }),
+    );
+    let new = PrimPath::new(out["comps"][0].as_str().unwrap()).unwrap();
+    let layers = query::comp_layers(&h.stage, &new);
+    assert_eq!(layers.len(), 2);
+    // The second starts where the first (5 s) ends minus the overlap.
+    let t = query::layer_timing(&h.stage, &layers[1]);
+    assert_eq!(t.in_point, Time::from_seconds(4.0));
+    let fades = |l: &PrimPath| {
+        query::attr_spec(&h.stage, l, "transform:opacity").map_or(0, |s| s.keyframes.len())
+    };
+    assert_eq!((fades(&layers[0]), fades(&layers[1])), (2, 2));
+    // Multiple Compositions: one per item.
+    h.run(
+        "comp.create_from_items",
+        json!({"items": [solid_item, comp], "multiple": true}),
+    );
+    assert_eq!(query::comps(&h.stage).len(), before + 3);
+}
+
 /// #460: the Window menu names what the viewers show (AE: "Composition: Comp 1").
 #[test]
 fn window_menu_titles_name_the_active_comp() {
@@ -3516,6 +3564,61 @@ fn new_folder_and_open_layer() {
     h.session().lock().selected_layers = vec![solid.clone()];
     h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
     assert_eq!(h.session().lock().layer_panel, Some(solid));
+}
+
+/// Camera Options, Light Options (by light type) and a 3D layer's Material
+/// Options sit after Transform, as in AE's timeline.
+#[test]
+fn camera_light_and_material_options_groups() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let layer = |h: &mut Harness, kind: &str| {
+        PrimPath::new(
+            h.run("layer.create", json!({"comp": comp, "kind": kind}))["path"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let camera = layer(&mut h, "camera");
+    let light = layer(&mut h, "light");
+    let groups = |h: &Harness, l: &PrimPath| {
+        crate::props::layer_tree(&h.stage, l)
+            .into_iter()
+            .filter_map(|n| match n {
+                crate::props::Node::Group {
+                    label, children, ..
+                } => Some((label, children.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cam = groups(&h, &camera);
+    assert_eq!(
+        cam.last(),
+        Some(&("Camera Options".to_owned(), 13)),
+        "{cam:?}"
+    );
+    let lit = groups(&h, &light);
+    assert_eq!(lit.last().map(|g| g.0.as_str()), Some("Light Options"));
+    assert_eq!(lit.last().map(|g| g.1), Some(10), "a spot light: {lit:?}");
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("ambient".into())}),
+    );
+    assert_eq!(groups(&h, &light).last().map(|g| g.1), Some(2), "ambient");
+    assert!(
+        groups(&h, &solid).iter().all(|g| g.0 != "Material Options"),
+        "2D layers have none"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "three_d", "value": Value::Bool(true)}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 9))
+    );
 }
 
 /// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label

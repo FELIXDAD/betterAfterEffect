@@ -14,18 +14,11 @@ use bae_model::{
     layer_styles as styles, psd::LayerImage,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ImportKind {
-    #[default]
-    Footage,
-    Composition,
-    RetainSize,
-}
+pub use bae_model::psd::ImportKind;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Params {
@@ -186,6 +179,7 @@ fn footage(
                     folder_label: p.folder_label,
                     parent: Some(parent.clone()),
                     comp: None,
+                    create_comp: false,
                     files: vec![file],
                 },
             )?

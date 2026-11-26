@@ -77,6 +77,7 @@ pub struct AnimEvaluator {
     preview_audio: Option<preview_audio::PreviewAudio>,
     inner: Evaluator,
     scalar_tracks: crate::parameter_track::TrackCache,
+    attributes: AttributeCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
     propagate_switches: bool,
@@ -101,6 +102,7 @@ impl AnimEvaluator {
             preview_audio: None,
             inner: Evaluator::new(),
             scalar_tracks: Default::default(),
+            attributes: AttributeCache::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             propagate_switches: true,
@@ -137,6 +139,7 @@ impl AnimEvaluator {
     /// Drops compiled animation when the caller observed edits without individual stage events.
     pub fn clear_compiled(&mut self) {
         self.inner.clear();
+        self.attributes = AttributeCache::default();
         #[cfg(feature = "media")]
         if let Some(preview) = &mut self.preview_audio {
             preview.composition = None;
@@ -268,6 +271,7 @@ impl AnimEvaluator {
         for (i, l) in rc.layers.iter_mut().enumerate() {
             l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
         }
+        collapse_3d_precomps(ec, &mut rc);
         if depth == 0 {
             self.customs.retain(|_, (_, used)| std::mem::take(used));
         }
@@ -657,6 +661,11 @@ impl AnimEvaluator {
                     },
                     size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
                     source_time: *time,
+                    alphabetical: stage.prim(asset).is_some_and(|view| {
+                        view.value("sequence:pattern")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| s.starts_with("*."))
+                    }),
                     sequence: (info.kind == "sequence")
                         .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
                     blend: l
@@ -690,7 +699,31 @@ impl CompEvaluator for AnimEvaluator {
         name: &str,
         time: Time,
     ) -> Option<bae_model::Value> {
-        self.inner.evaluate_attribute(stage, path, name, time).ok()
+        let cache = &mut self.attributes;
+        if cache.revision != stage.revision() || cache.len > ATTRIBUTE_CACHE_LIMIT {
+            *cache = AttributeCache {
+                revision: stage.revision(),
+                ..AttributeCache::default()
+            };
+        }
+        if let Some(value) = cache
+            .values
+            .get(path)
+            .and_then(|attrs| attrs.get(name))
+            .and_then(|times| times.get(&time))
+        {
+            return value.clone();
+        }
+        let value = self.inner.evaluate_attribute(stage, path, name, time).ok();
+        cache
+            .values
+            .entry(path.clone())
+            .or_default()
+            .entry(name.to_owned())
+            .or_default()
+            .insert(time, value.clone());
+        cache.len += 1;
+        value
     }
 
     fn integral(
@@ -712,6 +745,7 @@ impl CompEvaluator for AnimEvaluator {
     }
 
     fn invalidate(&mut self, event: &StageEvent) {
+        self.attributes = AttributeCache::default();
         self.inner.invalidate(event);
         #[cfg(feature = "media")]
         {
@@ -737,6 +771,22 @@ impl CompEvaluator for AnimEvaluator {
         std::mem::take(&mut self.warnings)
     }
 }
+
+/// Effect controls evaluated at other times (expressions of generate-mode
+/// effects sampled at every birth, the same births each frame), for one stage
+/// revision: an expression runs once per (control, time).
+#[derive(Debug, Default)]
+struct AttributeCache {
+    revision: u64,
+    len: usize,
+    values: rustc_hash::FxHashMap<
+        PrimPath,
+        rustc_hash::FxHashMap<String, rustc_hash::FxHashMap<Time, Option<bae_model::Value>>>,
+    >,
+}
+
+/// Entries before the cache starts over (a long scrub).
+const ATTRIBUTE_CACHE_LIMIT: usize = 16_384;
 
 /// Provider ID of shape layers (05's `bae_vector::SHAPE_PROVIDER`).
 pub const SHAPE_PROVIDER: &str = "bae.shape";
@@ -834,6 +884,94 @@ fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
         iris: c.iris,
         projection: crate::camera::Projection::Perspective,
     })
+}
+
+/// Collapsed 3D pre-comps (AE-CMP-424): a 3D pre-comp layer with Collapse
+/// Transformations on and no effects, masks or track matte joins the comp's
+/// 3D scene. Its layers take its place in the stack, placed by its matrix and
+/// faded by its opacity, and are seen by this comp's camera and lit by its
+/// lights (the pre-comp's own cameras and lights are ignored); its 2D layers
+/// lie on its plane.
+fn collapse_3d_precomps(ec: &EvaluatedComp, rc: &mut RenderComp) {
+    let mut i = 0;
+    while i < rc.layers.len() {
+        let collapsed = ec
+            .layers
+            .iter()
+            .find(|l| l.path == rc.layers[i].path)
+            .is_some_and(|l| l.switches.collapse_transformation && l.switches.three_d);
+        let outer = &rc.layers[i];
+        let (Some(m), LayerContent::Comp(nested)) = (outer.matrix_3d, &outer.content) else {
+            i += 1;
+            continue;
+        };
+        if !collapsed
+            || outer.effects.iter().any(|e| e.enabled)
+            || outer.masks.iter().any(|m| m.mode != MaskMode::None)
+            || outer.track_matte.is_some()
+        {
+            i += 1;
+            continue;
+        }
+        let nested = nested.clone();
+        let (opacity, active, visible) = (outer.opacity, outer.active, outer.visible);
+        let inner: Vec<RenderLayer> = nested
+            .layers
+            .iter()
+            .map(|l| {
+                let mut l = l.clone();
+                let world = m * l.matrix_3d.unwrap_or_else(|| embed_2d(&l.transform));
+                l.matrix_3d = Some(world);
+                l.transform = affine_2d(&world);
+                l.motion_samples = l
+                    .motion_samples
+                    .iter()
+                    .map(|s| LayerSample {
+                        transform: affine_2d(
+                            &(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                        ),
+                        matrix_3d: Some(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                    })
+                    .collect();
+                l.opacity *= opacity;
+                l.active &= active;
+                l.visible &= visible;
+                if let Some(t) = &mut l.track_matte {
+                    t.layer += i;
+                }
+                l
+            })
+            .collect();
+        let n = inner.len();
+        // Indices past the pre-comp move by the layers it adds.
+        let shift = |index: &mut usize| {
+            if *index > i {
+                *index = *index + n - 1;
+            }
+        };
+        for l in rc.layers.iter_mut() {
+            if let Some(t) = &mut l.track_matte {
+                shift(&mut t.layer);
+            }
+        }
+        for light in rc.lights.iter_mut() {
+            if let Some(index) = &mut light.scope_below {
+                shift(index);
+            }
+        }
+        rc.layers.splice(i..=i, inner);
+        i += n.max(1);
+    }
+}
+
+/// A 2D layer's transform as a 3D placement on the z = 0 plane.
+fn embed_2d(t: &DAffine2) -> DMat4 {
+    DMat4::from_cols(
+        glam::DVec4::new(t.matrix2.x_axis.x, t.matrix2.x_axis.y, 0.0, 0.0),
+        glam::DVec4::new(t.matrix2.y_axis.x, t.matrix2.y_axis.y, 0.0, 0.0),
+        glam::DVec4::new(0.0, 0.0, 1.0, 0.0),
+        glam::DVec4::new(t.translation.x, t.translation.y, 0.0, 1.0),
+    )
 }
 
 /// The lights of `ec` that light its layers.
