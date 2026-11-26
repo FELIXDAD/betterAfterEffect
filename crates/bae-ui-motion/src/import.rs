@@ -203,8 +203,9 @@ fn probe_dir(
         .into_iter()
         .flatten()
         .flatten()
+        .filter(|e| e.file_type().is_ok_and(|ty| ty.is_dir()))
         .map(|e| e.path())
-        .filter(|p| p.is_dir() && !file_name(p).starts_with('.'))
+        .filter(|p| !file_name(p).starts_with('.'))
         .collect();
     subdirs.sort();
     for sub in subdirs {
@@ -230,6 +231,21 @@ pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
         }
     }
     out
+}
+
+/// Route external drops on the Composition and Timeline panels through the same
+/// import command as the Project panel, including folders and image sequences.
+pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
+    if ui.rect_contains_pointer(ui.available_rect_before_wrap()) {
+        let paths = ui.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_owned())
+                .collect::<Vec<_>>()
+        });
+        import_paths(cx, &paths, None);
+    }
 }
 
 /// Import `paths` into `parent` (default the assets folder): one
