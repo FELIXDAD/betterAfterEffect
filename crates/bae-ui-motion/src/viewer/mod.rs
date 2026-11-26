@@ -608,23 +608,39 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
+/// The transparency grid: one rectangle tiled with a cached 2×2 texture
+/// (a rectangle per cell was tens of thousands of shapes at the small size).
 pub(crate) fn checkerboard(p: &egui::Painter, r: Rect, resources: &bae_app::Resources) {
     let prefs = prefs::ViewerPrefs::current(resources);
-    let s = prefs.checker_size;
+    let s = prefs.checker_size.max(1.0);
     let colors = prefs.checker_colors;
-    p.rect_filled(r, 0.0, colors[1]);
-    let mut y = r.top();
-    let mut row = 0;
-    while y < r.bottom() {
-        let mut x = r.left() + if row % 2 == 0 { 0.0 } else { s };
-        while x < r.right() {
-            let cell = Rect::from_min_size(pos2(x, y), vec2(s, s)).intersect(r);
-            p.rect_filled(cell, 0.0, colors[0]);
-            x += 2.0 * s;
-        }
-        y += s;
-        row += 1;
-    }
+    let ctx = p.ctx();
+    let id = egui::Id::new("bae.checkerboard");
+    let cached = ctx
+        .data(|d| d.get_temp::<([egui::Color32; 2], egui::TextureHandle)>(id))
+        .filter(|(c, _)| *c == colors)
+        .map(|(_, t)| t);
+    let texture = cached.unwrap_or_else(|| {
+        let image = egui::ColorImage::new([2, 2], vec![colors[0], colors[1], colors[1], colors[0]]);
+        let texture = ctx.load_texture(
+            "bae.checkerboard",
+            image,
+            egui::TextureOptions {
+                magnification: egui::TextureFilter::Nearest,
+                minification: egui::TextureFilter::Nearest,
+                wrap_mode: egui::TextureWrapMode::Repeat,
+                mipmap_mode: None,
+            },
+        );
+        ctx.data_mut(|d| d.insert_temp(id, (colors, texture.clone())));
+        texture
+    });
+    // Each texel is one cell: 2 cells per texture repeat.
+    let uv = Rect::from_min_max(
+        pos2(0.0, 0.0),
+        pos2(r.width() / (2.0 * s), r.height() / (2.0 * s)),
+    );
+    p.image(texture.id(), r, uv, egui::Color32::WHITE);
 }
 
 impl Panel for CompositionViewer {

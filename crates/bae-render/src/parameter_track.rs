@@ -253,6 +253,18 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn retiming_integrates_signed_speed_across_a_reversal_and_a_hold() {
+        let mut track = ScalarTrack::default();
+        track.push(Time::ZERO, 100., 100.);
+        track.push(Time::from_seconds(1.), -100., -100.);
+        track.push(Time::from_seconds(2.), 50., -100.);
+        assert_eq!(track.signed_integral(0.5), 25.);
+        assert_eq!(track.signed_integral(1.5), -50.);
+        assert_eq!(track.signed_integral(3.), -50.);
+        assert_eq!(track.at(1.5).1, 50.); // Nonnegative emission rates use the same knots.
+    }
+
+    #[test]
     fn editing_a_rate_preserves_only_the_unaffected_expression_samples() {
         let fps = FrameRate::FPS_30;
         let t = Time::from_seconds;
