@@ -57,6 +57,8 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const MANAGE_EFFECTS: &str = "motion.effect.manage_effects";
+    pub const BROWSE_PRESETS: &str = "motion.anim.browse_presets";
     pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
     pub const APPLY_PRESET: &str = "motion.anim.apply_animation_preset";
     pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
@@ -94,6 +96,10 @@ pub mod ids {
     pub const REVEAL_EXPRESSION_ERRORS: &str = "motion.layer.reveal_expression_errors";
     /// Animation > Keyframe Assistant > Convert Expression to Keyframes.
     pub const CONVERT_EXPRESSION: &str = "motion.anim.convert_expression_to_keyframes";
+    /// Animation > Keyframe Assistant > Exponential Scale (two Scale keys).
+    pub const EXPONENTIAL_SCALE: &str = "motion.anim.exponential_scale";
+    /// Animation > Keyframe Assistant > Sequence Layers… (its dialog).
+    pub const SEQUENCE_LAYERS: &str = "motion.anim.sequence_layers";
     /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
     pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
     /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
@@ -229,6 +235,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::MANAGE_EFFECTS, "Manage Effects..."),
+    (ids::BROWSE_PRESETS, "Browse Presets..."),
     (ids::SAVE_PRESET, "Save Animation Preset..."),
     (ids::APPLY_PRESET, "Apply Animation Preset..."),
     (ids::TIME_STRETCH, "Time Stretch..."),
@@ -240,6 +248,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
     (ids::REVEAL_EXPRESSION_ERRORS, "Reveal Expression Errors"),
     (ids::CONVERT_EXPRESSION, "Convert Expression to Keyframes"),
+    (ids::EXPONENTIAL_SCALE, "Exponential Scale"),
+    (ids::SEQUENCE_LAYERS, "Sequence Layers..."),
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
@@ -1067,6 +1077,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::import::import_multiple(cx, session);
             return true;
         }
+        ids::MANAGE_EFFECTS => {
+            crate::effects::manager::open(cx);
+            return true;
+        }
+        ids::BROWSE_PRESETS => {
+            crate::presets::browse(cx);
+            return true;
+        }
         // F4 / Shift+F4 with another panel in front: the Timeline toggles its
         // columns on its next frame (AE: they work whatever panel is active).
         ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN => {
@@ -1372,6 +1390,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::KEY_INTERPOLATION if !keys.is_empty() => {
             s.key_dialog = Some(crate::timeline::KeyDialog::Interpolation(
                 crate::timeline::InterpolationDialog::new(keys),
+            ));
+        }
+        ids::EXPONENTIAL_SCALE => {
+            // Two Scale keyframes of one layer (AE does nothing otherwise).
+            let scale: Vec<&KeyRef> = keys
+                .iter()
+                .filter(|k| k.attr == "transform:scale")
+                .collect();
+            if let [a, b] = scale.as_slice()
+                && a.path == b.path
+                && a.time != b.time
+            {
+                cx.invoke_with("key.exponential_scale", json!({"keys": [a, b]}));
+            }
+        }
+        // In the selection order, as AE sequences them.
+        ids::SEQUENCE_LAYERS if layers.len() > 1 => {
+            s.key_dialog = Some(crate::timeline::KeyDialog::Sequence(
+                crate::timeline::SequenceDialog::new(layers.clone(), info.clone()),
             ));
         }
         ids::KEY_VELOCITY if !keys.is_empty() => {
@@ -2001,6 +2038,8 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Manage Effects...", "管理效果..."),
+    ("Browse Presets...", "浏览预设..."),
     ("Save Animation Preset...", "保存动画预设..."),
     ("Apply Animation Preset...", "应用动画预设..."),
     // Layer ▸ Time and switches (AE 26's Chinese).
@@ -2036,6 +2075,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Draft Quality", "草图品质"),
     ("Wireframe Quality", "线框品质"),
     ("Show Position", "显示位置"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Add Position to Shown Properties", "将位置添加到显示的属性"),
     ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),
     ("Show Scale", "显示缩放"),
@@ -2088,8 +2129,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp", "适合复合"),
     ("Fit to Comp Width", "适合复合宽度"),
     ("Fit to Comp Height", "适合复合高度"),
-    ("Show Effects", "显示效果"),
-    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Find", "查找"),
     ("Open Layer", "打开图层"),
     ("Open Layer Source", "打开图层源"),

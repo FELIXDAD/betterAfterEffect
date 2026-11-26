@@ -362,6 +362,13 @@ impl CompositionViewer {
         let fit = fit.min(1.0 / ppp);
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let origin = area.center() - vec2(w, h) * scale / 2.0 + self.pan;
+        // At native size a fractional texture edge blends adjacent texels.
+        let origin = if cfg!(target_os = "macos") && scale == 1.0 / ppp {
+            use egui::emath::GuiRounding as _;
+            origin.round_to_pixels(ppp)
+        } else {
+            origin
+        };
         let point = self.prefs.point_size;
         (
             View {
@@ -1408,6 +1415,16 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
+        // The paint tools paint in the Layer panel: a double-click on a layer
+        // opens it there (AE).
+        if matches!(effective, Tool::Brush | Tool::CloneStamp | Tool::Eraser)
+            && resp.double_clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, pos)
+        {
+            session.lock().selected_layers = vec![layer.clone()];
+            crate::layer_panel::open(cx, &session, &layer);
+        }
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.

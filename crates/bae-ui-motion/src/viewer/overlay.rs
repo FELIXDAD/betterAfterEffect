@@ -175,7 +175,7 @@ pub(crate) fn editable_paths(
     out
 }
 
-fn shape_paths(
+pub(super) fn shape_paths(
     items: &[bae_anim::EvaluatedPrim],
     m: &DMat4,
     color: Color32,
