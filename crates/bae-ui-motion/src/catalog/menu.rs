@@ -606,7 +606,7 @@ const LAYER: &[Node] = &[
             SEP,
             it(11010057, "Set First Vertex", "motion.layer.set_first_vertex", "", A, Done),
             SEP,
-            it(11010059, "Free Transform Points", "motion.layer.free_transform_points", "", A, Todo),
+            it(11010059, "Free Transform Points", "motion.layer.free_transform_points", "", A, Done),
         ],
     ),
     sub(

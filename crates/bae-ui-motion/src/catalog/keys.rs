@@ -479,7 +479,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "Mask", "Ctrl+Shift+M", "motion.layer.mask_shape", "", E, Done, 0),
     k("CSwitchboard", "MaskFeather", "Ctrl+Shift+F", "motion.layer.mask_feather", "", E, Done, 0),
     k("CSwitchboard", "MaskInverse", "Ctrl+Shift+I", "motion.layer.mask_inverted", "", B, Done, 0),
-    k("CSwitchboard", "MaskReshape", "Ctrl+T", "motion.layer.free_transform_points", "", A, Todo, 0),
+    k("CSwitchboard", "MaskReshape", "Ctrl+T", "motion.layer.free_transform_points", "", A, Done, BOUND_ELSEWHERE),
     k("CSwitchboard", "MedResolution", "Ctrl+Shift+J", "motion.view.resolution", r#"{"factor":2}"#, B, Todo, 0),
     k("CSwitchboard", "MedResolutionRecurse", "Ctrl+Shift+macControl+J", "motion.view.resolution", r#"{"factor":2,"nested":true}"#, B, Later, 0),
     k("CSwitchboard", "New", "Ctrl+Alt+N", "file.new_project", "", B, Done, 0),

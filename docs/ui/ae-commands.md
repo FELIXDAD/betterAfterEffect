@@ -281,7 +281,7 @@
 | Mask and Shape Path ▸ Group Shapes | 11010054 | `motion.layer.group_shapes` |  | Ctrl+G | Cmd+G | A | ✅ |
 | Mask and Shape Path ▸ Ungroup Shapes | 11010055 | `motion.layer.ungroup_shapes` |  | Ctrl+Shift+G | Cmd+Shift+G | A | ✅ |
 | Mask and Shape Path ▸ Set First Vertex | 11010057 | `motion.layer.set_first_vertex` |  |  |  | A | ✅ |
-| Mask and Shape Path ▸ Free Transform Points | 11010059 | `motion.layer.free_transform_points` |  | Ctrl+T | Cmd+T | A | ☐ |
+| Mask and Shape Path ▸ Free Transform Points | 11010059 | `motion.layer.free_transform_points` |  | Ctrl+T | Cmd+T | A | ✅ |
 | Quality ▸ Best | 8585217 | `motion.layer.quality` | `{"quality":"best"}` | Ctrl+U | Cmd+U | B | ✅ |
 | Quality ▸ Draft | 8585218 | `motion.layer.quality` | `{"quality":"draft"}` | Ctrl+Shift+U | Cmd+Shift+U | B | ✅ |
 | Quality ▸ Wireframe | 8585219 | `motion.layer.quality` | `{"quality":"wireframe"}` | Ctrl+Alt+Shift+U | Cmd+Opt+Shift+U | B | ☐ |

@@ -295,12 +295,19 @@ pub(super) fn frame(
     if request && tool == Tool::Selection {
         // The path with selected vertices, else the one selected in the
         // Timeline, else the first.
-        let in_timeline = session
-            .lock()
-            .selected_props
-            .iter()
-            .find(|(p, attr)| attr == "path" && paths.iter().any(|e| &e.prim == p))
-            .map(|(p, _)| p.clone());
+        let in_timeline = {
+            let s = session.lock();
+            s.selected_props
+                .iter()
+                .filter(|(_, attr)| attr == "path")
+                .map(|(p, _)| p.clone())
+                .chain(
+                    s.selected_groups
+                        .iter()
+                        .filter_map(|id| crate::session::group_prim(id)),
+                )
+                .find(|p| paths.iter().any(|e| &e.prim == p))
+        };
         let prim = state
             .vertices
             .prim

@@ -123,6 +123,12 @@ pub(crate) fn targets(stage: &Stage, session: &SharedSession) -> Vec<PrimPath> {
     out
 }
 
+/// Whether Free Transform Points has something to transform: a selected mask
+/// or shape Path (else Cmd/Ctrl+T is the Type tools, AE).
+pub(crate) fn can_free_transform(stage: &Stage, resources: &bae_app::Resources) -> bool {
+    !targets(stage, &crate::common::session(resources)).is_empty()
+}
+
 /// The path's shape: its static value, or its first keyframe's.
 fn shape(stage: &Stage, p: &PrimPath) -> Option<BezierPath> {
     let spec = query::attr_spec(stage, p, "path")?;

@@ -640,8 +640,15 @@ pub fn bindings() -> Vec<Binding> {
         // passes it on to a drag or text it is editing.
         .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
         .chain(GIZMOS.iter().map(|(id, _, chord, _)| Binding::new(chord, id)))
+        // Cmd/Ctrl+T in the Composition and Timeline panels: Free Transform
+        // Points with a path selected, else the Type tools (AE; the Layer menu
+        // shows the shortcut).
+        .chain(FREE_TRANSFORM_PANELS.map(|k| Binding::new("Cmd+T", ids::FREE_TRANSFORM).when(k)))
         .collect()
 }
+
+/// Panels where Cmd/Ctrl+T is Free Transform Points when a path is selected.
+pub(crate) const FREE_TRANSFORM_PANELS: [&str; 2] = ["composition", "timeline"];
 
 /// The keymap extension holding [`bindings`].
 pub fn keymap_bindings() -> KeymapBindings {
@@ -1240,6 +1247,12 @@ impl ActionHandler for ToolActions {
         }
         if crate::path_menu::handle(&inv.id, cx) {
             return true;
+        }
+        if inv.id == ids::FREE_TRANSFORM
+            && !crate::path_menu::can_free_transform(cx.stage, cx.resources)
+        {
+            // The key with no mask or path to transform: the Type tools.
+            return shared(cx.resources).lock().shortcut(ids::TYPE, false);
         }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
