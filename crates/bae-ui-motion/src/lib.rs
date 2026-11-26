@@ -61,6 +61,7 @@ pub mod render_queue;
 pub mod scopes;
 pub mod scripts;
 pub mod session;
+mod source_view_menu;
 mod timeline;
 pub mod tools;
 mod tracker;
