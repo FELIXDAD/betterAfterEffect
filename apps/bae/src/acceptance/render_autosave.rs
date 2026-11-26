@@ -1,6 +1,6 @@
 use super::*;
 use bae_prefs::keys;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::Queryable as _;
 
 #[test]
 fn starting_the_queue_saves_the_changed_project_when_enabled() {
