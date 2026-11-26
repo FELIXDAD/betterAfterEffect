@@ -10,7 +10,7 @@ use bae_platform::logging::{self, LogOptions};
 use bae_platform::{AppDirs, console};
 
 /// Runs the assembled application and returns the process exit code.
-pub fn run(mut app: App) -> ExitCode {
+pub fn run(mut app: App, dirs: AppDirs) -> ExitCode {
     // Windows GUI-subsystem binary started from a terminal: reconnect stdio.
     console::attach_parent_console();
 
@@ -36,13 +36,6 @@ pub fn run(mut app: App) -> ExitCode {
     let global = invocation.global().clone();
     let is_subcommand = matches!(invocation, Invocation::Subcommand { .. });
 
-    let dirs = match AppDirs::resolve() {
-        Ok(dirs) => dirs,
-        Err(error) => {
-            eprintln!("{}: {error}", bae_platform::BINARY_NAME);
-            return ExitCode::FAILURE;
-        }
-    };
     let dirs_ok = dirs.create_all();
 
     // Subcommands print results on stdout; keep stderr quiet unless asked, and do
@@ -77,7 +70,6 @@ pub fn run(mut app: App) -> ExitCode {
     if !is_subcommand {
         bae_ui_motion::register_preset_index(&mut app, dirs.data.join("Presets"));
     }
-    app.insert_resource(dirs);
     // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
     bae_plugin::load_installed(&app);
     let packages = app
