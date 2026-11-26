@@ -16,7 +16,7 @@
 | Apple Silicon Mac | 待填 | 待填 | 待复测 |
 | Windows x64 | 待填 | 待填 | 待复测 |
 
-准备阶段在 Windows x64 上运行 `cargo xtask size`，0.1.0 release 版 `bae.exe` 为 **42,678,272 字节（40.70 MiB）**，距 50 MiB 上限还有 **9.30 MiB**。正式发布时以 tag 对应的双平台报告为准。
+准备阶段在 Windows x64 上运行 `cargo xtask size`，以 dev 合入 #656 后的代码构建。0.1.0 release 版 `bae.exe` 为 **42,910,208 字节（40.92 MiB）**，距 50 MiB 上限还有 **9.08 MiB**。Windows ZIP 为 **15.79 MiB**。正式发布时以 tag 对应的双平台报告为准。
 
 ## 生成与核对发布包
 
