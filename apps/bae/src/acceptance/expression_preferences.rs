@@ -92,12 +92,15 @@ fn settings_sample_folds_and_restores_its_expression() {
     use egui_kittest::kittest::Queryable as _;
     let mut h = gui();
     h.state_mut().dispatch(Invocation::with_params(
-        bae_ui::settings::ACTION, serde_json::json!({"page":"scripting_expressions"}),
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page":"scripting_expressions"}),
     ));
     settle(&mut h);
     let sample = |h: &Ui| {
         h.output().shapes.iter().find_map(|s| match &s.shape {
-            egui::Shape::Text(t) if t.galley.text().starts_with("function offset()") => Some(t.galley.text().to_owned()),
+            egui::Shape::Text(t) if t.galley.text().starts_with("function offset()") => {
+                Some(t.galley.text().to_owned())
+            }
             _ => None,
         })
     };

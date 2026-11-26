@@ -820,10 +820,6 @@ impl SettingsDialog {
             }
         }
     }
-
-    /// Expression editor preview (Scripting & Expressions): a few lines of code
-    /// in the editor's font size and colors.
-
 }
 
 fn visual_setting(key: &str) -> bool {
