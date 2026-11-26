@@ -402,6 +402,24 @@ fn param_row(
             });
         }
     });
+    if def.match_name == "ADBE Lumetri"
+        && let Edit::Commit(Value::Color([r, g, b, a])) = &edit
+        && let Some(curve) = bae_effects::LumetriCurve::from_param(param.id)
+    {
+        let curve_attr = param_attr(curve.id());
+        let old = common::current_value(eval.get(cx.resources), stage, effect, &curve_attr, now);
+        let time = query::to_key_time(stage, effect, now);
+        let points = curve.pick([*r, *g, *b], old.as_ref());
+        cx.invoke_with(
+            "attr.set_many",
+            json!({"edits":[
+                {"path":effect,"attr":attr,"time":time,"value":Value::Color([*r,*g,*b,*a])},
+                {"path":effect,"attr":curve_attr,"time":time,"value":points}
+            ]}),
+        );
+        session.lock().scrub = None;
+        return;
+    }
     // An expression pick whip dragged from the Timeline.
     if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
         crate::expr::link(cx, eval.get(cx.resources), &whip, effect, Some(&attr), now);
@@ -430,6 +448,15 @@ fn value_control(
     expression: bool,
 ) -> Edit {
     let id = ui.id().with(("fx-param", effect.as_str(), param.id));
+    if def.match_name == "ADBE Lumetri"
+        && let Some(curve) = bae_effects::LumetriCurve::from_param(param.id)
+    {
+        return if curve.id() == param.id {
+            super::lumetri_curve::graph(ui, id, curve, value, label)
+        } else {
+            super::lumetri_curve::picker(ui, id, value, label)
+        };
+    }
     match &param.kind {
         ParamKind::Slider {
             valid_min,

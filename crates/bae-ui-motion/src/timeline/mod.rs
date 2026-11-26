@@ -59,7 +59,7 @@ pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, select_children,
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
@@ -288,6 +288,17 @@ impl TimeAxis {
     pub(crate) fn per_point(&self) -> f64 {
         self.span.0 as f64 / f64::from((self.width - 2.0 * PAD).max(1.0))
     }
+}
+
+/// The Timeline's Rename on empty space: the comp's name in the Project panel,
+/// selected for typing (AE 26).
+fn rename_comp(cx: &mut PanelContext<'_>, session: &SharedSession, comp: &PrimPath) {
+    {
+        let mut s = session.lock();
+        s.selected_items = vec![comp.clone()];
+        s.rename_item = Some(comp.clone());
+    }
+    cx.open_panel("project");
 }
 
 fn flatten_tree(
@@ -755,9 +766,7 @@ impl TimelinePanel {
             );
             return;
         };
-        if session.lock().update_preview(cx, &info) {
-            ui.ctx().request_repaint();
-        }
+        session.lock().update_preview(cx, &info);
         let now = session.lock().time(&info.path);
         self.graph_mode = session.lock().graph_editor;
         let graph_left = full.left() + cols.viewport + 2.0;
@@ -859,9 +868,13 @@ impl TimelinePanel {
             }
             // Right-click on empty space: AE 26's comp menu (New ▸, Composition
             // Settings, Preview ▸ …).
+            let mut chosen = None;
             crate::common::context_menu(&bg, &mut |ui| {
-                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
+                chosen = crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
+            if chosen == Some("Rename") {
+                rename_comp(cx, &session, &info.path);
+            }
         }
 
         // Row widgets accept other drag types. Capture the project item before a
@@ -956,9 +969,13 @@ impl TimelinePanel {
                 s.selected_props.clear();
                 s.selected_groups.clear();
             }
+            let mut chosen = None;
             crate::common::context_menu(&bg, &mut |ui| {
-                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
+                chosen = crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
+            if chosen == Some("Rename") {
+                rename_comp(cx, &session, &info.path);
+            }
         }
 
         if let Some((item, pointer)) = project_drop {
@@ -993,9 +1010,27 @@ impl TimelinePanel {
 
         let mut cti_body = graph_body;
         if self.graph_mode {
-            let out = self
-                .graph
-                .ui(ui, cx, &session, &info, &axis, graph_body, now);
+            let waveforms = &mut self.waveforms;
+            let stage = cx.stage;
+            let out = self.graph.ui(
+                ui,
+                cx,
+                &session,
+                &info,
+                &axis,
+                graph_body,
+                now,
+                &mut |ui, layer, area| {
+                    waveforms.draw(
+                        ui,
+                        stage,
+                        layer,
+                        &axis,
+                        area,
+                        color::TEXT_DIM.gamma_multiply(0.5),
+                    );
+                },
+            );
             if let Some((a, b)) = out.fit_time {
                 self.fit_time(&info, a, b);
             }

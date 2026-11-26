@@ -41,6 +41,7 @@ mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
+mod live_preview;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
@@ -59,6 +60,7 @@ pub mod scripts;
 pub mod session;
 mod timeline;
 pub mod tools;
+mod tracker;
 mod viewer;
 mod workspaces;
 
@@ -88,6 +90,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     effects::register,
     render_queue::register,
     layer_panel::register,
+    tracker::register,
     ae_panels::register,
     presets::register,
     scopes::register,
