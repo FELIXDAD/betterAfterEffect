@@ -1387,9 +1387,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 };
                 s.preview(cx, &info);
                 s.preview.selected = editing;
-                if s.preview_options().video && !s.fullscreen_preview() {
-                    cx.open_panel("composition");
-                }
+                // AE: playback neither moves the keyboard focus nor switches
+                // tabs (the timeline's [ ] Delete and marker keys keep working).
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,

@@ -231,19 +231,61 @@ impl Panel for PropertiesPanel {
                                 .label(tr("Font Size")),
                         );
                         if response.changed() || response.drag_stopped() {
-                            let mut changed = doc.clone();
+                            // Only the size changes, on every selected text layer,
+                            // each keeping its own text and styles (one undo step).
+                            let mut layers = vec![layer.clone()];
+                            layers.extend(
+                                session
+                                    .lock()
+                                    .selected_layers
+                                    .iter()
+                                    .filter(|l| {
+                                        **l != layer
+                                            && query::layer_kind(stage, l).as_deref() == Some("text")
+                                    })
+                                    .cloned(),
+                            );
                             let style = bae_motion::text::TextStyleChange {
                                 font_size: Some(value),
                                 ..Default::default()
                             };
-                            style.apply(&mut changed, edit_range);
-                            let value = Value::TextDocument(changed);
-                            let edit = if response.dragged() {
-                                common::Edit::Live(value)
-                            } else {
-                                common::Edit::Commit(value)
-                            };
-                            common::apply_edit(cx, &session, &layer, "text:source", now, edit);
+                            let committed = (!response.dragged())
+                                .then(|| (stage.revision(), std::time::Instant::now()));
+                            let mut targets = layers.iter().filter_map(|l| {
+                                let t = query::to_key_time(stage, l, now);
+                                let Some(Value::TextDocument(mut d)) =
+                                    query::sample_attr(stage, l, "text:source", t)
+                                else {
+                                    return None;
+                                };
+                                let chars = if *l == layer {
+                                    edit_range.clone()
+                                } else {
+                                    0..usize::MAX
+                                };
+                                style.apply(&mut d, chars);
+                                Some((l.clone(), Value::TextDocument(d)))
+                            });
+                            if let Some((path, value)) = targets.next() {
+                                let mut s = session.lock();
+                                let auto_key = s.auto_key;
+                                s.scrub = Some(crate::session::Scrub {
+                                    auto_key,
+                                    path,
+                                    attr: "text:source".into(),
+                                    value,
+                                    peers: targets.collect(),
+                                    time: now,
+                                    committed,
+                                });
+                            }
+                            if committed.is_some() {
+                                cx.invoke_with(
+                                    "text.set_style",
+                                    json!({"layers": layers, "time": now, "range": range,
+                                        "style": {"font_size": value}}),
+                                );
+                            }
                         }
                     });
                     ui.horizontal(|ui| {

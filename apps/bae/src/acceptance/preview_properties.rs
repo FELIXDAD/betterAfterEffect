@@ -1,7 +1,7 @@
 //! Preview shortcuts and contextual properties through the application's workbench.
 
 use super::*;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::Queryable as _;
 
 #[test]
 fn preview_shortcuts_use_their_profiles_and_restore_the_workspace() {
@@ -117,4 +117,25 @@ fn properties_font_size_previews_before_committing_the_drag() {
     send(&mut h, button(end, false));
     settle(&mut h);
     assert_eq!(stored(&h), live);
+}
+
+/// #745: Space plays and stops without moving the focus off the Timeline, so
+/// its own keys ([ ] Delete, markers) keep working (AE).
+#[test]
+fn space_playback_keeps_the_timeline_focused() {
+    let mut h = gui();
+    new_comp(&mut h);
+    to_front(&mut h, "timeline");
+    settle(&mut h);
+    assert_eq!(
+        h.state().workspace.focused_kind().as_deref(),
+        Some("timeline")
+    );
+    key(&mut h, Modifiers::NONE, Key::Space);
+    assert!(h.state().session().lock().is_playing());
+    key(&mut h, Modifiers::NONE, Key::Space);
+    assert_eq!(
+        h.state().workspace.focused_kind().as_deref(),
+        Some("timeline")
+    );
 }
