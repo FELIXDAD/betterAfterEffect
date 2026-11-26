@@ -559,7 +559,8 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
         ui.separator();
     }
     if !status.gpu.is_empty() {
-        ui.label(small(status.gpu.clone()));
+        let adapter = ui.label(small(status.gpu.clone()));
+        bae_ui::a11y::value_source(&adapter, bae_ui::a11y::GPU_STATUS);
         ui.separator();
     }
     ui.label(small(
