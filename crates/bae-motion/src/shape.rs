@@ -289,6 +289,8 @@ impl Command for AddShape {
                         source: None,
                         index: p.index,
                         color: None,
+                        solids_folder_name: None,
+                        solids_folder_label: None,
                         size: None,
                         text: None,
                         font_size: None,

@@ -839,6 +839,17 @@ pub(crate) fn new_layer(
     if let Some(info) = query::comp_info(stage, &comp) {
         crate::prefs::apply_layer_defaults(cx.resources, session, &info, kind, &mut params);
     }
+    if matches!(kind, LayerKind::Solid | LayerKind::Adjustment) {
+        let prefs = crate::prefs::current(cx.resources);
+        let name = prefs.str("project.new_project_solids_folder");
+        let name = if name == "Solids" || name.trim().is_empty() {
+            bae_ui::tr("Solids")
+        } else {
+            name
+        };
+        params["solids_folder_name"] = json!(name);
+        params["solids_folder_label"] = json!(prefs.int("labels.label_default_folder"));
+    }
     if let (Some(p), serde_json::Value::Object(m)) = (params.as_object_mut(), extra) {
         p.extend(m);
     }

@@ -85,6 +85,8 @@ impl Command for CreateText {
                 source: None,
                 index: p.index,
                 color: None,
+                solids_folder_name: None,
+                solids_folder_label: None,
                 size: None,
                 text: Some(p.text.clone()),
                 font_size: Some(size),

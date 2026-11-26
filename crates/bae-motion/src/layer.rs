@@ -126,6 +126,12 @@ pub struct CreateLayerParams {
     /// Solid size in pixels (default the comp size).
     #[serde(default)]
     pub size: Option<[u32; 2]>,
+    /// Display name assigned only when this layer creates the solids folder.
+    #[serde(default)]
+    pub solids_folder_name: Option<String>,
+    /// Label assigned when creating that folder.
+    #[serde(default)]
+    pub solids_folder_label: Option<i64>,
     /// Solid pixel aspect ratio (default the comp's).
     #[serde(default)]
     pub pixel_aspect: Option<f64>,
@@ -170,6 +176,8 @@ impl CreateLayerParams {
             index: None,
             color: None,
             size: None,
+            solids_folder_name: None,
+            solids_folder_label: None,
             pixel_aspect: None,
             text: None,
             font_size: None,
@@ -319,7 +327,16 @@ impl Command for CreateLayer {
                     [0.5, 0.5, 0.5, 1.0]
                 });
                 let solids = PrimPath::new(SOLIDS_FOLDER).expect("valid");
-                ensure_folder(tx, &solids)?;
+                if !tx.stage().has_prim(&solids) {
+                    ensure_folder(tx, &solids)?;
+                    if let Some(name) = p.solids_folder_name.filter(|name| !name.trim().is_empty())
+                    {
+                        set(tx, &solids, "name", Value::String(name))?;
+                    }
+                    if let Some(label) = p.solids_folder_label.filter(|l| (0..=16).contains(l)) {
+                        set(tx, &solids, "label", Value::Int(label))?;
+                    }
+                }
                 let asset = child(
                     &solids,
                     &query::unique_child_name(tx.stage(), &solids, &name),
