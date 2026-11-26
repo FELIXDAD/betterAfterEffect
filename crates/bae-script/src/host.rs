@@ -245,6 +245,32 @@ fn layer(stage: &Stage, path: &PrimPath) -> R {
 }
 
 /// Children of `parent/<folder>` of prim type `ty`, in stack order.
+/// The AE property indices from the layer down to a mask or Bezier shape path.
+fn path_info(stage: &Stage, path: &PrimPath) -> R {
+    let prim = view(stage, path)?;
+    let mask = prim.is_a(&PrimType::MASK);
+    if !mask && !prim.is_a(&PrimType::PATH) {
+        return Err(format!("{path} is not a Bezier path"));
+    }
+    let layer = query::owning_layer(stage, path).ok_or("path has no layer")?;
+    let mut indices = Vec::new();
+    let mut item = path.clone();
+    while item != layer {
+        let folder = item.parent().ok_or("path has no property group")?;
+        let index = stage
+            .children(&folder)
+            .iter()
+            .position(|p| p == &item)
+            .ok_or("missing path item")?;
+        indices.push(index + 1);
+        item = folder.parent().ok_or("path has no containing layer")?;
+    }
+    indices.reverse();
+    Ok(
+        json!({"layer": layer, "mask": mask, "indices": indices, "name": query::display_name(&prim)}),
+    )
+}
+
 fn children_of_type(stage: &Stage, parent: &PrimPath, folder: &str, ty: &PrimType) -> Vec<Json> {
     let Ok(f) = parent.child(folder) else {
         return Vec::new();
@@ -663,6 +689,7 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
         }
         "items" => Ok(Json::Array(items(s.stage()))),
         "item" => item(s.stage(), &path(args, "path")?),
+        "pathInfo" => path_info(s.stage(), &path(args, "path")?),
         "layer" => layer(s.stage(), &path(args, "path")?),
         "prop" => s.prop(&path(args, "path")?, &string(args, "attr")?),
         "sample" => {

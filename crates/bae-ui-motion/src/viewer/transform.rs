@@ -171,7 +171,35 @@ struct Snapping {
 
 /// The 9 snap features of a layer: bounds corners, edge midpoints and center
 /// (comp space).
-fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
+/// A layer's snapping features (AE): its 9 bound points, its anchor point
+/// (`anchor`), and the vertices of its masks and shape paths.
+fn features(l: &EvaluatedLayer, anchor: bool, out: &mut Vec<DVec2>) {
+    if anchor {
+        let a = l.world_matrix.transform_point3(l.transform.anchor_point);
+        out.push(DVec2::new(a.x, a.y));
+    }
+    let mut paths = Vec::new();
+    for m in &l.masks {
+        paths.push((m.shape.clone(), l.world_matrix));
+    }
+    if l.kind == LayerKind::Shape {
+        let mut shapes = Vec::new();
+        super::overlay::shape_paths(
+            &l.contents,
+            &l.world_matrix,
+            egui::Color32::TRANSPARENT,
+            &mut shapes,
+        );
+        paths.extend(shapes.into_iter().map(|p| (p.path, p.to_comp)));
+    }
+    for (path, m) in paths {
+        let m = Affine::new(m);
+        out.extend(
+            path.vertices
+                .iter()
+                .map(|v| m.apply(DVec2::new(v[0], v[1]))),
+        );
+    }
     if let Some((a, b)) = render::layer_bounds(l) {
         let m = Affine::new(l.world_matrix);
         let c = (a + b) / 2.0;
@@ -240,10 +268,11 @@ impl TransformDrag {
     }
 
     /// Snapping as AE 26 does it (R1, transform-tools.md §4): only one point
-    /// snaps — for a move, the 9-point feature of the grabbed layer nearest the
-    /// grab point; for an anchor drag, the anchor — point to point to the 9
-    /// features of the other visible layers (and, dragging the anchor, of its own
-    /// layer). The comp frame is not a target.
+    /// snaps — for a move, the feature of the grabbed layer nearest the grab
+    /// point; for an anchor drag, the anchor — point to point to the features
+    /// of the other visible layers (and, dragging the anchor, of its own
+    /// layer). A layer's features are its 9 bound points, its anchor point and
+    /// its mask and shape path vertices (AE). The comp frame is not a target.
     pub fn with_snapping(mut self, comp: &EvaluatedComp, primary: &PrimPath, grab: DVec2) -> Self {
         let anchor = matches!(
             self.kind,
@@ -260,11 +289,12 @@ impl TransformDrag {
         let mut targets = Vec::new();
         for l in &comp.layers {
             if moving.contains(&&l.path) {
+                // Dragging the anchor: not to itself.
                 if &l.path == primary {
-                    features(l, &mut own);
+                    features(l, !anchor, &mut own);
                 }
             } else if l.visible && !matches!(l.kind, LayerKind::Camera | LayerKind::Light) {
-                features(l, &mut targets);
+                features(l, true, &mut targets);
             }
         }
         let feature = if anchor {
