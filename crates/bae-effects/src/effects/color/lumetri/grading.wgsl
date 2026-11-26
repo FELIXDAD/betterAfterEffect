@@ -246,23 +246,25 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
         }
         c=vec3f(curve(1u,c.r),curve(2u,c.g),curve(3u,c.b));
         if (u.curve_mask & 496u) != 0u {
-            var light = linear(c);
-            let hue = fx_hsl(light).x;
+            // Every secondary curve selects from the same post-RGB input.
+            let input_light = linear(c);
+            let input_hsl = fx_hsl(input_light);
+            let input_luma = dot(input_light,luma);
+            var light = input_light;
             if (u.curve_mask & 16u) != 0u {
-                let y = dot(light,luma);
-                light = y + (light-y) * max(0.,1.+curve(4u,hue));
+                light = input_luma + (light-input_luma) * max(0.,1.+curve(4u,input_hsl.x));
             }
             if (u.curve_mask & 32u) != 0u {
                 let hsl = fx_hsl(encoded(light));
-                light = linear(fx_rgb(vec3f(fract(hsl.x + curve(5u,hue)),hsl.yz)));
+                light = linear(fx_rgb(vec3f(fract(hsl.x + curve(5u,input_hsl.x)),hsl.yz)));
             }
             if (u.curve_mask & 64u) != 0u {
-                light *= exp2(curve(6u,hue));
+                light *= exp2(curve(6u,input_hsl.x));
             }
             let y = dot(light,luma);
             var factor = 1.;
-            if (u.curve_mask & 128u) != 0u { factor *= max(0.,1.+curve(7u,y)); }
-            if (u.curve_mask & 256u) != 0u { factor *= max(0.,1.+curve(8u,fx_hsl(light).y)); }
+            if (u.curve_mask & 128u) != 0u { factor *= max(0.,1.+curve(7u,input_luma)); }
+            if (u.curve_mask & 256u) != 0u { factor *= max(0.,1.+curve(8u,input_hsl.y)); }
             c = encoded(select(y + (light-y)*factor, light, factor == 1.));
         }
     }
