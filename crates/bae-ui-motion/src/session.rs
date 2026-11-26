@@ -321,13 +321,18 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// When L was last pressed to reveal the audio waveform on a second press.
     pub(crate) last_l: Option<Instant>,
+    /// When M was last pressed (MM: every mask property).
+    pub(crate) last_m: Option<Instant>,
+    /// When E was last pressed (EE: the expressions).
+    pub(crate) last_e: Option<Instant>,
     /// Motion Sketch armed (Start Capture): the next drag in the Composition
     /// panel records this layer's position.
     pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
-    /// Timeline column toggles asked for while another panel had focus (F4
-    /// Switches / Modes, Shift+F4 Parent & Link): the Timeline applies them.
+    /// Timeline actions asked for while another panel had focus (F4 Switches /
+    /// Modes, Shift+F4 Parent & Link, Select All Visible Keyframes …): the
+    /// Timeline runs them on its next frame.
     pub timeline_toggles: Vec<&'static str>,
     /// The frame the Composition viewer shows and its key (Lumetri Scopes).
     pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
