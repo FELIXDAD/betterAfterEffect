@@ -306,6 +306,7 @@ pub struct Session {
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
