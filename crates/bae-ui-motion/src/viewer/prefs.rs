@@ -17,6 +17,8 @@ pub(crate) struct ViewerPrefs {
     pub label_handles: bool,
     pub cycle_mask_colors: bool,
     pub center_shape_anchor: bool,
+    pub checker_size: f32,
+    pub checker_colors: [Color32; 2],
 }
 
 impl Default for ViewerPrefs {
@@ -32,12 +34,21 @@ impl ViewerPrefs {
             label_handles: p.bool(keys::LABEL_HANDLES),
             cycle_mask_colors: p.bool("appearance.cycle_mask_colors"),
             center_shape_anchor: p.bool(keys::CENTER_SHAPE_ANCHOR),
+            checker_size: match p.str("grids_guides.transparency_grid_size") {
+                "small" => 4.0,
+                "large" => 16.0,
+                _ => 8.0,
+            },
+            checker_colors: [keys::TRANSPARENCY_FIRST, keys::TRANSPARENCY_SECOND].map(|key| {
+                let [r, g, b] = p.color(key);
+                Color32::from_rgb(r, g, b)
+            }),
         }
     }
 
     pub fn current(resources: &bae_app::Resources) -> Self {
         match resources.get::<std::sync::Arc<PrefsStore>>() {
-            Some(store) => Self::from(&store.current()),
+            Some(store) => Self::from(&store.display()),
             None => Self::from(&Preferences::default()),
         }
     }

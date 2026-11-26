@@ -49,7 +49,39 @@ pub(crate) struct PreviewImage {
     pub rect: IRect,
 }
 
+/// Picker data belongs to the same composition and time as the displayed preview.
+#[derive(Debug)]
+pub(crate) struct ChannelFrame {
+    pub comp: bae_model::PrimPath,
+    pub time: Time,
+    pub layers: std::collections::HashMap<bae_model::PrimPath, Arc<bae_gpu::channels::ChannelInfo>>,
+}
+impl ChannelFrame {
+    fn from_comp(renderer: &Renderer, rc: &bae_render::RenderComp) -> Option<Arc<Self>> {
+        let mut layers = std::collections::HashMap::new();
+        for layer in &rc.layers {
+            if layer.effects.iter().any(|e| {
+                matches!(
+                    e.effect.as_str(),
+                    "Cryptomatte" | "EXtractoR" | "IDentifier"
+                )
+            }) && let bae_render::LayerContent::Footage(f) = &layer.content
+                && let Some(info) = renderer.footage_channels(f)
+            {
+                layers.insert(layer.path.clone(), info);
+            }
+        }
+        (!layers.is_empty()).then(|| {
+            Arc::new(Self {
+                comp: rc.path.clone(),
+                time: rc.time,
+                layers,
+            })
+        })
+    }
+}
 pub(super) struct RenderEngine {
+    pub(super) channels: Option<Arc<ChannelFrame>>,
     pub(super) renderer: Renderer,
     pub(super) anim: AnimEvaluator,
     /// The comp and per-layer render times of the last frame rendered (not
@@ -63,6 +95,7 @@ pub(super) struct RenderEngine {
 impl RenderEngine {
     pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
         Self {
+            channels: None,
             renderer: Renderer::with_config(
                 gpu,
                 RendererConfig {
@@ -97,7 +130,7 @@ impl RenderEngine {
     }
 
     /// The frame converted to an 8-bit target (`reuse` when it has the
-    /// frame's size) and the frame's rect, `None` when the frame is incomplete
+    /// frame's size) and its floating-point image, `None` when the frame is incomplete
     /// (something still warming up: not shown, and `reuse` comes back
     /// untouched).
     pub(super) fn render(
@@ -108,7 +141,7 @@ impl RenderEngine {
         display: bae_render::Display,
         roi: Option<IRect>,
         reuse: Option<OutputTarget>,
-    ) -> Result<(OutputTarget, Option<IRect>, bool), bae_render::RenderError> {
+    ) -> Result<(OutputTarget, Option<bae_render::GpuImage>, bool), bae_render::RenderError> {
         let request = RenderRequest {
             resolution: match resolution {
                 0 | 1 => Resolution::Full,
@@ -151,8 +184,9 @@ impl RenderEngine {
             (frame, target)
         };
         self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
-        let rect = (!frame.incomplete).then_some(frame.image.rect);
-        Ok((target, rect, frames.sampled))
+        self.channels = ChannelFrame::from_comp(&self.renderer, rc);
+        let source = (!frame.incomplete).then_some(frame.image);
+        Ok((target, source, frames.sampled))
     }
 }
 
@@ -182,12 +216,14 @@ pub(crate) struct GpuPreview {
     pub(super) playback: super::playback::PlaybackPreview,
     changes: StageChanges,
     sources_gen: Option<u64>,
+    solid_reload: u64,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
     /// The published frame (the Info panel reads pixels from it) and the last
     /// pixel read: (texel, value).
     target: Option<OutputTarget>,
+    direct_source: Option<bae_render::GpuImage>,
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// How the viewer shows the frame (Show Channel, Exposure).
     pub display: bae_render::Display,
@@ -214,6 +250,7 @@ pub(crate) struct GpuPreview {
     live_sent: Option<LiveKey>,
     /// The live target the registry shows.
     live_texture: Option<wgpu::Texture>,
+    live_generation: u64,
     /// Layer pixels for `sampleImage`, shared with the evaluator that evaluates
     /// the comps this preview shows.
     samples: Arc<bae_anim::ImageSamples>,
@@ -226,10 +263,16 @@ type LiveKey = ((u64, Time, u32), (bae_render::Display, Option<IRect>));
 impl GpuPreview {
     /// A preview on the app's GPU context, if the app has one (the headless test
     /// harness and agents do not).
-    pub fn new(resources: &Resources) -> Option<Self> {
+    pub fn new(resources: &Resources, ui: &egui::Context) -> Option<Self> {
         let gpu = resources.get::<Arc<GpuContext>>()?.clone();
         let registry = resources.get::<Arc<ViewportTextureRegistry>>()?.clone();
-        Some(Self::with(gpu, registry))
+        let mut preview = Self::with(gpu, registry);
+        let ui = ui.clone();
+        preview
+            .engine
+            .anim
+            .prepare_preview_audio(move || ui.request_repaint());
+        Some(preview)
     }
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
@@ -247,9 +290,11 @@ impl GpuPreview {
             playback,
             changes: StageChanges::default(),
             sources_gen: None,
+            solid_reload: 0,
             last: None,
             rect: None,
             target: None,
+            direct_source: None,
             sampled: None,
             display: bae_render::Display::default(),
             roi: None,
@@ -262,6 +307,7 @@ impl GpuPreview {
             live_scene: None,
             live_sent: None,
             live_texture: None,
+            live_generation: 0,
             samples,
             waiting: false,
         }
@@ -312,6 +358,23 @@ impl GpuPreview {
         }
     }
 
+    pub(super) fn reload_solid(&mut self, generation: u64, item: &bae_model::PrimPath) {
+        if self.solid_reload == generation {
+            return;
+        }
+        let event = bae_model::StageEvent {
+            origin: bae_model::EventOrigin::Local,
+            author: None,
+            sublayers: vec![],
+            changes: vec![bae_model::Change::Resynced { path: item.clone() }],
+        };
+        self.engine.renderer.invalidate(&event);
+        self.engine.anim.clear_compiled();
+        self.last = None;
+        self.playback.invalidate_source(&event);
+        self.solid_reload = generation;
+    }
+
     /// Render `comp` (if it changed) and return the texture to draw. `None` until
     /// the shell has registered the texture with egui (the frame after the first
     /// publish) or when rendering failed.
@@ -350,6 +413,9 @@ impl GpuPreview {
                 return None;
             }
         };
+        if self.engine.anim.audio_preparation_pending() {
+            return self.image();
+        }
         // A 3D view other than Active Camera (the output never changes).
         if let Some(camera) = camera {
             rc.camera = Some(camera);
@@ -421,9 +487,9 @@ impl GpuPreview {
             // renderer still warming up) is never shown: the last complete
             // frame stays, and the frame is rendered again on the redraw the
             // warm-up requests when it is ready.
-            let (target, rect, _) = rendered;
-            self.preparing = rect.is_none();
-            let Some(rect) = rect else {
+            let (target, source, _) = rendered;
+            self.preparing = source.is_none();
+            let Some(source) = source else {
                 // The published target (if any) still shows the last complete
                 // frame; a new one holds the incomplete frame and is dropped.
                 if old_size.is_some() {
@@ -449,14 +515,22 @@ impl GpuPreview {
                 tracing_warn(&format!("preview: {e}"));
                 return None;
             }
+            if let Some(session) = resources.get::<crate::session::SharedSession>() {
+                session.lock().channel_frame = self.engine.channels.clone();
+            }
             self.last = Some(key);
-            self.rect = Some(rect);
+            self.rect = Some(source.rect);
+            self.direct_source = Some(source);
             self.target = Some(target);
             self.target_shown = true;
             self.live_texture = None;
             self.sampled = None;
         }
-        // Back from a snapshot: show the frame again.
+        self.image()
+    }
+
+    /// The frame to draw; back from a snapshot, the frame is shown again.
+    fn image(&mut self) -> Option<PreviewImage> {
         if !self.target_shown
             && let Some(t) = &self.target
             && self
@@ -489,9 +563,25 @@ impl GpuPreview {
             t.hash(&mut h);
             return Some((t.clone(), h.finish()));
         }
+        if let Some(texture) = &self.live_texture {
+            return Some((texture.clone(), self.live_generation));
+        }
         let (hash, time, resolution) = self.last?;
         let key = hash ^ (time.flicks() as u64).rotate_left(17) ^ u64::from(resolution);
         Some((self.target.as_ref()?.view().texture().clone(), key))
+    }
+
+    /// Keep the pool lease alive while Lumetri samples the working buffer.
+    pub(super) fn scope_source(&self) -> Option<bae_render::GpuImage> {
+        if self.cached.is_some() {
+            self.playback.scope_source()
+        } else {
+            self.direct_source.clone()
+        }
+    }
+
+    pub(super) fn snapshot_texture(&self, slot: usize) -> Option<wgpu::Texture> {
+        self.snapshots.get(slot)?.as_ref().map(|s| s.0.clone())
     }
 
     /// The viewer shows `texture` (a frame of the background renderer or
@@ -499,6 +589,7 @@ impl GpuPreview {
     /// [`Self::frame`].
     pub fn show_cached(&mut self, texture: wgpu::Texture, rect: IRect) {
         if self.cached.as_ref().map(|c| &c.0) != Some(&texture) {
+            self.direct_source = None;
             self.cached = Some((texture, rect));
             self.sampled = None;
         }
@@ -619,8 +710,8 @@ impl GpuPreview {
             self.live_sent = Some(sent);
         }
         if let Some(frame) = self.live.take() {
-            self.preparing = frame.rect.is_none();
-            if let Some(rect) = frame.rect {
+            self.preparing = frame.source.is_none();
+            if let Some(source) = frame.source {
                 if self.live_texture.as_ref() != Some(frame.view.texture()) {
                     if let Err(e) = self.registry.publish_view(
                         self.id,
@@ -635,7 +726,9 @@ impl GpuPreview {
                     self.live_texture = Some(frame.view.texture().clone());
                     self.target_shown = false;
                 }
-                self.rect = Some(rect);
+                self.rect = Some(source.rect);
+                self.direct_source = Some(source);
+                self.live_generation = self.live_generation.wrapping_add(1);
                 self.sampled = None;
             }
             if measure_layer_times

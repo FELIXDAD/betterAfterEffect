@@ -1,5 +1,7 @@
 # vendor/epaint：为什么有这份拷贝
 
+表达式编辑器通过 `LayoutJob::tab_stop_spaces` 指定制表位的空格数。字形排版使用该间距计算下一个制表位，光标、选择和缩进线共用同一组位置。其他文本沿用字体的制表宽度。
+
 这里是 crates.io 上的 epaint 0.36.2（egui 提交 `49682f8b`），通过根 `Cargo.toml` 的 `[patch.crates-io]` 替换掉注册表里的 epaint。egui、egui-wgpu、egui-winit 等其余 egui crate 仍然从 crates.io 来。
 
 ## 为什么

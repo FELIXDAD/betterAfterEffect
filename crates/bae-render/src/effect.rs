@@ -21,6 +21,10 @@ use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Audio analysis and optional mask geometry supplied only for the two Generate effects.
+pub const AUDIO_VISUAL_VALUES: u32 = u32::MAX;
+pub const AUDIO_VISUAL_PATH: u32 = u32::MAX - 1;
+
 /// A parameter lookup can borrow the evaluated values and shadow individual IDs.
 /// A shadow with no value hides that ID from the target effect.
 #[derive(Clone, Copy, Debug)]
