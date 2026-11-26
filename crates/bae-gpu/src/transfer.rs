@@ -116,6 +116,19 @@ impl TextureReadback {
         texture: &wgpu::Texture,
         region: TextureRegion,
     ) -> Result<Self, GpuError> {
+        Self::record_reusing(ctx, encoder, texture, region, None)
+    }
+
+    /// [`Self::record`] into `staging` (a buffer from an earlier
+    /// [`MappedReadback::into_buffer`]) when it is large enough, so a per-frame
+    /// readback allocates nothing.
+    pub fn record_reusing(
+        ctx: &GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+        region: TextureRegion,
+        staging: Option<wgpu::Buffer>,
+    ) -> Result<Self, GpuError> {
         let format = texture.format();
         let bpp = bytes_per_pixel(format).ok_or_else(|| {
             GpuError::Unsupported(format!("readback of {format:?} (compressed or planar)"))
@@ -136,12 +149,16 @@ impl TextureReadback {
         }
         let unpadded = region.size.width * bpp;
         let padded = padded_bytes_per_row(unpadded);
-        let buffer = ctx.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae.readback"),
-            size: u64::from(padded) * u64::from(region.size.height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let size = u64::from(padded) * u64::from(region.size.height);
+        let buffer = match staging {
+            Some(buffer) if buffer.size() >= size => buffer,
+            _ => ctx.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("bae.readback"),
+                size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }),
+        };
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -222,6 +239,24 @@ impl PendingReadback {
         Some(status.map_err(GpuError::Map).and_then(|()| self.copy_out()))
     }
 
+    /// Blocks until the GPU finished the copy and keeps the staging buffer
+    /// mapped, to read the rows in place instead of copying them out.
+    pub fn wait_mapped(self, ctx: &GpuContext) -> Result<MappedReadback, GpuError> {
+        loop {
+            if let Some(status) = self.status.lock().take() {
+                status.map_err(GpuError::Map)?;
+                return Ok(MappedReadback {
+                    buffer: self.buffer,
+                    layout: self.layout,
+                });
+            }
+            if let Some(info) = ctx.lost_info() {
+                return Err(GpuError::DeviceLost(info));
+            }
+            ctx.device().poll(wgpu::PollType::wait_indefinitely())?;
+        }
+    }
+
     /// Blocks until the GPU finished the copy and returns the pixels.
     pub fn wait(self, ctx: &GpuContext) -> Result<ImageData, GpuError> {
         loop {
@@ -259,6 +294,32 @@ impl PendingReadback {
             bytes_per_row: layout.unpadded_bytes_per_row,
             data,
         })
+    }
+}
+
+/// A finished readback still mapped: its rows are read where they are, then
+/// the staging buffer goes back to [`TextureReadback::record_reusing`].
+#[derive(Debug)]
+pub struct MappedReadback {
+    buffer: wgpu::Buffer,
+    layout: ReadbackLayout,
+}
+
+impl MappedReadback {
+    /// Calls `f` with the mapped rows and their stride in bytes (rows are padded
+    /// to the copy alignment; each holds `width` pixels).
+    pub fn with_rows<R>(&self, f: impl FnOnce(&[u8], usize) -> R) -> Result<R, GpuError> {
+        let view = self
+            .buffer
+            .get_mapped_range(..)
+            .map_err(|e| GpuError::Map(e.to_string()))?;
+        Ok(f(&view, self.layout.padded_bytes_per_row as usize))
+    }
+
+    /// Unmaps the staging buffer for reuse.
+    pub fn into_buffer(self) -> wgpu::Buffer {
+        self.buffer.unmap();
+        self.buffer
     }
 }
 
