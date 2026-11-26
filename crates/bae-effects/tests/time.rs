@@ -1,5 +1,7 @@
 use bae_model::{Time, Value};
-use bae_render::{LayerContent, RenderComp, RenderEffect, RenderLayer};
+use bae_render::{
+    LayerContent, OutputAlpha, RenderComp, RenderEffect, RenderLayer, RenderRequest, Renderer,
+};
 use std::sync::Arc;
 #[path = "ae/categories/mod.rs"]
 mod categories;
