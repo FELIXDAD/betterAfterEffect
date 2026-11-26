@@ -49,7 +49,39 @@ pub(crate) struct PreviewImage {
     pub rect: IRect,
 }
 
+/// Picker data belongs to the same composition and time as the displayed preview.
+#[derive(Debug)]
+pub(crate) struct ChannelFrame {
+    pub comp: bae_model::PrimPath,
+    pub time: Time,
+    pub layers: std::collections::HashMap<bae_model::PrimPath, Arc<bae_gpu::channels::ChannelInfo>>,
+}
+impl ChannelFrame {
+    fn from_comp(renderer: &Renderer, rc: &bae_render::RenderComp) -> Option<Arc<Self>> {
+        let mut layers = std::collections::HashMap::new();
+        for layer in &rc.layers {
+            if layer.effects.iter().any(|e| {
+                matches!(
+                    e.effect.as_str(),
+                    "Cryptomatte" | "EXtractoR" | "IDentifier"
+                )
+            }) && let bae_render::LayerContent::Footage(f) = &layer.content
+                && let Some(info) = renderer.footage_channels(f)
+            {
+                layers.insert(layer.path.clone(), info);
+            }
+        }
+        (!layers.is_empty()).then(|| {
+            Arc::new(Self {
+                comp: rc.path.clone(),
+                time: rc.time,
+                layers,
+            })
+        })
+    }
+}
 pub(super) struct RenderEngine {
+    pub(super) channels: Option<Arc<ChannelFrame>>,
     pub(super) renderer: Renderer,
     pub(super) anim: AnimEvaluator,
     /// The comp and per-layer render times of the last frame rendered (not
@@ -63,6 +95,7 @@ pub(super) struct RenderEngine {
 impl RenderEngine {
     pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
         Self {
+            channels: None,
             renderer: Renderer::with_config(
                 gpu,
                 RendererConfig {
@@ -151,6 +184,7 @@ impl RenderEngine {
             (frame, target)
         };
         self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
+        self.channels = ChannelFrame::from_comp(&self.renderer, rc);
         let rect = (!frame.incomplete).then_some(frame.image.rect);
         Ok((target, rect, frames.sampled))
     }
@@ -457,6 +491,9 @@ impl GpuPreview {
             {
                 tracing_warn(&format!("preview: {e}"));
                 return None;
+            }
+            if let Some(session) = resources.get::<crate::session::SharedSession>() {
+                session.lock().channel_frame = self.engine.channels.clone();
             }
             self.last = Some(key);
             self.rect = Some(rect);
