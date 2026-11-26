@@ -20,7 +20,46 @@
 use bae_model::{Change, PrimPath, StageEvent, Time};
 use rustc_hash::FxHashMap;
 
+use crate::GpuImage;
 use crate::input::Dependency;
+use std::hash::BuildHasher;
+
+/// Frame-local writes and submitted intermediates share the renderer's LRU budget.
+pub(crate) struct IntermediateImages<'a> {
+    pub submitted: &'a mut FrameCache<GpuImage>,
+    pub pending: &'a mut FrameCache<GpuImage>,
+    pub request: u64,
+}
+
+impl IntermediateImages<'_> {
+    fn key(&self, mut key: FrameKey) -> FrameKey {
+        key.request =
+            rustc_hash::FxBuildHasher.hash_one(("effect intermediate", self.request, key.request));
+        key
+    }
+
+    pub(crate) fn get(&mut self, key: FrameKey) -> Option<GpuImage> {
+        let key = self.key(key);
+        self.pending
+            .get(&key)
+            .or_else(|| self.submitted.get(&key))
+            .cloned()
+    }
+
+    pub(crate) fn store(&mut self, key: FrameKey, image: GpuImage) {
+        let bytes = image.byte_size();
+        self.pending
+            .insert(self.key(key), image, bytes, Vec::new(), 0);
+    }
+}
+
+impl FrameCache<GpuImage> {
+    pub(crate) fn publish(self, submitted: &mut Self, comp: &crate::RenderComp) {
+        for (key, entry) in self.entries {
+            submitted.insert(key, entry.value, entry.bytes, comp.dependencies(), 0);
+        }
+    }
+}
 
 /// Key of a cached frame.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -153,6 +192,9 @@ impl<T> FrameCache<T> {
         if let Some(old) = self.entries.remove(&key) {
             self.stats.bytes -= old.bytes;
         }
+        if history {
+            self.trim_history(&key.comp);
+        }
         self.evict_to(self.stats.budget - bytes);
         self.stats.bytes += bytes;
         self.entries.insert(
@@ -166,6 +208,30 @@ impl<T> FrameCache<T> {
                 last_used: self.clock,
             },
         );
+    }
+
+    /// A feedback effect's earlier surfaces: only the newest are worth keeping
+    /// (the next frame reads the previous one, a step back the one before), so
+    /// a playing feedback effect does not push every other entry out of the
+    /// cache with a full-resolution surface per frame.
+    fn trim_history(&mut self, comp: &PrimPath) {
+        const KEEP: usize = 1;
+        let mut older: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|(k, e)| e.history && k.comp == *comp)
+            .map(|(k, e)| (e.last_used, k.clone()))
+            .collect();
+        if older.len() <= KEEP {
+            return;
+        }
+        older.sort_unstable_by_key(|(used, _)| std::cmp::Reverse(*used));
+        for (_, key) in older.drain(KEEP..) {
+            if let Some(e) = self.entries.remove(&key) {
+                self.stats.bytes -= e.bytes;
+                self.stats.evicted += 1;
+            }
+        }
     }
 
     fn evict_to(&mut self, limit: u64) {
@@ -401,6 +467,23 @@ mod tests {
         }]));
         assert_eq!(n, 4);
         assert_eq!(cache.stats().entries, 0);
+    }
+
+    #[test]
+    fn a_feedback_effect_keeps_only_its_newest_surfaces() {
+        let mut cache = FrameCache::<u32>::new(1000);
+        let at = |flicks| FrameKey {
+            comp: p("/comps/main/layers/a/effects/blend"),
+            time: Time::from_flicks(flicks),
+            request: 0,
+        };
+        for t in 0..5 {
+            cache.insert_surface(at(t), t as u32, 10, Vec::new(), 0, true);
+        }
+        // The newest and the one before it: 2 of 5.
+        assert_eq!(cache.stats().entries, 2);
+        assert!(cache.contains(&at(4)) && cache.contains(&at(3)));
+        assert_eq!(cache.stats().bytes, 20);
     }
 
     #[test]

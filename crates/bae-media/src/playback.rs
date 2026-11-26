@@ -39,7 +39,9 @@ struct Monitor {
     clock: clock::Clock,
     gain: AtomicU32,
     muted: AtomicBool,
-    peaks: AtomicU64,
+    /// Stereo peaks (f32 bits; non-negative, so they order like integers) since
+    /// the meter last read them: every block raises them, the meter takes them.
+    peaks: [AtomicU32; 2],
     // Bit 0 routes L to output 2, bit 1 routes R to output 1. Zero is stereo.
     routing: AtomicU32,
 }
@@ -113,11 +115,9 @@ impl Sink {
                 self.offset = 0;
             }
         }
-        let bits = peaks.map(f32::to_bits);
-        self.monitor.peaks.store(
-            u64::from(bits[0]) | (u64::from(bits[1]) << 32),
-            Ordering::Relaxed,
-        );
+        for (held, peak) in self.monitor.peaks.iter().zip(peaks) {
+            held.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        }
         if self.consumed != first {
             self.monitor
                 .clock
@@ -204,16 +204,14 @@ impl AudioOutput {
     /// Open the selected endpoint with a buffer supported by the device.
     pub fn open_with(request: &OutputConfig) -> Result<Self, String> {
         let host = cpal::default_host();
-        let device = if request.device_id == "system_default" {
-            host.default_output_device()
-        } else {
-            request
-                .device_id
-                .parse()
-                .ok()
-                .and_then(|id| host.device_by_id(&id))
-        }
-        .ok_or("Audio output device unavailable")?;
+        // A saved device that is gone (unplugged, renamed) plays on the
+        // system's default output instead of going silent.
+        let device = (request.device_id != "system_default")
+            .then(|| request.device_id.parse().ok())
+            .flatten()
+            .and_then(|id| host.device_by_id(&id))
+            .or_else(|| host.default_output_device())
+            .ok_or("Audio output device unavailable")?;
         let config = device.default_output_config().map_err(|e| e.to_string())?;
         let rate = config.sample_rate();
         let channels = config.channels();
@@ -224,13 +222,20 @@ impl AudioOutput {
         let requested_frames =
             (u64::from(rate) * u64::from(request.latency_ms.clamp(1, 500))).div_ceil(1000) as u32;
         let mut stream_config = config.config();
-        let mut frames = requested_frames;
-        if let cpal::SupportedBufferSize::Range { min, max } = *config.buffer_size() {
+        // Audio Hardware > Latency caps the device buffer (AE): the device's
+        // own buffer unless the setting asks for less, so the default never
+        // plays later than the device would by itself.
+        let device_frames = default_buffer_frames(&device, &stream_config, config.sample_format());
+        let mut frames = device_frames.unwrap_or(requested_frames);
+        if let cpal::SupportedBufferSize::Range { min, max } = *config.buffer_size()
+            && device_frames.is_none_or(|d| requested_frames < d)
+        {
             frames = requested_frames.clamp(min, max);
             stream_config.buffer_size = cpal::BufferSize::Fixed(frames);
         }
+        // The ring only feeds the device buffer: no latency of its own.
         let (writer, reader) = RingBuffer::new(
-            (frames.max(requested_frames) as usize)
+            (frames as usize)
                 .div_ceil(BLOCK_FRAMES)
                 .saturating_mul(2)
                 .max(4),
@@ -350,13 +355,13 @@ impl AudioOutput {
         self.monitor.gain.store(gain.to_bits(), Ordering::Relaxed);
     }
 
-    /// Stereo peaks after monitor gain and before device clipping.
+    /// Stereo peaks after monitor gain and before device clipping, since the
+    /// last call (the meter reads once per frame and sees every block's peak).
     pub fn peaks(&self) -> [f32; 2] {
-        let bits = self.monitor.peaks.load(Ordering::Relaxed);
-        [
-            f32::from_bits(bits as u32),
-            f32::from_bits((bits >> 32) as u32),
-        ]
+        self.monitor
+            .peaks
+            .each_ref()
+            .map(|p| f32::from_bits(p.swap(0, Ordering::Relaxed)))
     }
 
     /// Silence queued audio while retaining the device and the prepared sources.
@@ -364,6 +369,18 @@ impl AudioOutput {
         self.monitor.epoch.fetch_add(1, Ordering::AcqRel);
         let _ = self.commands.send(producer::Command::Stop);
     }
+}
+
+/// The buffer the device picks on its own (a silent probe stream).
+fn default_buffer_frames(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    format: SampleFormat,
+) -> Option<u32> {
+    let probe = device
+        .build_output_stream_raw(*config, format, |_, _| {}, |_| {}, None)
+        .ok()?;
+    probe.buffer_size().ok().filter(|n| *n > 0)
 }
 
 fn stream<T: SizedSample + FromSample<f32>>(
@@ -430,6 +447,9 @@ mod tests {
         assert_eq!(monitor.clock.heard(2, 4_000_000, 1000), 1);
         assert_eq!(monitor.clock.heard(2, 8_000_000, 1000), 3);
 
+        // The meter keeps the loudest block until it reads it.
+        let peak = |i: usize| f32::from_bits(monitor.peaks[i].swap(0, Ordering::Relaxed));
+        assert_eq!([peak(0), peak(1)], [0.75, 0.75]);
         // The master fader changes the actual samples. Meters see each peak before clipping.
         monitor.gain.store(2.0_f32.to_bits(), Ordering::Relaxed);
         let mut chunk = writer.write_chunk(1).unwrap();
@@ -441,9 +461,7 @@ mod tests {
         let mut stereo = [0.0; 2];
         sink.pull(&mut stereo, 2, 9_000_000);
         assert_eq!(stereo, [-1.0, 0.5]);
-        let bits = monitor.peaks.load(Ordering::Relaxed);
-        assert_eq!(f32::from_bits(bits as u32), 1.5);
-        assert_eq!(f32::from_bits((bits >> 32) as u32), 0.5);
+        assert_eq!([peak(0), peak(1)], [1.5, 0.5]);
 
         // Routing changes on the existing stream. The two sources may share an output.
         for (routing, expected) in [(3, [0.5, -1.0]), (1, [0.0, -1.0]), (2, [-1.0, 0.0])] {
