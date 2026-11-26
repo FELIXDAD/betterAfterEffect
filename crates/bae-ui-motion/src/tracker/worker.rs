@@ -116,8 +116,10 @@ pub(super) fn start(
                                 free,
                             )
                             .map_err(|e| e.to_string())?;
-                        if let Some(warning) = frame.warnings.first() {
-                            return Err(warning.clone());
+                        // A warning (a missing effect or footage) still leaves a
+                        // frame to track, as in AE; only errors stop the analysis.
+                        for warning in &frame.warnings {
+                            tracing::debug!("tracking: {warning}");
                         }
                         let target = Arc::new(target);
                         targets.push(target.clone());
