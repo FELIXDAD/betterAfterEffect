@@ -635,9 +635,8 @@ impl Panel for CompositionViewer {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().update_preview(cx, &info) {
-            ui.ctx().request_repaint();
-        }
+        // The shell ticks the clock; this keeps the audio mix current.
+        session.lock().update_preview(cx, &info);
         let time = session.lock().time(&info.path);
         let ppp = ui.ctx().pixels_per_point();
 
@@ -828,6 +827,9 @@ impl Panel for CompositionViewer {
                     completed = Some(image);
                     if actual == time || playback.is_some() {
                         let mut s = session.lock();
+                        if playback.is_some() {
+                            s.drew_preview(actual);
+                        }
                         if s.expr_errors != errors {
                             s.expr_errors = errors.to_vec();
                         }
@@ -868,6 +870,18 @@ impl Panel for CompositionViewer {
                 paint_image(&clip, &view, image);
             }
             Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
+            let (fps, dropped) = {
+                let s = session.lock();
+                (s.playback_stats.fps, s.playback_stats.dropped)
+            };
+            let label = format!("{fps:.1} fps   {} {dropped}", tr("Dropped frames"));
+            painter.text(
+                area.right_top() + vec2(-8., 8.),
+                Align2::RIGHT_TOP,
+                label,
+                theme::body(),
+                color::TEXT_STRONG,
+            );
             self.banner.ui(ui, cx, &session, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
             return;
