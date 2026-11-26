@@ -40,6 +40,10 @@ const ZH: &[(&str, &str)] = &[
     ("Workspace", "工作区"),
     ("Minimize", "最小化"),
     ("Settings...", "设置..."),
+    (
+        "The project template could not be opened. A blank project is created instead.",
+        "无法打开项目模板，已改为新建空白项目。",
+    ),
     ("App", "应用"),
     ("Full Screen", "全屏"),
     ("frame {ms} ms", "帧 {ms} 毫秒"),
