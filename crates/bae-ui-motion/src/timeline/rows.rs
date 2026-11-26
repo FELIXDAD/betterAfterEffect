@@ -369,10 +369,22 @@ impl TimelinePanel {
                         vec2(14.0, 14.0),
                     );
                     icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
-                    let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
-                        egui::WidgetType::Button,
-                        &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
-                    );
+                    let wresp = ui
+                        .interact(whip, rid("whip"), Sense::click_and_drag())
+                        .labeled(
+                            egui::WidgetType::Button,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
+                        );
+                    // Cmd/Ctrl-click: remove the parent (Alt too: the layer jumps).
+                    if wresp.clicked() && ui.input(|i| i.modifiers.command) {
+                        let layers = if layer_selected {
+                            session.lock().selected_layers.clone()
+                        } else {
+                            vec![layer.clone()]
+                        };
+                        let mods = ui.input(|i| i.modifiers);
+                        cx.invoke_with("layer.set_parent", parent_params(&layers, None, now, mods));
+                    }
                     if wresp.drag_started() {
                         let layers = if layer_selected {
                             session.lock().selected_layers.clone()
@@ -411,9 +423,15 @@ impl TimelinePanel {
                     if sel != before {
                         let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
                         if parent.as_ref() != Some(layer) {
+                            let mods = ui.input(|i| i.modifiers);
                             cx.invoke_with(
                                 "layer.set_parent",
-                                json!({"layers": [layer], "parent": parent, "time": now}),
+                                parent_params(
+                                    std::slice::from_ref(layer),
+                                    parent.as_ref(),
+                                    now,
+                                    mods,
+                                ),
                             );
                         }
                     }
@@ -1267,4 +1285,22 @@ fn footage_frame_blending(stage: &Stage, layer: &PrimPath) -> Option<FrameBlendi
     } else {
         None
     }
+}
+
+/// `layer.set_parent` for a pick whip or Parent & Link choice with `mods`
+/// held (AE): Shift moves the layers to the parent, Alt lets them jump
+/// instead of staying where they are.
+pub(super) fn parent_params(
+    layers: &[PrimPath],
+    parent: Option<&PrimPath>,
+    now: Time,
+    mods: egui::Modifiers,
+) -> serde_json::Value {
+    json!({
+        "layers": layers,
+        "parent": parent,
+        "time": now,
+        "keep_transform": !mods.alt,
+        "move_to_parent": mods.shift && parent.is_some(),
+    })
 }
