@@ -39,6 +39,15 @@ pub(crate) fn comp_label(p: &Preferences) -> i64 {
     p.int("labels.label_default_comp")
 }
 
+/// Default label for newly created comment or segmentation markers.
+pub(crate) fn marker_label(prefs: &Preferences, segment: bool) -> usize {
+    prefs.int(if segment {
+        "labels.label_default_marker_segmentation"
+    } else {
+        "labels.label_default_marker_comment"
+    }) as usize
+}
+
 /// Creation preferences used by the Layer menu and the drawing tools.
 pub(crate) fn apply_layer_defaults(
     resources: &Resources,
