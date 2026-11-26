@@ -340,6 +340,15 @@ impl Command for ConfigureTracker {
             }
             set(tx, &p.tracker, &key, val)?;
         }
+        if matches!(
+            mode(tx.stage(), &p.tracker).as_str(),
+            "parallel" | "perspective"
+        ) && let Some(Value::PrimRef(target)) = setting(tx.stage(), &p.tracker, "target")
+            && let Some(layer) = crate::effect::layer_of_effect(&target)
+        {
+            set(tx, &p.tracker, "target", Value::PrimRef(layer))?;
+            set(tx, &p.tracker, "target_property", String::new())?;
+        }
         sync_points(tx, &p.tracker, false)
     }
 }

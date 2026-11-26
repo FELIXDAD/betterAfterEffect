@@ -1184,6 +1184,7 @@ def skip_ahead(q, st):
     if len(q) < 2 or waited < CFG.get("skip_ahead_after_minutes", 30):
         return False
     head_files = None
+    pre_left = CFG.get("preupdate_ahead", 0)
     for p in q[1:]:
         try:
             decision, detail, _ = decide(p, st)
@@ -1193,6 +1194,18 @@ def skip_ahead(q, st):
         if (decision, detail) != (ps.get("decision"), ps.get("detail")):
             log("#%d (behind #%d) %s → %s: %s" % (p["number"], q[0]["number"],
                                                   p["headRefOid"][:7], decision, detail))
+        if decision == "update" and pre_left > 0:
+            # Start this PR's CI now so it is green when it reaches the front, instead
+            # of every behind PR waiting for the head's CI and then running its own.
+            pre_left -= 1
+            if ps.get("updated_head") != p["headRefOid"] and mutate(
+                    "pre-update #%d behind #%d" % (p["number"], q[0]["number"])):
+                rc, out, err = sh(["gh", "pr", "update-branch", str(p["number"]),
+                                   "--repo", CFG["repo"]], check=False)
+                if rc == 0:
+                    ps.update(updated_head=p["headRefOid"], updated_at=now_utc().isoformat())
+                    log("#%d (behind #%d) pre-updated; its CI runs while the head waits"
+                        % (p["number"], q[0]["number"]))
         if decision == "merge":
             try:
                 if head_files is None:
