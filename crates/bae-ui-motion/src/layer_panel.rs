@@ -41,6 +41,8 @@ pub struct LayerPanel {
     eval: EvalCache,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
+    zoom: Option<f32>,
+    pan: egui::Vec2,
     pub(crate) show: Show,
     /// Render: the picture includes the effects up to the shown one.
     pub(crate) render: bool,
@@ -218,11 +220,39 @@ impl LayerPanel {
     ) -> View {
         let ppp = ui.ctx().pixels_per_point();
         let (w, h) = (one.width as f32, one.height as f32);
-        let scale = ((area.width() - 24.0) / w)
+        let fit = ((area.width() - 24.0) / w)
             .min((area.height() - 24.0) / h)
             .clamp(0.01, 1.0 / ppp);
+        let mut scale = self.zoom.map_or(fit, |z| z / ppp);
+        if cfg!(target_os = "macos")
+            && ui.rect_contains_pointer(area)
+            && let Some(anchor) = ui.input(|i| i.pointer.hover_pos())
+        {
+            let wheel = crate::viewer::wheel(ui);
+            let smart = crate::viewer::smart_zoom(ui.ctx());
+            if smart && self.zoom.is_some() {
+                self.zoom = None;
+                self.pan = egui::Vec2::ZERO;
+                scale = fit;
+            } else {
+                let factor = if smart {
+                    (1.0 / (fit * ppp)).max(2.0)
+                } else {
+                    wheel.pinch
+                };
+                if factor != 1.0 {
+                    let mag = (scale * ppp * factor).clamp(0.02, 32.0);
+                    let next = mag / ppp;
+                    self.pan += (anchor - area.center() - self.pan) * (1.0 - next / scale);
+                    self.zoom = Some(mag);
+                    scale = next;
+                } else {
+                    self.pan += wheel.pan;
+                }
+            }
+        }
         let view = View {
-            origin: area.center() - vec2(w, h) * scale / 2.0,
+            origin: area.center() - vec2(w, h) * scale / 2.0 + self.pan,
             scale,
             point: 6.0,
             camera: None,

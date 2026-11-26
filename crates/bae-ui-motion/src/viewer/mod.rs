@@ -87,6 +87,17 @@ fn next_step(mag: f32, up: bool) -> Option<f32> {
     }
 }
 
+/// Associate the native smart-magnify event with the next input pass.
+pub fn request_smart_zoom(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("mac.smart_zoom"), pass));
+}
+
+pub(crate) fn smart_zoom(ctx: &egui::Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new("mac.smart_zoom"))) == Some(pass)
+}
+
 /// What the mouse wheel and trackpad did this frame over a picture (the
 /// viewer and the Layer panel share it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -644,6 +655,7 @@ impl Panel for CompositionViewer {
         let opts = session.lock().view_options;
         self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
+        crate::import::drop_on_panel(ui, cx);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
@@ -711,7 +723,15 @@ impl Panel for CompositionViewer {
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
             let w = wheel(ui);
-            if w.pinch != 1.0 {
+            if smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, &info, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), resp.hover_pos(), area, &info, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
                 if w.notches != 0.0 {

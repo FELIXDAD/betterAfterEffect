@@ -232,6 +232,21 @@ pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
     out
 }
 
+/// Route external drops on the Composition and Timeline panels through the same
+/// import command as the Project panel, including folders and image sequences.
+pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
+    if ui.rect_contains_pointer(ui.available_rect_before_wrap()) {
+        let paths = ui.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_owned())
+                .collect::<Vec<_>>()
+        });
+        import_paths(cx, &paths, None);
+    }
+}
+
 /// Import `paths` into `parent` (default the assets folder): one
 /// `item.import`; unreadable files are reported in an alert.
 pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent: Option<PrimPath>) {

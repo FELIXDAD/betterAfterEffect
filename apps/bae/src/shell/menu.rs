@@ -117,6 +117,13 @@ pub fn extra_items() -> Vec<(&'static str, MenuItemSpec)> {
             .checked_when(move |cx| cx.panel_open(&open))
     };
     vec![
+        #[cfg(target_os = "macos")]
+        (
+            "shell.app.settings",
+            MenuItemSpec::new(&[APP_MENU], "Settings…", bae_ui::settings::ACTION)
+                .group(1)
+                .order(-1),
+        ),
         ("shell.window.history", panel("history", "History", 1)),
         (
             "shell.window.agent_activity",
@@ -209,6 +216,11 @@ impl AppMenu {
             }
             let sub = Submenu::new(menu_text(tr(title), menu_mnemonic(title)), true);
             append_entries(&sub, entries, &mut items)?;
+            #[cfg(target_os = "macos")]
+            if title == "View" {
+                sub.append(&PredefinedMenuItem::separator())?;
+                sub.append(&PredefinedMenuItem::fullscreen(Some(tr("Full Screen"))))?;
+            }
             menu.append(&sub)?;
         }
         let find = |action: &str| {
