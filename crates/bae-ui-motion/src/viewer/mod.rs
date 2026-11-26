@@ -16,18 +16,22 @@ use serde_json::json;
 
 use crate::common::{self, EvalCache};
 use crate::gpu_preview::GpuPreview;
-use crate::project::ItemDrag;
+use crate::project::{DropPlacement, ItemDrag};
 use crate::render::{self, Affine, View};
 use crate::session::{Scrub, SharedSession};
 use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+mod camera_tool;
 pub(crate) mod display;
 mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
+mod gizmo3d;
 pub(crate) mod guides;
+mod layout;
+mod look_at;
 mod menu;
 mod motion_path;
 mod navigator;
@@ -35,6 +39,7 @@ mod overlay;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+mod scene_icons;
 mod select_tool;
 mod shape_tool;
 #[cfg(test)]
@@ -81,6 +86,8 @@ pub struct CompositionViewer {
     pending_zoom: Option<bool>,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
+    /// GPU previews of the other views of the layout (by view index).
+    extra_gpu: Vec<Option<GpuPreview>>,
     /// The last frame came from the GPU compositor.
     on_gpu: bool,
     /// Space is held over the viewer (temporary Hand tool): whether the comp was
@@ -117,6 +124,8 @@ pub struct CompositionViewer {
     esc_taken: bool,
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
+    /// A camera tool drag.
+    camera_drag: Option<camera_tool::CameraDrag>,
 }
 
 impl CompositionViewer {
@@ -128,6 +137,41 @@ impl CompositionViewer {
             v.checker = s.get("checker").and_then(|v| v.as_bool()).unwrap_or(false);
         }
         v
+    }
+
+    fn paint_guides(
+        &self,
+        cx: &PanelContext<'_>,
+        painter: &egui::Painter,
+        clip: &egui::Painter,
+        comp_rect: Rect,
+        view: &View,
+        opts: guides::ViewOptions,
+    ) {
+        // Preferences > Grids & Guides (bae-prefs, workstream D).
+        let guides = bae_ui::settings::GridGuides::current(cx.resources);
+        if opts.grid {
+            guides.paint_grid(clip, comp_rect, view.scale);
+        }
+        if opts.proportional {
+            guides::paint_proportional(clip, comp_rect, guides.proportional, guides.grid_color);
+        }
+        if opts.safe {
+            guides.paint_safe(
+                painter,
+                comp_rect,
+                Stroke::new(1.0, Color32::from_gray(150)),
+            );
+            let c = comp_rect.center();
+            painter.line_segment(
+                [c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)],
+                Stroke::new(1.0, Color32::from_gray(150)),
+            );
+            painter.line_segment(
+                [c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)],
+                Stroke::new(1.0, Color32::from_gray(150)),
+            );
+        }
     }
 
     fn view(&self, area: Rect, info: &CompInfo, ppp: f32) -> (View, f32) {
@@ -314,24 +358,26 @@ fn apply_overrides(
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
-        // A scrubbed effect parameter of this layer (Effect Controls, timeline).
-        if let Some(s) = scrub.filter(|s| s.attr.starts_with("param:"))
-            && crate::effects::layer_of(&s.path).as_ref() == Some(&layer.path)
-            && let Some(e) = layer.effects.iter_mut().find(|e| e.path == s.path)
-        {
-            e.params.insert(
-                s.attr.trim_start_matches("param:").to_owned(),
-                s.value.clone(),
-            );
-        }
-        if let Some(s) = scrub.filter(|s| s.path == layer.path) {
+        let attr = scrub.map_or("", |s| s.attr.as_str());
+        for (path, value) in scrub.into_iter().flat_map(Scrub::targets) {
+            // A scrubbed effect parameter of this layer (Effect Controls, timeline).
+            if attr.starts_with("param:")
+                && crate::effects::layer_of(path).as_ref() == Some(&layer.path)
+                && let Some(e) = layer.effects.iter_mut().find(|e| e.path == *path)
+            {
+                e.params
+                    .insert(attr.trim_start_matches("param:").to_owned(), value.clone());
+            }
+            if *path != layer.path {
+                continue;
+            }
             touched = true;
             let v3 = |v: &Value| match v {
                 Value::Vec3(a) => Some(DVec3::from_array(*a)),
                 Value::Vec2(a) => Some(DVec3::new(a[0], a[1], 0.0)),
                 _ => None,
             };
-            match (s.attr.as_str(), &s.value) {
+            match (attr, value) {
                 ("transform:position", v) => t.position = v3(v).unwrap_or(t.position),
                 ("transform:anchor_point", v) => t.anchor_point = v3(v).unwrap_or(t.anchor_point),
                 ("transform:scale", v) => t.scale = v3(v).unwrap_or(t.scale),
@@ -429,6 +475,18 @@ impl Panel for CompositionViewer {
         if view3d::handle(action, cx) {
             return true;
         }
+        // With a camera tool, F is Look at Selected Layers (AE's camera tool
+        // shortcut; elsewhere F reveals Mask Feather).
+        if action.id == "motion.reveal"
+            && action.params.get("what").and_then(|v| v.as_str()) == Some("mask_feather")
+            && matches!(
+                crate::tools::shared(cx.resources).lock().current().group(),
+                crate::tools::Group::Orbit | crate::tools::Group::Pan | crate::tools::Group::Dolly
+            )
+        {
+            let look = Invocation::new(look_at::ids::SELECTED);
+            return look_at::handle(&look, cx);
+        }
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
         if self.shape.is_some() || self.pen.busy() || self.select.busy() {
@@ -516,7 +574,7 @@ impl Panel for CompositionViewer {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().tick(&info) {
+        if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
         let time = session.lock().time(&info.path);
@@ -531,6 +589,16 @@ impl Panel for CompositionViewer {
             pos2(full.right(), full.bottom() - bar_h),
         );
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
+        // View layout: the active view is the viewer, the others are drawn below.
+        let (panes, active) = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .map_or((vec![view3d::View3d::Active], 0), |v| {
+                (v.panes(), v.active())
+            });
+        let pane_rects = layout::rects(area, panes.len());
+        let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
         let (rulers, area) = guides::layout(area, opts.rulers);
         let resp = ui
@@ -606,8 +674,11 @@ impl Panel for CompositionViewer {
                 self.pan += pan;
             }
         }
-        if resp.dragged_by(egui::PointerButton::Middle)
-            || resp.dragged_by(egui::PointerButton::Secondary)
+        // With a camera tool these drags pan and dolly the camera.
+        let camera_tool = crate::tools::shared(cx.resources).lock().current();
+        if (resp.dragged_by(egui::PointerButton::Middle)
+            || resp.dragged_by(egui::PointerButton::Secondary))
+            && !camera_tool.is_camera()
         {
             self.pan += resp.drag_delta();
         }
@@ -616,6 +687,100 @@ impl Panel for CompositionViewer {
         if self.mag != mag {
             self.mag = mag;
             crate::tools::shared(cx.resources).lock().magnification = mag;
+        }
+
+        // GPU preview through 04's compositor when the app has a GPU.
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(|g| !g.is_current(cx.resources))
+        {
+            self.gpu = None;
+            self.gpu_tried = false;
+        }
+        if self.gpu.is_none() && !self.gpu_tried {
+            self.gpu_tried = true;
+            self.gpu = GpuPreview::new(cx.resources);
+        }
+        let mut resolution = {
+            let s = session.lock();
+            // Preview ▸ Resolution overrides the viewer's while playing.
+            match s.preview.resolution.filter(|_| s.is_playing()) {
+                Some(r) => r,
+                None => render_factor(cx.stage, &info.path, s.auto_resolution, mag),
+            }
+        };
+        // Fast Previews while something is dragged.
+        let interacting = resp.dragged() || self.select.busy() || session.lock().scrub.is_some();
+        if interacting && self.display.fast == display::Fast::Adaptive {
+            resolution = resolution.max(4);
+        }
+        let wireframe = interacting && self.display.fast == display::Fast::Wireframe;
+        self.render_factor = resolution;
+        // Paint.
+        let painter = ui.painter_at(area);
+        painter.rect_filled(area, 0.0, Color32::from_gray(35));
+        let comp_rect = render::comp_rect(&view, info.width, info.height);
+        // Region of interest: only it shows the comp.
+        let comp_rect = match self.display.roi() {
+            Some(r) => Rect::from_min_max(
+                view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
+                view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
+            )
+            .intersect(comp_rect),
+            None => comp_rect,
+        };
+        if self.checker {
+            checkerboard(&painter, comp_rect.intersect(area));
+        } else {
+            let c = info.bg_color;
+            painter.rect_filled(
+                comp_rect,
+                0.0,
+                Color32::from_rgb(
+                    (c[0] * 255.0) as u8,
+                    (c[1] * 255.0) as u8,
+                    (c[2] * 255.0) as u8,
+                ),
+            );
+        }
+        let clip = painter.with_clip_rect(comp_rect.intersect(area));
+        let playback = session.lock().playback.clone();
+        if let (Some(pb), Some(gpu)) = (playback, self.gpu.as_mut())
+            && pb.comp == info.path
+            && !resp.dragged()
+            && !resp.clicked()
+        {
+            let looping = session.lock().loop_playback;
+            let ready = gpu.playback.poll(
+                cx.stage,
+                cx.resources,
+                &info.path,
+                time,
+                info.frame_rate,
+                pb.range,
+                looping,
+                resolution,
+                ui.ctx(),
+            );
+            self.on_gpu = ready.is_some();
+            if let Some((image, _, errors)) = ready {
+                paint_image(&clip, &view, image);
+                let mut s = session.lock();
+                if s.expr_errors != errors {
+                    s.expr_errors = errors.to_vec();
+                }
+            }
+            self.paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
+            self.banner.ui(ui, cx, &session, area);
+            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+            return;
+        }
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.playback.stop();
+        }
+        if resp.dragged() || resp.clicked() {
+            session.lock().stop();
         }
 
         // Evaluate.
@@ -649,11 +814,29 @@ impl Panel for CompositionViewer {
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
-        let view_camera = session
-            .lock()
-            .views3d
-            .get(&info.path)
-            .and_then(|v| v.camera(size));
+        if camera_tool.is_camera() || self.camera_drag.is_some() {
+            camera_tool::frame(
+                &mut self.camera_drag,
+                &resp,
+                ui,
+                cx,
+                &session,
+                &info.path,
+                &comp,
+                size,
+                &view,
+                camera_tool,
+                time,
+            );
+        }
+        let layer_camera = self.camera_drag.as_ref().and_then(|d| d.layer_camera());
+        let view_camera = layer_camera.or_else(|| {
+            session
+                .lock()
+                .views3d
+                .get(&info.path)
+                .and_then(|v| v.camera(size))
+        });
         let view = View {
             camera: Some((
                 view_camera.unwrap_or_else(|| view3d::active_camera(&comp, size)),
@@ -680,56 +863,6 @@ impl Panel for CompositionViewer {
             select_tool::center_anchors(cx, &session, &info, &comp);
         }
 
-        // Paint.
-        let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, Color32::from_gray(35));
-        let comp_rect = render::comp_rect(&view, info.width, info.height);
-        // Region of interest: only it shows the comp.
-        let comp_rect = match self.display.roi() {
-            Some(r) => Rect::from_min_max(
-                view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
-                view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
-            )
-            .intersect(comp_rect),
-            None => comp_rect,
-        };
-        if self.checker {
-            checkerboard(&painter, comp_rect.intersect(area));
-        } else {
-            let c = info.bg_color;
-            painter.rect_filled(
-                comp_rect,
-                0.0,
-                Color32::from_rgb(
-                    (c[0] * 255.0) as u8,
-                    (c[1] * 255.0) as u8,
-                    (c[2] * 255.0) as u8,
-                ),
-            );
-        }
-        let clip = painter.with_clip_rect(comp_rect.intersect(area));
-        // GPU preview through 04's compositor when the app has a GPU.
-        if self
-            .gpu
-            .as_ref()
-            .is_some_and(|g| !g.is_current(cx.resources))
-        {
-            self.gpu = None;
-            self.gpu_tried = false;
-        }
-        if self.gpu.is_none() && !self.gpu_tried {
-            self.gpu_tried = true;
-            self.gpu = GpuPreview::new(cx.resources);
-        }
-        let mut resolution =
-            render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
-        // Fast Previews while something is dragged.
-        let interacting = resp.dragged() || self.select.busy() || session.lock().scrub.is_some();
-        if interacting && self.display.fast == display::Fast::Adaptive {
-            resolution = resolution.max(4);
-        }
-        let wireframe = interacting && self.display.fast == display::Fast::Wireframe;
-        self.render_factor = resolution;
         if let Some(g) = self.gpu.as_mut() {
             g.display = self.display.render();
             g.roi = self.display.roi();
@@ -737,9 +870,21 @@ impl Panel for CompositionViewer {
         let image = if wireframe {
             None
         } else {
-            self.gpu
-                .as_mut()
-                .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera))
+            let frame_nr = ui.ctx().cumulative_frame_nr();
+            let measure = session
+                .lock()
+                .timing_column_frame
+                .is_some_and(|shown| frame_nr.saturating_sub(shown) <= 1);
+            self.gpu.as_mut().and_then(|g| {
+                g.frame(
+                    cx.resources,
+                    cx.stage,
+                    &comp,
+                    resolution,
+                    view_camera,
+                    measure,
+                )
+            })
         };
         // Show Snapshot while F5–F8 (or the bar button) is held.
         let keys = [egui::Key::F5, egui::Key::F6, egui::Key::F7, egui::Key::F8];
@@ -772,17 +917,7 @@ impl Panel for CompositionViewer {
         }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
         if let Some(img) = image {
-            let r = img.rect;
-            let rect = Rect::from_min_max(
-                view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
-                view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
-            );
-            clip.image(
-                egui::TextureId::User(img.handle),
-                rect,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            paint_image(&clip, &view, img);
             // Until 05's text source is registered, text layers are drawn here.
             let has_text = self.gpu.as_ref().is_some_and(|g| g.has_text);
             let mut text_only = comp.clone();
@@ -809,44 +944,36 @@ impl Panel for CompositionViewer {
                 ..comp.clone()
             });
         }
-        let mut shapes = Vec::new();
-        let to_screen = |p: DVec2| view.to_screen(p);
-        render::paint_comp(
-            &vector,
-            &clip,
-            &to_screen,
-            Affine::new(DMat4::IDENTITY),
-            1.0,
-            f64::from(view.scale),
-            &|s| egui::FontId::proportional(s),
-            &mut shapes,
-        );
-        clip.extend(shapes);
+        // Something is still warming up (an effect pipeline, the text
+        // renderer): the last complete frame stays (none yet: nothing, not the
+        // simplified drawing) with a small hint, like AE's render progress.
+        let preparing = self.gpu.as_ref().is_some_and(|g| g.preparing);
+        if !(preparing && !self.on_gpu) {
+            let mut shapes = Vec::new();
+            let to_screen = |p: DVec2| view.to_screen(p);
+            render::paint_comp(
+                &vector,
+                &clip,
+                &to_screen,
+                Affine::new(DMat4::IDENTITY),
+                1.0,
+                f64::from(view.scale),
+                &|s| egui::FontId::proportional(s),
+                &mut shapes,
+            );
+            clip.extend(shapes);
+        }
+        if preparing {
+            painter.text(
+                area.right_bottom() + vec2(-8.0, -8.0),
+                Align2::RIGHT_BOTTOM,
+                tr("Preparing…"),
+                theme::small(),
+                color::TEXT_DIM,
+            );
+        }
 
-        // Preferences > Grids & Guides (bae-prefs, workstream D).
-        let guides = bae_ui::settings::GridGuides::current(cx.resources);
-        if opts.grid {
-            guides.paint_grid(&clip, comp_rect, view.scale);
-        }
-        if opts.proportional {
-            guides::paint_proportional(&clip, comp_rect, guides.proportional, guides.grid_color);
-        }
-        if opts.safe {
-            guides.paint_safe(
-                &painter,
-                comp_rect,
-                Stroke::new(1.0, Color32::from_gray(150)),
-            );
-            let c = comp_rect.center();
-            painter.line_segment(
-                [c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)],
-                Stroke::new(1.0, Color32::from_gray(150)),
-            );
-            painter.line_segment(
-                [c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)],
-                Stroke::new(1.0, Color32::from_gray(150)),
-            );
-        }
+        self.paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
 
         // Selection: bounding boxes, handles, anchor points (AE draws them in the
         // layer's label color).
@@ -895,6 +1022,19 @@ impl Panel for CompositionViewer {
         if opts.paths {
             overlay::masks(&painter, cx.stage, &comp, &view, &selected);
         }
+        // Cameras and lights in the 3D views (not the camera looked through).
+        let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
+            None | Some(view3d::View3d::Active) => comp.camera.map(|i| comp.layers[i].path.clone()),
+            Some(_) => None,
+        };
+        scene_icons::paint(
+            &painter,
+            cx.stage,
+            &comp,
+            &view,
+            &selected,
+            through.as_ref(),
+        );
 
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
@@ -1082,7 +1222,11 @@ impl Panel for CompositionViewer {
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
-            add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
+            item.add_as_layer(
+                cx,
+                &session,
+                DropPlacement::Viewer(pointer.map(|p| view.to_comp(p))),
+            );
         }
         // An effect dropped on a layer (Effects & Presets) is applied to it.
         if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
@@ -1093,6 +1237,7 @@ impl Panel for CompositionViewer {
         }
 
         self.banner.ui(ui, cx, &session, area);
+        self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
         self.esc_taken = self.shape.is_some()
             || self.pen.busy()
@@ -1101,6 +1246,33 @@ impl Panel for CompositionViewer {
             || ui.ctx().text_edit_focused()
             || egui::Popup::is_any_open(ui.ctx());
     }
+}
+
+/// View ▸ Look at Selected / All Layers (see [`look_at`]).
+pub(crate) fn look_at(inv: &bae_ui::Invocation, cx: &mut PanelContext<'_>) -> bool {
+    look_at::handle(inv, cx)
+}
+
+pub(crate) fn look_at_actions() -> impl Iterator<Item = (&'static str, &'static str)> {
+    look_at::ACTIONS.iter().copied()
+}
+
+pub(crate) fn look_at_enabled(resources: &bae_app::Resources, all: bool) -> bool {
+    look_at::enabled(resources, all)
+}
+
+fn paint_image(clip: &egui::Painter, view: &View, img: crate::gpu_preview::PreviewImage) {
+    let r = img.rect;
+    let rect = Rect::from_min_max(
+        view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
+        view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
+    );
+    clip.image(
+        egui::TextureId::User(img.handle),
+        rect,
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
 }
 
 /// The comp's resolution as a pixel step (Composition Settings > Resolution:
@@ -1162,38 +1334,6 @@ pub(crate) fn set_resolution(
             );
         }
     }
-}
-
-/// Add a project item to the active comp (drag and drop).
-pub(crate) fn add_item_as_layer(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    item: &PrimPath,
-    at: Option<DVec2>,
-) {
-    let stage = cx.stage;
-    let Some(active) = session.lock().active_comp.clone() else {
-        return;
-    };
-    let kind = if query::comp_info(stage, item).is_some() {
-        if item == &active {
-            return;
-        }
-        LayerKind::PreComp
-    } else {
-        match stage
-            .prim(item)
-            .and_then(|v| query::static_value(&v, "kind"))
-        {
-            Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
-            _ => LayerKind::Footage,
-        }
-    };
-    let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
-    if let Some(p) = at {
-        extra["position"] = json!([p.x, p.y]);
-    }
-    common::new_layer(cx, session, kind, extra);
 }
 
 fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {

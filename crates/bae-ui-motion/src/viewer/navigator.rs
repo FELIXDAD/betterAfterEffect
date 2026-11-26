@@ -45,6 +45,27 @@ pub(super) fn bar(ui: &Ui, cx: &PanelContext<'_>, session: &SharedSession, rect:
                 font.clone(),
                 color::TEXT_DIM,
             );
+            // An arrow opens the Composition Mini-Flowchart (#402's popup).
+            if ui
+                .interact(
+                    arrow.expand2(vec2(3.0, 2.0)),
+                    ui.id().with(("comp-nav-arrow", i)),
+                    Sense::click(),
+                )
+                .labeled(
+                    egui::WidgetType::Button,
+                    &format!(
+                        "{}: {}",
+                        tr("Composition Navigator"),
+                        tr("Composition Mini-Flowchart")
+                    ),
+                )
+                .clicked()
+                && let Some(active) = &active
+            {
+                session.lock().mini_flow =
+                    Some(crate::timeline::navigation::MiniFlow::new(cx.stage, active));
+            }
             x = arrow.right() + 6.0;
         }
         let name = query::display_name_of(cx.stage, comp);
@@ -56,7 +77,10 @@ pub(super) fn bar(ui: &Ui, cx: &PanelContext<'_>, session: &SharedSession, rect:
         );
         let resp = ui
             .interact(r, ui.id().with(("comp-nav", i)), Sense::click())
-            .labeled(egui::WidgetType::Button, &name)
+            .labeled(
+                egui::WidgetType::Button,
+                &format!("{}: {name}", tr("Composition Navigator")),
+            )
             .on_hover_text(tr(
                 "Click a name to open the composition; click an arrow to open the Mini-Flowchart (Tab)",
             ));
@@ -85,7 +109,10 @@ pub(super) fn bar(ui: &Ui, cx: &PanelContext<'_>, session: &SharedSession, rect:
 }
 
 /// Chinese (AE's zh_CN dictionary, Breadcrumb).
-pub(crate) const ZH: &[(&str, &str)] = &[(
-    "Click a name to open the composition; click an arrow to open the Mini-Flowchart (Tab)",
-    "单击名称可打开合成；单击箭头可打开微型流程图（Tab 键）",
-)];
+pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Composition Navigator", "合成导航器"),
+    (
+        "Click a name to open the composition; click an arrow to open the Mini-Flowchart (Tab)",
+        "单击名称可打开合成；单击箭头可打开微型流程图（Tab 键）",
+    ),
+];

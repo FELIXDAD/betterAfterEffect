@@ -49,12 +49,92 @@ pub(crate) struct PreviewImage {
     pub rect: IRect,
 }
 
+pub(super) struct RenderEngine {
+    pub(super) renderer: Renderer,
+    pub(super) anim: AnimEvaluator,
+    /// The comp and per-layer render times of the last frame rendered (not
+    /// from the cache) while [`Renderer::set_layer_times`] was on.
+    pub(super) layer_times: Option<(
+        bae_model::PrimPath,
+        Vec<(bae_model::PrimPath, std::time::Duration)>,
+    )>,
+}
+
+impl RenderEngine {
+    pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
+        Self {
+            renderer: Renderer::with_config(
+                gpu,
+                RendererConfig {
+                    frame_cache_bytes: cache,
+                    pool_idle_bytes: 128 << 20,
+                },
+            ),
+            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            layer_times: None,
+        }
+    }
+
+    /// The frame converted to an 8-bit texture and its rect, or `None` when
+    /// it is incomplete (something still warming up: not shown).
+    pub(super) fn render(
+        &mut self,
+        stage: &Stage,
+        rc: &bae_render::RenderComp,
+        resolution: u32,
+        display: bae_render::Display,
+        roi: Option<IRect>,
+    ) -> Result<Option<(wgpu::Texture, IRect)>, bae_render::RenderError> {
+        let request = RenderRequest {
+            resolution: match resolution {
+                0 | 1 => Resolution::Full,
+                2 => Resolution::Half,
+                3 => Resolution::Third,
+                4 => Resolution::Quarter,
+                n => Resolution::Custom(n),
+            },
+            purpose: RenderPurpose::Preview,
+            roi,
+            ..RenderRequest::full()
+        };
+        let mut frames = bae_render::eval::EvaluatorFrames {
+            stage,
+            evaluator: &mut self.anim,
+        };
+        let (frame, texture) = if display == bae_render::Display::default() {
+            // The frame and its 8-bit conversion in one GPU submission.
+            self.renderer.render_frame_output(
+                rc,
+                &request,
+                Some(&mut frames),
+                OutputAlpha::Premultiplied,
+            )?
+        } else {
+            // Show Channel / Exposure: the conversion applies them.
+            let frame = self
+                .renderer
+                .render_frame_with(rc, &request, Some(&mut frames))?;
+            let texture = self.renderer.output_texture_display(
+                &frame,
+                OutputAlpha::Premultiplied,
+                display,
+            )?;
+            (frame, texture)
+        };
+        self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
+        if frame.incomplete {
+            return Ok(None);
+        }
+        Ok(Some((texture, frame.image.rect)))
+    }
+}
+
 pub(crate) struct GpuPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
-    renderer: Renderer,
-    anim: AnimEvaluator,
+    engine: RenderEngine,
+    pub(super) playback: super::playback::PlaybackPreview,
     changes: StageChanges,
     sources_gen: Option<u64>,
     /// `(content hash, time, resolution)` of the published frame.
@@ -74,6 +154,10 @@ pub(crate) struct GpuPreview {
     last_view: Option<(bae_render::Display, Option<IRect>)>,
     /// Snapshots 1–4 (AE's Take Snapshot): a published frame.
     snapshots: [Option<(wgpu::Texture, IRect)>; 4],
+    /// The newest frame was incomplete (something still warming up): the
+    /// viewer keeps showing the last complete frame with a "Preparing…" hint
+    /// until it is redrawn complete.
+    pub preparing: bool,
 }
 
 impl GpuPreview {
@@ -87,19 +171,14 @@ impl GpuPreview {
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
         let id = registry.create("motion composition viewer");
-        let renderer = Renderer::with_config(
-            gpu.clone(),
-            RendererConfig {
-                frame_cache_bytes: 512 << 20,
-                pool_idle_bytes: 128 << 20,
-            },
-        );
+        let engine = RenderEngine::new(gpu.clone(), 512 << 20);
+        let playback = super::playback::PlaybackPreview::new(gpu.clone(), registry.clone());
         GpuPreview {
             gpu,
             registry,
             id,
-            renderer,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            engine,
+            playback,
             changes: StageChanges::default(),
             sources_gen: None,
             last: None,
@@ -111,6 +190,7 @@ impl GpuPreview {
             roi: None,
             last_view: None,
             snapshots: Default::default(),
+            preparing: false,
         }
     }
 
@@ -132,7 +212,7 @@ impl GpuPreview {
             return;
         }
         self.sources_gen = Some(generation);
-        let providers = self.renderer.providers_mut();
+        let providers = self.engine.renderer.providers_mut();
         for entry in registry.snapshot().iter() {
             providers.register(entry.item().clone());
         }
@@ -142,7 +222,7 @@ impl GpuPreview {
 
     fn sync_effects(&mut self, resources: &Resources) {
         if let Some(PreviewEffects(registry)) = resources.get::<PreviewEffects>()
-            && self.renderer.sync_effects(registry)
+            && self.engine.renderer.sync_effects(registry)
         {
             self.last = None;
         }
@@ -158,14 +238,15 @@ impl GpuPreview {
         comp: &EvaluatedComp,
         resolution: u32,
         camera: Option<bae_render::Camera>,
+        measure_layer_times: bool,
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
         if self.changes.changed(resources) {
-            self.anim.clear_compiled();
+            self.engine.anim.clear_compiled();
             self.last = None;
         }
-        let mut rc = match self.anim.convert(stage, comp, 0) {
+        let mut rc = match self.engine.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
                 tracing_warn(&format!("preview: {e}"));
@@ -180,47 +261,39 @@ impl GpuPreview {
                 blur.cameras.fill(Some(camera));
             }
         }
-        let key = (rc.content_hash(), rc.time, resolution);
+        let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         let view = (self.display, self.roi);
         if self.last != Some(key) || self.last_view != Some(view) {
             self.last_view = Some(view);
-            let request = RenderRequest {
-                resolution: match resolution {
-                    0 | 1 => Resolution::Full,
-                    2 => Resolution::Half,
-                    3 => Resolution::Third,
-                    4 => Resolution::Quarter,
-                    n => Resolution::Custom(n),
-                },
-                purpose: RenderPurpose::Preview,
-                roi: self.roi,
-                ..RenderRequest::full()
-            };
-            // Effects reading other frames evaluate them like this one.
-            let mut frames = bae_render::eval::EvaluatorFrames {
-                stage,
-                evaluator: &mut self.anim,
-            };
-            let frame = match self
-                .renderer
-                .render_frame_with(&rc, &request, Some(&mut frames))
+            self.engine.renderer.set_layer_times(measure_layer_times);
+            let rendered = match self
+                .engine
+                .render(stage, &rc, resolution, self.display, self.roi)
             {
-                Ok(f) => f,
+                Ok(rendered) => rendered,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
                     return None;
                 }
             };
-            let texture = match self.renderer.output_texture_display(
-                &frame,
-                OutputAlpha::Premultiplied,
-                self.display,
-            ) {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing_warn(&format!("preview: {e}"));
-                    return None;
-                }
+            if let Some((comp, times)) = self.engine.layer_times.take()
+                && measure_layer_times
+                && let Some(session) = resources.get::<crate::session::SharedSession>()
+            {
+                let mut s = session.lock();
+                s.layer_times.retain(|layer, _| !comp.is_prefix_of(layer));
+                s.layer_times.extend(times);
+            }
+            // Like AE, an incomplete frame (an effect pipeline or the text
+            // renderer still warming up) is never shown: the last complete
+            // frame stays, and the frame is rendered again on the redraw the
+            // warm-up requests when it is ready.
+            self.preparing = rendered.is_none();
+            let Some((texture, rect)) = rendered else {
+                return Some(PreviewImage {
+                    handle: self.registry.display_handle(self.id)?,
+                    rect: self.rect?,
+                });
             };
             // Display-encoded 8-bit values, sampled as they are (egui blends in
             // gamma space, see docs/spec/app-shell.md §5).
@@ -232,7 +305,7 @@ impl GpuPreview {
                 return None;
             }
             self.last = Some(key);
-            self.rect = Some(frame.image.rect);
+            self.rect = Some(rect);
             self.texture = Some(texture);
             self.sampled = None;
         }
@@ -339,7 +412,7 @@ impl GpuPreview {
 
     #[cfg(test)]
     pub fn renderer(&mut self) -> &mut Renderer {
-        &mut self.renderer
+        &mut self.engine.renderer
     }
 
     #[cfg(test)]

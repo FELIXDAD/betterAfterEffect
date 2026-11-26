@@ -270,6 +270,47 @@ fn the_viewer_edits_the_selected_layer_under_others() {
     );
 }
 
+/// #400: with the Selection tool, double-clicking a shape layer puts its path
+/// in Free Transform; double-clicking a text layer edits its text.
+#[test]
+fn double_clicking_shape_and_text_layers_edits_them() {
+    let mut h = H::new();
+    h.tools().lock().options.bezier_path = true;
+    let r = h.draw(Tool::Rectangle, (200.0, 100.0), (300.0, 200.0));
+    h.apply(&r);
+    h.session().lock().selected_layers.clear();
+    h.tools().lock().set(Tool::Selection);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    assert!(h.viewer.select.free.is_some(), "Free Transform");
+    // A text layer: the Type tool edits it.
+    let text = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": h.comp, "kind": "text", "text": "Hello World"}),
+        )["path"],
+    );
+    h.viewer.select.free = None;
+    h.select(&[&text]);
+    // Long enough after the last clicks that these are a new double-click.
+    for _ in 0..40 {
+        h.frame(Vec::new(), Modifiers::NONE);
+    }
+    let l = {
+        let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+        let (a, b) = crate::render::layer_bounds(comp.layer(&text).unwrap()).unwrap();
+        let m = comp.layer(&text).unwrap().world_matrix;
+        let c = m.transform_point3(((a + b) / 2.0).extend(0.0));
+        (c.x, c.y)
+    };
+    h.click(l.0, l.1, Modifiers::NONE);
+    h.click(l.0, l.1, Modifiers::NONE);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.tools().lock().current(), Tool::TypeHorizontal);
+    assert_eq!(h.viewer.type_tool.edited_layer(), Some(&text));
+}
+
 /// The bar's Toggle Mask and Shape Path Visibility off: mask paths are not
 /// shown, so their vertices cannot be picked.
 #[test]

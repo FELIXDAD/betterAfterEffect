@@ -31,12 +31,25 @@ fn the_navigator_shows_the_path_through_pre_comps() {
     assert_eq!(h.session().lock().comp_flow, [outer.clone(), inner.clone()]);
     h.frame(Vec::new(), Modifiers::NONE);
     let name = query::display_name_of(&h.stage, &outer);
-    let at = h.labeled(&name).expect("outer comp on the navigator");
+    let at = h
+        .labeled(&format!("Composition Navigator: {name}"))
+        .expect("outer comp on the navigator");
     h.move_to(at, Modifiers::NONE, Vec::new());
     h.pointer_button(at, true, Modifiers::NONE);
     h.pointer_button(at, false, Modifiers::NONE);
-    let s = h.session();
-    let s = s.lock();
-    assert_eq!(s.active_comp.as_ref(), Some(&outer));
-    assert_eq!(s.comp_flow, [outer.clone(), inner]);
+    {
+        let s = h.session();
+        let s = s.lock();
+        assert_eq!(s.active_comp.as_ref(), Some(&outer));
+        assert_eq!(s.comp_flow, [outer.clone(), inner]);
+    }
+    // An arrow opens the Composition Mini-Flowchart.
+    h.frame(Vec::new(), Modifiers::NONE);
+    let at = h
+        .labeled("Composition Navigator: Composition Mini-Flowchart")
+        .expect("an arrow on the navigator");
+    h.move_to(at, Modifiers::NONE, Vec::new());
+    h.pointer_button(at, true, Modifiers::NONE);
+    h.pointer_button(at, false, Modifiers::NONE);
+    assert!(h.session().lock().mini_flow.is_some());
 }

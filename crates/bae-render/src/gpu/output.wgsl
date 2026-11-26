@@ -64,5 +64,9 @@ fn fs_out(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         }
         default: {}
     }
+    // Resolve halfway values before the adapter's UNORM conversion.
+    if params.mode.y == 0u {
+        return floor(saturate(c) * 255.0 + 0.5) / 255.0;
+    }
     return c;
 }

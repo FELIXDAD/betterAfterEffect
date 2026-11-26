@@ -103,7 +103,8 @@ pub(super) fn bottom_bar(
 
     // AE hides the bar's controls that do not fit; the 3D View popup and the
     // time stay.
-    let reserve = if v.on_gpu { 220.0 } else { 330.0 };
+    // The 3D View popup, the view layout popup and the time stay.
+    let reserve = if v.on_gpu { 300.0 } else { 330.0 };
     let room = |ui: &Ui, w: f32| ui.available_width() >= w + reserve;
     // Choose grid and guide options (AE's popup).
     let mut opts = session.lock().view_options;
@@ -270,12 +271,38 @@ pub(super) fn bottom_bar(
             .or_default()
             .switch(views[i]);
     }
+    // Select View Layout (AE hides bar controls that do not fit).
+    if ui.available_width() > 170.0 {
+        let layouts = [tr("1 View"), tr("2 Views"), tr("4 Views")];
+        let n = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .map_or(1, super::view3d::Views::layout);
+        let mut k = match n {
+            2 => 1,
+            4 => 2,
+            _ => 0,
+        };
+        if widgets::dropdown(ui, "layout", &mut k, &layouts, 70.0)
+            .on_hover_text(tr("Select View Layout"))
+            .changed()
+        {
+            session
+                .lock()
+                .views3d
+                .entry(info.path.clone())
+                .or_default()
+                .set_layout([1, 2, 4][k]);
+        }
+    }
     ui.label(
         egui::RichText::new(common::timecode(info, time))
             .font(theme::body())
             .color(color::ACCENT),
     );
-    if !v.on_gpu {
+    // BAE's own hint (no GPU): only when it fits.
+    if !v.on_gpu && ui.available_width() > 120.0 {
         ui.label(
             egui::RichText::new(tr("Preview (simplified)"))
                 .font(theme::small())
