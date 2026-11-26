@@ -694,6 +694,26 @@ impl RenderQueue {
     }
 }
 
+/// The active frame counter for the Info and Flowchart panels.
+pub(crate) fn panel_progress(resources: &Resources, stage: &Stage) -> Option<String> {
+    if !crate::prefs::current(resources)
+        .bool("appearance.show_rendering_progress_in_info_flowchart")
+    {
+        return None;
+    }
+    let queue = resources.get::<SharedRenderQueue>()?.lock();
+    queue.items().iter().find_map(|item| {
+        let ItemStatus::Rendering { done, total } = item.status else {
+            return None;
+        };
+        Some(format!(
+            "{} {}  {done}/{total}",
+            tr("Rendering"),
+            bae_motion::query::display_name_of(stage, &item.comp)
+        ))
+    })
+}
+
 /// The queue as an app resource.
 #[derive(Clone, Debug, Default)]
 pub struct SharedRenderQueue(Arc<Mutex<RenderQueue>>);

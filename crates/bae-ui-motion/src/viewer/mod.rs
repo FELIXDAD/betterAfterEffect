@@ -524,7 +524,7 @@ impl CompositionViewer {
         };
         let selected = session.lock().selected_layers.clone();
         let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
-        if path_edit::delete(cx, &paths, &self.select.vertices) {
+        if path_edit::delete(cx, session, info, &paths, &self.select.vertices) {
             self.select.vertices.clear();
         }
     }
