@@ -812,6 +812,14 @@ fn catalog_lines() -> Vec<String> {
     for (top, nodes) in app.into_iter().chain(MENUS.iter().copied()) {
         out.push(format!("{top} ▸"));
         walk(top, nodes, &mut out);
+        // The Layer menu also exposes the two BAE writing-direction commands.
+        if top == "Layer" {
+            out.extend([
+                "Layer > ---".into(),
+                "Layer > Convert to Vertical Text".into(),
+                "Layer > Convert to Horizontal Text".into(),
+            ]);
+        }
     }
     out
 }

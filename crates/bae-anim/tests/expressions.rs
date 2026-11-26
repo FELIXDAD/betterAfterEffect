@@ -889,7 +889,7 @@ fn source_text_strings_and_styles() {
             &st,
             "text:source",
             doc("Styled"),
-            "text.sourceText.style.setFontSize(80).setFillColor([1, 0, 0]).setText(\"New\").setFauxBold(true)",
+            "text.sourceText.style.setLineOrientation(\"vertical\").setFontSize(80).setFillColor([1, 0, 0]).setText(\"New\").setFauxBold(true)",
         );
         let n = b.layer(MAIN, "N", "null");
         b.expr(
@@ -906,11 +906,48 @@ fn source_text_strings_and_styles() {
     assert_eq!(text(2).text, "Hi there");
     let styled = text(3);
     assert_eq!(styled.text, "New");
+    assert_eq!(
+        styled.line_orientation,
+        bae_model::LineOrientation::Vertical
+    );
     assert_eq!(styled.style.font_size, 80.0);
     assert_eq!(styled.style.fill_color[..3], [1.0, 0.0, 0.0]);
     assert!(styled.style.faux_bold);
     // 11 characters, 2 words, 50 pt.
     assert_eq!(ec.layers[4].transform.rotation.z, 1100.0 + 20.0 + 5.0);
+}
+
+#[test]
+fn vertical_styles_follow_the_utf16_selection() {
+    let s = stage(|b| {
+        let a = b.layer(MAIN, "A", "text");
+        let mut document = TextDocument::new("中🙂12A", "Arial", 36.);
+        document.line_orientation = bae_model::LineOrientation::Vertical;
+        document.edit_styles(2..4, |style| {
+            style.baseline_direction = bae_model::BaselineDirection::TateChuYoko
+        });
+        b.set(&a, "text:source", Value::TextDocument(Box::new(document)));
+        let r = b.layer(MAIN, "R", "text");
+        b.expr(&r,"text:source",doc("中🙂12A"),r#"
+            var s = thisComp.layer("A").text.sourceText;
+            if (s.style.lineOrientation !== "vertical" || s.getStyleAt(5).baselineDirection !== "default")
+                throw Error("wrong source style");
+            text.sourceText.style.setLineOrientation(s.style.lineOrientation)
+                .setBaselineDirection(s.getStyleAt(3).baselineDirection,3,2)
+        "#);
+    });
+    let ec = eval(&s, 0.);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let d = ec.layers[1].text.as_ref().unwrap();
+    assert_eq!(d.line_orientation, bae_model::LineOrientation::Vertical);
+    assert_eq!(
+        d.style_at(2).baseline_direction,
+        bae_model::BaselineDirection::TateChuYoko
+    );
+    assert_eq!(
+        d.style_at(4).baseline_direction,
+        bae_model::BaselineDirection::Default
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! Horizontal Type tool in the Composition viewer.
+//! Horizontal and Vertical Type tools in the Composition viewer.
 //!
 //! Click: new point text at the click (the first baseline starts there); drag: a
 //! paragraph text box; click a text layer: edit its text. Typing goes into an
@@ -9,9 +9,11 @@
 //! nothing. Layer > New > Text (E) starts editing through
 //! [`crate::tools::ToolState::edit_text_request`].
 
+use crate::render::vertical_text::Preview;
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2, DVec3};
-use bae_model::PrimPath;
+use bae_model::{LineOrientation, PrimPath, TextDocument};
+mod vertical;
 use bae_motion::query::{self, CompInfo};
 use bae_motion::text::{DEFAULT_SIZE, TextReplacement};
 use bae_ui::PanelContext;
@@ -39,6 +41,9 @@ pub(crate) struct Editing {
     selection: Option<std::ops::Range<usize>>,
     drag_end: Option<Pos2>,
     source_cursors: Option<(usize, usize)>,
+    tool: Tool,
+    orientation: LineOrientation,
+    preview: Option<std::sync::Arc<Preview>>,
     font_size: f64,
     align: egui::Align,
     color: Color32,
@@ -91,6 +96,7 @@ fn edit_layer(
     info: &CompInfo,
     layer: &PrimPath,
     caret_at: Option<Pos2>,
+    tool: Tool,
 ) -> Option<Editing> {
     let l = comp.layer(layer)?;
     let doc = l.text.as_ref()?;
@@ -108,6 +114,9 @@ fn edit_layer(
         selection: None,
         drag_end: None,
         source_cursors: None,
+        tool,
+        orientation: doc.line_orientation,
+        preview: None,
         font_size: doc.style.font_size,
         align: text_align(doc),
         color: color32(doc.style.fill_color),
@@ -122,6 +131,7 @@ fn new_text(
     origin: DVec2,
     text_box: Option<[f64; 2]>,
     defaults: Option<&bae_model::TextDocument>,
+    tool: Tool,
 ) -> Editing {
     // The Character panel's settings for new text (AE), else the defaults.
     let (font_size, color) = defaults.map_or((DEFAULT_SIZE, Color32::WHITE), |d| {
@@ -143,6 +153,13 @@ fn new_text(
         selection: None,
         drag_end: None,
         source_cursors: None,
+        tool,
+        orientation: if tool == Tool::TypeVertical {
+            LineOrientation::Vertical
+        } else {
+            LineOrientation::Horizontal
+        },
+        preview: None,
         font_size,
         align: defaults.map_or(egui::Align::Min, text_align),
         color,
@@ -168,6 +185,9 @@ impl Editing {
     fn rect(&self, view: &View, area: Rect) -> Rect {
         let s = self.scale(view);
         let size = (self.font_size as f32 * s).max(4.0);
+        if self.orientation == LineOrientation::Vertical {
+            return self.vertical_field(view);
+        }
         match self.text_box {
             Some((pos, b)) => {
                 let a = self.screen(view, pos);
@@ -239,12 +259,13 @@ impl Editing {
                 };
                 let mut params = json!({
                     "comp": self.comp, "text": self.buffer, "name": name,
-                    "position": [origin.x, origin.y], "index": index,
+                    "position": [origin.x, origin.y], "index": index, "line_orientation": self.orientation,
                 });
                 if let Some((_, b)) = self.text_box {
                     params["box_size"] = json!(b);
                 }
                 if let Some(d) = session.lock().text_defaults.clone() {
+                    params["baseline_direction"] = json!(d.style.baseline_direction);
                     params["font"] = json!(d.style.font);
                     params["font_size"] = json!(d.style.font_size);
                     params["fill_color"] = json!(d.style.fill_color);
@@ -279,16 +300,17 @@ fn hit_text(
             && l.visible
             && !l.switches.guide
             && !query::is_locked(stage, &l.path)
-            && (!doc.runs.is_empty() || doc.box_size.is_some() || doc.text.contains(['\r', '\n']))
+            && (doc.line_orientation == LineOrientation::Vertical
+                || !doc.runs.is_empty()
+                || doc.box_size.is_some()
+                || doc.text.contains(['\r', '\n']))
             && let Some(layout) = crate::ae_panels::character::hit_layout(doc)
         {
             let p = l.world_matrix.inverse().transform_point3(comp_point);
-            let inside = layout.lines.iter().any(|line| {
-                p.x >= line.x
-                    && p.x <= line.x + line.width
-                    && p.y >= line.baseline - line.ascent
-                    && p.y <= line.baseline + line.descent
-            });
+            let inside = layout
+                .lines
+                .iter()
+                .any(|line| layout.line_rect(line).contains((p.x, p.y)));
             if inside || top.as_ref() == Some(&l.path) {
                 *hit_layout = Some(layout);
                 return Some(l.path.clone());
@@ -392,21 +414,30 @@ pub(super) fn frame(
         if let Some(e) = state.editing.take() {
             e.commit(cx, session);
         }
-        if let Some(e) = edit_layer(comp, info, &layer, None) {
-            tools.lock().set(Tool::TypeHorizontal);
+        let direction = comp
+            .layer(&layer)
+            .and_then(|l| l.text.as_ref())
+            .map(|d| d.line_orientation);
+        let requested_tool = if direction == Some(LineOrientation::Vertical) {
+            Tool::TypeVertical
+        } else {
+            Tool::TypeHorizontal
+        };
+        if let Some(e) = edit_layer(comp, info, &layer, None, requested_tool) {
+            tools.lock().set(requested_tool);
             session.lock().selected_layers = vec![layer];
             state.editing = Some(e);
         }
     }
     let current = tools.lock().current();
-    if current != Tool::TypeHorizontal || request_started {
+    if !current.is_type() || request_started {
         session.lock().text_selection = None;
     }
     // Switching tools or comps commits.
     if state
         .editing
         .as_ref()
-        .is_some_and(|e| current != Tool::TypeHorizontal || e.comp != info.path)
+        .is_some_and(|e| current != e.tool || e.comp != info.path)
     {
         let e = state.editing.take().expect("checked above");
         if e.comp == info.path {
@@ -423,7 +454,7 @@ pub(super) fn frame(
     let field = state.editing.as_ref().map(|e| e.rect(view, area));
     let pressed = ui.input(|i| i.pointer.primary_pressed());
     let press_pos = ui.input(|i| i.pointer.press_origin());
-    if tool == Tool::TypeHorizontal
+    if tool.is_type()
         && pressed
         && resp.hovered()
         && let Some(pos) = press_pos
@@ -466,7 +497,7 @@ pub(super) fn frame(
             state.editing = match hit {
                 Some(layer) => {
                     session.lock().selected_layers = vec![layer.clone()];
-                    edit_layer(comp, info, &layer, Some(origin)).map(|mut e| {
+                    edit_layer(comp, info, &layer, Some(origin), tool).map(|mut e| {
                         e.drag_end = pointer.filter(|p| p.distance(origin) > 3.);
                         if let Some(layout) = hit_layout {
                             let inverse = e.to_comp.inverse();
@@ -490,9 +521,10 @@ pub(super) fn frame(
                                 lo,
                                 Some([hi.x - lo.x, hi.y - lo.y]),
                                 defaults.as_ref(),
+                                tool,
                             )
                         }
-                        None => new_text(info, a, None, defaults.as_ref()),
+                        None => new_text(info, a, None, defaults.as_ref(), tool),
                     })
                 }
             };
@@ -530,8 +562,14 @@ pub(super) fn frame(
         .as_ref()
         .and_then(|layer| comp.layer(layer))
         .and_then(|l| l.text.as_deref());
+    let defaults = session.lock().text_defaults.clone();
+    let vertical = e.orientation == LineOrientation::Vertical;
+    if vertical {
+        e.update_preview(template.or(defaults.as_ref()), painter);
+        e.vertical_navigation(ui);
+    }
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, width: f32| {
-        let mut job = match template {
+        let mut job = match template.filter(|_| !vertical) {
             Some(doc) if doc.text == buffer.as_str() => {
                 crate::render::text_job(doc, scale, 1., &FontId::proportional)
             }
@@ -565,8 +603,18 @@ pub(super) fn frame(
         .desired_width(rect.width())
         .desired_rows(1)
         .margin(egui::Margin::ZERO);
+    let edit = if vertical {
+        edit.min_size(rect.size())
+    } else {
+        edit
+    };
     let shown = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| edit.show(ui))
+        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            if vertical {
+                ui.set_opacity(0.);
+            }
+            edit.show(ui)
+        })
         .inner;
     let out = shown.response.response.clone();
     if !e.focused_once {
@@ -575,13 +623,33 @@ pub(super) fn frame(
     }
     // AE puts the insertion point where the text was clicked (otherwise at
     // the end).
-    let initial = e.caret_at.take().map(|p| {
-        let anchor = shown.galley.cursor_from_pos(p - shown.galley_pos);
-        let end = e.drag_end.take().map_or(anchor, |p| {
-            shown.galley.cursor_from_pos(p - shown.galley_pos)
-        });
-        egui::text::CCursorRange::two(anchor, end)
-    });
+    let initial = if vertical {
+        e.preview.as_ref().and_then(|preview| {
+            let at = |pos| {
+                let p = e
+                    .to_comp
+                    .inverse()
+                    .transform_point3(view.to_comp(pos).extend(0.));
+                preview
+                    .layout
+                    .cursor_at(p.x, p.y)
+                    .map(egui::text::CCursor::new)
+            };
+            let origin = e.caret_at.take()?;
+            Some(egui::text::CCursorRange::two(
+                at(origin)?,
+                at(e.drag_end.take().unwrap_or(origin))?,
+            ))
+        })
+    } else {
+        e.caret_at.take().map(|p| {
+            let anchor = shown.galley.cursor_from_pos(p - shown.galley_pos);
+            let end = e.drag_end.take().map_or(anchor, |p| {
+                shown.galley.cursor_from_pos(p - shown.galley_pos)
+            });
+            egui::text::CCursorRange::two(anchor, end)
+        })
+    };
     let initial = e
         .source_cursors
         .take()
@@ -589,6 +657,12 @@ pub(super) fn frame(
             egui::text::CCursorRange::two(egui::text::CCursor::new(a), egui::text::CCursor::new(b))
         })
         .or(initial);
+    let pointer_cursors = if vertical && e.focused_once {
+        e.vertical_drag(ui, view, rect)
+    } else {
+        None
+    };
+    let initial = pointer_cursors.or(initial);
     let cursor = initial.or(shown.cursor_range);
     if initial.is_some() || (cursor.is_none() && out.has_focus()) {
         let mut state = shown.state;
@@ -611,6 +685,12 @@ pub(super) fn frame(
                 .clone()
                 .map(|range| (layer.clone(), s.active_time(), range));
         }
+    }
+    if vertical {
+        if out.changed() {
+            e.update_preview(template.or(defaults.as_ref()), painter);
+        }
+        e.paint_vertical(ui, painter, view, cursor);
     }
     if e.refocus && !escape && !command_enter && !out.has_focus() {
         // Clicked elsewhere in the viewer: keep typing.

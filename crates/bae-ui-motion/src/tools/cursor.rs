@@ -55,6 +55,7 @@ pub(crate) fn for_tool(tool: Tool, hover: Hover) -> Cursor {
         AddVertex | DeleteVertex | ConvertVertex | MaskFeather => glyph(tool.icon(), (2.0, 11.6)),
         OrbitCursor | OrbitScene | OrbitPoi | PanCursor | PanPoi | DollyCursor | DollyTo
         | DollyPoi => glyph(tool.icon(), (8.0, 8.0)),
+        TypeVertical => Cursor::System(CursorIcon::VerticalText),
         TypeHorizontal => Cursor::System(CursorIcon::Text),
         // Not available in the Composition viewer in this version.
         _ => Cursor::System(CursorIcon::NotAllowed),

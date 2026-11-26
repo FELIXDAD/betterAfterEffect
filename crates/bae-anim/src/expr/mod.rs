@@ -942,6 +942,14 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
                     doc.set_text(&text);
                     continue;
                 }
+                if let Ok(value) = change.get::<_, String>("lineOrientation") {
+                    doc.line_orientation = match value.as_str() {
+                        "vertical" => bae_model::LineOrientation::Vertical,
+                        "horizontal" => bae_model::LineOrientation::Horizontal,
+                        _ => return Err(format!("unknown lineOrientation: {value}")),
+                    };
+                    continue;
+                }
                 let start = change.get::<_, f64>("start").unwrap_or(0.) as usize;
                 let count = change.get::<_, Option<f64>>("count").ok().flatten();
                 let from = char_index(&doc.text, start);
@@ -1331,6 +1339,13 @@ fn apply_style(doc: &mut bae_model::TextStyle, c: &Object<'_>) {
             .flatten()
             .filter(|v| v.len() >= 3)
     };
+    if let Ok(mode) = c.get::<_, String>("baselineDirection") {
+        doc.baseline_direction = match mode.as_str() {
+            "rotated" => bae_model::BaselineDirection::UprightRoman,
+            "tate-chuu-yoko" => bae_model::BaselineDirection::TateChuYoko,
+            _ => bae_model::BaselineDirection::Default,
+        };
+    }
     if let Ok(mode) = c.get::<_, String>("baselineOption") {
         doc.baseline_option = match mode.as_str() {
             "superscript" => bae_model::BaselineOption::Superscript,
@@ -1396,8 +1411,27 @@ fn char_index(text: &str, utf16: usize) -> usize {
 }
 
 /// A text document's style as the expression `TextStyle` reads it.
-fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextStyle) -> rquickjs::Result<Object<'js>> {
+fn text_style<'js>(
+    ctx: &Ctx<'js>,
+    doc: &bae_model::TextStyle,
+    orientation: bae_model::LineOrientation,
+) -> rquickjs::Result<Object<'js>> {
     let o = Object::new(ctx.clone())?;
+    o.set(
+        "lineOrientation",
+        match orientation {
+            bae_model::LineOrientation::Horizontal => "horizontal",
+            bae_model::LineOrientation::Vertical => "vertical",
+        },
+    )?;
+    o.set(
+        "baselineDirection",
+        match doc.baseline_direction {
+            bae_model::BaselineDirection::Default => "default",
+            bae_model::BaselineDirection::UprightRoman => "rotated",
+            bae_model::BaselineDirection::TateChuYoko => "tate-chuu-yoko",
+        },
+    )?;
     o.set(
         "baselineOption",
         match doc.baseline_option {
@@ -1754,9 +1788,11 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     js: Some(&ctx),
                 };
                 match prop.sample(&cx) {
-                    Value::TextDocument(doc) => {
-                        text_style(&ctx, doc.style_at(char_index(&doc.text, index as usize)))
-                    }
+                    Value::TextDocument(doc) => text_style(
+                        &ctx,
+                        doc.style_at(char_index(&doc.text, index as usize)),
+                        doc.line_orientation,
+                    ),
                     _ => throw(&ctx, "style is only available on Source Text"),
                 }
             },

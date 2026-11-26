@@ -315,6 +315,32 @@ pub fn draw_cpu(ctx: &mut vello_cpu::RenderContext, text: &TextLayout, transform
     }
 }
 
+/// Rasterizes the editable layer preview with the same outlines and paints as a render.
+pub fn preview_image(layout: &TextLayout) -> Option<(Rect, vello_cpu::Pixmap)> {
+    let ink = layout.bounds(true)?.inflate(1., 1.).expand();
+    let scale = (2048. / ink.width().max(ink.height())).min(1.);
+    let width = (ink.width() * scale).ceil() as u16;
+    let height = (ink.height() * scale).ceil() as u16;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let mut ctx = vello_cpu::RenderContext::new(width, height);
+    draw_cpu(
+        &mut ctx,
+        layout,
+        Affine::scale(scale) * Affine::translate((-ink.x0, -ink.y0)),
+    );
+    let mut image = vello_cpu::Pixmap::new(width, height);
+    ctx.render(&mut image, &mut vello_cpu::Resources::new());
+    let rect = Rect::new(
+        ink.x0,
+        ink.y0,
+        ink.x0 + f64::from(width) / scale,
+        ink.y0 + f64::from(height) / scale,
+    );
+    Some((rect, image))
+}
+
 /// Layer-space outlines of a run's glyphs (`None` for glyphs without one),
 /// with faux italic shear and faux bold expansion applied.
 fn glyph_outlines(run: &GlyphRun) -> Vec<Option<BezPath>> {
@@ -586,6 +612,7 @@ impl bae_gpu::WarmUp for VerticalGlyphWarmUp {
     fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
         let doc = crate::layout::vertical_warmup_document();
         let layout = self.0.layout(&doc);
+        let _ = preview_image(&layout);
         if !layout.is_empty() {
             VelloRenderer::shared(gpu)
                 .and_then(|r| r.render_region(gpu, pixel_bounds(&layout), 1., &layout))

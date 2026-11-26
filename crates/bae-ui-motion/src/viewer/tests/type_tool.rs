@@ -199,3 +199,58 @@ fn type_selection_drags_and_extends_by_character_then_styles_once() {
     h.stage.undo(&h.author).unwrap();
     assert!(h.doc(&layer).runs.is_empty());
 }
+
+#[test]
+fn vertical_box_and_selected_range_survive_editing() {
+    let mut h = H::new();
+    h.tools().lock().set(Tool::TypeVertical);
+    h.drag((100., 50.), (300., 250.), Modifiers::NONE);
+    h.type_text(vec![Event::Text("中12A".into())]);
+    let r = h.commit_text();
+    h.apply(&r);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let d = h.doc(&layer);
+    assert_eq!(d.line_orientation, bae_model::LineOrientation::Vertical);
+    assert_eq!(d.box_size, Some([200., 200.]));
+    crate::ae_panels::character::prewarm();
+    let start = std::time::Instant::now();
+    let layout = loop {
+        if let Some(l) = crate::ae_panels::character::hit_layout(&d) {
+            break l;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(15),
+            "font scan"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let pos = h.v3(&layer, "transform:position");
+    let at = |i: usize, t: f64| {
+        let c = &layout.chars[i];
+        (pos[0] + c.origin.x, pos[1] + c.origin.y + c.advance * t)
+    };
+    h.drag(at(1, 0.05), at(2, 0.95), Modifiers::NONE);
+    let selected = h.session().lock().text_range(Some(&layer)).unwrap();
+    assert_eq!(selected, 1..3);
+    h.run(
+        "text.set_style",
+        json!({"layers":[layer],"range":selected,"style":{"baseline_direction":"tate_chu_yoko"}}),
+    );
+    h.escape();
+    h.tools().lock().edit_text_request = Some(layer.clone());
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.tools().lock().current(), Tool::TypeVertical);
+    h.type_text(vec![Event::Text("尾".into())]);
+    let r = h.commit_text();
+    h.apply(&r);
+    let d = h.doc(&layer);
+    assert_eq!(d.text, "中12A尾");
+    assert_eq!(
+        d.style_at(2).baseline_direction,
+        bae_model::BaselineDirection::TateChuYoko
+    );
+    assert_eq!(
+        d.style_at(3).baseline_direction,
+        bae_model::BaselineDirection::Default
+    );
+}

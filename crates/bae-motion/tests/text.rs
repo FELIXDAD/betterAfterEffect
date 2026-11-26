@@ -188,3 +188,43 @@ fn text_follows_a_mask_path() {
             .is_err()
     );
 }
+
+#[test]
+fn convert_orientation_preserves_source_text_keys_and_undo() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = p(&fx.run(
+        "text.create",
+        json!({"comp":comp,"text":"中12","position":[0,0]}),
+    )["path"]);
+    fx.run(
+        "attr.set_animated",
+        json!({"path":layer,"attr":"text:source","animated":true,"time":0}),
+    );
+    fx.run(
+        "text.set_text",
+        json!({"layer":layer,"text":"日12","time":100}),
+    );
+    fx.run("text.set_style",json!({"layers":[layer],"time":100,"range":{"start":1,"end":3},"style":{"baseline_direction":"tate_chu_yoko"}}));
+    let before = query::attr_spec(&fx.stage, &layer, "text:source")
+        .unwrap()
+        .clone();
+    fx.run(
+        "text.convert_orientation",
+        json!({"layers":[layer],"orientation":"vertical"}),
+    );
+    let after = query::attr_spec(&fx.stage, &layer, "text:source").unwrap();
+    assert_eq!(before.keyframes.len(), 2);
+    for (time, key) in &before.keyframes {
+        let Value::TextDocument(mut expected) = key.value.clone() else {
+            panic!("text key")
+        };
+        expected.line_orientation = bae_model::LineOrientation::Vertical;
+        assert_eq!(after.keyframes[time].value, Value::TextDocument(expected));
+    }
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        query::attr_spec(&fx.stage, &layer, "text:source"),
+        Some(&before)
+    );
+}

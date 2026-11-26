@@ -230,9 +230,12 @@ impl TextLayout {
     /// Nearest insertion point in source-character coordinates, including RTL runs.
     pub fn cursor_at(&self, x: f64, y: f64) -> Option<usize> {
         let distance = |l: &TextLine| {
-            (l.baseline - l.ascent - y)
-                .max(y - l.baseline - l.descent)
-                .max(0.)
+            let r = self.line_rect(l);
+            if self.vertical() {
+                (r.x0 - x).max(x - r.x1).max(0.)
+            } else {
+                (r.y0 - y).max(y - r.y1).max(0.)
+            }
         };
         let line = self
             .lines
@@ -252,9 +255,14 @@ impl TextLayout {
                 } else {
                     right
                 };
-                [(c.origin.x, left), (c.origin.x + c.advance, right)]
+                [(false, left), (true, right)].map(|(end, index)| {
+                    let [a, b] = self.caret_edge(c, end);
+                    let dx = (a.x.min(b.x) - x).max(x - a.x.max(b.x)).max(0.);
+                    let dy = (a.y.min(b.y) - y).max(y - a.y.max(b.y)).max(0.);
+                    (dx * dx + dy * dy, index)
+                })
             })
-            .min_by(|a, b| (x - a.0).abs().total_cmp(&(x - b.0).abs()))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, i)| i)
             .or_else(|| {
                 self.chars

@@ -26,14 +26,13 @@ static FONTS: std::sync::OnceLock<std::sync::Mutex<bae_text::FontSystem>> =
 /// Starts scanning the installed fonts on a background thread (at startup,
 /// before the Character panel first needs them).
 pub(crate) fn prewarm() {
-    if FONTS.get().is_some() {
-        return;
-    }
-    let _ = std::thread::Builder::new()
-        .name("bae-font-scan".into())
-        .spawn(|| {
-            FONTS.get_or_init(|| std::sync::Mutex::new(bae_text::FontSystem::new()));
+    crate::render::vertical_text::start_worker(|| {
+        FONTS.get_or_init(|| {
+            let mut fonts = bae_text::FontSystem::new();
+            bae_text::layout_text(&mut fonts, &bae_text::layout::vertical_warmup_document());
+            std::sync::Mutex::new(fonts)
         });
+    });
 }
 
 /// `f` on the installed fonts, or `None` while they are still being scanned.
@@ -111,8 +110,15 @@ fn style_name(face: &bae_text::FontFace) -> String {
     out
 }
 
-impl Panel for CharacterPanel {
-    fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+struct StyleTarget {
+    layers: Vec<PrimPath>,
+    time: bae_model::Time,
+    doc: TextDocument,
+    range: Option<std::ops::Range<usize>>,
+}
+
+impl StyleTarget {
+    fn current(cx: &PanelContext<'_>) -> Self {
         let session = common::session(cx.resources);
         let (layers, time, defaults) = {
             let s = session.lock();
@@ -132,8 +138,47 @@ impl Panel for CharacterPanel {
             .or(defaults)
             .unwrap_or_else(|| TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE));
         let range = session.lock().text_range(layers.first());
+        Self {
+            layers,
+            time,
+            doc,
+            range,
+        }
+    }
+
+    fn apply(&self, cx: &mut PanelContext<'_>, change: Json) {
+        let Self {
+            layers,
+            time,
+            doc,
+            range,
+        } = self;
+        if change.as_object().is_some_and(|o| !o.is_empty()) {
+            if layers.is_empty() {
+                // No text selected: the settings for new text (AE).
+                let mut d = doc.clone();
+                if let Ok(c) = serde_json::from_value::<bae_motion::TextStyleChange>(change.clone())
+                {
+                    c.apply(&mut d, 0..usize::MAX);
+                }
+                common::session(cx.resources).lock().text_defaults = Some(d);
+            } else {
+                cx.invoke_with(
+                    "text.set_style",
+                    json!({ "layers": layers, "time": time, "style": change, "range":range }),
+                );
+            }
+        }
+    }
+}
+
+impl Panel for CharacterPanel {
+    fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let target = StyleTarget::current(cx);
+        let doc = &target.doc;
+        let range = &target.range;
         let selected = common::SelectedStyles {
-            doc: &doc,
+            doc,
             range: range.clone().unwrap_or(0..usize::MAX),
         };
         let font = selected.character(|s| s.font.clone()).unwrap_or_default();
@@ -498,47 +543,50 @@ impl Panel for CharacterPanel {
             });
         });
 
-        if change.as_object().is_some_and(|o| !o.is_empty()) {
-            if layers.is_empty() {
-                // No text selected: the settings for new text (AE).
-                let mut d = doc.clone();
-                if let Ok(c) = serde_json::from_value::<bae_motion::TextStyleChange>(change.clone())
-                {
-                    c.apply(&mut d, 0..usize::MAX);
-                }
-                session.lock().text_defaults = Some(d);
-            } else {
-                cx.invoke_with(
-                    "text.set_style",
-                    json!({ "layers": layers, "time": time, "style": change, "range":range }),
-                );
-            }
-        }
+        target.apply(cx, change);
     }
 
     fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let _ = cx;
-        // AE's panel menu items; the ones the text engine does not do yet are greyed.
-        ui.add_enabled_ui(false, |ui| {
-            for item in [
-                "Faux Bold",
-                "Faux Italic",
-                "Standard Vertical Roman Alignment",
-                "Tate-Chuu-Yoko",
-                "All Caps",
-                "Small Caps",
-                "Superscript",
-                "Subscript",
-                "Ligatures",
-                "Hindi Digits",
-                "Use Smart Quotes",
-                "Show Font Names in English",
-                "No Break",
-                "Reset Character",
-            ] {
-                let _ = ui.button(tr(item));
+        use bae_model::BaselineDirection::{Default, TateChuYoko, UprightRoman};
+        let target = StyleTarget::current(cx);
+        let selected = common::SelectedStyles {
+            doc: &target.doc,
+            range: target.range.clone().unwrap_or(0..usize::MAX),
+        };
+        let mode = selected.character(|s| s.baseline_direction);
+        for item in [
+            "Faux Bold",
+            "Faux Italic",
+            "Standard Vertical Roman Alignment",
+            "Tate-Chuu-Yoko",
+            "All Caps",
+            "Small Caps",
+            "Superscript",
+            "Subscript",
+            "Ligatures",
+            "Hindi Digits",
+            "Use Smart Quotes",
+            "Show Font Names in English",
+            "No Break",
+            "Reset Character",
+        ] {
+            let direction = match item {
+                "Standard Vertical Roman Alignment" => UprightRoman,
+                "Tate-Chuu-Yoko" => TateChuYoko,
+                _ => {
+                    ui.add_enabled(false, egui::Button::new(tr(item)));
+                    continue;
+                }
+            };
+            let checked = mode == Some(direction);
+            if ui.selectable_label(checked, tr(item)).clicked() {
+                target.apply(
+                    cx,
+                    json!({"baseline_direction": if checked {Default} else {direction}}),
+                );
+                ui.close();
             }
-        });
+        }
     }
 }
 
