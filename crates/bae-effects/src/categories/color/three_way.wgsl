@@ -2,11 +2,13 @@ fn ramp(x:f32, lo:f32, hi:f32) -> f32 {
     return clamp((x-lo)/max(hi-lo,1e-6),0.,1.);
 }
 
-fn interval(x:f32, id:u32) -> f32 {
+fn interval(component:f32, id:u32) -> f32 {
+    // HSL math can round a fully saturated channel slightly above one.
+    let x=clamp(component,0.,1.);
     let lo=value(id)*0.01;
     let hi=value(id+2)*0.01;
-    let left=select(ramp(x,lo-value(id+1)*0.01,lo),1.,x>=lo);
-    let right=select(1.-ramp(x,hi,hi+value(id+3)*0.01),1.,x<=hi);
+    let left=select(ramp(x,lo-value(id+1)*0.01,lo),1.,x>=lo || lo==0.);
+    let right=select(1.-ramp(x,hi,hi+value(id+3)*0.01),1.,x<=hi || hi==1.);
     return select(left*right, max(left,right), id==92u && lo>hi);
 }
 

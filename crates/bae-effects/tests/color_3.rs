@@ -382,7 +382,11 @@ fn three_way_preserves_alpha_and_limits_saturation_to_the_selected_range() {
         rect,
         1.,
     );
-    assert!((changed.data[0][0] - changed.data[0][2]).abs() < 0.00001);
+    assert!(
+        (changed.data[0][0] - changed.data[0][2]).abs() < 0.00001,
+        "shadow pixel {:?}",
+        changed.data[0]
+    );
     assert_eq!(changed.data[0][3], 0.5);
     assert_close(
         &changed,
