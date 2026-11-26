@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；传输出错时的处理（2.4）在 `collab/hub-reliability`。分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；传输出错时的处理（2.4）和按连接设置会话（第 3 节）在 `collab/hub-reliability`。分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -89,6 +89,11 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - `Relay::pump` 在同一次调用里最多循环 4 轮，让一个客户端的修改在一次调用内转发给其他人。
 - Hub 用 `MemDocs::load` 恢复持久化的快照，用 `docs().export_snapshot` 保存。Hub 重启丢了数据也没关系：客户端重连后对方 `Hello` 里版本变小，客户端会把缺的重新上传。
 - 传输出错的连接会被断开（`RelayOutcome::disconnected`）。它出错之前发来的数据已经导入（见 2.4），同一次 `pump` 里就转发给其他人。
+- **按连接设置会话**：
+  - `connect(transport)` 用默认设置：Relay 的 ID 和 `hello_interval`。`session_config()` 返回这份设置。
+  - `connect_with(transport, config)` 给一个连接单独的设置。从 `session_config()` 改起；`config.client` 保持 Relay 的 ID，对端在 `Hello` 里看到的就是它。
+  - 例子：Hub 存盘用的对端（工程目录的 `DirTransport`）`min_send_interval` 设成 250 ms，客户端拖动一个值时少写几次盘。
+  - `peer_config_mut(handle)` 改已连接的对端的设置，下一次 `pump` 生效。Hub 关闭工程前用它去掉存盘对端的节流，最后一次 `pump` 把所有修改都写进去。
 
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 

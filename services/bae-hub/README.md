@@ -123,7 +123,7 @@ Authorization: Bearer <令牌>
 | 文件 | 内容 |
 |---|---|
 | `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept(stream, None)` 完成握手，然后挂到工程的 Relay 上。 |
-| `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。 |
+| `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。发给目录的修改最多每 250 ms 一次（`Relay::connect_with`），拖动时少写几次盘；关闭工程时最后一次 pump 不节流，修改全部写盘。 |
 | `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
 | `src/auth.rs` | 令牌只保存 BLAKE3 哈希，比较用常数时间。 |

@@ -16,7 +16,8 @@ use crate::protocol::Message;
 use crate::session::{SessionConfig, SyncSession};
 use crate::transport::Transport;
 
-/// A connected client, as returned by [`Relay::connect`].
+/// A connected client, as returned by [`Relay::connect`] and
+/// [`Relay::connect_with`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PeerHandle(u64);
 
@@ -91,11 +92,33 @@ impl Relay {
         &self.docs
     }
 
-    pub fn connect(&mut self, transport: Box<dyn Transport + Send>) -> PeerHandle {
-        let handle = PeerHandle(self.next_handle);
-        self.next_handle += 1;
+    /// The session settings [`connect`](Self::connect) gives a connection: the
+    /// relay's client ID and hello interval, defaults otherwise. Start from them
+    /// for [`connect_with`](Self::connect_with).
+    pub fn session_config(&self) -> SessionConfig {
         let mut config = SessionConfig::new(self.client.clone());
         config.hello_interval = self.hello_interval;
+        config
+    }
+
+    /// Attach a connection (a client, or a store such as the hub's project
+    /// directory) with the default [`session_config`](Self::session_config).
+    pub fn connect(&mut self, transport: Box<dyn Transport + Send>) -> PeerHandle {
+        let config = self.session_config();
+        self.connect_with(transport, config)
+    }
+
+    /// [`connect`](Self::connect) with session settings for this connection only,
+    /// e.g. a `min_send_interval` for a peer that writes everything to disk.
+    /// Start from [`session_config`](Self::session_config) and keep
+    /// `config.client`: it is the relay's ID in the `Hello`s every peer sees.
+    pub fn connect_with(
+        &mut self,
+        transport: Box<dyn Transport + Send>,
+        config: SessionConfig,
+    ) -> PeerHandle {
+        let handle = PeerHandle(self.next_handle);
+        self.next_handle += 1;
         self.peers.push(Peer {
             handle,
             session: SyncSession::new(config),
@@ -127,6 +150,16 @@ impl Relay {
             }
         }
         true
+    }
+
+    /// Session settings of a connected peer, to change them while it stays
+    /// connected (takes effect on the next pump; keep `client`). `None` if
+    /// `handle` is not connected.
+    pub fn peer_config_mut(&mut self, handle: PeerHandle) -> Option<&mut SessionConfig> {
+        self.peers
+            .iter_mut()
+            .find(|p| p.handle == handle)
+            .map(|p| p.session.config_mut())
     }
 
     /// Connected peers and the client IDs they announced.

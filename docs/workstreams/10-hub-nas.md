@@ -87,6 +87,7 @@
 ### 2026-11-26
 
 - 09 修好了请求 1（分支 `collab/hub-reliability`）：会话遇到传输错误时先导入本轮已收到的数据。`PeerLink` 里"出错晚一次报告"的绕行已经去掉；`idle_projects_are_unloaded_and_reloaded` 不靠它也能通过。
+- 请求 4 也做了：存盘用的对端（工程目录）用 `Relay::connect_with` 设 `min_send_interval` 250 ms，客户端拖动时少写几次盘。关闭工程前去掉这个节流，最后一次 pump 把修改全部写盘（不去掉的话，`clients_converge_and_the_hub_keeps_the_project` 重启后会少修改）。
 
 ## 请求（其他工作流在这里留言）
 

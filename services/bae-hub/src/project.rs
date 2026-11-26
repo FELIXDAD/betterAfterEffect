@@ -40,6 +40,11 @@ const STORE_POLL: Duration = Duration::from_secs(60);
 const STORE_TICK: Duration = Duration::from_millis(250);
 /// Wait this long before reopening a project directory that failed.
 const STORE_RETRY: Duration = Duration::from_secs(5);
+/// The relay sends edits to the project directory at most this often. While a
+/// client drags a value, the edits of 250 ms become one append to the log
+/// instead of one per message: fewer disk writes. Shutdown saves what is still
+/// held back.
+const STORE_SEND_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Identifies a project on the hub; also its directory name. 1-64 ASCII letters,
 /// digits, `_` and `-`.
@@ -269,6 +274,13 @@ fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError>
     }))
 }
 
+/// Attach the project directory to the relay, with its send throttle.
+fn connect_store(relay: &mut Relay, store: ThreadedTransport) -> PeerHandle {
+    let mut config = relay.session_config();
+    config.min_send_interval = STORE_SEND_INTERVAL;
+    relay.connect_with(Box::new(store), config)
+}
+
 enum Load {
     Done,
     TimedOut,
@@ -286,7 +298,7 @@ impl RelayThread {
                 return;
             }
         };
-        let store_handle = relay.connect(Box::new(store));
+        let store_handle = connect_store(&mut relay, store);
         let started = Instant::now();
         match self.load(&mut relay, store_handle) {
             Load::Done => tracing::info!(
@@ -401,7 +413,7 @@ impl RelayThread {
             if store.is_none() && retry_store_at.is_some_and(|t| Instant::now() >= t) {
                 match open_store(&self.dir, &self.waker) {
                     Ok(t) => {
-                        store = Some(relay.connect(Box::new(t)));
+                        store = Some(connect_store(&mut relay, t));
                         retry_store_at = None;
                         tracing::info!(project = %self.id, "project directory reattached");
                     }
@@ -429,9 +441,13 @@ impl RelayThread {
                 break;
             }
         }
-        // Final pump; dropping the relay closes every connection and drops the
-        // store transport, which writes everything still queued before its
-        // thread ends.
+        // Final pump, without the store's throttle so it gets every edit;
+        // dropping the relay closes every connection and drops the store
+        // transport, which writes everything still queued before its thread
+        // ends.
+        if let Some(config) = store.and_then(|h| relay.peer_config_mut(h)) {
+            config.min_send_interval = Duration::ZERO;
+        }
         relay.pump();
         drop(relay);
         tracing::info!(project = %self.id, "project closed");
