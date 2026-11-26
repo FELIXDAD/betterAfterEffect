@@ -189,7 +189,7 @@ impl ProjectPanel {
         let stage = cx.stage;
         let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
         if self.thumbnail_grid {
-            crate::viewer::checkerboard(p, thumb);
+            crate::viewer::checkerboard(p, thumb, cx.resources);
         } else {
             p.rect_filled(thumb, 1.0, color::FIELD);
         }

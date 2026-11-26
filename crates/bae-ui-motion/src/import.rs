@@ -531,6 +531,14 @@ pub(crate) fn reveal_footage(cx: &PanelContext<'_>, session: &SharedSession) {
     }
 }
 
+/// Edit > Edit Original (Cmd/Ctrl+E): the footage file in the application the
+/// system opens it with.
+pub(crate) fn edit_original(cx: &PanelContext<'_>, session: &SharedSession) {
+    if let Some(path) = replace_target(cx, session).and_then(|i| footage_file(cx.stage, &i)) {
+        bae_platform::open(&path);
+    }
+}
+
 /// File > Replace Footage > File… (Cmd/Ctrl+H): the item takes another file.
 pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
     let Some(item) = replace_target(cx, session) else {
