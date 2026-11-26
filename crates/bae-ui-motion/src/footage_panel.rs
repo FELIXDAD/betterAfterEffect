@@ -142,6 +142,10 @@ impl Gpu {
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: time,
+                    alphabetical: view
+                        .value("sequence:pattern")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s.starts_with("*.")),
                     sequence: (footage.kind == "sequence").then(|| footage.rate()),
                     // The footage panel shows source frames as they are.
                     blend: None,

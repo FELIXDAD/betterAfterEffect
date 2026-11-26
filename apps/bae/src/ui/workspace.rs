@@ -555,6 +555,11 @@ impl Workspace {
     }
 
     /// The effective keymap of the active workspace (menu shortcuts).
+    #[cfg(target_os = "macos")]
+    pub fn set_standard_system_shortcuts(&mut self, standard: bool) {
+        self.workbench.set_standard_system_shortcuts(standard);
+    }
+
     pub fn keymap(&self) -> &bae_ui::Keymap {
         self.workbench.keymap()
     }

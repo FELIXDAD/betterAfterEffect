@@ -559,6 +559,25 @@ fn window_panel_items_toggle_and_reopen_panels() {
     assert!(failed.is_empty(), "{failed:?}");
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn system_shortcut_preference_swaps_minimize_and_queue() {
+    let mut h = gui();
+    for standard in [false, true] {
+        h.state_mut()
+            .workspace
+            .set_standard_system_shortcuts(standard);
+        let keymap = h.state().workspace.keymap();
+        for (command, control) in [
+            (ids::MINIMIZE, !standard),
+            ("motion.add_to_render_queue", standard),
+        ] {
+            let chord = bae_ui::Chord::parse(if control { "Ctrl+Cmd+M" } else { "Cmd+M" }).unwrap();
+            assert_eq!(keymap.lookup(&chord, None).unwrap().action, command);
+        }
+    }
+}
+
 #[test]
 fn undo_redo_and_shell_items_show_their_keymap_chords() {
     // AppMenu::sync shows what the keymap binds to each shell item (#117).

@@ -661,6 +661,11 @@ impl AnimEvaluator {
                     },
                     size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
                     source_time: *time,
+                    alphabetical: stage.prim(asset).is_some_and(|view| {
+                        view.value("sequence:pattern")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| s.starts_with("*."))
+                    }),
                     sequence: (info.kind == "sequence")
                         .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
                     blend: l

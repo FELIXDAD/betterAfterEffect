@@ -362,6 +362,7 @@ impl RenderLayer {
             size: Some(size),
             source_time: Time::ZERO,
             sequence: None,
+            alphabetical: false,
             file_revision: bae_model::asset::file_revision(&view),
             psd_layer: Some(selection),
             blend: None,
@@ -685,6 +686,8 @@ pub struct FootageRef {
     /// Image sequences: the frame rate of the sequence (its numbered files are
     /// frames from `file` on); `None` opens `file` alone (a still or a movie).
     pub sequence: Option<FrameRate>,
+    /// Sequence uses actual filenames sorted alphabetically.
+    pub alphabetical: bool,
     pub file_revision: i64,
     pub psd_layer: Option<bae_model::psd::LayerImage>,
     /// Frame blending, when the comp and layer switches are on.
@@ -905,6 +908,7 @@ mod tests {
                 size: None,
                 source_time: Time::ZERO,
                 sequence: None,
+                alphabetical: false,
                 psd_layer: None,
                 file_revision: 0,
                 blend: None,

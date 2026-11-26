@@ -641,6 +641,9 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         K::Enter => Code::Enter,
         K::Escape => Code::Escape,
         K::Tab => Code::Tab,
+        #[cfg(target_os = "macos")]
+        key => mac_extended_key(key)?,
+        #[cfg(not(target_os = "macos"))]
         _ => return None,
     };
     let mut mods = Modifiers::empty();
@@ -661,6 +664,38 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         mods |= Modifiers::SHIFT;
     }
     Some(Accelerator::new(mods, code))
+}
+
+/// NumericPad is part of an AppKit key equivalent, so the main digits stay distinct.
+#[cfg(target_os = "macos")]
+fn mac_extended_key(key: egui::Key) -> Option<Code> {
+    use egui::Key as K;
+    Some(match key {
+        K::F13 => Code::F13,
+        K::F14 => Code::F14,
+        K::F15 => Code::F15,
+        K::F16 => Code::F16,
+        K::F17 => Code::F17,
+        K::F18 => Code::F18,
+        K::F19 => Code::F19,
+        K::F20 => Code::F20,
+        K::F21 => Code::NumpadMultiply,
+        K::F22 => Code::NumpadDivide,
+        K::F23 => Code::NumpadAdd,
+        K::F24 => Code::NumpadSubtract,
+        K::F25 => Code::NumpadDecimal,
+        K::F26 => Code::Numpad0,
+        K::F27 => Code::Numpad1,
+        K::F28 => Code::Numpad2,
+        K::F29 => Code::Numpad3,
+        K::F30 => Code::Numpad4,
+        K::F31 => Code::Numpad5,
+        K::F32 => Code::Numpad6,
+        K::F33 => Code::Numpad7,
+        K::F34 => Code::Numpad8,
+        K::F35 => Code::Numpad9,
+        _ => return None,
+    })
 }
 
 #[cfg(target_os = "macos")]
