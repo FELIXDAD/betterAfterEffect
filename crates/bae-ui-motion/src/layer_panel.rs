@@ -399,7 +399,7 @@ impl LayerPanel {
         let frame = render::comp_rect(view, one.width, one.height);
         let painter = ui.painter_at(area);
         if self.display.grid {
-            crate::viewer::checkerboard(&painter, frame.intersect(area));
+            crate::viewer::checkerboard(&painter, frame.intersect(area), cx.resources);
         }
         if self.gpu.is_none() && !self.gpu_tried {
             self.gpu_tried = true;
