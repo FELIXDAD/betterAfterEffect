@@ -22,6 +22,46 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Exponential Scale", "指数比例"),
+    ("Set Work Area to Selected Layers", "将工作区域设为所选图层"),
+    ("Go to Work Area Start", "转到工作区域的开头"),
+    ("Go to Work Area End", "转到工作区域的结尾"),
+    (
+        "Go to Previous Layer In or Out Point",
+        "转到上一图层入点或出点",
+    ),
+    ("Go to Next Layer In or Out Point", "转到下一图层入点或出点"),
+    (
+        "Align Selected Layers' In Points to Composition Start",
+        "将所选图层的入点对齐到合成开头",
+    ),
+    (
+        "Align Selected Layers' Out Points to Composition End",
+        "将所选图层的出点对齐到合成末端",
+    ),
+    (
+        "Stretch Layer In Point to Current Time",
+        "将图层入点拉伸到当前时间",
+    ),
+    (
+        "Stretch Layer Out Point to Current Time",
+        "将图层出点拉伸到当前时间",
+    ),
+    (
+        "Set Layer In Point (Relative to Selection)",
+        "设置图层入点（相对于选区）",
+    ),
+    (
+        "Set Layer Out Point (Relative to Selection)",
+        "设置图层出点（相对于选区）",
+    ),
+    (
+        "Trim Layer In Point (Relative to Selection)",
+        "修剪图层入点（相对于选区）",
+    ),
+    (
+        "Trim Layer Out Point (Relative to Selection)",
+        "修剪图层出点（相对于选区）",
+    ),
     (
         "Select All Visible Keyframes and Revealed Properties",
         "选择全部可见的关键帧和显示的属性",
