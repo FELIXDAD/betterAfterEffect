@@ -313,6 +313,44 @@ fn params(
         if param.flags.hidden || hidden_from.is_some_and(|d| depth >= d) {
             continue;
         }
+        if def.match_name == bae_effects::effects::liquify::MATCH_NAME
+            && param.id == bae_effects::effects::liquify::TOOL
+        {
+            let selected = session.lock().liquify_tool;
+            let labels = if super::chinese() {
+                &[
+                    "变形",
+                    "湍流",
+                    "顺时针旋转",
+                    "逆时针旋转",
+                    "褶皱",
+                    "膨胀",
+                    "移动像素",
+                    "反射",
+                    "仿制",
+                    "重建",
+                ]
+            } else {
+                bae_effects::effects::liquify::TOOLS
+            };
+            ui.horizontal_wrapped(|ui| {
+                for (index, name) in labels.iter().enumerate() {
+                    if ui.selectable_label(index == selected, *name).clicked()
+                        && let Some(layer) = super::layer_of(effect)
+                    {
+                        let mut s = session.lock();
+                        crate::tools::shared(cx.resources)
+                            .lock()
+                            .set(crate::tools::Tool::Selection);
+                        s.liquify_tool = index;
+                        s.layer_panel = Some(layer);
+                        s.open_liquify = Some(effect.clone());
+                        cx.open_panel("layer");
+                    }
+                }
+            });
+            continue;
+        }
         if def.match_name == "ADBE Param EQ" && param.kind == ParamKind::Display {
             ui.label(super::param_label(&def.match_name, param));
             let rate = session
