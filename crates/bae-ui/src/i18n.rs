@@ -130,6 +130,7 @@ macro_rules! tr {
 
 /// Shell strings. Keep in sync with docs/glossary.md.
 const ZH: &[(&str, &str)] = &[
+    ("Theme name", "主题名称"),
     (
         "Drop files here to import footage.",
         "将文件拖到这里即可导入素材。",
@@ -144,6 +145,7 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("Got it", "知道了"),
     // Numpad keys in shortcuts (AE: 数字小键盘).
+    ("Num Clear", "数字小键盘 清除"),
     ("Num *", "数字小键盘 *"),
     ("Num /", "数字小键盘 /"),
     ("Num +", "数字小键盘 +"),

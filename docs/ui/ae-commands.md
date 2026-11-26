@@ -76,7 +76,7 @@
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
 | Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ✅ |
 | Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ✅ |
-| New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ☐ |
+| New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ✅ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ⏸ |
 | Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ⏸ |
@@ -210,7 +210,7 @@
 | Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
 | Preview ▸ Play Current Preview | 10682369 | `motion.play` |  | Space | Space | B | ✅ |
-| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ⏸ |
+| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ✅ |
 | Preview ▸ Audio | 10682372 | `motion.comp.preview_audio` |  |  |  | B | ⏸ |
 | Save Frame As ▸ File... | 15335425 | `motion.comp.save_frame_as_file` |  | Ctrl+Alt+S | Cmd+Opt+S | B | ✅ |
 | Save Frame As ▸ Photoshop Layers... | 15335427 | `motion.comp.save_frame_as_photoshop_layers` |  |  |  | B | ⏸ |
@@ -1025,7 +1025,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | `FitItemView` | `viewer.fit` |  | Shift+/ | Shift+/ | effect_controls | A | ✅ |
-| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | effect_controls | A | ☐ |
+| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | effect_controls | A | ✅ |
 | `NOP` | `motion.panel.nop` |  |  |  | effect_controls | B | Ⓐ |
 | `OpenComp` | `motion.panel.toggle_viewer_timeline` |  | \\ | \\ | effect_controls | B | ☐ |
 | `SelectNext` | `motion.panel.select_next` | `{"add":false}` | Down | Down | effect_controls | B | ☐ |
@@ -1055,7 +1055,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | `FitItemView` | `viewer.fit` |  | Shift+/ | Shift+/ | composition | A | ✅ |
-| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | composition | A | ☐ |
+| `FitItemViewUpTo100` | `motion.viewer.fit_up_to_100` |  | Alt+/ | Opt+/ | composition | A | ✅ |
 | `SelectNextMask` | `motion.layer.select_next_mask` |  | Alt+\` | Opt+\` | composition | A | ⏸ |
 | `SelectPreviousMask` | `motion.layer.select_previous_mask` |  | Alt+Shift+\` | Opt+Shift+\` | composition | A | ⏸ |
 | `Zoom100Percent` | `motion.viewer.zoom_100` |  | / | / | composition | A | ☐ |

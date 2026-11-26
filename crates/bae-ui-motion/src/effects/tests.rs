@@ -369,13 +369,18 @@ fn mask_params_pick_a_mask_of_the_layer() {
 #[test]
 fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
     let mut fx = Fx::new();
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    fx.resources.insert(gpu);
     let layer = fx.comp_with_layer();
     fx.run(
         "effect.apply",
-        json!({"layers": [layer], "match_name": "ADBE Liquify"}),
+        json!({"layers": [layer], "match_name": "ADBE LIQUIFY"}),
     );
     let session = fx.resources.get::<SharedSession>().unwrap().clone();
     session.lock().layer_panel = Some(layer.clone());
+    session.lock().auto_key = true;
     let mut panel = crate::layer_panel::LayerPanel::new(None);
     panel.show = crate::layer_panel::Show::Effect(0);
     let frame = |fx: &Fx, panel: &mut crate::layer_panel::LayerPanel, events: Vec<egui::Event>| {
@@ -409,28 +414,78 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
         pressed,
         modifiers: Default::default(),
     };
-    let mut last = PanelRequests::default();
     for events in [
         vec![egui::Event::PointerMoved(at(20.0))],
         vec![button(20.0, true)],
         vec![egui::Event::PointerMoved(at(30.0))],
         vec![egui::Event::PointerMoved(at(40.0))],
-        vec![button(40.0, false)],
     ] {
-        last = frame(&fx, &mut panel, events);
+        assert!(frame(&fx, &mut panel, events).invocations.is_empty());
+    }
+    let start = std::time::Instant::now();
+    loop {
+        if session.lock().scrub.as_ref().is_some_and(|s| {
+            s.attr == "param:0014"
+                && matches!(s.value, Value::Vec2([surface,rev]) if surface>0. && rev>0.)
+        }) {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "no live deformation during drag"
+        );
+        assert!(frame(&fx, &mut panel, vec![]).invocations.is_empty());
+    }
+    let mut last = frame(&fx, &mut panel, vec![button(40.0, false)]);
+    // Shown as committed from the release on: the viewers keep the stroke
+    // while the mesh is read back (no flash of the old mesh).
+    assert!(
+        session
+            .lock()
+            .scrub
+            .as_ref()
+            .is_some_and(|s| s.committed.is_some())
+    );
+    let start = std::time::Instant::now();
+    while !last.invocations.iter().any(|v| v.id == "attr.set_at") && start.elapsed().as_secs() < 10
+    {
+        last = frame(&fx, &mut panel, Vec::new());
     }
     let set = last
         .invocations
         .iter()
         .find(|i| i.id == "attr.set_at")
         .expect("the mesh is set");
-    assert_eq!(set.params["attr"], "param:0010");
+    assert_eq!(set.params["attr"], "param:0014");
+    // Until the command runs, the read-back mesh is what the viewers show.
+    assert!(
+        session
+            .lock()
+            .scrub
+            .as_ref()
+            .is_some_and(|s| s.committed.is_some()
+                && matches!(s.value, Value::FloatList(ref v) if !v.is_empty()))
+    );
     fx.exec_all(last);
     let effect = bae_motion::effect::effects_of(&fx.stage, &layer)[0].clone();
-    let v =
-        bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0010").unwrap();
-    let mesh = bae_effects::effects::liquify::Mesh::from_value(&v).expect("a mesh");
+    let spec = bae_motion::query::attr_spec(&fx.stage, &effect, "param:0014").unwrap();
+    assert_eq!(spec.keyframes.len(), 1);
+    let mesh = bae_effects::effects::liquify::Mesh::from_value(
+        &spec.keyframes[&bae_model::Time::ZERO].value,
+    )
+    .expect("a keyed mesh");
     assert!(mesh.reach() > 1.0, "warped");
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(
+        bae_motion::query::attr_spec(&fx.stage, &effect, "param:0014")
+            .unwrap()
+            .keyframes
+            .is_empty()
+    );
+    assert_eq!(
+        bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0014"),
+        Some(Value::FloatList(vec![]))
+    );
 }
 
 #[test]

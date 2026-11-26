@@ -632,3 +632,65 @@ fn model_layers_draw_through_the_camera() {
     );
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// A collapsed 3D pre-comp joins the comp's 3D scene (AE-CMP-424): its layers
+/// take its place, placed by its matrix and seen by this comp's camera; a
+/// pre-comp that is not collapsed stays one plane.
+#[test]
+fn collapsed_3d_precomp_layers_join_the_scene() {
+    use bae_render::AnimEvaluator;
+    use bae_render::fixture::SceneBuilder;
+    let scene = |collapse: bool| {
+        let mut b = SceneBuilder::new();
+        let rate = bae_model::FrameRate::FPS_30;
+        let main = b.comp("main", 200, 100, rate, Time::ONE_SECOND).unwrap();
+        let inner = b.comp("inner", 200, 100, rate, Time::ONE_SECOND).unwrap();
+        let solid = b
+            .solid_layer(&inner, "s", [1.0, 0.0, 0.0, 1.0], [40, 40], [80.0, 30.0])
+            .unwrap();
+        b.set(&solid, "three_d", Value::Bool(true)).unwrap();
+        b.set(
+            &solid,
+            "transform:position",
+            Value::Vec3([100.0, 50.0, 200.0]),
+        )
+        .unwrap();
+        let pre = b.layer(&main, "pre", "pre_comp", Some(&inner)).unwrap();
+        b.set(&pre, "three_d", Value::Bool(true)).unwrap();
+        b.set(&pre, "collapse_transformation", Value::Bool(collapse))
+            .unwrap();
+        let stage = b.into_stage();
+        let rc = AnimEvaluator::new(None)
+            .evaluate(&stage, &main, Time::ZERO)
+            .unwrap();
+        (rc, pre, solid)
+    };
+    let (rc, pre, _) = scene(false);
+    assert!(
+        matches!(
+            rc.layers.iter().find(|l| l.path == pre).unwrap().content,
+            LayerContent::Comp(_)
+        ),
+        "not collapsed: one plane"
+    );
+    let (rc, pre, solid) = scene(true);
+    assert!(
+        rc.layers.iter().all(|l| l.path != pre),
+        "replaced by its layers"
+    );
+    let s = rc
+        .layers
+        .iter()
+        .find(|l| l.path == solid)
+        .expect("the inner solid");
+    // The pre-comp layer sits at the comp centre with its anchor at the
+    // pre-comp's centre: the inner solid keeps its comp-space placement.
+    let centre = s
+        .matrix_3d
+        .unwrap()
+        .transform_point3(DVec3::new(20.0, 20.0, 0.0));
+    assert!(
+        (centre - DVec3::new(100.0, 50.0, 200.0)).length() < 1e-6,
+        "{centre}"
+    );
+}

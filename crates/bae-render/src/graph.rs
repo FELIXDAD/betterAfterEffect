@@ -1463,6 +1463,8 @@ impl Builder<'_, '_> {
             opacity: layer.opacity.clamp(0.0, 1.0),
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
+            // Best in final renders; previews follow the layer's switch.
+            quality: layer.quality,
             preserve_transparency: layer.preserve_transparency,
             matte: None,
             mask: None,

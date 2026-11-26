@@ -14,6 +14,7 @@ use crate::common;
 use crate::session::{KeyClipboard, Pending, Reveal, SharedSession};
 
 pub mod ids {
+    pub const CACHE_WHEN_IDLE: &str = "motion.comp.cache_frames_when_idle";
     pub const PLAY: &str = "motion.play";
     pub const GO_START: &str = "motion.go_start";
     pub const GO_END: &str = "motion.go_end";
@@ -74,6 +75,8 @@ pub mod ids {
     pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > New Comp from Selection... (Alt+\).
+    pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
     pub const REPLACE_FOOTAGE: &str = "motion.file.replace_footage_file";
     /// File > Reload Footage (Cmd/Ctrl+Alt+L).
@@ -321,6 +324,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EXPONENTIAL_SCALE, "Exponential Scale"),
     (ids::SEQUENCE_LAYERS, "Sequence Layers..."),
     (ids::PLAY, "Play/Stop"),
+    (ids::CACHE_WHEN_IDLE, "Cache Frames When Idle"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
     ("motion.file.find", "Find"),
@@ -358,6 +362,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
     (ids::REVEAL_IN_EXPLORER, "Reveal in Explorer"),
@@ -1265,6 +1270,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::CACHE_WHEN_IDLE {
+        if let Some(store) = cx.resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
+            let mut prefs = (*store.current()).clone();
+            let key = bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE;
+            prefs.set(key, !prefs.bool(key));
+            if let Err(error) = store.set(prefs) {
+                tracing::warn!(%error, "could not save idle cache setting");
+            }
+        }
+        return true;
+    }
     if id == ids::TRACK_MOTION {
         let layer = session.lock().selected_layers.first().cloned();
         if let Some(layer) = layer
@@ -1385,7 +1401,33 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             return true;
         }
         ids::IMPORT_FILE => {
-            crate::import::import_file(cx, session);
+            if let Some(paths) = inv.params.get("paths") {
+                if let Ok(paths) = serde_json::from_value::<Vec<std::path::PathBuf>>(paths.clone())
+                {
+                    crate::import::import_paths(cx, &paths, None);
+                }
+            } else {
+                crate::import::import_file(cx, session);
+            }
+            return true;
+        }
+        ids::NEW_COMP_FROM_SELECTION => {
+            // Comps, footage and solids selected in the Project panel.
+            let items: Vec<PrimPath> = session
+                .lock()
+                .selected_items
+                .iter()
+                .filter(|i| {
+                    query::comp_info(stage, i).is_some()
+                        || stage
+                            .prim(i)
+                            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+                })
+                .cloned()
+                .collect();
+            let prefs = crate::prefs::current(cx.resources);
+            let still = crate::import::ImportDefaults::of(&prefs).still_duration;
+            crate::dialogs::comp_from_selection(cx, items, still);
             return true;
         }
         ids::REPLACE_FOOTAGE => {
@@ -2082,22 +2124,34 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     Some(_) => {}
                     None => cx.invoke_with(
                         "marker.add",
-                        json!({"owner": info.path, "time": now, "comment": n.to_string()}),
+                        json!({"owner": info.path, "time": now, "comment": n.to_string(), "label": crate::prefs::marker_label(&crate::prefs::current(cx.resources), false)}),
                     ),
                 }
             }
         }
         ids::ADD_MARKER => {
+            let label = crate::prefs::marker_label(&crate::prefs::current(cx.resources), false);
             if layers.is_empty() {
-                cx.invoke_with("marker.add", json!({"owner": info.path, "time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owner": info.path, "time": now, "label": label}),
+                );
             } else {
-                cx.invoke_with("marker.add", json!({"owners": layers, "comp_time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owners": layers, "comp_time": now, "label": label}),
+                );
             }
         }
         ids::ADD_MARKER_DIALOG => {
             let owner = layers.first().cloned().unwrap_or_else(|| info.path.clone());
             s.key_dialog = Some(crate::timeline::KeyDialog::Marker(Box::new(
-                crate::timeline::MarkerDialog::new_marker(&info, owner, now),
+                crate::timeline::MarkerDialog::new_marker(
+                    &info,
+                    owner,
+                    now,
+                    crate::prefs::marker_label(&crate::prefs::current(cx.resources), false),
+                ),
             )));
         }
         ids::DELETE_ALL_MARKERS if !layers.is_empty() => {
