@@ -235,6 +235,7 @@ pub(super) fn frame(
     view: &View,
     tool: Tool,
     painter: &Painter,
+    eval: &mut crate::common::EvalCache,
 ) -> Option<CursorIcon> {
     if !matches!(tool, Tool::Selection | Tool::Rotation | Tool::PanBehind) {
         state.press = None;
@@ -385,7 +386,16 @@ pub(super) fn frame(
                         state.path_drag = None;
                     }
                 }
-                Some(_) => crate::layer_panel::open(cx, session, layer),
+                Some(_) => {
+                    crate::layer_panel::open_clicked(
+                        cx,
+                        session,
+                        layer,
+                        ui.input(|i| i.modifiers.alt),
+                        tool,
+                        eval,
+                    );
+                }
                 None => {}
             }
         }
