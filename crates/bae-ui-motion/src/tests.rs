@@ -1111,7 +1111,7 @@ fn render_button_activates_with_space_and_enter() {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
-            item.output = dir
+            item.outputs[0].output = dir
                 .path()
                 .join(format!("k{n}/f_####.png"))
                 .to_string_lossy()
@@ -2019,6 +2019,9 @@ impl egui::DroppedFile for Dropped {
 struct Picker(std::sync::Mutex<Vec<Vec<std::path::PathBuf>>>);
 
 impl bae_ui::files::FilePicker for Picker {
+    fn save(&self, _: &str, _: &std::path::Path) -> Option<std::path::PathBuf> {
+        None
+    }
     fn open(&self, _: &bae_ui::files::OpenRequest) -> Vec<std::path::PathBuf> {
         let mut answers = self.0.lock().unwrap();
         if answers.is_empty() {

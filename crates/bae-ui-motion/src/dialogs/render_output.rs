@@ -196,17 +196,20 @@ fn work_area(info: &CompInfo) -> (i64, i64) {
 #[derive(Clone, Debug)]
 pub struct OutputModule {
     item: u64,
+    module: usize,
     format: ExportFormat,
     channels: Channels,
     bit_rate: f64,
 }
 
 impl OutputModule {
-    pub(crate) fn new(queue: &SharedRenderQueue, item: u64) -> Option<Self> {
+    pub(crate) fn new(queue: &SharedRenderQueue, item: u64, module: usize) -> Option<Self> {
         let q = queue.lock();
         let it = q.items().iter().find(|i| i.id == item)?;
+        let it = it.outputs.get(module)?;
         Some(OutputModule {
             item,
+            module,
             format: it.format,
             channels: it.channels,
             bit_rate: it.bit_rate_mbps,
@@ -221,7 +224,11 @@ impl OutputModule {
         match shown {
             Some(Outcome::Ok) => {
                 let queue = render_queue::shared(cx.resources);
-                if let Some(it) = queue.lock().item_mut(self.item) {
+                if let Some(it) = queue
+                    .lock()
+                    .item_mut(self.item)
+                    .and_then(|i| i.outputs.get_mut(self.module))
+                {
                     if it.format != self.format {
                         it.set_format(self.format);
                     }

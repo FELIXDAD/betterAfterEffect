@@ -27,6 +27,9 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
+mod item_menu;
+use item_menu::{ItemAction, LogMode, RenderLog};
+
 /// Formats offered in the panel and by `bae render --format`.
 pub const FORMATS: [ExportFormat; 8] = [
     ExportFormat::Wav,
@@ -97,7 +100,7 @@ const OM_TEMPLATES: [(&str, Option<OmSettings>); 12] = [
 ];
 
 /// The Output Module template an item's settings match, if any.
-fn om_template(item: &QueueItem) -> Option<&'static str> {
+fn om_template(item: &QueueOutput) -> Option<&'static str> {
     OM_TEMPLATES.iter().find_map(|(name, t)| {
         let (f, c, rate) = (*t)?;
         let rate_matches = !has_bit_rate(f) || (item.bit_rate_mbps - rate).abs() < 1e-6;
@@ -118,9 +121,9 @@ fn template_menu(
         .add(egui::Button::new("▾").frame(false).small())
         .labeled(egui::WidgetType::Button, label);
     let mut picked = None;
-    let mut sorted = items.to_vec();
-    sorted.sort_by_key(|(n, _)| tr(n));
     egui::Popup::menu(&resp).id(id).show(|ui| {
+        let mut sorted = items.to_vec();
+        sorted.sort_by_key(|(n, _)| tr(n));
         for (name, enabled) in &sorted {
             if ui
                 .add_enabled(*enabled, egui::Button::new(tr(name)))
@@ -238,14 +241,10 @@ pub struct QueueItem {
     pub comp_name: String,
     /// Its frame rate.
     pub rate: FrameRate,
-    /// Output format.
-    pub format: ExportFormat,
-    /// Output file; for sequences a pattern (`name_[####].png`).
-    pub output: String,
-    /// Channels written.
-    pub channels: Channels,
-    /// H.264 / HEVC target bit rate in Mbps.
-    pub bit_rate_mbps: f64,
+    /// All destinations, in the order shown under this render item.
+    pub outputs: Vec<QueueOutput>,
+    log: LogMode,
+    log_file: Option<PathBuf>,
     /// First and last frame (comp frames, inclusive).
     pub start: i64,
     /// Last frame (inclusive).
@@ -265,7 +264,21 @@ impl QueueItem {
     pub fn frame_count(&self) -> usize {
         (self.end - self.start + 1).max(0) as usize
     }
+}
 
+#[derive(Clone, Debug)]
+pub struct QueueOutput {
+    /// Output format.
+    pub format: ExportFormat,
+    /// Output file; for sequences a pattern (`name_[####].png`).
+    pub output: String,
+    /// Channels written.
+    pub channels: Channels,
+    /// H.264 / HEVC target bit rate in Mbps.
+    pub bit_rate_mbps: f64,
+}
+
+impl QueueOutput {
     /// Switches the format, the output's extension and its frame numbering
     /// with it (a movie is one file, a sequence numbers its files), and the
     /// channels to the format's default.
@@ -343,10 +356,14 @@ impl RenderQueue {
             comp: comp.path.clone(),
             comp_name: comp.name.clone(),
             rate,
-            format,
-            output: output.to_string_lossy().into_owned(),
-            channels: default_channels(format),
-            bit_rate_mbps: DEFAULT_BIT_RATE_MBPS,
+            outputs: vec![QueueOutput {
+                format,
+                output: output.to_string_lossy().into_owned(),
+                channels: default_channels(format),
+                bit_rate_mbps: DEFAULT_BIT_RATE_MBPS,
+            }],
+            log: LogMode::Errors,
+            log_file: None,
             start,
             end,
             status: ItemStatus::Queued,
@@ -373,7 +390,7 @@ impl RenderQueue {
         );
         if let Some(item) = self.item_mut(id) {
             let format = ExportFormat::Png;
-            item.output = output_dir
+            item.outputs[0].output = output_dir
                 .join(format!(
                     "{} ({code}).{}",
                     sanitize(&comp.name),
@@ -406,6 +423,46 @@ impl RenderQueue {
         self.batch.clear();
         if let Some(ctx) = &self.repaint {
             ctx.request_repaint();
+        }
+    }
+
+    fn duplicate(&mut self, id: u64, keep_names: bool) {
+        let Some(index) = self.items.iter().position(|it| it.id == id) else {
+            return;
+        };
+        let mut copy = self.items[index].clone();
+        copy.id = self.next_id;
+        self.next_id += 1;
+        copy.render = true;
+        copy.started = None;
+        copy.log_file = None;
+        copy.cancel = Arc::default();
+        copy.status = ItemStatus::Queued;
+        if !keep_names {
+            let mut used = self.output_names();
+            for out in &mut copy.outputs {
+                out.output = unique_name(&out.output, &used);
+                used.insert(output_key(Path::new(&out.output)));
+            }
+        }
+        self.items.insert(index + 1, copy);
+    }
+
+    fn output_names(&self) -> std::collections::HashSet<String> {
+        self.items
+            .iter()
+            .flat_map(|i| i.outputs.iter().map(|o| output_key(Path::new(&o.output))))
+            .collect()
+    }
+
+    fn add_output(&mut self, id: u64) {
+        let used = self.output_names();
+        if let Some(it) = self.item_mut(id)
+            && !matches!(it.status, ItemStatus::Rendering { .. })
+        {
+            let mut module = it.outputs[0].clone();
+            module.output = unique_name(&module.output, &used);
+            it.outputs.push(module);
         }
     }
 
@@ -473,16 +530,15 @@ impl RenderQueue {
         let total = comp_frames(&item.comp)
             .and_then(|frames| limited_range(item.start, item.end, frames))
             .map_or(0, |(start, end)| (end - start + 1) as usize);
+        let total = total * item.outputs.len();
         item.status = ItemStatus::Rendering { done: 0, total };
         item.started = Some(std::time::SystemTime::now());
         Some(Job {
             id: item.id,
             comp: item.comp.clone(),
             rate: item.rate,
-            format: item.format,
-            output: PathBuf::from(&item.output),
-            channels: item.channels,
-            bit_rate_mbps: item.bit_rate_mbps,
+            outputs: item.outputs.clone(),
+            log: item.log,
             start: item.start,
             end: item.end,
             cancel: item.cancel.clone(),
@@ -538,6 +594,42 @@ fn output_dir_from(videos: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
     videos.or(home).unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Keep a sequence's trailing frame token when assigning a unique destination.
+fn output_key(path: &Path) -> String {
+    let name = path.to_string_lossy();
+    if cfg!(windows) {
+        name.replace('/', "\\").to_lowercase()
+    } else {
+        name.into_owned()
+    }
+}
+
+fn unique_name(output: &str, used: &std::collections::HashSet<String>) -> String {
+    if output.is_empty() {
+        return String::new();
+    }
+    let path = Path::new(output);
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let before_number = stem.find('#').map_or(stem.as_ref(), |start| {
+        stem[..start]
+            .trim_end_matches('[')
+            .trim_end_matches(['_', '-', ' ', '.'])
+    });
+    let (prefix, suffix) = stem.split_at(before_number.len());
+    for i in 1.. {
+        let mut name = format!("{prefix}_{i}{suffix}");
+        if let Some(ext) = path.extension() {
+            name.push('.');
+            name.push_str(&ext.to_string_lossy());
+        }
+        let candidate = path.with_file_name(name).to_string_lossy().into_owned();
+        if !used.contains(&output_key(Path::new(&candidate))) && !Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
 /// A file-name-safe version of a comp name.
 fn sanitize(name: &str) -> String {
     let cleaned: String = name
@@ -562,10 +654,8 @@ pub(crate) struct Job {
     id: u64,
     comp: PrimPath,
     rate: FrameRate,
-    format: ExportFormat,
-    output: PathBuf,
-    channels: Channels,
-    bit_rate_mbps: f64,
+    outputs: Vec<QueueOutput>,
+    log: LogMode,
     start: i64,
     end: i64,
     cancel: Arc<AtomicBool>,
@@ -573,7 +663,7 @@ pub(crate) struct Job {
 
 /// Renders one item; `progress` gets the frames done so far.
 /// The export settings of a job's output module.
-fn export_settings(job: &Job, output: PathBuf) -> ExportSettings {
+fn export_settings(job: &QueueOutput, output: PathBuf) -> ExportSettings {
     let mut settings = ExportSettings::new(job.format, output);
     settings.alpha = match job.channels {
         Channels::RgbAlpha if supports_alpha(job.format) => ExportAlpha::Straight,
@@ -638,7 +728,6 @@ pub(crate) fn render_job(
     let started = Instant::now();
     let info = bae_motion::query::comp_info(stage, &job.comp)
         .ok_or_else(|| RenderError::Other(tr("The composition no longer exists.").to_owned()))?;
-    let output = output_path(&job.output, job.format, &info.name)?;
     // AE limits the range to the comp.
     let Some((start, end)) = limited_range(job.start, job.end, info.frame_count()) else {
         return Err(RenderError::Other(
@@ -651,43 +740,66 @@ pub(crate) fn render_job(
         .collect();
     // The progress counts the frames actually rendered (the limited range).
     let total = times.len();
-    progress(0, total);
     // A `#` run in the name numbers the frames, one frame too (#207);
     // export_frames decides, like `bae render`.
-    let settings = export_settings(job, output);
+
     let request = RenderRequest {
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
     };
-    settings.validate(job.rate, &request)?;
-    let report = export_frames(
-        renderer,
-        evaluator,
-        &ExportJob {
-            stage,
-            comp: &job.comp,
-            times: &times,
-            rate: job.rate,
-            request: &request,
-            settings: &settings,
-            encoders: None,
-        },
-        Some(&job.cancel),
-        &mut |frame| progress(frame.index + 1, total),
-    )?;
-    let first = report.frames.first().map(|f| f.file.clone());
-    Ok(if report.stopped {
-        ItemStatus::Stopped {
-            done: report.frames.len(),
-            total: times.len(),
-            first,
+    let destinations = job
+        .outputs
+        .iter()
+        .map(|o| {
+            let path = output_path(Path::new(&o.output), o.format, &info.name)?;
+            let settings = export_settings(o, path.clone());
+            settings.validate(job.rate, &request)?;
+            Ok((path, settings))
+        })
+        .collect::<Result<Vec<_>, RenderError>>()?;
+    let mut names = std::collections::HashSet::new();
+    if destinations
+        .iter()
+        .any(|(p, _)| !names.insert(output_key(p)))
+    {
+        return Err(RenderError::Other(
+            tr("Output modules must use different files.").to_owned(),
+        ));
+    }
+    let total = total * destinations.len();
+    let mut first = None;
+    let mut done = 0;
+    let mut files = 0;
+    progress(0, total);
+    for (_, settings) in destinations {
+        let report = export_frames(
+            renderer,
+            evaluator,
+            &ExportJob {
+                stage,
+                comp: &job.comp,
+                times: &times,
+                rate: job.rate,
+                request: &request,
+                settings: &settings,
+                encoders: None,
+            },
+            Some(&job.cancel),
+            &mut |frame| progress(done + frame.index + 1, total),
+        )?;
+        if first.is_none() {
+            first = report.frames.first().map(|f| f.file.clone());
         }
-    } else {
-        ItemStatus::Done {
-            files: report.stats.files,
-            first: first.unwrap_or_default(),
-            seconds: started.elapsed().as_secs_f64(),
+        done += report.frames.len();
+        files += report.stats.files;
+        if report.stopped {
+            return Ok(ItemStatus::Stopped { done, total, first });
         }
+    }
+    Ok(ItemStatus::Done {
+        files,
+        first: first.unwrap_or_default(),
+        seconds: started.elapsed().as_secs_f64(),
     })
 }
 
@@ -799,10 +911,12 @@ pub(crate) fn run_worker(
         let Some(job) = queue.lock().take_next(&comp_frames) else {
             break;
         };
+        let mut log = RenderLog::new(&job);
         let status = match &stage {
             Err(error) => ItemStatus::Failed(error.clone()),
             Ok(stage) => {
                 let mut progress = |done: usize, total: usize| {
+                    log.progress(&job, done, total);
                     let mut q = queue.lock();
                     q.set_status(job.id, ItemStatus::Rendering { done, total });
                 };
@@ -812,7 +926,12 @@ pub(crate) fn run_worker(
                 }
             }
         };
-        queue.lock().set_status(job.id, status);
+        let log_file = log.finish(&job, &status);
+        let mut q = queue.lock();
+        if let Some(it) = q.item_mut(job.id) {
+            it.log_file = log_file;
+        }
+        q.set_status(job.id, status);
     }
     let mut q = queue.lock();
     q.running = false;
@@ -872,6 +991,72 @@ pub struct RenderQueuePanel {
 }
 
 impl Panel for RenderQueuePanel {
+    fn on_action(&mut self, inv: &bae_ui::Invocation, cx: &mut PanelContext<'_>) -> bool {
+        if let Some(id) = inv.params["queue_item"].as_u64() {
+            let queue = shared(cx.resources);
+            let mut queue = queue.lock();
+            let Some(item) = queue.item_mut(id) else {
+                return true;
+            };
+            let action = match inv.id.as_str() {
+                crate::actions::ids::DUPLICATE
+                    if inv.params["keep_names"].as_bool() == Some(true) =>
+                {
+                    ItemAction::DuplicateWithName
+                }
+                crate::actions::ids::DUPLICATE => ItemAction::Duplicate,
+                "motion.comp.add_output_module" => ItemAction::AddOutput,
+                "motion.layer.reveal_composition_in_project" => ItemAction::Reveal,
+                _ => return false,
+            };
+            if action.enabled(
+                matches!(item.status, ItemStatus::Rendering { .. }),
+                cx.stage.has_prim(&item.comp),
+            ) {
+                match action {
+                    ItemAction::Duplicate | ItemAction::DuplicateWithName => {
+                        queue.duplicate(id, action == ItemAction::DuplicateWithName)
+                    }
+                    ItemAction::AddOutput => queue.add_output(id),
+                    ItemAction::Reveal => {
+                        crate::common::session(cx.resources).lock().selected_items =
+                            vec![item.comp.clone()];
+                        cx.open_panel("project");
+                    }
+                }
+            }
+            return true;
+        }
+        if inv.id != CHOOSE_OUTPUT {
+            return false;
+        }
+        let (Some(id), Some(index)) = (
+            inv.params["item"].as_u64(),
+            inv.params["module"]
+                .as_u64()
+                .and_then(|i| usize::try_from(i).ok()),
+        ) else {
+            return true;
+        };
+        let queue = shared(cx.resources);
+        let initial = queue
+            .lock()
+            .item_mut(id)
+            .and_then(|i| i.outputs.get(index))
+            .map(|o| o.output.clone());
+        if let Some(initial) = initial
+            && let Some(picker) = cx.resources.get::<bae_ui::files::SharedFilePicker>()
+            && let Some(path) = picker.0.save(tr("Output Movie To"), Path::new(&initial))
+            && let Some(module) = queue
+                .lock()
+                .item_mut(id)
+                .and_then(|i| i.outputs.get_mut(index))
+        {
+            module.output = path.to_string_lossy().into_owned();
+        }
+        true
+    }
+
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         TabInfo::new(tr("Render Queue"))
     }
@@ -886,7 +1071,7 @@ impl Panel for RenderQueuePanel {
 }
 
 impl RenderQueuePanel {
-    fn contents(&mut self, ui: &mut egui::Ui, cx: &PanelContext<'_>) {
+    fn contents(&mut self, ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
         let queue = shared(cx.resources);
         let (running, queued) = {
             let mut q = queue.lock();
@@ -921,21 +1106,22 @@ impl RenderQueuePanel {
         let mut remove = None;
         let mut cancel = None;
         let mut requeue = None;
+        let mut command = None;
         let mut open = None;
         // No scroll area of its own: the dock scrolls a panel that does not fit
         // (AE opens the Render Queue in the short Timeline frame).
         for (i, item) in q.items.iter_mut().enumerate() {
-            let last =
-                bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
+            let comp = bae_motion::query::comp_info(cx.stage, &item.comp);
             ui.push_id(item.id, |ui| {
                 item_ui(
                     ui,
                     i + 1,
                     item,
-                    last,
+                    comp.as_ref(),
                     &mut remove,
                     &mut cancel,
                     &mut requeue,
+                    &mut command,
                     &mut open,
                 );
             });
@@ -950,6 +1136,14 @@ impl RenderQueuePanel {
         if let Some(id) = requeue {
             q.requeue(id);
         }
+        if let Some((id, action)) = command {
+            cx.invoke_with(
+                action.action_id(),
+                serde_json::json!({
+                    "queue_item": id, "keep_names": action == ItemAction::DuplicateWithName
+                }),
+            );
+        }
         if q.running {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
@@ -957,24 +1151,38 @@ impl RenderQueuePanel {
         drop(q);
         // The item's settings links (the dialogs read the queue themselves).
         match open {
-            Some((id, true)) => crate::dialogs::render_settings(cx, id),
-            Some((id, false)) => crate::dialogs::output_module(cx, id),
+            Some((id, QueueLink::RenderSettings)) => crate::dialogs::render_settings(cx, id),
+            Some((id, QueueLink::Output(module))) => crate::dialogs::output_module(cx, id, module),
+            Some((id, QueueLink::File(module))) => cx.invoke_with(
+                CHOOSE_OUTPUT,
+                serde_json::json!({"item": id, "module":module}),
+            ),
             None => {}
         }
     }
 }
+
+enum QueueLink {
+    RenderSettings,
+    Output(usize),
+    File(usize),
+}
+
+const CHOOSE_OUTPUT: &str = "motion.render_queue.choose_output";
 
 #[allow(clippy::too_many_arguments)]
 fn item_ui(
     ui: &mut egui::Ui,
     number: usize,
     item: &mut QueueItem,
-    last: Option<i64>,
+    comp: Option<&CompInfo>,
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
-    open: &mut Option<(u64, bool)>,
+    command: &mut Option<(u64, ItemAction)>,
+    open: &mut Option<(u64, QueueLink)>,
 ) {
+    let last = comp.map(|c| c.frame_count() - 1);
     let editable = matches!(
         item.status,
         ItemStatus::Queued | ItemStatus::Failed(_) | ItemStatus::Stopped { .. }
@@ -987,96 +1195,107 @@ fn item_ui(
     let name = |what: &str| bae_ui::a11y::context(&[&item_ctx, tr(what)]);
     // Name, status and actions wrap in a narrow panel instead of running
     // off its edge.
-    ui.horizontal_wrapped(|ui| {
-        // AE's Render column and the item's number.
-        ui.add_enabled_ui(!matches!(item.status, ItemStatus::Rendering { .. }), |ui| {
-            let mut render = item.render;
-            if bae_ui::widgets::checkbox(ui, &mut render, "")
-                .labeled_toggle(egui::WidgetType::Checkbox, &name("Render"), render)
-                .changed()
-            {
-                item.render = render;
-            }
-        });
-        ui.label(number.to_string());
-        ui.strong(&item.comp_name);
-        match &item.status {
-            ItemStatus::Queued if !item.render => {
-                ui.label(tr("Unqueued"));
-            }
-            ItemStatus::Queued => {
-                ui.label(tr("Queued"));
-            }
-            ItemStatus::Rendering { done, total } => {
-                let fraction = if *total == 0 {
-                    0.0
-                } else {
-                    *done as f32 / *total as f32
-                };
-                ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .desired_width(ui.available_width().clamp(60.0, 160.0))
-                        .text(format!("{done} / {total}")),
-                );
-                if ui
-                    .button(tr("Stop"))
-                    .labeled(egui::WidgetType::Button, &name("Stop"))
-                    .clicked()
+    let row = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| {
+        ui.horizontal_wrapped(|ui| {
+            // AE's Render column and the item's number.
+            ui.add_enabled_ui(!matches!(item.status, ItemStatus::Rendering { .. }), |ui| {
+                let mut render = item.render;
+                if bae_ui::widgets::checkbox(ui, &mut render, "")
+                    .labeled_toggle(egui::WidgetType::Checkbox, &name("Render"), render)
+                    .changed()
                 {
-                    *cancel = Some(item.id);
+                    item.render = render;
                 }
-            }
-            ItemStatus::Done {
-                files,
-                first,
-                seconds,
-            } => {
-                ui.label(format!("{} · {files} · {seconds:.1} s", tr("Done")));
-                if ui
-                    .button(tr(reveal_label()))
-                    .labeled(egui::WidgetType::Button, &name(reveal_label()))
-                    .clicked()
-                {
-                    reveal(first);
+            });
+            ui.label(number.to_string());
+            ui.strong(&item.comp_name);
+            match &item.status {
+                ItemStatus::Queued if !item.render => {
+                    ui.label(tr("Unqueued"));
                 }
-            }
-            ItemStatus::Failed(message) => {
-                ui.colored_label(ui.visuals().error_fg_color, tr("Failed"))
-                    .on_hover_text(message);
-            }
-            ItemStatus::Stopped { done, total, first } => {
-                ui.label(
-                    tr("Stopped ({done}/{total} frames)")
-                        .replace("{done}", &done.to_string())
-                        .replace("{total}", &total.to_string()),
-                );
-                if let Some(first) = first
-                    && ui
+                ItemStatus::Queued => {
+                    ui.label(tr("Queued"));
+                }
+                ItemStatus::Rendering { done, total } => {
+                    let fraction = if *total == 0 {
+                        0.0
+                    } else {
+                        *done as f32 / *total as f32
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(fraction)
+                            .desired_width(ui.available_width().clamp(60.0, 160.0))
+                            .text(format!("{done} / {total}")),
+                    );
+                    if ui
+                        .button(tr("Stop"))
+                        .labeled(egui::WidgetType::Button, &name("Stop"))
+                        .clicked()
+                    {
+                        *cancel = Some(item.id);
+                    }
+                }
+                ItemStatus::Done {
+                    files,
+                    first,
+                    seconds,
+                } => {
+                    ui.label(format!("{} · {files} · {seconds:.1} s", tr("Done")));
+                    if ui
                         .button(tr(reveal_label()))
                         .labeled(egui::WidgetType::Button, &name(reveal_label()))
                         .clicked()
-                {
-                    reveal(first);
+                    {
+                        reveal(first);
+                    }
+                }
+                ItemStatus::Failed(message) => {
+                    ui.colored_label(ui.visuals().error_fg_color, tr("Failed"))
+                        .on_hover_text(message);
+                }
+                ItemStatus::Stopped { done, total, first } => {
+                    ui.label(
+                        tr("Stopped ({done}/{total} frames)")
+                            .replace("{done}", &done.to_string())
+                            .replace("{total}", &total.to_string()),
+                    );
+                    if let Some(first) = first
+                        && ui
+                            .button(tr(reveal_label()))
+                            .labeled(egui::WidgetType::Button, &name(reveal_label()))
+                            .clicked()
+                    {
+                        reveal(first);
+                    }
                 }
             }
-        }
-        if !matches!(
-            item.status,
-            ItemStatus::Rendering { .. } | ItemStatus::Queued
-        ) && ui
-            .button(tr("Render Again"))
-            .labeled(egui::WidgetType::Button, &name("Render Again"))
-            .clicked()
-        {
-            *requeue = Some(item.id);
-        }
-        if !matches!(item.status, ItemStatus::Rendering { .. })
-            && ui
-                .button(tr("Remove"))
-                .labeled(egui::WidgetType::Button, &name("Remove"))
+            if !matches!(
+                item.status,
+                ItemStatus::Rendering { .. } | ItemStatus::Queued
+            ) && ui
+                .button(tr("Render Again"))
+                .labeled(egui::WidgetType::Button, &name("Render Again"))
                 .clicked()
-        {
-            *remove = Some(item.id);
+            {
+                *requeue = Some(item.id);
+            }
+            if !matches!(item.status, ItemStatus::Rendering { .. })
+                && ui
+                    .button(tr("Remove"))
+                    .labeled(egui::WidgetType::Button, &name("Remove"))
+                    .clicked()
+            {
+                *remove = Some(item.id);
+            }
+        })
+    });
+    crate::common::context_menu(&row.response, &mut |ui| {
+        if let Some(action) = ItemAction::menu(
+            ui,
+            matches!(item.status, ItemStatus::Rendering { .. }),
+            last.is_some(),
+        ) {
+            *command = Some((item.id, action));
         }
     });
     if let ItemStatus::Failed(message) = &item.status {
@@ -1096,8 +1315,6 @@ fn item_ui(
         );
     }
     // Render Settings and Log (AE's templates; BAE renders at Best Settings).
-    // AE's template links: Render Settings and Output Module open their
-    // dialogs; Log keeps AE's default.
     ui.add_enabled_ui(editable, |ui| {
         ui.horizontal_wrapped(|ui| {
             let rs: Vec<(&str, bool)> = RS_TEMPLATES
@@ -1105,206 +1322,267 @@ fn item_ui(
                 .map(|t| (*t, *t == "Best Settings"))
                 .collect();
             let id = egui::Id::new(("rq-rs-templates", item.id));
-            if let Some(None) = template_menu(ui, id, &name("Render Settings Templates"), &rs) {
-                *open = Some((item.id, true));
+            match template_menu(ui, id, &name("Render Settings Templates"), &rs) {
+                Some(Some("Best Settings")) => {
+                    if let Some(comp) = comp {
+                        let rate = comp.frame_rate;
+                        item.start = rate.time_to_frame(comp.work_area.start);
+                        item.end = (rate.time_to_frame(comp.work_area.end) - 1).max(item.start);
+                    }
+                }
+                Some(None) => *open = Some((item.id, QueueLink::RenderSettings)),
+                _ => {}
             }
             ui.label(tr("Render Settings:"));
             if bae_ui::widgets::link(ui, tr("Best Settings"))
                 .labeled(egui::WidgetType::Link, &name("Render Settings"))
                 .clicked()
             {
-                *open = Some((item.id, true));
+                *open = Some((item.id, QueueLink::RenderSettings));
             }
             ui.add_space(12.0);
-            ui.add_enabled_ui(false, |ui| {
-                ui.label(tr("Log:"));
-                let mut j = 0;
-                bae_ui::widgets::dropdown(ui, "log", &mut j, &[tr("Errors Only")], 110.0)
-                    .labeled_value(egui::WidgetType::ComboBox, &name("Log"), tr("Errors Only"));
-            });
-            ui.add_space(12.0);
-            let om: Vec<(&str, bool)> = OM_TEMPLATES
-                .iter()
-                .map(|(n, t)| (*n, t.is_some_and(|(f, ..)| format_available(f))))
-                .collect();
-            let id = egui::Id::new(("rq-om-templates", item.id));
-            match template_menu(ui, id, &name("Output Module Templates"), &om) {
-                Some(None) => *open = Some((item.id, false)),
-                Some(Some(t)) => {
-                    if let Some((_, Some((f, c, rate)))) =
-                        OM_TEMPLATES.iter().find(|(n, _)| *n == t)
-                    {
-                        if item.format != *f {
-                            item.set_format(*f);
-                        }
-                        item.channels = *c;
-                        item.bit_rate_mbps = *rate;
+            ui.label(tr("Log:"));
+            let label = LogMode::ALL.iter().find(|(m, _)| *m == item.log).unwrap().1;
+            bae_ui::widgets::menu_button(ui, tr(label), |ui| {
+                for (mode, title) in LogMode::ALL {
+                    if ui.radio_value(&mut item.log, mode, tr(title)).clicked() {
+                        ui.close();
                     }
                 }
-                None => {}
-            }
-            ui.label(tr("Output Module:"));
-            let om_label = om_template(item).unwrap_or(format_label(item.format));
-            if bae_ui::widgets::link(ui, tr(om_label))
-                .labeled(egui::WidgetType::Link, &name("Output Module"))
-                .clicked()
-            {
-                *open = Some((item.id, false));
-            }
+            });
         });
     });
-    ui.add_enabled_ui(editable, |ui| {
-        egui::Grid::new("output").num_columns(2).show(ui, |ui| {
-            // Fields are named after the label in front of them and the item
-            // (screen readers read "… · Format: PNG", issue #128).
-            ui.label(tr("Format"));
-            let mut format = item.format;
-            // As wide as the column allows; long names are shortened rather
-            // than widening a narrow panel.
-            let combo_w = ui.available_width().clamp(60.0, 220.0);
-            egui::ComboBox::from_id_salt("format")
-                .width(combo_w)
-                .truncate()
-                .selected_text(tr(format_label(format)))
-                .show_ui(ui, |ui| {
-                    for f in FORMATS {
-                        let available = format_available(f);
-                        let r = ui.add_enabled(
-                            available,
-                            egui::Button::selectable(format == f, tr(format_label(f))),
-                        );
-                        if r.clicked() {
-                            format = f;
-                        }
-                        if !available {
-                            let reason = match f {
-                                ExportFormat::ProRes | ExportFormat::ProRes4444 => {
-                                    "ProRes export requires macOS."
+    if let Some(path) = &item.log_file
+        && ui.link(path.display().to_string()).clicked()
+    {
+        reveal(path);
+    }
+    let id = item.id;
+    let multiple = item.outputs.len() > 1;
+    let mut remove_output = None;
+    for (index, module) in item.outputs.iter_mut().enumerate() {
+        ui.push_id(("output_module", index), |ui| {
+            ui.add_enabled_ui(editable, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let om: Vec<(&str, bool)> = OM_TEMPLATES
+                        .iter()
+                        .map(|(n, t)| (*n, t.is_some_and(|(f, ..)| format_available(f))))
+                        .collect();
+                    let popup_id = egui::Id::new(("rq-om-templates", id, index));
+                    match template_menu(ui, popup_id, &name("Output Module Templates"), &om) {
+                        Some(None) => *open = Some((id, QueueLink::Output(index))),
+                        Some(Some(t)) => {
+                            if let Some((_, Some((f, c, rate)))) =
+                                OM_TEMPLATES.iter().find(|(n, _)| *n == t)
+                            {
+                                if module.format != *f {
+                                    module.set_format(*f);
                                 }
-                                ExportFormat::Hevc => "A hardware HEVC encoder is required.",
-                                _ => "The system H.264 encoder is unavailable.",
-                            };
-                            r.on_disabled_hover_text(tr(reason));
+                                module.channels = *c;
+                                module.bit_rate_mbps = *rate;
+                            }
                         }
+                        None => {}
                     }
-                })
-                .response
-                .labeled_value(
-                    egui::WidgetType::ComboBox,
-                    &name("Format"),
-                    tr(format_label(item.format)),
-                );
-            if format != item.format {
-                item.set_format(format);
-            }
-            ui.end_row();
-            // AE: Channels RGB / RGB + Alpha (RGB + Alpha only where the
-            // codec has alpha).
-            if item.format == ExportFormat::Wav {
-                ui.label(tr("Audio"));
-                ui.label(tr("Stereo, 48 kHz, 24-bit PCM"));
-                ui.end_row();
-            } else {
-                ui.label(tr("Channels"));
-                let mut channels = item.channels;
-                egui::ComboBox::from_id_salt("channels")
-                    .width(combo_w)
-                    .truncate()
-                    .selected_text(channels_label(channels))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut channels,
-                            Channels::Rgb,
-                            channels_label(Channels::Rgb),
-                        );
-                        let alpha = supports_alpha(item.format);
-                        let r = ui.add_enabled(
-                            alpha,
-                            egui::Button::selectable(
-                                channels == Channels::RgbAlpha,
-                                channels_label(Channels::RgbAlpha),
-                            ),
-                        );
-                        if r.clicked() {
-                            channels = Channels::RgbAlpha;
-                        }
-                        if !alpha {
-                            r.on_disabled_hover_text(tr("This format has no alpha channel."));
-                        }
-                    })
-                    .response
-                    .labeled_value(
-                        egui::WidgetType::ComboBox,
-                        &name("Channels"),
-                        channels_label(item.channels),
-                    );
-                item.channels = channels;
-                ui.end_row();
-            }
-            if has_bit_rate(item.format) {
-                // AE's H.264 format options: VBR, target bitrate.
-                ui.label(tr("Target Bitrate"));
-                let value = format!("{} Mbps", item.bit_rate_mbps);
-                ui.add(
-                    egui::DragValue::new(&mut item.bit_rate_mbps)
-                        .range(1.0..=800.0)
-                        .speed(0.5)
-                        .suffix(" Mbps"),
-                )
-                .labeled_value(
-                    egui::WidgetType::DragValue,
-                    &name("Target Bitrate"),
-                    &value,
-                );
-                ui.end_row();
-            }
-            ui.label(tr("Output To"));
-            ui.vertical(|ui| {
-                let output = item.output.clone();
-                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY))
-                    .labeled_value(egui::WidgetType::TextEdit, &name("Output To"), &output);
-                // AE: the format decides the extension.
-                if let Some(ext) = extension_follows_format(&item.output, item.format) {
-                    ui.weak(
-                        tr("The file will be saved as .{ext} to match the format.")
-                            .replace("{ext}", ext),
-                    );
-                }
+                    ui.label(tr("Output Module:"));
+                    let om_label = om_template(module).unwrap_or(format_label(module.format));
+                    if bae_ui::widgets::link(ui, tr(om_label))
+                        .labeled(egui::WidgetType::Link, &name("Output Module"))
+                        .clicked()
+                    {
+                        *open = Some((id, QueueLink::Output(index)));
+                    }
+                });
             });
-            ui.end_row();
-            ui.label(tr("Frames"));
-            // Typed and dragged values stay inside the comp (AE); a range set
-            // otherwise (or a comp shortened later) is limited, or refused when
-            // entirely outside, at render time.
-            let last = last.unwrap_or(i64::MAX).max(0);
-            // Start – end wrap in a narrow panel instead of widening it.
-            ui.horizontal_wrapped(|ui| {
-                let start = item.start.to_string();
-                ui.add(
-                    egui::DragValue::new(&mut item.start)
-                        .range(0..=item.end.clamp(0, last))
-                        .clamp_existing_to_range(false),
-                )
-                .labeled_value(
-                    egui::WidgetType::DragValue,
-                    &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("Start")]),
-                    &start,
-                );
-                ui.label("–");
-                let end = item.end.to_string();
-                ui.add(
-                    egui::DragValue::new(&mut item.end)
-                        .range(item.start.clamp(0, last)..=last)
-                        .clamp_existing_to_range(false),
-                )
-                .labeled_value(
-                    egui::WidgetType::DragValue,
-                    &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("End")]),
-                    &end,
-                );
+            ui.add_enabled_ui(editable, |ui| {
+                egui::Grid::new("output").num_columns(2).show(ui, |ui| {
+                    // Fields are named after the label in front of them and the item
+                    // (screen readers read "… · Format: PNG", issue #128).
+                    ui.label(tr("Format"));
+                    let mut format = module.format;
+                    // As wide as the column allows; long names are shortened rather
+                    // than widening a narrow panel.
+                    let combo_w = ui.available_width().clamp(60.0, 220.0);
+                    egui::ComboBox::from_id_salt("format")
+                        .width(combo_w)
+                        .truncate()
+                        .selected_text(tr(format_label(format)))
+                        .show_ui(ui, |ui| {
+                            for f in FORMATS {
+                                let available = format_available(f);
+                                let r = ui.add_enabled(
+                                    available,
+                                    egui::Button::selectable(format == f, tr(format_label(f))),
+                                );
+                                if r.clicked() {
+                                    format = f;
+                                }
+                                if !available {
+                                    let reason = match f {
+                                        ExportFormat::ProRes | ExportFormat::ProRes4444 => {
+                                            "ProRes export requires macOS."
+                                        }
+                                        ExportFormat::Hevc => {
+                                            "A hardware HEVC encoder is required."
+                                        }
+                                        _ => "The system H.264 encoder is unavailable.",
+                                    };
+                                    r.on_disabled_hover_text(tr(reason));
+                                }
+                            }
+                        })
+                        .response
+                        .labeled_value(
+                            egui::WidgetType::ComboBox,
+                            &name("Format"),
+                            tr(format_label(module.format)),
+                        );
+                    if format != module.format {
+                        module.set_format(format);
+                    }
+                    ui.end_row();
+                    // AE: Channels RGB / RGB + Alpha (RGB + Alpha only where the
+                    // codec has alpha).
+                    if module.format == ExportFormat::Wav {
+                        ui.label(tr("Audio"));
+                        ui.label(tr("Stereo, 48 kHz, 24-bit PCM"));
+                        ui.end_row();
+                    } else {
+                        ui.label(tr("Channels"));
+                        let mut channels = module.channels;
+                        egui::ComboBox::from_id_salt("channels")
+                            .width(combo_w)
+                            .truncate()
+                            .selected_text(channels_label(channels))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut channels,
+                                    Channels::Rgb,
+                                    channels_label(Channels::Rgb),
+                                );
+                                let alpha = supports_alpha(module.format);
+                                let r = ui.add_enabled(
+                                    alpha,
+                                    egui::Button::selectable(
+                                        channels == Channels::RgbAlpha,
+                                        channels_label(Channels::RgbAlpha),
+                                    ),
+                                );
+                                if r.clicked() {
+                                    channels = Channels::RgbAlpha;
+                                }
+                                if !alpha {
+                                    r.on_disabled_hover_text(tr(
+                                        "This format has no alpha channel.",
+                                    ));
+                                }
+                            })
+                            .response
+                            .labeled_value(
+                                egui::WidgetType::ComboBox,
+                                &name("Channels"),
+                                channels_label(module.channels),
+                            );
+                        module.channels = channels;
+                        ui.end_row();
+                    }
+                    if has_bit_rate(module.format) {
+                        // AE's H.264 format options: VBR, target bitrate.
+                        ui.label(tr("Target Bitrate"));
+                        let value = format!("{} Mbps", module.bit_rate_mbps);
+                        ui.add(
+                            egui::DragValue::new(&mut module.bit_rate_mbps)
+                                .range(1.0..=800.0)
+                                .speed(0.5)
+                                .suffix(" Mbps"),
+                        )
+                        .labeled_value(
+                            egui::WidgetType::DragValue,
+                            &name("Target Bitrate"),
+                            &value,
+                        );
+                        ui.end_row();
+                    }
+                    ui.label(tr("Output To"));
+                    let target = Path::new(&module.output)
+                        .file_name()
+                        .map(|p| p.to_string_lossy())
+                        .unwrap_or_default();
+                    let label = if target.is_empty() {
+                        tr("Not yet specified")
+                    } else {
+                        target.as_ref()
+                    };
+                    let file_link = bae_ui::widgets::link(ui, label).labeled_value(
+                        egui::WidgetType::Link,
+                        &name("Output To"),
+                        &module.output,
+                    );
+                    if let Some(extension) = extension_follows_format(&module.output, module.format)
+                    {
+                        file_link.clone().on_hover_text(
+                            Path::new(&module.output)
+                                .with_extension(extension)
+                                .display()
+                                .to_string(),
+                        );
+                    }
+                    if file_link.clicked() {
+                        *open = Some((id, QueueLink::File(index)));
+                    }
+                    if multiple
+                        && ui
+                            .small_button("−")
+                            .on_hover_text(tr("Remove Output Module"))
+                            .clicked()
+                    {
+                        remove_output = Some(index);
+                    }
+                    ui.end_row();
+                });
             });
-            ui.end_row();
         });
+    }
+    if let Some(i) = remove_output {
+        item.outputs.remove(i);
+    }
+    ui.add_enabled_ui(editable, |ui| {
+        egui::Grid::new("render_range")
+            .num_columns(2)
+            .show(ui, |ui| {
+                ui.label(tr("Frames"));
+                // Typed and dragged values stay inside the comp (AE); a range set
+                // otherwise (or a comp shortened later) is limited, or refused when
+                // entirely outside, at render time.
+                let last = last.unwrap_or(i64::MAX).max(0);
+                // Start – end wrap in a narrow panel instead of widening it.
+                ui.horizontal_wrapped(|ui| {
+                    let start = item.start.to_string();
+                    ui.add(
+                        egui::DragValue::new(&mut item.start)
+                            .range(0..=item.end.clamp(0, last))
+                            .clamp_existing_to_range(false),
+                    )
+                    .labeled_value(
+                        egui::WidgetType::DragValue,
+                        &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("Start")]),
+                        &start,
+                    );
+                    ui.label("–");
+                    let end = item.end.to_string();
+                    ui.add(
+                        egui::DragValue::new(&mut item.end)
+                            .range(item.start.clamp(0, last)..=last)
+                            .clamp_existing_to_range(false),
+                    )
+                    .labeled_value(
+                        egui::WidgetType::DragValue,
+                        &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("End")]),
+                        &end,
+                    );
+                });
+                ui.end_row();
+            });
     });
 }
 
@@ -1333,6 +1611,17 @@ pub(crate) fn channels_label(channels: Channels) -> &'static str {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Duplicate (Render Item)", "复制"),
+    ("Duplicate With File Name", "与文件名一起复制"),
+    ("Remove Output Module", "移除输出模块"),
+    ("Plus Settings", "增加设置"),
+    ("Plus Per Frame Info", "增加每帧信息"),
+    ("Not yet specified", "未指定"),
+    ("Output Movie To", "将影片输出到"),
+    (
+        "Output modules must use different files.",
+        "每个输出模块需要使用不同的文件。",
+    ),
     ("Save Frame As File", "帧另存为文件"),
     // AE 26's Render Queue (渲染队列) terms.
     ("Unqueued", "未加入队列"),
@@ -1483,14 +1772,17 @@ mod tests {
         let item = q.item_mut(id).unwrap();
         assert_eq!((item.start, item.end), (45, 45));
         assert!(
-            item.output.ends_with("Main (0;00;01;15).png"),
+            item.outputs[0].output.ends_with("Main (0;00;01;15).png"),
             "{}",
-            item.output
+            item.outputs[0].output
         );
-        assert_eq!(om_template(item), None);
-        item.set_format(ExportFormat::Tiff);
-        item.channels = Channels::RgbAlpha;
-        assert_eq!(om_template(item), Some("TIFF Sequence with Alpha"));
+        assert_eq!(om_template(&item.outputs[0]), None);
+        item.outputs[0].set_format(ExportFormat::Tiff);
+        item.outputs[0].channels = Channels::RgbAlpha;
+        assert_eq!(
+            om_template(&item.outputs[0]),
+            Some("TIFF Sequence with Alpha")
+        );
     }
 
     #[test]
@@ -1509,6 +1801,32 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_and_add_output_keep_module_settings_and_allocate_independent_paths() {
+        let mut queue = RenderQueue::default();
+        let id = queue.add(&comp_info("/comps/a", "A"), Path::new("renders"));
+        queue.add_output(id);
+        queue.items[0].outputs[1].set_format(ExportFormat::Tiff);
+        let paths = |item: &QueueItem| {
+            item.outputs
+                .iter()
+                .map(|output| output.output.clone())
+                .collect::<Vec<_>>()
+        };
+        let original = paths(&queue.items[0]);
+        assert_ne!(original[0], original[1]);
+        queue.duplicate(id, false);
+        let unique = paths(&queue.items[1]);
+        assert!(
+            unique
+                .iter()
+                .all(|path| !original.contains(path) && path.contains("[####]"))
+        );
+        queue.duplicate(id, true);
+        assert_eq!(paths(&queue.items[1]), original);
+        assert_eq!(queue.items[2].outputs[1].format, ExportFormat::Tiff);
+    }
+
+    #[test]
     fn queue_bookkeeping() {
         let mut q = RenderQueue::default();
         let dir = Path::new("/renders");
@@ -1516,13 +1834,13 @@ mod tests {
         let b = q.add(&comp_info("/comps/other", "Other"), dir);
         let item = &q.items()[0];
         assert_eq!((item.start, item.end, item.frame_count()), (3, 8, 6));
-        assert_eq!(item.format, ExportFormat::Png);
+        assert_eq!(item.outputs[0].format, ExportFormat::Png);
         assert_eq!(
-            PathBuf::from(&item.output),
+            PathBuf::from(&item.outputs[0].output),
             dir.join("Main_ v2/Main_ v2_[####].png")
         );
-        q.item_mut(a).unwrap().set_format(ExportFormat::Tiff);
-        assert!(q.items()[0].output.ends_with("_[####].tif"));
+        q.item_mut(a).unwrap().outputs[0].set_format(ExportFormat::Tiff);
+        assert!(q.items()[0].outputs[0].output.ends_with("_[####].tif"));
         assert_eq!(q.queued(), 2);
 
         // Taking a job marks it rendering; it cannot be removed meanwhile.
@@ -1635,7 +1953,7 @@ mod tests {
         let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
         let mut q = RenderQueue::default();
         let id = q.add(&info, dir.path());
-        q.item_mut(id).unwrap().output = dir
+        q.item_mut(id).unwrap().outputs[0].output = dir
             .path()
             .join("stop/f_####.png")
             .to_string_lossy()
@@ -1683,7 +2001,8 @@ mod tests {
         let id = {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
-            q.item_mut(id).unwrap().output = dir.path().join("f_####.png").to_string_lossy().into();
+            q.item_mut(id).unwrap().outputs[0].output =
+                dir.path().join("f_####.png").to_string_lossy().into();
             id
         };
         let mut resources = Resources::new();
@@ -1761,7 +2080,7 @@ mod tests {
         for name in outputs {
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
-            item.output = dir.path().join(name).to_string_lossy().into_owned();
+            item.outputs[0].output = dir.path().join(name).to_string_lossy().into_owned();
             (item.start, item.end) = (5, 5);
         }
         assert!(q.begin());
@@ -1821,8 +2140,8 @@ mod tests {
         let mut queue = RenderQueue::default();
         let id = queue.add(&info, dir.path());
         let item = queue.item_mut(id).unwrap();
-        item.set_format(ExportFormat::Wav);
-        item.output = output.to_string_lossy().into_owned();
+        item.outputs[0].set_format(ExportFormat::Wav);
+        item.outputs[0].output = output.to_string_lossy().into_owned();
         (item.start, item.end) = (1, 2);
         assert!(queue.begin());
         let job = queue.take_next(&|_| Some(info.frame_count())).unwrap();
@@ -1924,7 +2243,7 @@ mod tests {
         let mut q = RenderQueue::default();
         let id = q.add(&comp_info("/comps/main", "Main"), Path::new("/r"));
         let item = q.item_mut(id).unwrap();
-        assert_eq!(item.bit_rate_mbps, DEFAULT_BIT_RATE_MBPS);
+        assert_eq!(item.outputs[0].bit_rate_mbps, DEFAULT_BIT_RATE_MBPS);
         let steps = [
             (ExportFormat::H264, "/r/Main/Main.mp4", Channels::Rgb),
             (
@@ -1937,13 +2256,13 @@ mod tests {
             (ExportFormat::Hevc, "/r/Main/Main.mp4", Channels::Rgb),
         ];
         for (format, output, channels) in steps {
-            item.set_format(format);
+            item.outputs[0].set_format(format);
             assert_eq!(
-                PathBuf::from(&item.output),
+                PathBuf::from(&item.outputs[0].output),
                 PathBuf::from(output),
                 "{format:?}"
             );
-            assert_eq!(item.channels, channels, "{format:?}");
+            assert_eq!(item.outputs[0].channels, channels, "{format:?}");
         }
         assert_eq!(without_frame_run("shot_####_v2"), "shot__v2");
         assert_eq!(without_frame_run("f[###]"), "f");
@@ -1956,19 +2275,17 @@ mod tests {
 
     #[test]
     fn output_module_maps_to_export_settings() {
-        let job = |format, channels| Job {
-            id: 0,
-            comp: PrimPath::new("/c").unwrap(),
-            rate: FrameRate::FPS_30,
-            format,
-            output: PathBuf::from("/r/x"),
-            channels,
-            bit_rate_mbps: 12.5,
-            start: 0,
-            end: 0,
-            cancel: Arc::default(),
+        let s = |format, channels| {
+            export_settings(
+                &QueueOutput {
+                    format,
+                    channels,
+                    output: "/r/x".into(),
+                    bit_rate_mbps: 12.5,
+                },
+                PathBuf::from("/r/x"),
+            )
         };
-        let s = |format, channels| export_settings(&job(format, channels), PathBuf::from("/r/x"));
         let png = s(ExportFormat::Png, Channels::RgbAlpha);
         assert_eq!((png.alpha, png.bit_rate), (ExportAlpha::Straight, None));
         assert_eq!(
@@ -2015,8 +2332,8 @@ mod tests {
         for &format in &formats {
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
-            item.set_format(format);
-            item.output = dir
+            item.outputs[0].set_format(format);
+            item.outputs[0].output = dir
                 .path()
                 .join(format!("m_{}.{}", format.name(), format.extension()))
                 .to_string_lossy()
@@ -2034,7 +2351,7 @@ mod tests {
             assert!(
                 matches!(status, ItemStatus::Done { .. }),
                 "{:?}: {status:?}",
-                job.format
+                job.outputs[0].format
             );
         }
         for format in formats {
@@ -2061,13 +2378,13 @@ mod tests {
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
             assert_eq!(
-                (item.format, item.channels),
+                (item.outputs[0].format, item.outputs[0].channels),
                 (ExportFormat::Png, Channels::Rgb)
             );
             if let Some(c) = channels {
-                item.channels = c;
+                item.outputs[0].channels = c;
             }
-            item.output = dir
+            item.outputs[0].output = dir
                 .path()
                 .join(format!("{name}.png"))
                 .to_string_lossy()
@@ -2154,20 +2471,27 @@ mod tests {
             let tiff = q.add(&info, dir.path());
             let stopped = q.add(&info, dir.path());
             let bad = q.add(&info, dir.path());
-            q.item_mut(png).unwrap().output =
+            q.item_mut(png).unwrap().outputs[0].output =
                 dir.path().join("png/f_[####].png").to_string_lossy().into();
+            q.add_output(tiff);
             let t = q.item_mut(tiff).unwrap();
-            t.set_format(ExportFormat::Tiff);
-            t.output = dir.path().join("tif/f_####.tif").to_string_lossy().into();
+            t.log = LogMode::Frames;
+            t.outputs[1].output = dir
+                .path()
+                .join("another/f_####.png")
+                .to_string_lossy()
+                .into_owned();
+            t.outputs[0].set_format(ExportFormat::Tiff);
+            t.outputs[0].output = dir.path().join("tif/f_####.tif").to_string_lossy().into();
             (t.start, t.end) = (4, 5);
-            q.item_mut(stopped).unwrap().output = dir
+            q.item_mut(stopped).unwrap().outputs[0].output = dir
                 .path()
                 .join("stopped/f_####.png")
                 .to_string_lossy()
                 .into();
             // A regular file where the output folder should be.
             std::fs::write(dir.path().join("blocker"), b"x").unwrap();
-            q.item_mut(bad).unwrap().output = dir
+            q.item_mut(bad).unwrap().outputs[0].output = dir
                 .path()
                 .join("blocker/f_####.png")
                 .to_string_lossy()
@@ -2205,7 +2529,11 @@ mod tests {
         }
         match status(tiff) {
             ItemStatus::Done { files, first, .. } => {
-                assert_eq!(files, 2);
+                assert_eq!(files, 4);
+                assert!(dir.path().join("another/f_0005.png").is_file());
+                let item = q.items().iter().find(|i| i.id == tiff).unwrap();
+                let text = std::fs::read_to_string(item.log_file.as_ref().unwrap()).unwrap();
+                assert!(text.contains("2 · 5 ·"));
                 assert_eq!(first, dir.path().join("tif/f_0004.tif"));
                 assert!(first.is_file());
             }

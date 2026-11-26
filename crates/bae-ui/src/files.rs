@@ -24,6 +24,8 @@ pub struct OpenRequest {
 
 /// A native open panel.
 pub trait FilePicker: Send + Sync {
+    /// Choose a destination, keeping the platform's overwrite confirmation.
+    fn save(&self, title: &str, initial: &std::path::Path) -> Option<PathBuf>;
     /// The chosen files (and folders, when allowed); empty when cancelled.
     fn open(&self, request: &OpenRequest) -> Vec<PathBuf>;
 }

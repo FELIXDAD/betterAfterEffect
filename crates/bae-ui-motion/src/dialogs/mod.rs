@@ -313,12 +313,12 @@ pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
 }
 
 /// Open Output Module Settings for render queue item `item`.
-pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64) {
+pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64, module: usize) {
     let queue = crate::render_queue::shared(cx.resources);
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
     if d.open.is_none()
-        && let Some(o) = render_output::OutputModule::new(&queue, item)
+        && let Some(o) = render_output::OutputModule::new(&queue, item, module)
     {
         d.open = Some(Dialog::OutputModule(Box::new(o)));
     }
