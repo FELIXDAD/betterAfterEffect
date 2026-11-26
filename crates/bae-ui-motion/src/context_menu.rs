@@ -26,6 +26,28 @@ pub(crate) enum Entry {
     Own(&'static str),
     /// An item with no command yet: shown greyed.
     Off(&'static str),
+    /// An entry that applies to some kinds of Project items only ([`COMP`],
+    /// [`FOOTAGE`], [`FOLDER`], [`SOLID`]); greyed on the others (AE 26).
+    Only(u8, &'static Entry),
+    /// Project ▸ Reveal Project in Finder / Explorer: shows the saved project
+    /// file; greyed while the project has not been saved.
+    RevealProject,
+}
+
+/// Project item kinds for [`Entry::Only`] and [`show_item`].
+pub(crate) const COMP: u8 = 1;
+pub(crate) const FOOTAGE: u8 = 2;
+pub(crate) const FOLDER: u8 = 4;
+pub(crate) const SOLID: u8 = 8;
+const ANY: u8 = u8::MAX;
+
+/// AE's title of Reveal Project on this platform.
+pub(crate) fn reveal_project_title() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Reveal Project in Finder"
+    } else {
+        "Reveal Project in Explorer"
+    }
 }
 
 use Entry::*;
@@ -96,9 +118,40 @@ pub(crate) fn show_with(
     entries: &'static [Entry],
     off: &[&str],
 ) -> Option<&'static str> {
+    show_item(ui, cx, entries, off, ANY)
+}
+
+/// [`show_with`] for a Project item of `kind` ([`COMP`] …): [`Entry::Only`]
+/// entries for other kinds are greyed.
+pub(crate) fn show_item(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    entries: &'static [Entry],
+    off: &[&str],
+    kind: u8,
+) -> Option<&'static str> {
     let mut chosen = None;
     for e in entries {
         match *e {
+            Only(kinds, entry) => {
+                let one = std::slice::from_ref(entry);
+                let r =
+                    ui.add_enabled_ui(kinds & kind != 0, |ui| show_item(ui, cx, one, off, kind));
+                chosen = chosen.or(r.inner);
+            }
+            RevealProject => {
+                let saved = cx
+                    .resources
+                    .get::<bae_ui::files::ProjectFile>()
+                    .is_some_and(|f| f.get().is_some());
+                if ui
+                    .add_enabled(saved, egui::Button::new(tr(reveal_project_title())))
+                    .clicked()
+                {
+                    cx.invoke(bae_ui::action::ids::REVEAL_PROJECT);
+                    ui.close();
+                }
+            }
             Menu(path) => {
                 if let Some(n) = find(path) {
                     catalog_node(ui, cx, n);
@@ -124,7 +177,7 @@ pub(crate) fn show_with(
                 ui.add_enabled(false, egui::Button::new(tr(title)));
             }
             Sub(title, list) => common::submenu(ui, tr(title), &mut |ui| {
-                chosen = chosen.or(show_with(ui, cx, list, off));
+                chosen = chosen.or(show_item(ui, cx, list, off, kind));
             }),
             Own(title) => {
                 if ui
@@ -264,25 +317,30 @@ pub(crate) const PROJECT_BLANK: &[Entry] = &[
     ),
     Menu("File/Import"),
     Menu("File/Import Recent Footage"),
-    Off("Reveal Project in Finder"),
+    RevealProject,
 ];
 
 /// Project panel, right-click on an item (comp, footage, folder: the same menu,
-/// AE greys what does not apply).
+/// AE greys what does not apply to the item: `project.item.comp` / `.footage` /
+/// `.folder`, #600).
 pub(crate) const PROJECT_ITEM: &[Entry] = &[
-    Menu("Composition/Composition Settings..."),
-    Menu("Composition/Open in Essential Graphics"),
+    Only(COMP, &Menu("Composition/Composition Settings...")),
+    Only(COMP, &Menu("Composition/Open in Essential Graphics")),
     As("New Comp from Selection", "File/New Comp from Selection..."),
     Off("Replace with Precomp"),
-    Menu("File/Create Proxy"),
-    Menu("File/Set Proxy"),
-    Menu("File/Import"),
-    Menu("File/Import Recent Footage"),
-    Menu("File/Interpret Footage"),
-    Menu("File/Replace Footage"),
-    Menu("File/Reload Footage"),
+    Only(COMP, &Menu("File/Create Proxy")),
+    Only(COMP, &Menu("File/Set Proxy")),
+    // AE greys Import with a comp selected.
+    Only(FOOTAGE | FOLDER | SOLID, &Menu("File/Import")),
+    Only(
+        FOOTAGE | FOLDER | SOLID,
+        &Menu("File/Import Recent Footage"),
+    ),
+    Only(FOOTAGE, &Menu("File/Interpret Footage")),
+    Only(FOOTAGE, &Menu("File/Replace Footage")),
+    Only(FOOTAGE, &Menu("File/Reload Footage")),
     Menu("File/License..."),
-    Menu("File/Reveal in Explorer"),
+    Only(FOOTAGE, &Menu("File/Reveal in Explorer")),
     Menu("File/Reveal in Bridge"),
     Sub("Reveal in Composition", &[]),
     Off("Solids Folder"),

@@ -270,6 +270,9 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => bae_prefs::PrefsStore::default(),
     });
     app.insert_resource(prefs.clone());
+    let project_file = bae_ui::files::ProjectFile::default();
+    project_file.set(document.location().map(std::path::Path::to_owned));
+    app.insert_resource(project_file);
     crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());
@@ -601,6 +604,11 @@ impl Shell {
                 return;
             }
             ids::ABOUT => self.workspace.show_about(),
+            ids::REVEAL_PROJECT => {
+                if let Some(path) = self.document.location() {
+                    bae_platform::reveal(path);
+                }
+            }
             bae_ui::settings::ACTION => self
                 .workspace
                 .show_settings(inv.params.get("page").and_then(|p| p.as_str())),
@@ -615,6 +623,9 @@ impl Shell {
                 );
                 // A save or another project restarts the auto-save interval.
                 self.autosave.reset();
+                if let Some(file) = self.app.resource::<bae_ui::files::ProjectFile>() {
+                    file.set(self.document.location().map(std::path::Path::to_owned));
+                }
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
