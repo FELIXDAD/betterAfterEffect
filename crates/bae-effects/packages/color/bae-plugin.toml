@@ -1,0 +1,191 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "cc-color-neutralizer"
+name = "CC Color Neutralizer"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["CS Color Neutralizer"]
+shader = "shaders/cc_color_neutralizer.wgsl"
+
+[[effect.param]]
+id = 1
+key = "shadows_unbalance"
+type = "color"
+name = "Shadows Unbalance"
+default = [0, 0, 0, 1]
+
+[[effect.param]]
+id = 2
+key = "shadows"
+type = "group"
+name = "Shadows"
+end_id = 6
+
+[[effect.param]]
+id = 3
+key = "red_shadows"
+type = "float"
+name = "Red - Shadows"
+group = "shadows"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 4
+key = "green_shadows"
+type = "float"
+name = "Green - Shadows"
+group = "shadows"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 5
+key = "blue_shadows"
+type = "float"
+name = "Blue - Shadows"
+group = "shadows"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 7
+key = "midtones_unbalance"
+type = "color"
+name = "Midtones Unbalance"
+default = [0.498039, 0.498039, 0.498039, 1]
+
+[[effect.param]]
+id = 8
+key = "midtones"
+type = "group"
+name = "Midtones"
+end_id = 12
+
+[[effect.param]]
+id = 9
+key = "red_midtones"
+type = "float"
+name = "Red - Midtones"
+group = "midtones"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 10
+key = "green_midtones"
+type = "float"
+name = "Green - Midtones"
+group = "midtones"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 11
+key = "blue_midtones"
+type = "float"
+name = "Blue - Midtones"
+group = "midtones"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 13
+key = "highlights_unbalance"
+type = "color"
+name = "Highlights Unbalance"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 14
+key = "highlights"
+type = "group"
+name = "Highlights"
+end_id = 18
+
+[[effect.param]]
+id = 15
+key = "red_highlights"
+type = "float"
+name = "Red - Highlights"
+group = "highlights"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 16
+key = "green_highlights"
+type = "float"
+name = "Green - Highlights"
+group = "highlights"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 17
+key = "blue_highlights"
+type = "float"
+name = "Blue - Highlights"
+group = "highlights"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 19
+key = "pinning"
+type = "float"
+name = "Pinning"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 20
+key = "blend_w_original"
+type = "float"
+name = "Blend w. Original"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 21
+key = "special"
+type = "group"
+name = "Special"
+end_id = 25
+
+[[effect.param]]
+id = 22
+key = "view"
+type = "popup"
+name = "View"
+group = "special"
+default = 1
+choices = ["Final Result", "Correction B to W", "Correction Stair"]
+
+[[effect.param]]
+id = 23
+key = "black_point"
+type = "float"
+name = "Black Point"
+group = "special"
+default = 0
+range = [0, 49.900002]
+
+[[effect.param]]
+id = 24
+key = "white_point"
+type = "float"
+name = "White Point"
+group = "special"
+default = 100
+range = [50.099998, 100]

@@ -338,7 +338,7 @@ pub(super) fn render(
         - 1;
     let engine = Engine::get(&rt)?;
     let advance = engine.advance[advance].clone();
-    let mut frame = surface::frame(scene, input, roi, maps);
+    let mut frame = surface::frame(kind, scene, input, roi, maps);
     let controls = scene.controls(kind, seed);
     let config_offset = rt.uniform(&controls.bytes);
     let config = wgpu::BindGroupEntry {

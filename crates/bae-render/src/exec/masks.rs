@@ -357,12 +357,14 @@ pub(super) fn encode(
     // Encode: per page coverage, resolve + x feather, y feather; then the
     // accumulators.
     let dummy = ctx.pipelines.dummy.clone();
+    let masks = ctx.pipelines.masks();
     let mut run = |ctx: &mut ExecCtx<'_>,
                    target: &GpuImage,
                    sources: &[&wgpu::TextureView],
                    draws: &[Draw],
                    edges_pass: bool| {
-        let pipelines = ctx.pipelines.masks(device);
+        let mut slot = masks.lock();
+        let pipelines = slot.get_or_insert_with(|| crate::gpu::MaskPipelines::new(device));
         let groups: Vec<wgpu::BindGroup> = sources
             .iter()
             .map(|view| {
