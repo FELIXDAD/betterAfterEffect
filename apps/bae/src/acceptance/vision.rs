@@ -37,7 +37,9 @@ fn roto_brush_layer_strokes_and_undo() {
         Modifiers::ALT,
     );
     let both = read(&h).unwrap();
-    assert!(both[fg.len()..].chunks_exact(6).all(|s| s[1] < 0.) && both.len() > fg.len());
+    assert!(both.len() > fg.len());
+    let (background, tail) = both[fg.len()..].as_chunks::<6>();
+    assert!(tail.is_empty() && background.iter().all(|s| s[1] < 0.));
     let (modifiers, key_z) = cmd(Key::Z);
     key(&mut h, modifiers, key_z);
     assert_eq!(read(&h), Some(fg));
