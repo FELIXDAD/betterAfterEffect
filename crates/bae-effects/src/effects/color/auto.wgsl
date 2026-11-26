@@ -33,6 +33,9 @@ fn auto_histogram(@builtin(global_invocation_id) id: vec3u, @builtin(workgroup_i
             let c = fx_load(src, u.image, vec2i(vec2u(x,y)), true);
             let rgb = vec3u(round(saturate(c.rgb) * 255.0));
             if u.mode==5u {
+                // The average colour of what is visible: a transparent pixel's
+                // colour is undefined.
+                if c.a<=0.0 { continue; }
                 let bin=u32(round(fx_luma(vec3f(rgb))));
                 atomicAdd(&counts[bin],rgb.r);
                 atomicAdd(&counts[256u+bin],rgb.g);
@@ -40,9 +43,13 @@ fn auto_histogram(@builtin(global_invocation_id) id: vec3u, @builtin(workgroup_i
                 atomicAdd(&counts[768u+bin],1u);
                 continue;
             }
-            atomicAdd(&counts[rgb.r], 1u);
-            atomicAdd(&counts[256u + rgb.g], 1u);
-            atomicAdd(&counts[512u + rgb.b], 1u);
+            // Color Link (mode 4) averages the colour of what is visible; the
+            // alpha histogram still counts every pixel.
+            if u.mode != 4u || c.a > 0.0 {
+                atomicAdd(&counts[rgb.r], 1u);
+                atomicAdd(&counts[256u + rgb.g], 1u);
+                atomicAdd(&counts[512u + rgb.b], 1u);
+            }
             let y8 = u32(round(dot(vec3f(rgb), vec3f(0.299, 0.587, 0.114))));
             if u.mode == 2u {
                 let low = min(rgb.r, min(rgb.g, rgb.b));

@@ -662,17 +662,17 @@ const LAYER: &[Node] = &[
             it(8912912, "Fit to Comp Width", "motion.layer.fit_to_comp_width", "", B, Done),
             it(8912913, "Fit to Comp Height", "motion.layer.fit_to_comp_height", "", B, Done),
             SEP,
-            it(8912915, "Auto-Orient...", "motion.layer.auto_orient", "", E, Todo),
+            it(8912915, "Auto-Orient...", "motion.layer.auto_orient", "", E, Done),
         ],
     ),
     sub(
         "Time",
         &[
-            it(1966081, "Enable Time Remapping", "motion.layer.enable_time_remapping", "", B, Todo),
-            it(1966082, "Time-Reverse Layer", "motion.layer.time_reverse_layer", "", B, Todo),
-            it(1966083, "Time Stretch...", "motion.layer.time_stretch", "", E, Todo),
-            it(1966084, "Freeze Frame", "motion.layer.freeze_frame", "", B, Todo),
-            it(1966085, "Freeze On Last Frame", "motion.layer.freeze_on_last_frame", "", B, Todo),
+            it(1966081, "Enable Time Remapping", "motion.layer.enable_time_remapping", "", B, Done),
+            it(1966082, "Time-Reverse Layer", "motion.layer.time_reverse_layer", "", B, Done),
+            it(1966083, "Time Stretch...", "motion.layer.time_stretch", "", E, Done),
+            it(1966084, "Freeze Frame", "motion.layer.freeze_frame", "", B, Done),
+            it(1966085, "Freeze On Last Frame", "motion.layer.freeze_on_last_frame", "", B, Done),
             it(1966086, "Align Video to Data", "motion.layer.align_video_to_data", "", B, Later),
         ],
     ),
@@ -685,7 +685,7 @@ const LAYER: &[Node] = &[
         ],
     ),
     it(393231, "3D Layer", "motion.layer.switch", r#"{"switch":"three_d"}"#, B, Done),
-    it(393232, "Guide Layer", "motion.layer.switch", r#"{"switch":"guide"}"#, B, Todo),
+    it(393232, "Guide Layer", "motion.layer.switch", r#"{"switch":"guide"}"#, B, Done),
     it(393233, "Environment Layer", "motion.layer.switch", r#"{"switch":"environment"}"#, B, Later),
     sub(
         "Markers",
@@ -697,7 +697,7 @@ const LAYER: &[Node] = &[
         ],
     ),
     SEP,
-    it(393236, "Preserve Transparency", "motion.layer.switch", r#"{"switch":"preserve_transparency"}"#, B, Todo),
+    it(393236, "Preserve Transparency", "motion.layer.switch", r#"{"switch":"preserve_transparency"}"#, B, Done),
     sub(
         "Blending Mode",
         &[
@@ -867,8 +867,8 @@ const EFFECT: &[Node] = &[
 #[rustfmt::skip]
 const ANIMATION: &[Node] = &[
     it(851969, "Track in Boris FX Mocha", "motion.anim.track_in_boris_fx_mocha", "", B, Adobe),
-    it(851970, "Save Animation Preset...", "motion.anim.save_animation_preset", "", E, Later),
-    it(851971, "Apply Animation Preset...", "motion.anim.apply_animation_preset", "", E, Later),
+    it(851970, "Save Animation Preset...", "motion.anim.save_animation_preset", "", E, Done),
+    it(851971, "Apply Animation Preset...", "motion.anim.apply_animation_preset", "", E, Done),
     sub(
         "Recent Animation Presets",
         &[
@@ -967,7 +967,7 @@ const ANIMATION: &[Node] = &[
     it(851987, "Separate Dimensions", "motion.anim.separate_dimensions", "", B, Todo),
     it(851988, "Track Camera", "motion.anim.track_camera", "", B, Later),
     it(851989, "Warp Stabilizer VFX", "motion.anim.warp_stabilizer_vfx", "", B, Later),
-    it(851990, "Track Motion", "motion.anim.track_motion", "", B, Later),
+    it(851990, "Track Motion", "motion.anim.track_motion", "", B, Done),
     it(851991, "Track Mask", "motion.anim.track_mask", "", B, Later),
     it(851992, "Track this Property", "motion.anim.track_this_property", "", B, Later),
     SEP,

@@ -34,6 +34,10 @@ use crate::renderer::{OUTPUT_PARAMS_SIZE, OutputAlpha, RenderedFrame, Renderer, 
 use crate::request::BitDepth;
 use crate::request::RenderRequest;
 
+/// Rounds of `sampleImage` read-backs per exported frame (samples of layers
+/// whose own pixels come from samples need one more each).
+const MAX_SAMPLE_ROUNDS: usize = 4;
+
 #[cfg(feature = "media")]
 fn export_wav(
     job: &ExportJob<'_>,
@@ -1581,6 +1585,9 @@ pub fn export_frames(
     };
     let mut warnings: Vec<String> = Vec::new();
     let mut stopped = false;
+    // sampleImage: export waits for the sampled pixels (the preview never does).
+    let samples = Arc::new(bae_anim::ImageSamples::new());
+    evaluator.set_image_samples(Some(samples.clone()));
     let result = (|| -> Result<(), RenderError> {
         for (index, (frame, time)) in job.times.iter().enumerate() {
             if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
@@ -1592,7 +1599,23 @@ pub fn export_frames(
                 None => error,
             };
             let t0 = Instant::now();
-            let rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
+            let mut rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
+            // Layers sampled by expressions: drawn, read back, evaluated again (a
+            // few rounds for samples of layers whose own pixels use samples).
+            for _ in 0..MAX_SAMPLE_ROUNDS {
+                if !samples.has_requests() {
+                    break;
+                }
+                let mut frames = crate::eval::EvaluatorFrames {
+                    stage: job.stage,
+                    evaluator: &mut *evaluator,
+                };
+                renderer
+                    .read_samples(&samples, &rc, job.request, Some(&mut frames))
+                    .map_err(at)?;
+                renderer.wait_samples(&samples).map_err(at)?;
+                rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
+            }
             let eval = t0.elapsed();
             let t1 = Instant::now();
             // Effects reading other frames evaluate them with the same evaluator.
