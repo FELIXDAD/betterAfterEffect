@@ -486,7 +486,8 @@ use egui_kittest::kittest::Queryable as _;
 // ---- Retest of #109 / #112 / #117 / #118 (dev 763eaad) ----
 
 fn render_queue_open(h: &Ui) -> bool {
-    h.query_by_label("Render").is_some()
+    h.query_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+        .is_some()
 }
 
 #[test]

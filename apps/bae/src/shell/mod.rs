@@ -235,13 +235,30 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     let workbench_state = loaded.map(|l| l.value.0).unwrap_or_default();
     let mut document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
     document.add_module_commands(&app);
+    let prefs = Arc::new(match &dirs {
+        Some(dirs) if global.smoke_test.is_none() => {
+            bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
+        }
+        _ => bae_prefs::PrefsStore::default(),
+    });
     // `bae <project>`: open it now. One project at a time, like AE.
     let mut startup_error = None;
-    if let Some(path) = global.open.first() {
+    let settings = prefs.current();
+    let startup = global
+        .open
+        .first()
+        .map(|p| p.as_path())
+        .or_else(|| files::template_path(&settings));
+    if let Some(path) = startup {
         if global.open.len() > 1 {
             tracing::warn!("only the first project is opened: {}", path.display());
         }
-        match document.open(path) {
+        let result = if global.open.is_empty() {
+            Document::load_template(path).map(|opened| document.replace(opened))
+        } else {
+            document.open(path)
+        };
+        match result {
             Ok(()) => {
                 #[cfg(target_os = "macos")]
                 if global.smoke_test.is_none()
@@ -269,14 +286,6 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             }
         }
     }
-    // Preferences: read from the config folder; smoke tests use the defaults and
-    // never write them.
-    let prefs = Arc::new(match &dirs {
-        Some(dirs) if global.smoke_test.is_none() => {
-            bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
-        }
-        _ => bae_prefs::PrefsStore::default(),
-    });
     app.insert_resource(prefs.clone());
     let project_file = bae_ui::files::ProjectFile::default();
     project_file.set(document.location().map(std::path::Path::to_owned));
@@ -285,6 +294,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());
     let mut workspace = Workspace::new(&mut app, workbench_state);
+    workspace.restore_project_workspace(&document);
     workspace.set_extra_commands(document.command_titles());
     if first_run {
         workspace.show_role_picker();
@@ -632,6 +642,7 @@ impl Shell {
                 let outcome = crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.document,
+                    &mut self.workspace,
                     &mut *dialogs,
                     &inv,
                 );
@@ -755,13 +766,15 @@ impl Shell {
                     reveal(&dirs.config_file(bae_prefs::FILE_NAME));
                 }
             } else if let Some(key) = request.strip_prefix("choose:") {
-                let mut dialog = rfd::FileDialog::new();
-                if let Some(view) = &self.view {
-                    dialog = dialog.set_parent(&*view.window);
-                }
                 let picked = if key == "project.project_template" {
-                    dialog.add_filter("BAE", &["bae", "baez"]).pick_file()
+                    self.dialogs()
+                        .pick_project()
+                        .map(|p| crate::document::project_path(&p))
                 } else {
+                    let mut dialog = rfd::FileDialog::new();
+                    if let Some(view) = &self.view {
+                        dialog = dialog.set_parent(&*view.window);
+                    }
                     dialog.pick_folder()
                 };
                 if let Some(path) = picked {
@@ -885,7 +898,12 @@ impl Shell {
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         if self.smoke.is_none() {
             let mut dialogs = self.dialogs();
-            if !crate::view_state::confirm_quit(&self.app, &mut self.document, &mut *dialogs) {
+            if !crate::view_state::confirm_quit(
+                &self.app,
+                &mut self.document,
+                &self.workspace,
+                &mut *dialogs,
+            ) {
                 self.request_redraw();
                 return;
             }
