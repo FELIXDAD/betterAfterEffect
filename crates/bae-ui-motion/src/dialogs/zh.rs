@@ -127,9 +127,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("% of composition", "合成的 %"),
     ("in", "英寸"),
     ("mm", "毫米"),
-    ("Width: {pct}% of comp", "宽度：合成的 {pct}%"),
-    ("Height: {pct}% of comp", "高度：合成的 {pct}%"),
-    ("Frame Aspect Ratio: {ratio}", "画面长宽比：{ratio}"),
+    ("{pct}% of comp", "合成的 {pct}%"),
+    (
+        "Lock Aspect Ratio to {w}:{h} ({ratio})",
+        "将长宽比锁定为 {w}:{h} ({ratio})",
+    ),
     ("Make Comp Size", "制作合成大小"),
     ("Solid Color", "纯色颜色"),
     (
@@ -269,27 +271,28 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Renderer:", "渲染器:"),
     ("Renderer", "渲染器"),
     ("Classic 3D", "经典 3D"),
-    ("Cinema 4D", "CINEMA 4D"),
+    ("Cinema 4D", "Cinema 4D"),
     ("Advanced 3D", "高级 3D"),
     ("Options...", "选项..."),
     ("About...", "关于..."),
+    ("Enabled", "启用"),
+    ("Disabled", "禁用"),
+    ("Save Custom Preset", "保存自定义预设"),
+    ("Delete Custom Preset", "删除自定义预设"),
+    ("Choose Name", "选择名称"),
+    ("Custom Resolution", "自定义分辨率"),
+    ("Render every", "渲染每"),
+    ("pixel(s) horizontally.", "个像素（水平）。"),
+    ("pixel(s) vertically.", "个像素（垂直）。"),
     (
-        "Extruded text and shapes, reflections; slower than Classic 3D.",
-        "可以凸出文本和形状、反射；比经典 3D 慢。",
-    ),
-    (
-        "GPU-accelerated 3D with lights, shadows and 3D models.",
-        "GPU 加速的 3D，支持灯光、阴影和 3D 模型。",
-    ),
-    (
-        "Layers as planes in 3D space; supports all 2D features.",
-        "图层是 3D 空间中的平面；支持所有 2D 功能。",
+        "{w} x {h}, {size} per 8bpc frame",
+        "{w} x {h}，{size}（每 8bpc 帧）",
     ),
     ("Square Pixels", "方形像素"),
     ("D1/DV NTSC (0.91)", "D1/DV NTSC (0.91)"),
-    ("D1/DV NTSC Widescreen (1.21)", "D1/DV NTSC 宽银幕 (1.21)"),
+    ("D1/DV NTSC Widescreen (1.21)", "D1/DV NTSC 宽银幕  (1.21)"),
     ("D1/DV PAL (1.09)", "D1/DV PAL (1.09)"),
-    ("D1/DV PAL Widescreen (1.46)", "D1/DV PAL 宽银幕 (1.46)"),
+    ("D1/DV PAL Widescreen (1.46)", "D1/DV PAL 宽银幕  (1.46)"),
     ("Anamorphic 2:1 (2)", "变形 2:1 (2)"),
     (
         "HDV 1080/DVCPRO HD 720 (1.33)",
@@ -305,6 +308,72 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Cineon Full", "Cineon 完整"),
     ("Film (2K)", "胶片 (2K)"),
     ("Film (4K)", "胶片 (4K)"),
+    // The 3D Renderer and Advanced tabs' texts (AE 26's Chinese).
+    (
+        super::comp_settings::MOTION_BLUR_HELP,
+        "“每帧样本”控制经典 3D 图层、形状图层和特定效果的运动模糊样本数。需要时，二维图层运动会自动使用更大的每帧样本，最高可达“自适应采样限制”指定的值。",
+    ),
+    (
+        super::comp_settings::RENDERER_HELP,
+        "所选渲染器确定合成中的 3D 图层可以使用的功能，以及它们如何与 2D 图层交互。",
+    ),
+    (
+        super::comp_settings::ABOUT_CLASSIC,
+        "Classic 3D 是传统的 After Effects 渲染器。图层可以作为平面放置在 3D 空间中。",
+    ),
+    (
+        super::comp_settings::ABOUT_ADVANCED,
+        "3D 渲染器支持 3D 模型、环境光、阴影以及文本和形状的凸出。",
+    ),
+    (
+        super::comp_settings::ABOUT_C4D,
+        "Cinema 4D 渲染器可以启用挤压文本和形状。",
+    ),
+    (
+        super::comp_settings::ENABLED_ADVANCED,
+        "• 3D 模型和素材
+• 环境光和阴影
+• 基于物理的 3D 图层渲染
+• 拉伸和斜角 3D 文本和形状
+• 文本/形状斜角和侧面上的素材覆盖
+• 弯曲素材图层
+• 仅接受阴影
+• 聚光和平行光的阴影",
+    ),
+    (
+        super::comp_settings::DISABLED_ADVANCED,
+        "• 效果、混合模式、图层样式、跟踪遮罩、蒙版并保留以下对象的底层透明度:
+    • 3D 模型
+    • 3D 文本和形状图层
+    • 折叠的 3D 预合成图层
+    • 连续栅格化 3D 图层
+• 运动模糊和景深
+• 光透射
+• 点光和环境光的阴影",
+    ),
+    (
+        super::comp_settings::ENABLED_C4D,
+        "• AE 光和阴影
+• 挤压和斜角 3D 文本和形状
+• 文本/形状斜角和侧面上的素材覆盖
+• 弯曲素材图层
+• 环境图层（仅在反射中）
+• 使用 3D 通道传递深度效果（需要预合成）",
+    ),
+    (
+        super::comp_settings::DISABLED_C4D,
+        "• 3D 模型和素材
+• 环境光
+• 基于物理的 3D 图层渲染
+• 效果、混合模式、图层样式、跟踪遮罩、蒙版并保留以下对象的底层透明度：
+    • 3D 模型
+    • 3D 文本和形状图层
+    • 折叠的 3D 预合成图层
+    • 连续栅格化 3D 图层
+• 运动模糊和景深
+• 光传输
+• 仅接受阴影",
+    ),
     // Layer ▸ Transform value dialogs (AE 26's Chinese).
     ("X:", "X:"),
     ("Y:", "Y:"),
@@ -324,4 +393,28 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Center Anchor Point in Layer Content",
         "在图层内容中居中放置锚点",
     ),
+    // Layer ▸ Mask (AE 26's Chinese).
+    ("Mask Mode", "蒙版模式"),
+    ("Mask Shape...", "蒙版形状..."),
+    ("Mask Feather...", "蒙版羽化..."),
+    ("Mask Opacity...", "蒙版不透明度..."),
+    ("Mask Expansion...", "蒙版扩展..."),
+    ("Reset Mask", "重置蒙版"),
+    ("Remove Mask", "移除蒙版"),
+    ("Remove All Masks", "移除所有蒙版"),
+    ("Inverted", "反转"),
+    ("Mask Locked", "蒙版锁定"),
+    ("Unlock All Masks", "解锁所有蒙版"),
+    ("Lock Other Masks", "锁定其他蒙版"),
+    ("Mask Shape", "蒙版形状"),
+    ("Horizontal:", "水平:"),
+    ("Vertical:", "垂直:"),
+    ("Expansion:", "扩展:"),
+    ("Bounding Box", "定界框"),
+    ("Top:", "顶部:"),
+    ("Left:", "左侧:"),
+    ("Right:", "右侧:"),
+    ("Bottom:", "底部:"),
+    ("Shape", "形状"),
+    ("Reset To:", "重置为:"),
 ];

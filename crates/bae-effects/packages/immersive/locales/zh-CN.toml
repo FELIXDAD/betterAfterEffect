@@ -1,0 +1,140 @@
+[effect.vr-converter]
+name = "VR 转换器"
+keywords = ["沉浸式视频", "VR 转换器"]
+
+[effect.vr-converter.params]
+input = "输入"
+output = "输出"
+output_frame_width = "输出帧宽度"
+field_of_view = "视角"
+re_orient_camera_view = "重定向摄像机视图"
+tilt_x_axis = "倾斜 (X 轴)"
+pan_y_axis = "平移 (Y 轴)"
+roll_z_axis = "滚动 (Z 轴)"
+invert_rotation = "反旋转"
+
+[effect.vr-converter.choices]
+input = ["2D 源", "立方图 4:3", "球形图", "球面投影 2:1", "鱼眼 (球幕)", "立方图 Facebook 3:2", "立方图 Pano2VR 3:2", "立方图 GearVR 6:1", "球面投影 16:9"]
+output = ["立方图 4:3", "球形图", "球面投影 2:1", "鱼眼 (球幕)", "立方图 Facebook 3:2", "立方图 Pano2VR 3:2", "立方图 GearVR 6:1", "球面投影 16:9"]
+
+[effect.vr-plane-to-sphere]
+name = "VR 平面到球面"
+keywords = ["沉浸式视频", "VR 平面到球面"]
+
+[effect.vr-plane-to-sphere.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+scale_degrees = "缩放 (度)"
+stereo_disparity_degrees = "立体视差 (度)"
+feather = "羽化"
+rotate_source = "旋转源"
+source_tilt_x_axis = "源倾斜 (X 轴)"
+source_pan_y_axis = "源平移 (Y 轴)"
+source_roll_z_axis = "源滚动 (Z 轴)"
+rotate_projection = "旋转投影"
+projection_tilt_x_axis = "投影倾斜 (X 轴)"
+projection_pan_y_axis = "投影平移 (Y 轴)"
+projection_roll_z_axis = "投影滚动 (Z 轴)"
+
+[effect.vr-plane-to-sphere.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-rotate-sphere]
+name = "VR 旋转球面"
+keywords = ["沉浸式视频", "VR 旋转球面"]
+
+[effect.vr-rotate-sphere.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+tilt_x_axis = "倾斜 (X 轴)"
+pan_y_axis = "平移 (Y 轴)"
+roll_z_axis = "滚动 (Z 轴)"
+invert_rotation = "反旋转"
+
+[effect.vr-rotate-sphere.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-sphere-to-plane]
+name = "VR 球面到平面"
+keywords = ["沉浸式视频", "VR 球面到平面"]
+
+[effect.vr-sphere-to-plane.params]
+input_format = "输入格式"
+output_frame_width = "输出帧宽度"
+output_frame_aspect_ratio = "输出帧速率"
+rotate_projection = "旋转投影"
+projection_tilt_x_axis = "投影倾斜 (X 轴)"
+projection_pan_y_axis = "投影倾斜 (Y 轴)"
+projection_roll_z_axis = "投影倾斜 (Z 轴)"
+invert_rotation = "反旋转"
+
+[effect.vr-sphere-to-plane.choices]
+input_format = ["立方图", "球形图", "球面投影"]
+output_frame_aspect_ratio = ["1:1", "4:3", "16:9", "16:10", "不变"]
+
+[effect.vr-blur]
+name = "VR 模糊"
+keywords = ["沉浸式视频", "VR 模糊"]
+
+[effect.vr-blur.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+blurriness = "模糊度"
+
+[effect.vr-blur.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-de-noise]
+name = "VR 降噪"
+keywords = ["沉浸式视频", "VR 降噪"]
+
+[effect.vr-de-noise.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+noise_type = "杂色类型"
+noise_level = "杂色级别"
+
+[effect.vr-de-noise.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+noise_type = ["随机赋值", "盐和胡椒"]
+
+[effect.vr-glow]
+name = "VR 发光"
+keywords = ["沉浸式视频", "VR 发光"]
+
+[effect.vr-glow.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+luma_threshold = "亮度阈值"
+glow_radius = "发光半径"
+glow_brightness = "发光亮度"
+glow_saturation = "发光饱和度"
+use_tint_color = "使用色调颜色"
+tint_color = "色调颜色"
+
+[effect.vr-glow.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-sharpen]
+name = "VR 锐化"
+keywords = ["沉浸式视频", "VR 锐化"]
+
+[effect.vr-sharpen.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+sharpen_amount = "锐化量"
+
+[effect.vr-sharpen.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]

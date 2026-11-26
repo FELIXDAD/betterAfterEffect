@@ -260,7 +260,7 @@ fn space_with_nothing_focused_plays_and_stops() {
 fn space_on_a_focused_button_presses_it_and_does_not_play() {
     let mut h = comp_with_solid();
     // The Render Queue's "Remove" button gets keyboard focus (Tab), then Space.
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     queue_control(&h, 1, "Remove").expect("Remove").focus();
     settle(&mut h);
@@ -489,7 +489,7 @@ fn enter_renames_the_topmost_selected_layer() {
 #[test]
 fn enter_on_a_focused_button_does_not_start_a_rename() {
     let mut h = comp_with_solid();
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     h.state().session().lock().selected_layers = h.state().layers();
     queue_control(&h, 1, "Remove").expect("Remove").focus();
@@ -634,6 +634,33 @@ fn locked_layers_are_skipped_by_clicks_ranges_select_all_and_delete() {
         wrong.push("Bring to Front moves the locked layer");
     }
     assert!(wrong.is_empty(), "locked layer: {wrong:?}");
+}
+
+/// F4 swaps the Switches and Modes columns and Shift+F4 shows or hides Parent
+/// & Link, whichever panel is in front (#459): keys through the app's keymap.
+#[test]
+fn f4_and_shift_f4_toggle_timeline_columns_from_any_panel() {
+    let mut h = comp_with_solid();
+    let has = |h: &Ui, t: &str| find_text(h, t).is_some();
+    assert!(!has(&h, "Mode"), "AE starts with Switches");
+    assert!(has(&h, "Parent & Link"));
+    key(&mut h, Modifiers::NONE, Key::F4);
+    settle(&mut h);
+    assert!(has(&h, "Mode"), "F4 shows Modes");
+    key(&mut h, Modifiers::SHIFT, Key::F4);
+    settle(&mut h);
+    assert!(!has(&h, "Parent & Link"), "Shift+F4 hides Parent & Link");
+    // With the Composition viewer in front.
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::action::ids::OPEN_PANEL,
+        serde_json::json!({ "id": "composition" }),
+    ));
+    settle(&mut h);
+    key(&mut h, Modifiers::NONE, Key::F4);
+    key(&mut h, Modifiers::SHIFT, Key::F4);
+    settle(&mut h);
+    assert!(!has(&h, "Mode"), "F4 from the viewer");
+    assert!(has(&h, "Parent & Link"), "Shift+F4 from the viewer");
 }
 
 /// Home / End / PageUp / PageDown / Shift+PageDown with a timeline layer just

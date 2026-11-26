@@ -161,6 +161,33 @@ impl FileDialogs for Native {
         }
     }
 
+    fn confirm_revert(&mut self) -> bool {
+        let question =
+            tr("Revert the project to the last saved version? All changes will be lost.");
+        let dialog = self.message(rfd::MessageLevel::Warning);
+        #[cfg(target_os = "macos")]
+        {
+            let revert = tr("Revert").to_owned();
+            let result = dialog
+                .set_title(question)
+                .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                    revert.clone(),
+                    tr("Cancel").to_owned(),
+                ))
+                .show();
+            matches!(result, rfd::MessageDialogResult::Custom(c) if c == revert)
+        }
+        #[cfg(windows)]
+        {
+            let result = dialog
+                .set_title(bae_platform::APP_NAME)
+                .set_description(question)
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show();
+            result == rfd::MessageDialogResult::Ok
+        }
+    }
+
     fn save_dialog_confirms_replace(&self) -> bool {
         // In BAE.app, `.bae` is a package (Info.plist), so the save panel treats
         // it as a file and asks before replacing; a bare binary does not.
@@ -262,5 +289,20 @@ impl bae_ui::files::FilePicker for NativePicker {
     #[cfg(not(any(target_os = "macos", windows)))]
     fn open(&self, _request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
         Vec::new()
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    fn save(&self, request: &bae_ui::files::SaveRequest) -> Option<PathBuf> {
+        let mut dialog = Native::new(self.parent.clone())
+            .files()
+            .set_title(&request.title)
+            .set_file_name(&request.file_name);
+        if let Some(dir) = &request.directory {
+            dialog = dialog.set_directory(dir);
+        }
+        for (label, extensions) in &request.filters {
+            dialog = dialog.add_filter(label, extensions);
+        }
+        dialog.save_file()
     }
 }

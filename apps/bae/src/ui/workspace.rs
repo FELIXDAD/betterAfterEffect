@@ -259,6 +259,11 @@ impl Workspace {
         doc: &Document,
         resources: &Resources,
     ) -> Vec<Invocation> {
+        if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
+            let mut s = session.lock();
+            s.sync_playback(doc.stage());
+            s.tick(std::time::Instant::now());
+        }
         let title = doc.title();
         let cx = WorkbenchContext {
             stage: doc.stage(),

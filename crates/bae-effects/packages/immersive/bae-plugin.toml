@@ -1,0 +1,712 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "vr-converter"
+name = "VR Converter"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Converter"]
+shader = "shaders/vr_converter.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/projection.wgsl"]
+
+[effect.roi]
+whole_input = true
+size = ["params.output_frame_width", "params.output_frame_width * ((params.output == 1) * 0.75 + (params.output == 2 || params.output == 4) + (params.output == 3) * 0.5 + (params.output == 5 || params.output == 6) * 2 / 3 + (params.output == 7) / 6 + (params.output == 8) * 9 / 16)"]
+
+[[effect.pass]]
+entry = "vr_converter"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 2
+key = "input"
+type = "popup"
+name = "Input"
+default = 1
+choices = ["2D Source", "Cube-map 4:3", "Sphere-map", "Equirectangular 2:1", "Fisheye (FullDome)", "Cube-map Facebook 3:2", "Cube-map Pano2VR 3:2", "Cube-map GearVR 6:1", "Equirectangular 16:9"]
+
+[[effect.param]]
+id = 3
+key = "output"
+type = "popup"
+name = "Output"
+default = 3
+choices = ["Cube-map 4:3", "Sphere-map", "Equirectangular 2:1", "Fisheye (FullDome)", "Cube-map Facebook 3:2", "Cube-map Pano2VR 3:2", "Cube-map GearVR 6:1", "Equirectangular 16:9"]
+
+[[effect.param]]
+id = 4
+key = "output_frame_width"
+type = "int"
+name = "Output Frame Width"
+default = 640
+range = [256, 16384]
+
+[[effect.param]]
+id = 10
+key = "field_of_view"
+type = "angle"
+name = "Field of View"
+default = 180
+
+[[effect.param]]
+id = 5
+key = "re_orient_camera_view"
+type = "group"
+name = "Re-orient Camera View"
+end_id = 9
+
+[[effect.param]]
+id = 6
+key = "tilt_x_axis"
+type = "angle"
+name = "Tilt (X Axis)"
+group = "re_orient_camera_view"
+default = 0
+
+[[effect.param]]
+id = 7
+key = "pan_y_axis"
+type = "angle"
+name = "Pan (Y Axis)"
+group = "re_orient_camera_view"
+default = 0
+
+[[effect.param]]
+id = 8
+key = "roll_z_axis"
+type = "angle"
+name = "Roll (Z Axis)"
+group = "re_orient_camera_view"
+default = 0
+
+[[effect.param]]
+id = 11
+key = "invert_rotation"
+type = "checkbox"
+name = "Invert Rotation"
+group = "re_orient_camera_view"
+default = false
+
+[[effect]]
+id = "vr-plane-to-sphere"
+name = "VR Plane to Sphere"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Project 2D"]
+shader = "shaders/vr_plane_to_sphere.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl"]
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_plane_to_sphere"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 16
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 14
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 17
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 18
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "scale_degrees"
+type = "float"
+name = "Scale (Degrees)"
+default = 60
+range = [0, 180]
+
+[[effect.param]]
+id = 3
+key = "stereo_disparity_degrees"
+type = "float"
+name = "Stereo Disparity (Degrees)"
+default = 0
+range = [0, 45]
+
+[[effect.param]]
+id = 15
+key = "feather"
+type = "float"
+name = "Feather"
+default = 10
+range = [0, 100]
+
+[[effect.param]]
+id = 4
+key = "rotate_source"
+type = "group"
+name = "Rotate Source"
+end_id = 8
+
+[[effect.param]]
+id = 5
+key = "source_tilt_x_axis"
+type = "angle"
+name = "Source Tilt (X Axis)"
+group = "rotate_source"
+default = 0
+
+[[effect.param]]
+id = 6
+key = "source_pan_y_axis"
+type = "angle"
+name = "Source Pan (Y Axis)"
+group = "rotate_source"
+default = 0
+
+[[effect.param]]
+id = 7
+key = "source_roll_z_axis"
+type = "angle"
+name = "Source Roll (Z Axis)"
+group = "rotate_source"
+default = 0
+
+[[effect.param]]
+id = 9
+key = "rotate_projection"
+type = "group"
+name = "Rotate Projection"
+end_id = 13
+
+[[effect.param]]
+id = 10
+key = "projection_tilt_x_axis"
+type = "angle"
+name = "Projection Tilt (X Axis)"
+group = "rotate_projection"
+default = 0
+
+[[effect.param]]
+id = 11
+key = "projection_pan_y_axis"
+type = "angle"
+name = "Projection Pan (Y Axis)"
+group = "rotate_projection"
+default = 0
+
+[[effect.param]]
+id = 12
+key = "projection_roll_z_axis"
+type = "angle"
+name = "Projection Roll (Z Axis)"
+group = "rotate_projection"
+default = 0
+
+[[effect]]
+id = "vr-rotate-sphere"
+name = "VR Rotate Sphere"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Rotate Sphere"]
+shader = "shaders/vr_rotate_sphere.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl"]
+identity_when = "params.tilt_x_axis == 0 && params.pan_y_axis == 0 && params.roll_z_axis == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_rotate_sphere"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 7
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 6
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 8
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 9
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "tilt_x_axis"
+type = "angle"
+name = "Tilt (X Axis)"
+default = 0
+
+[[effect.param]]
+id = 3
+key = "pan_y_axis"
+type = "angle"
+name = "Pan (Y Axis)"
+default = 0
+
+[[effect.param]]
+id = 4
+key = "roll_z_axis"
+type = "angle"
+name = "Roll (Z Axis)"
+default = 0
+
+[[effect.param]]
+id = 5
+key = "invert_rotation"
+type = "checkbox"
+name = "Invert Rotation"
+default = false
+
+[[effect]]
+id = "vr-sphere-to-plane"
+name = "VR Sphere to Plane"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Viewer"]
+shader = "shaders/vr_sphere_to_plane.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/projection.wgsl"]
+
+[effect.roi]
+whole_input = true
+size = ["params.output_frame_width", "params.output_frame_width * ((params.output_frame_aspect_ratio == 1) + (params.output_frame_aspect_ratio == 2) * 0.75 + (params.output_frame_aspect_ratio == 3) * 9 / 16 + (params.output_frame_aspect_ratio == 4) * 10 / 16 + (params.output_frame_aspect_ratio == 5) / frame.input_aspect)"]
+
+[[effect.pass]]
+entry = "vr_sphere_to_plane"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 2
+key = "input_format"
+type = "popup"
+name = "Input Format"
+default = 3
+choices = ["Cube-map", "Sphere-map", "Equirectangular"]
+
+[[effect.param]]
+id = 3
+key = "output_frame_width"
+type = "int"
+name = "Output Frame Width"
+default = 640
+range = [256, 16384]
+
+[[effect.param]]
+id = 4
+key = "output_frame_aspect_ratio"
+type = "popup"
+name = "Output Frame Aspect Ratio"
+default = 5
+choices = ["1:1", "4:3", "16:9", "16:10", "Unchanged"]
+
+[[effect.param]]
+id = 5
+key = "rotate_projection"
+type = "group"
+name = "Rotate Projection"
+end_id = 9
+
+[[effect.param]]
+id = 6
+key = "projection_tilt_x_axis"
+type = "angle"
+name = "Projection Tilt (X Axis)"
+group = "rotate_projection"
+default = 0
+
+[[effect.param]]
+id = 7
+key = "projection_pan_y_axis"
+type = "angle"
+name = "Projection Pan (Y Axis)"
+group = "rotate_projection"
+default = 0
+
+[[effect.param]]
+id = 8
+key = "projection_roll_z_axis"
+type = "angle"
+name = "Projection Roll (Z Axis)"
+group = "rotate_projection"
+default = 0
+
+[[effect.param]]
+id = 10
+key = "invert_rotation"
+type = "checkbox"
+name = "Invert Rotation"
+group = "rotate_projection"
+default = false
+
+[[effect]]
+id = "vr-blur"
+name = "VR Blur"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Blur"]
+shader = "shaders/vr_blur.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl", "shaders/cascade.wgsl"]
+identity_when = "params.blurriness == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.texture]]
+name = "a"
+rect = "input"
+
+[[effect.texture]]
+name = "b"
+rect = "input"
+
+[[effect.pass]]
+entry = "vr_blur_fine"
+reads = ["input"]
+writes = "a"
+
+[[effect.pass]]
+entry = "vr_blur_mid"
+reads = ["a"]
+writes = "b"
+
+[[effect.pass]]
+entry = "vr_blur"
+reads = ["b"]
+writes = "output"
+
+[[effect.param]]
+id = 4
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 3
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 5
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 6
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "blurriness"
+type = "float"
+name = "Blurriness"
+default = 0
+range = [0, 400]
+
+[[effect]]
+id = "vr-de-noise"
+name = "VR De-Noise"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Denoise"]
+shader = "shaders/vr_de_noise.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+identity_when = "params.noise_level == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_de_noise"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 5
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 4
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 6
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 7
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "noise_type"
+type = "popup"
+name = "Noise Type"
+default = 1
+choices = ["Random Value", "Salt and Pepper"]
+
+[[effect.param]]
+id = 3
+key = "noise_level"
+type = "float"
+name = "Noise Level"
+default = 0.2
+range = [0, 1]
+
+[[effect]]
+id = "vr-glow"
+name = "VR Glow"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Glow"]
+shader = "shaders/vr_glow.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl", "shaders/cascade.wgsl"]
+identity_when = "params.glow_brightness == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.texture]]
+name = "a"
+rect = "input"
+
+[[effect.texture]]
+name = "b"
+rect = "input"
+
+[[effect.pass]]
+entry = "vr_glow_fine"
+reads = ["input"]
+writes = "a"
+
+[[effect.pass]]
+entry = "vr_glow_mid"
+reads = ["a"]
+writes = "b"
+
+[[effect.pass]]
+entry = "vr_glow"
+reads = ["b", "input"]
+writes = "output"
+
+[[effect.param]]
+id = 9
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 8
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 10
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 11
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "luma_threshold"
+type = "float"
+name = "Luma Threshold"
+default = 0.9
+range = [0, 1]
+
+[[effect.param]]
+id = 3
+key = "glow_radius"
+type = "float"
+name = "Glow Radius"
+default = 100
+range = [0, 400]
+
+[[effect.param]]
+id = 4
+key = "glow_brightness"
+type = "float"
+name = "Glow Brightness"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 5
+key = "glow_saturation"
+type = "float"
+name = "Glow Saturation"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 6
+key = "use_tint_color"
+type = "checkbox"
+name = "Use Tint Color"
+default = false
+
+[[effect.param]]
+id = 7
+key = "tint_color"
+type = "color"
+name = "Tint Color"
+default = [1, 1, 1, 1]
+
+[[effect]]
+id = "vr-sharpen"
+name = "VR Sharpen"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Sharpen"]
+shader = "shaders/vr_sharpen.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+identity_when = "params.sharpen_amount == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_sharpen"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 4
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 3
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 5
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 6
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "sharpen_amount"
+type = "float"
+name = "Sharpen Amount"
+default = 0
+range = [0, 100]
