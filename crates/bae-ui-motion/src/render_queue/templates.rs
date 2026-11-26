@@ -73,6 +73,8 @@ impl Output {
 pub(super) enum Template {
     Render(Span),
     Output(Output),
+    Filename(String),
+    DefaultFilename(String),
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -80,6 +82,8 @@ pub(super) enum Template {
 pub(super) struct Library {
     pub render: BTreeMap<String, Span>,
     pub outputs: BTreeMap<String, Output>,
+    pub names: BTreeMap<String, String>,
+    pub default_name: Option<String>,
 }
 
 impl VersionedSettings for Library {
@@ -106,13 +110,17 @@ impl Store {
             .clone()
     }
 
-    fn save(&self, name: &str, value: &Template) -> Result<(), String> {
+    pub(super) fn save(&self, name: &str, value: &Template) -> Result<(), String> {
         let mut current = self.library.write().unwrap_or_else(|e| e.into_inner());
         let mut library = current
             .as_deref()
             .cloned()
             .ok_or_else(|| tr("Please wait.").to_owned())?;
         match value {
+            Template::Filename(pattern) => {
+                library.names.insert(name.into(), pattern.clone());
+            }
+            Template::DefaultFilename(pattern) => library.default_name = Some(pattern.clone()),
             Template::Render(s) => {
                 library.render.insert(name.into(), s.clone());
             }
@@ -192,6 +200,7 @@ impl NameDialog {
                     let taken = |s: &str| name.eq_ignore_ascii_case(s);
                     let reserved = |s: &str| taken(s) || taken(tr(s));
                     match &self.value {
+                        Template::Filename(_) | Template::DefaultFilename(_) => false,
                         Template::Render(_) => {
                             !RS_TEMPLATES.iter().any(|s| reserved(s))
                                 && !library.render.keys().any(|s| taken(s))

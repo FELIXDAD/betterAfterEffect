@@ -1120,9 +1120,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
         ids::ADD_TO_RENDER_QUEUE => {
-            crate::render_queue::shared(cx.resources)
-                .lock()
-                .add(&info, &crate::render_queue::default_output_dir());
+            crate::render_queue::add_to_queue(cx, &info);
             cx.open_panel("render_queue");
         }
         ids::SAVE_FRAME_AS => {

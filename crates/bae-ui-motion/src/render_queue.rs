@@ -27,7 +27,9 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
+mod filenames;
 mod item_menu;
+pub(crate) use filenames::add as add_to_queue;
 mod templates;
 use item_menu::{ItemAction, LogMode, RenderLog};
 use templates::{Library, NameDialog, Span, Store, Template};
@@ -301,6 +303,7 @@ impl QueueItem {
 
 #[derive(Clone, Debug)]
 pub struct QueueOutput {
+    naming: filenames::Naming,
     template: Option<String>,
     /// Output format.
     pub format: ExportFormat,
@@ -392,6 +395,7 @@ impl RenderQueue {
             rate,
             render_template: None,
             outputs: vec![QueueOutput {
+                naming: filenames::Naming::in_comp_folder(output_dir),
                 template: None,
                 format,
                 output: output.to_string_lossy().into_owned(),
@@ -434,6 +438,7 @@ impl RenderQueue {
                 ))
                 .to_string_lossy()
                 .into_owned();
+            item.outputs[0].naming.pattern = None;
             item.start = f;
             item.end = f;
         }
@@ -478,6 +483,7 @@ impl RenderQueue {
             let mut used = self.output_names();
             for out in &mut copy.outputs {
                 out.output = unique_name(&out.output, &used);
+                out.naming.pattern = None;
                 used.insert(output_key(Path::new(&out.output)));
             }
         }
@@ -498,6 +504,7 @@ impl RenderQueue {
         {
             let mut module = it.outputs[0].clone();
             module.output = unique_name(&module.output, &used);
+            module.naming.pattern = None;
             it.outputs.push(module);
         }
     }
@@ -1025,6 +1032,7 @@ fn reveal_label() -> &'static str {
 pub struct RenderQueuePanel {
     error: Option<String>,
     naming: Option<(u64, Option<usize>, NameDialog)>,
+    file_editor: Option<filenames::Editor>,
 }
 
 impl Panel for RenderQueuePanel {
@@ -1108,6 +1116,7 @@ impl Panel for RenderQueuePanel {
                 .and_then(|i| i.outputs.get_mut(index))
         {
             module.output = path.to_string_lossy().into_owned();
+            module.naming = Default::default();
         }
         true
     }
@@ -1135,6 +1144,15 @@ impl RenderQueuePanel {
         };
         let store = cx.resources.get::<Arc<Store>>();
         let library = store.and_then(|s| s.snapshot());
+        if let (Some(editor), Some(store)) = (&mut self.file_editor, store)
+            && editor.show(ui, cx, store, &queue)
+        {
+            self.file_editor = None;
+        }
+        let project = cx
+            .resources
+            .get::<bae_ui::files::ProjectFile>()
+            .and_then(|p| p.get());
         if let Some((id, module, dialog)) = &mut self.naming
             && let Some(store) = store
             && dialog.show(ui, store)
@@ -1194,6 +1212,7 @@ impl RenderQueuePanel {
                     item,
                     comp.as_ref(),
                     library.as_deref(),
+                    project.as_deref(),
                     &mut remove,
                     &mut cancel,
                     &mut requeue,
@@ -1229,6 +1248,14 @@ impl RenderQueuePanel {
         match open {
             Some((id, QueueLink::RenderSettings)) => crate::dialogs::render_settings(cx, id),
             Some((id, QueueLink::Output(module))) => crate::dialogs::output_module(cx, id, module),
+            Some((_, QueueLink::NameFile(editor))) => self.file_editor = Some(editor),
+            Some((_, QueueLink::DefaultNaming(pattern))) => {
+                if let Some(store) = store
+                    && let Err(e) = store.save("", &Template::DefaultFilename(pattern))
+                {
+                    self.error = Some(e);
+                }
+            }
             Some((id, QueueLink::Make(module, template))) => {
                 self.naming = Some((id, module, NameDialog::new(template)));
             }
@@ -1246,6 +1273,8 @@ enum QueueLink {
     Output(usize),
     File(usize),
     Make(Option<usize>, Template),
+    NameFile(filenames::Editor),
+    DefaultNaming(String),
 }
 
 const CHOOSE_OUTPUT: &str = "motion.render_queue.choose_output";
@@ -1257,6 +1286,7 @@ fn item_ui(
     item: &mut QueueItem,
     comp: Option<&CompInfo>,
     library: Option<&Library>,
+    project: Option<&Path>,
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
@@ -1655,7 +1685,25 @@ fn item_ui(
                         );
                         ui.end_row();
                     }
-                    ui.label(tr("Output To"));
+                    ui.horizontal(|ui| {
+                        ui.label(tr("Output To"));
+                        if let Some(comp) = comp {
+                            filenames::menu(
+                                ui,
+                                id,
+                                index,
+                                module,
+                                &filenames::Context {
+                                    comp,
+                                    start: item.start,
+                                    end: item.end,
+                                    project,
+                                },
+                                library,
+                                open,
+                            );
+                        }
+                    });
                     let target = Path::new(&module.output)
                         .file_name()
                         .map(|p| p.to_string_lossy())
@@ -1790,6 +1838,19 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Render Settings Templates", "渲染设置模板"),
     ("Output Module Templates", "输出模块模板"),
     ("Make Template...", "创建模板..."),
+    ("File Name and Location Templates", "文件名称和位置模板"),
+    ("Comp Name", "合成名称"),
+    ("Comp and Output Module Name", "合成和输出模块名称"),
+    ("Project and Comp Name", "项目和合成名称"),
+    ("Comp Name and Dimensions", "合成名称和尺寸"),
+    ("Comp and Frame Range", "合成和帧范围"),
+    ("Comp Name and Date/Time", "合成名称和日期/时间"),
+    ("Comp Folder and Name", "合成文件夹和名称"),
+    ("Comp Name and Aspect Ratio", "合成名称和长宽比"),
+    ("Render Next to Project File", "项目文件旁边的渲染"),
+    ("Add Property...", "添加属性..."),
+    ("Template:", "模板:"),
+    ("Please wait.", "请稍候。"),
     ("AIFF 48kHz", "AIFF 48kHz"),
     ("Alpha Only", "仅 Alpha"),
     (
@@ -1914,6 +1975,44 @@ mod tests {
             bg_color: [0.0, 0.0, 0.0, 1.0],
             display_start: Time::ZERO,
         }
+    }
+
+    #[test]
+    fn output_names_expand_in_the_selected_module_and_keep_the_folder_stable() {
+        let comp = comp_info("/comps/a", "Main: Shot");
+        let mut queue = RenderQueue::default();
+        let dir = Path::new("render-here");
+        let id = queue.add(&comp, dir);
+        queue.add_output(id);
+        let item = queue.item_mut(id).unwrap();
+        let first = item.outputs[0].output.clone();
+        let module = &mut item.outputs[1];
+        let mut ctx = filenames::Context {
+            comp: &comp,
+            start: 3,
+            end: 8,
+            project: None,
+        };
+        assert!(!ctx.apply(module, "[projectFolder]/[compName].[extension]"));
+        assert!(ctx.apply(module, "[compName]/[width]x[height].[extension]"));
+        let named = module.output.clone();
+        assert_eq!(
+            Path::new(&named),
+            dir.join("Main_ Shot").join("40x24_[####].png")
+        );
+        assert!(ctx.apply(module, "[compName]/[width]x[height].[extension]"));
+        assert_eq!(module.output, named);
+        let project = std::path::absolute("project/Test.bae").unwrap();
+        ctx.project = Some(&project);
+        assert!(ctx.apply(
+            module,
+            "[projectFolder]/[projectName]_[startFrame]-[endFrame].[extension]"
+        ));
+        assert_eq!(
+            Path::new(&module.output),
+            project.with_file_name("Test_3-8_[####].png")
+        );
+        assert_eq!(item.outputs[0].output, first);
     }
 
     #[test]
@@ -2465,6 +2564,7 @@ mod tests {
         let s = |format, channels| {
             export_settings(
                 &QueueOutput {
+                    naming: Default::default(),
                     template: None,
                     format,
                     channels,
