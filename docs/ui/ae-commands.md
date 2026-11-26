@@ -718,7 +718,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `SelectPreviousAdd` | `motion.layer.select_previous` | `{"add":true}` | Ctrl+Shift+Up | Cmd+Shift+Up |  | B | ☐ |
 | `SetWorkAreaEnd` | `motion.work_area_end` |  | N | N |  | B | ✅ |
 | `SetWorkAreaStart` | `motion.work_area_start` |  | B | B |  | B | ✅ |
-| `SetWorkAreaToSelection` | `motion.comp.set_work_area_to_selection` |  | Ctrl+Alt+B | Cmd+Opt+B |  | B | ☐ |
+| `SetWorkAreaToSelection` | `motion.comp.set_work_area_to_selection` |  | Ctrl+Alt+B | Cmd+Opt+B |  | B | ✅ |
 
 ### `CCompCompCmd`
 
@@ -818,8 +818,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `PrevKeyframe` | `motion.prev_key` |  | J | J |  | B | ✅ |
 | `PrevKeyframeInSelection` | `motion.timeline.previous_keyframe_in_selection` |  | Shift+J | Shift+J |  | C | ✅ |
 | `SelectAllVisibleKeyframes` | `motion.timeline.select_all_visible_keyframes` |  | Ctrl+Alt+A | Cmd+Opt+A |  | C | ✅ |
-| `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ☐ |
-| `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ☐ |
+| `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ✅ |
+| `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ✅ |
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ✅ |
 | `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ✅ |
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  |  | C | ⏸ |
@@ -888,27 +888,27 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 |---|---|---|---|---|---|---|---|
 | `TimeFastForward` | `motion.go_end` |  | Ctrl+Alt+Right / End | Cmd+Opt+Right / End |  | B | ✅ |
 | `TimeJumpToIn` | `motion.go_in` |  | I | I |  | B | ✅ |
-| `TimeJumpToNextInOut` | `motion.comp.go_to_next_in_or_out_point` |  | Ctrl+Alt+Shift+Right | Cmd+Opt+Shift+Right |  | B | ☐ |
+| `TimeJumpToNextInOut` | `motion.comp.go_to_next_in_or_out_point` |  | Ctrl+Alt+Shift+Right | Cmd+Opt+Shift+Right |  | B | ✅ |
 | `TimeJumpToOut` | `motion.go_out` |  | O | O |  | B | ✅ |
-| `TimeJumpToPrevInOut` | `motion.comp.go_to_previous_in_or_out_point` |  | Ctrl+Alt+Shift+Left | Cmd+Opt+Shift+Left |  | B | ☐ |
-| `TimeJumpToWAEnd` | `motion.comp.go_to_work_area_end` |  | Shift+End | Shift+End |  | B | ☐ |
-| `TimeJumpToWAStart` | `motion.comp.go_to_work_area_start` |  | Shift+Home | Shift+Home |  | B | ☐ |
+| `TimeJumpToPrevInOut` | `motion.comp.go_to_previous_in_or_out_point` |  | Ctrl+Alt+Shift+Left | Cmd+Opt+Shift+Left |  | B | ✅ |
+| `TimeJumpToWAEnd` | `motion.comp.go_to_work_area_end` |  | Shift+End | Shift+End |  | B | ✅ |
+| `TimeJumpToWAStart` | `motion.comp.go_to_work_area_start` |  | Shift+Home | Shift+Home |  | B | ✅ |
 | `TimeRewind` | `motion.go_start` |  | Ctrl+Alt+Left / Home | Cmd+Opt+Left / Home |  | B | ✅ |
 | `TimeSetIn` | `motion.move_in` |  | [ | [ |  | B | ✅ |
-| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ |  | B | ☐ |
+| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ |  | B | ✅ |
 | `TimeSetOut` | `motion.move_out` |  | ] | ] |  | B | ✅ |
-| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] |  | B | ☐ |
+| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] |  | B | ✅ |
 | `TimeShiftSpacebarPlay` | `motion.play` | `{"alternate":true}` | Shift+Space | Shift+Space |  | B | ☐ |
 | `TimeStepBack` | `motion.step` | `{"frames":-1}` | Ctrl+Left / PageUp | Cmd+Left / PageUp |  | B | ✅ |
 | `TimeStepBackMore` | `motion.step` | `{"frames":-10}` | Shift+PageUp / Ctrl+Shift+Left | Shift+PageUp / Cmd+Shift+Left |  | B | ✅ |
 | `TimeStepForward` | `motion.step` | `{"frames":1}` | Ctrl+Right / PageDown | Cmd+Right / PageDown |  | B | ✅ |
 | `TimeStepForwardMore` | `motion.step` | `{"frames":10}` | Shift+PageDown / Ctrl+Shift+Right | Shift+PageDown / Cmd+Shift+Right |  | B | ✅ |
-| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, |  | C | ☐ |
-| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, |  | C | ☐ |
+| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, |  | C | ✅ |
+| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, |  | C | ✅ |
 | `TimeTrimIn` | `motion.trim_in` |  | Alt+[ | Opt+[ |  | B | ✅ |
-| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ |  | B | ☐ |
+| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ |  | B | ✅ |
 | `TimeTrimOut` | `motion.trim_out` |  | Alt+] | Opt+] |  | B | ✅ |
-| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] |  | B | ☐ |
+| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] |  | B | ✅ |
 
 ### `CDirItemTabPanelTime`
 
@@ -1216,15 +1216,15 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - | timeline | C | ✅ |
 | `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; | timeline | C | ☐ |
 | `TimeSetIn` | `motion.move_in` |  | [ | [ | timeline | B | ✅ |
-| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ | timeline | B | ☐ |
+| `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ | timeline | B | ✅ |
 | `TimeSetOut` | `motion.move_out` |  | ] | ] | timeline | B | ✅ |
-| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] | timeline | B | ☐ |
-| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, | timeline | C | ☐ |
-| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, | timeline | C | ☐ |
+| `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] | timeline | B | ✅ |
+| `TimeStretchIn` | `motion.timeline.stretch_in_point_to_current_time` |  | Ctrl+Shift+, | Cmd+Shift+, | timeline | C | ✅ |
+| `TimeStretchOut` | `motion.timeline.stretch_out_point_to_current_time` |  | Ctrl+Alt+, | Cmd+Opt+, | timeline | C | ✅ |
 | `TimeTrimIn` | `motion.trim_in` |  | Alt+[ | Opt+[ | timeline | B | ✅ |
-| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ | timeline | B | ☐ |
+| `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ | timeline | B | ✅ |
 | `TimeTrimOut` | `motion.trim_out` |  | Alt+] | Opt+] | timeline | B | ✅ |
-| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] | timeline | B | ☐ |
+| `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] | timeline | B | ✅ |
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 | timeline | C | ✅ |
 | `CompTimeZoomWorkArea`（只在 macOS 26.2 的快捷键文件里） | `motion.timeline.zoom_to_work_area` |  |  | Opt+; | timeline | C | ☐ |
 
