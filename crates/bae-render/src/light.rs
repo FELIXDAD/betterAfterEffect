@@ -134,7 +134,45 @@ pub struct Lighting {
     /// Motion blur: the layer, its lights and the eye at every sample (empty:
     /// every sample is lit as the frame).
     pub samples: Arc<[LightingSample]>,
+    /// The layer's drawn rectangle in layer pixels (the shadow tile grid).
+    pub rect: Rect,
+    /// Its receiver-space shadow map ([`crate::graph::ShadowMapNode`]): lit
+    /// draws sample it instead of testing the casters.
+    pub shadow_map: Option<crate::graph::NodeId>,
 }
+
+/// Largest side of a shadow map slot, in texels.
+const SHADOW_MAP_SIDE: f64 = 1024.0;
+
+impl Lighting {
+    /// The lights with a shadow map slot (casting shadows), in slot order.
+    pub(crate) fn shadow_slots(&self) -> Vec<usize> {
+        (0..self.lights.len())
+            .filter(|&i| self.lights[i].casts_shadows)
+            .take(8)
+            .collect()
+    }
+
+    /// Layer pixels per shadow map texel, and a slot's size in texels: twice
+    /// the layer's own resolution (sampling keeps the edges sharp), at most
+    /// [`SHADOW_MAP_SIDE`] a side.
+    pub(crate) fn shadow_map_size(&self) -> (f64, [u32; 2]) {
+        let (w, h) = (self.rect.x1 - self.rect.x0, self.rect.y1 - self.rect.y0);
+        let k = (w.max(h) / SHADOW_MAP_SIDE).max(0.5);
+        (
+            k,
+            [
+                (w / k).ceil().max(1.0) as u32,
+                (h / k).ceil().max(1.0) as u32,
+            ],
+        )
+    }
+}
+
+/// Tiles per side of a lit layer's shadow grid.
+const SHADOW_TILES: usize = 8;
+/// Most casters the shadow grid lists (4 × 32 bits per tile).
+const SHADOW_TILE_CASTERS: usize = 128;
 
 /// A motion-blur sample of a lit layer.
 #[derive(Clone, Debug, PartialEq)]
@@ -160,6 +198,10 @@ pub struct ShadowCaster {
     pub transmission: f32,
     /// What blocks the light.
     pub pixels: CasterPixels,
+    /// Per light of the receiver it is attached to: where its shadow can
+    /// fall on the receiver (receiver layer pixels, the softest edge
+    /// included; empty: nowhere). Missing: anywhere.
+    pub footprints: Arc<[Rect]>,
 }
 
 /// A caster's pixels.
@@ -186,8 +228,11 @@ pub(crate) const CASTER_VEC4S: usize = 8;
 impl Lighting {
     /// Vec4s of the GPU records (one per motion-blur sample when sampled).
     pub(crate) fn record_len(&self) -> usize {
-        let one =
-            HEADER_VEC4S + LIGHT_VEC4S * self.lights.len() + CASTER_VEC4S * self.casters.len();
+        let one = HEADER_VEC4S
+            + LIGHT_VEC4S * self.lights.len()
+            + (CASTER_VEC4S + self.lights.len()) * self.casters.len()
+            + 1
+            + SHADOW_TILES * SHADOW_TILES * self.lights.len();
         one * self.samples.len().max(1)
     }
 
@@ -201,6 +246,7 @@ impl Lighting {
         from_texel: &DAffine2,
         pixel_scale: f64,
         atlas: &dyn Fn(NodeId) -> Option<[[f32; 4]; 2]>,
+        use_map: bool,
         out: &mut Vec<[f32; 4]>,
     ) -> u32 {
         let first = out.len() as u32;
@@ -224,12 +270,31 @@ impl Lighting {
             mat.specular_intensity / 100.0,
             mat.specular_shininess,
         ]);
+        // With a shadow map the casters stay out of the record: the draw
+        // samples the map (texels axis-aligned with the layer only).
+        let slots = self.shadow_slots();
+        let (k, [map_w, map_h]) = self.shadow_map_size();
+        let map = (use_map
+            && self.shadow_map.is_some()
+            && from_texel.matrix2.x_axis.y == 0.0
+            && from_texel.matrix2.y_axis.x == 0.0)
+            .then(|| {
+                [
+                    (from_texel.matrix2.x_axis.x / k) as f32,
+                    ((from_texel.translation.x - self.rect.x0) / k) as f32,
+                    (from_texel.matrix2.y_axis.y / k) as f32,
+                    ((from_texel.translation.y - self.rect.y0) / k) as f32,
+                ]
+            });
         // Casters are counted after packing (missing images are skipped).
         let header = out.len();
         // w: Accepts Shadows Only (the layer shows only the shadows on it).
         let shadows_only = f32::from(u8::from(mat.accepts_shadows == ShadowMode::Only));
         out.push([mat.metal / 100.0, 0.0, 0.0, shadows_only]);
-        for l in self.lights.iter() {
+        for (li, l) in self.lights.iter().enumerate() {
+            let slot = map
+                .and_then(|_| slots.iter().position(|&s| s == li))
+                .map_or(-1.0, |s| s as f32);
             let kind = match l.kind {
                 LightKind::Ambient | LightKind::Environment => 0.0,
                 LightKind::Parallel => 1.0,
@@ -251,18 +316,23 @@ impl Lighting {
                 outer.cos() as f32,
                 inner.cos() as f32,
                 l.falloff_distance,
-                0.0,
+                map_h as f32,
             ]);
             let darkness = if l.casts_shadows && !self.casters.is_empty() {
                 l.shadow_darkness.clamp(0.0, 100.0) / 100.0
             } else {
                 0.0
             };
-            out.push([darkness, l.shadow_diffusion.max(0.0), 0.0, 0.0]);
+            // z: the light's shadow map slot (−1: test the casters), w: the
+            // slot width in texels (the height is in the previous row's w).
+            out.push([darkness, l.shadow_diffusion.max(0.0), slot, map_w as f32]);
         }
         let mut count = 0.0f32;
         let block = (out.len() as u32 - first) as f32;
-        for c in self.casters.iter() {
+        let to_texel = from_texel.inverse();
+        let mut footprints: Vec<Vec<[f32; 4]>> = Vec::with_capacity(self.casters.len());
+        let casters: &[ShadowCaster] = if map.is_some() { &[] } else { &self.casters };
+        for c in casters {
             let (color, kind, map) = match c.pixels {
                 CasterPixels::Solid(color) => (color, 0.0, [[0.0; 4]; 2]),
                 CasterPixels::Image(id) => match atlas(id) {
@@ -300,11 +370,88 @@ impl Lighting {
                 px_per_world as f32,
                 kind,
             ]);
+            // Per light: the footprint in input texels (the shader skips the
+            // caster outside it).
+            let mut feet = Vec::with_capacity(self.lights.len());
+            for i in 0..self.lights.len() {
+                let bounds = match c.footprints.get(i) {
+                    None => [f32::MIN, f32::MIN, f32::MAX, f32::MAX],
+                    Some(r) if r.is_empty() => [1.0, 1.0, 0.0, 0.0],
+                    Some(r) => {
+                        let pts = r.corners().map(|p| to_texel.transform_point2(p));
+                        let b = crate::three_d::points_bounds(&pts);
+                        [b.x0 as f32, b.y0 as f32, b.x1 as f32, b.y1 as f32]
+                    }
+                };
+                out.push(bounds);
+                feet.push(bounds);
+            }
+            footprints.push(feet);
             count += 1.0;
         }
         out[header][1] = count;
         out[header][2] = block;
+        if let Some(xf) = map {
+            // In the grid header's place: input texel → slot texel
+            // (`x · [0] + [1]`, `y · [2] + [3]`); no masks are read.
+            out.push(xf);
+            out.extend(std::iter::repeat_n(
+                [0.0; 4],
+                SHADOW_TILES * SHADOW_TILES * self.lights.len(),
+            ));
+        } else {
+            self.pack_tiles(&to_texel, &footprints, out);
+        }
         first
+    }
+
+    /// The shadow grid after the casters: a header `(x0, y0, tiles / width,
+    /// tiles / height)` in input texels (`z = 0`: no grid, every caster is
+    /// tested), then per light and tile (row by row) a 128-bit mask of the
+    /// casters whose footprint reaches the tile.
+    fn pack_tiles(
+        &self,
+        to_texel: &DAffine2,
+        footprints: &[Vec<[f32; 4]>],
+        out: &mut Vec<[f32; 4]>,
+    ) {
+        let pts = self.rect.corners().map(|p| to_texel.transform_point2(p));
+        let g = crate::three_d::points_bounds(&pts);
+        let (w, h) = (g.x1 - g.x0, g.y1 - g.y0);
+        if footprints.len() > SHADOW_TILE_CASTERS || w <= 0.0 || h <= 0.0 {
+            out.push([0.0; 4]);
+            return;
+        }
+        let n = SHADOW_TILES as f64;
+        out.push([g.x0 as f32, g.y0 as f32, (n / w) as f32, (n / h) as f32]);
+        for li in 0..self.lights.len() {
+            for ty in 0..SHADOW_TILES {
+                for tx in 0..SHADOW_TILES {
+                    let x0 = g.x0 + w * tx as f64 / n;
+                    let y0 = g.y0 + h * ty as f64 / n;
+                    let (x1, y1) = (x0 + w / n, y0 + h / n);
+                    let mut mask = [0u32; 4];
+                    for (ci, feet) in footprints.iter().enumerate() {
+                        let f = feet[li];
+                        let f = [
+                            f64::from(f[0]),
+                            f64::from(f[1]),
+                            f64::from(f[2]),
+                            f64::from(f[3]),
+                        ];
+                        // The outer tiles reach past the grid (pixels at its edge).
+                        let inside_x =
+                            (tx == 0 || f[2] >= x0) && (tx == SHADOW_TILES - 1 || f[0] <= x1);
+                        let inside_y =
+                            (ty == 0 || f[3] >= y0) && (ty == SHADOW_TILES - 1 || f[1] <= y1);
+                        if f[0] <= f[2] && inside_x && inside_y {
+                            mask[ci / 32] |= 1 << (ci % 32);
+                        }
+                    }
+                    out.push(mask.map(f32::from_bits));
+                }
+            }
+        }
     }
 }
 
