@@ -83,6 +83,33 @@ pub(super) fn hit_layer(
     layers_at(stage, comp, view, pos).next()
 }
 
+/// The edges of the layers not in `moving`, extended across the comp: the
+/// left and right of their bounds as vertical lines, top and bottom as
+/// horizontal ones (comp space).
+fn extended_edges(comp: &EvaluatedComp, moving: &[PrimPath]) -> Vec<(bool, f64)> {
+    let mut out = Vec::new();
+    for l in comp.layers.iter().filter(|l| {
+        l.visible
+            && !moving.contains(&l.path)
+            && !matches!(
+                l.kind,
+                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+            )
+    }) {
+        let Some((a, b)) = render::layer_bounds(l) else {
+            continue;
+        };
+        let m = Affine::new(l.world_matrix);
+        let corners = [a, DVec2::new(b.x, a.y), b, DVec2::new(a.x, b.y)].map(|p| m.apply(p));
+        let (lo, hi) = corners.iter().fold(
+            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+            |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+        );
+        out.extend([(true, lo.x), (true, hi.x), (false, lo.y), (false, hi.y)]);
+    }
+    out
+}
+
 /// The unlocked layers under `pos`, topmost first.
 pub(super) fn layers_at<'a>(
     stage: &'a bae_model::Stage,
@@ -517,7 +544,7 @@ pub(super) fn frame(
                         compensate: true,
                     },
                 );
-                state.drag = Some(drag.with_snapping(comp, &layer, anchor));
+                state.drag = Some(drag.with_snapping(comp, &layer, anchor, options.snap_features));
             }
             Press::Layer(layer) => {
                 let layers = {
@@ -573,15 +600,20 @@ pub(super) fn frame(
                         })
                     });
                 let drag = TransformDrag::new(stage, comp, &layers, kind).with_plane(plane);
-                let lines = super::guides::snap_lines(
+                let mut lines = super::guides::snap_lines(
                     stage,
                     info,
                     &session.lock().view_options,
                     &bae_ui::settings::GridGuides::current(cx.resources),
                 );
+                // Snap to edges extended beyond layer bounds: the other
+                // layers' edges as lines across the comp.
+                if options.snap_edges {
+                    lines.extend(extended_edges(comp, &layers));
+                }
                 let reach = f64::from(transform::SNAP_DISTANCE / view.scale.max(1e-6));
                 let drag = drag
-                    .with_snapping(comp, &layer, at)
+                    .with_snapping(comp, &layer, at, options.snap_features)
                     .with_lines(lines, reach);
                 state.drag = Some(primary_first(drag, &layer));
             }
