@@ -113,6 +113,8 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
         ],
     ),
     ("libraries", "Libraries", &[Search("Search"), Area("")]),
+    // Review with Frame.io needs an Adobe account: its outline, greyed.
+    ("frame_io", "Review with Frame.io", &[Area("")]),
     (
         "wiggler",
         "Wiggler",

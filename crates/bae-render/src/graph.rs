@@ -557,33 +557,75 @@ pub fn build_with(
         Some(roi) => units(&roi.to_rect(), scale).intersect(&domain),
         None => domain,
     };
-    let mut builder = Builder {
-        sources,
-        effects,
-        linear: request.color.blend == crate::request::BlendSpace::Linear,
-        purpose: request.purpose,
-        clamp: request.depth.clamps(),
-        nodes: Vec::new(),
-        dedup: FxHashMap::default(),
-        warnings: Vec::new(),
-        skip_effects_of: None,
-        frames,
-        resolving: Vec::new(),
-        time_dependent: false,
-        incomplete: false,
-        owner: None,
-        owners: Vec::new(),
-    };
+    let mut builder = Builder::new(request, sources, effects, frames);
     let output = builder.composite(comp, rect, scale, 0, false)?;
-    Ok(RenderGraph {
-        depth: request.depth,
-        nodes: builder.nodes,
-        output,
-        warnings: builder.warnings,
-        time_dependent: builder.time_dependent,
-        incomplete: builder.incomplete,
-        owners: builder.owners,
-    })
+    Ok(builder.finish(request, output))
+}
+
+/// A graph whose output is `region` (layer texels at `request`'s resolution) of
+/// one layer of `comp` in its layer space, as an effect layer input reads it
+/// (`dep`: which layer, at which comp time, how far through masks and effects),
+/// drawn into a working texture of its own (readable back). `None` when the
+/// layer has no pixels. `sampleImage` expressions read layers through this.
+pub fn build_layer_image(
+    comp: &RenderComp,
+    request: &RenderRequest,
+    sources: &mut dyn SourceResolver,
+    effects: &EffectLibrary,
+    frames: Option<&mut dyn CompFrames>,
+    dep: &LayerDependency,
+    region: IRect,
+) -> Result<Option<RenderGraph>, RenderError> {
+    let scale = f64::from(request.resolution.factor());
+    let mut builder = Builder::new(request, sources, effects, frames);
+    let Some(layer) = builder.layer_input(comp, dep, scale, 0)? else {
+        return Ok(None);
+    };
+    let node = &builder.nodes[layer.index()];
+    let content = node.rect.to_rect();
+    let mut h = FxHasher::default();
+    (
+        "layer image",
+        node.key,
+        region,
+        scale.to_bits(),
+        builder.clamp,
+    )
+        .hash(&mut h);
+    let output = builder.push(Node {
+        kind: NodeKind::Composite(CompositeNode {
+            prim: dep.layer.clone(),
+            time: dep.time,
+            ops: vec![LayerOp {
+                layer: dep.layer.clone(),
+                input: OpInput::Image(layer),
+                transform: DAffine2::IDENTITY,
+                opacity: 1.0,
+                blend: BlendMode::Normal,
+                dissolve_seed: 0,
+                preserve_transparency: false,
+                matte: None,
+                mask: None,
+                bounds: region,
+                content: Rect::new(
+                    content.x0 * scale,
+                    content.y0 * scale,
+                    content.x1 * scale,
+                    content.y1 * scale,
+                ),
+                projection: None,
+                motion: None,
+                clips: Vec::new(),
+                lighting: None,
+            }],
+            clamp: builder.clamp,
+        }),
+        rect: region,
+        pixel_scale: scale,
+        key: h.finish(),
+        cacheable: false,
+    });
+    Ok(Some(builder.finish(request, output)))
 }
 
 /// Converts a rectangle in space pixels to texel units at `pixel_scale`.
@@ -635,6 +677,45 @@ enum Content {
     /// Frame blending: source frames (start times) and their weights.
     Mix(Arc<dyn LayerSource>, Vec<(Time, f32)>),
     Comp(Arc<RenderComp>),
+}
+
+impl<'a, 'f> Builder<'a, 'f> {
+    fn new(
+        request: &RenderRequest,
+        sources: &'a mut dyn SourceResolver,
+        effects: &'a EffectLibrary,
+        frames: Option<&'f mut dyn CompFrames>,
+    ) -> Self {
+        Self {
+            sources,
+            effects,
+            linear: request.color.blend == crate::request::BlendSpace::Linear,
+            purpose: request.purpose,
+            clamp: request.depth.clamps(),
+            nodes: Vec::new(),
+            dedup: FxHashMap::default(),
+            warnings: Vec::new(),
+            skip_effects_of: None,
+            frames,
+            resolving: Vec::new(),
+            time_dependent: false,
+            incomplete: false,
+            owner: None,
+            owners: Vec::new(),
+        }
+    }
+
+    fn finish(self, request: &RenderRequest, output: NodeId) -> RenderGraph {
+        RenderGraph {
+            depth: request.depth,
+            nodes: self.nodes,
+            output,
+            warnings: self.warnings,
+            time_dependent: self.time_dependent,
+            incomplete: self.incomplete,
+            owners: self.owners,
+        }
+    }
 }
 
 impl Builder<'_, '_> {
@@ -2077,6 +2158,17 @@ impl Builder<'_, '_> {
                 Some(source) => Some(match (footage.blend, source.frame_rate()) {
                     (Some(blend), Some(rate)) => {
                         if blend.pixel_motion {
+                            if let Some(interpolator) = self.effects.frame_interpolator() {
+                                let time = footage.source_time;
+                                let source = frame_blend::pixel_motion(
+                                    source,
+                                    interpolator,
+                                    &layer.path,
+                                    time,
+                                    rate,
+                                );
+                                return Ok(Some(Content::Source(source, time)));
+                            }
                             self.warn(format!(
                                 "{}: Pixel Motion frame blending is not available yet; Frame Mix is used",
                                 layer.path
