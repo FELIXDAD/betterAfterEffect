@@ -38,8 +38,8 @@ impl Analysis<'_> {
             time += self.stride;
             let image = picture(time)?;
             let size = DVec2::new(
-                previous.texture.width() as f64,
-                previous.texture.height() as f64,
+                previous.texture().width() as f64,
+                previous.texture().height() as f64,
             );
             let mut observations: [Vec<DVec2>; CELLS] = Default::default();
             let offsets: &[f64] = if detailed {
@@ -60,7 +60,7 @@ impl Analysis<'_> {
                                     .round();
                             let center = pos.as_ivec2().to_array();
                             Region {
-                                reference: &previous.texture,
+                                reference: previous.texture(),
                                 field: 0,
                                 center,
                                 search_center: (pos + previous.origin - image.origin)
@@ -75,7 +75,7 @@ impl Analysis<'_> {
                     for (batch, chunk) in regions.chunks(8).enumerate() {
                         let hits = self.gpu.matcher.analyze(
                             &self.gpu.gpu,
-                            &image.texture,
+                            image.texture(),
                             chunk,
                             super::super::gpu::Options {
                                 channel: 1,
