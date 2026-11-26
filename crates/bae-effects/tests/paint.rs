@@ -99,3 +99,42 @@ fn brush_strokes_paint_and_the_eraser_removes() {
     assert_eq!(at(&px, 16, 16), [0, 0, 255, 255], "newest on top");
     assert_eq!(at(&px, 8, 26)[3], 0, "erased");
 }
+
+/// The Clone Stamp paints what is at its offset; the Eraser's Paint Only
+/// brings the layer back, Last Stroke Only the image before the last stroke.
+#[test]
+fn clone_stamp_and_the_eraser_modes() {
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let blue = [0.0, 0.0, 1.0, 1.0];
+    let line = |tool, y: f64, color| stroke(tool, DVec2::new(4.0, y), DVec2::new(28.0, y), color);
+    let down = |erase| Stroke {
+        erase,
+        ..stroke(
+            Tool::Eraser,
+            DVec2::new(16.0, 4.0),
+            DVec2::new(16.0, 28.0),
+            [0.0; 4],
+        )
+    };
+    // Red at y = 8, cloned 16 px down.
+    let mut clone = line(Tool::Clone, 24.0, [0.0; 4]);
+    clone.clone_offset = DVec2::new(0.0, -16.0);
+    let Some(px) = paint(&[line(Tool::Brush, 8.0, red), clone]) else {
+        assert!(bae_gpu::testing::shared_context().is_none(), "rendered");
+        return;
+    };
+    assert_eq!(at(&px, 16, 24), [255, 0, 0, 255], "cloned red");
+    assert_eq!(at(&px, 16, 16), [255, 255, 255, 255], "white between");
+    // Paint Only: the white layer comes back under the red stroke.
+    let px = paint(&[line(Tool::Brush, 16.0, red), down(Erase::PaintOnly)]).unwrap();
+    assert_eq!(at(&px, 16, 16), [255, 255, 255, 255]);
+    // Last Stroke Only: blue over red, erased back to red.
+    let px = paint(&[
+        line(Tool::Brush, 16.0, red),
+        line(Tool::Brush, 16.0, blue),
+        down(Erase::LastStroke),
+    ])
+    .unwrap();
+    assert_eq!(at(&px, 16, 16), [255, 0, 0, 255]);
+    assert_eq!(at(&px, 8, 16), [0, 0, 255, 255], "blue elsewhere");
+}

@@ -4,6 +4,14 @@
 //! table (`<module>::ZH` / `<module>/zh.rs`); only common words stay here.
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Project Columns", "项目面板列"),
+    ("Scroll Project Columns", "滚动项目面板列"),
+    ("Timeline Layer Pane Width", "时间轴图层列表宽度"),
+    ("Scroll Timeline Columns", "滚动时间轴列"),
+    ("Timeline Columns", "时间轴列"),
+    ("Column Width", "列宽"),
+    ("Timeline Layer List", "时间轴图层列表"),
+    ("Label and Layer Number", "标签和图层编号"),
     // Command title (`layer.auto_orient`).
     ("Auto-Orient", "自动定向"),
     // Command title (`project.set_settings`).
