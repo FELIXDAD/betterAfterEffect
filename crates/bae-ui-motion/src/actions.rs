@@ -1388,7 +1388,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             return true;
         }
         ids::IMPORT_FILE => {
-            crate::import::import_file(cx, session);
+            if let Some(paths) = inv.params.get("paths") {
+                if let Ok(paths) = serde_json::from_value::<Vec<std::path::PathBuf>>(paths.clone())
+                {
+                    crate::import::import_paths(cx, &paths, None);
+                }
+            } else {
+                crate::import::import_file(cx, session);
+            }
             return true;
         }
         ids::NEW_COMP_FROM_SELECTION => {

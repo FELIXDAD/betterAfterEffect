@@ -252,6 +252,14 @@ fn menus_show_the_ae_shortcuts() {
 /// (the document answers "unknown"), and none may panic.
 #[test]
 fn every_enabled_menu_item_does_something() {
+    // Last Effect remembers effects applied across projects in the same process.
+    // Start this fresh-launch menu check without another test's effect history.
+    if !in_child(
+        "acceptance::release_001::every_enabled_menu_item_does_something",
+        &[],
+    ) {
+        return;
+    }
     let items = rich().state().menu_items();
     let mut problems = Vec::new();
     let mut ran = 0;

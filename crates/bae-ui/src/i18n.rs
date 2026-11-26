@@ -144,6 +144,7 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("Got it", "知道了"),
     // Numpad keys in shortcuts (AE: 数字小键盘).
+    ("Num Clear", "数字小键盘 清除"),
     ("Num *", "数字小键盘 *"),
     ("Num /", "数字小键盘 /"),
     ("Num +", "数字小键盘 +"),
