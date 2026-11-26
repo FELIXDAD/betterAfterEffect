@@ -59,7 +59,7 @@ pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, select_children,
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
@@ -686,6 +686,7 @@ impl Panel for TimelinePanel {
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let full = ui.available_rect_before_wrap();
+        crate::import::drop_on_panel(ui, cx);
         let cols = self.columns.layout(ui, full);
         self.contents(ui, cx, &cols);
     }
@@ -718,7 +719,41 @@ impl TimelinePanel {
         self.graph_mode = session.lock().graph_editor;
         let graph_left = full.left() + cols.viewport + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
-        let axis = self.axis(&info, graph_left, graph_w);
+        let mut axis = self.axis(&info, graph_left, graph_w);
+        if cfg!(target_os = "macos")
+            && ui.rect_contains_pointer(Rect::from_min_max(
+                pos2(graph_left, tabs.bottom()),
+                full.max,
+            ))
+            && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
+        {
+            let smart = crate::viewer::smart_zoom(ui.ctx());
+            let factor = ui.input(|i| i.zoom_delta());
+            if smart || factor != 1.0 {
+                let time = axis.t(pointer.x);
+                let full_span = info.duration.0 as f64;
+                let min_span = (info.frame_duration().0 * 10).min(info.duration.0) as f64;
+                let span = if smart {
+                    if self.zoom > 0.0 {
+                        full_span
+                    } else {
+                        full_span / 2.0
+                    }
+                } else {
+                    axis.span.0 as f64 / f64::from(factor)
+                };
+                if full_span > min_span {
+                    self.zoom = 1.0
+                        - ((span - min_span) / (full_span - min_span))
+                            .clamp(0.0, 1.0)
+                            .cbrt() as f32;
+                    let new_axis = self.axis(&info, graph_left, graph_w);
+                    self.scroll = time - (new_axis.t(pointer.x) - new_axis.start);
+                    axis = self.axis(&info, graph_left, graph_w);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
         #[cfg(test)]
         {
             self.last_axis = Some(axis);
