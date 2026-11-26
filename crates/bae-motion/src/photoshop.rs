@@ -72,7 +72,7 @@ impl Command for ImportPhotoshop {
             assets
         };
         if let Some(rel) = &p.folder {
-            parent = crate::import::folder_path(tx, &parent, rel)?;
+            parent = crate::import::folder_path(tx, &parent, rel, p.folder_label)?;
         }
         let (item, kind) = if p.kind == ImportKind::Footage {
             let layer = if let Some(sel) = p.selection {
@@ -180,6 +180,7 @@ fn footage(
             .run(
                 tx,
                 ImportParams {
+                    folder_label: p.folder_label,
                     parent: Some(parent.clone()),
                     comp: None,
                     files: vec![file],
