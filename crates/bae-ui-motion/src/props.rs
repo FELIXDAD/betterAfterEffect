@@ -397,10 +397,16 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             if !v.is_a(&PrimType::EFFECT) {
                 return None;
             }
+            let match_name_of = query::static_value(&v, "match_name")
+                .and_then(|m| m.as_str().map(str::to_owned))
+                .unwrap_or_default();
             let mut params: Vec<&str> = v
                 .attr_names()
                 .into_iter()
                 .filter(|n| n.starts_with("param:"))
+                // The Puppet effect's traced outline is data, shown as its
+                // Mesh group (AE's Auto-traced Shapes has no value).
+                .filter(|n| !(match_name_of == bae_motion::puppet::PUPPET && *n == "param:0006"))
                 .collect();
             params.sort_unstable();
             let match_name = query::static_value(&v, "match_name")

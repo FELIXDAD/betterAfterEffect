@@ -183,6 +183,31 @@ fn edit_pins(
     }
 }
 
+/// Stores the outlines the renderer traced for Puppet effects that have none
+/// yet (AE's Create Puppet Mesh, one undo step): from then on every render
+/// builds the same mesh.
+fn store_traces(ui: &Ui, cx: &mut PanelContext<'_>, comp: &EvaluatedComp) {
+    use bae_effects::effects::puppet::{OUTLINES, take_trace, tracing};
+    for e in comp
+        .layers
+        .iter()
+        .flat_map(|l| &l.effects)
+        .filter(|e| e.match_name == bae_render::puppet::PUPPET_EFFECT)
+    {
+        let stored = matches!(e.param(OUTLINES), Some(Value::FloatList(f)) if !f.is_empty());
+        if !stored && let Some(outlines) = take_trace(&e.path) {
+            cx.invoke_with(
+                "puppet.set_mesh",
+                serde_json::json!({ "effect": e.path, "outlines": outlines }),
+            );
+        }
+    }
+    if tracing() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
+    }
+}
+
 /// What the frame did: whether it owns the pointer and the cursor to show.
 pub(crate) struct PuppetFrame {
     pub owns: bool,
@@ -191,7 +216,7 @@ pub(crate) struct PuppetFrame {
 
 /// Mesh ▸ Show: the `selected` layers' Puppet meshes, deformed by their pins.
 fn paint_meshes(selected: &[PrimPath], comp: &EvaluatedComp, view: &View, painter: &Painter) {
-    use bae_effects::effects::puppet::{DENSITY, EXPANSION, Mesh, REFINEMENT, deform};
+    use bae_effects::effects::puppet::{DENSITY, EXPANSION, OUTLINES, REFINEMENT, deform, mesh_of};
     let stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(250, 215, 40, 150));
     for layer in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
         let Some((min, max)) = crate::render::layer_bounds(layer) else {
@@ -203,8 +228,18 @@ fn paint_meshes(selected: &[PrimPath], comp: &EvaluatedComp, view: &View, painte
             .filter(|e| e.match_name == bae_render::puppet::PUPPET_EFFECT)
         {
             let num = |id: u32, d: f64| e.param(id).and_then(Value::as_f64).unwrap_or(d);
-            let grow = num(EXPANSION, 3.0).max(0.0);
-            let mesh = Mesh::grid(min.floor() - grow, max.ceil() + grow, num(DENSITY, 10.0));
+            let bounds = bae_render::IRect::new(
+                min.x.floor() as i32,
+                min.y.floor() as i32,
+                max.x.ceil() as i32,
+                max.y.ceil() as i32,
+            );
+            let mesh = mesh_of(
+                e.param(OUTLINES),
+                bounds,
+                num(EXPANSION, 3.0),
+                num(DENSITY, 10.0),
+            );
             let pins = bae_render::puppet::pins(&e.children);
             let rounds = num(REFINEMENT, 20.0).round().clamp(1.0, 20.0) as usize;
             let at: Vec<Pos2> = deform(&mesh, &pins, rounds)
@@ -241,6 +276,7 @@ pub(crate) fn frame(
     now: Time,
     selected: &[PrimPath],
 ) -> PuppetFrame {
+    store_traces(ui, cx, comp);
     let show_mesh = crate::tools::shared(cx.resources)
         .lock()
         .options

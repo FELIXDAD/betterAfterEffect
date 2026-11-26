@@ -220,6 +220,11 @@ impl DefBuilder {
         self
     }
 
+    /// Hides the last parameter from Effect Controls (data the effect keeps).
+    pub(crate) fn hide_last(&mut self) {
+        self.def.params.last_mut().unwrap().flags.hidden = true;
+    }
+
     /// Marks the last parameter as static, as for AE path selectors.
     pub(crate) fn static_param(mut self) -> Self {
         let flags = &mut self.def.params.last_mut().unwrap().flags;

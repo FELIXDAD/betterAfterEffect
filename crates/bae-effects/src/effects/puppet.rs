@@ -9,14 +9,23 @@
 //! pins hold their point; Starch pins stiffen the mesh around them; Overlap
 //! pins draw the mesh near them in front. Mesh Rotation Refinement is the
 //! number of solver rounds. AE keeps Density and Expansion per mesh (Mesh 1);
-//! here the effect has one mesh over the layer's bounds, a grid of Density's
-//! triangle count grown by Expansion (AE traces the layer's outline: an
-//! accepted difference for now).
+//! here they are effect parameters.
+//!
+//! The mesh covers where the layer is opaque (AE's auto-traced shapes): the
+//! first render without a traced outline reads the layer's alpha back once,
+//! asynchronously and at mesh precision ([`take_trace`]); the viewer stores it
+//! in Auto-traced Shapes (`puppet.set_mesh`, AE's Create Puppet Mesh), and
+//! from then on the mesh is built from it, the same in every render.
+//! Separate parts get separate meshes; a part with no pin stays still. Until
+//! the outline is stored the mesh is a grid over the layer's bounds.
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use bae_gpu::wgpu::{self, util::DeviceExt};
-use bae_model::EffectDef;
+use bae_model::{EffectDef, ParamKind, PrimPath, Value};
 use bae_render::puppet::{self, Pin, PinKind};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
 use glam::DVec2;
@@ -37,6 +46,8 @@ pub const ON_TRANSPARENT: u32 = 3;
 pub const EXPANSION: u32 = 4;
 /// Parameter: the mesh's Density (35 triangles per unit).
 pub const DENSITY: u32 = 5;
+/// Parameter: Auto-traced Shapes, the layer's traced alpha ([`Mask::to_value`]).
+pub const OUTLINES: u32 = 6;
 
 const LABEL: &str = "bae.effects.puppet";
 const UNIFORM_SIZE: u32 = 64;
@@ -90,6 +101,16 @@ pub(crate) fn puppet_effect() -> Builtin {
             "",
         )
         .static_param();
+    let mut def = def;
+    def.push(
+        OUTLINES,
+        "Auto-traced Shapes",
+        "自动追踪形状",
+        ParamKind::CurvePoints,
+        Some(Value::FloatList(Vec::new())),
+    );
+    let mut def = def.ae_match_name("ADBE FreePin3 Outlines").static_param();
+    def.hide_last();
     let (def, names) = def.build();
     crate::rust_builtin(
         (
@@ -123,33 +144,326 @@ pub struct Mesh {
     neighbours: Vec<Vec<u32>>,
 }
 
+/// Where a layer is opaque, on a grid of cells (layer pixels): its alpha
+/// traced at mesh precision, grown by the mesh's Expansion.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Mask {
+    /// Layer-pixel corner of cell (0, 0).
+    pub origin: DVec2,
+    /// Cell side (layer pixels).
+    pub step: f64,
+    /// Cells per row.
+    pub cols: usize,
+    /// Rows of cells.
+    pub rows: usize,
+    /// Per cell, row by row: inside the shape.
+    pub on: Vec<bool>,
+}
+
+impl Mask {
+    /// Cells whose most opaque pixel shows (alpha above 1/32), grown by
+    /// `grow` pixels.
+    pub fn from_alpha(
+        origin: DVec2,
+        step: f64,
+        cols: usize,
+        rows: usize,
+        alpha: &[f32],
+        grow: f64,
+    ) -> Mask {
+        let solid: Vec<bool> = (0..cols * rows)
+            .map(|i| alpha.get(i).is_some_and(|a| *a > 1.0 / 32.0))
+            .collect();
+        let r = (grow / step).ceil().max(0.0) as isize;
+        let mut on = solid.clone();
+        if r > 0 {
+            for y in 0..rows as isize {
+                for x in 0..cols as isize {
+                    if solid[(y * cols as isize + x) as usize] {
+                        continue;
+                    }
+                    let hit = (-r..=r).any(|dy| {
+                        (-r..=r).any(|dx| {
+                            let (u, v) = (x + dx, y + dy);
+                            dx * dx + dy * dy <= r * r
+                                && u >= 0
+                                && v >= 0
+                                && u < cols as isize
+                                && v < rows as isize
+                                && solid[(v * cols as isize + u) as usize]
+                        })
+                    });
+                    on[(y * cols as isize + x) as usize] = hit;
+                }
+            }
+        }
+        Mask {
+            origin,
+            step,
+            cols,
+            rows,
+            on,
+        }
+    }
+
+    /// Whether `p` (layer pixels) is inside; outside the grid counts as out
+    /// unless the expansion reaches past the layer (the nearest cell).
+    pub fn at(&self, p: DVec2) -> bool {
+        let c = ((p - self.origin) / self.step).floor();
+        let x = (c.x as isize).clamp(0, self.cols as isize - 1) as usize;
+        let y = (c.y as isize).clamp(0, self.rows as isize - 1) as usize;
+        self.on.get(y * self.cols + x).copied().unwrap_or(false)
+    }
+
+    /// Area inside (square pixels).
+    pub fn area(&self) -> f64 {
+        self.on.iter().filter(|b| **b).count() as f64 * self.step * self.step
+    }
+
+    /// Auto-traced Shapes: cols, rows, step, origin, then the cells as run
+    /// lengths, alternately out and in (starting out).
+    pub fn to_value(&self) -> Value {
+        let mut f = vec![
+            self.cols as f64,
+            self.rows as f64,
+            self.step,
+            self.origin.x,
+            self.origin.y,
+        ];
+        let (mut current, mut run) = (false, 0.0);
+        for &b in &self.on {
+            if b == current {
+                run += 1.0;
+            } else {
+                f.push(run);
+                current = b;
+                run = 1.0;
+            }
+        }
+        f.push(run);
+        Value::FloatList(f)
+    }
+
+    /// The mask a value from [`Mask::to_value`] holds (`None` when empty).
+    pub fn from_value(v: &Value) -> Option<Mask> {
+        let Value::FloatList(f) = v else {
+            return None;
+        };
+        let (cols, rows) = (*f.first()? as usize, *f.get(1)? as usize);
+        let (step, origin) = (*f.get(2)?, DVec2::new(*f.get(3)?, *f.get(4)?));
+        if cols == 0 || rows == 0 || cols * rows > 1 << 20 || step <= 0.0 {
+            return None;
+        }
+        let mut on = Vec::with_capacity(cols * rows);
+        let mut inside = false;
+        for run in f.get(5..)? {
+            on.extend(std::iter::repeat_n(inside, *run as usize));
+            inside = !inside;
+        }
+        on.resize(cols * rows, false);
+        Some(Mask {
+            origin,
+            step,
+            cols,
+            rows,
+            on,
+        })
+    }
+
+    /// The mask grown by `grow` pixels.
+    pub fn grown(&self, grow: f64) -> Mask {
+        let alpha: Vec<f32> = self.on.iter().map(|b| f32::from(u8::from(*b))).collect();
+        Mask::from_alpha(self.origin, self.step, self.cols, self.rows, &alpha, grow)
+    }
+}
+
+/// The Puppet mesh of a layer whose content spans `bounds` (layer pixels):
+/// over the stored outline (`outlines`, grown by `expansion`) when there is
+/// one, else a grid over the bounds grown by `expansion`. The renderer and the
+/// viewer's Show Mesh both build it here.
+pub fn mesh_of(outlines: Option<&Value>, bounds: IRect, expansion: f64, density: f64) -> Mesh {
+    let grow = expansion.max(0.0);
+    let min = DVec2::new(f64::from(bounds.x0), f64::from(bounds.y0)) - grow;
+    let max = DVec2::new(f64::from(bounds.x1), f64::from(bounds.y1)) + grow;
+    match outlines.and_then(Mask::from_value) {
+        Some(mask) => Mesh::traced(min, max, density, &mask.grown(grow)),
+        None => Mesh::grid(min, max, density),
+    }
+}
+
+/// A layer's alpha being read back for its outline.
+enum Trace {
+    /// Copied to `buffer` (cells of `step` pixels from `origin`) at `since`;
+    /// `state` follows its mapping.
+    Pending {
+        bounds: IRect,
+        device: wgpu::Device,
+        buffer: wgpu::Buffer,
+        origin: DVec2,
+        step: f64,
+        cols: usize,
+        rows: usize,
+        since: Instant,
+        state: Arc<AtomicU8>,
+    },
+    /// Read back, waiting for [`take_trace`].
+    Ready { bounds: IRect, outlines: Value },
+    /// Taken: not read again for these bounds.
+    Taken { bounds: IRect },
+}
+
+const COPIED: u8 = 0;
+const MAPPING: u8 = 1;
+const MAPPED: u8 = 2;
+const FAILED: u8 = 3;
+
+/// Outlines being traced, per Puppet effect.
+static TRACES: LazyLock<Mutex<HashMap<PrimPath, Trace>>> = LazyLock::new(Mutex::default);
+
+/// Moves a pending read-back along without waiting: maps it once its frame
+/// is surely submitted, polls, reads it once mapped. `true` when it must
+/// start again (failed or lost).
+fn advance(trace: &mut Trace) -> bool {
+    let Trace::Pending {
+        bounds,
+        device,
+        buffer,
+        origin,
+        step,
+        cols,
+        rows,
+        since,
+        state,
+    } = trace
+    else {
+        return false;
+    };
+    if state.load(Ordering::Acquire) == COPIED {
+        if since.elapsed() < TRACE_SETTLE {
+            return false;
+        }
+        state.store(MAPPING, Ordering::Release);
+        let done = state.clone();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            done.store(if r.is_ok() { MAPPED } else { FAILED }, Ordering::Release);
+        });
+    }
+    if state.load(Ordering::Acquire) == MAPPING {
+        let _ = device.poll(wgpu::PollType::Poll);
+    }
+    match state.load(Ordering::Acquire) {
+        MAPPING => since.elapsed() > Duration::from_secs(10),
+        MAPPED => {
+            let alpha: Option<Vec<f32>> = buffer.slice(..).get_mapped_range().ok().map(|d| {
+                d.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| f32::from_le_bytes(*c))
+                    .collect()
+            });
+            buffer.unmap();
+            let Some(alpha) = alpha else {
+                return true;
+            };
+            let mask = Mask::from_alpha(*origin, *step, *cols, *rows, &alpha, 0.0);
+            *trace = Trace::Ready {
+                bounds: *bounds,
+                outlines: mask.to_value(),
+            };
+            false
+        }
+        FAILED => true,
+        _ => false,
+    }
+}
+
+/// Whether an outline is still being read back (the viewer keeps drawing
+/// until it lands).
+pub fn tracing() -> bool {
+    TRACES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .values()
+        .any(|t| matches!(t, Trace::Pending { .. }))
+}
+
+/// The outline traced for the Puppet effect `effect` since it was last
+/// taken: the value for Auto-traced Shapes (the viewer stores it, asking
+/// every frame, which also moves the read-back along).
+pub fn take_trace(effect: &PrimPath) -> Option<Value> {
+    let mut traces = TRACES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(t) = traces.get_mut(effect)
+        && advance(t)
+    {
+        traces.remove(effect);
+    }
+    let bounds = match traces.get(effect) {
+        Some(Trace::Ready { bounds, .. }) => *bounds,
+        _ => return None,
+    };
+    match traces.insert(effect.clone(), Trace::Taken { bounds }) {
+        Some(Trace::Ready { outlines, .. }) => Some(outlines),
+        _ => None,
+    }
+}
+
 impl Mesh {
     /// A grid of about `35 × density` triangles over `min .. max`.
     pub fn grid(min: DVec2, max: DVec2, density: f64) -> Mesh {
         let size = (max - min).max(DVec2::ONE);
-        let triangles = (35.0 * density.max(1.0)).min(20_000.0);
-        let cell = (2.0 * size.x * size.y / triangles).sqrt().max(2.0);
+        Mesh::build(min, max, cell_for(size.x * size.y, density), |_| true)
+    }
+
+    /// The mesh over the shape `mask` traces (AE's auto-traced outline):
+    /// about `35 × density` triangles over its area, triangles kept where
+    /// the shape is, so separate parts get separate meshes. A layer with
+    /// nothing opaque gets the whole grid.
+    pub fn traced(min: DVec2, max: DVec2, density: f64, mask: &Mask) -> Mesh {
+        let area = mask.area();
+        if area <= 0.0 {
+            return Mesh::grid(min, max, density);
+        }
+        Mesh::build(min, max, cell_for(area, density), |t| {
+            let centre = (t[0] + t[1] + t[2]) / 3.0;
+            mask.at(centre) || t.iter().any(|v| mask.at(*v))
+        })
+    }
+
+    /// Grid triangles of side `cell` over `min .. max` that `keep` accepts,
+    /// with only the vertices they use.
+    fn build(min: DVec2, max: DVec2, cell: f64, keep: impl Fn([DVec2; 3]) -> bool) -> Mesh {
+        let size = (max - min).max(DVec2::ONE);
         let cols = ((size.x / cell).ceil() as usize).clamp(1, 200);
         let rows = ((size.y / cell).ceil() as usize).clamp(1, 200);
         let step = size / DVec2::new(cols as f64, rows as f64);
-        let mut rest = Vec::with_capacity((cols + 1) * (rows + 1));
-        for j in 0..=rows {
-            for i in 0..=cols {
-                rest.push(min + DVec2::new(i as f64, j as f64) * step);
-            }
-        }
-        let at = |i: usize, j: usize| (j * (cols + 1) + i) as u32;
+        let grid: Vec<DVec2> = (0..=rows)
+            .flat_map(|j| (0..=cols).map(move |i| (i, j)))
+            .map(|(i, j)| min + DVec2::new(i as f64, j as f64) * step)
+            .collect();
+        let at = |i: usize, j: usize| j * (cols + 1) + i;
+        let mut index = vec![u32::MAX; grid.len()];
+        let mut rest = Vec::new();
         let mut tris = Vec::with_capacity(cols * rows * 2);
         for j in 0..rows {
             for i in 0..cols {
                 let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
                 // Alternate the diagonal so the mesh has no grain.
-                if (i + j) % 2 == 0 {
-                    tris.push([a, b, c]);
-                    tris.push([a, c, d]);
+                let pair = if (i + j) % 2 == 0 {
+                    [[a, b, c], [a, c, d]]
                 } else {
-                    tris.push([a, b, d]);
-                    tris.push([b, c, d]);
+                    [[a, b, d], [b, c, d]]
+                };
+                for t in pair {
+                    if !keep(t.map(|v| grid[v])) {
+                        continue;
+                    }
+                    tris.push(t.map(|v| {
+                        if index[v] == u32::MAX {
+                            index[v] = rest.len() as u32;
+                            rest.push(grid[v]);
+                        }
+                        index[v]
+                    }));
                 }
             }
         }
@@ -178,6 +492,12 @@ impl Mesh {
             .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
             .map_or(0, |(i, _)| i)
     }
+}
+
+/// The cell side giving about `35 × density` triangles over `area`.
+fn cell_for(area: f64, density: f64) -> f64 {
+    let triangles = (35.0 * density.max(1.0)).min(20_000.0);
+    (2.0 * area.max(1.0) / triangles).sqrt().max(2.0)
 }
 
 fn rotate(v: DVec2, (s, c): (f64, f64)) -> DVec2 {
@@ -237,15 +557,34 @@ pub fn deform(mesh: &Mesh, pins: &[Pin], rounds: usize) -> Vec<DVec2> {
             turns[v as usize] = Some((scale * sin, scale * cos));
         }
     }
-    // One pin: the mesh moves with it, unrotated.
+    // Parts of the mesh no pin reaches stay where they rest (AE: each traced
+    // shape is its own mesh).
     let pulled: Vec<usize> = (0..n).filter(|&i| fixed[i].is_some()).collect();
+    let mut reached = vec![false; n];
+    let mut stack = pulled.clone();
+    for &i in &stack {
+        reached[i] = true;
+    }
+    while let Some(i) = stack.pop() {
+        for &j in &mesh.neighbours[i] {
+            if !reached[j as usize] {
+                reached[j as usize] = true;
+                stack.push(j as usize);
+            }
+        }
+    }
+    // One pin: its part moves with it, unrotated.
     if let [k] = pulled[..]
         && turns.iter().all(Option::is_none)
     {
         let d = x[k] - mesh.rest[k];
-        return mesh.rest.iter().map(|p| *p + d).collect();
+        return (0..n)
+            .map(|i| mesh.rest[i] + if reached[i] { d } else { DVec2::ZERO })
+            .collect();
     }
-    let free: Vec<usize> = (0..n).filter(|&i| fixed[i].is_none()).collect();
+    let free: Vec<usize> = (0..n)
+        .filter(|&i| fixed[i].is_none() && reached[i])
+        .collect();
     let mut index = vec![usize::MAX; n];
     for (u, &i) in free.iter().enumerate() {
         index[i] = u;
@@ -424,14 +763,19 @@ impl Puppet {
             grow.to_bits(),
             density.to_bits(),
         ];
+        let outlines = v
+            .value(OUTLINES)
+            .filter(|o| !matches!(o, Value::FloatList(f) if f.is_empty()));
+        let mut mesh_key = mesh_key;
+        if let Some(Value::FloatList(f)) = outlines {
+            mesh_key.extend(f.iter().map(|v| v.to_bits()));
+        }
         let rounds = v.f(REFINEMENT).round().clamp(1.0, 20.0) as usize;
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let mesh = match &cache.mesh {
             Some((key, mesh)) if *key == mesh_key => mesh.clone(),
             _ => {
-                let min = DVec2::new(f64::from(b.x0), f64::from(b.y0)) - grow;
-                let max = DVec2::new(f64::from(b.x1), f64::from(b.y1)) + grow;
-                let mesh = Arc::new(Mesh::grid(min, max, density));
+                let mesh = Arc::new(mesh_of(outlines, b, grow, density));
                 cache.mesh = Some((mesh_key.clone(), mesh.clone()));
                 mesh
             }
@@ -514,6 +858,13 @@ impl TargetEffect for Puppet {
         };
         if roi.is_empty() {
             return Ok(input.clone());
+        }
+        let stored = matches!(
+            Params::new(&self.def, p).value(OUTLINES),
+            Some(Value::FloatList(f)) if !f.is_empty()
+        );
+        if !stored {
+            trace(target, p, input)?;
         }
         let pins = p
             .effect
@@ -620,9 +971,147 @@ impl TargetEffect for Puppet {
     }
 }
 
-/// Compile the kernel ahead of first use (the effects' background warm-up).
+/// Cells on the long side of a traced outline.
+const TRACE_CELLS: f64 = 256.0;
+/// Time between recording the copy and mapping it (the frame is submitted).
+const TRACE_SETTLE: Duration = Duration::from_millis(50);
+
+/// Moves the outline trace of `p`'s effect along, never waiting on the GPU:
+/// records the alpha read-back (a pass summing the layer's alpha into cells,
+/// copied to a mappable buffer), maps it a frame later, reads it once mapped.
+fn trace(
+    target: &mut dyn EffectTarget,
+    p: &EffectParams<'_>,
+    input: &GpuImage,
+) -> Result<(), RenderError> {
+    let effect = &p.effect.path;
+    let bounds = p.layer_bounds;
+    let rt = gpu::runtime(target.gpu());
+    let mut traces = TRACES.lock().unwrap_or_else(|e| e.into_inner());
+    let same = |t: &Trace| match t {
+        Trace::Pending { bounds: b, .. }
+        | Trace::Ready { bounds: b, .. }
+        | Trace::Taken { bounds: b } => *b == bounds,
+    };
+    if let Some(t) = traces.get_mut(effect)
+        && same(t)
+        && (!matches!(t, Trace::Pending { .. }) || !advance(t))
+    {
+        return Ok(());
+    }
+    // Start: the layer's alpha in cells of `step` layer pixels.
+    let size = DVec2::new(f64::from(bounds.width()), f64::from(bounds.height()));
+    let step = (size.max_element() / TRACE_CELLS).max(1.0);
+    let (cols, rows) = (
+        (size.x / step).ceil().max(1.0) as usize,
+        (size.y / step).ceil().max(1.0) as usize,
+    );
+    let origin = DVec2::new(f64::from(bounds.x0), f64::from(bounds.y0));
+    let grid = image_grid::grid_scale(p, input);
+    let bytes = (cols * rows * 4) as u64;
+    let cells = rt.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(TRACE_LABEL),
+        size: bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let buffer = rt.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(TRACE_LABEL),
+        size: bytes,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let pipeline = trace_kernel(&rt, target.format())?;
+    let mut u = UniformWriter::with_size(TRACE_UNIFORM_SIZE as usize);
+    image_grid::image_coords(&mut u, 0, input, grid);
+    u.f32(32, (origin.x / grid) as f32)
+        .f32(36, (origin.y / grid) as f32)
+        .f32(40, (step / grid) as f32)
+        .u32(44, ((step / grid).ceil() as u32).clamp(1, 16))
+        .u32(48, cols as u32)
+        .u32(52, rows as u32);
+    let offset = gpu::push_uniform(&rt, &u);
+    let group = rt.bind_group(
+        &pipeline,
+        &[
+            Resource::Uniform,
+            Resource::View(&input.view),
+            Resource::Buffer(&cells),
+        ],
+    );
+    {
+        let mut pass = target
+            .encoder()
+            .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(TRACE_LABEL),
+                timestamp_writes: None,
+            });
+        gpu::dispatch(
+            &mut pass,
+            &pipeline,
+            &group,
+            &[offset],
+            [cols as u32, rows as u32],
+        );
+    }
+    target
+        .encoder()
+        .copy_buffer_to_buffer(&cells, 0, &buffer, 0, bytes);
+    traces.insert(
+        effect.clone(),
+        Trace::Pending {
+            bounds,
+            device: rt.device.clone(),
+            buffer,
+            origin,
+            step,
+            cols,
+            rows,
+            since: Instant::now(),
+            state: Arc::new(AtomicU8::new(COPIED)),
+        },
+    );
+    Ok(())
+}
+
+const TRACE_LABEL: &str = "bae.effects.puppet.trace";
+const TRACE_UNIFORM_SIZE: u32 = 64;
+
+fn trace_kernel(
+    rt: &gpu::Runtime,
+    format: wgpu::TextureFormat,
+) -> Result<Arc<Kernel>, RenderError> {
+    rt.kernel(
+        &KernelKey {
+            owner: TRACE_LABEL.into(),
+            entry: "main".into(),
+            variant: gpu::format_key(format),
+        },
+        || {
+            Ok(KernelSource {
+                label: TRACE_LABEL,
+                wgsl: [
+                    image_grid::CHANNEL_MATH,
+                    include_str!("../shaders/image_grid.wgsl"),
+                    include_str!("puppet_trace.wgsl"),
+                ]
+                .concat(),
+                entry: "main",
+                bindings: vec![
+                    (0, Binding::Uniform(TRACE_UNIFORM_SIZE)),
+                    (1, Binding::Texture),
+                    (2, Binding::ReadWriteBuffer),
+                ],
+                workgroup: [8, 8, 1],
+            })
+        },
+    )
+}
+
+/// Compile the kernels ahead of first use (the effects' background warm-up).
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
-    kernel(rt, format).map(|_| ())
+    kernel(rt, format)?;
+    trace_kernel(rt, format).map(|_| ())
 }
 
 fn kernel(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<Arc<Kernel>, RenderError> {
@@ -671,6 +1160,39 @@ mod tests {
             extent: 15.0,
             in_front: 0.0,
         }
+    }
+
+    #[test]
+    fn traced_outlines_split_the_mesh_and_round_trip() {
+        // Two 20 × 20 blobs 40 px apart in an 80 × 20 layer, cells of 2 px.
+        let (cols, rows) = (40, 10);
+        let alpha: Vec<f32> = (0..cols * rows)
+            .map(|i| {
+                if i % cols < 10 || i % cols >= 30 {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let mask = Mask::from_alpha(DVec2::ZERO, 2.0, cols, rows, &alpha, 0.0);
+        assert_eq!(Mask::from_value(&mask.to_value()), Some(mask.clone()));
+        let mesh = Mesh::traced(DVec2::ZERO, DVec2::new(80.0, 20.0), 10.0, &mask);
+        assert!(
+            mesh.rest.iter().all(|p| p.x <= 24.0 || p.x >= 56.0),
+            "no vertices in the gap"
+        );
+        // A pin on the left blob moves it; the right one stays.
+        let left = mesh.rest[mesh.nearest(DVec2::new(10.0, 10.0))];
+        let pins = [pin(PinKind::Position, left, left + DVec2::new(5.0, 0.0))];
+        let moved = deform(&mesh, &pins, 5);
+        let l = mesh.nearest(DVec2::new(0.0, 0.0));
+        let r = mesh.nearest(DVec2::new(80.0, 0.0));
+        assert!((moved[l].x - mesh.rest[l].x - 5.0).abs() < 1e-6);
+        assert_eq!(moved[r], mesh.rest[r]);
+        // Expansion grows it: the gap narrows.
+        let grown = mesh_of(Some(&mask.to_value()), IRect::new(0, 0, 80, 20), 6.0, 10.0);
+        assert!(grown.rest.iter().any(|p| p.x > 21.0 && p.x < 30.0));
     }
 
     #[test]

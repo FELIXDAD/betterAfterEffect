@@ -145,6 +145,41 @@ impl Command for DeletePins {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct SetMeshParams {
+    pub effect: PrimPath,
+    /// Auto-traced Shapes: the layer's traced alpha (the renderer's encoding).
+    pub outlines: Value,
+}
+
+pub struct SetMesh;
+
+impl Command for SetMesh {
+    type Params = SetMeshParams;
+    type Output = ();
+    const ID: &'static str = "puppet.set_mesh";
+    const TITLE: &'static str = "Create Puppet Mesh";
+    const DESCRIPTION: &'static str = "Store a Puppet effect's traced outline (AE: the mesh \
+        the Puppet tools build from the layer's alpha).";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: SetMeshParams) -> Result<(), CommandError> {
+        let is_puppet = tx.stage().prim(&p.effect).is_some_and(|v| {
+            v.value("match_name")
+                .and_then(|m| m.as_str().map(str::to_owned))
+                .as_deref()
+                == Some(PUPPET)
+        });
+        if !is_puppet {
+            return Err(fail(format!("{} is not a Puppet effect", p.effect)));
+        }
+        if !matches!(p.outlines, Value::FloatList(_)) {
+            return Err(fail("outlines must be a list of numbers"));
+        }
+        // Auto-traced Shapes (parameter 6).
+        set(tx, &p.effect, &bae_model::effect::param_attr(6), p.outlines)
+    }
+}
+
 /// The layer's Puppet effect, added at the bottom of its stack if missing.
 fn puppet_effect(
     tx: &mut Transaction<'_>,
