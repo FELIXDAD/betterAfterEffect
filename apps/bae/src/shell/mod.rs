@@ -1569,9 +1569,10 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .as_ref()
                     .and_then(|m| m.contributed_invocation(id))
                     .unwrap_or_else(|| menu::invocation(id));
-                // A modal dialog is open: menu commands (and their key
-                // equivalents) do not reach the project behind it; Quit still works.
-                if self.workspace.modal_open(self.app.resources()) && inv.id != ids::QUIT {
+                if !self
+                    .workspace
+                    .accepts_native_menu(self.app.resources(), &inv)
+                {
                     return;
                 }
                 // Undo / Redo, Cut / Copy / Paste and Select All (their native

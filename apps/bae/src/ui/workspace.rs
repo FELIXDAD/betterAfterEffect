@@ -276,12 +276,24 @@ impl Workspace {
         self.settings.set(key, value);
     }
 
-    /// Ask for the user's role (first launch).
-    /// A modal dialog (the welcome / role picker, Preferences, a module dialog
-    /// such as Composition Settings) is open: it owns the keyboard and the menu
-    /// commands wait.
+    /// Whether Home or another dialog currently owns keyboard input.
     pub fn modal_open(&self, resources: &Resources) -> bool {
         self.home || self.workbench.modal_open(resources) || self.settings.is_open()
+    }
+
+    /// Home gives way to native menu commands. Other dialogs retain their modal guard.
+    pub fn accepts_native_menu(&mut self, resources: &Resources, inv: &Invocation) -> bool {
+        self.dismiss_home();
+        inv.id == bae_ui::action::ids::QUIT || !self.modal_open(resources)
+    }
+
+    /// Close the startup Home screen as soon as a command or project takes its place.
+    pub fn dismiss_home(&mut self) {
+        if self.home {
+            self.home = false;
+            // Native events can arrive before another frame refreshes the workbench.
+            self.workbench.set_external_modal(self.settings.is_open());
+        }
     }
 
     pub fn start_without_project(&mut self, first_run: bool) {
@@ -420,13 +432,13 @@ impl Workspace {
                     ] {
                         if ui.button(tr(label)).clicked() {
                             out.push(Invocation::new(id));
-                            self.home = false;
+                            self.dismiss_home();
                         }
                     }
                 });
             });
             if modal.should_close() {
-                self.home = false;
+                self.dismiss_home();
             }
         }
         if self.settings.is_open() {
