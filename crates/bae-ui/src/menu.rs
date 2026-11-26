@@ -129,12 +129,31 @@ pub type MenuLabel = dyn Fn(&MenuContext<'_>) -> Option<String> + Send + Sync;
 /// Where an entry sits in one level of the menu: entries sort by `(group,
 /// order)`; a separator goes between groups. `sorted`: the entry is placed by its
 /// localized title among the sorted entries of its group (AE's panel list).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct MenuPos {
     pub group: i32,
     pub order: i32,
     pub sorted: bool,
+    /// For a sorted entry: the key its localized title sorts by, when not the
+    /// title itself (AE sorts its Effect menu by pinyin in Chinese).
+    pub collate: Option<fn(&str) -> String>,
 }
+
+/// Positions compare by place; a collation key only by whether there is one
+/// (function addresses are not meaningful).
+impl PartialEq for MenuPos {
+    fn eq(&self, other: &Self) -> bool {
+        (self.group, self.order, self.sorted, self.collate.is_some())
+            == (
+                other.group,
+                other.order,
+                other.sorted,
+                other.collate.is_some(),
+            )
+    }
+}
+
+impl Eq for MenuPos {}
 
 impl MenuPos {
     pub const fn new(group: i32, order: i32) -> Self {
@@ -142,7 +161,15 @@ impl MenuPos {
             group,
             order,
             sorted: false,
+            collate: None,
         }
+    }
+
+    /// Sorted by `key` of the localized title.
+    pub const fn collated(mut self, key: fn(&str) -> String) -> Self {
+        self.sorted = true;
+        self.collate = Some(key);
+        self
     }
 
     pub const fn sorted(mut self) -> Self {
@@ -472,6 +499,7 @@ impl Level {
                 Node::Sub(title, _) if pos.sorted => localize(title),
                 _ => String::new(),
             };
+            let title = pos.collate.map_or(title.clone(), |key| key(&title));
             let unsorted = (!pos.sorted).then_some((pos.order, *index));
             (pos.group, unsorted, title)
         });
