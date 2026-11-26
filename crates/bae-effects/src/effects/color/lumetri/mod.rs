@@ -103,7 +103,7 @@ pub fn prepare_lumetri_lut(
             wgpu::TextureFormat::Rgba16Float,
             wgpu::TextureFormat::Rgba32Float,
         ] {
-            LUTS.prepare(gpu, format, LutSource::File(&bytes))
+            LUTS.prepare_file(gpu, format, &bytes)
                 .map_err(|e| e.to_string())?;
         }
     }

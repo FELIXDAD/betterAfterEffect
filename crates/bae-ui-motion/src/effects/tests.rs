@@ -408,3 +408,39 @@ fn browse_lumetri_look_commits_both_ae_selectors_and_owned_cube_in_one_edit() {
         matches!(effect.value("param:0126"),Some(Value::Bytes(data)) if data.starts_with(b"user.cube\0"))
     );
 }
+
+#[test]
+fn animation_presets_save_and_apply_effects_with_their_values() {
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    let out = fx.run(
+        "effect.apply",
+        json!({"layers": [layer], "match_name": "ADBE Gaussian Blur 2"}),
+    );
+    let blur = PrimPath::new(out["effects"][0].as_str().unwrap()).unwrap();
+    fx.run(
+        "attr.set",
+        json!({"path": blur, "attr": "param:1", "value": {"type": "float", "value": 25.0}}),
+    );
+    // Save: the layer's effects and their values.
+    let preset = crate::presets::preset_of(&fx.stage, &[blur], bae_model::Time::ZERO);
+    assert_eq!(preset.effects[0].match_name, "ADBE Gaussian Blur 2");
+    assert_eq!(
+        preset.effects[0].values.get("param:1"),
+        Some(&Value::Float(25.0))
+    );
+    // Apply to another layer: the effect with the stored value, one step.
+    let comp = bae_motion::query::owning_comp(&fx.stage, &layer).unwrap();
+    let other = fx.run("layer.create", json!({"comp": comp, "kind": "solid"}));
+    let other = PrimPath::new(other["path"].as_str().unwrap()).unwrap();
+    let out = fx.run(
+        "effect.apply_preset",
+        json!({"layers": [other], "effects": preset.effects}),
+    );
+    let applied = PrimPath::new(out["effects"][0].as_str().unwrap()).unwrap();
+    let v = fx.stage.prim(&applied).unwrap();
+    assert_eq!(
+        bae_motion::query::static_value(&v, "param:1"),
+        Some(Value::Float(25.0))
+    );
+}

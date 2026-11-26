@@ -644,7 +644,10 @@ fn data_range(pieces: &[Piece], extra: impl Iterator<Item = f64>) -> Option<(f64
 /// A range with room around the data (and never empty).
 fn padded((lo, hi): (f64, f64)) -> (f64, f64) {
     let span = hi - lo;
-    if span.abs() < 1e-9 {
+    // Flat when the spread is rounding noise next to the values (a linear
+    // segment's speed samples differ by ~1e-9): fitting it would blow the noise
+    // up to the full height (#552).
+    if span.abs() <= 1e-9 * lo.abs().max(hi.abs()).max(1.0) {
         let m = lo.abs().max(1.0) * 0.1;
         (lo - m, hi + m)
     } else {
@@ -1898,6 +1901,12 @@ impl GraphEditor {
                     k.time = *t;
                 }
             }
+            // Panels drawn before the edit runs keep the moved keys selected.
+            let landing: Vec<KeyRef> = moved
+                .iter()
+                .map(|(k, t)| KeyRef::new(k.path.clone(), k.attr.clone(), *t))
+                .collect();
+            s.expect(crate::session::Pending::Keys(landing));
             self.sel_dims = self
                 .sel_dims
                 .drain()
@@ -3070,6 +3079,42 @@ mod tests {
         for (_, v) in &pieces[0].pts {
             assert!((v - 500.0).abs() < 1e-3, "{v}");
         }
+    }
+
+    /// #552: a linear segment's constant speed draws as a level line, not as its
+    /// rounding noise fitted to the full height.
+    #[test]
+    fn constant_speed_draws_level() {
+        let lin = prop(
+            "transform:position",
+            vec![
+                (62.0 / 30.0, Keyframe::linear([960.0, 540.0, 0.0])),
+                (242.0 / 30.0, Keyframe::linear([1500.0, 540.0, 0.0])),
+            ],
+            true,
+            true,
+        );
+        let axis = TimeAxis {
+            left: 0.0,
+            width: 1500.0,
+            start: Time::ZERO,
+            span: Time::from_seconds(10.0),
+        };
+        let c = lin.curve().unwrap();
+        let data = Sampled::new(
+            sample(&lin, &c, &axis, 0.0, 1500.0, true),
+            key_values(&lin, &c, true),
+        );
+        let va = VAxis::new(
+            padded(data.range.unwrap()),
+            Rect::from_min_size(Pos2::ZERO, vec2(1500.0, 300.0)),
+        );
+        let ys: Vec<f32> = data.pieces[0].pts.iter().map(|(_, v)| va.y(*v)).collect();
+        let (lo, hi) = ys
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(*y), b.max(*y)));
+        assert!(hi - lo < 0.5, "a level line, not spikes: {lo}..{hi}");
+        assert!((va.v(lo) - 90.0).abs() < 1e-6);
     }
 
     #[test]

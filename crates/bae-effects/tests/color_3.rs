@@ -386,6 +386,32 @@ fn legacy_corrections_clip_straight_hdr_before_premultiplying() {
 }
 
 #[test]
+fn cineon_reuses_the_pass_with_the_current_white_point() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(1, 1);
+    let input = Pixels::new(rect, |_, _| [1.; 4]);
+    let cineon = builtin("ADBE Cineon Converter2");
+    for white in [500., 800., 500.] {
+        let out = run(
+            &gpu,
+            F32,
+            cineon,
+            vec![
+                (1, Value::Int(1)),
+                (4, Value::Float(white)),
+                (8, Value::Float(0.)),
+                (9, Value::Float(1.)),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        let expected = white as f32 / 1023.;
+        assert!((out.get(0, 0)[0] - expected).abs() < 0.0001);
+    }
+}
+
+#[test]
 fn ocio_file_and_cdl_apply_embedded_grades_on_gpu() {
     let Some(gpu) = context() else {
         return;

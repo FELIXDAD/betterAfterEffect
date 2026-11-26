@@ -52,7 +52,7 @@ struct ApplyLut {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct LutCache(Mutex<VecDeque<CacheEntry>>);
+pub(super) struct LutCache(Mutex<VecDeque<Arc<Prepared>>>);
 
 type Processor = (crate::categories::color::ocio::Operation, [i64; 9]);
 
@@ -62,22 +62,49 @@ pub(super) enum LutSource<'a> {
 }
 
 #[derive(Debug)]
-struct CacheEntry {
+struct Prepared {
     device: wgpu::Device,
     format: wgpu::TextureFormat,
     data: Vec<u8>,
     processor: Option<Processor>,
-    prepared: Option<Arc<Prepared>>,
+    /// `None` for an identity transform: cached too, so it is not rebuilt
+    /// (and a CDL file reparsed) every frame.
+    pass: Option<Pass>,
 }
 
 #[derive(Debug)]
-pub(super) struct Prepared {
+struct Pass {
     kernel: Arc<Kernel>,
     values: Vec<u8>,
     views: Vec<wgpu::TextureView>,
 }
 
 impl Prepared {
+    /// `live`: the values change every frame, so even an identity keeps a pass.
+    fn new(
+        gpu: &Arc<GpuContext>,
+        format: wgpu::TextureFormat,
+        data: &[u8],
+        processor: Option<Processor>,
+        transform: bae_color::ColorTransform,
+        live: bool,
+    ) -> Result<Self, RenderError> {
+        let pass = if transform.is_identity() && !live {
+            None
+        } else {
+            Some(Pass::new(gpu, format, transform)?)
+        };
+        Ok(Self {
+            device: gpu.device().clone(),
+            format,
+            data: data.into(),
+            processor,
+            pass,
+        })
+    }
+}
+
+impl Pass {
     fn new(
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
@@ -222,56 +249,62 @@ impl TargetEffect for ApplyLut {
 }
 
 impl LutCache {
-    /// Build the transform outside the lock. An identity transform needs no GPU pass.
-    pub(super) fn prepare(
+    pub(super) fn prepare_file(
         &self,
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
-        source: LutSource<'_>,
-    ) -> Result<Option<Arc<Prepared>>, RenderError> {
-        let (data, processor) = match source {
-            LutSource::File(data) => (data, None),
-            LutSource::Ocio(data, processor) => (data, Some(processor)),
+        data: &[u8],
+    ) -> Result<(), RenderError> {
+        self.prepare(gpu, format, data, None, None).map(|_| ())
+    }
+
+    fn prepare(
+        &self,
+        gpu: &Arc<GpuContext>,
+        format: wgpu::TextureFormat,
+        data: &[u8],
+        processor: Option<Processor>,
+        frame_transform: Option<&bae_color::ColorTransform>,
+    ) -> Result<Arc<Prepared>, RenderError> {
+        // Animated Cineon controls share one pipeline per conversion type.
+        let key = if frame_transform.is_some() {
+            processor.map(|(op, s)| (op, [s[0], 0, 0, 0, 0, 0, 0, 0, 0]))
+        } else {
+            processor
         };
-        if data.is_empty() && processor.is_none_or(|(op, _)| op.data_id() != 0) {
-            return Ok(None);
-        }
-        let matches = |entry: &&CacheEntry| {
+        let matches = |entry: &&Arc<Prepared>| {
             &entry.device == gpu.device()
                 && entry.format == format
                 && entry.data == data
-                && entry.processor == processor
+                && entry.processor == key
         };
         if let Some(entry) = self.0.lock().iter().find(matches) {
-            return Ok(entry.prepared.clone());
+            return Ok(entry.clone());
         }
-        let transform = match processor {
-            Some((op, selection)) => op.transform(data, selection)?,
-            None => bae_color::lutfile::from_embedded(data)
+        // Parse files and build pipelines outside the lock used by the renderer.
+        let transform = match (frame_transform, processor) {
+            (Some(t), _) => t.clone(),
+            (None, Some((op, selection))) => op.transform(data, selection)?,
+            (None, None) => bae_color::lutfile::from_embedded(data)
                 .map_err(|e| RenderError::Other(e.to_string()))?,
         };
-        let prepared = if transform.is_identity() {
-            None
-        } else {
-            Some(Arc::new(Prepared::new(gpu, format, transform)?))
-        };
-        let candidate = CacheEntry {
-            device: gpu.device().clone(),
+        let entry = Arc::new(Prepared::new(
+            gpu,
             format,
-            data: data.into(),
-            processor,
-            prepared: prepared.clone(),
-        };
+            data,
+            key,
+            transform,
+            frame_transform.is_some(),
+        )?);
         let mut cache = self.0.lock();
-        if let Some(entry) = cache.iter().find(matches) {
-            return Ok(entry.prepared.clone());
+        if let Some(existing) = cache.iter().find(matches) {
+            return Ok(existing.clone());
         }
-        // Two project work formats for each of the two Lumetri slots.
         if cache.len() == 4 {
             cache.pop_front();
         }
-        cache.push_back(candidate);
-        Ok(prepared)
+        cache.push_back(entry.clone());
+        Ok(entry)
     }
 
     pub(super) fn apply(
@@ -283,34 +316,50 @@ impl LutCache {
         source: LutSource<'_>,
         intensity: f32,
     ) -> Result<GpuImage, RenderError> {
-        if roi.is_empty() || intensity == 0. {
+        let (data, processor) = match source {
+            LutSource::File(data) => (data, None),
+            LutSource::Ocio(data, processor) => (data, Some(processor)),
+        };
+        let needs_data = processor.is_none_or(|(op, _)| op.data_id() != 0);
+        if (needs_data && data.is_empty()) || roi.is_empty() || intensity == 0. {
             return Ok(input.clone());
         }
-        let Some(lut) = self.prepare(target.gpu(), target.format(), source)? else {
+        // Animated Cineon settings change only the uniform values: one entry per
+        // conversion type, with this frame's values.
+        let live =
+            processor.filter(|(op, _)| *op == crate::categories::color::ocio::Operation::Cineon);
+        let now = live.map(|(op, s)| op.transform(data, s)).transpose()?;
+        if now.as_ref().is_some_and(|t| t.is_identity()) {
+            return Ok(input.clone());
+        }
+        let lut = self.prepare(target.gpu(), target.format(), data, processor, now.as_ref())?;
+        let Some(pass) = &lut.pass else {
             return Ok(input.clone());
         };
+        let values = now.map(|t| t.to_wgsl("lut").params_bytes());
+        let values = values.as_deref().unwrap_or(&pass.values);
         let grid = image_grid::grid_scale(p, input);
         let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let rt = gpu::runtime(target.gpu());
-        let mut w = UniformWriter::with_size(64 + lut.values.len());
+        let mut w = UniformWriter::with_size(64 + values.len());
         image_grid::image_coords(&mut w, 0, input, grid);
         w.i32s(32, &[roi.x0, roi.y0])
             .u32(40, roi.width())
             .u32(44, roi.height())
             .u32(48, u32::from(p.float))
             .f32(52, intensity);
-        w.bytes[64..].copy_from_slice(&lut.values);
+        w.bytes[64..].copy_from_slice(values);
         let mut resources = vec![
             Resource::Uniform,
             Resource::View(&input.view),
             Resource::View(&out.view),
         ];
-        resources.extend(lut.views.iter().map(Resource::View));
-        let group = rt.bind_group(&lut.kernel, &resources);
+        resources.extend(pass.views.iter().map(Resource::View));
+        let group = rt.bind_group(&pass.kernel, &resources);
         let offset = gpu::push_uniform(&rt, &w);
-        let mut pass = target.encoder().begin_compute_pass(&Default::default());
-        gpu::dispatch(&mut pass, &lut.kernel, &group, &[offset], roi.size());
-        drop(pass);
+        let mut compute = target.encoder().begin_compute_pass(&Default::default());
+        gpu::dispatch(&mut compute, &pass.kernel, &group, &[offset], roi.size());
+        drop(compute);
         Ok(out)
     }
 }

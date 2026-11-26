@@ -21,6 +21,7 @@ pub(crate) mod temporal;
 /// Localized dropdown options for the Color Correction Rust effects.
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     match (match_name, param_id) {
+        ("ADBE Aud HiLo", 1) => Some(&["高通", "低通"]),
         ("APC Colorama", id) => color::colorama_definition::options_zh(id),
         ("ADBE Equalize", 1) => Some(&["RGB", "亮度", "Photoshop 样式"]),
         ("ADBE CurvesCustom", 2) => Some(&["RGB", "红色", "绿色", "蓝色", "Alpha"]),

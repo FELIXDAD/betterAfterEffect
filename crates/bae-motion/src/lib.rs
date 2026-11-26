@@ -77,9 +77,11 @@ pub mod layer;
 pub mod markers;
 pub mod matte;
 pub mod names;
+pub mod orient;
 pub mod paint;
 pub mod path;
 pub mod precompose;
+pub mod project_settings;
 pub mod query;
 pub mod shape;
 pub mod solid;
@@ -87,6 +89,7 @@ pub mod text;
 pub mod text_animators;
 pub mod text_path;
 pub mod time;
+pub mod tracker;
 mod util;
 
 use std::sync::Arc;
@@ -102,7 +105,7 @@ pub use comp::{
 pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
-pub use import::{ImportFile, ImportItems, ImportOutput};
+pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
     PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
@@ -115,8 +118,10 @@ pub use layer::{
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 pub use matte::SetTrackMatte;
+pub use orient::AutoOrient;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
+pub use project_settings::SetProjectSettings;
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
@@ -131,11 +136,16 @@ pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
         r.register(paint::AddStroke),
+        r.register(tracker::CreateTracker),
+        r.register(tracker::ConfigureTracker),
+        r.register(tracker::RecordTrack),
+        r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(ReplaceFile),
         r.register(CreateLayer),
         r.register(Precompose),
         r.register(SetSolidSettings),
@@ -174,6 +184,8 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(AutoOrient),
+        r.register(SetProjectSettings),
         r.register(SetText),
         r.register(SetExpressions),
         r.register(DuplicateContent),
