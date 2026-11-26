@@ -37,7 +37,7 @@ impl ViewerPrefs {
 
     pub fn current(resources: &bae_app::Resources) -> Self {
         match resources.get::<std::sync::Arc<PrefsStore>>() {
-            Some(store) => Self::from(&store.current()),
+            Some(store) => Self::from(&store.display()),
             None => Self::from(&Preferences::default()),
         }
     }
