@@ -557,12 +557,7 @@ pub(crate) fn live_evaluator<'a>(
     cx: &PanelContext<'_>,
     session: &SharedSession,
 ) -> &'a mut bae_anim::Evaluator {
-    let overrides = session
-        .lock()
-        .scrub
-        .as_ref()
-        .map(|s| s.overrides(cx.stage))
-        .unwrap_or_default();
+    let overrides = session.lock().live_overrides(cx.stage);
     let eval = eval.get(cx.stage);
     eval.set_overrides(overrides);
     eval
