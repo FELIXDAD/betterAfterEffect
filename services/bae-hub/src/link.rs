@@ -70,4 +70,8 @@ impl Transport for PeerLink {
             }
         }
     }
+
+    fn close(&mut self) -> Result<(), SyncError> {
+        self.inner.close()
+    }
 }

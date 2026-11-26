@@ -257,13 +257,15 @@ impl SyncSession {
         now: Instant,
     ) -> Result<PumpOutcome, SyncError> {
         let mut out = PumpOutcome::default();
-        self.maybe_hello(docs, transport, now, &mut out)?;
+        let hello = self.maybe_hello(docs, transport, now, &mut out);
         let mut incoming = Incoming::new();
         let received = self.receive(docs, transport, &mut incoming, now, &mut out);
-        // Import what arrived even when the link failed part-way: the remote
-        // counts it as delivered (a client that sends its last edits and closes
-        // at once must not lose them), and the CRDT import does not need the link.
+        // Import what arrived even when the link failed part-way (a periodic
+        // `Hello` that could not be sent included): the remote counts it as
+        // delivered (a client that sends its last edits and closes at once must
+        // not lose them), and the CRDT import does not need the link.
         self.import(docs, incoming, &mut out);
+        hello?;
         received?;
         out.presence_changed |= self.peers.expire(now);
         self.maybe_presence(transport, now, &mut out)?;
@@ -491,7 +493,10 @@ impl SyncSession {
     }
 
     /// Send every document's ops the remote is not known to have. Returns whether
-    /// anything was sent.
+    /// anything was sent. A failed send does not stop the others: they are
+    /// already counted as sent, and a transport can fail one message and take
+    /// the next (a shared folder whose log for one document cannot be written,
+    /// a message over the hub's size limit). The first error is returned.
     fn send_missing(
         &mut self,
         docs: &dyn DocSet,
@@ -523,10 +528,16 @@ impl SyncSession {
             }
         }
         let sent = !batch.is_empty();
+        let mut failed = None;
         for msg in batch {
-            self.send(transport, msg, out)?;
+            if let Err(e) = self.send(transport, msg, out) {
+                failed.get_or_insert(e);
+            }
         }
-        Ok(sent)
+        match failed {
+            Some(e) => Err(e),
+            None => Ok(sent),
+        }
     }
 
     fn send(

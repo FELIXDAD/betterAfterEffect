@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use bae_model::project::Project;
-use bae_model::{AuthorId, Op, Stage, SublayerId, Value};
+use bae_model::{AuthorId, Op, PrimType, Specifier, Stage, SublayerId, Value};
 use bae_sync::{
     ClientId, DirConfig, DirTransport, DocKey, DocSet, MemoryTransport, SessionConfig, SyncError,
     SyncSession, ThreadedTransport, Transport,
@@ -196,6 +196,21 @@ fn set_opacity(c: &mut Client, value: f64) {
         .unwrap();
 }
 
+/// One small edit in `layer`: a new layer `name`.
+fn create_layer(c: &mut Client, layer: &SublayerId, name: &str) {
+    c.stage.set_edit_target(layer).unwrap();
+    c.stage
+        .transact(&c.who, "edit", |tx| {
+            tx.apply(Op::CreatePrim {
+                path: p(&format!("{LAYERS}/{name}")),
+                specifier: Specifier::Def,
+                prim_type: Some(PrimType::new("Layer")),
+                index: None,
+            })
+        })
+        .unwrap();
+}
+
 /// The share stalls: writes to `log` fail (it is a directory for now) until
 /// [`unstall`] puts the file back as it was.
 fn stall(log: &Path) -> PathBuf {
@@ -244,6 +259,9 @@ fn a_failed_append_leaves_no_gap_for_the_next_session() {
         n,
         tag,
     } = a;
+    // Closing tells that the log still lacks edits.
+    let mut old_dir = old_dir;
+    assert!(old_dir.close().is_err());
     drop((old_session, old_dir));
     let mut a = Client {
         stage,
@@ -295,6 +313,36 @@ fn a_failed_append_is_repaired_with_a_snapshot() {
     // Appending works again afterwards.
     set_opacity(&mut a, 5.0);
     a.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+    assert!(a.dir.close().is_ok());
+}
+
+/// A failed write to one document's log does not keep the session from
+/// sending the others in the same pump: it already counts them as sent, so a
+/// skipped one would leave a gap in its log that nothing repairs.
+#[test]
+fn a_failed_append_does_not_hold_back_other_documents() {
+    let (_tmp, dir) = project_dir();
+    let anim = sl("anim/a");
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    create_layer(&mut a, &anim, "a1");
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    // `anim/a` is sent first.
+    assert_eq!(a.stage.doc_keys()[0], DocKey::sublayer(&anim));
+    let log = a.dir.log_path(&DocKey::sublayer(&anim));
+    let aside = stall(&log);
+    create_layer(&mut a, &anim, "a2");
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    unstall(&log, &aside);
+    set_opacity(&mut a, 3.0);
+    a.pump();
+    a.pump();
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
     b.pump();
     assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
 }
@@ -747,16 +795,18 @@ fn a_stalled_log_is_not_snapshotted_on_every_pump() {
     let before = a.session.stats().bytes_sent;
     let mut pumps = 0;
     let start = Instant::now();
-    while start.elapsed() < Duration::from_millis(500) {
+    while start.elapsed() < Duration::from_millis(800) {
         let _ = a.session.pump(&mut a.stage, &mut a.dir);
         pumps += 1;
         std::thread::sleep(Duration::from_millis(1));
     }
+    // At once, then after 100, 200 and 400 ms (the poll interval is zero here,
+    // so the backoff starts at 100 ms and doubles).
     let snapshots = (a.session.stats().bytes_sent - before) / snapshot_len;
-    assert!(pumps > 50, "only {pumps} pumps");
+    assert!(pumps > 80, "only {pumps} pumps");
     assert!(
-        (1..=5).contains(&snapshots),
-        "{snapshots} snapshots in {pumps} pumps over 0.5 s"
+        (3..=5).contains(&snapshots),
+        "{snapshots} snapshots in {pumps} pumps over 0.8 s"
     );
     unstall(&log, &aside);
     let deadline = Instant::now() + Duration::from_secs(10);

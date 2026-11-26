@@ -319,23 +319,152 @@ fn a_peer_that_stops_reading_is_cut_off() {
     let limits = HubLimits {
         max_message: 1 << 20,
         max_backlog: 1 << 20,
+        stall_timeout: Duration::from_millis(300),
     };
-    // The client never reads; the server keeps sending.
+    // The client never reads; the server keeps sending and polling, as a relay
+    // does.
     let (_client, mut server) = raw_pair(limits);
     let chunk = Message::Updates {
         doc: DocKey::sublayer(&SublayerId::root()),
         version: Default::default(),
         data: vec![7; 256 << 10],
     };
-    let mut failed = None;
-    for i in 0..1024 {
-        if let Err(e) = server.send(chunk.clone()) {
-            failed = Some((i, e));
-            break;
+    let start = Instant::now();
+    let mut sent = 0;
+    let e = loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{sent} messages queued for a peer that does not read"
+        );
+        if let Err(e) = server
+            .send(chunk.clone())
+            .and_then(|()| server.recv().map(drop))
+        {
+            break e;
+        }
+        sent += 1;
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    // Socket buffers take a few MiB, then more than `max_backlog` waits with
+    // nothing going out for `stall_timeout`.
+    assert!(start.elapsed() >= limits.stall_timeout);
+    assert!(sent >= 4, "failed after only {sent} messages: {e}");
+    assert!(e.to_string().contains("not reading"), "{e}");
+}
+
+/// A peer that reads, however slowly, is not cut off because much waits for it:
+/// a session sends everything a newcomer lacks back to back (on a first sync,
+/// the whole project).
+#[test]
+fn a_slow_reader_gets_a_large_batch() {
+    use bae_sync::{DocKey, HubLimits, Message, Transport};
+    const N: usize = 10;
+    let limits = HubLimits {
+        max_message: 4 << 20,
+        max_backlog: 1 << 20,
+        ..HubLimits::default()
+    };
+    let (mut client, mut server) = raw_pair(limits);
+    // About 120 MB/s.
+    let reader = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut got = 0;
+        while got < N && Instant::now() < deadline {
+            match client.recv().unwrap() {
+                Some(_) => {
+                    got += 1;
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                None => std::thread::sleep(Duration::from_millis(1)),
+            }
+        }
+        // Still connected: the server may be polling.
+        (got, client)
+    });
+    let batch: Vec<Message> = (0..N)
+        .map(|i| Message::Updates {
+            doc: DocKey::sublayer(&SublayerId::root()),
+            version: Default::default(),
+            data: vec![i as u8; 3 << 20],
+        })
+        .collect();
+    for (i, msg) in batch.into_iter().enumerate() {
+        if let Err(e) = server.send(msg) {
+            panic!("message {i} of {N}: {e}");
         }
     }
-    // Socket buffers take a few MiB; the queue on top of them is capped.
-    let (i, e) = failed.expect("256 MiB queued for a peer that does not read");
-    assert!(i >= 4, "failed after only {i} messages: {e}");
-    assert!(e.to_string().contains("not reading"), "{e}");
+    while !reader.is_finished() {
+        server.recv().unwrap(); // drives the rest of the sends
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(reader.join().unwrap().0, N);
+}
+
+/// The peer sent its last message and went away (a reset) while we were still
+/// sending to it: the failed write is reported only after that message.
+#[test]
+fn a_message_that_arrived_before_a_reset_is_still_read() {
+    use bae_sync::{DocKey, HubLimits, Message, Transport};
+    let (mut client, mut server) = raw_pair(HubLimits::default());
+    let doc = DocKey::sublayer(&SublayerId::root());
+    // More than the socket buffers take: the rest waits in the server.
+    server
+        .send(Message::Updates {
+            doc: doc.clone(),
+            version: Default::default(),
+            data: vec![0; 40 << 20],
+        })
+        .unwrap();
+    client
+        .send(Message::Updates {
+            doc,
+            version: Default::default(),
+            data: vec![1, 2, 3],
+        })
+        .unwrap();
+    // Closing a socket with unread data resets the connection.
+    std::thread::sleep(Duration::from_millis(50));
+    drop(client);
+    std::thread::sleep(Duration::from_millis(50));
+    match server.recv() {
+        Ok(Some(Message::Updates { data, .. })) => assert_eq!(data, [1, 2, 3]),
+        other => panic!("the last message was lost: {other:?}"),
+    }
+    assert!(server.recv().is_err());
+}
+
+/// `close` on the usual client stack returns once the hub has read everything:
+/// a large last message is not cut off when the connection goes away.
+#[test]
+fn closing_a_hub_client_delivers_its_last_message() {
+    use bae_sync::{DocKey, HubLimits, Message, Transport};
+    let (client, mut server) = raw_pair(HubLimits::default());
+    // The hub is busy for a moment: the message does not fit in the socket
+    // buffers by the time `close` is called.
+    let reader = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        let mut got = None;
+        loop {
+            match server.recv() {
+                Ok(Some(m)) => got = Some(m),
+                Ok(None) => std::thread::sleep(Duration::from_millis(1)),
+                Err(e) => return (got, e),
+            }
+        }
+    });
+    let mut client = ThreadedTransport::spawn(client, Duration::from_millis(1), || {});
+    client
+        .send(Message::Updates {
+            doc: DocKey::sublayer(&SublayerId::root()),
+            version: Default::default(),
+            data: vec![9; 20 << 20],
+        })
+        .unwrap();
+    client.close().unwrap();
+    let (got, e) = reader.join().unwrap();
+    match got {
+        Some(Message::Updates { data, .. }) => assert_eq!(data.len(), 20 << 20),
+        other => panic!("the last message was lost ({e}): {other:?}"),
+    }
+    assert!(matches!(e, SyncError::Closed), "{e}");
 }

@@ -379,7 +379,6 @@ impl DirTransport {
             self.scanned = true;
             self.inbox.push_back(self.hello());
         }
-        self.rerequest_behind();
     }
 
     fn note(&mut self, r: Result<(), SyncError>) {
@@ -674,12 +673,14 @@ impl DirTransport {
     /// it holds, and the next session on the folder writes what is missing.
     fn fell_behind(&mut self, doc: &DocKey) {
         let now = Instant::now();
-        let first = self.config.poll_interval.max(Duration::from_millis(100));
+        let first = self
+            .config
+            .poll_interval
+            .clamp(Duration::from_millis(100), BEHIND_MAX_DELAY);
         match self.behind.get_mut(doc) {
             Some(b) => {
-                // Failed again (the rewrite, or a write while we waited): ask
-                // again later, not on every failure.
-                b.delay = (b.delay * 2).min(BEHIND_MAX_DELAY);
+                // The rewrite failed too: ask again once the current delay
+                // (doubled when the request went out) has passed since now.
                 b.next_request = b.next_request.max(now + b.delay);
             }
             None => {
@@ -697,7 +698,9 @@ impl DirTransport {
     }
 
     /// Ask again for the snapshots of logs that are still behind (the answer may
-    /// have been lost with a session that went away), with backoff.
+    /// have been lost with a session that went away), with backoff. Checked on
+    /// every `recv`, not only when the folder is polled (which may be rare with
+    /// file events).
     fn rerequest_behind(&mut self) {
         let now = Instant::now();
         for (doc, b) in &mut self.behind {
@@ -821,8 +824,22 @@ impl Transport for DirTransport {
                 self.last_poll = Some(now);
                 self.poll();
             }
+            self.rerequest_behind();
         }
         Ok(self.inbox.pop_front())
+    }
+
+    /// Writes happen in `send`; what can still be missing is a log that fell
+    /// behind (a write failed) and was not rewritten yet: the edits since are
+    /// in no file. The next session on the folder writes them if the documents
+    /// still hold them (see [`DirTransport::fell_behind`]).
+    fn close(&mut self) -> Result<(), SyncError> {
+        match self.behind.keys().next() {
+            Some(doc) => Err(SyncError::io(&self.log_path(doc))(io::Error::other(
+                "a write failed and the log was not rewritten yet; the edits since are not in it",
+            ))),
+            None => Ok(()),
+        }
     }
 }
 

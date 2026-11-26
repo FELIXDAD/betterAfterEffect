@@ -340,20 +340,33 @@ impl bae_sync::Transport for DyingLink {
 
 #[test]
 fn edits_received_just_before_a_link_fails_are_kept() {
+    edit_sent_just_before_a_link_fails(false);
+}
+
+/// As above, but the relay's periodic `Hello` to the leaving client is due in
+/// that pump: its send fails before anything is read.
+#[test]
+fn edits_received_just_before_a_link_fails_are_kept_when_a_hello_is_due() {
+    edit_sent_just_before_a_link_fails(true);
+}
+
+fn edit_sent_just_before_a_link_fails(hello_due: bool) {
     use bae_sync::MemoryTransport;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let base = base_snapshots();
     let mut relay = Relay::new(ClientId::new("hub").unwrap());
+    // The client that stays is pumped first in each relay round: it only gets
+    // the edit if the relay goes round once more after the failure.
+    let (hub_end, mut staying_end) = MemoryTransport::pair();
+    relay.connect(Box::new(hub_end));
     let dead = Arc::new(AtomicBool::new(false));
     let (hub_end, mut leaving_end) = MemoryTransport::pair();
     relay.connect(Box::new(DyingLink {
         inner: hub_end,
         dead: dead.clone(),
     }));
-    let (hub_end, mut staying_end) = MemoryTransport::pair();
-    relay.connect(Box::new(hub_end));
     let mut leaving = client_stage(&base);
     let mut leaving_session = SyncSession::new(SessionConfig::new(ClientId::new("a").unwrap()));
     let mut staying = client_stage(&base);
@@ -389,7 +402,11 @@ fn edits_received_just_before_a_link_fails_are_kept() {
 
     // One relay pump: the hub imports the edit, drops the link and passes the
     // edit on to the client that stayed.
-    let out = relay.pump();
+    let out = if hello_due {
+        relay.pump_at(Instant::now() + Duration::from_secs(60))
+    } else {
+        relay.pump()
+    };
     assert_eq!(out.disconnected.len(), 1);
     let root = DocKey::sublayer(&SublayerId::root());
     assert!(

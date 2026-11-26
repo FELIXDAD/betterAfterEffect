@@ -343,9 +343,12 @@ fn slow_store(data: &Path) -> HubConfig {
     cfg
 }
 
-/// Two writers on `PROJECT`, once the hub has written the base project (the
-/// store's first write is never held back). Returns the clients and how many
-/// records the root log has then.
+/// Two writers on `PROJECT`, once the store's first write is on disk (it is
+/// never held back). Returns the clients and how many records the root log has
+/// then: 0 if that write only had `anim/a` (the base project arrives as one
+/// message per sublayer, and the relay may read them in different pumps); the
+/// root's part then waits with the rest for a flush, which writes it as one
+/// record.
 fn two_writers(
     addr: SocketAddr,
     data: &Path,
@@ -356,11 +359,21 @@ fn two_writers(
         Client::join(addr, PROJECT, WRITE, "bob", base),
     ];
     let log = root_log(data);
+    let anim_log = data.join(format!("projects/{PROJECT}/updates/anim/a/hub.log"));
     pump_until(&mut clients, Duration::from_secs(10), |c| {
-        c.iter().all(|c| c.session.is_connected()) && records_now(&log) > 0
+        c.iter().all(|c| c.session.is_connected()) && records_now(&log) + records_now(&anim_log) > 0
     });
-    let records = records_now(&log);
-    (clients, records)
+    // The store's thread writes one document after the other: wait until the
+    // rest of that write (if any) is on disk too.
+    let mut records = records_now(&log);
+    loop {
+        pump_for(&mut clients, Duration::from_millis(50));
+        let now = records_now(&log);
+        if now == records {
+            return (clients, records);
+        }
+        records = now;
+    }
 }
 
 /// Wait until the project is (`true`) or is no longer (`false`) loaded.

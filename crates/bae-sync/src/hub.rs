@@ -5,8 +5,9 @@
 //! wait; still, wrap it in a [`crate::ThreadedTransport`] so connecting and large
 //! transfers stay off the stage thread.
 
+use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tungstenite::client::IntoClientRequest;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -17,7 +18,7 @@ use crate::error::SyncError;
 use crate::protocol::Message;
 use crate::transport::Transport;
 
-/// Size limits of a hub connection, the same in both directions.
+/// Limits of a hub connection, the same in both directions.
 ///
 /// tungstenite's defaults (16 MiB per frame, unlimited write queue) do not fit
 /// the protocol: messages are sent as single unfragmented frames, so a sublayer
@@ -28,13 +29,19 @@ use crate::transport::Transport;
 pub struct HubLimits {
     /// Largest encoded protocol message either side sends or accepts (also the
     /// frame limit, since a message is one frame). A whole sublayer snapshot
-    /// must fit: a larger one fails to send instead of being refused remotely.
+    /// must fit: a larger one fails to send instead of being refused remotely
+    /// (the session still sends its other documents first).
     pub max_message: usize,
-    /// Bytes that may wait for a peer that is not reading, on top of room for
-    /// one more message of up to `max_message`. Past that, `send` fails and the
-    /// connection is dropped (a relay drops it at once) instead of growing
-    /// without bound.
+    /// Bytes that may wait for a peer that stopped reading. Once more than this
+    /// waits and nothing went out for `stall_timeout`, `send` and `recv` fail and
+    /// the connection is dropped (a relay drops it at once) instead of growing
+    /// without bound. How much waits alone never cuts a peer off: one that
+    /// keeps reading, however slowly, gets everything (a session sends all a
+    /// newcomer lacks back to back, on a first sync the whole project).
     pub max_backlog: usize,
+    /// How long nothing may go out while more than `max_backlog` waits; also
+    /// how long [`Transport::close`] waits while nothing moves.
+    pub stall_timeout: Duration,
 }
 
 impl Default for HubLimits {
@@ -42,19 +49,61 @@ impl Default for HubLimits {
         HubLimits {
             max_message: 256 << 20,
             max_backlog: 16 << 20,
+            stall_timeout: Duration::from_secs(30),
         }
+    }
+}
+
+/// The socket, counting the bytes written to it: how [`HubTransport`] tells a
+/// slow peer (bytes keep leaving) from one that stopped reading.
+#[derive(Debug)]
+struct Counted {
+    stream: TcpStream,
+    written: u64,
+}
+
+impl Counted {
+    fn new(stream: TcpStream) -> Self {
+        Counted { stream, written: 0 }
+    }
+}
+
+impl Read for Counted {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stream.read(buf)
+    }
+}
+
+impl Write for Counted {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.stream.write(buf)?;
+        self.written += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
     }
 }
 
 /// One WebSocket connection carrying the sync protocol, client or server side.
 pub struct HubTransport {
-    ws: WebSocket<TcpStream>,
+    ws: WebSocket<Counted>,
+    limits: HubLimits,
+    /// About how many bytes wait in tungstenite's write buffer.
+    unsent: u64,
+    /// `Counted::written` when we last looked.
+    written: u64,
+    /// When bytes last left, or nothing was waiting.
+    progress: Instant,
+    /// A write failed; reported once what already arrived has been read.
+    failed: Option<SyncError>,
 }
 
 impl std::fmt::Debug for HubTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HubTransport")
-            .field("peer", &self.ws.get_ref().peer_addr().ok())
+            .field("peer", &self.ws.get_ref().stream.peer_addr().ok())
             .finish()
     }
 }
@@ -110,12 +159,13 @@ impl HubTransport {
         stream.set_nodelay(true).map_err(hub_err)?;
         stream.set_read_timeout(Some(timeout)).map_err(hub_err)?;
         stream.set_write_timeout(Some(timeout)).map_err(hub_err)?;
-        let (ws, _) = tungstenite::client::client(request, stream).map_err(|e| match e {
-            tungstenite::HandshakeError::Failure(WsError::Http(resp)) => {
-                SyncError::Hub(format!("hub refused the connection: {}", resp.status()))
-            }
-            other => hub_err(other),
-        })?;
+        let (ws, _) =
+            tungstenite::client::client(request, Counted::new(stream)).map_err(|e| match e {
+                tungstenite::HandshakeError::Failure(WsError::Http(resp)) => {
+                    SyncError::Hub(format!("hub refused the connection: {}", resp.status()))
+                }
+                other => hub_err(other),
+            })?;
         Self::ready(ws, limits)
     }
 
@@ -154,44 +204,71 @@ impl HubTransport {
                 _ => Ok(resp),
             }
         };
-        let ws = tungstenite::accept_hdr(stream, check).map_err(hub_err)?;
+        let ws = tungstenite::accept_hdr(Counted::new(stream), check).map_err(hub_err)?;
         Self::ready(ws, limits)
     }
 
-    fn ready(ws: WebSocket<TcpStream>, limits: HubLimits) -> Result<Self, SyncError> {
-        let s = ws.get_ref();
+    fn ready(ws: WebSocket<Counted>, limits: HubLimits) -> Result<Self, SyncError> {
+        let s = &ws.get_ref().stream;
         s.set_read_timeout(None).map_err(hub_err)?;
         s.set_write_timeout(None).map_err(hub_err)?;
         s.set_nonblocking(true).map_err(hub_err)?;
-        let mut transport = HubTransport { ws };
+        let written = ws.get_ref().written;
+        let mut transport = HubTransport {
+            ws,
+            limits,
+            unsent: 0,
+            written,
+            progress: Instant::now(),
+            failed: None,
+        };
         transport.set_limits(limits);
         Ok(transport)
     }
 
-    /// Change the size limits of an open connection.
+    /// Change the limits of an open connection.
     pub fn set_limits(&mut self, limits: HubLimits) {
+        self.limits = limits;
         let max_message = limits.max_message.max(1);
         self.ws.set_config(|c| {
             c.max_message_size = Some(max_message);
             c.max_frame_size = Some(max_message);
-            c.max_write_buffer_size = c
-                .write_buffer_size
-                .saturating_add(max_message)
-                .saturating_add(limits.max_backlog.max(1));
+            // A peer that stopped reading is told by the lack of progress
+            // (`track`), not by how much waits.
+            c.max_write_buffer_size = usize::MAX;
         });
     }
 
-    /// The connection's size limits.
+    /// The connection's limits.
     pub fn limits(&self) -> HubLimits {
-        let c = self.ws.get_config();
-        let max_message = c.max_message_size.unwrap_or(usize::MAX);
-        HubLimits {
-            max_message,
-            max_backlog: c
-                .max_write_buffer_size
-                .saturating_sub(c.write_buffer_size)
-                .saturating_sub(max_message),
+        self.limits
+    }
+
+    /// Account for what left since the last call (`drained`: nothing waits any
+    /// more). Fails when more than `max_backlog` bytes wait and nothing left for
+    /// `stall_timeout`.
+    fn track(&mut self, drained: bool) -> Result<(), SyncError> {
+        let now = Instant::now();
+        let written = self.ws.get_ref().written;
+        let moved = written - self.written;
+        self.written = written;
+        self.unsent = if drained {
+            0
+        } else {
+            self.unsent.saturating_sub(moved)
+        };
+        if moved > 0 || self.unsent == 0 {
+            self.progress = now;
+        } else if self.unsent > self.limits.max_backlog as u64
+            && now.saturating_duration_since(self.progress) >= self.limits.stall_timeout
+        {
+            return Err(SyncError::Hub(format!(
+                "peer is not reading: {} KiB waiting, nothing sent for {} s",
+                self.unsent >> 10,
+                self.limits.stall_timeout.as_secs_f32()
+            )));
         }
+        Ok(())
     }
 }
 
@@ -202,9 +279,6 @@ fn would_block(e: &WsError) -> bool {
 fn link_err(e: WsError) -> SyncError {
     match e {
         WsError::ConnectionClosed | WsError::AlreadyClosed => SyncError::Closed,
-        WsError::WriteBufferFull(_) => {
-            SyncError::Hub("peer is not reading: send queue is full".into())
-        }
         WsError::Io(io)
             if matches!(
                 io.kind(),
@@ -233,17 +307,29 @@ impl Transport for HubTransport {
                 bytes.len()
             )));
         }
-        match self.ws.send(WsMessage::Binary(bytes.into())) {
+        // Frame header included (at most 14 bytes).
+        self.unsent += bytes.len() as u64 + 14;
+        let drained = match self.ws.send(WsMessage::Binary(bytes.into())) {
+            Ok(()) => true,
             // Queued; the rest goes out on later flushes.
-            Err(e) if would_block(&e) => Ok(()),
-            r => r.map_err(link_err),
-        }
+            Err(e) if would_block(&e) => false,
+            Err(e) => return Err(link_err(e)),
+        };
+        self.track(drained)
     }
 
+    /// A write that failed (the peer reset the connection, or stopped reading)
+    /// is reported only once nothing that already arrived is left to read: the
+    /// peer counts those messages as delivered (a client that sends its last
+    /// edits and closes at once while we are still sending to it).
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {
-        match self.ws.flush() {
-            Err(e) if !would_block(&e) => return Err(link_err(e)),
-            _ => {}
+        if self.failed.is_none() {
+            let flushed = match self.ws.flush() {
+                Ok(()) => self.track(true),
+                Err(e) if would_block(&e) => self.track(false),
+                Err(e) => Err(link_err(e)),
+            };
+            self.failed = flushed.err();
         }
         loop {
             match self.ws.read() {
@@ -255,8 +341,56 @@ impl Transport for HubTransport {
                 Ok(WsMessage::Close(_)) => return Err(SyncError::Closed),
                 // Pings are answered by tungstenite on the next flush.
                 Ok(_) => continue,
-                Err(e) if would_block(&e) => return Ok(None),
-                Err(e) => return Err(link_err(e)),
+                Err(e) if would_block(&e) => {
+                    return match self.failed.take() {
+                        Some(e) => Err(e),
+                        None => Ok(None),
+                    };
+                }
+                Err(e) => return Err(self.failed.take().unwrap_or_else(|| link_err(e))),
+            }
+        }
+    }
+
+    /// Sends what waits and a close frame, then reads (and drops) what arrives
+    /// until the peer answers the close: by then it has read everything we
+    /// sent, and our socket has nothing unread left, so closing it does not
+    /// reset the connection (a reset can throw away what the peer has not read
+    /// yet). Gives up with an error once nothing went out for
+    /// [`HubLimits::stall_timeout`].
+    fn close(&mut self) -> Result<(), SyncError> {
+        if let Some(e) = self.failed.take() {
+            return Err(e);
+        }
+        let mut written = self.ws.get_ref().written;
+        let mut progress = Instant::now();
+        let mut r = self.ws.close(None);
+        loop {
+            match r {
+                // tungstenite saw the close handshake through.
+                Err(WsError::ConnectionClosed) => return Ok(()),
+                Err(e) if !would_block(&e) => return Err(link_err(e)),
+                _ => {}
+            }
+            r = loop {
+                match self.ws.read() {
+                    // The peer's answer (we sent our close frame first).
+                    Ok(WsMessage::Close(_)) => return Ok(()),
+                    Ok(_) => continue,
+                    Err(e) => break Err(e),
+                }
+            };
+            if matches!(&r, Err(e) if would_block(e)) {
+                let now_written = self.ws.get_ref().written;
+                if now_written != written {
+                    (written, progress) = (now_written, Instant::now());
+                } else if progress.elapsed() >= self.limits.stall_timeout {
+                    return Err(SyncError::Hub(
+                        "the peer did not confirm closing the connection".into(),
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(1));
+                r = self.ws.flush();
             }
         }
     }

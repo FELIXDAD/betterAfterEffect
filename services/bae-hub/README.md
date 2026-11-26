@@ -131,7 +131,7 @@ Authorization: Bearer <令牌>
 
 **链路出错时不丢修改。** 客户端发完最后的修改马上断开时，`SyncSession::pump` 先导入这一轮已经收到的修改，再报告传输错误（spec 2.4），`Relay` 再多转一轮，把它们转给其他连接和工程目录。所以 `PeerLink` 出错时直接报告，不需要绕行。
 
-**消息大小**：`HubTransport` 默认单条消息（也是单帧）最大 256 MiB，对方不读时最多积压 16 MiB 后断开（`bae_sync::HubLimits`，spec 3.1）。
+**消息大小**：`HubTransport` 默认单条消息（也是单帧）最大 256 MiB。对方不再读时断开：积压超过 16 MiB、并且 30 秒内一个字节都没发出去；读得慢的客户端（比如第一次同步大工程）积压再多也不断开（`bae_sync::HubLimits`，spec 3.1）。
 
 ## 测试
 
