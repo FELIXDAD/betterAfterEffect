@@ -856,13 +856,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.layer.arrange.front",
         "motion.animation.ease",
         "menu.edit.copy",
-        "menu.layer.time.time_reverse_layer",
+        "menu.layer.markers.lock_markers",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
     let handled: std::collections::HashSet<String> =
-        ["motion.layer.time_reverse_layer".to_owned()].into();
+        ["motion.layer.lock_markers".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -890,7 +890,7 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Time-Reverse Layer once handled.
+    // A selected layer: layer commands too; Lock Markers once handled.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -903,7 +903,7 @@ fn menu_items_grey_and_check_like_ae() {
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(6, "menu.layer.time.time_reverse_layer");
+    with_fit.insert(6, "menu.layer.markers.lock_markers");
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();
@@ -1082,11 +1082,17 @@ fn add_to_render_queue_action() {
             .any(|(id, item)| id == "motion.composition.render_queue"
                 && item.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
+    // On macOS ⌘M is the system's Minimize: AE uses ⌃⌘M.
+    let chord = if cfg!(target_os = "macos") {
+        "Ctrl+Cmd+M"
+    } else {
+        "Cmd+M"
+    };
     assert!(
         crate::actions::bindings()
             .bindings
             .iter()
-            .any(|b| b.chord == bae_ui::Chord::parse("Cmd+M").unwrap()
+            .any(|b| b.chord == bae_ui::Chord::parse(chord).unwrap()
                 && b.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
 }
@@ -2315,7 +2321,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.layer.time_reverse_layer".into()]
+            vec!["motion.comp.set_work_area_to_selection".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2349,7 +2355,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.layer.time_reverse_layer")
+            .filter(|(_, a, _)| a == "motion.comp.set_work_area_to_selection")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2357,7 +2363,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Alt+R").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+B").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -2641,6 +2647,118 @@ fn layer_copy_cut_and_paste() {
     );
 }
 
+/// The viewer's GPU path with an effect (the user's case): a red solid with
+/// Gaussian Blur 25 shows the same image at every preview resolution — with
+/// Repeat Edge Pixels a sharp rectangle filling its layer box, without it a
+/// blur spreading past the box (not a smaller copy in the box's corner).
+#[test]
+fn gpu_preview_keeps_blurred_solids_in_their_box() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let mut app = bae_app::AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    let mut app = app.build();
+    let defs = app.registry::<bae_model::EffectDef>();
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    h.resources.insert(crate::gpu_preview::PreviewEffects(
+        app.registry::<dyn bae_render::Effect>(),
+    ));
+    let comp = h.run("comp.create", json!({"width": 640, "height": 360}))["path"].clone();
+    let solid = h.run(
+        "layer.create",
+        json!({"comp": comp, "kind": "solid", "color": [1.0, 0.0, 0.0, 1.0], "size": [100, 250]}),
+    )["path"]
+        .clone();
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "transform:position", "value": {"type": "vec3", "value": [400.0, 180.0, 0.0]}}),
+    );
+    let fx = h.run(
+        "effect.apply",
+        json!({"layers": [solid], "match_name": "ADBE Gaussian Blur 2"}),
+    )["effects"][0]
+        .clone();
+    let set = |h: &mut Harness, id: u32, value: serde_json::Value| {
+        h.run(
+            "attr.set",
+            json!({"path": fx, "attr": format!("param:{id:04}"), "value": value}),
+        );
+    };
+    set(&mut h, 1, json!({"type": "float", "value": 25.0}));
+    let comp = PrimPath::new(comp.as_str().unwrap()).unwrap();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    // What the viewer draws: the published texture stretched over `rect`;
+    // returns the comp-pixel box of texels more than half opaque.
+    let mut shown = |h: &Harness, resolution: u32| {
+        let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+        preview.frame(&h.resources, &h.stage, &evaluated, resolution, None, false);
+        let img = preview
+            .frame(&h.resources, &h.stage, &evaluated, resolution, None, false)
+            .expect("image");
+        let rc = bae_render::AnimEvaluator::new(None)
+            .with_purpose(bae_render::RenderPurpose::Preview)
+            .convert(&h.stage, &evaluated, 0)
+            .unwrap();
+        let request = bae_render::RenderRequest {
+            resolution: match resolution {
+                1 => bae_render::Resolution::Full,
+                2 => bae_render::Resolution::Half,
+                _ => bae_render::Resolution::Quarter,
+            },
+            purpose: bae_render::RenderPurpose::Preview,
+            ..bae_render::RenderRequest::full()
+        };
+        let frame = preview.renderer().render_frame(&rc, &request).unwrap();
+        assert!(frame.from_cache, "the frame the preview published");
+        let data = preview
+            .renderer()
+            .read_rgba8(&frame, bae_render::OutputAlpha::Straight)
+            .unwrap();
+        let size = registry.get(preview.viewport()).unwrap().size;
+        assert_eq!(size, [data.width, data.height]);
+        let r = img.rect;
+        let s = r.width() as i32 / data.width as i32;
+        let mut bbox = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
+        for j in 0..data.height as i32 {
+            for i in 0..data.width as i32 {
+                if data.pixel(i as u32, j as u32)[3] > 128 {
+                    let (x, y) = (r.x0 + i * s, r.y0 + j * s);
+                    bbox = [
+                        bbox[0].min(x),
+                        bbox[1].min(y),
+                        bbox[2].max(x + s),
+                        bbox[3].max(y + s),
+                    ];
+                }
+            }
+        }
+        bbox
+    };
+    let close = |a: [i32; 4], b: [i32; 4], tol: i32| (0..4).all(|k| (a[k] - b[k]).abs() <= tol);
+    for repeat in [true, false] {
+        set(&mut h, 3, json!({"type": "bool", "value": repeat}));
+        // Half-opaque at the layer's edges either way (the blur used to come
+        // out shifted, cut or as stale pixels for larger layers).
+        let full = shown(&h, 1);
+        assert!(
+            close(full, [350, 55, 450, 305], 1),
+            "repeat {repeat}: {full:?}"
+        );
+        for (resolution, tol) in [(2, 4), (4, 8)] {
+            let got = shown(&h, resolution);
+            assert!(
+                close(got, full, tol),
+                "repeat {repeat}, 1/{resolution}: {got:?} vs {full:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn expression_errors_reach_the_session_banner_and_timeline() {
     let mut h = Harness::new();
@@ -2687,6 +2805,33 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     );
     h.frame("composition", &mut viewer, Vec::new());
     assert!(h.session().lock().expr_errors.is_empty());
+}
+
+/// #465: the Properties tab names the layer selected now, even before the
+/// panel draws again (a collapsed tab), and only "Properties" without one.
+#[test]
+fn properties_tab_follows_the_selection() {
+    let mut h = Harness::new();
+    let (_comp, solid, _shape) = h.comp_with_layers();
+    let panel = crate::panels::PropertiesPanel::default();
+    let title = |h: &Harness| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("properties");
+        let cx = PanelContext::new(
+            &id,
+            "properties",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        panel.tab(&cx).title
+    };
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let name = query::display_name_of(&h.stage, &solid);
+    assert_eq!(title(&h), format!("Properties: {name}"));
+    h.session().lock().selected_layers.clear();
+    assert_eq!(title(&h), "Properties");
 }
 
 /// File ▸ Replace Footage ▸ File… and Reload Footage: the item takes the new
@@ -2771,6 +2916,50 @@ fn transform_value_dialogs_set_every_selected_layer() {
     assert!(!h.dialogs().is_open());
 }
 
+/// Layer ▸ Time: Time-Reverse Layer, Enable Time Remapping (a toggle with a
+/// check mark) and Freeze Frame run on layers that have time (a pre-comp).
+#[test]
+fn layer_time_menu() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let inner = h.run("comp.create", json!({"name": "Inner"}))["path"].clone();
+    let pre = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "pre_comp", "source": inner}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    // A solid has no time to remap: nothing happens.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::TIME_REVERSE))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().selected_layers = vec![pre.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REVERSE));
+    assert_eq!(r.invocations[0].id, "layer.time_reverse");
+    h.apply(r);
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REMAP));
+    assert_eq!(r.invocations[0].params["enabled"], true);
+    h.apply(r);
+    assert!(crate::actions::switch_on(
+        &h.stage,
+        &pre,
+        "time_remap_enabled"
+    ));
+    let r = h.action(&mut viewer, Invocation::new(ids::TIME_REMAP));
+    assert_eq!(r.invocations[0].params["enabled"], false, "a toggle");
+    let r = h.action(&mut viewer, Invocation::new(ids::FREEZE_FRAME));
+    assert_eq!(r.invocations[0].id, "layer.freeze_frame");
+}
+
 /// The Paint and Brushes panels edit the next stroke's settings; Clone Options
 /// show with the Clone Stamp, Erase with the Eraser.
 #[test]
@@ -2801,5 +2990,67 @@ fn paint_and_brushes_panels_show_for_each_paint_tool() {
     assert_eq!(
         (p.opacity, p.diameter, p.duration.as_str()),
         (100.0, 21.0, "constant")
+    );
+}
+
+/// A Brush drag in the Layer panel is one `paint.add_stroke` in layer pixels,
+/// with the Paint and Brushes panels' settings.
+#[test]
+fn brush_drag_in_the_layer_panel_paints_one_stroke() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::Brush);
+    tools.lock().options.paint.diameter = 30.0;
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = |x: f32, y: f32| pos2(320.0 + x, 195.0 + y);
+    let mut r = PanelRequests::default();
+    for (i, (x, y)) in [
+        (10.0, 10.0),
+        (10.0, 10.0),
+        (40.0, 20.0),
+        (80.0, 30.0),
+        (80.0, 30.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut evs = Vec::new();
+        pointer(
+            &mut evs,
+            at(x, y),
+            match i {
+                1 => Some(true),
+                4 => Some(false),
+                _ => None,
+            },
+        );
+        r = h.frame("layer", &mut panel, evs);
+    }
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "paint.add_stroke")
+        .expect("a stroke");
+    assert_eq!(inv.params["points"][0], json!([10.0, 10.0]));
+    assert_eq!(inv.params["diameter"], json!(30.0));
+    h.apply(r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    assert_eq!(
+        bae_motion::paint::strokes_of(&h.stage, &effects[0]).len(),
+        1
     );
 }
