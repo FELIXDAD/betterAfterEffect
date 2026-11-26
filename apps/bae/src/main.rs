@@ -106,6 +106,10 @@ fn app_builder() -> AppBuilder {
             std::sync::Arc::new(bae_vector::render::VectorWarmUp)
                 as std::sync::Arc<dyn bae_gpu::WarmUp>,
         ),
+        (
+            "bae.text.vertical",
+            std::sync::Arc::new(bae_text::render::VerticalGlyphWarmUp(text.clone())),
+        ),
         ("bae.text.fonts", text),
         (
             "bae.anim.expressions",

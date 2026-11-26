@@ -186,6 +186,9 @@ impl Workbench {
     /// Menu items (`Registry<MenuItemSpec>`), for the Keyboard Shortcuts tree.
     pub fn with_menus(mut self, menus: Arc<Registry<crate::menu::MenuItemSpec>>) -> Self {
         self.menus = menus;
+        for (id, custom) in &self.state.custom {
+            self.register_workspace_menu(id, &custom.title);
+        }
         self
     }
 
@@ -223,6 +226,7 @@ impl Workbench {
     /// dialog. Hosts use it to disable the native menu bar, like AE.
     pub fn modal_open(&self, resources: &bae_app::Resources) -> bool {
         self.role_picker_open()
+            || self.dialogs.naming_workspace()
             || self.external_modal
             || self.editor.open
             || self
@@ -1085,7 +1089,24 @@ impl Workbench {
                 if let Some(title) = inv.params.get("title").and_then(|v| v.as_str()) {
                     self.save_as_new_workspace(title);
                 } else {
-                    self.dialogs.edit_open = true;
+                    self.dialogs.start_naming();
+                }
+                true
+            }
+            ids::ASSIGN_WORKSPACE_SHORTCUT => {
+                if let Some(key) = inv.params["slot"]
+                    .as_u64()
+                    .and_then(|slot| usize::try_from(slot).ok())
+                    .and_then(|slot| crate::presets::WORKSPACE_KEYS.get(slot))
+                {
+                    let id = self.keymap_id();
+                    let mut overrides = self.keymap_overrides(&id);
+                    overrides.bind(
+                        crate::keymap::Binding::new(key, ids::SWITCH_WORKSPACE)
+                            .params(serde_json::json!({"id":self.active})),
+                    );
+                    self.set_keymap_overrides(&id, overrides);
+                    self.save_requested = true;
                 }
                 true
             }
