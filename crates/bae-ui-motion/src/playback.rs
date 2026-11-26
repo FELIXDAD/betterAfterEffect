@@ -731,8 +731,10 @@ fn render_worker(
                 };
                 drop(spares_now);
                 let texture = target.view().texture().clone();
-                let channels=engine.channels.clone();
-                let pick_bytes=channels.as_ref().map_or(0,|c|c.layers.values().map(|l|l.pick_bytes()).sum());
+                let channels = engine.channels.clone();
+                let pick_bytes = channels
+                    .as_ref()
+                    .map_or(0, |c| c.layers.values().map(|l| l.pick_bytes()).sum());
                 let slot = Arc::new(Slot {
                     channels,
                     registry: registry.clone(),
@@ -740,7 +742,8 @@ fn render_worker(
                     rect,
                     time: job.time,
                     errors: job.errors,
-                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4 + pick_bytes,
+                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
+                        + pick_bytes,
                     texture,
                     target: Some(target),
                     spares: spares.clone(),
