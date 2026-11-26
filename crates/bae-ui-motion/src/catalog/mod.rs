@@ -18,6 +18,7 @@
 //! (`motion.layer.blending_mode {"mode": "multiply"}`).
 
 mod blob;
+pub mod mnemonics;
 // The source tables are compiled into tests only; the app reads them from the
 // compressed `catalog.bin` that `build.rs` generates from them (see `blob`).
 #[cfg(test)]
@@ -105,19 +106,31 @@ pub const SAME_IN_CHINESE: &[&str] = &[
 
 impl Key {
     /// AE's default chords for this command on Windows (`mac = false`) or macOS,
-    /// in BAE notation (see [`chords`]).
+    /// in BAE notation (see [`chords`]). On macOS they are the ones AE uses with
+    /// "Use System Shortcut Keys" on (its default): the system keeps ⌘H, ⌥⌘H and
+    /// ⌘M (`MacSysShortcutsStd`; the `MacSysShortcutsAlt` set is for the setting
+    /// off) and AE's own commands on them get Control (see [`mac_system_key`]).
     pub fn chords(&self, mac: bool) -> Vec<String> {
-        if mac
-            && let Some((_, _, keys)) = mac_keys()
-                .iter()
-                .find(|(ctx, cmd, _)| *ctx == self.context && *cmd == self.command)
-        {
-            return mac_chords(keys);
+        if !mac {
+            if self.flags & MAC_ONLY != 0 {
+                return Vec::new();
+            }
+            return chords(self.keys, false);
         }
-        if self.flags & MAC_ONLY != 0 && !mac {
+        if self.context == "MacSysShortcutsAlt" {
             return Vec::new();
         }
-        chords(self.keys, mac)
+        let file = match mac_keys()
+            .iter()
+            .find(|(ctx, cmd, _)| *ctx == self.context && *cmd == self.command)
+        {
+            Some((_, _, keys)) => mac_chords(keys),
+            None => chords(self.keys, true),
+        };
+        if self.context == "MacSysShortcutsStd" {
+            return file;
+        }
+        file.into_iter().map(mac_system_key).collect()
     }
 
     /// The BAE panel kind the AE context corresponds to (`None` = everywhere).
@@ -234,6 +247,18 @@ pub fn chords(keys: &str, mac: bool) -> Vec<String> {
             Some(chord_string(ctrl, cmd, alt, shift, key))
         })
         .collect()
+}
+
+/// A macOS chord of AE's shortcut file as AE binds it: Hide (⌘H), Hide Others
+/// (⌥⌘H) and Minimize (⌘M) belong to the system, so with "Use System Shortcut
+/// Keys" on (AE's default) AE adds Control to its commands on them
+/// (`docs/reference/ae/mac/menus.md` 5.4).
+pub fn mac_system_key(chord: String) -> String {
+    if ["Cmd+H", "Cmd+Alt+H", "Cmd+M"].contains(&chord.as_str()) {
+        format!("Ctrl+{chord}")
+    } else {
+        chord
+    }
 }
 
 /// AE's macOS notation (`Cmd+Option+macControl+H`) in BAE chord strings.
@@ -452,4 +477,25 @@ pub fn ae_bindings(keys: &[Key], live: &dyn Fn(&Key) -> bool) -> Vec<bae_ui::Bin
         }
     }
     out
+}
+
+/// AE's Windows mnemonic of the item with AE command id `ae` (Alt+letter).
+pub fn item_mnemonic(ae: u32) -> Option<char> {
+    let i = mnemonics::ITEMS
+        .binary_search_by_key(&ae, |(id, _)| *id)
+        .ok()?;
+    Some(mnemonics::ITEMS[i].1)
+}
+
+/// AE's Windows mnemonic of the menu or submenu titled `en` (looked up by its
+/// Chinese title, whatever the UI language).
+pub fn menu_mnemonic(en: &str) -> Option<char> {
+    let zh = bae_ui::i18n::translation(en)
+        .or_else(|| menu_zh().iter().find(|(e, _)| *e == en).map(|(_, z)| *z))
+        .unwrap_or(en);
+    let zh = zh.trim_end_matches("...").trim_end_matches('…');
+    mnemonics::MENUS
+        .iter()
+        .find(|(t, _)| *t == zh)
+        .map(|(_, c)| *c)
 }

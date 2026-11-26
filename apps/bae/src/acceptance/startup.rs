@@ -193,7 +193,7 @@ fn busy_window() -> Ui {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
     key(&mut h, Modifiers::NONE, Key::P);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     h
 }
 
@@ -269,7 +269,7 @@ fn main_controls_are_found_by_accessible_name() {
         .query_all_by_label("Layer 1 “Text”")
         .map(|n| n.rect())
         .collect();
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     let row = rows
         .into_iter()
         .find(|r| r.top() > head.bottom())
@@ -677,8 +677,8 @@ fn inputs_are_named_apart_from_their_values() {
 fn render_queue_items_are_told_apart() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     settle(&mut h);
     let all = labels(&h);
     for n in [1, 2] {
@@ -749,7 +749,7 @@ fn layer_numbers_in_names_follow_reorder_and_delete() {
     );
     // Delete the middle one: 1, 2, still unique.
     let middle = h.state().layers()[1].clone();
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(
         &mut h,
         egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
@@ -781,8 +781,8 @@ fn numbered_names_in_chinese() {
     for l in h.state().layers() {
         rename(&mut h, &l, "同名");
     }
-    key(&mut h, Modifiers::COMMAND, Key::M);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let mut all = labels(&h);
     to_front(&mut h, "timeline");
     all.extend(labels(&h));
@@ -829,7 +829,7 @@ fn render_queue_items_of_one_comp_stay_distinct_after_removing_one() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
     for _ in 0..3 {
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     }
     assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
     for n in 1..=3 {

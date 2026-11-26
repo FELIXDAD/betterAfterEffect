@@ -41,7 +41,7 @@ pub(super) fn scene(count: usize, effects: bool) -> (Harness, PrimPath) {
         let layer = h.run(
             "layer.create",
             json!({"comp":comp,"name":format!("R{i:04}"),
-            "kind":"shape","shape":"rect","size":[72,36],"position":position}),
+            "kind":"shape","shape":"rect","position":position}),
         );
         let path = &layer["path"];
         h.run(
@@ -131,7 +131,7 @@ fn playback_4k() {
             });
             let encode = Instant::now();
             preview
-                .frame(&h.resources, &h.stage, &comp, 1, None)
+                .frame(&h.resources, &h.stage, &comp, 1, None, false)
                 .expect("published preview");
             if let Some(scope) = scope {
                 cpu_ms += (evaluation + encode.elapsed()).as_secs_f64() * 1000.0;

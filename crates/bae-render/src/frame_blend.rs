@@ -4,7 +4,108 @@
 //! with the speed above it. Measured in AE 2026 (weights fit within 0.02);
 //! frame-aligned positions still mix about 89 / 5.5 / 5.5 %.
 
-use bae_model::{FrameRate, Time};
+use std::hash::BuildHasher;
+use std::sync::Arc;
+
+use crate::effect::LayerDependency;
+use crate::{
+    Effect, EffectParams, EncodeContext, GpuImage, LayerSource, RenderEffect, RenderError,
+    SourceRequest,
+};
+use bae_model::{FrameRate, PrimPath, Time, Value};
+
+/// Bind the interpolator to two raw footage frames. Their times are in the source
+/// domain, so reverse playback and non-monotonic remaps need no inverse mapping.
+pub(super) fn pixel_motion(
+    source: Arc<dyn LayerSource>,
+    effect: &Arc<dyn Effect>,
+    layer: &PrimPath,
+    time: Time,
+    rate: FrameRate,
+) -> Arc<dyn LayerSource> {
+    let frame = rate.time_to_frame(time);
+    let first = rate.frame_to_time(frame);
+    if frame < 0 || time == first {
+        return source;
+    }
+    let next = rate.frame_to_time(frame + 1);
+    let a = source.content_hash(first);
+    let b = source.content_hash(next);
+    if a == b {
+        return source;
+    }
+    let phase = (time - first).as_seconds() / (next - first).as_seconds();
+    let instance = RenderEffect {
+        path: layer
+            .child("effects")
+            .and_then(|p| p.child("pixel_motion"))
+            .expect("fixed child names"),
+        effect: effect.def().match_name.clone(),
+        enabled: true,
+        params: vec![(1, Value::Float(phase)), (2, Value::Int(next.flicks()))],
+    };
+    Arc::new(MotionFrame {
+        source,
+        effect: effect.clone(),
+        first,
+        next: LayerDependency::source(layer.clone(), next),
+        instance,
+        key: rustc_hash::FxBuildHasher.hash_one(("pixel_motion", a, b, phase.to_bits())),
+    })
+}
+
+struct MotionFrame {
+    source: Arc<dyn LayerSource>,
+    effect: Arc<dyn Effect>,
+    first: Time,
+    next: LayerDependency,
+    instance: RenderEffect,
+    key: u64,
+}
+
+impl LayerSource for MotionFrame {
+    fn size(&self) -> [u32; 2] {
+        self.source.size()
+    }
+    fn content_hash(&self, _: Time) -> u64 {
+        self.key
+    }
+
+    fn render(
+        &self,
+        ctx: &mut EncodeContext<'_>,
+        _: &SourceRequest,
+    ) -> Result<GpuImage, RenderError> {
+        // Optical flow needs both full source images even for a cropped preview.
+        let request = SourceRequest {
+            roi: self.source.bounds(),
+            scale: 1.0,
+            time: self.first,
+        };
+        let first = self.source.render(ctx, &request)?;
+        let next = self.source.render(
+            ctx,
+            &SourceRequest {
+                time: self.next.time,
+                ..request
+            },
+        )?;
+        let mut ctx = EncodeContext {
+            gpu: ctx.gpu,
+            encoder: ctx.encoder,
+            format: ctx.format,
+            allocator: ctx.allocator,
+            effect_inputs: &[(self.next.clone(), next)],
+            effect_masks: &[],
+        };
+        self.effect.render(
+            &mut ctx,
+            &EffectParams::new(&self.instance),
+            &first,
+            first.rect,
+        )
+    }
+}
 
 /// Most frames one comp frame mixes.
 const MAX_FRAMES: f64 = 64.0;

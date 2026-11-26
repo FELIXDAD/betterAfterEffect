@@ -1,5 +1,7 @@
 //! A layer-space compute pass for effects with auxiliary images. Each parameter
 //! occupies its AE disk-ID slot. This keeps the CPU and WGSL layouts identical.
+#[path = "sampled_lights.rs"]
+pub(crate) mod lights;
 use super::{image_grid, layer_input};
 use crate::{
     EffectTarget, TargetEffect,
@@ -49,10 +51,11 @@ impl Shader {
         aux: [Option<&GpuImage>; N],
         stage: [u32; 2],
     ) -> Result<GpuImage, RenderError> {
-        self.dispatch_at("main", target, v, roi, input, aux, stage)
+        self.dispatch_at("main", target, v, roi, input, aux, stage, |_, _| {})
     }
 
-    /// [`Self::dispatch`] through entry point `entry`.
+    /// [`Self::dispatch`] through entry point `entry`; `extra` writes uniforms
+    /// past the parameter slots (given the header size).
     #[allow(clippy::too_many_arguments)]
     pub fn dispatch_at<const N: usize>(
         &self,
@@ -63,6 +66,7 @@ impl Shader {
         input: &GpuImage,
         aux: [Option<&GpuImage>; N],
         stage: [u32; 2],
+        extra: impl FnOnce(&mut UniformWriter, usize),
     ) -> Result<GpuImage, RenderError> {
         const { assert!(N <= 4) };
         let rt = gpu::runtime(target.gpu());
@@ -120,6 +124,8 @@ impl Shader {
                 _ => {}
             }
         }
+        lights::write(v.p.effect, &mut u, HEADER);
+        extra(&mut u, HEADER);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &kernel,

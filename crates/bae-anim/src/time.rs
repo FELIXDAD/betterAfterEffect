@@ -36,7 +36,8 @@ impl Default for LayerTiming {
 }
 
 impl LayerTiming {
-    fn factor(&self) -> f64 {
+    /// Effective AE stretch in percent, including the minimum nonzero magnitude.
+    pub fn stretch_percent(&self) -> f64 {
         let s = if self.stretch.is_finite() && self.stretch != 0.0 {
             self.stretch
         } else {
@@ -47,7 +48,7 @@ impl LayerTiming {
 
     /// `layerTime = (compTime - startTime) * 100 / stretch`.
     pub fn layer_time(&self, comp_time: Time) -> Time {
-        let s = self.factor();
+        let s = self.stretch_percent();
         let d = comp_time.0 as i128 - self.start_time.0 as i128;
         if s == 100.0 {
             return Time(d as i64);
@@ -60,7 +61,7 @@ impl LayerTiming {
 
     /// `compTime = startTime + layerTime * stretch / 100`.
     pub fn comp_time(&self, layer_time: Time) -> Time {
-        let s = self.factor();
+        let s = self.stretch_percent();
         if s == 100.0 {
             return self.start_time + layer_time;
         }
