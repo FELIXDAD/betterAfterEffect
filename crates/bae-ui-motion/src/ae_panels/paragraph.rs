@@ -61,12 +61,20 @@ impl Panel for ParagraphPanel {
             })
             .or(defaults)
             .unwrap_or_else(|| TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE));
-        let current = if doc.justification == "justify_last_full" {
+        let range = session.lock().text_range(layers.first());
+        let selected = common::SelectedStyles {
+            doc: &doc,
+            range: range.clone().unwrap_or(0..usize::MAX),
+        };
+        let token = selected
+            .paragraph(|p| p.justification.clone())
+            .unwrap_or_default();
+        let current = if token == "justify_last_full" {
             "justify_all"
         } else {
-            doc.justification.as_str()
+            token.as_str()
         };
-        let mut picked = None;
+        let mut change = json!({});
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
@@ -77,29 +85,53 @@ impl Panel for ParagraphPanel {
                     ui.add_space(8.0);
                 }
                 if align_button(ui, *token == current, *icon, token, tr(tip)).clicked() {
-                    picked = Some(*token);
+                    change["justification"] = json!(token);
                 }
             }
         });
         ui.add_space(6.0);
-        // Indents and spacing (not drawn by the text engine yet: greyed, like AE
-        // greys what does not apply).
+        // AE groups paragraph indentation and spacing in two rows.
         let fields = [
             [
-                ("Indent left margin", "\u{2192}\u{2261}"),
-                ("Add space before paragraph", "\u{2261}\u{2191}"),
-                ("Indent first line", "\u{21b3}\u{2261}"),
+                (
+                    "left_indent",
+                    selected.paragraph(|p| p.left_indent),
+                    "Indent left margin",
+                    "\u{2192}\u{2261}",
+                ),
+                (
+                    "space_before",
+                    selected.paragraph(|p| p.space_before),
+                    "Add space before paragraph",
+                    "\u{2261}\u{2191}",
+                ),
+                (
+                    "first_line_indent",
+                    selected.paragraph(|p| p.first_line_indent),
+                    "Indent first line",
+                    "\u{21b3}\u{2261}",
+                ),
             ],
             [
-                ("Indent right margin", "\u{2261}\u{2190}"),
-                ("Add space after paragraph", "\u{2261}\u{2193}"),
-                ("", ""),
+                (
+                    "right_indent",
+                    selected.paragraph(|p| p.right_indent),
+                    "Indent right margin",
+                    "\u{2261}\u{2190}",
+                ),
+                (
+                    "space_after",
+                    selected.paragraph(|p| p.space_after),
+                    "Add space after paragraph",
+                    "\u{2261}\u{2193}",
+                ),
+                ("", None, "", ""),
             ],
         ];
         for row in fields {
             ui.horizontal(|ui| {
                 ui.add_space(6.0);
-                for (tip, glyph) in row {
+                for (field, value, tip, glyph) in row {
                     if tip.is_empty() {
                         // AE: the text direction buttons.
                         ui.add_enabled_ui(false, |ui| {
@@ -130,26 +162,33 @@ impl Panel for ParagraphPanel {
                         bae_ui::theme::color::ICON,
                     );
                     resp.on_hover_text(tr(tip));
-                    ui.label(
-                        egui::RichText::new(format!("0 {}", tr("px")))
-                            .color(bae_ui::theme::color::TEXT_DISABLED),
-                    );
+                    if let Some(v) = super::character::number(
+                        ui,
+                        ui.id().with(field),
+                        value,
+                        tr("px"),
+                        -10000.0..=10000.0,
+                        1,
+                        tr(tip),
+                    ) {
+                        change[field] = json!(v);
+                    }
                     ui.add_space(14.0);
                 }
             });
         }
-        if let Some(token) = picked
-            && token != current
-        {
-            let change = json!({ "justification": token });
+        if change.as_object().is_some_and(|o| !o.is_empty()) {
             if layers.is_empty() {
                 let mut d = doc.clone();
-                d.justification = token.to_owned();
+                if let Ok(c) = serde_json::from_value::<bae_motion::TextStyleChange>(change.clone())
+                {
+                    c.apply(&mut d, 0..usize::MAX);
+                }
                 session.lock().text_defaults = Some(d);
             } else {
                 cx.invoke_with(
                     "text.set_style",
-                    json!({ "layers": layers, "time": time, "style": change }),
+                    json!({ "layers": layers, "time": time, "style": change, "range":range }),
                 );
             }
         }

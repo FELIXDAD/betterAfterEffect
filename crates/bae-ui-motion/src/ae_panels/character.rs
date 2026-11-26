@@ -125,13 +125,19 @@ impl Panel for CharacterPanel {
         let doc = current_doc(cx.stage, &layers, time)
             .or(defaults)
             .unwrap_or_else(|| TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE));
+        let range = session.lock().text_range(layers.first());
+        let selected = common::SelectedStyles {
+            doc: &doc,
+            range: range.clone().unwrap_or(0..usize::MAX),
+        };
+        let font = selected.character(|s| s.font.clone()).unwrap_or_default();
         let mut change = json!({});
         let id = ui.id().with("character");
-        let (family, face_style) = with_fonts(|f| match f.resolve(&doc.font) {
+        let (family, face_style) = with_fonts(|f| match f.resolve(&font) {
             bae_text::FontMatch::Found(face) => (face.family.clone(), style_name(&face)),
-            bae_text::FontMatch::Missing => (doc.font.clone(), String::new()),
+            bae_text::FontMatch::Missing => (font.clone(), String::new()),
         })
-        .unwrap_or_else(|| (doc.font.clone(), String::new()));
+        .unwrap_or_else(|| (font.clone(), String::new()));
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         ui.add_space(4.0);
 
@@ -212,7 +218,7 @@ impl Panel for CharacterPanel {
         });
         // Fill (front, top left) and stroke (back, bottom right) swatches.
         let swatches = Rect::from_min_size(top + vec2(170.0, 0.0), vec2(44.0, 44.0));
-        if let Some(edit) = self.swatches_ui(ui, id, swatches, &doc) {
+        if let Some(edit) = self.swatches_ui(ui, id, swatches, &selected) {
             for (k, v) in edit.as_object().into_iter().flatten() {
                 change[k] = v.clone();
             }
@@ -227,7 +233,7 @@ impl Panel for CharacterPanel {
             if let Some(v) = number(
                 ui,
                 id.with("size"),
-                doc.font_size,
+                selected.character(|s| s.font_size),
                 tr("px"),
                 0.1..=1296.0,
                 1,
@@ -240,12 +246,12 @@ impl Panel for CharacterPanel {
             }
             ui.add_space(8.0);
             glyph_icon(ui, "A\u{2195}", tr("Set the leading"));
-            match doc.leading {
-                Some(l) => {
+            match selected.character(|s| s.leading) {
+                Some(Some(l)) => {
                     if let Some(v) = number(
                         ui,
                         id.with("leading"),
-                        l,
+                        Some(l),
                         tr("px"),
                         0.0..=5000.0,
                         1,
@@ -255,6 +261,19 @@ impl Panel for CharacterPanel {
                     }
                 }
                 None => {
+                    if let Some(v) = number(
+                        ui,
+                        id.with("leading"),
+                        None,
+                        tr("px"),
+                        0.0..=5000.0,
+                        1,
+                        tr("Set the leading"),
+                    ) {
+                        change["leading"] = json!(v);
+                    }
+                }
+                Some(None) => {
                     ui.label(egui::RichText::new(tr("Auto")).color(bae_ui::theme::color::ACCENT));
                 }
             }
@@ -293,7 +312,7 @@ impl Panel for CharacterPanel {
             if let Some(v) = number(
                 ui,
                 id.with("tracking"),
-                doc.tracking,
+                selected.character(|s| s.tracking),
                 "",
                 -1000.0..=10000.0,
                 0,
@@ -312,7 +331,7 @@ impl Panel for CharacterPanel {
             if let Some(v) = number(
                 ui,
                 id.with("stroke_width"),
-                doc.stroke_width,
+                selected.character(|s| s.stroke_width),
                 tr("px"),
                 0.0..=1000.0,
                 1,
@@ -321,7 +340,9 @@ impl Panel for CharacterPanel {
                 change["stroke_width"] = json!(v);
             }
             ui.add_space(8.0);
-            let order = if doc.stroke_over_fill {
+            let order = if selected.character(|s| s.stroke_over_fill).is_none() {
+                ""
+            } else if selected.character(|s| s.stroke_over_fill) == Some(true) {
                 tr("Stroke Over Fill")
             } else {
                 tr("Fill Over Stroke")
@@ -331,13 +352,19 @@ impl Panel for CharacterPanel {
                 .id(id.with("stroke_order"))
                 .show(|ui| {
                     if ui
-                        .selectable_label(!doc.stroke_over_fill, tr("Fill Over Stroke"))
+                        .selectable_label(
+                            selected.character(|s| s.stroke_over_fill) == Some(false),
+                            tr("Fill Over Stroke"),
+                        )
                         .clicked()
                     {
                         change["stroke_over_fill"] = json!(false);
                     }
                     if ui
-                        .selectable_label(doc.stroke_over_fill, tr("Stroke Over Fill"))
+                        .selectable_label(
+                            selected.character(|s| s.stroke_over_fill) == Some(true),
+                            tr("Stroke Over Fill"),
+                        )
                         .clicked()
                     {
                         change["stroke_over_fill"] = json!(true);
@@ -366,7 +393,7 @@ impl Panel for CharacterPanel {
             if let Some(v) = number(
                 ui,
                 id.with("baseline"),
-                doc.baseline_shift,
+                selected.character(|s| s.baseline_shift),
                 tr("px"),
                 -5000.0..=5000.0,
                 1,
@@ -390,7 +417,7 @@ impl Panel for CharacterPanel {
             for (key, on, icon, text, tip, enabled) in [
                 (
                     "faux_bold",
-                    doc.faux_bold,
+                    selected.character(|s| s.faux_bold).unwrap_or(false),
                     Some(Icon::TextBold),
                     "",
                     "Faux Bold",
@@ -398,16 +425,23 @@ impl Panel for CharacterPanel {
                 ),
                 (
                     "faux_italic",
-                    doc.faux_italic,
+                    selected.character(|s| s.faux_italic).unwrap_or(false),
                     Some(Icon::TextItalic),
                     "",
                     "Faux Italic",
                     true,
                 ),
-                ("all_caps", doc.all_caps, None, "TT", "All Caps", true),
+                (
+                    "all_caps",
+                    selected.character(|s| s.all_caps).unwrap_or(false),
+                    None,
+                    "TT",
+                    "All Caps",
+                    true,
+                ),
                 (
                     "small_caps",
-                    doc.small_caps,
+                    selected.character(|s| s.small_caps).unwrap_or(false),
                     Some(Icon::SmallCaps),
                     "",
                     "Small Caps",
@@ -415,23 +449,29 @@ impl Panel for CharacterPanel {
                 ),
                 (
                     "superscript",
-                    false,
+                    selected.character(|s| s.baseline_option)
+                        == Some(bae_model::BaselineOption::Superscript),
                     Some(Icon::TextSuperscript),
                     "",
                     "Superscript",
-                    false,
+                    true,
                 ),
                 (
                     "subscript",
-                    false,
+                    selected.character(|s| s.baseline_option)
+                        == Some(bae_model::BaselineOption::Subscript),
                     Some(Icon::TextSubscript),
                     "",
                     "Subscript",
-                    false,
+                    true,
                 ),
             ] {
                 if style_button(ui, on, icon, text, tr(tip), enabled).clicked() {
-                    change[key] = json!(!on);
+                    if matches!(key, "subscript" | "superscript") {
+                        change["baseline_option"] = json!(if on { "normal" } else { key });
+                    } else {
+                        change[key] = json!(!on);
+                    }
                     // AE: All Caps and Small Caps exclude each other.
                     if key == "all_caps" && !on {
                         change["small_caps"] = json!(false);
@@ -458,13 +498,13 @@ impl Panel for CharacterPanel {
                 let mut d = doc.clone();
                 if let Ok(c) = serde_json::from_value::<bae_motion::TextStyleChange>(change.clone())
                 {
-                    c.apply(&mut d);
+                    c.apply(&mut d, 0..usize::MAX);
                 }
                 session.lock().text_defaults = Some(d);
             } else {
                 cx.invoke_with(
                     "text.set_style",
-                    json!({ "layers": layers, "time": time, "style": change }),
+                    json!({ "layers": layers, "time": time, "style": change, "range":range }),
                 );
             }
         }
@@ -499,7 +539,14 @@ impl Panel for CharacterPanel {
 impl CharacterPanel {
     /// AE's fill and stroke swatches with the swap arrow; the Color Picker opens
     /// on a click. Returns the change it made.
-    fn swatches_ui(&mut self, ui: &Ui, id: Id, r: Rect, doc: &TextDocument) -> Option<Json> {
+    fn swatches_ui(
+        &mut self,
+        ui: &Ui,
+        id: Id,
+        r: Rect,
+        selected: &common::SelectedStyles<'_>,
+    ) -> Option<Json> {
+        let doc = selected.doc.style_at(selected.range.start);
         let fill_r = Rect::from_min_size(r.min, vec2(28.0, 28.0));
         let stroke_r = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
         let swap_r = Rect::from_min_size(r.min + vec2(32.0, 0.0), vec2(12.0, 12.0));
@@ -525,7 +572,22 @@ impl CharacterPanel {
                 );
             }
         }
-        p.rect_filled(fill_r, 0.0, c(doc.fill_color));
+        if selected.character(|s| s.stroke_color).is_none() {
+            p.rect_filled(stroke_r, 0.0, bae_ui::theme::color::PANEL);
+            p.rect_stroke(
+                stroke_r,
+                0.,
+                Stroke::new(1., bae_ui::theme::color::DIVIDER),
+                egui::StrokeKind::Inside,
+            );
+        }
+        p.rect_filled(
+            fill_r,
+            0.0,
+            selected
+                .character(|s| s.fill_color)
+                .map_or(bae_ui::theme::color::PANEL, c),
+        );
         p.rect_stroke(
             fill_r,
             0.0,
@@ -592,21 +654,23 @@ impl CharacterPanel {
 }
 
 /// A hot number whose dragged value commits on release; a typed one at once.
-fn number(
+pub(crate) fn number(
     ui: &mut Ui,
     id: Id,
-    model: f64,
+    model: Option<f64>,
     suffix: &str,
     range: std::ops::RangeInclusive<f64>,
     decimals: usize,
     label: &str,
 ) -> Option<f64> {
     let key = id.with("scrub");
-    let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
+    let pending = ui.data(|d| d.get_temp::<f64>(key));
+    let mut v = pending.or(model).unwrap_or_default();
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
+                    .mixed(pending.is_none() && model.is_none())
                     .decimals(decimals)
                     .speed(0.5)
                     .suffix(suffix)
@@ -617,13 +681,13 @@ fn number(
         .inner;
     if resp.drag_stopped() {
         ui.data_mut(|d| d.remove::<f64>(key));
-        return (v != model).then_some(v);
+        return (Some(v) != model).then_some(v);
     }
     if resp.dragged() {
         ui.data_mut(|d| d.insert_temp(key, v));
         return None;
     }
-    (resp.changed() && v != model).then_some(v)
+    (resp.changed() && Some(v) != model).then_some(v)
 }
 
 /// The ▾ after a value with AE's presets; `auto` adds "Auto" first (NaN).

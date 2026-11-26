@@ -528,12 +528,18 @@ pub(crate) fn paint_comp(
                 }
             }
             LayerKind::Text => {
-                if let Some(t) = &layer.text {
-                    let size = (t.style.font_size * xf.scale() * view_scale) as f32;
-                    let color = color32(t.style.fill_color, alpha);
-                    if size >= 1.0 && color.a() > 0 {
-                        shapes.push(text_shape(painter, t, size, color, xf, &screen, font));
-                    }
+                if let Some(t) = &layer.text
+                    && alpha > 0.
+                {
+                    shapes.push(text_shape(
+                        painter,
+                        t,
+                        (xf.scale() * view_scale) as f32,
+                        alpha,
+                        xf,
+                        &screen,
+                        font,
+                    ));
                 }
             }
             _ => {}
@@ -541,16 +547,59 @@ pub(crate) fn paint_comp(
     }
 }
 
+/// TextEdit and the lightweight viewer use the same character advances for hit testing.
+pub(crate) fn text_job(
+    doc: &bae_model::TextDocument,
+    scale: f32,
+    alpha: f64,
+    font: &dyn Fn(f32) -> FontId,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let mut chars = doc.text.char_indices().peekable();
+    let mut start = 0;
+    for (style, end) in std::iter::once(&doc.style)
+        .chain(doc.runs.iter().map(|r| &r.style))
+        .zip(
+            doc.runs
+                .iter()
+                .map(|r| r.start)
+                .chain(std::iter::once(usize::MAX)),
+        )
+    {
+        let from = chars.peek().map_or(doc.text.len(), |(i, _)| *i);
+        let n = chars.by_ref().take(end.saturating_sub(start)).count();
+        let to = chars.peek().map_or(doc.text.len(), |(i, _)| *i);
+        let size = style.font_size as f32 * scale;
+        let (factor, valign) = match style.baseline_option {
+            bae_model::BaselineOption::Normal => (1., egui::Align::BOTTOM),
+            bae_model::BaselineOption::Superscript => (0.6, egui::Align::TOP),
+            bae_model::BaselineOption::Subscript => (0.6, egui::Align::BOTTOM),
+        };
+        let mut format = egui::TextFormat::simple(
+            font((size * factor).max(1.)),
+            color32(style.fill_color, alpha),
+        );
+        format.italics = style.faux_italic;
+        format.valign = valign;
+        format.extra_letter_spacing = style.tracking as f32 / 1000. * size;
+        format.line_height = style.leading.map(|v| v as f32 * scale);
+        job.append(&doc.text[from..to], 0., format);
+        start += n;
+    }
+    job
+}
+
 fn text_shape(
     painter: &egui::Painter,
     t: &bae_model::TextDocument,
-    size: f32,
-    color: Color32,
+    scale: f32,
+    alpha: f64,
     xf: Affine,
     screen: &dyn Fn(DVec2) -> Pos2,
     font: &dyn Fn(f32) -> FontId,
 ) -> Shape {
-    let galley = painter.layout_no_wrap(t.text.clone(), font(size), color);
+    let size = t.style.font_size as f32 * scale;
+    let galley = painter.layout_job(text_job(t, scale, alpha, font));
     let ascent = galley
         .rows
         .first()
@@ -566,7 +615,7 @@ fn text_shape(
     let (sin, cos) = angle.sin_cos();
     let off = egui::vec2(dx * cos + ascent * sin, dx * sin - ascent * cos);
     let pos = screen(DVec2::ZERO) + off;
-    Shape::Text(TextShape::new(pos, galley, color).with_angle(angle))
+    Shape::Text(TextShape::new(pos, galley, Color32::WHITE).with_angle(angle))
 }
 
 /// Screen-space quad of a layer's bounds (for selection outlines).

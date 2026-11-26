@@ -278,6 +278,8 @@ pub struct Session {
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,
+    /// Viewer selection at a specific source-text frame, retained across panel focus changes.
+    pub(crate) text_selection: Option<(PrimPath, Time, std::ops::Range<usize>)>,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
@@ -394,6 +396,14 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    pub(crate) fn text_range(&self, layer: Option<&PrimPath>) -> Option<std::ops::Range<usize>> {
+        let (owner, time, range) = self.text_selection.as_ref()?;
+        (Some(owner) == layer
+            && *time == self.active_time()
+            && self.selected_layers.as_slice() == std::slice::from_ref(owner))
+        .then(|| range.clone())
+    }
+
     /// Current time of `comp` (comp time, on a frame boundary).
     pub fn time(&self, comp: &PrimPath) -> Time {
         self.times.get(comp).copied().unwrap_or(Time::ZERO)
@@ -564,6 +574,12 @@ impl Session {
             self.stop();
         }
         // AE: a locked layer cannot be selected, so locking one deselects it.
+        if let Some((owner, time, _)) = &self.text_selection
+            && (self.selected_layers.as_slice() != std::slice::from_ref(owner)
+                || *time != self.active_time())
+        {
+            self.text_selection = None;
+        }
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));

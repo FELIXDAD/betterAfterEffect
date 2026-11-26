@@ -111,6 +111,9 @@ pub fn set_default_spatial_linear(on: bool) {
 /// A new keyframe of `attr` (keyframes `spec`): linear in time; spatially linear or
 /// Auto Bezier as the preference says.
 pub(crate) fn new_key(attr: &str, spec: &AttrSpec, value: Value) -> Keyframe {
+    if matches!(value, Value::TextDocument(_)) {
+        return Keyframe::hold(value);
+    }
     let mut k = Keyframe::linear(value);
     if !DEFAULT_SPATIAL_LINEAR.load(Ordering::Relaxed)
         && bae_anim::schema::curve_kind(attr, spec) == bae_anim::CurveKind::Spatial
