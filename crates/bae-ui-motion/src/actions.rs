@@ -57,6 +57,8 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
+    pub const APPLY_PRESET: &str = "motion.anim.apply_animation_preset";
     pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
     pub const AUTO_ORIENT: &str = "motion.layer.auto_orient";
     pub const GO_TO_TIME: &str = "motion.view.go_to_time";
@@ -106,6 +108,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
     /// Numbered comp marker N at the current time (AE Shift+0–9 on the main
@@ -219,6 +222,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::SAVE_PRESET, "Save Animation Preset..."),
+    (ids::APPLY_PRESET, "Apply Animation Preset..."),
     (ids::TIME_STRETCH, "Time Stretch..."),
     (ids::AUTO_ORIENT, "Auto-Orient..."),
     (ids::GO_TO_TIME, "Go to Time..."),
@@ -311,6 +316,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
+    (ids::TRACK_MOTION, "Track Motion"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
@@ -828,6 +834,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::TRACK_MOTION {
+        let layer = session.lock().selected_layers.first().cloned();
+        if let Some(layer) = layer
+            && !query::is_locked(stage, &layer)
+        {
+            crate::tracker::create(cx, &layer, false);
+        }
+        return true;
+    }
     if id == ids::CUT {
         // AE: Cut = Copy + Clear (one undo step: the Clear).
         if handle(&Invocation::new(ids::COPY), cx, session) {
@@ -952,6 +967,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::SAVE_PRESET => {
+            crate::presets::save(cx, session);
+            return true;
+        }
+        ids::APPLY_PRESET => {
+            crate::presets::apply(cx, session);
             return true;
         }
         ids::TIME_STRETCH => {
@@ -1680,12 +1703,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
             s.layer_clipboard = bae_motion::copy_layers(stage, &layers);
             s.clipboard = None;
+            s.expression_clipboard = None;
         }
         ids::COPY => {
             let Some(first) = keys.first() else {
                 return false;
             };
             s.layer_clipboard.clear();
+            s.expression_clipboard = None;
             let same: Vec<&KeyRef> = keys
                 .iter()
                 .filter(|k| k.path == first.path && k.attr == first.attr)
@@ -1774,6 +1799,20 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
+        // An expression copied with Copy Expression Only: onto the selected
+        // properties (AE).
+        ids::PASTE if s.expression_clipboard.is_some() && !s.selected_props.is_empty() => {
+            let source = s.expression_clipboard.clone();
+            let items: Vec<_> = s
+                .selected_props
+                .iter()
+                .filter(|(p, _)| query::locked_layer_of(stage, p).is_none())
+                .map(|(p, a)| json!({"path": p, "attr": a, "source": source}))
+                .collect();
+            if !items.is_empty() {
+                cx.invoke_with("attr.set_expressions", json!({"items": items}));
+            }
+        }
         ids::PASTE if !s.layer_clipboard.is_empty() => {
             // Above the topmost selected layer, else on top; named like
             // Duplicate; the pasted layers end up selected.
@@ -1844,6 +1883,8 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Save Animation Preset...", "保存动画预设..."),
+    ("Apply Animation Preset...", "应用动画预设..."),
     // Layer ▸ Time and switches (AE 26's Chinese).
     ("Enable Time Remapping", "启用时间重映射"),
     ("Time-Reverse Layer", "时间反向图层"),

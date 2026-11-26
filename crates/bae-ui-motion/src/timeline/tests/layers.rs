@@ -352,3 +352,110 @@ fn e_reveals_the_effects_group_with_its_effects() {
     };
     assert!(bound("E") && bound("Shift+E"));
 }
+
+/// #599: Rename on the Timeline's empty space renames the comp in the Project
+/// panel (AE 26).
+#[test]
+fn timeline_blank_rename_asks_the_project_panel() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("timeline");
+    let session = h.session();
+    {
+        let mut cx = PanelContext::new(
+            &id,
+            "timeline",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        super::super::rename_comp(&mut cx, &session, &comp);
+    }
+    assert!(
+        requests.open.iter().any(|p| p.kind() == "project"),
+        "{:?}",
+        requests.open
+    );
+    let s = session.lock();
+    assert_eq!(s.selected_items, vec![comp.clone()]);
+    assert_eq!(s.rename_item.as_ref(), Some(&comp));
+    drop(s);
+    let _ = &mut h;
+}
+
+/// The Chinese of an English UI string, from the tables the app registers.
+fn zh_of(en: &str) -> String {
+    crate::i18n::all()
+        .into_iter()
+        .chain(crate::catalog::menu_zh().iter().copied())
+        .find(|(e, _)| *e == en)
+        .map(|(_, z)| z.to_owned())
+        .unwrap_or_else(|| panic!("no Chinese for {en:?}"))
+}
+
+/// #596: a property name's right-click menu matches AE 26 zh_CN (Anchor Point
+/// and Position, no keyframes): titles, separators and greying. Add Property
+/// to Essential Graphics is enabled in AE; the panel is not built yet.
+#[test]
+fn property_name_menu_matches_ae() {
+    let h = H::new();
+    let ae: [(Option<&str>, bool); 15] = [
+        (Some("编辑值..."), true),
+        (Some("编辑属性..."), false),
+        (Some("单独尺寸"), true),
+        (None, true),
+        (Some("添加关键帧"), true),
+        (Some("移除所有关键帧"), false),
+        (Some("上一关键帧"), false),
+        (Some("下一关键帧"), false),
+        (None, true),
+        (Some("重置"), true),
+        (Some("编辑表达式"), true),
+        (Some("仅复制表达式"), true),
+        (Some("在效果控件中显示"), false),
+        (Some("关键帧辅助"), true),
+        (Some("向基本图形添加属性"), true),
+    ];
+    for attr in ["transform:anchor_point", POS] {
+        let ours =
+            crate::timeline::menus::property_menu_entries(&h.stage, &h.layer, attr, Time::ZERO);
+        assert_eq!(ours.len(), ae.len(), "{attr}");
+        for ((title, enabled), (ae_title, ae_enabled)) in ours.iter().zip(ae) {
+            assert_eq!(title.map(zh_of).as_deref(), ae_title, "{attr}");
+            if ae_title != Some("向基本图形添加属性") {
+                assert_eq!(*enabled, ae_enabled, "{attr}: {ae_title:?}");
+            }
+        }
+    }
+}
+
+/// #596: the Graph Editor's empty-space menu matches AE 26 zh_CN.
+#[test]
+fn graph_area_menu_matches_ae() {
+    let ae = [
+        Some("自动缩放高度以适合视图"),
+        Some("显示选择的属性"),
+        None,
+        Some("显示动画属性"),
+        Some("显示图表编辑器集"),
+        Some("自动选择图表类型"),
+        Some("编辑值图表"),
+        None,
+        Some("编辑速度图表"),
+        Some("显示参考图表"),
+        Some("对齐"),
+        Some("显示音频波形"),
+        Some("显示图层的入点/出点"),
+        None,
+        Some("显示图层标记"),
+        Some("显示图表工具技巧"),
+        Some("显示表达式编辑器"),
+    ];
+    let ours: Vec<Option<String>> = crate::graph::AREA_MENU
+        .iter()
+        .map(|t| t.map(zh_of))
+        .collect();
+    assert_eq!(ours, ae.map(|t| t.map(str::to_owned)));
+}

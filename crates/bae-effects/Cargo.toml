@@ -21,6 +21,7 @@ bae-plugin.workspace = true
 bae-render.workspace = true
 bae-text = { workspace = true, features = ["render"] }
 bae-anim.workspace = true
+half.workspace = true
 parking_lot.workspace = true
 pollster.workspace = true
 rustc-hash.workspace = true
@@ -36,7 +37,6 @@ serde_json.workspace = true
 [dev-dependencies]
 bae-motion.workspace = true
 bae-render = { workspace = true, features = ["media"] }
-half.workspace = true
 png.workspace = true
 tempfile.workspace = true
 
