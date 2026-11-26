@@ -96,6 +96,10 @@ pub mod ids {
     pub const REVEAL_EXPRESSION_ERRORS: &str = "motion.layer.reveal_expression_errors";
     /// Animation > Keyframe Assistant > Convert Expression to Keyframes.
     pub const CONVERT_EXPRESSION: &str = "motion.anim.convert_expression_to_keyframes";
+    /// Animation > Keyframe Assistant > Exponential Scale (two Scale keys).
+    pub const EXPONENTIAL_SCALE: &str = "motion.anim.exponential_scale";
+    /// Animation > Keyframe Assistant > Sequence Layers… (its dialog).
+    pub const SEQUENCE_LAYERS: &str = "motion.anim.sequence_layers";
     /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
     pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
     /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
@@ -244,6 +248,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::DISABLE_EXPRESSIONS, "Disable Expressions"),
     (ids::REVEAL_EXPRESSION_ERRORS, "Reveal Expression Errors"),
     (ids::CONVERT_EXPRESSION, "Convert Expression to Keyframes"),
+    (ids::EXPONENTIAL_SCALE, "Exponential Scale"),
+    (ids::SEQUENCE_LAYERS, "Sequence Layers..."),
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
@@ -1381,6 +1387,25 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::KEY_INTERPOLATION if !keys.is_empty() => {
             s.key_dialog = Some(crate::timeline::KeyDialog::Interpolation(
                 crate::timeline::InterpolationDialog::new(keys),
+            ));
+        }
+        ids::EXPONENTIAL_SCALE => {
+            // Two Scale keyframes of one layer (AE does nothing otherwise).
+            let scale: Vec<&KeyRef> = keys
+                .iter()
+                .filter(|k| k.attr == "transform:scale")
+                .collect();
+            if let [a, b] = scale.as_slice()
+                && a.path == b.path
+                && a.time != b.time
+            {
+                cx.invoke_with("key.exponential_scale", json!({"keys": [a, b]}));
+            }
+        }
+        // In the selection order, as AE sequences them.
+        ids::SEQUENCE_LAYERS if layers.len() > 1 => {
+            s.key_dialog = Some(crate::timeline::KeyDialog::Sequence(
+                crate::timeline::SequenceDialog::new(layers.clone(), info.clone()),
             ));
         }
         ids::KEY_VELOCITY if !keys.is_empty() => {

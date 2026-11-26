@@ -29,6 +29,7 @@ use crate::graph::{CompositeNode, LayerOp, Node, NodeId, NodeKind, OpInput, Rend
 use rustc_hash::FxHashMap;
 
 pub(crate) mod adjust;
+pub(crate) mod dof;
 mod masks;
 mod shadow;
 use crate::pool::TexturePool;
@@ -457,6 +458,25 @@ pub(crate) fn execute(
                     [&images[0], &images[1], &images[2]],
                 );
                 ctx.passes += 1;
+                target
+            }
+            (NodeKind::DepthBlur(blur), None) => {
+                let input = outputs[blur.input.index()]
+                    .clone()
+                    .ok_or_else(|| RenderError::Other("depth of field input missing".into()))?;
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let dof = ctx.pipelines.dof();
+                ctx.passes += dof::encode(
+                    &mut dof.lock(),
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    pool,
+                    format,
+                    blur,
+                    &input,
+                    &target,
+                )?;
                 target
             }
             (NodeKind::Mask(_), None) => ctx.mask_outs[index]
@@ -1133,7 +1153,26 @@ fn plan_op(
             let img = outputs[id.index()].as_ref()?;
             Some(shadow::uv_map(img, *slots.get(&id)?, image.texture_size()))
         };
-        data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
+        let per_sample = op.motion.as_ref().is_some_and(|m| {
+            m.len() == l.samples.len() && l.samples.iter().all(|s| s.lights.len() == l.lights.len())
+        });
+        if per_sample {
+            // Motion blur: the layer lit at every sample, records back to back.
+            data.extra[3] = lighting.len() as u32;
+            for s in l.samples.iter() {
+                let at = crate::light::Lighting {
+                    matrix: s.matrix,
+                    lights: s.lights.clone(),
+                    eye: s.eye,
+                    samples: std::sync::Arc::new([]),
+                    ..(**l).clone()
+                };
+                at.pack(&from_texel, node.pixel_scale, &map, lighting);
+            }
+            data.mode[1] |= flags::LIT_SAMPLES;
+        } else {
+            data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
+        }
         data.mode[1] |= flags::LIT;
     }
     if !op.clips.is_empty() {

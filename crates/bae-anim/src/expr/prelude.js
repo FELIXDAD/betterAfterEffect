@@ -772,11 +772,7 @@ Layer.prototype = {
   get rotationX() { return this.transform.xRotation; },
   get rotationY() { return this.transform.yRotation; },
   get rotationZ() { return this.transform.rotation; },
-  get cameraOption() {
-    var g = __optionGroup(this, "Camera Options", __CAMERA_OPTIONS);
-    for (var k in __CAMERA_DEFAULTS) g[k] = __CAMERA_DEFAULTS[k];
-    return g;
-  },
+  get cameraOption() { return __optionGroup(this, "Camera Options", __CAMERA_OPTIONS); },
   get lightOption() { return __optionGroup(this, "Light Options", __LIGHT_OPTIONS); },
   get materialOption() { return __optionGroup(this, "Material Options", __MATERIAL_OPTIONS); },
   get audioLevels() {
@@ -843,11 +839,10 @@ Layer.prototype = {
 var __CAMERA_OPTIONS = {
   zoom: "camera:zoom", depthOfField: "camera:depth_of_field", focusDistance: "camera:focus_distance",
   aperture: "camera:aperture", blurLevel: "camera:blur_level",
-};
-// Iris and highlight options are not modelled yet: AE's defaults.
-var __CAMERA_DEFAULTS = {
-  irisShape: 1, irisRotation: 0, irisRoundness: 0, irisAspectRatio: 1, irisDiffractionFringe: 0,
-  highlightGain: 0, highlightThreshold: 255, highlightSaturation: 0,
+  irisShape: "camera:iris_shape", irisRotation: "camera:iris_rotation",
+  irisRoundness: "camera:iris_roundness", irisAspectRatio: "camera:iris_aspect_ratio",
+  irisDiffractionFringe: "camera:iris_diffraction_fringe", highlightGain: "camera:highlight_gain",
+  highlightThreshold: "camera:highlight_threshold", highlightSaturation: "camera:highlight_saturation",
 };
 var __LIGHT_OPTIONS = {
   intensity: "light:intensity", color: "light:color", coneAngle: "light:cone_angle",
@@ -879,9 +874,6 @@ function __optionGroup(layer, name, options) {
   function attrGetter(attr) { return function () { return __prop(this.__c, this.__l, "", attr); }; }
   [__CAMERA_OPTIONS, __LIGHT_OPTIONS, __MATERIAL_OPTIONS].forEach(function (options) {
     for (var k in options) if (k !== "castsShadows") define(k, attrGetter(options[k]));
-  });
-  Object.keys(__CAMERA_DEFAULTS).forEach(function (k) {
-    define(k, function () { return __CAMERA_DEFAULTS[k]; });
   });
   // A light's own Casts Shadows; any other layer's Material Option.
   define("castsShadows", function () {

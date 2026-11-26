@@ -54,6 +54,13 @@ impl AppModule for RenderModule {
     fn build(&self, app: &mut AppBuilder) {
         // The GPU module provides the context descriptor (and the placeholder).
         app.add_module(bae_gpu::GpuModule);
+        #[cfg(all(target_os = "macos", feature = "media"))]
+        if let Err(e) = app.register_arc::<dyn bae_gpu::WarmUp>(
+            "bae.media.quicktime",
+            std::sync::Arc::new(bae_media::apple::EncoderWarmUp),
+        ) {
+            tracing::warn!("QuickTime warm-up not registered: {e}");
+        }
         // The compositor's pipelines, compiled in the app's warm-up.
         for (id, task) in [
             (

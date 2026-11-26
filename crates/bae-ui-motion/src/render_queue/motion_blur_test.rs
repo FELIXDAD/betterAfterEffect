@@ -22,6 +22,7 @@ fn export_alpha(gpu: &Arc<GpuContext>, stage: &Stage, comp: &PrimPath, frame: i6
             dir.path(),
         );
         let item = q.item_mut(id).unwrap();
+        item.outputs[0].set_format(bae_render::ExportFormat::Png);
         item.outputs[0].output = file.to_string_lossy().into_owned();
         item.outputs[0].channels = Channels::RgbAlpha;
         (item.start, item.end) = (frame, frame);

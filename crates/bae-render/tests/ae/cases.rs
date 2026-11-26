@@ -357,11 +357,11 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                         .expect("accepts");
                 }
                 if let Some(v) = m["casts"].as_bool() {
-                    b.set(&layer, "material:casts_shadows", Value::Bool(v))
+                    b.set(&layer, "material:casts_shadows", Value::Int(i64::from(v)))
                         .expect("casts");
                 }
                 if let Some(v) = m["accepts_shadows"].as_bool() {
-                    b.set(&layer, "material:accepts_shadows", Value::Bool(v))
+                    b.set(&layer, "material:accepts_shadows", Value::Int(i64::from(v)))
                         .expect("accepts shadows");
                 }
             }
