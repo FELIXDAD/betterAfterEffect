@@ -323,7 +323,7 @@ const FILE: &[Node] = &[
     it(131109, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
     it(131110, "Reveal in Bridge", "motion.file.reveal_in_bridge", "", B, Adobe),
     SEP,
-    it(131112, "Project Settings...", "motion.file.project_settings", "", E, Todo),
+    it(131112, "Project Settings...", "motion.file.project_settings", "", E, Done),
     SEP,
     win(it(131114, "Exit", "app.quit", "", B, Done)),
 ];
@@ -1089,7 +1089,7 @@ const VIEW: &[Node] = &[
     it(589858, "Look at Selected Layers", "motion.view.look_at_selected_layers", "", A, Later),
     it(589859, "Look at All Layers", "motion.view.look_at_all_layers", "", A, Later),
     SEP,
-    it(589861, "Go to Time...", "motion.view.go_to_time", "", B, Todo),
+    it(589861, "Go to Time...", "motion.view.go_to_time", "", B, Done),
 ];
 
 /// Window.

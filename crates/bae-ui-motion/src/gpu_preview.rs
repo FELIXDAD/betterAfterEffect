@@ -16,8 +16,8 @@ use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
 use bae_gpu::wgpu;
 use bae_model::{Stage, Time};
 use bae_render::{
-    AnimEvaluator, IRect, OutputAlpha, RenderPurpose, RenderRequest, Renderer, RendererConfig,
-    Resolution, SourceProvider,
+    AnimEvaluator, IRect, OutputAlpha, OutputTarget, RenderPurpose, RenderRequest, Renderer,
+    RendererConfig, Resolution, SourceProvider,
 };
 
 /// Layer source providers registered by other modules (05's shape layers, plugin
@@ -96,8 +96,10 @@ impl RenderEngine {
             .read_samples(samples, rc, &request, Some(&mut frames))
     }
 
-    /// The frame converted to an 8-bit texture and its rect, or `None` when
-    /// it is incomplete (something still warming up: not shown).
+    /// The frame converted to an 8-bit target (`reuse` when it has the
+    /// frame's size) and the frame's rect, `None` when the frame is incomplete
+    /// (something still warming up: not shown, and `reuse` comes back
+    /// untouched).
     pub(super) fn render(
         &mut self,
         stage: &Stage,
@@ -105,7 +107,8 @@ impl RenderEngine {
         resolution: u32,
         display: bae_render::Display,
         roi: Option<IRect>,
-    ) -> Result<Option<(wgpu::Texture, IRect)>, bae_render::RenderError> {
+        reuse: Option<OutputTarget>,
+    ) -> Result<(OutputTarget, Option<IRect>), bae_render::RenderError> {
         let request = RenderRequest {
             resolution: match resolution {
                 0 | 1 => Resolution::Full,
@@ -122,31 +125,30 @@ impl RenderEngine {
             stage,
             evaluator: &mut self.anim,
         };
-        let (frame, texture) = if display == bae_render::Display::default() {
+        let (frame, target) = if display == bae_render::Display::default() {
             // The frame and its 8-bit conversion in one GPU submission.
             self.renderer.render_frame_output(
                 rc,
                 &request,
                 Some(&mut frames),
                 OutputAlpha::Premultiplied,
+                reuse,
             )?
         } else {
             // Show Channel / Exposure: the conversion applies them.
             let frame = self
                 .renderer
                 .render_frame_with(rc, &request, Some(&mut frames))?;
-            let texture = self.renderer.output_texture_display(
+            let target = self.renderer.output_texture_display(
                 &frame,
                 OutputAlpha::Premultiplied,
                 display,
+                reuse,
             )?;
-            (frame, texture)
+            (frame, target)
         };
         self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
-        if frame.incomplete {
-            return Ok(None);
-        }
-        Ok(Some((texture, frame.image.rect)))
+        Ok((target, (!frame.incomplete).then_some(frame.image.rect)))
     }
 }
 
@@ -163,7 +165,7 @@ pub(crate) struct GpuPreview {
     rect: Option<IRect>,
     /// The published frame (the Info panel reads pixels from it) and the last
     /// pixel read: (texel, value).
-    texture: Option<wgpu::Texture>,
+    target: Option<OutputTarget>,
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
@@ -175,6 +177,8 @@ pub(crate) struct GpuPreview {
     last_view: Option<(bae_render::Display, Option<IRect>)>,
     /// Snapshots 1–4 (AE's Take Snapshot): a published frame.
     snapshots: [Option<(wgpu::Texture, IRect)>; 4],
+    /// The registry shows `target`'s view (not a snapshot).
+    target_shown: bool,
     /// The newest frame was incomplete (something still warming up): the
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
@@ -211,13 +215,14 @@ impl GpuPreview {
             sources_gen: None,
             last: None,
             rect: None,
-            texture: None,
+            target: None,
             sampled: None,
             has_text: false,
             display: bae_render::Display::default(),
             roi: None,
             last_view: None,
             snapshots: Default::default(),
+            target_shown: false,
             preparing: false,
             samples,
             waiting: false,
@@ -313,7 +318,7 @@ impl GpuPreview {
         }
         let arrived = self.engine.renderer.poll_samples(&self.samples);
         self.waiting = arrived || self.samples.is_waiting();
-        if self.waiting && self.texture.is_some() {
+        if self.waiting && self.rect.is_some() {
             return Some(PreviewImage {
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
@@ -324,10 +329,15 @@ impl GpuPreview {
         if self.last != Some(key) || self.last_view != Some(view) {
             self.last_view = Some(view);
             self.engine.renderer.set_layer_times(measure_layer_times);
-            let rendered = match self
-                .engine
-                .render(stage, &rc, resolution, self.display, self.roi)
-            {
+            let old_size = self.target.as_ref().map(OutputTarget::size);
+            let rendered = match self.engine.render(
+                stage,
+                &rc,
+                resolution,
+                self.display,
+                self.roi,
+                self.target.take(),
+            ) {
                 Ok(rendered) => rendered,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
@@ -346,8 +356,14 @@ impl GpuPreview {
             // renderer still warming up) is never shown: the last complete
             // frame stays, and the frame is rendered again on the redraw the
             // warm-up requests when it is ready.
-            self.preparing = rendered.is_none();
-            let Some((texture, rect)) = rendered else {
+            let (target, rect) = rendered;
+            self.preparing = rect.is_none();
+            let Some(rect) = rect else {
+                // The published target (if any) still shows the last complete
+                // frame; a new one holds the incomplete frame and is dropped.
+                if old_size.is_some() {
+                    self.target = Some(target);
+                }
                 return Some(PreviewImage {
                     handle: self.registry.display_handle(self.id)?,
                     rect: self.rect?,
@@ -355,17 +371,40 @@ impl GpuPreview {
             };
             // Display-encoded 8-bit values, sampled as they are (egui blends in
             // gamma space, see docs/spec/app-shell.md §5).
-            if let Err(e) = self
-                .registry
-                .publish(self.id, &texture, wgpu::FilterMode::Linear)
+            // Egui keeps the same view until the render dimensions change.
+            if (old_size != Some(target.size()) || !self.target_shown)
+                && let Err(e) = self.registry.publish_view(
+                    self.id,
+                    target.view().clone(),
+                    target.size(),
+                    target.view().texture().format(),
+                    wgpu::FilterMode::Linear,
+                )
             {
                 tracing_warn(&format!("preview: {e}"));
                 return None;
             }
             self.last = Some(key);
             self.rect = Some(rect);
-            self.texture = Some(texture);
+            self.target = Some(target);
+            self.target_shown = true;
             self.sampled = None;
+        }
+        // Back from a snapshot: show the frame again.
+        if !self.target_shown
+            && let Some(t) = &self.target
+            && self
+                .registry
+                .publish_view(
+                    self.id,
+                    t.view().clone(),
+                    t.size(),
+                    t.view().texture().format(),
+                    wgpu::FilterMode::Linear,
+                )
+                .is_ok()
+        {
+            self.target_shown = true;
         }
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
@@ -375,12 +414,16 @@ impl GpuPreview {
 
     /// Take Snapshot: keep the frame shown now in `slot` (0–3).
     pub fn take_snapshot(&mut self, slot: usize) -> bool {
-        let (Some(t), Some(r)) = (self.texture.clone(), self.rect) else {
+        let (Some(r), Some(s)) = (self.rect, self.snapshots.get_mut(slot)) else {
             return false;
         };
-        if let Some(s) = self.snapshots.get_mut(slot) {
-            *s = Some((t, r));
-        }
+        // The snapshot keeps the frame's texture: the next frame renders into
+        // a new one instead of reusing it.
+        let Some(target) = self.target.take() else {
+            return false;
+        };
+        *s = Some((target.view().texture().clone(), r));
+        self.last = None;
         true
     }
 
@@ -391,13 +434,13 @@ impl GpuPreview {
     }
 
     /// Show Snapshot: publish snapshot `slot` instead of the frame (the next
-    /// [`GpuPreview::frame`] publishes the frame again).
+    /// [`GpuPreview::frame`] shows the frame again).
     pub fn show_snapshot(&mut self, slot: usize) -> Option<PreviewImage> {
         let (t, rect) = self.snapshots.get(slot)?.clone()?;
         self.registry
             .publish(self.id, &t, wgpu::FilterMode::Linear)
             .ok()?;
-        self.last = None;
+        self.target_shown = false;
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
             rect,
@@ -409,7 +452,7 @@ impl GpuPreview {
     /// one texel back from the GPU (blocking, only when the pointer moved to
     /// another texel or the frame changed).
     pub fn pixel(&mut self, p: [f64; 2]) -> Option<[u8; 4]> {
-        let (texture, rect) = (self.texture.as_ref()?, self.rect?);
+        let (texture, rect) = (self.target.as_ref()?.view().texture(), self.rect?);
         let (w, h) = (texture.width(), texture.height());
         let (rw, rh) = (f64::from(rect.x1 - rect.x0), f64::from(rect.y1 - rect.y0));
         if rw <= 0.0 || rh <= 0.0 {
