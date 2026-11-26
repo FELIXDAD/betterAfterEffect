@@ -152,6 +152,13 @@ impl Group {
 }
 
 impl Tool {
+    pub(crate) fn is_layer_paint(self) -> bool {
+        matches!(
+            self,
+            Self::Brush | Self::CloneStamp | Self::Eraser | Self::RotoBrush | Self::RefineEdge
+        )
+    }
+
     pub fn group(self) -> Group {
         Group::ALL
             .into_iter()
@@ -994,7 +1001,7 @@ impl ToolState {
     }
 
     /// Run a tool shortcut (`motion.tool.*`). Returns false for other actions.
-    pub fn shortcut(&mut self, action: &str) -> bool {
+    pub fn shortcut(&mut self, action: &str, toggle_pen: bool) -> bool {
         let Some((_, _, _, what)) = SHORTCUTS.iter().find(|(id, ..)| *id == action) else {
             return false;
         };
@@ -1007,7 +1014,11 @@ impl ToolState {
             return true;
         }
         let previous = self.momentary.as_ref().map_or(self.current, |m| m.previous);
-        let tool = self.apply(*what);
+        let tool = if matches!(action, ids::PEN | ids::PEN_CYCLE) && !toggle_pen {
+            Tool::Pen
+        } else {
+            self.apply(*what)
+        };
         self.set(tool);
         self.momentary = Some(Momentary {
             action: action.to_owned(),
@@ -1154,7 +1165,10 @@ impl ActionHandler for ToolActions {
             t.free_transform_request = true;
             return true;
         }
-        shared(cx.resources).lock().shortcut(&inv.id)
+        let toggle_pen = !matches!(inv.id.as_str(), ids::PEN | ids::PEN_CYCLE)
+            || crate::prefs::current(cx.resources)
+                .bool("composition.pen_shortcut_toggles_mask_feather");
+        shared(cx.resources).lock().shortcut(&inv.id, toggle_pen)
     }
 }
 

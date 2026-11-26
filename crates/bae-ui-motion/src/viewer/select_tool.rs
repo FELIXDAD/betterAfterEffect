@@ -200,6 +200,7 @@ pub(super) fn frame(
     view: &View,
     tool: Tool,
     painter: &Painter,
+    eval: &mut crate::common::EvalCache,
 ) -> Option<CursorIcon> {
     if !matches!(tool, Tool::Selection | Tool::Rotation | Tool::PanBehind) {
         state.press = None;
@@ -325,6 +326,21 @@ pub(super) fn frame(
                         state.free = FreeTransform::new(p, &[]);
                         state.path_drag = None;
                     }
+                }
+                Some(
+                    bae_model::LayerKind::Footage
+                    | bae_model::LayerKind::Solid
+                    | bae_model::LayerKind::Audio
+                    | bae_model::LayerKind::PreComp,
+                ) => {
+                    crate::layer_panel::open_clicked(
+                        cx,
+                        session,
+                        layer,
+                        ui.input(|i| i.modifiers.alt),
+                        tool,
+                        eval,
+                    );
                 }
                 _ => {}
             }

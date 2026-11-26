@@ -90,6 +90,35 @@ fn project_drop_inserts_one_undoable_precomp_and_blocks_cycles() {
 }
 
 #[test]
+fn composition_preferences_choose_the_pen_and_double_click_destination() {
+    use bae_ui_motion::{SharedTools, Tool};
+    let mut h = fixture();
+    let parent = h.state().active_comp().unwrap();
+    let header = timeline_header(&h).unwrap();
+    drop_item(&mut h, "Child", header.center() + vec2(0.0, 80.0));
+    let layer = h.state().layers()[0].clone();
+    let child = query::precomp_source(h.state().stage(), &layer).unwrap();
+    let mut prefs = (*h.state().prefs.current()).clone();
+    prefs.set("composition.double_click_comp_layer", "layer_panel");
+    prefs.set("composition.pen_shortcut_toggles_mask_feather", false);
+    h.state().prefs.set(prefs).unwrap();
+    let tools = h.state().app.resource::<SharedTools>().unwrap().clone();
+    key(&mut h, Modifiers::NONE, Key::G);
+    key(&mut h, Modifiers::NONE, Key::G);
+    assert_eq!(tools.current(), Tool::Pen);
+    key(&mut h, Modifiers::NONE, Key::V);
+    let at = row(&h, "Child").center();
+    double_click_at(&mut h, at);
+    assert!(find_text(&h, "Layer Child").is_some());
+    assert_eq!(h.state().active_comp(), Some(parent));
+    pause(&mut h);
+    let at = row(&h, "Child").center();
+    click_at_mods(&mut h, at, Modifiers::ALT);
+    click_at_mods(&mut h, at, Modifiers::ALT);
+    assert_eq!(h.state().active_comp(), Some(child));
+}
+
+#[test]
 fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
     use bae_model::Time;
 
