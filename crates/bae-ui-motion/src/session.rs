@@ -343,6 +343,23 @@ impl SharedSession {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// A new or opened project in the same window: fresh view state on this
+    /// same session. Panels, the script host and the audio warm-up all reach
+    /// the session through it, so the audio output (an application device)
+    /// stays open; the loop setting is the user's, not the project's.
+    pub fn replace_project(&self) {
+        let mut s = self.lock();
+        s.stop();
+        let fresh = Session {
+            output: s.output.take(),
+            retry_audio_after: s.retry_audio_after.take(),
+            opening_audio: s.opening_audio,
+            loop_playback: s.loop_playback,
+            ..Session::default()
+        };
+        *s = fresh;
+    }
+
     /// Called on a background thread. Device negotiation may block in the OS.
     pub(crate) fn open_audio(&self) -> Result<(), String> {
         let device = bae_media::playback::AudioOutput::open();
@@ -662,6 +679,18 @@ impl Session {
 
     pub fn is_playing(&self) -> bool {
         self.playback.is_some()
+    }
+
+    /// Playback follows the audio device's clock (it plays the comp's mix).
+    #[cfg(test)]
+    pub(crate) fn audio_clock(&self) -> bool {
+        self.audio_clock
+    }
+
+    /// The device is being opened; an output device is open.
+    #[cfg(test)]
+    pub(crate) fn audio_device(&self) -> (bool, bool) {
+        (self.opening_audio, self.output.is_some())
     }
 
     /// The range Preview ▸ Range plays for the current time `now`.
@@ -1059,5 +1088,31 @@ mod tests {
         assert!(!s.is_playing());
         assert_eq!(s.time(&i.path), time(2));
         assert_eq!(s.playback_stats.dropped, 1);
+    }
+
+    /// Waits for a device open started by `retry_audio` (no device in CI).
+    fn settle(shared: &SharedSession) {
+        let start = Instant::now();
+        while shared.lock().opening_audio && start.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_replaced_project_keeps_the_audio_device_and_play_opens_a_missing_one() {
+        let shared = SharedSession::default();
+        // Nothing opened yet and no failure recorded: Play opens the device.
+        shared.retry_audio();
+        settle(&shared);
+        let opened = shared.lock().output.is_some();
+        assert!(
+            opened || shared.lock().retry_audio_after.is_some(),
+            "an open was attempted"
+        );
+        shared.lock().open_comp(&PrimPath::new("/c").unwrap());
+        shared.replace_project();
+        let s = shared.lock();
+        assert!(s.open_comps.is_empty());
+        assert_eq!(s.output.is_some(), opened);
     }
 }
