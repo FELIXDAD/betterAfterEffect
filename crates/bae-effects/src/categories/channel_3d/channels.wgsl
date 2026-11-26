@@ -8,9 +8,18 @@ struct Controls {
 @group(0) @binding(2) var planes: texture_2d_array<u32>;
 @group(0) @binding(3) var ramp: texture_2d<f32>;
 @group(0) @binding(4) var dst: texture_storage_2d<WORKING_FORMAT,write>;
+@group(0) @binding(5) var halves: texture_2d_array<u32>;
 fn v(i:u32)->f32 { return u.values[i].x; }
+// Plane ids: FLOAT slices >= 0, UINT slices below -1, HALF slices from HALF
+// (as f32 bits); -1 = none.
+const HALF: i32 = 65536;
 fn word(id:i32, p:vec2i)->u32 {
-    if id == -1 || any(p<vec2i(0)) || any(p>=vec2i(textureDimensions(planes))) { return 0u; }
+    if id == -1 || any(p<vec2i(0)) { return 0u; }
+    if id >= HALF {
+        if any(p>=vec2i(textureDimensions(halves))) { return 0u; }
+        return bitcast<u32>(unpack2x16float(textureLoad(halves,p,id-HALF,0).r).x);
+    }
+    if any(p>=vec2i(textureDimensions(planes))) { return 0u; }
     return textureLoad(planes,p,select(id,-2-id,id < -1),0).r;
 }
 fn scalar(id:i32,p:vec2i)->f32 {
@@ -48,6 +57,12 @@ fn evaluate(p:vec2f)->vec4f {
     let z=scalar(u.planes.x,q);
     switch u.method {
         case 0u: {
+            // Unclamped with no separate pass: the beauty image itself.
+            if v(1)==7.0 && u.planes.x == -1 {
+                var rgb=c.rgb;
+                if v(5)!=0.0 || u.hdr==0u {rgb=clamp(rgb,vec3f(0),vec3f(1));}
+                return vec4f(rgb,1);
+            }
             var rgb=extracted(q);
             if v(4)!=0.0 {
                 rgb=rgb*0.5+0.125*(extracted(q+vec2i(1,0))+extracted(q-vec2i(1,0))+extracted(q+vec2i(0,1))+extracted(q-vec2i(0,1)));

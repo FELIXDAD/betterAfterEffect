@@ -10,7 +10,10 @@ use crate::{
     params::Params,
     rust_builtin,
 };
-use bae_gpu::{channels::FootageChannels, wgpu};
+use bae_gpu::{
+    channels::{ChannelKind, FootageChannels},
+    wgpu,
+};
 use bae_model::{EffectDef, Value};
 use bae_render::{
     Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError,
@@ -103,14 +106,15 @@ impl TargetEffect for ChannelEffect {
                 .effect_layer(&source(p)?)
                 .and_then(|im| im.channels.clone())
         });
-        let Some(channels) = channels else {
+        let Some((channels, planes)) = channels.as_ref().and_then(|c| c.planes().map(|p| (c, p)))
+        else {
             return Ok(input.clone());
         };
         if roi.is_empty() {
             return Ok(input.clone());
         }
         let params = Params::new(&self.def, p);
-        let ids = depth::planes(&channels, self.method, params);
+        let ids = depth::planes(channels, self.method, params);
         let ramp = (self.method == Method::Fog)
             .then(|| layer_input::dependency(p, 7, false))
             .flatten()
@@ -143,9 +147,10 @@ impl TargetEffect for ChannelEffect {
             &[
                 gpu::Resource::Uniform,
                 gpu::Resource::View(&input.view),
-                gpu::Resource::View(&channels.view),
+                gpu::Resource::View(&planes.words),
                 gpu::Resource::View(&ramp.as_ref().unwrap_or(input).view),
                 gpu::Resource::View(&out.view),
+                gpu::Resource::View(&planes.halves),
             ],
         );
         let mut pass = target
@@ -159,13 +164,17 @@ impl TargetEffect for ChannelEffect {
     }
 }
 
-/// Negative indices below -1 distinguish unsigned integer channels from FLOAT.
+/// A channel's plane for the shader: FLOAT slices as is, UINT slices below
+/// -1, HALF slices from `HALF` (channels.wgsl); -1 = none.
 fn plane(channels: &FootageChannels, names: &[&str]) -> i32 {
+    const HALF: i32 = 1 << 16;
     channels.find(names).map_or(-1, |i| {
-        if channels.channels[i].unsigned {
-            -(i as i32) - 2
-        } else {
-            i as i32
+        let c = &channels.channels[i];
+        let slice = c.slice as i32;
+        match c.kind {
+            ChannelKind::Float => slice,
+            ChannelKind::Uint => -slice - 2,
+            ChannelKind::Half => HALF + slice,
         }
     })
 }
