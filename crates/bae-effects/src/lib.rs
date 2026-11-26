@@ -180,6 +180,14 @@ impl Effect for Forward {
     fn integrated_parameters(&self) -> &'static [u32] {
         self.0.integrated_parameters()
     }
+    fn feedback_source(
+        &self,
+        p: &EffectParams<'_>,
+        stack: &[bae_render::RenderEffect],
+    ) -> Option<bae_model::PrimPath> {
+        self.0.feedback_source(p, stack)
+    }
+
     fn full_surface(&self) -> bool {
         self.0.full_surface()
     }
