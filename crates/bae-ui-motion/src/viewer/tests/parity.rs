@@ -139,3 +139,39 @@ fn snapping_reaches_inside_collapsed_precomps() {
     let p = drag(&mut h);
     assert!(close3(p, [287.0, 103.0, 0.0]), "{p:?}");
 }
+
+/// Right-clicking a keyframe square on a motion path opens AE's keyframe
+/// menu (and selects the keyframe), not the layer menu.
+#[test]
+fn right_clicking_a_motion_path_keyframe_opens_the_keyframe_menu() {
+    let mut h = H::new();
+    let l = h.solid([20.0, 20.0], [100.0, 100.0]);
+    h.run(
+        "attr.set_animated",
+        json!({"path": l, "attr": "transform:position", "animated": true, "time": 0}),
+    );
+    let sec = bae_model::Time::FLICKS_PER_SECOND;
+    for (t, x) in [(0, 100.0), (sec, 300.0)] {
+        h.run(
+            "attr.set_at",
+            json!({"path": l, "attr": "transform:position", "time": t,
+                   "value": {"type": "vec3", "value": [x, 100.0, 0.0]}}),
+        );
+    }
+    h.select(&[&l]);
+    // The current time away from the keyframe at 1 s.
+    let info = query::comp_info(&h.stage, &h.comp).unwrap();
+    h.session()
+        .lock()
+        .set_time(&info, bae_model::Time::from_seconds(0.25));
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.right_click(300.0, 100.0);
+    assert!(
+        h.labeled("Toggle Hold Keyframe").is_some(),
+        "the keyframe menu"
+    );
+    assert!(h.labeled("Mask").is_none(), "not the layer menu");
+    let keys = h.session().lock().selected_keys.clone();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].time, bae_model::Time(sec));
+}
