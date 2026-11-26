@@ -230,6 +230,8 @@ pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    /// CC Particle World producer paths (expressions evaluated once per time).
+    particle_paths: particle_guides::PathCache,
     preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
@@ -287,6 +289,8 @@ pub struct CompositionViewer {
     mag: f32,
     /// Layers under the pointer when the context menu opened (topmost first).
     menu_layers: Vec<PrimPath>,
+    /// Arrow-key nudges while a key is held (one undo step on release).
+    nudge: Option<Nudge>,
     /// The motion path keyframe the context menu opened on (AE: the keyframe
     /// menu instead of the layer menu).
     menu_key: Option<bae_motion::KeyRef>,
@@ -310,16 +314,10 @@ pub struct CompositionViewer {
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
     /// The current time and since when it has not changed (idle prefetch).
-    idle: Option<(Time, std::time::Instant)>,
+    idle: Option<(PrimPath, Time, u64, std::time::Instant)>,
     /// A camera tool drag.
     camera_drag: Option<camera_tool::CameraDrag>,
 }
-
-/// How long the current time stays put before the frames playback would
-/// start with are prepared.
-const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300);
-/// Frames prepared from where playback would start.
-const PREFETCH_FRAMES: i64 = 6;
 
 impl CompositionViewer {
     fn has_3d_layers(&mut self, stage: &bae_model::Stage, path: &bae_model::PrimPath) -> bool {
@@ -439,19 +437,88 @@ impl CompositionViewer {
         }
     }
 
-    fn nudge_vertices(
+    /// An arrow-key nudge by `d` comp pixels: the selected vertices, the
+    /// anchor point with the Pan Behind tool, or the selected layers. While an
+    /// arrow key stays down the nudges add up, previewed live, and become one
+    /// undo step when the keys come up ([`Self::finish_nudge`]).
+    fn nudge_by(
         &mut self,
-        cx: &mut PanelContext<'_>,
+        cx: &PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
         d: DVec2,
     ) -> bool {
+        match &mut self.nudge {
+            Some(Nudge::Vertices(drag, total)) => {
+                *total += d;
+                drag.update(*total, false);
+                return true;
+            }
+            Some(Nudge::Layers(drag, total)) => {
+                *total += d;
+                drag.update(*total, false, None);
+                return true;
+            }
+            None => {}
+        }
         let Some(comp) = self.evaluate(cx, session, info) else {
             return false;
         };
         let selected = session.lock().selected_layers.clone();
-        let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
-        path_edit::nudge(cx, session, info, &paths, &self.select.vertices, d)
+        if !self.select.vertices.is_empty() {
+            let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
+            let Some(p) = paths
+                .iter()
+                .find(|p| self.select.vertices.prim.as_ref() == Some(&p.prim))
+            else {
+                return false;
+            };
+            let mut drag = path_edit::PathDrag::new(
+                p.clone(),
+                path_edit::Hit::Vertex { path: 0, index: 0 },
+                &self.select.vertices,
+                DVec2::ZERO,
+            );
+            drag.update(d, false);
+            self.nudge = Some(Nudge::Vertices(drag, d));
+            return true;
+        }
+        if selected.is_empty() {
+            return false;
+        }
+        // Pan Behind: the anchor point moves, the layer stays (AE).
+        let kind = if crate::tools::shared(cx.resources).lock().current() == Tool::PanBehind {
+            transform::Kind::Anchor {
+                start: DVec2::ZERO,
+                compensate: true,
+            }
+        } else {
+            transform::Kind::Move { start: DVec2::ZERO }
+        };
+        let mut drag = transform::TransformDrag::new(cx.stage, &comp, &selected, kind);
+        drag.update(d, false, None);
+        self.nudge = Some(Nudge::Layers(drag, d));
+        true
+    }
+
+    /// The arrow keys are up: the nudges so far become one undo step.
+    fn finish_nudge(
+        &mut self,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        info: &CompInfo,
+    ) {
+        match self.nudge.take() {
+            Some(Nudge::Vertices(drag, _)) if drag.changed() => drag.commit(cx, session, info),
+            Some(Nudge::Layers(drag, _)) => {
+                let time = session.lock().time(&info.path);
+                let edits = drag.commit(cx.stage, time);
+                if !edits.is_empty() {
+                    cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+                }
+            }
+            _ => {}
+        }
     }
 
     fn delete_vertices(
@@ -465,7 +532,7 @@ impl CompositionViewer {
         };
         let selected = session.lock().selected_layers.clone();
         let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
-        if path_edit::delete(cx, &paths, &self.select.vertices) {
+        if path_edit::delete(cx, session, info, &paths, &self.select.vertices) {
             self.select.vertices.clear();
         }
     }
@@ -560,15 +627,17 @@ pub(crate) fn live_evaluator<'a>(
     cx: &PanelContext<'_>,
     session: &SharedSession,
 ) -> &'a mut bae_anim::Evaluator {
-    let overrides = session
-        .lock()
-        .scrub
-        .as_ref()
-        .map(|s| s.overrides(cx.stage))
-        .unwrap_or_default();
+    let overrides = session.lock().live_overrides(cx.stage);
     let eval = eval.get(cx.stage);
     eval.set_overrides(overrides);
     eval
+}
+
+/// Arrow-key nudges held down: the drag they add up to and its total offset
+/// (comp pixels).
+enum Nudge {
+    Layers(transform::TransformDrag, DVec2),
+    Vertices(path_edit::PathDrag, DVec2),
 }
 
 /// Apply the viewer's own transform drag to an evaluated comp and recompute
@@ -741,14 +810,11 @@ impl Panel for CompositionViewer {
             crate::tools::ids::NUDGE => {
                 let p = |k: &str| action.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let mag = f64::from(if self.mag > 0.0 { self.mag } else { 1.0 });
-                if !self.select.vertices.is_empty()
-                    && let Some(info) = common::active_comp(cx.stage, &session)
-                {
-                    let d = DVec2::new(p("dx") / mag, p("dy") / mag);
-                    return self.nudge_vertices(cx, &session, &info, d);
+                let d = DVec2::new(p("dx") / mag, p("dy") / mag);
+                match common::active_comp(cx.stage, &session) {
+                    Some(info) => self.nudge_by(cx, &session, &info, d),
+                    None => false,
                 }
-                nudge_layers(cx, &session, p("dx"), p("dy"), mag);
-                true
             }
             crate::actions::ids::DELETE if self.puppet.has_selection() => {
                 self.puppet.delete_selected(cx);
@@ -1019,8 +1085,26 @@ impl Panel for CompositionViewer {
                 s.scrub = None;
             }
         }
+        // Nudges end when no arrow key is down (one undo step).
+        let arrows = [
+            egui::Key::ArrowLeft,
+            egui::Key::ArrowRight,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowDown,
+        ];
+        if self.nudge.is_some() && !ui.input(|i| arrows.iter().any(|k| i.key_down(*k))) {
+            self.finish_nudge(cx, &session, &info);
+        }
+        // Ctrl+T knows a path is selected (Free Transform Points).
+        session.lock().vertex_path = self
+            .select
+            .vertices
+            .prim
+            .clone()
+            .filter(|_| !self.select.vertices.is_empty());
         let scrub = session.lock().scrub.clone();
         let editing = scrub.is_some()
+            || self.nudge.is_some()
             || self.select.drag.is_some()
             || self.type_tool.edited_layer().is_some();
         let playback = session
@@ -1034,6 +1118,7 @@ impl Panel for CompositionViewer {
                 gpu.reload_solid(*generation, item);
             }
             if editing {
+                self.idle = None;
                 gpu.playback.stop();
             } else {
                 let range = playback.as_ref().map_or(
@@ -1045,6 +1130,7 @@ impl Panel for CompositionViewer {
                     |pb| pb.range,
                 );
                 let looping = playback.is_some() && session.lock().loop_playback;
+                let mut shown_now = false;
                 if let Some((image, actual, errors)) = gpu.playback.poll(
                     cx.stage,
                     cx.resources,
@@ -1057,6 +1143,7 @@ impl Panel for CompositionViewer {
                     ui.ctx(),
                 ) {
                     completed = Some(image);
+                    shown_now = actual == time;
                     if actual == time || playback.is_some() {
                         let mut s = session.lock();
                         if playback.is_some() {
@@ -1067,31 +1154,47 @@ impl Panel for CompositionViewer {
                         }
                     }
                 }
-                // Idle (the current time still for a moment): prepare the first
-                // frames playback would show, so pressing play shows them at
-                // once while the pipeline fills.
-                if playback.is_none() {
+                // A cold start: the clock waits for playback's first frame.
+                if playback.is_some() {
+                    session.lock().hold_first_frame(shown_now);
+                }
+                let prefs = crate::prefs::current(cx.resources);
+                let source_focused = cx
+                    .focused_panel
+                    .is_some_and(|id| matches!(id.kind(), "footage" | "layer"));
+                if playback.is_none()
+                    && !source_focused
+                    && prefs.bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
+                {
                     let now = std::time::Instant::now();
-                    match self.idle {
-                        Some((at, since)) if at == time => {
-                            if now.duration_since(since) >= IDLE_PREFETCH {
-                                let (from, range) = session.lock().play_start(&info);
-                                let rate = info.frame_rate;
-                                let first = rate.time_to_frame(from);
-                                let times = (0..PREFETCH_FRAMES)
-                                    .map(|k| rate.frame_to_time(first + k))
-                                    .filter(|t| *t != time && range.contains(*t))
-                                    .collect();
-                                gpu.playback.prefetch(times);
-                            } else {
-                                ui.ctx().request_repaint_after(IDLE_PREFETCH);
-                            }
+                    let revision = cx.stage.revision();
+                    let active = ui.input(|i| !i.raw.events.is_empty());
+                    let since = match &self.idle {
+                        Some((comp, t, rev, since))
+                            if !active && comp == &info.path && *t == time && *rev == revision =>
+                        {
+                            *since
                         }
                         _ => {
-                            self.idle = Some((time, now));
-                            ui.ctx().request_repaint_after(IDLE_PREFETCH);
+                            self.idle = Some((info.path.clone(), time, revision, now));
+                            now
                         }
-                    }
+                    };
+                    let delay = std::time::Duration::from_secs(
+                        prefs.int("previews.idle_delay_before_caching") as u64,
+                    );
+                    let elapsed = now.duration_since(since);
+                    let plan = if !active && elapsed >= delay {
+                        crate::playback::idle::Plan::from_prefs(&prefs, &info, time)
+                    } else {
+                        ui.ctx()
+                            .request_repaint_after(delay.saturating_sub(elapsed));
+                        None
+                    };
+                    gpu.playback.prefetch(plan);
+                } else {
+                    self.idle = None;
+                    gpu.playback.prefetch(None);
                 }
                 gpu.playback.publish_ranges(&session, info.frame_rate);
             }
@@ -1149,7 +1252,11 @@ impl Panel for CompositionViewer {
                 s.expr_errors = comp.errors.clone();
             }
         }
-        apply_overrides(&mut comp, self.select.drag.as_ref());
+        let nudged = match &self.nudge {
+            Some(Nudge::Layers(d, _)) => Some(d),
+            _ => None,
+        };
+        apply_overrides(&mut comp, self.select.drag.as_ref().or(nudged));
         // A shape group being dragged.
         if let Some(d) = &self.select.group_drag
             && let Some(l) = comp.layers.iter_mut().find(|l| l.path == d.layer)
@@ -1158,11 +1265,16 @@ impl Panel for CompositionViewer {
         }
         // A mask or shape path being edited shows in the picture, not only as
         // its outline (#593).
+        let nudged_path = match &self.nudge {
+            Some(Nudge::Vertices(d, _)) => Some((d.prim().clone(), d.preview().path)),
+            _ => None,
+        };
         if let Some((prim, path)) = self
             .select
             .path_preview()
             .or(self.pen.path_preview())
             .or(self.feather.path_preview())
+            .or(nudged_path)
         {
             overlay::apply_path_preview(&mut comp, &prim, &path);
         }
@@ -1437,7 +1549,16 @@ impl Panel for CompositionViewer {
         if controls.masks && opts.paths {
             overlay::masks(&painter, cx.stage, &comp, &view, &selected);
         }
-        particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected, view_camera);
+        particle_guides::paint(
+            &clip,
+            cx.stage,
+            eval,
+            &comp,
+            &view,
+            &selected,
+            view_camera,
+            &mut self.particle_paths,
+        );
         // Cameras and lights in the 3D views (not the camera looked through).
         let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
             None | Some(view3d::View3d::Active) => comp.camera.map(|i| comp.layers[i].path.clone()),

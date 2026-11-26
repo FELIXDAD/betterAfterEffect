@@ -559,6 +559,25 @@ fn window_panel_items_toggle_and_reopen_panels() {
     assert!(failed.is_empty(), "{failed:?}");
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn system_shortcut_preference_swaps_minimize_and_queue() {
+    let mut h = gui();
+    for standard in [false, true] {
+        h.state_mut()
+            .workspace
+            .set_standard_system_shortcuts(standard);
+        let keymap = h.state().workspace.keymap();
+        for (command, control) in [
+            (ids::MINIMIZE, !standard),
+            ("motion.add_to_render_queue", standard),
+        ] {
+            let chord = bae_ui::Chord::parse(if control { "Ctrl+Cmd+M" } else { "Cmd+M" }).unwrap();
+            assert_eq!(keymap.lookup(&chord, None).unwrap().action, command);
+        }
+    }
+}
+
 #[test]
 fn undo_redo_and_shell_items_show_their_keymap_chords() {
     // AppMenu::sync shows what the keymap binds to each shell item (#117).
@@ -602,7 +621,7 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
     g.workspace.show_role_picker();
     let mut h = gui_with(g);
     settle(&mut h);
-    // `Workspace::modal_open` is what the shell checks for native menu commands.
+    // The first-run role picker is modal for native menu commands and keyboard events.
     assert!(h.state().workspace.modal_open(h.state().app.resources()));
     for (m, k) in [
         (Modifiers::COMMAND, Key::N),

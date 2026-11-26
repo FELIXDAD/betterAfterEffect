@@ -237,7 +237,7 @@ const FILE: &[Node] = &[
     it(131093, "Find", "motion.file.find", "", E, Done),
     SEP,
     it(131095, "Add Footage to Comp", "motion.file.add_footage_to_comp", "", E, Done),
-    it(131096, "New Comp from Selection...", "motion.file.new_comp_from_selection", "", E, Todo),
+    it(131096, "New Comp from Selection...", "motion.file.new_comp_from_selection", "", E, Done),
     SEP,
     sub(
         "Dependencies",
@@ -473,7 +473,7 @@ const COMPOSITION: &[Node] = &[
         "Preview",
         &[
             it(10682369, "Play Current Preview", "motion.play", "", B, Done),
-            it(10682370, "Cache Frames When Idle", "motion.comp.cache_frames_when_idle", "", B, Later),
+            it(10682370, "Cache Frames When Idle", "motion.comp.cache_frames_when_idle", "", B, Done),
             SEP,
             it(10682372, "Audio", "motion.comp.preview_audio", "", B, Later),
         ],
@@ -500,7 +500,7 @@ const COMPOSITION: &[Node] = &[
         ],
     ),
     SEP,
-    it(327701, "Composition Flowchart", "motion.comp.composition_flowchart", "", E, Later),
+    it(327701, "Composition Flowchart", "motion.comp.composition_flowchart", "", E, Done),
     it(327702, "Composition Mini-Flowchart", "motion.comp.composition_mini_flowchart", "", E, Done),
     SEP,
     sub(
@@ -802,7 +802,7 @@ const LAYER: &[Node] = &[
             it(23003137, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
             it(23003138, "Reveal Layer Source in Project", "motion.layer.reveal_layer_source_in_project", "", B, Todo),
             it(23003139, "Reveal Layer in Project Flowchart", "motion.layer.reveal_layer_in_project_flowchart", "", E, Later),
-            it(23003140, "Reveal Composition in Project", "motion.layer.reveal_composition_in_project", "", B, Todo),
+            it(23003140, "Reveal Composition in Project", "motion.layer.reveal_composition_in_project", "", B, Done),
             it(23003141, "Reveal Expression Errors", "motion.layer.reveal_expression_errors", "", C, Later),
         ],
     ),

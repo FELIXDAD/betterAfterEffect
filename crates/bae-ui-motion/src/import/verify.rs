@@ -1,6 +1,7 @@
 //! Import diagnostics. Decode requested sequence frames sequentially off the UI thread.
 use super::{Probed, formats};
 use crate::dialogs::{Dialog, SharedDialogs};
+use bae_media::SequenceMode;
 use bae_ui::{PanelContext, tr};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -37,7 +38,7 @@ pub(super) fn ranges(numbers: &[i64]) -> String {
 
 #[derive(Default, Debug)]
 pub(crate) struct FrameChecks {
-    pending: VecDeque<(String, PathBuf, String)>,
+    pending: VecDeque<(String, PathBuf, String, SequenceMode)>,
     notices: VecDeque<(String, String)>,
     running: bool,
 }
@@ -78,7 +79,7 @@ pub(super) fn report(cx: &PanelContext<'_>, title: &str, mut result: Probed) {
         result
             .sequences_to_verify
             .into_iter()
-            .map(|(path, name)| (title.to_owned(), path, name)),
+            .map(|(path, name, mode)| (title.to_owned(), path, name, mode)),
     );
     if d.frame_checks.running || d.frame_checks.pending.is_empty() {
         return;
@@ -114,14 +115,14 @@ fn run(dialogs: &SharedDialogs) {
     bae_gpu::warm_up::lower_priority();
     let _running = Running(dialogs);
     loop {
-        let (title, path, name) = {
+        let (title, path, name, mode) = {
             let mut d = dialogs.lock();
             let Some(job) = d.frame_checks.pending.pop_front() else {
                 return;
             };
             job
         };
-        if let Some(message) = verify(&path, &name) {
+        if let Some(message) = verify(&path, &name, mode) {
             dialogs
                 .lock()
                 .frame_checks
@@ -134,8 +135,13 @@ fn run(dialogs: &SharedDialogs) {
     }
 }
 
-fn verify(path: &Path, name: &str) -> Option<String> {
-    let Ok(Some(seq)) = bae_media::sequence::detect_sequence(path) else {
+fn verify(path: &Path, name: &str, mode: SequenceMode) -> Option<String> {
+    let sequence = if mode == SequenceMode::Alphabetical {
+        bae_media::sequence::alphabetical_sequence(path).map(Some)
+    } else {
+        bae_media::sequence::detect_sequence(path)
+    };
+    let Ok(Some(seq)) = sequence else {
         return Some(format!(
             "{} — {}",
             path.display(),
