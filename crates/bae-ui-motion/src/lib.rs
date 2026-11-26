@@ -241,8 +241,22 @@ impl AppModule for MotionUiModule {
         if let Some(dir) = &scripts_dir {
             scripts::register_menu(&menu, &owner, dir);
         }
+        let _ = app.register("script_editor", scripts::editor_panel());
+        let editor = MenuItemSpec::new(
+            &["File", "Scripts"],
+            "Open Script Editor...",
+            "motion.file.script_editor",
+        )
+        .workspace(menus::WORKSPACE);
+        let _ = app.register("motion.file.script_editor", editor);
+        let recent = scripts::RecentScripts::load(
+            app.resource::<bae_platform::AppDirs>()
+                .map(|d| d.config_file("recent-scripts.json")),
+        );
+        recent.publish(&menu, &owner);
         let script_actions: std::sync::Arc<dyn ActionHandler> =
             std::sync::Arc::new(scripts::ScriptActions {
+                recent: std::sync::Mutex::new(recent),
                 dir: scripts_dir,
                 menu,
                 owner: owner.clone(),

@@ -4,6 +4,28 @@ use bae_motion::query;
 use egui_kittest::kittest::Queryable as _;
 use serde_json::json;
 
+#[test]
+fn script_editor_runs_typed_jsx_through_the_file_menu() {
+    let mut h = gui();
+    assert!(h.state_mut().menu("motion.file.script_editor"));
+    settle(&mut h);
+    let source = h.get_by_label(bae_ui::tr("Script Source")).rect().center();
+    click_at(&mut h, source);
+    type_text(
+        &mut h,
+        include_str!("../../../../crates/bae-script/tests/compat/editor-title.jsx"),
+    );
+    let run = h.get_by_label(bae_ui::tr("Run Script")).rect().center();
+    click_at(&mut h, run);
+    settle(&mut h);
+    let stage = h.state().stage();
+    let comp = query::comps(stage)
+        .into_iter()
+        .find(|p| query::display_name_of(stage, p) == "Caption")
+        .unwrap();
+    assert_eq!(query::comp_layers(stage, &comp).len(), 1);
+}
+
 fn panel_gui() -> Ui {
     let app = crate::app_builder().build();
     assert!(
