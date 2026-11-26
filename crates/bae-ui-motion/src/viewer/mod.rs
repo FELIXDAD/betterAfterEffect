@@ -90,6 +90,17 @@ pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
     }
 }
 
+/// Associate the native smart-magnify event with the next input pass.
+pub fn request_smart_zoom(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("mac.smart_zoom"), pass));
+}
+
+pub(crate) fn smart_zoom(ctx: &egui::Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new("mac.smart_zoom"))) == Some(pass)
+}
+
 /// What the mouse wheel and trackpad did this frame over a picture (the
 /// viewer and the Layer panel share it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -153,6 +164,7 @@ pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
@@ -632,6 +644,7 @@ impl Panel for CompositionViewer {
         let opts = session.lock().view_options;
         self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
+        crate::import::drop_on_panel(ui, cx);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
@@ -646,13 +659,41 @@ impl Panel for CompositionViewer {
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
         // View layout: the active view is the viewer, the others are drawn below.
-        let (panes, active) = session
-            .lock()
-            .views3d
-            .get(&info.path)
-            .map_or((vec![view3d::View3d::Active], 0), |v| {
-                (v.panes(), v.active())
-            });
+        let (panes, active) = {
+            let s = session.lock();
+            s.views3d
+                .get(&info.path)
+                .map_or((vec![view3d::View3d::Active], 0), |v| {
+                    let panes = v.panes();
+                    let active = layout::preview_pane(
+                        &panes,
+                        v.active(),
+                        s.is_playing() && s.preview.favor_active_camera,
+                        || {
+                            let revision = cx.stage.revision();
+                            if let Some((comp, rev, result)) = &self.preview_3d
+                                && comp == &info.path
+                                && *rev == revision
+                            {
+                                return *result;
+                            }
+                            let result =
+                                query::comp_layers(cx.stage, &info.path)
+                                    .iter()
+                                    .any(|layer| {
+                                        cx.stage
+                                            .prim(layer)
+                                            .and_then(|p| query::static_value(&p, "three_d"))
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false)
+                                    });
+                            self.preview_3d = Some((info.path.clone(), revision, result));
+                            result
+                        },
+                    );
+                    (panes, active)
+                })
+        };
         let pane_rects = layout::rects(area, panes.len());
         let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
@@ -698,7 +739,15 @@ impl Panel for CompositionViewer {
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
             let w = wheel(ui);
-            if w.pinch != 1.0 {
+            if smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, &info, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), resp.hover_pos(), area, &info, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
                 if w.notches != 0.0 {
@@ -948,7 +997,7 @@ impl Panel for CompositionViewer {
                 .lock()
                 .views3d
                 .get(&info.path)
-                .and_then(|v| v.camera(size))
+                .and_then(|v| v.camera_of(panes[active], size))
         });
         let view = View {
             camera: Some((
