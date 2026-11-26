@@ -1502,8 +1502,10 @@ fn item_ui(
             ui.label(tr("Output To"));
             ui.vertical(|ui| {
                 let output = item.output.clone();
-                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(output_width))
+                let path_field = ui
+                    .add(egui::TextEdit::singleline(&mut item.output).desired_width(output_width))
                     .labeled_value(egui::WidgetType::TextEdit, &name("Output To"), &output);
+                bae_ui::a11y::value_source(&path_field, bae_ui::a11y::VERBATIM_VALUE);
                 // AE: the format decides the extension.
                 if let Some(ext) = extension_follows_format(&item.output, item.format) {
                     ui.weak(
