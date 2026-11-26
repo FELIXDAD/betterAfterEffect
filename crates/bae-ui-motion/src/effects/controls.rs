@@ -272,19 +272,13 @@ fn params(
                 .as_ref()
                 .map_or(48_000, |output| output.sample_rate());
             super::eq_response::show(ui, rate, |id| {
-                common::current_value(
-                    eval.get(cx.stage),
-                    cx.stage,
-                    effect,
-                    &param_attr(id),
-                    now,
-                )
-                .or_else(|| def.param(id)?.default.clone())
-                .and_then(|v| {
-                    v.as_f64()
-                        .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
-                })
-                .unwrap_or_default()
+                common::current_value(eval.get(cx.stage), cx.stage, effect, &param_attr(id), now)
+                    .or_else(|| def.param(id)?.default.clone())
+                    .and_then(|v| {
+                        v.as_f64()
+                            .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
+                    })
+                    .unwrap_or_default()
             });
             continue;
         }

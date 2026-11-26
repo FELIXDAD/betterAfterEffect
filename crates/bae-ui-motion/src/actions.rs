@@ -57,6 +57,8 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
+    pub const APPLY_PRESET: &str = "motion.anim.apply_animation_preset";
     pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
     pub const AUTO_ORIENT: &str = "motion.layer.auto_orient";
     pub const GO_TO_TIME: &str = "motion.view.go_to_time";
@@ -150,6 +152,12 @@ pub mod ids {
     /// Layer ▸ Transform ▸ Anchor Point… / Position… / Scale… / Orientation… /
     /// Rotation… / Opacity…: params `{"attr": "position"}` (the value dialog).
     pub const TRANSFORM_DIALOG: &str = "motion.layer.transform_dialog";
+    /// Layer ▸ Time: Enable Time Remapping (Cmd/Ctrl+Alt+T, toggles),
+    /// Time-Reverse Layer (Cmd/Ctrl+Alt+R), Freeze Frame, Freeze On Last Frame.
+    pub const TIME_REMAP: &str = "motion.layer.enable_time_remapping";
+    pub const TIME_REVERSE: &str = "motion.layer.time_reverse_layer";
+    pub const FREEZE_FRAME: &str = "motion.layer.freeze_frame";
+    pub const FREEZE_LAST: &str = "motion.layer.freeze_on_last_frame";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -181,6 +189,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("adjustment_layer", "Adjustment Layer"),
     ("three_d", "3D Layer"),
     ("preserve_transparency", "Preserve Transparency"),
+    ("guide", "Guide Layer"),
 ];
 
 /// Whether a switch is on for a layer.
@@ -212,6 +221,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::SAVE_PRESET, "Save Animation Preset..."),
+    (ids::APPLY_PRESET, "Apply Animation Preset..."),
     (ids::TIME_STRETCH, "Time Stretch..."),
     (ids::AUTO_ORIENT, "Auto-Orient..."),
     (ids::GO_TO_TIME, "Go to Time..."),
@@ -287,6 +298,10 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
     (ids::TRANSFORM_DIALOG, "Transform"),
     (ids::RESET_TRANSFORM, "Reset"),
+    (ids::TIME_REMAP, "Enable Time Remapping"),
+    (ids::TIME_REVERSE, "Time-Reverse Layer"),
+    (ids::FREEZE_FRAME, "Freeze Frame"),
+    (ids::FREEZE_LAST, "Freeze On Last Frame"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -931,12 +946,24 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 })
                 .collect();
             if !items.is_empty() {
+                if !remove && let Some((p, a)) = props.iter().find(|(p, a)| !has(p, a)) {
+                    session.lock().focus_expression =
+                        Some((p.clone(), a.clone(), std::time::Instant::now()));
+                }
                 cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
             return true;
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::SAVE_PRESET => {
+            crate::presets::save(cx, session);
+            return true;
+        }
+        ids::APPLY_PRESET => {
+            crate::presets::apply(cx, session);
             return true;
         }
         ids::TIME_STRETCH => {
@@ -1553,6 +1580,41 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
+        ids::TIME_REMAP | ids::TIME_REVERSE | ids::FREEZE_FRAME | ids::FREEZE_LAST => {
+            // Layers with time to remap: footage with a duration and pre-comps.
+            let timed: Vec<PrimPath> = layers
+                .iter()
+                .filter(|l| {
+                    !query::is_locked(stage, l)
+                        && matches!(
+                            query::layer_kind(stage, l).as_deref(),
+                            Some("footage" | "pre_comp" | "audio")
+                        )
+                        && query::source_duration(stage, l).is_some()
+                })
+                .cloned()
+                .collect();
+            if !timed.is_empty() {
+                match id {
+                    ids::TIME_REMAP => {
+                        // AE toggles: off when every layer has it on.
+                        let on = !timed
+                            .iter()
+                            .all(|l| switch_on(stage, l, "time_remap_enabled"));
+                        cx.invoke_with("layer.time_remap", json!({"layers": timed, "enabled": on}));
+                    }
+                    ids::TIME_REVERSE => {
+                        cx.invoke_with("layer.time_reverse", json!({ "layers": timed }));
+                    }
+                    ids::FREEZE_FRAME => {
+                        cx.invoke_with("layer.freeze_frame", json!({"layers": timed, "time": now}));
+                    }
+                    _ => {
+                        cx.invoke_with("layer.freeze_on_last_frame", json!({ "layers": timed }));
+                    }
+                }
+            }
+        }
         ids::TRANSFORM_DIALOG => {
             let kind = inv
                 .params
@@ -1794,6 +1856,14 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Save Animation Preset...", "保存动画预设..."),
+    ("Apply Animation Preset...", "应用动画预设..."),
+    // Layer ▸ Time and switches (AE 26's Chinese).
+    ("Enable Time Remapping", "启用时间重映射"),
+    ("Time-Reverse Layer", "时间反向图层"),
+    ("Freeze Frame", "冻结帧"),
+    ("Freeze On Last Frame", "在最后一帧上冻结"),
+    ("Guide Layer", "参考图层"),
     ("Time Stretch...", "时间伸缩..."),
     ("Auto-Orient...", "自动定向..."),
     ("Go to Time...", "转到时间..."),

@@ -90,6 +90,9 @@ fn require_tracker(stage: &Stage, tracker: &PrimPath) -> Result<(), CommandError
     ensure_unlocked(stage, [tracker])
 }
 
+/// Half the width and height of the rectangle multi-point trackers start on.
+const POINT_SPREAD: [f64; 2] = [32.0, 24.0];
+
 fn sync_points(
     tx: &mut Transaction<'_>,
     tracker: &PrimPath,
@@ -115,14 +118,16 @@ fn sync_points(
         } else if !reset {
             continue;
         }
+        // One point sits on the origin; more points take the corners of a
+        // fixed rectangle around it (1 top left, 2 top right, 3 bottom left,
+        // 4 bottom right), wherever the origin is.
+        let [hx, hy] = POINT_SPREAD;
         let center = match i {
-            0 => origin,
-            1 => [origin[0] + origin[0].abs().clamp(8.0, 64.0), origin[1]],
-            2 => [origin[0], origin[1] + origin[1].abs().clamp(8.0, 64.0)],
-            _ => [
-                origin[0] + origin[0].abs().clamp(8.0, 64.0),
-                origin[1] + origin[1].abs().clamp(8.0, 64.0),
-            ],
+            0 if n <= 1 => origin,
+            0 => [origin[0] - hx, origin[1] - hy],
+            1 => [origin[0] + hx, origin[1] - hy],
+            2 => [origin[0] - hx, origin[1] + hy],
+            _ => [origin[0] + hx, origin[1] + hy],
         };
         for (key, _) in PROPERTIES {
             let val = match key {

@@ -519,7 +519,30 @@ fn linked_channel_average_and_neutralizer_preserve_alpha() {
             [0., 0., 1., 1.]
         }
     });
-    let linked = run(&gpu, F32, builtin("ADBE Color Link"), vec![], &image, r, 1.);
+    // The source layer (its own layer here, half of it transparent outside the
+    // two colours: the average ignores transparent pixels).
+    let linked = {
+        let fx = builtin("ADBE Color Link");
+        let inst = instance("ADBE Color Link", vec![]);
+        let p = bae_render::EffectParams::new(&inst);
+        let dep = fx.effect().layer_dependencies(&p).pop().unwrap();
+        let source = Pixels::new(IRect::from_size(16, 16), |x, y| {
+            if y >= 8 {
+                [0.; 4]
+            } else if x < 8 {
+                [1., 0., 0., 1.]
+            } else {
+                [0., 0., 1., 1.]
+            }
+        })
+        .upload(&gpu, F32);
+        let input = image.upload(&gpu, F32);
+        let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+        target.set_effect_inputs(vec![(dep, source)], vec![]);
+        let out = fx.render(&mut target, &p, &input, r).unwrap();
+        target.finish().unwrap();
+        Pixels::download(&gpu, &out)
+    };
     assert_close(
         &linked,
         &Pixels::new(r, |_, _| [0.5, 0., 0.5, 1.]),
