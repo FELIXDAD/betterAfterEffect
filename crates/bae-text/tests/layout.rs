@@ -292,6 +292,11 @@ fn mixed_styles_share_a_line_and_paragraphs_have_independent_margins() {
         40.
     );
     assert_eq!(l.lines[1].x, 20.);
+    let c = &l.chars[4];
+    assert_eq!(
+        l.cursor_at(c.origin.x + 0.1 * c.advance, l.lines[1].baseline),
+        Some(4)
+    );
 }
 
 #[test]

@@ -34,6 +34,7 @@
 mod blur;
 pub mod catalog;
 mod categories;
+pub use categories::channel_3d::settings as exr_controls;
 mod common;
 pub mod effects;
 mod gpu;
@@ -55,9 +56,14 @@ pub use catalog::{EffectInfo, Form, category_zh};
 pub use categories::color::ocio::embed_color_file;
 pub use categories::simulation::{particle_scene_projection, particle_world_projection};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
-pub use effects::color::lumetri::LumetriCurve;
+pub use effects::color::lumetri::{
+    LumetriCurve, LumetriLut, lumetri_key_edits, prepare_lumetri_lut,
+};
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
+
+/// Slider settings used by the Lumetri white balance selector.
+pub use effects::color::lumetri::lumetri_white_balance_settings;
 
 /// Plugin id of the built-in effects (`bae.effects/<id>`).
 pub const PLUGIN_ID: &str = "bae.effects";
@@ -180,6 +186,14 @@ impl Effect for Forward {
     fn integrated_parameters(&self) -> &'static [u32] {
         self.0.integrated_parameters()
     }
+    fn feedback_source(
+        &self,
+        p: &EffectParams<'_>,
+        stack: &[bae_render::RenderEffect],
+    ) -> Option<bae_model::PrimPath> {
+        self.0.feedback_source(p, stack)
+    }
+
     fn full_surface(&self) -> bool {
         self.0.full_surface()
     }

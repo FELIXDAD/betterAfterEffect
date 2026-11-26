@@ -41,15 +41,19 @@ mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
+mod layer_styles;
 mod live_preview;
 mod masks;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
+mod panel_columns;
 mod panels;
+mod path_nulls;
 mod playback;
 mod prefs;
 mod presets;
+pub use presets::register_preset_index;
 mod preview_snapshot;
 pub mod progress_metadata;
 mod project;
@@ -59,10 +63,12 @@ pub mod render_queue;
 pub mod scopes;
 pub mod scripts;
 pub mod session;
+mod source_view_menu;
 mod timeline;
 pub mod tools;
 mod tracker;
 mod viewer;
+mod vr_editor;
 mod workspaces;
 
 use bae_app::{AppBuilder, AppModule};
@@ -100,6 +106,8 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     footage_panel::register,
     progress_metadata::register,
     paint_panels::register,
+    path_nulls::register,
+    vr_editor::register,
     assist::register,
     // Chinese strings only.
     actions::register,
@@ -141,7 +149,10 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(catalog::menu_zh());
         bae_ui::i18n::register(ae_panels::ZH);
         bae_ui::i18n::register(ae_shells::ZH);
+        // The Character panel's font list, scanned before it is first opened.
+        ae_panels::character::prewarm();
         effects::register_i18n();
+        layer_styles::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }
@@ -215,6 +226,10 @@ impl AppModule for MotionUiModule {
         // panel has focus.
         let handler: std::sync::Arc<dyn ActionHandler> = std::sync::Arc::new(menus::MotionActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion", handler);
+        let _ = app.register_arc::<dyn ActionHandler>(
+            "bae-ui-motion.layer-styles",
+            std::sync::Arc::new(layer_styles::Actions),
+        );
         let effect_actions: std::sync::Arc<dyn ActionHandler> =
             std::sync::Arc::new(effects::EffectActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.effects", effect_actions);

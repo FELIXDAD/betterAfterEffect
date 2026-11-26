@@ -241,6 +241,11 @@ impl Scene<'_> {
         let history_offset = 32 + CONTROL_COUNT * 16;
         let mut u = UniformWriter::with_size(history_offset + 16 + 64 * 16);
         u.u32(0, kind as u32).u32(8, seed).f32s(16, &self.size);
+        if matches!(kind, Kind::Rain | Kind::Snow) {
+            // The old weather effects can place the source in the particle field.
+            let depth = self.p.p.value(144).and_then(Value::as_f64).unwrap_or(1.);
+            u.f32(32 + 144 * 16, depth as f32);
+        }
         for (index, c) in self
             .p
             .def

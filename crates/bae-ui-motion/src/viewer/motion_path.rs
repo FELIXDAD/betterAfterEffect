@@ -9,6 +9,10 @@
 //! it; Cmd/Ctrl-drag breaks them apart); Cmd/Ctrl-drag a keyframe square to pull new
 //! handles out of it. Each drag is one `key.edit`.
 //!
+//! With the Convert Vertex tool: a click on a square toggles the keyframe
+//! between linear (no handles) and Auto Bezier; a drag pulls new handles out
+//! of it (AE).
+//!
 //! Preferences > Appearance > Motion Path decides how much of the path shows: none,
 //! all keyframes, no more than N keyframes or no more than a duration around the
 //! current time.
@@ -48,7 +52,7 @@ impl PathMode {
         let store = resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>();
         let prefs = store.map_or_else(
             || std::sync::Arc::new(bae_prefs::Preferences::default()),
-            |s| s.current(),
+            |s| s.display(),
         );
         match prefs.str(bae_prefs::keys::MOTION_PATH_MODE) {
             "no_motion_path" => PathMode::None,
@@ -88,6 +92,8 @@ pub(crate) struct MotionPathState {
     /// is still down: the gesture is the motion path's from the press on (the
     /// Selection tool reacts at mouse-down).
     pressed: Option<(KeyRef, Option<bool>, Pos2)>,
+    /// Last frame's keyframe squares on screen (the right-click menu).
+    on_screen: Vec<(KeyRef, Pos2)>,
     /// Last frame's geometry, for tests.
     #[cfg(test)]
     pub(crate) last: Drawn,
@@ -324,6 +330,37 @@ fn drag_edit(drag: &PathDrag, paths: &[LayerPath], view: &View, pointer: Pos2) -
     Some(e)
 }
 
+impl MotionPathState {
+    /// The keyframe whose square is at `pos` (last frame's), if any.
+    pub(crate) fn key_at(&self, pos: Pos2) -> Option<KeyRef> {
+        self.on_screen
+            .iter()
+            .filter(|(_, p)| p.distance(pos) <= PICK.max(4.0))
+            .min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
+            .map(|(k, _)| k.clone())
+    }
+}
+
+/// Convert Vertex on a keyframe square: handles retract (linear), or a linear
+/// keyframe becomes Auto Bezier.
+fn convert_edit(key: &KeyRef, paths: &[LayerPath]) -> Option<KeyEdit> {
+    let path = paths.iter().find(|p| p.layer == key.path)?;
+    let kf = path.spec.keyframes.get(&key.time)?;
+    let has = |t: Option<[f64; 3]>| t.is_some_and(|t| DVec3::from_array(t).length() > 1e-9);
+    let curved = kf.flags.spatial_auto_bezier || has(kf.spatial_in) || has(kf.spatial_out);
+    let mut e = KeyEdit::new(key.clone());
+    if curved {
+        e.spatial_in = Some([0.0; 3]);
+        e.spatial_out = Some([0.0; 3]);
+        e.spatial_continuous = Some(false);
+        e.spatial_auto_bezier = Some(false);
+    } else {
+        e.spatial_continuous = Some(true);
+        e.spatial_auto_bezier = Some(true);
+    }
+    Some(e)
+}
+
 /// Draw the motion paths of the selected layers and, with the Selection tool, edit
 /// them.
 #[allow(clippy::too_many_arguments)]
@@ -350,10 +387,11 @@ pub(crate) fn frame(
         cursor: None,
     };
     // View Options: Motion Paths, Keyframes, Motion Path Tangents.
-    let shown = session.lock().layer_controls;
+    let shown = super::view_options::shown_controls(&session.lock());
     if mode == PathMode::None || !shown.motion_paths {
         state.drag = None;
         state.pressed = None;
+        state.on_screen.clear();
         return out;
     }
     let now = session.lock().time(&info.path);
@@ -378,6 +416,10 @@ pub(crate) fn frame(
             d.keys.clear();
         }
     }
+    state.on_screen = drawn
+        .iter()
+        .flat_map(|(_, d)| d.keys.iter().cloned())
+        .collect();
     let selected = session.lock().selected_keys.clone();
 
     // Paint: dots, handles and their lines, squares (filled when selected).
@@ -412,7 +454,8 @@ pub(crate) fn frame(
         }
     }
 
-    if tool != Tool::Selection {
+    let converting = tool == Tool::ConvertVertex;
+    if tool != Tool::Selection && !converting {
         state.drag = None;
         state.pressed = None;
         out.owns = false;
@@ -453,10 +496,21 @@ pub(crate) fn frame(
         state.pressed = Some((k, handle, pos));
         out.owns = true;
     }
-    // Clicks select keyframes (Shift adds or removes).
-    if resp.clicked_by(egui::PointerButton::Primary)
+    // Convert Vertex: a click toggles linear / Auto Bezier (one key.edit).
+    if converting
+        && resp.clicked_by(egui::PointerButton::Primary)
         && let Some((k, None, _)) = state.pressed.clone()
     {
+        out.owns = true;
+        if query::locked_layer_of(cx.stage, &k.path).is_none()
+            && let Some(e) = convert_edit(&k, &paths)
+        {
+            cx.invoke_with("key.edit", json!({ "edits": [e] }));
+        }
+    } else if resp.clicked_by(egui::PointerButton::Primary)
+        && let Some((k, None, _)) = state.pressed.clone()
+    {
+        // Clicks select keyframes (Shift adds or removes).
         out.owns = true;
         let mut s = session.lock();
         if mods.shift {
@@ -476,13 +530,15 @@ pub(crate) fn frame(
         out.owns = true;
         if query::locked_layer_of(cx.stage, &k.path).is_none() {
             state.drag = Some(match handle {
+                // Convert Vertex drags one handle on its own (AE).
                 Some(o) => PathDrag::Handle {
                     key: k,
                     out: o,
-                    split: mods.command,
+                    split: mods.command || converting,
                 },
-                // Cmd/Ctrl-drag on a square pulls out new handles (Convert Vertex).
-                None if mods.command => PathDrag::Handle {
+                // Cmd/Ctrl-drag (or Convert Vertex) on a square pulls out new
+                // handles.
+                None if mods.command || converting => PathDrag::Handle {
                     key: k,
                     out: true,
                     split: false,
@@ -721,6 +777,37 @@ mod tests {
                 .keyframes[&Time(t)]
                 .clone()
         }
+    }
+
+    /// The Convert Vertex tool on a square: linear → Auto Bezier → linear.
+    #[test]
+    fn convert_vertex_toggles_a_keyframe_between_linear_and_auto_bezier() {
+        let mut h = H::new();
+        h.resources
+            .get::<SharedTools>()
+            .unwrap()
+            .lock()
+            .set(Tool::ConvertVertex);
+        let click = |h: &mut H| {
+            let p = h.key_pos(SEC);
+            h.frame(vec![Event::PointerMoved(p)], Modifiers::NONE);
+            h.button(p, true, Modifiers::NONE);
+            let r = h.button(p, false, Modifiers::NONE);
+            assert_eq!(r.invocations.len(), 1, "one key.edit");
+            assert_eq!(r.invocations[0].id, "key.edit");
+            h.apply(&r);
+            // Not a double-click next time.
+            for _ in 0..40 {
+                h.frame(Vec::new(), Modifiers::NONE);
+            }
+        };
+        click(&mut h);
+        assert!(h.kf(SEC).flags.spatial_auto_bezier, "Auto Bezier");
+        click(&mut h);
+        let k = h.kf(SEC);
+        assert!(!k.flags.spatial_auto_bezier, "linear again");
+        let zero = |t: Option<[f64; 3]>| t.is_none_or(|t| t == [0.0; 3]);
+        assert!(zero(k.spatial_in) && zero(k.spatial_out), "{k:?}");
     }
 
     #[test]

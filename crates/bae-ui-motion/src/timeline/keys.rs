@@ -24,6 +24,11 @@ pub(super) fn paint_key(p: &egui::Painter, c: Pos2, k: &Keyframe, selected: bool
         color::KEYFRAME
     };
     let stroke = Stroke::new(1.0, Color32::from_gray(20));
+    // Roving keyframes: a small dot (AE).
+    if k.flags.roving {
+        p.circle(c, 2.5, fill, stroke);
+        return;
+    }
     let r = 5.0;
     let half = |left: bool, interp: Interpolation, auto: bool| -> Vec<Pos2> {
         let s = if left { -1.0 } else { 1.0 };
@@ -157,7 +162,7 @@ impl TimelinePanel {
         let selected_keys = session.lock().selected_keys.clone();
         // Keyframes of a locked layer cannot be selected or moved (AE).
         let locked = query::locked_layer_of(stage, path).is_some();
-        for (t, k) in &spec.keyframes {
+        for (index, (t, k)) in spec.keyframes.iter().enumerate() {
             let kr = KeyRef::new(path.clone(), attr, *t);
             let selected = selected_keys.contains(&kr);
             let mut ct = query::to_comp_time(stage, path, *t);
@@ -168,7 +173,21 @@ impl TimelinePanel {
             if !graph.expand(6.0).contains(c) {
                 continue;
             }
-            paint_key(&p, c, k, selected);
+            if self.display.indices {
+                p.text(
+                    c,
+                    Align2::CENTER_CENTER,
+                    (index + 1).to_string(),
+                    theme::small(),
+                    if selected {
+                        color::ACCENT
+                    } else {
+                        color::KEYFRAME
+                    },
+                );
+            } else {
+                paint_key(&p, c, k, selected);
+            }
             #[cfg(test)]
             self.last_keys.push((kr.clone(), c));
             let hit = Rect::from_center_size(c, vec2(11.0, 13.0));

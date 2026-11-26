@@ -9,10 +9,12 @@ mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
+mod interpret_footage;
 mod layer_time;
 mod light_settings;
 mod mask_value;
 pub mod memory;
+pub(crate) mod photoshop;
 mod precompose;
 mod project_settings;
 mod render_output;
@@ -39,6 +41,7 @@ use crate::session::SharedSession;
 /// The dialog that is open.
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    Photoshop(Box<photoshop::PhotoshopDialog>),
     /// Analysis of the composition work area for the Keyframe Assistant.
     AudioAnalysis(crate::audio_analysis::Analysis),
     /// Display units and slider floor of the Audio panel.
@@ -54,6 +57,8 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// File > Interpret Footage > Main (Cmd/Ctrl+Alt+G).
+    InterpretFootage(Box<interpret_footage::InterpretFootage>),
     /// Layer > Time > Time Stretch.
     TimeStretch(Box<layer_time::TimeStretch>),
     /// Layer > Transform > Auto-Orient (Cmd/Ctrl+Alt+O).
@@ -62,6 +67,7 @@ pub enum Dialog {
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
+    EffectManager(Box<crate::effects::manager::EffectManager>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
     TransformValue(Box<TransformValue>),
@@ -72,20 +78,28 @@ pub enum Dialog {
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
-    Alert { title: String, message: String },
+    Alert {
+        title: String,
+        message: String,
+    },
     /// View ▸ View Options (Cmd/Ctrl+Alt+U).
     ViewOptions(Box<crate::viewer::view_options::LayerControls>),
     /// View ▸ Panel Background Color ▸ Select Custom Background Color…
     BackgroundColor([u8; 3]),
     /// View ▸ Resolution ▸ Custom…: pixel steps (horizontal, vertical);
     /// `nested`: also for the comps nested in the active one.
-    CustomResolution { steps: [u32; 2], nested: bool },
+    CustomResolution {
+        steps: [u32; 2],
+        nested: bool,
+    },
 }
 
 /// Open dialog and remembered values.
 #[derive(Debug, Default)]
 pub struct Dialogs {
     pub open: Option<Dialog>,
+    pub(crate) photoshop_queue: std::collections::VecDeque<photoshop::PhotoshopDialog>,
+    pub(crate) frame_checks: crate::import::FrameChecks,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
@@ -124,7 +138,8 @@ impl SharedDialogs {
 
     /// Whether a motion dialog is open.
     pub fn is_open(&self) -> bool {
-        self.lock().open.is_some()
+        let d = self.lock();
+        d.open.is_some() || !d.photoshop_queue.is_empty()
     }
 }
 
@@ -276,6 +291,18 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
     if let Some(p) = PrecomposeDialog::new(cx.stage, layers, &d.precompose) {
         d.open = Some(Dialog::Precompose(Box::new(p)));
+    }
+}
+
+/// Open Interpret Footage for the footage selected in the Project panel.
+pub(crate) fn interpret_footage(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    let selected = session.lock().selected_items.clone();
+    if d.open.is_none()
+        && let Some(f) = interpret_footage::InterpretFootage::new(cx.stage, &selected)
+    {
+        d.open = Some(Dialog::InterpretFootage(Box::new(f)));
     }
 }
 
@@ -435,6 +462,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        interpret_footage::STRINGS,
         layer_time::STRINGS,
         go_to_time::STRINGS,
         project_settings::STRINGS,
@@ -452,16 +480,34 @@ pub struct MotionDialogs;
 impl bae_ui::DialogHost for MotionDialogs {
     fn is_open(&self, resources: &Resources) -> bool {
         shared(resources).is_open()
+            || crate::common::session(resources)
+                .lock()
+                .loading_lut
+                .is_some()
     }
 
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
+        if crate::effects::lut::poll(ctx, cx) {
+            return;
+        }
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
-        let Some(mut open) = dialogs.lock().open.take() else {
-            return;
+        let open = {
+            let mut d = dialogs.lock();
+            d.frame_checks.repaint_while_running(ctx);
+            d.open
+                .take()
+                .or_else(|| d.frame_checks.next_notice())
+                .or_else(|| {
+                    d.photoshop_queue
+                        .pop_front()
+                        .map(|job| Dialog::Photoshop(Box::new(job)))
+                })
         };
+        let Some(mut open) = open else { return };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
+            Dialog::Photoshop(d) => d.ui(ctx, cx),
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
             Dialog::AudioOptions(d) => d.ui(ctx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
@@ -469,10 +515,12 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::InterpretFootage(d) => d.ui(ctx, cx),
             Dialog::TimeStretch(d) => d.ui(ctx, cx),
             Dialog::AutoOrient(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
+            Dialog::EffectManager(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),
             Dialog::MaskValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
@@ -499,4 +547,5 @@ pub(crate) use zh::ZH;
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(photoshop::ZH);
 }

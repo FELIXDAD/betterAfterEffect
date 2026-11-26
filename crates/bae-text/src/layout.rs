@@ -153,6 +153,7 @@ pub enum CharKind {
 /// One animatable "character" (a shaped cluster ≈ grapheme, AE-TXT-012).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextChar {
+    pub right_to_left: bool,
     /// Height of a tate-chu-yoko cell containing this horizontal character.
     pub combined_em: Option<f64>,
     pub paint: TextPaint,
@@ -224,6 +225,42 @@ impl TextLayout {
     /// Whether nothing is drawn.
     pub fn is_empty(&self) -> bool {
         self.runs.iter().all(|r| r.glyphs.is_empty())
+    }
+
+    /// Nearest insertion point in source-character coordinates, including RTL runs.
+    pub fn cursor_at(&self, x: f64, y: f64) -> Option<usize> {
+        let distance = |l: &TextLine| {
+            (l.baseline - l.ascent - y)
+                .max(y - l.baseline - l.descent)
+                .max(0.)
+        };
+        let line = self
+            .lines
+            .iter()
+            .min_by(|a, b| distance(a).total_cmp(&distance(b)))?;
+        let chars = &self.chars[line.chars.clone()];
+        chars
+            .iter()
+            .flat_map(|c| {
+                let (left, right) = if c.right_to_left {
+                    (c.source.end, c.source.start)
+                } else {
+                    (c.source.start, c.source.end)
+                };
+                let right = if c.kind == CharKind::LineBreak {
+                    left
+                } else {
+                    right
+                };
+                [(c.origin.x, left), (c.origin.x + c.advance, right)]
+            })
+            .min_by(|a, b| (x - a.0).abs().total_cmp(&(x - b.0).abs()))
+            .map(|(_, i)| i)
+            .or_else(|| {
+                self.chars
+                    .get(line.chars.start.checked_sub(1)?)
+                    .map(|c| c.source.end)
+            })
     }
 
     pub fn vertical(&self) -> bool {
@@ -827,6 +864,7 @@ fn shape_paragraph(
                     }
                     pen += f64::from(cluster.advance());
                     out.chars.push(TextChar {
+                        right_to_left: run.is_rtl(),
                         combined_em: None,
                         paint,
                         source: src,

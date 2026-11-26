@@ -213,5 +213,11 @@ fn weather(id: u32, t: f32, s: State) -> Sprite {
     if rain && f(18) == 1. {
         color = mix(color, src.rgb, .5 * src.a);
     }
-    return sprite(pos, half, angle, style, vec4f(color, select(f(19), f(9), rain) * .01 * z));
+    // Behind the source only (old weather effects): `select` would sample the
+    // source for every particle.
+    var visibility = 1.;
+    if q.z > f(144) {
+        visibility = 1. - source_at(pos).a;
+    }
+    return sprite(pos, half, angle, style, vec4f(color, select(f(19), f(9), rain) * .01 * z * visibility));
 }
