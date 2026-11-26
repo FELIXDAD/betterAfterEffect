@@ -65,3 +65,32 @@ keywords = ["伸缩"]
 stretch = "Stretch"
 center = "Center"
 direction = "Direction"
+
+[effect.cc-jaws]
+name = "CC Jaws"
+keywords = ["过渡"]
+
+[effect.cc-jaws.params]
+completion = "Completion"
+center = "Center"
+direction = "Direction"
+height = "Height"
+width = "Width"
+shape = "Shape"
+
+[effect.cc-jaws.choices.shape]
+1 = "Spikes"
+2 = "RoboJaw"
+3 = "Block"
+4 = "Waves"
+
+[effect.cc-line-sweep]
+name = "CC Line Sweep"
+keywords = ["过渡"]
+
+[effect.cc-line-sweep.params]
+completion = "Completion"
+direction = "Direction"
+thickness = "Thickness"
+slant = "Slant"
+flip_direction = "Flip Direction"

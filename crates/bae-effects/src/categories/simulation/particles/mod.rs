@@ -2,9 +2,11 @@
 mod catalog;
 mod emission;
 mod engine;
+pub(crate) mod projection;
 pub(crate) use engine::{Engine, prewarm};
 mod scatter;
 mod surface;
+mod water;
 
 use crate::effects::layer_input;
 use crate::{Builtin, EffectTarget, TargetEffect, common, gpu::UniformWriter, params::Params};
@@ -31,6 +33,9 @@ pub(crate) enum Kind {
     Ball,
     Mercury,
     Hair,
+    Foam = 15,
+    Wave = 16,
+    Caustics = 17,
 }
 
 pub(crate) fn builtin(kind: Kind) -> Builtin {
@@ -40,6 +45,18 @@ pub(crate) fn builtin(kind: Kind) -> Builtin {
 struct Simulation {
     def: EffectDef,
     kind: Kind,
+}
+
+// Every birth stays in one fixed layer-time bucket throughout the particle's
+// life. Four adjacent buckets cover the live population at the requested time.
+fn texture_times(now: f64, life: f64, at_birth: bool) -> [f64; 4] {
+    let step = life.max(0.001) / 3.;
+    let first = if at_birth {
+        (now / step).floor() - 3.
+    } else {
+        0.
+    };
+    [0., 1., 2., 3.].map(|i| ((first + i) * step).max(0.))
 }
 
 fn max_lifetime(p: Params<'_>, id: u32) -> f64 {
@@ -54,12 +71,22 @@ impl Simulation {
         match self.kind {
             Kind::Hair => &[8],
             Kind::Playground => &[201, 281, 501, 551, 253, 303, 353, 403, 423],
+            Kind::Foam => &[54, 58, 64],
+            Kind::Wave => &[36],
+            Kind::Caustics => &[2, 10, 70],
             Kind::Cards => &[10, 12, 8],
             Kind::Shatter => &[8, 20, 62, 70, 66],
             _ => &[],
         }
     }
     fn inputs(&self, p: &EffectParams<'_>) -> Vec<Option<LayerDependency>> {
+        if self.kind == Kind::Caustics {
+            return self
+                .sources()
+                .iter()
+                .map(|&id| water::dependency(p, id, id == 2))
+                .collect();
+        }
         if self.kind == Kind::World {
             let Some(texture) = layer_input::dependency(p, 45, false) else {
                 return vec![];
@@ -69,12 +96,10 @@ impl Simulation {
                 return vec![Some(texture)];
             }
             let t = p.time.as_seconds();
-            let duration = max_lifetime(v, 5);
-            let start = if v.popup(47) == 1 { t - duration } else { 0. };
-            return (0..4)
-                .map(|i| {
+            return texture_times(t, max_lifetime(v, 5), v.popup(47) == 1)
+                .into_iter()
+                .map(|local| {
                     let mut dep = texture.clone();
-                    let local = (start + duration * f64::from(i) / 3.).max(0.);
                     dep.time = p.comp_time
                         + bae_model::Time::from_seconds((local - t) * p.layer_time_scale);
                     Some(dep)
@@ -126,6 +151,7 @@ impl Effect for Simulation {
         match self.kind {
             Kind::World => true,
             Kind::Mercury => p.popup(31) == 2,
+            Kind::Caustics => p.popup(38) == 3,
             Kind::Cards => p.popup(66) == 3 || p.popup(102) == 3,
             Kind::Shatter => p.popup(72) == 3 || p.popup(108) == 3,
             Kind::Drizzle => p.popup(22) == 2,
@@ -140,6 +166,7 @@ impl Effect for Simulation {
         match self.kind {
             Kind::World => &[4, 5],
             Kind::Mercury => &[6, 7],
+            Kind::Foam => &[14, 20],
             Kind::Systems | Kind::Drizzle => &[1, 2],
             Kind::Playground => &[103],
             _ => &[],
@@ -320,7 +347,7 @@ impl Scene<'_> {
         let n = match k {
             Kind::World | Kind::Systems | Kind::Drizzle | Kind::Scatter => 0.,
 
-            Kind::Mercury => 0.,
+            Kind::Mercury | Kind::Wave | Kind::Foam | Kind::Caustics => 0.,
             Kind::Ball => tiles(f(6) + 1.),
             Kind::Hair => 4. * (f(5) * self.size[0] as f64 * self.size[1] as f64 / 10000.).ceil(),
             // The grid and the exploded layer; the cannon's births are intervals.
@@ -369,6 +396,9 @@ impl TargetEffect for Simulation {
             return Ok(input.clone());
         }
         let p = Params::new(&self.def, params);
+        if matches!(self.kind, Kind::Wave | Kind::Caustics) {
+            return water::render(self.kind, target, p, input, roi);
+        }
         if self.kind == Kind::Scatter {
             return scatter::render(target, &p, input, roi);
         }

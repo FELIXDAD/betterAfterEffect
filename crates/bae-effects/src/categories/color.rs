@@ -1,3 +1,5 @@
+mod cc;
+
 use super::packages;
 use crate::Registry;
 use crate::{effects, rust_builtin};
@@ -6,6 +8,11 @@ use std::sync::Arc;
 pub(crate) mod ocio;
 
 pub(crate) fn register(registry: &mut Registry) {
+    cc::register(registry);
+    super::packages(
+        registry,
+        &[embedded!("color", ["shaders/cc_color_neutralizer.wgsl"])],
+    );
     registry.effects.extend(ocio::entries());
     registry.prewarm.push(effects::color::prewarm);
     packages(

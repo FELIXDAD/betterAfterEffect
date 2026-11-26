@@ -136,6 +136,14 @@ pub(crate) fn frame(
     prefs: &ViewerPrefs,
     now: Time,
 ) -> PointsFrame {
+    // View Options ▸ Effect Controls off: no crosshairs, nothing to drag.
+    if !session.lock().layer_controls.effect_controls {
+        state.drag = None;
+        return PointsFrame {
+            owns: false,
+            cursor: None,
+        };
+    }
     let handles = handles(cx, session, comp, view, prefs);
     for h in &handles {
         paint(painter, h.pos, h.color);

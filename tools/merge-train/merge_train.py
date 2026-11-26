@@ -1019,6 +1019,37 @@ def auto_resume_if_green(st, sha, latest):
     return True
 
 
+def notify_recent_dev_failure(st):
+    """dev gets merges every few minutes, so the full run for the newest dev commit is
+    usually cancelled by the next push and check_dev_red never sees a result. Look at
+    the newest dev full run that actually finished; if it failed, tell the leader once
+    per run (no pause: a red dev must be fixed forward, not block the queue)."""
+    rc, out, _ = sh(["gh", "run", "list", "--repo", CFG["repo"], "--branch", CFG["base"],
+                     "--workflow", CFG.get("full_workflow", "CI"), "--status", "completed",
+                     "--limit", "15", "--json", "databaseId,headSha,conclusion,url"], check=False)
+    if rc != 0:
+        return False
+    try:
+        runs = [r for r in json.loads(out) if r.get("conclusion") != "cancelled"]
+    except ValueError:
+        return False
+    if not runs or runs[0].get("conclusion") not in ("failure", "timed_out", "startup_failure"):
+        return False
+    run = runs[0]
+    seen = st.setdefault("dev_red_runs", [])
+    if run["databaseId"] in seen:
+        return False
+    seen.append(run["databaseId"])
+    st["dev_red_runs"] = seen[-20:]
+    line = "dev %s 的全量 CI 失败（最近一次跑完的）：%s" % (run["headSha"][:7], run["url"])
+    log("RED: " + line)
+    if mutate("notify %s about red dev run %d" % (LEADERS.get("pause_notify"), run["databaseId"])):
+        for leader in LEADERS.get("pause_notify", []):
+            send(leader, "dev 全量 CI 红了：" + run["headSha"][:7], line + "\n队列不暂停，请尽快在 dev 上修。",
+                 msg_type="escalation", priority="high")
+    return True
+
+
 def check_dev_red(st):
     """Pause the queue when the newest dev commit's required full checks failed; lift
     that pause by itself once the newest dev commit is green again."""
@@ -1092,6 +1123,7 @@ def one_pass(st):
                     "queued_at": p["queued_at"]} for p in q]
     st["last_pass"] = now_utc().isoformat()
     check_dev_red(st)
+    notify_recent_dev_failure(st)
     reason = paused_reason(st)
     st["paused"] = reason
     if reason:
@@ -1152,6 +1184,7 @@ def skip_ahead(q, st):
     if len(q) < 2 or waited < CFG.get("skip_ahead_after_minutes", 30):
         return False
     head_files = None
+    pre_left = CFG.get("preupdate_ahead", 0)
     for p in q[1:]:
         try:
             decision, detail, _ = decide(p, st)
@@ -1161,6 +1194,18 @@ def skip_ahead(q, st):
         if (decision, detail) != (ps.get("decision"), ps.get("detail")):
             log("#%d (behind #%d) %s → %s: %s" % (p["number"], q[0]["number"],
                                                   p["headRefOid"][:7], decision, detail))
+        if decision == "update" and pre_left > 0:
+            # Start this PR's CI now so it is green when it reaches the front, instead
+            # of every behind PR waiting for the head's CI and then running its own.
+            pre_left -= 1
+            if ps.get("updated_head") != p["headRefOid"] and mutate(
+                    "pre-update #%d behind #%d" % (p["number"], q[0]["number"])):
+                rc, out, err = sh(["gh", "pr", "update-branch", str(p["number"]),
+                                   "--repo", CFG["repo"]], check=False)
+                if rc == 0:
+                    ps.update(updated_head=p["headRefOid"], updated_at=now_utc().isoformat())
+                    log("#%d (behind #%d) pre-updated; its CI runs while the head waits"
+                        % (p["number"], q[0]["number"]))
         if decision == "merge":
             try:
                 if head_files is None:

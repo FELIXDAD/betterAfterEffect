@@ -99,6 +99,7 @@ impl Engine {
             include_str!("shared.wgsl"),
             include_str!("motion.wgsl"),
             include_str!("sprites.wgsl"),
+            include_str!("foam.wgsl"),
             include_str!("tiles.wgsl"),
             include_str!(concat!(env!("OUT_DIR"), "/playground_slots.wgsl")),
             include_str!("playground.wgsl"),
@@ -282,6 +283,7 @@ pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<
     Engine::get(rt)?;
     surface::composite_kernel(rt, format)?;
     super::scatter::prewarm(rt, format)?;
+    super::water::prewarm(rt, format)?;
     Ok(())
 }
 
@@ -297,6 +299,7 @@ pub(super) fn render(
     let p = scene.p;
     let seed = p.p.seed as u32
         ^ match kind {
+            Kind::Foam => p.f(72) as u32,
             Kind::World => p.f(104) as u32,
             Kind::Systems => p.f(30) as u32,
             Kind::Rain => p.f(22) as u32,
@@ -306,14 +309,17 @@ pub(super) fn render(
     let advance = match kind {
         Kind::World | Kind::Systems => 0,
         Kind::Rain | Kind::Snow | Kind::Bubbles => 1,
-        Kind::Drizzle => 2,
+        Kind::Drizzle | Kind::Foam => 2,
         Kind::Ball => 4,
         Kind::Hair => 5,
         Kind::Mercury => 6,
         Kind::Playground => 7,
         _ => 3,
     };
-    let batches = super::emission::batches(kind, scene);
+    let mut batches = super::emission::batches(kind, scene);
+    if kind == Kind::Foam && p.popup(50) == 2 {
+        batches.reverse();
+    }
     let blend = match kind {
         Kind::World => {
             if p.popup(39) == 4 {
@@ -338,7 +344,7 @@ pub(super) fn render(
         - 1;
     let engine = Engine::get(&rt)?;
     let advance = engine.advance[advance].clone();
-    let mut frame = surface::frame(scene, input, roi, maps);
+    let mut frame = surface::frame(kind, scene, input, roi, maps);
     let controls = scene.controls(kind, seed);
     let config_offset = rt.uniform(&controls.bytes);
     let config = wgpu::BindGroupEntry {
@@ -385,7 +391,7 @@ pub(super) fn render(
         &entries,
     );
     // These emitters consume one inline birth interval per draw, including animated rates.
-    let group_size = if matches!(kind, Kind::Mercury | Kind::Playground) {
+    let group_size = if matches!(kind, Kind::Mercury | Kind::Playground | Kind::Foam) {
         1
     } else {
         usize::MAX
@@ -446,6 +452,13 @@ pub(super) fn render(
         pass.set_vertex_buffer(0, scratch.slice(..));
         pass.set_viewport(0., 0., roi.width() as f32, roi.height() as f32, 0., 1.);
         pass.draw(0..4, 0..count);
+    }
+    if kind == Kind::Foam
+        && p.popup(2) == 2
+        && let Some(map) = maps.get(2).and_then(Option::as_ref)
+    {
+        let background = super::water::flow_background(target, p, input, map, roi)?;
+        return surface::composite(kind, target, scene, &background, &overlay);
     }
     surface::composite(kind, target, scene, input, &overlay)
 }

@@ -2,6 +2,8 @@
 //! stopwatches, values and keyframes; expression rows.
 
 use super::*;
+use bae_anim::FrameBlending;
+use switches::SwitchValue;
 
 /// AE's name of a layer switch, for screen readers.
 pub(super) fn switch_name(icon: Icon) -> &'static str {
@@ -130,7 +132,7 @@ impl TimelinePanel {
                         &layer_ctx,
                         attr,
                         icon,
-                        on,
+                        on.into(),
                         locked,
                     );
                 }
@@ -265,8 +267,10 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) && !locked {
-                        self.rename = Some((layer.clone(), name.clone()));
+                    // AE: a double-click opens a pre-comp's comp, any other layer
+                    // in the Layer panel; Enter renames.
+                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) {
+                        crate::layer_panel::open(cx, session, layer);
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {
@@ -308,7 +312,7 @@ impl TimelinePanel {
                             icon,
                             on,
                             locked,
-                        );
+                        )
                     };
                     for (i, attr, icon) in [
                         (0, "shy", Icon::Shy),
@@ -317,7 +321,15 @@ impl TimelinePanel {
                         (6, "adjustment_layer", Icon::Adjustment),
                         (7, "three_d", Icon::Cube),
                     ] {
-                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr));
+                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr).into());
+                    }
+                    if let Some(mode) = footage_frame_blending(stage, layer) {
+                        cell(
+                            sw(4),
+                            "frame_blending",
+                            Icon::FrameBlend,
+                            SwitchValue::Frames(mode),
+                        );
                     }
                     // Effect switch (fx): only on layers with effects, like AE.
                     if !bae_motion::effect::effects_of(stage, layer).is_empty() {
@@ -326,13 +338,13 @@ impl TimelinePanel {
                             .and_then(|v| query::static_value(&v, "effects_enabled"))
                             .and_then(|v| v.as_bool())
                             .unwrap_or(true);
-                        cell(sw(3), "effects_enabled", Icon::Fx, on);
+                        cell(sw(3), "effects_enabled", Icon::Fx, on.into());
                     }
                     let draft = stage
                         .prim(layer)
                         .and_then(|v| query::static_value(&v, "quality"))
                         .is_some_and(|v| v.as_str() == Some("draft"));
-                    cell(sw(2), "quality", Icon::Quality, !draft);
+                    cell(sw(2), "quality", Icon::Quality, (!draft).into());
                 }
                 // Modes: Mode, T, Track Matte.
                 if cols.visible(Column::Modes) {
@@ -491,7 +503,8 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
-                self.waveforms.draw(ui, stage, layer, axis, graph);
+                self.waveforms
+                    .draw(ui, stage, layer, axis, graph, color::TEXT);
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
@@ -739,6 +752,10 @@ impl TimelinePanel {
                 } else {
                     Some(crate::expr::default_expression(stage, path, attr))
                 };
+                if source.is_some() {
+                    session.lock().focus_expression =
+                        Some((path.clone(), attr.to_owned(), std::time::Instant::now()));
+                }
                 cx.invoke_with(
                     "attr.set_expression",
                     json!({"path": path, "attr": attr, "source": source}),
@@ -836,6 +853,13 @@ impl TimelinePanel {
                 s.selected_keys = keys;
                 s.selected_layers = vec![layer.clone()];
             }
+        }
+        // Right-click: AE's property menu (Edit Value…, keyframes, Reset,
+        // expressions …).
+        if query::locked_layer_of(stage, path).is_none() {
+            crate::common::context_menu(&nresp, &mut |ui| {
+                menus::property_menu(ui, cx, session, path, attr, now);
+            });
         }
         // Value.
         let value = session
@@ -1078,9 +1102,33 @@ impl TimelinePanel {
             pos2(rect.right() - 4.0, rect.bottom() - 1.0),
         );
         let mut buf = match &self.expr_edit {
-            Some((p, a, b)) if p == path && a == attr => b.clone(),
+            Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
             _ => expr.source.clone(),
         };
+        // Just added: the field takes the focus with the whole text selected.
+        let focus = {
+            let mut s = session.lock();
+            match &s.focus_expression {
+                Some((p, a, _)) if p == path && a == attr => s.focus_expression.take().is_some(),
+                Some((.., at)) if at.elapsed() > std::time::Duration::from_secs(1) => {
+                    s.focus_expression = None;
+                    false
+                }
+                _ => false,
+            }
+        };
+        if focus {
+            let mut state =
+                egui::text_edit::TextEditState::load(ui.ctx(), field_id).unwrap_or_default();
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(buf.chars().count()),
+                )));
+            state.store(ui.ctx(), field_id);
+            ui.memory_mut(|m| m.request_focus(field_id));
+        }
         // Keypad Enter ends editing (Return adds a line).
         let keypad = ui.memory(|m| m.has_focus(field_id))
             && bae_ui::keypad_enter()
@@ -1113,7 +1161,12 @@ impl TimelinePanel {
                     a.min(b)..a.max(b),
                 ));
             }
-            self.expr_edit = Some((path.clone(), attr.to_owned(), buf.clone()));
+            self.expr_edit = Some((
+                path.clone(),
+                attr.to_owned(),
+                buf.clone(),
+                expr.source.clone(),
+            ));
         }
         if keypad {
             r.surrender_focus();
@@ -1192,4 +1245,26 @@ fn option_label(token: &str) -> &'static str {
         .iter()
         .find(|(t, _, _)| *t == token)
         .map_or("", |(_, en, z)| if zh { z } else { en })
+}
+
+/// The media importer writes a frame rate only for moving footage. Still and audio layers
+/// have no temporal video samples to mix.
+fn footage_frame_blending(stage: &Stage, layer: &PrimPath) -> Option<FrameBlending> {
+    let view = stage.prim(layer)?;
+    if view.value("kind")?.as_str()? != "footage" {
+        return None;
+    }
+    let asset = stage.prim(view.value("source")?.as_prim_ref()?)?;
+    let kind = asset.value("kind")?.as_str()?;
+    if kind == "sequence" || (kind == "footage" && asset.value("frame_rate").is_some()) {
+        Some(
+            match view.value("frame_blending").and_then(|v| v.as_str()) {
+                Some("frame_mix") => FrameBlending::FrameMix,
+                Some("pixel_motion") => FrameBlending::PixelMotion,
+                _ => FrameBlending::Off,
+            },
+        )
+    } else {
+        None
+    }
 }
