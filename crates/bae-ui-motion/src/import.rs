@@ -114,6 +114,7 @@ fn probe_file(
             SequenceMode::Single
         },
         sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
+        ..Default::default()
     };
     let info = match bae_media::audio::file_info(path) {
         Some(info) => Ok(info),

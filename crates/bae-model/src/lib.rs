@@ -23,6 +23,7 @@ mod op;
 mod path;
 mod prim;
 pub mod project;
+pub mod psd;
 pub mod schema;
 mod stage;
 mod sublayer;

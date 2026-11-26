@@ -483,6 +483,7 @@ impl LayerContent {
                 f.file.hash(h);
                 f.source_time.hash(h);
                 f.sequence.hash(h);
+                f.psd_layer.hash(h);
                 f.blend.hash(h);
             }
             LayerContent::Comp(c) => c.hash_content(h, effects),
@@ -510,6 +511,7 @@ pub struct FootageRef {
     /// Image sequences: the frame rate of the sequence (its numbered files are
     /// frames from `file` on); `None` opens `file` alone (a still or a movie).
     pub sequence: Option<FrameRate>,
+    pub psd_layer: Option<bae_model::psd::LayerImage>,
     /// Frame blending, when the comp and layer switches are on.
     pub blend: Option<FrameBlend>,
 }
@@ -728,6 +730,7 @@ mod tests {
                 size: None,
                 source_time: Time::ZERO,
                 sequence: None,
+                psd_layer: None,
                 blend: None,
             }),
         ));

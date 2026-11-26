@@ -116,6 +116,7 @@ impl Gpu {
                 footage.asset.clone(),
                 LayerContent::Footage(FootageRef {
                     asset: footage.asset.clone(),
+                    psd_layer: bae_model::psd::LayerImage::from_asset(&view),
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: time,

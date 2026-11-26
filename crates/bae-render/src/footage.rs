@@ -32,6 +32,7 @@ mod imp {
             &self,
             path: &Path,
             _sequence: Option<bae_model::FrameRate>,
+            _psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
             Err(format!(
                 "footage {}: bae-render was built without the `media` feature",
@@ -91,14 +92,17 @@ mod imp {
             gpu: Arc<MediaGpu>,
             path: &Path,
             sequence: Option<FrameRate>,
+            psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Self, RenderError> {
-            let open = match sequence {
+            let mut open = match sequence {
                 Some(rate) => OpenOptions {
                     sequence: SequenceMode::Sequence,
                     sequence_frame_rate: rate,
+                    ..Default::default()
                 },
                 None => OpenOptions::default(),
             };
+            open.psd_layer = psd_layer;
             let info = library
                 .info(path, &open)
                 .map_err(|e| RenderError::Footage {
@@ -165,11 +169,17 @@ mod imp {
         }
     }
 
+    type SourceKey = (
+        PathBuf,
+        Option<FrameRate>,
+        Option<bae_model::psd::LayerImage>,
+    );
+
     /// Footage sources by path, over one [`MediaLibrary`].
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
-        sources: FxHashMap<(PathBuf, Option<FrameRate>), Result<Arc<FootageSource>, String>>,
+        sources: FxHashMap<SourceKey, Result<Arc<FootageSource>, String>>,
     }
 
     impl FootageCache {
@@ -197,21 +207,28 @@ mod imp {
             &mut self,
             path: &Path,
             sequence: Option<FrameRate>,
+            psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
-            let key = (path.to_path_buf(), sequence);
+            let key = (path.to_path_buf(), sequence, psd_layer);
             if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
             }
-            let entry = FootageSource::open(self.library.clone(), self.gpu.clone(), path, sequence)
-                .map(Arc::new)
-                .map_err(|e| e.to_string());
+            let entry = FootageSource::open(
+                self.library.clone(),
+                self.gpu.clone(),
+                path,
+                sequence,
+                psd_layer,
+            )
+            .map(Arc::new)
+            .map_err(|e| e.to_string());
             self.sources.insert(key, entry.clone());
             entry.map(|s| s as Arc<dyn LayerSource>)
         }
 
         /// Forgets open files (they changed on disk or were relinked).
         pub fn clear(&mut self) {
-            for (path, _) in self.sources.keys() {
+            for (path, _, _) in self.sources.keys() {
                 self.library.invalidate(path);
             }
             self.sources.clear();

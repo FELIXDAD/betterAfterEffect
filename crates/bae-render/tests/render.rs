@@ -484,6 +484,7 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
         p("/comps/main/layers/img"),
         LayerContent::Footage(bae_render::FootageRef {
             asset: p("/assets/img"),
+            psd_layer: None,
             file: Some(path),
             size: None,
             source_time: Time::ZERO,
@@ -535,6 +536,7 @@ fn frame_mix_blends_neighbouring_sequence_frames() {
     let footage = |blend| {
         LayerContent::Footage(bae_render::FootageRef {
             asset: p("/assets/seq"),
+            psd_layer: None,
             file: Some(dir.path().join("seq_0000.png")),
             size: None,
             source_time: fps.frame_to_time(1),

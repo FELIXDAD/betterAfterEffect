@@ -732,12 +732,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-interop-psd"
+version = "0.0.2"
+dependencies = [
+ "bae-model",
+ "rust-motion-psd",
+]
+
+[[package]]
 name = "bae-media"
 version = "0.0.2"
 dependencies = [
  "bae-anim",
  "bae-app",
  "bae-gpu",
+ "bae-interop-psd",
  "bae-model",
  "bytemuck",
  "cpal",
@@ -4779,6 +4788,36 @@ name = "rtrb"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5974e397833d890f2f74963408e0d4a6cd8eda2f6a445ae06750291b5d7a997e"
+
+[[package]]
+name = "rust-motion-cms"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5268635906922f787496d5e15a2c8aeb7a49f88814d099af0c327093af2f1ba1"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "rust-motion-color"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8408c53b5b96dfd2f73cefcd578c1515e651c6312e21914783f8736ab5e14d4"
+dependencies = [
+ "rust-motion-cms",
+ "serde",
+]
+
+[[package]]
+name = "rust-motion-psd"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8417ab40fc83c1d4f71722573da5abd40bfba0a5be31feebf1427cd41c2c60a"
+dependencies = [
+ "flate2",
+ "rust-motion-color",
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "rustc-hash"

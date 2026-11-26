@@ -463,6 +463,7 @@ impl<'a> MockPass<'a> {
                 };
                 Ok(LayerContent::Footage(FootageRef {
                     asset: source,
+                    psd_layer: bae_model::psd::LayerImage::from_asset(&src),
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: local,

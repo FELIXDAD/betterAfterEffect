@@ -408,6 +408,9 @@ impl AnimEvaluator {
                 },
                 "footage" | "sequence" => LayerContent::Footage(FootageRef {
                     asset: asset.clone(),
+                    psd_layer: stage
+                        .prim(asset)
+                        .and_then(|v| bae_model::psd::LayerImage::from_asset(&v)),
                     file: match stage.prim(asset).map(|view| self.assets.file(&view)) {
                         Some(Ok(file)) => file,
                         Some(Err(message)) => {
