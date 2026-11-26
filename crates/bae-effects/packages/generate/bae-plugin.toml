@@ -10,6 +10,448 @@ authors = ["BAE"]
 license = "Apache-2.0"
 
 [[effect]]
+id = "lens-flare"
+name = "Lens Flare"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Lens Flare"]
+shader = "shaders/lens_flare.wgsl"
+
+[[effect.param]]
+id = 1
+key = "flare_center"
+type = "point"
+name = "Flare Center"
+default = [0.4, 0.4]
+
+[[effect.param]]
+id = 2
+key = "flare_brightness"
+type = "float"
+name = "Flare Brightness"
+default = 100
+range = [0, 300]
+
+[[effect.param]]
+id = 4
+key = "lens_type"
+type = "popup"
+name = "Lens Type"
+default = 1
+choices = ["50-300mm Zoom", "35mm Prime", "105mm Prime"]
+
+[[effect.param]]
+id = 3
+key = "blend_with_original"
+type = "float"
+name = "Blend With Original"
+default = 0
+range = [0, 100]
+
+[[effect]]
+id = "beam"
+name = "Beam"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Laser"]
+shader = "shaders/beam.wgsl"
+
+[[effect.param]]
+id = 1
+key = "starting_point"
+type = "point"
+name = "Starting Point"
+default = [0.1, 0.5]
+
+[[effect.param]]
+id = 2
+key = "ending_point"
+type = "point"
+name = "Ending Point"
+default = [0.9, 0.5]
+
+[[effect.param]]
+id = 3
+key = "length"
+type = "float"
+name = "Length"
+default = 0.25
+range = [0, 1]
+
+[[effect.param]]
+id = 4
+key = "time"
+type = "float"
+name = "Time"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 5
+key = "starting_thickness"
+type = "float"
+name = "Starting Thickness"
+default = 8
+range = [0, 4000]
+
+[[effect.param]]
+id = 6
+key = "ending_thickness"
+type = "float"
+name = "Ending Thickness"
+default = 8
+range = [0, 4000]
+
+[[effect.param]]
+id = 7
+key = "softness"
+type = "float"
+name = "Softness"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 8
+key = "inside_color"
+type = "color"
+name = "Inside Color"
+default = [1, 0.745098, 0.980392, 0.72549]
+
+[[effect.param]]
+id = 9
+key = "outside_color"
+type = "color"
+name = "Outside Color"
+default = [1, 0.098039, 0.098039, 0.588235]
+
+[[effect.param]]
+id = 10
+key = "perspective_3d"
+type = "checkbox"
+name = "3D Perspective"
+default = true
+
+[[effect.param]]
+id = 11
+key = "composite_on_original"
+type = "checkbox"
+name = "Composite On Original"
+default = false
+
+[[effect]]
+id = "advanced-lightning"
+name = "Advanced Lightning"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Lightning 2"]
+shader = "shaders/advanced_lightning.wgsl"
+
+[[effect.param]]
+id = 1
+key = "lightning_type"
+type = "popup"
+name = "Lightning Type"
+default = 1
+choices = ["Direction", "Strike", "Breaking", "Bouncy", "(-", "Omni", "Anywhere", "Vertical", "Two-Way Strike"]
+
+[[effect.param]]
+id = 2
+key = "origin"
+type = "point"
+name = "Origin"
+default = [0.45, 0.05]
+
+[[effect.param]]
+id = 3
+key = "context_control"
+type = "point"
+name = "Context Control"
+default = [0.5, 0.95]
+
+[[effect.param]]
+id = 4
+key = "conductivity_state"
+type = "float"
+name = "Conductivity State"
+default = 0
+range = [0, 32767]
+
+[[effect.param]]
+id = 5
+key = "core_settings"
+type = "group"
+name = "Core Settings"
+end_id = 9
+
+[[effect.param]]
+id = 6
+key = "core_radius"
+type = "float"
+name = "Core Radius"
+group = "core_settings"
+default = 2
+range = [0, 40]
+
+[[effect.param]]
+id = 7
+key = "core_opacity"
+type = "float"
+name = "Core Opacity"
+group = "core_settings"
+default = 75
+range = [0, 100]
+
+[[effect.param]]
+id = 8
+key = "core_color"
+type = "color"
+name = "Core Color"
+group = "core_settings"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 10
+key = "glow_settings"
+type = "group"
+name = "Glow Settings"
+end_id = 14
+
+[[effect.param]]
+id = 11
+key = "glow_radius"
+type = "float"
+name = "Glow Radius"
+group = "glow_settings"
+default = 50
+range = [1, 400]
+
+[[effect.param]]
+id = 12
+key = "glow_opacity"
+type = "float"
+name = "Glow Opacity"
+group = "glow_settings"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 13
+key = "glow_color"
+type = "color"
+name = "Glow Color"
+group = "glow_settings"
+default = [0.196078, 0.196078, 1, 1]
+
+[[effect.param]]
+id = 15
+key = "alpha_obstacle"
+type = "float"
+name = "Alpha Obstacle"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 16
+key = "turbulence"
+type = "float"
+name = "Turbulence"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 17
+key = "forking"
+type = "float"
+name = "Forking"
+default = 0.25
+range = [0, 1]
+
+[[effect.param]]
+id = 18
+key = "decay"
+type = "float"
+name = "Decay"
+default = 0.299988
+range = [0, 100]
+
+[[effect.param]]
+id = 19
+key = "decay_main_core"
+type = "checkbox"
+name = "Decay Main Core"
+default = false
+
+[[effect.param]]
+id = 20
+key = "composite_on_original"
+type = "checkbox"
+name = "Composite On Original"
+default = false
+
+[[effect.param]]
+id = 21
+key = "expert_settings"
+type = "group"
+name = "Expert Settings"
+end_id = 30
+
+[[effect.param]]
+id = 22
+key = "complexity"
+type = "float"
+name = "Complexity"
+group = "expert_settings"
+default = 6
+range = [1, 10]
+
+[[effect.param]]
+id = 23
+key = "min_forkdistance"
+type = "float"
+name = "Min. Forkdistance"
+group = "expert_settings"
+default = 64
+range = [8, 1024]
+
+[[effect.param]]
+id = 24
+key = "termination_threshold"
+type = "float"
+name = "Termination Threshold"
+group = "expert_settings"
+default = 100
+range = [0.25, 100]
+
+[[effect.param]]
+id = 25
+key = "main_core_collisions_only"
+type = "checkbox"
+name = "Main Core Collisions Only"
+group = "expert_settings"
+default = false
+
+[[effect.param]]
+id = 26
+key = "fractal_type"
+type = "popup"
+name = "Fractal Type"
+group = "expert_settings"
+default = 1
+choices = ["Linear", "Semi Linear", "Spline"]
+
+[[effect.param]]
+id = 27
+key = "core_drain"
+type = "float"
+name = "Core Drain"
+group = "expert_settings"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 28
+key = "fork_strength"
+type = "float"
+name = "Fork Strength"
+group = "expert_settings"
+default = 70
+range = [0, 100]
+
+[[effect.param]]
+id = 29
+key = "fork_variation"
+type = "float"
+name = "Fork Variation"
+group = "expert_settings"
+default = 20
+range = [0, 100]
+
+[[effect]]
+id = "cc-light-sweep"
+name = "CC Light Sweep"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["CC Light Sweep"]
+shader = "shaders/cc_light_sweep.wgsl"
+
+[effect.roi]
+read = "params.edge_thickness + 2"
+
+[[effect.pass]]
+entry = "cc_light_sweep"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.25]
+
+[[effect.param]]
+id = 2
+key = "direction"
+type = "angle"
+name = "Direction"
+default = -30
+
+[[effect.param]]
+id = 3
+key = "shape"
+type = "popup"
+name = "Shape"
+default = 3
+choices = ["Linear", "Smooth", "Sharp"]
+
+[[effect.param]]
+id = 4
+key = "width"
+type = "float"
+name = "Width"
+default = 50
+range = [0, 4000]
+
+[[effect.param]]
+id = 5
+key = "sweep_intensity"
+type = "float"
+name = "Sweep Intensity"
+default = 25
+range = [0, 500]
+
+[[effect.param]]
+id = 6
+key = "edge_intensity"
+type = "float"
+name = "Edge Intensity"
+default = 50
+range = [0, 500]
+
+[[effect.param]]
+id = 7
+key = "edge_thickness"
+type = "float"
+name = "Edge Thickness"
+default = 4
+range = [0, 20]
+
+[[effect.param]]
+id = 8
+key = "light_color"
+type = "color"
+name = "Light Color"
+default = [1, 0.980392, 0.941176, 1]
+
+[[effect.param]]
+id = 9
+key = "light_reception"
+type = "popup"
+name = "Light Reception"
+default = 1
+choices = ["Add", "Composite", "Cutout"]
+
+[[effect]]
 id = "fractal"
 name = "Fractal"
 category = "Generate"

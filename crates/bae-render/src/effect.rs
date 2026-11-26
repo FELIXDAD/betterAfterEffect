@@ -155,7 +155,7 @@ impl ScalarTrack {
 pub struct ParameterSample {
     /// Layer time of the sample.
     pub time: Time,
-    /// Requested controls authored on the instance.
+    /// Sampled controls. An omitted control keeps its current instance value.
     pub values: Vec<(u32, Value)>,
 }
 
