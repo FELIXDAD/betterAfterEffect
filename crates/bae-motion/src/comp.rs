@@ -596,6 +596,9 @@ pub struct CreateFolderParams {
     /// Parent folder (default the project root).
     #[serde(default)]
     pub parent: Option<PrimPath>,
+    /// Project panel label, 0 to 16.
+    #[serde(default)]
+    pub label: Option<i64>,
 }
 
 /// Output of commands that create one prim.
@@ -623,6 +626,9 @@ impl Command for CreateFolder {
         )?;
         create(tx, &path, PrimType::FOLDER, None)?;
         set(tx, &path, "name", Value::String(name))?;
+        if let Some(label) = p.label.filter(|l| (0..=16).contains(l)) {
+            set(tx, &path, "label", Value::Int(label))?;
+        }
         Ok(PathOutput { path })
     }
 }

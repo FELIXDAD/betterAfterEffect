@@ -140,6 +140,14 @@ pub mod ids {
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
     /// Layer ▸ Track Matte ▸ … (params `{"matte": "alpha", "source": "above"}`).
     pub const TRACK_MATTE: &str = "motion.layer.track_matte";
+    /// Ctrl+Alt+A: every keyframe and property the Timeline shows.
+    pub const SELECT_VISIBLE_KEYS: &str = "motion.timeline.select_all_visible_keyframes";
+    /// Shift+F2, Ctrl+Alt+Shift+A: no keyframe or property selected (layers stay).
+    pub const DESELECT_KEYS: &str = "motion.comp.deselect_all_keyframes";
+    /// Shift+J / Shift+K: the previous / next keyframe of the selected
+    /// properties (else of the selected layers).
+    pub const PREV_SELECTED_KEY: &str = "motion.timeline.previous_keyframe_in_selection";
+    pub const NEXT_SELECTED_KEY: &str = "motion.timeline.next_keyframe_in_selection";
     /// F4 / Shift+F4 (the Timeline handles them).
     pub const TOGGLE_SWITCHES_MODES: &str = "motion.timeline.toggle_switches_modes";
     pub const TOGGLE_PARENT_COLUMN: &str = "motion.timeline.toggle_parent_column";
@@ -173,6 +181,18 @@ pub mod ids {
     /// Layer ▸ Open Layer Source (Alt+Enter): a pre-comp's composition, footage
     /// in the Footage panel.
     pub const OPEN_LAYER_SOURCE: &str = "motion.layer.open_layer_source";
+    /// File ▸ Add Footage to Comp (Cmd/Ctrl+/): the selected Project items as
+    /// layers of the active comp.
+    pub const ADD_FOOTAGE_TO_COMP: &str = "motion.file.add_footage_to_comp";
+    /// Edit ▸ Edit Original (Cmd/Ctrl+E).
+    pub const EDIT_ORIGINAL: &str = "motion.edit.edit_original";
+    /// Edit ▸ Label ▸ Edit Label Colors…: Preferences ▸ Labels.
+    pub const EDIT_LABEL_COLORS: &str = "motion.edit.edit_label_colors";
+    /// Animation ▸ Separate Dimensions (Position of the selected layers).
+    pub const SEPARATE_DIMENSIONS: &str = "motion.anim.separate_dimensions";
+    /// Layer ▸ Camera ▸ Camera Settings… (and View ▸): the selected camera, else
+    /// the comp's active camera.
+    pub const CAMERA_SETTINGS: &str = "motion.layer.camera_settings";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -308,6 +328,19 @@ pub const ACTIONS: &[(&str, &str)] = &[
         "Toggle Switches / Modes Columns",
     ),
     (ids::TOGGLE_PARENT_COLUMN, "Show / Hide Parent Column"),
+    (
+        ids::SELECT_VISIBLE_KEYS,
+        "Select All Visible Keyframes and Revealed Properties",
+    ),
+    (ids::DESELECT_KEYS, "Deselect All Keyframes and Properties"),
+    (
+        ids::PREV_SELECTED_KEY,
+        "Go to Previous Keyframe on Selected Layers/Properties",
+    ),
+    (
+        ids::NEXT_SELECTED_KEY,
+        "Go to Next Keyframe on Selected Layers/Properties",
+    ),
     (ids::BLENDING_MODE, "Blending Mode"),
     (ids::BLENDING_MODE_STEP, "Next Blending Mode"),
     (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
@@ -338,6 +371,11 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_FOLDER, "New Folder"),
     (ids::OPEN_LAYER, "Open Layer"),
     (ids::OPEN_LAYER_SOURCE, "Open Layer Source"),
+    (ids::ADD_FOOTAGE_TO_COMP, "Add Footage to Comp"),
+    (ids::EDIT_ORIGINAL, "Edit Original..."),
+    (ids::EDIT_LABEL_COLORS, "Edit Label Colors..."),
+    (ids::SEPARATE_DIMENSIONS, "Separate Dimensions"),
+    (ids::CAMERA_SETTINGS, "Camera Settings..."),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -422,6 +460,46 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         ids::REVEAL,
         r#"{"what":"audio:levels","add":true}"#,
         "Add Audio Levels to Revealed Properties",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"animated","add":true}"#,
+        "Add Animated Properties to Revealed Properties",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_path","add":false}"#,
+        "Reveal Mask Path",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_path","add":true}"#,
+        "Add Mask Path to Revealed Properties",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_feather","add":false}"#,
+        "Reveal Mask Feather",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_feather","add":true}"#,
+        "Add Mask Feather to Revealed Properties",
+    ),
+    (
+        ids::TOGGLE_KEY,
+        r#"{"attr":"mask_path"}"#,
+        "Mask Path: Add or Remove Keyframe",
+    ),
+    (
+        ids::TOGGLE_KEY,
+        r#"{"attr":"mask_feather"}"#,
+        "Mask Feather: Add or Remove Keyframe",
+    ),
+    (
+        ids::TOGGLE_KEY,
+        r#"{"attr":"audio:levels"}"#,
+        "Audio Levels: Add or Remove Keyframe",
     ),
 ];
 
@@ -863,9 +941,47 @@ fn transform_edits(
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
+/// File ▸ Add Footage to Comp: the selected Project items (not folders) as
+/// layers of the active comp, the first one on top (AE).
+fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
+    use crate::project::{DropPlacement, ItemDrag, ItemKind, item_kind};
+    let items: Vec<PrimPath> = session
+        .lock()
+        .selected_items
+        .iter()
+        .filter(|p| matches!(item_kind(cx.stage, p), Some(k) if k != ItemKind::Folder))
+        .cloned()
+        .collect();
+    for item in items.into_iter().rev() {
+        ItemDrag(item).add_as_layer(cx, session, DropPlacement::Viewer(None));
+    }
+}
+
+/// Whether every one of `layers` has its Position separated (Animation ▸
+/// Separate Dimensions is checked).
+pub(crate) fn all_separated(stage: &bae_model::Stage, layers: &[PrimPath]) -> bool {
+    !layers.is_empty()
+        && layers
+            .iter()
+            .all(|l| bae_motion::dimensions::is_separated(stage, l))
+}
+
+/// The camera Camera Settings edits: the selected camera layer, else the
+/// topmost camera of the active comp (AE's active camera).
+fn camera_settings_target(stage: &bae_model::Stage, session: &SharedSession) -> Option<PrimPath> {
+    let is_camera = |l: &PrimPath| query::layer_kind(stage, l).as_deref() == Some("camera");
+    let s = session.lock();
+    if let Some(layer) = s.selected_layers.iter().find(|l| is_camera(l)) {
+        return Some(layer.clone());
+    }
+    let comp = s.active_comp.clone()?;
+    drop(s);
+    query::comp_layers(stage, &comp).into_iter().find(is_camera)
+}
+
 /// File ▸ New ▸ New Folder: an “Untitled N” folder in the folder selected in
 /// the Project panel, else at the top level (AE).
-fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
+pub(crate) fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
     use crate::project::{ItemKind, item_kind};
     let parent = session
         .lock()
@@ -880,7 +996,8 @@ fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
         parent.as_ref().unwrap_or(&root),
         "Untitled",
     );
-    let mut params = json!({ "name": name });
+    let prefs = crate::prefs::current(cx.resources);
+    let mut params = json!({ "name": name, "label": prefs.int("labels.label_default_folder") });
     if let Some(folder) = &parent {
         params["parent"] = json!(folder);
     }
@@ -955,6 +1072,35 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::NEW_FOLDER => {
             new_folder(cx, session);
+            return true;
+        }
+        ids::ADD_FOOTAGE_TO_COMP => {
+            add_footage_to_comp(cx, session);
+            return true;
+        }
+        ids::EDIT_ORIGINAL => {
+            crate::import::edit_original(cx, session);
+            return true;
+        }
+        ids::EDIT_LABEL_COLORS => {
+            cx.invoke_with(bae_ui::settings::ACTION, json!({"page": "labels"}));
+            return true;
+        }
+        ids::SEPARATE_DIMENSIONS => {
+            let layers = target_layers(stage, &session.lock());
+            if !layers.is_empty() {
+                let separated = !all_separated(stage, &layers);
+                cx.invoke_with(
+                    "transform.separate_dimensions",
+                    json!({"layers": layers, "separated": separated}),
+                );
+            }
+            return true;
+        }
+        ids::CAMERA_SETTINGS => {
+            if let Some(camera) = camera_settings_target(stage, session) {
+                crate::dialogs::layer_settings(cx, session, &camera);
+            }
             return true;
         }
         ids::OPEN_LAYER | ids::OPEN_LAYER_SOURCE => {
@@ -1092,12 +1238,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         // F4 / Shift+F4 with another panel in front: the Timeline toggles its
         // columns on its next frame (AE: they work whatever panel is active).
-        ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN => {
-            let id = if id == ids::TOGGLE_SWITCHES_MODES {
-                ids::TOGGLE_SWITCHES_MODES
-            } else {
-                ids::TOGGLE_PARENT_COLUMN
-            };
+        ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN | ids::SELECT_VISIBLE_KEYS => {
+            let id = [
+                ids::TOGGLE_SWITCHES_MODES,
+                ids::TOGGLE_PARENT_COLUMN,
+                ids::SELECT_VISIBLE_KEYS,
+            ]
+            .into_iter()
+            .find(|i| *i == id)
+            .unwrap_or(ids::TOGGLE_PARENT_COLUMN);
             session.lock().timeline_toggles.push(id);
             return true;
         }
@@ -1245,6 +1394,38 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             s.set_time(&info, now + Time(frame.0 * n));
         }
         ids::PREV_KEY | ids::NEXT_KEY => jump_to_key(stage, &mut s, &info, id == ids::NEXT_KEY),
+        ids::PREV_SELECTED_KEY | ids::NEXT_SELECTED_KEY => {
+            let now = s.time(&info.path);
+            let mut times: Vec<Time> = Vec::new();
+            if s.selected_props.is_empty() {
+                for l in &layers {
+                    times.extend(layer_key_times(stage, l));
+                }
+            } else {
+                for (p, a) in &s.selected_props {
+                    if let Some(spec) = query::attr_spec(stage, p, a) {
+                        times.extend(
+                            spec.keyframes
+                                .keys()
+                                .map(|t| query::to_comp_time(stage, p, *t)),
+                        );
+                    }
+                }
+            }
+            let times = times.into_iter().map(|t| info.frame_rate.snap(t));
+            let pick = if id == ids::NEXT_SELECTED_KEY {
+                times.filter(|t| *t > now).min()
+            } else {
+                times.filter(|t| *t < now).max()
+            };
+            if let Some(t) = pick {
+                s.set_time(&info, t);
+            }
+        }
+        ids::DESELECT_KEYS => {
+            s.selected_keys.clear();
+            s.selected_props.clear();
+        }
         ids::GO_IN | ids::GO_OUT => {
             if let Some(l) = layers.first() {
                 let t = query::layer_timing(stage, l);
@@ -1527,17 +1708,71 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             } else {
                 layers.clone()
             };
-            let what = if what == "audio:levels" && !add {
-                let previous = s.last_l.take();
-                if previous.is_some_and(|at| at.elapsed() < Duration::from_millis(450)) {
-                    "audio:waveform"
+            // Double presses (AE): LL the waveform, MM every mask property, EE
+            // the expressions.
+            let double = |slot: &mut Option<Instant>| {
+                if slot
+                    .take()
+                    .is_some_and(|at| at.elapsed() < Duration::from_millis(450))
+                {
+                    true
                 } else {
-                    s.last_l = Some(Instant::now());
-                    what
+                    *slot = Some(Instant::now());
+                    false
                 }
-            } else {
-                what
             };
+            let what = match (what, add) {
+                ("audio:levels", false) if double(&mut s.last_l) => "audio:waveform",
+                ("mask_path", false) if double(&mut s.last_m) => "masks",
+                ("effects", false) if double(&mut s.last_e) => "expressions",
+                _ => what,
+            };
+            // Shift+U: the animated properties added to those shown.
+            if what == "animated" && add {
+                for l in targets {
+                    let mut list: Vec<(PrimPath, String)> = Vec::new();
+                    let current = s.reveal.get(&l).cloned();
+                    let shown = current
+                        .iter()
+                        .flat_map(|r| crate::props::revealed(stage, &l, r))
+                        .chain(crate::props::revealed(stage, &l, &Reveal::Animated));
+                    for n in shown {
+                        if let crate::props::Node::Prop { path, attr, .. } = n
+                            && !list.iter().any(|(p, a)| *p == path && *a == attr)
+                        {
+                            list.push((path, attr));
+                        }
+                    }
+                    if !list.is_empty() {
+                        s.reveal.insert(l, Reveal::Props(list));
+                    }
+                }
+                return true;
+            }
+            // EE: the properties with expressions.
+            if what == "expressions" {
+                for l in targets {
+                    let list: Vec<(PrimPath, String)> =
+                        crate::props::revealed(stage, &l, &Reveal::Animated)
+                            .into_iter()
+                            .filter_map(|n| match n {
+                                crate::props::Node::Prop { path, attr, .. }
+                                    if query::attr_spec(stage, &path, &attr)
+                                        .is_some_and(|s| s.expression.is_some()) =>
+                                {
+                                    Some((path, attr))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                    if list.is_empty() {
+                        s.reveal.remove(&l);
+                    } else {
+                        s.reveal.insert(l, Reveal::Props(list));
+                    }
+                }
+                return true;
+            }
             let reveal = if what == "animated" {
                 let double = s
                     .last_u
@@ -1585,38 +1820,55 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::TOGGLE_KEY => {
-            let Some(attr) = inv.params.get("attr").and_then(|v| v.as_str()) else {
+            let Some(reveal_as) = inv.params.get("attr").and_then(|v| v.as_str()) else {
                 return true;
             };
-            for l in &layers {
-                let kt = query::to_key_time(stage, l, now);
-                let spec = query::attr_spec(stage, l, attr);
+            // Mask Path / Mask Feather (Alt+Shift+M / F): every mask of the layer.
+            let mask_attr = match reveal_as {
+                "mask_path" => Some("path"),
+                "mask_feather" => Some("feather"),
+                _ => None,
+            };
+            let targets: Vec<(PrimPath, PrimPath)> = layers
+                .iter()
+                .flat_map(|l| match mask_attr {
+                    Some(_) => crate::props::masks_of(stage, l)
+                        .into_iter()
+                        .map(|m| (l.clone(), m))
+                        .collect::<Vec<_>>(),
+                    None => vec![(l.clone(), l.clone())],
+                })
+                .collect();
+            let attr = mask_attr.unwrap_or(reveal_as);
+            for (l, path) in &targets {
+                let kt = query::to_key_time(stage, path, now);
+                let spec = query::attr_spec(stage, path, attr);
                 match spec {
                     Some(a) if a.keyframes.contains_key(&kt) => {
                         cx.invoke_with(
                             "key.delete",
-                            json!({"keys": [KeyRef::new(l.clone(), attr, kt)]}),
+                            json!({"keys": [KeyRef::new(path.clone(), attr, kt)]}),
                         );
                     }
                     Some(a) if a.is_animated() => {
-                        if let Some(v) = query::sample_attr(stage, l, attr, kt) {
+                        if let Some(v) = query::sample_attr(stage, path, attr, kt) {
                             cx.invoke_with(
                                 "attr.set_at",
-                                json!({"path": l, "attr": attr, "time": kt, "value": v}),
+                                json!({"path": path, "attr": attr, "time": kt, "value": v}),
                             );
                         }
                     }
                     _ => cx.invoke_with(
                         "attr.set_animated",
-                        json!({"path": l, "attr": attr, "animated": true, "time": kt}),
+                        json!({"path": path, "attr": attr, "animated": true, "time": kt}),
                     ),
                 }
                 let mut r = match s.reveal.get(l) {
                     Some(Reveal::Attrs(v)) => v.clone(),
                     _ => Vec::new(),
                 };
-                if !r.iter().any(|a| a == attr) {
-                    r.push(attr.to_owned());
+                if !r.iter().any(|a| a == reveal_as) {
+                    r.push(reveal_as.to_owned());
                 }
                 s.reveal.insert(l.clone(), Reveal::Attrs(r));
             }
@@ -2138,6 +2390,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Find", "查找"),
     ("Open Layer", "打开图层"),
     ("Open Layer Source", "打开图层源"),
+    ("Add Footage to Comp", "将素材添加到合成"),
+    ("Edit Original...", "编辑原稿..."),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

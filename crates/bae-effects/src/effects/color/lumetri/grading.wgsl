@@ -1,7 +1,7 @@
 struct Grading {
     image:FxImage, origin:vec2i, floating:u32, flags:u32, bounds:vec4i,
     creative:vec4f, shadows:vec3f, balance:f32, highlights:vec3f, curve_mask:u32,
-    lift:vec4f, midtone:vec4f, gain:vec4f,
+    lift:vec4f, midtone:vec3f, curve_white:f32, gain:vec3f, wheel_white:f32,
     key_color:vec3f, has_key:u32, range:vec4f,
     white_balance:vec3f, sat:f32, contrast:f32, invert:u32, mask_view:u32, spatial:u32,
     vignette:vec4f, blur0:vec4f,
@@ -236,7 +236,8 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
         c=encoded(rgb);
         if (u.flags&16u)!=0u {c=vec3f(tint(c.r,0u),tint(c.g,1u),tint(c.b,2u));}
     }
-    if u.curve_mask!=0u {
+    if (u.curve_mask&15u)!=0u {
+        c/=u.curve_white;
         if (u.curve_mask&1u)!=0u {
             let light=linear(c);
             let lo=least(light); let hi=greatest(light);
@@ -244,32 +245,35 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
             let b=linear(vec3f(curve(0u,greatest(c)))).r;
             c=encoded(a+(light-lo)*(b-a)/max(1e-12,hi-lo));
         }
-        c=vec3f(curve(1u,c.r),curve(2u,c.g),curve(3u,c.b));
-        if (u.curve_mask & 496u) != 0u {
-            var light = linear(c);
-            let hue = fx_hsl(light).x;
-            if (u.curve_mask & 16u) != 0u {
-                let y = dot(light,luma);
-                light = y + (light-y) * max(0.,1.+curve(4u,hue));
-            }
-            if (u.curve_mask & 32u) != 0u {
-                let hsl = fx_hsl(encoded(light));
-                light = linear(fx_rgb(vec3f(fract(hsl.x + curve(5u,hue)),hsl.yz)));
-            }
-            if (u.curve_mask & 64u) != 0u {
-                light *= exp2(curve(6u,hue));
-            }
-            let y = dot(light,luma);
-            var factor = 1.;
-            if (u.curve_mask & 128u) != 0u { factor *= max(0.,1.+curve(7u,y)); }
-            if (u.curve_mask & 256u) != 0u { factor *= max(0.,1.+curve(8u,fx_hsl(light).y)); }
-            c = encoded(select(y + (light-y)*factor, light, factor == 1.));
+        c=u.curve_white*vec3f(curve(1u,c.r),curve(2u,c.g),curve(3u,c.b));
+    }
+    if (u.curve_mask & 496u) != 0u {
+        // Every secondary curve selects from the same post-RGB input.
+        let input_light = linear(c);
+        let input_hsl = fx_hsl(input_light);
+        let input_luma = dot(input_light,luma);
+        var light = input_light;
+        if (u.curve_mask & 16u) != 0u {
+            light = input_luma + (light-input_luma) * max(0.,1.+curve(4u,input_hsl.x));
         }
+        if (u.curve_mask & 32u) != 0u {
+            let hsl = fx_hsl(encoded(light));
+            light = linear(fx_rgb(vec3f(fract(hsl.x + curve(5u,input_hsl.x)),hsl.yz)));
+        }
+        if (u.curve_mask & 64u) != 0u {
+            light *= exp2(curve(6u,input_hsl.x));
+        }
+        let y = dot(light,luma);
+        var factor = 1.;
+        if (u.curve_mask & 128u) != 0u { factor *= max(0.,1.+curve(7u,input_luma)); }
+        if (u.curve_mask & 256u) != 0u { factor *= max(0.,1.+curve(8u,input_hsl.y)); }
+        c = encoded(select(y + (light-y)*factor, light, factor == 1.));
     }
     if (u.flags&2u)!=0u {
+        c/=u.wheel_white;
         c+=.5*u.lift.rgb*(1.-c);
-        c=sign(c)*pow(abs(c),max(vec3f(.01),1.-u.midtone.rgb));
-        c=gain(c,1.+.5*u.gain.rgb);
+        c=sign(c)*pow(abs(c),max(vec3f(.01),1.-u.midtone));
+        c=u.wheel_white*gain(c,1.+.5*u.gain);
     }
     if (u.flags&4u)!=0u {
         var weight=key_weight(c);
