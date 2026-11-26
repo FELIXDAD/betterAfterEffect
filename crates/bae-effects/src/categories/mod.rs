@@ -24,6 +24,7 @@ macro_rules! embedded {
 pub(super) mod audio;
 pub(super) mod blur_sharpen;
 pub(super) mod channel;
+pub(super) mod channel_3d;
 pub(super) mod color;
 pub(super) mod controls;
 pub(super) mod distort;
