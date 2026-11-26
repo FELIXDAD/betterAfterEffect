@@ -274,6 +274,93 @@ fn wiggle_is_deterministic_and_bounded() {
     assert!(seen.iter().any(|x| (x - seen[0]).abs() > 1.0));
 }
 
+fn rotation_expression(source: &str, t: f64) -> f64 {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "sample", "null");
+        b.expr(&l, "transform:rotation", 0.0, source);
+    });
+    let comp = eval(&s, t);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    comp.layers[0].transform.rotation.z
+}
+
+#[test]
+fn seed_random_restarts_the_property_stream() {
+    let src = "seedRandom(7, true); var x=random(); seedRandom(9); random(); seedRandom(7,true); random()-x";
+    assert_eq!(rotation_expression(src, 1.25), 0.0);
+    for timeless in [false, true] {
+        let src = format!("seedRandom(7,{timeless});random()");
+        assert_eq!(
+            rotation_expression(&src, 0.0) == rotation_expression(&src, 1.0),
+            timeless
+        );
+    }
+    let s = stage(|b| {
+        for name in ["a", "b"] {
+            let layer = b.layer(MAIN, name, "null");
+            b.expr(
+                &layer,
+                "transform:rotation",
+                0.0,
+                "seedRandom(7,true);random()",
+            );
+        }
+    });
+    let result = eval(&s, 1.0);
+    assert!(result.errors.is_empty());
+    assert_ne!(
+        result.layers[0].transform.rotation.z,
+        result.layers[1].transform.rotation.z
+    );
+}
+
+#[test]
+fn random_pads_vector_ranges_and_consumes_one_draw_per_component() {
+    let src = "seedRandom(0,true);var v=random([1],[1,8]);seedRandom(0,true);random();var y=random(8); (v[0]===1 && v[1]===y) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn uniform_draws_follow_the_measured_ae26_recurrence() {
+    let src = "var a=Math.round(random()*4294967295);var expected=(Math.imul(a,1664525)+1013904223)>>>0; random()===expected/4294967295 ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn gauss_random_has_the_documented_tails() {
+    let src = "var tails=0; for(var i=0;i<2048;i++){var v=gaussRandom([4],[4,1]); if(v[0]!==4) throw Error('range'); if(v[1]<0 || v[1]>1) tails++;} tails/2048";
+    assert!((0.07..0.14).contains(&rotation_expression(src, 0.0)));
+}
+
+#[test]
+fn noise_varies_across_the_plane_and_volume() {
+    let src = "var p=noise([0.32,0.27]);var q=noise([0.32,0.27,0.15]); (p!==noise([0.32+31.7,0.27-1]) && q!==p && Math.abs(p-noise([0.32001,0.27]))<0.001 && Math.abs(q)<=1) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn wiggle_uses_the_offset_independently_of_timeless() {
+    let src = "seedRandom(2,true);var a=wiggle(2,4);seedRandom(2,false);var b=wiggle(2,4);seedRandom(3,true); (a===b && a!==wiggle(2,4)) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn temporal_wiggle_samples_an_animated_property_with_multiple_octaves() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "animated", "null");
+        let mut spec = AttrSpec::default();
+        spec.keyframes.insert(secs(0.0), Keyframe::linear(0.0));
+        spec.keyframes.insert(secs(3.0), Keyframe::linear(300.0));
+        spec.expression = Some(Expression::new(
+            "temporalWiggle(2,0.25,3,0.5)-temporalWiggle(2,0.25,1)",
+        ));
+        b.spec(&l, "transform:rotation", spec);
+    });
+    let comp = eval(&s, 1.25);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert!(comp.layers[0].transform.rotation.z.abs() > 0.01);
+}
+
 #[test]
 fn to_comp_uses_the_parent_chain() {
     let s = stage(|b| {
