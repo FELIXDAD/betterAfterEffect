@@ -197,6 +197,15 @@ impl Editing {
                 if let Some((_, b)) = self.text_box {
                     params["box_size"] = json!(b);
                 }
+                if let Some(info) = query::comp_info(stage, &self.comp) {
+                    crate::prefs::apply_layer_defaults(
+                        cx.resources,
+                        session,
+                        &info,
+                        bae_model::LayerKind::Text,
+                        &mut params,
+                    );
+                }
                 cx.invoke_with("text.create", params);
                 if let Ok(path) = folder.child(&query::unique_child_name(stage, &folder, &name)) {
                     let mut s = session.lock();

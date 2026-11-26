@@ -39,10 +39,36 @@ pub(crate) fn comp_label(p: &Preferences) -> i64 {
     p.int("labels.label_default_comp")
 }
 
-/// Composition page: new layers start at the comp's start (else at the
-/// current time).
-pub(crate) fn layers_at_comp_start(p: &Preferences) -> bool {
-    p.bool("composition.create_layers_at_comp_start")
+/// Creation preferences used by the Layer menu and the drawing tools.
+pub(crate) fn apply_layer_defaults(
+    resources: &Resources,
+    session: &crate::session::SharedSession,
+    comp: &bae_motion::query::CompInfo,
+    kind: LayerKind,
+    params: &mut serde_json::Value,
+) {
+    use serde_json::json;
+    let p = current(resources);
+    params["label"] = json!(layer_label(&p, kind));
+    if !p.bool("composition.create_layers_at_comp_start") {
+        params["start"] = json!(session.lock().time(&comp.path));
+    }
+    if p.bool("composition.default_position_separate_dimensions") {
+        params["separate_position"] = json!(true);
+    }
+    if !matches!(
+        kind,
+        LayerKind::PreComp | LayerKind::Footage | LayerKind::Audio
+    ) && p.str("composition.synthetic_layers_duration_mode") == "fixed_duration"
+        && let Some(frames) = crate::dialogs::fields::parse_timecode(
+            p.str("composition.synthetic_layers_duration_timecode"),
+            comp.frame_rate.as_f64(),
+            false,
+        )
+    {
+        let frames = frames.clamp(1, comp.frame_rate.time_to_frame(Time::MAX));
+        params["duration"] = json!(comp.frame_rate.frame_to_time(frames));
+    }
 }
 
 /// Import page: frames per second of image sequences.
