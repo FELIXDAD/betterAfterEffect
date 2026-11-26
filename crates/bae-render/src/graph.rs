@@ -351,6 +351,8 @@ impl std::fmt::Debug for SourceNode {
 
 /// An effect invocation.
 pub struct EffectNode {
+    /// Effect whose previous output supplies temporal feedback.
+    pub feedback: Option<PrimPath>,
     /// The layer.
     pub layer: PrimPath,
     /// The implementation.
@@ -1775,6 +1777,8 @@ impl Builder<'_, '_> {
         }
         rect.hash(&mut h);
         let params = frame.params(&instance);
+        let feedback = effect.feedback_source(&params, &layer.effects);
+        self.time_dependent |= feedback.is_some();
         let scene = effect.uses_scene(&params).then(|| {
             let world = layer.matrix_3d.unwrap_or_else(|| {
                 let m = layer.transform;
@@ -1924,6 +1928,7 @@ impl Builder<'_, '_> {
         });
         Ok(self.push(Node {
             kind: NodeKind::Effect(Box::new(EffectNode {
+                feedback,
                 scene,
                 layer: layer.path.clone(),
                 effect,

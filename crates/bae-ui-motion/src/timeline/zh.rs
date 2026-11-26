@@ -15,6 +15,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Disable Expressions", "禁用表达式"),
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
+    ("Exponential Scale", "指数比例"),
+    ("Sequence Layers...", "序列图层..."),
     ("Set Expressions", "设置多个表达式"),
     (
         "Error in property '{prop}' of layer {index} ('{layer}') in comp '{comp}'.",
@@ -56,6 +58,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // checked against AE (PR "待核").
     ("Keyframe Interpolation...", "关键帧插值..."),
     ("Keyframe Velocity", "关键帧速度"),
+    ("Sequence Layers", "序列图层"),
+    ("Overlap", "重叠"),
+    ("Transition:", "过渡:"),
+    ("Dissolve Front Layer", "溶解前景图层"),
+    (
+        "Cross Dissolve Front and Back Layers",
+        "交叉溶解前景与背景图层",
+    ),
     ("Keyframe Velocity...", "关键帧速度..."),
     ("Edit Value...", "编辑值..."),
     ("Select Equal Keyframes", "选择相同关键帧"),
