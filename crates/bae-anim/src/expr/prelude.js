@@ -186,8 +186,7 @@ function hslToRgb(c) {
   return [hue(p, q, h + 1 / 3), hue(p, q, h), hue(p, q, h - 1 / 3), a];
 }
 function hexToRgb(hex) {
-  hex = String(hex).replace(/^#/, "");
-  if (hex.length === 3) hex = hex.replace(/(.)/g, "$1$1");
+  hex = String(__val(hex)).replace(/^(#|0x)/i, "");
   var n = parseInt(hex.slice(0, 6), 16);
   var a = hex.length >= 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, a];
@@ -333,7 +332,7 @@ function __call(fn, c, l, prim, attr, t, seed) {
   try {
     var r = fn(c, l, prim, attr, t);
     // A Source Text expression may end with a text style (AE 17.0+).
-    if (r instanceof TextStyle) return { __style: true, changes: r.__c };
+    if (r instanceof TextStyle) return { __style: true, changes: Object.assign({}, r.__f, r.__c) };
     return __val(r);
   } finally {
     __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __timeless = saveTl;
@@ -598,7 +597,7 @@ Property.prototype.getStyleAt = function (charIndex, t) {
   return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t), {});
 };
 Property.prototype.createStyle = function () { return this.getStyleAt(0, __now); };
-Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, __now); } });
+Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, 0); } });
 
 function __TextGroup(c, l) { this.__c = c; this.__l = l; }
 __TextGroup.prototype = {
@@ -625,7 +624,7 @@ TextStyle.prototype = {
   get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
 };
 [
-  ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
+  ["justification", "justification"], ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
   ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
   ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
   ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
@@ -635,7 +634,7 @@ TextStyle.prototype = {
   });
 });
 [
-  ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
+  ["setJustification", "justification"], ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
   ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
   ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineShift", "baselineShift"],
   ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
@@ -645,7 +644,7 @@ TextStyle.prototype = {
   TextStyle.prototype[p[0]] = function (v) {
     var c = {};
     for (var k in this.__c) c[k] = this.__c[k];
-    c[p[1]] = __val(v);
+    c[p[1]] = p[1] === "text" ? String(__val(v)) : __val(v);
     return new TextStyle(this.__f, c);
   };
 });
