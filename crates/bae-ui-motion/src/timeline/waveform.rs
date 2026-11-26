@@ -146,6 +146,9 @@ impl Waveforms {
         let painter = ui.painter().with_clip_rect(rect);
         let channels = usize::from(wave.channels);
         let height = rect.height() / channels as f32;
+        // One mesh of one-pixel columns instead of a line shape per column
+        // and channel (about 4000 shapes for 2000 px of stereo).
+        let mut mesh = egui::epaint::Mesh::default();
         for x in start..end {
             let a = at(x as f32);
             let b = at(x as f32 + 1.0);
@@ -158,13 +161,17 @@ impl Waveforms {
                     hi = hi.max(peak[1]);
                 }
                 let mid = rect.top() + height * (ch as f32 + 0.5);
-                painter.vline(
-                    x as f32,
-                    mid - hi * height * 0.47..=mid - lo * height * 0.47,
-                    Stroke::new(1.0, color::TEXT),
+                let x = x as f32;
+                mesh.add_colored_rect(
+                    Rect::from_min_max(
+                        egui::pos2(x - 0.5, mid - hi * height * 0.47),
+                        egui::pos2(x + 0.5, mid - lo * height * 0.47 + 1.0),
+                    ),
+                    color::TEXT,
                 );
             }
         }
+        painter.add(egui::Shape::mesh(mesh));
     }
 }
 

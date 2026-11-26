@@ -2,6 +2,23 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Time Stretch and Auto-Orientation (docs/reference/ae/ui/dialogs).
+    ("Original Duration:", "原持续时间:"),
+    ("Stretch Factor:", "拉伸因数:"),
+    ("Stretch Factor", "拉伸因数"),
+    ("New Duration:", "新持续时间:"),
+    ("Hold in Place", "固定位置"),
+    ("Current Frame", "当前帧"),
+    ("Layer In-point", "图层进入点"),
+    ("Layer Out-point", "图层输出点"),
+    ("Auto-Orientation", "自动方向"),
+    ("Orient Along Path", "沿路径定向"),
+    ("Orient Towards Point of Interest", "定位于目标点"),
+    ("Orient Towards Camera", "定位于摄像机"),
+    (
+        "Orient Each Character Independently (requires Per-character 3D)",
+        "独立定向每个字符（需要逐字 3D 化）",
+    ),
     // Go to Time and Project Settings (docs/reference/ae/ui/dialogs).
     ("Go to Time", "转到时间"),
     ("Time Input", "时间码输入"),

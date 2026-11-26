@@ -52,17 +52,27 @@ impl Processor for Main {
         frame
     }
 }
+/// Bass & Treble: a low shelf at 120 Hz and a high shelf at 7 kHz (AE's
+/// controls are shelving, not peaking), ±100 mapping to ±24 dB like the EQ bands.
 #[derive(Default)]
-pub(super) struct Shelves(Main);
+pub(super) struct Shelves {
+    low: Filter,
+    high: Filter,
+    boosts: [f64; 2],
+    gains: [f32; 2],
+}
 impl Processor for Shelves {
     fn apply(&mut self, frame: [f32; 2], p: &[f64], rate: u32) -> [f32; 2] {
-        self.0.apply(
-            frame,
-            &[
-                0.0, 1.0, 120.0, 99.0, p[0], 1.0, 7000.0, 99.0, p[1], 0.0, 0.0, 1.0, 0.0,
-            ],
-            rate,
-        )
+        for i in 0..2 {
+            if self.boosts[i] != p[i] {
+                self.boosts[i] = p[i];
+                self.gains[i] = (band_gain(p[i]) - 1.0) as f32;
+            }
+        }
+        let q = std::f64::consts::FRAC_1_SQRT_2;
+        let low = self.low.split(frame, 120.0, q, rate)[0];
+        let high = self.high.split(frame, 7000.0, q, rate)[2];
+        std::array::from_fn(|ch| frame[ch] + low[ch] * self.gains[0] + high[ch] * self.gains[1])
     }
 }
 #[test]
@@ -83,21 +93,30 @@ fn displayed_band_response_matches_filtered_audio() {
 }
 
 #[test]
-fn bass_and_treble_use_the_two_wide_equalizer_bands() {
-    let mut alias = Shelves::default();
-    let mut eq = Main::default();
-    for n in 0..512 {
-        let input = [(n as f32 * 0.02).sin(); 2];
-        let actual = alias.apply(input, &[65.0, -15.0], 48000);
-        assert_eq!(
-            actual,
-            eq.apply(
-                input,
-                &[
-                    0.0, 1.0, 120.0, 99.0, 65.0, 1.0, 7000.0, 99.0, -15.0, 0.0, 0.0, 1.0, 0.0
-                ],
-                48000
-            )
-        );
-    }
+fn bass_and_treble_shelve_the_low_and_high_ends() {
+    let gain = |boosts: [f64; 2], hz: f64| {
+        let mut shelves = Shelves::default();
+        let mut peak = 0.0_f32;
+        for i in 0..48_000 {
+            let input = (std::f64::consts::TAU * hz * f64::from(i) / 48_000.0).sin() as f32;
+            let out = shelves.apply([input; 2], &boosts, 48_000)[0];
+            if i >= 24_000 {
+                peak = peak.max(out.abs());
+            }
+        }
+        f64::from(peak)
+    };
+    let boost = band_gain(50.0);
+    assert!(
+        (gain([50.0, 0.0], 30.0) / boost - 1.0).abs() < 0.05,
+        "bass shelf"
+    );
+    assert!(
+        (gain([50.0, 0.0], 3000.0) - 1.0).abs() < 0.02,
+        "mids untouched"
+    );
+    assert!(
+        (gain([0.0, 50.0], 18_000.0) / boost - 1.0).abs() < 0.08,
+        "treble shelf"
+    );
 }

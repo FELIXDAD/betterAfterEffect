@@ -66,7 +66,7 @@ pub(crate) fn prewarm(rt: &Runtime, format: wgpu::TextureFormat) -> Result<(), R
     Ok(())
 }
 
-pub(super) fn dispatch(
+pub(crate) fn dispatch(
     target: &mut dyn EffectTarget,
     entry: &'static str,
     input: &GpuImage,
