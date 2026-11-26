@@ -1788,6 +1788,48 @@ fn import_fixture(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+/// Opening a project keeps the audio device opened at startup, so Play on a
+/// comp with audio runs on the device clock. Skipped without an output device.
+#[test]
+fn playback_after_opening_a_project_uses_the_audio_clock() {
+    let mut h = Harness::new();
+    let session = h.session();
+    session.retry_audio();
+    let start = std::time::Instant::now();
+    while session.lock().audio_device().0 && start.elapsed().as_secs() < 10 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if !session.lock().audio_device().1 {
+        return;
+    }
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tone.wav");
+    std::fs::write(&file, b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\x40").unwrap();
+    h.run("item.import", json!({"files":[{"path":file,"name":"tone.wav",
+        "attrs":{"has_audio":{"type":"bool","value":true},"duration":{"type":"time","value":88200}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "tone.wav")
+        .unwrap();
+    h.run(
+        "layer.create",
+        json!({"kind":"audio","comp":comp,"source":asset}),
+    );
+    // What File > Open does to the session.
+    session.replace_project();
+    session.lock().open_comp(&comp);
+    let mut tl = TimelinePanel::default();
+    h.action(&mut tl, Invocation::new(crate::actions::ids::PLAY));
+    let s = session.lock();
+    assert!(
+        s.is_playing() && s.audio_clock(),
+        "playback runs on the audio clock"
+    );
+}
+
 #[test]
 fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
     let mut h = Harness::new();
