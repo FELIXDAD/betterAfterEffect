@@ -202,7 +202,10 @@ pub struct TimelinePanel {
     focus_search: bool,
     comment_edit: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
-    expr_edit: Option<(PrimPath, String, String)>,
+    /// The expression field being edited: its text, and the stored source it
+    /// started from (a pick whip or the language menu changing the stored
+    /// expression meanwhile replaces the text).
+    expr_edit: Option<(PrimPath, String, String, String)>,
     /// The field being edited: its text and selection (chars), for the pick whip
     /// and the language menu, which take its focus.
     expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
@@ -536,11 +539,14 @@ impl TimelinePanel {
                 out.push(row);
                 continue;
             };
+            let stored = query::attr_spec(stage, path, attr).and_then(|s| s.expression.as_ref());
             let lines = match &self.expr_edit {
-                Some((p, a, buf)) if p == path && a == attr => buf.split('\n').count(),
-                _ => query::attr_spec(stage, path, attr)
-                    .and_then(|s| s.expression.as_ref())
-                    .map_or(1, |e| e.source.split('\n').count()),
+                Some((p, a, buf, base))
+                    if p == path && a == attr && stored.is_some_and(|e| e.source == *base) =>
+                {
+                    buf.split('\n').count()
+                }
+                _ => stored.map_or(1, |e| e.source.split('\n').count()),
             }
             .clamp(1, MAX_EXPR_LINES);
             for line in 0..lines {
