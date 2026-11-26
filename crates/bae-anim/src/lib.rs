@@ -45,6 +45,7 @@ pub use evaluated::{
     LightState, LightType, MaterialState, TextPathOptions, TrackMatte,
 };
 pub use expr::prewarm as prewarm_expressions;
+pub use expr::rewrite::{ExpressionToken, expression_tokens};
 pub use reads::{ExprRead, ReadKind, reads_touched};
 pub use samples::{ImageSamples, SampleKey, SampleRequests};
 pub use time::{LayerTiming, MotionBlur};
