@@ -343,6 +343,9 @@ impl<'a> MockPass<'a> {
                 if boolean(layer, "effects_enabled", local).unwrap_or(true) {
                     out.effects = self.effects(layer, local);
                 }
+                out.layer_styles =
+                    bae_model::layer_styles::effective_styles(self.stage, layer.path())
+                        .and_then(|p| self.effect(p, local));
                 out.masks = self.masks(layer, local);
             }
             if layer_has_expressions(layer) {
@@ -478,25 +481,27 @@ impl<'a> MockPass<'a> {
         let stage = self.stage;
         children_of_type(stage, layer.path(), "effects", &PrimType::EFFECT)
             .into_iter()
-            .filter_map(|path| {
-                let fx = stage.prim(&path)?;
-                let mut params: Vec<(u32, Value)> = fx
-                    .attr_names()
-                    .into_iter()
-                    .filter_map(|name| {
-                        let id = bae_model::effect::param_id(name)?;
-                        Some((id, sample(&fx, name, local)?))
-                    })
-                    .collect();
-                params.sort_by_key(|(id, _)| *id);
-                Some(RenderEffect {
-                    effect: string(&fx, "match_name", local).unwrap_or_default(),
-                    enabled: boolean(&fx, "enabled", local).unwrap_or(true),
-                    params,
-                    path,
-                })
-            })
+            .filter_map(|path| self.effect(path, local))
             .collect()
+    }
+
+    fn effect(&self, path: PrimPath, local: Time) -> Option<RenderEffect> {
+        let fx = self.stage.prim(&path)?;
+        let mut params: Vec<(u32, Value)> = fx
+            .attr_names()
+            .into_iter()
+            .filter_map(|name| {
+                let id = bae_model::effect::param_id(name)?;
+                Some((id, sample(&fx, name, local)?))
+            })
+            .collect();
+        params.sort_by_key(|(id, _)| *id);
+        Some(RenderEffect {
+            effect: string(&fx, "match_name", local).unwrap_or_default(),
+            enabled: boolean(&fx, "enabled", local).unwrap_or(true),
+            params,
+            path,
+        })
     }
 
     fn masks(&self, layer: &PrimView<'_>, local: Time) -> Vec<RenderMask> {

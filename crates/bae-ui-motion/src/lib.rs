@@ -41,6 +41,7 @@ mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
+mod layer_styles;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
@@ -134,6 +135,7 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(ae_panels::ZH);
         bae_ui::i18n::register(ae_shells::ZH);
         effects::register_i18n();
+        layer_styles::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }
@@ -207,6 +209,10 @@ impl AppModule for MotionUiModule {
         // panel has focus.
         let handler: std::sync::Arc<dyn ActionHandler> = std::sync::Arc::new(menus::MotionActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion", handler);
+        let _ = app.register_arc::<dyn ActionHandler>(
+            "bae-ui-motion.layer-styles",
+            std::sync::Arc::new(layer_styles::Actions),
+        );
         let effect_actions: std::sync::Arc<dyn ActionHandler> =
             std::sync::Arc::new(effects::EffectActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.effects", effect_actions);

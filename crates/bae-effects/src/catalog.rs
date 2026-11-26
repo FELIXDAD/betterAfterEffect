@@ -69,6 +69,7 @@ pub fn category_zh(category: &str) -> &'static str {
     match category {
         "3D Channel" => "3D 通道",
         "Audio" => "音频",
+        "Layer Styles" => "图层样式",
         "Blur & Sharpen" => "模糊和锐化",
         "Channel" => "通道",
         "Color Correction" => "颜色校正",

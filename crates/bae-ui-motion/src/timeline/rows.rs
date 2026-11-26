@@ -895,39 +895,42 @@ impl TimelinePanel {
                 _ => &[],
             };
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
-            let edit = if let bae_model::Value::Bool(on) = value {
-                // AE's timeline switches On/Off with hot text, not a checkbox.
-                let text = tr(if on { "On" } else { "Off" });
-                if widgets::link(&mut child, text)
-                    .labeled_toggle(egui::WidgetType::Checkbox, &prop_name, on)
-                    .clicked()
-                {
-                    common::Edit::Commit(bae_model::Value::Bool(!on))
+            let edit =
+                if let Some(edit) = crate::layer_styles::edit(&mut child, id, path, attr, &value) {
+                    edit
+                } else if let bae_model::Value::Bool(on) = value {
+                    // AE's timeline switches On/Off with hot text, not a checkbox.
+                    let text = tr(if on { "On" } else { "Off" });
+                    if widgets::link(&mut child, text)
+                        .labeled_toggle(egui::WidgetType::Checkbox, &prop_name, on)
+                        .clicked()
+                    {
+                        common::Edit::Commit(bae_model::Value::Bool(!on))
+                    } else {
+                        common::Edit::None
+                    }
+                } else if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
+                    let names: Vec<&str> = options.iter().map(|o| option_label(o)).collect();
+                    let mut sel = options.iter().position(|o| o == cur).unwrap_or(0);
+                    let before = sel;
+                    widgets::dropdown(&mut child, id.with("choice"), &mut sel, &names, 160.0)
+                        .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
+                    if sel != before {
+                        common::Edit::Commit(bae_model::Value::Enum(options[sel].into()))
+                    } else {
+                        common::Edit::None
+                    }
                 } else {
-                    common::Edit::None
-                }
-            } else if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
-                let names: Vec<&str> = options.iter().map(|o| option_label(o)).collect();
-                let mut sel = options.iter().position(|o| o == cur).unwrap_or(0);
-                let before = sel;
-                widgets::dropdown(&mut child, id.with("choice"), &mut sel, &names, 160.0)
-                    .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
-                if sel != before {
-                    common::Edit::Commit(bae_model::Value::Enum(options[sel].into()))
-                } else {
-                    common::Edit::None
-                }
-            } else {
-                common::value_editor(
-                    &mut child,
-                    id.with("ed"),
-                    attr,
-                    &value,
-                    dims,
-                    &prop_name,
-                    expression,
-                )
-            };
+                    common::value_editor(
+                        &mut child,
+                        id.with("ed"),
+                        attr,
+                        &value,
+                        dims,
+                        &prop_name,
+                        expression,
+                    )
+                };
             common::apply_edit(cx, session, path, attr, now, edit);
         }
         // Keyframes (layer bar mode; the Graph Editor draws its own).

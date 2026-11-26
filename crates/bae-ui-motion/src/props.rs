@@ -277,6 +277,7 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             .map(|a| prop(stage, layer, a, three_d))
             .collect(),
     });
+    out.extend(crate::layer_styles::node(stage, layer));
     out
 }
 

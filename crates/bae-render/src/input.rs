@@ -280,6 +280,8 @@ pub struct RenderLayer {
     pub masks: Vec<RenderMask>,
     /// Effects in stack order (applied through the effect registry).
     pub effects: Vec<RenderEffect>,
+    /// Photoshop styles applied in composition space before the matte and blend.
+    pub layer_styles: Option<RenderEffect>,
     /// 3D layer (AE-CMP-400): layer space → comp space as a 4×4 matrix (anchor,
     /// scale, X/Y/Z rotation, orientation, position, parents). The layer is a
     /// plane seen through [`RenderComp::camera`] and depth sorted with the
@@ -314,6 +316,7 @@ impl RenderLayer {
             adjustment: false,
             masks: Vec::new(),
             effects: Vec::new(),
+            layer_styles: None,
             matrix_3d: None,
             motion_samples: Arc::new([]),
             material: Material::default(),
@@ -335,13 +338,20 @@ impl RenderLayer {
         for m in &self.masks {
             m.hash_into(h);
         }
+        if let Some(styles) = &self.layer_styles {
+            styles.hash_into(h);
+        }
         self.effects.len().hash(h);
         for e in &self.effects {
             e.hash_into(h);
         }
     }
 
-    fn hash_composite(&self, h: &mut impl Hasher, effects: Option<&crate::EffectLibrary>) {
+    pub(crate) fn hash_composite(
+        &self,
+        h: &mut impl Hasher,
+        effects: Option<&crate::EffectLibrary>,
+    ) {
         self.path.hash(h);
         self.hash_content(h, effects);
         for v in self.transform.to_cols_array() {

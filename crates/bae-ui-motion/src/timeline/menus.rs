@@ -71,7 +71,11 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
             ui.separator();
         }
         Node::Submenu(s) if s.platform.current() => {
-            if s.children.is_empty() {
+            if s.title == "Layer Styles" {
+                common::submenu(ui, tr(s.title), &mut |ui| {
+                    crate::layer_styles::context_menu(ui, cx)
+                });
+            } else if s.children.is_empty() {
                 ui.add_enabled(false, egui::Button::new(tr(s.title)));
             } else {
                 common::submenu(ui, tr(s.title), &mut |ui| catalog_nodes(ui, cx, s.children));
