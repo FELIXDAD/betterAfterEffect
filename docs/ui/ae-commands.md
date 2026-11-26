@@ -222,7 +222,7 @@
 | Responsive Design — Time ▸ Create Outro | 2097154 | `motion.comp.create_outro` |  |  |  | B | ⏸ |
 | Responsive Design — Time ▸ Create Protected Region from Work Area | 2097155 | `motion.comp.create_protected_region_from_work_area` |  |  |  | B | ⏸ |
 | Composition Flowchart | 327701 | `motion.comp.composition_flowchart` |  | Ctrl+Shift+F11 | Cmd+Shift+F11 | E | ⏸ |
-| Composition Mini-Flowchart | 327702 | `motion.comp.composition_mini_flowchart` |  | Tab | Tab | E | ⏸ |
+| Composition Mini-Flowchart | 327702 | `motion.comp.composition_mini_flowchart` |  | Tab | Tab | E | ✅ |
 | VR ▸ Create VR Environment... | 328466433 | `motion.comp.create_vr_environment` |  |  |  | B | ⏸ |
 | VR ▸ Extract Cubemap... | 328466434 | `motion.comp.extract_cubemap` |  |  |  | B | ⏸ |
 
@@ -740,8 +740,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTimeZoomIn` | `timeline.zoom_in` |  | = | = |  | C | ✅ |
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - |  | C | ✅ |
 | `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; |  | C | ☐ |
-| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ☐ |
-| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ☐ |
+| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ✅ |
+| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ✅ |
 | `CompToggleMaskFeathers` | `motion.reveal` | `{"what":"mask_feather","add":false}` | F | F |  | B | ☐ |
 | `CompToggleMaskFeathersAddState` | `motion.reveal` | `{"what":"mask_feather","add":true}` | Shift+F | Shift+F |  | B | ☐ |
 | `CompToggleMaskFeathersAddStateNewKF` | `motion.toggle_key` | `{"attr":"mask_feather"}` | Alt+Shift+F | Opt+Shift+F |  | B | ☐ |

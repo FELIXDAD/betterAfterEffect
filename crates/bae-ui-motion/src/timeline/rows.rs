@@ -153,6 +153,35 @@ impl TimelinePanel {
                         color::TEXT,
                     );
                 }
+                // Label and # columns: a click selects the layer, a right-click
+                // opens the layer menu, as anywhere on the row in AE.
+                let lead_cols: Vec<Column> = [Column::Label, Column::Index]
+                    .into_iter()
+                    .filter(|c| cols.visible(*c))
+                    .collect();
+                if let (Some(first), Some(last)) = (lead_cols.first(), lead_cols.last()) {
+                    let lead = ui.interact(
+                        Rect::from_min_max(
+                            pos2(l + cols.x(*first), rect.top()),
+                            pos2(l + cols.right(*last), rect.bottom()),
+                        ),
+                        rid("lead"),
+                        Sense::click(),
+                    );
+                    if lead.clicked() {
+                        select_layer(session, stage, layer, ui.input(|i| i.modifiers));
+                    }
+                    let mut lead_menu = None;
+                    crate::common::context_menu(&lead, &mut |ui| {
+                        if !session.lock().selected_layers.contains(layer) {
+                            select_layer(session, stage, layer, egui::Modifiers::NONE);
+                        }
+                        lead_menu = menus::layer_menu(ui, cx, session, layer);
+                    });
+                    if lead_menu == Some(menus::LayerMenuOut::Rename) {
+                        self.rename = Some((layer.clone(), query::display_name_of(stage, layer)));
+                    }
+                }
                 // Twirl.
                 let tw = Rect::from_center_size(
                     pos2(l + cols.right(Column::Av) + 7.0, cy),
@@ -185,7 +214,7 @@ impl TimelinePanel {
                 {
                     self.toggle(layer.as_str());
                 }
-                // Name (click selects, double-click renames, drag reorders).
+                // Double-click opens a precomp or renames an ordinary layer.
                 let name_rect = Rect::from_min_max(
                     pos2(l + cols.x(Column::Name) + 2.0, rect.top()),
                     pos2(l + cols.right(Column::Name) - 2.0, rect.bottom()),
@@ -236,7 +265,7 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    if resp.double_clicked() && !locked {
+                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) && !locked {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
                     if resp.drag_started() && !locked {
