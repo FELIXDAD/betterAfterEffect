@@ -30,6 +30,7 @@ pub(crate) mod errors;
 mod feather_tool;
 mod free_transform;
 mod gizmo3d;
+mod group_edit;
 pub(crate) mod guides;
 mod layout;
 mod look_at;
@@ -279,6 +280,9 @@ pub struct CompositionViewer {
     mag: f32,
     /// Layers under the pointer when the context menu opened (topmost first).
     menu_layers: Vec<PrimPath>,
+    /// The motion path keyframe the context menu opened on (AE: the keyframe
+    /// menu instead of the layer menu).
+    menu_key: Option<bae_motion::KeyRef>,
     /// Pixel step the last frame rendered at (1 Full, 2 Half …).
     render_factor: u32,
     /// Type tool: text being typed or edited.
@@ -375,6 +379,7 @@ impl CompositionViewer {
         (
             View {
                 origin,
+                aspect: 1.0,
                 scale,
                 point,
                 camera: None,
@@ -445,7 +450,13 @@ impl CompositionViewer {
         session: &SharedSession,
         info: &CompInfo,
     ) -> Option<EvaluatedComp> {
-        let time = session.lock().time(&info.path);
+        let time = {
+            let s = session.lock();
+            s.held_viewer_time
+                .as_ref()
+                .filter(|(p, _)| p == &info.path)
+                .map_or_else(|| s.time(&info.path), |(_, t)| *t)
+        };
         live_evaluator(&mut self.eval, cx, session)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
@@ -584,7 +595,7 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
-fn checkerboard(p: &egui::Painter, r: Rect) {
+pub(crate) fn checkerboard(p: &egui::Painter, r: Rect) {
     p.rect_filled(r, 0.0, Color32::from_gray(200));
     let s = 8.0;
     let mut y = r.top();
@@ -728,7 +739,16 @@ impl Panel for CompositionViewer {
         };
         // The shell ticks the clock; this keeps the audio mix current.
         session.lock().update_preview(cx, &info);
-        let time = session.lock().time(&info.path);
+        let time = {
+            let mut s = session.lock();
+            if !ui.input(|i| i.pointer.primary_down()) {
+                s.held_viewer_time = None;
+            }
+            s.held_viewer_time
+                .as_ref()
+                .filter(|(p, _)| p == &info.path)
+                .map_or_else(|| s.time(&info.path), |(_, t)| *t)
+        };
         let ppp = ui.ctx().pixels_per_point();
 
         let full = ui.available_rect_before_wrap();
@@ -1049,6 +1069,12 @@ impl Panel for CompositionViewer {
             }
         }
         apply_overrides(&mut comp, self.select.drag.as_ref());
+        // A shape group being dragged.
+        if let Some(d) = &self.select.group_drag
+            && let Some(l) = comp.layers.iter_mut().find(|l| l.path == d.layer)
+        {
+            d.preview(l);
+        }
         // A mask or shape path being edited shows in the picture, not only as
         // its outline (#593).
         if let Some((prim, path)) = self
@@ -1144,6 +1170,7 @@ impl Panel for CompositionViewer {
                 && let Some(g) = self.gpu.as_mut()
                 && let Some((texture, rect)) = g.playback.shown_texture()
             {
+                session.lock().channel_frame = g.playback.shown_channels();
                 g.show_cached(texture, rect);
             }
             completed
@@ -1357,6 +1384,23 @@ impl Panel for CompositionViewer {
         } else {
             tool
         };
+        if resp.double_clicked()
+            && effective.is_layer_paint()
+            && crate::prefs::current(cx.resources)
+                .bool("composition.double_click_paint_roto_opens_layer")
+            && let Some(layer) =
+                pointer.and_then(|pos| select_tool::hit_layer(cx.stage, &comp, &view, pos))
+        {
+            session.lock().selected_layers = vec![layer.clone()];
+            crate::layer_panel::open_clicked(
+                cx,
+                &session,
+                &layer,
+                ui.input(|i| i.modifiers.alt),
+                effective,
+                &mut self.eval,
+            );
+        }
         if hand && resp.drag_started_by(egui::PointerButton::Primary) {
             self.panning = true;
             // Space started playback when pressed; a Space-drag only pans:
@@ -1449,16 +1493,6 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
-        // The paint tools paint in the Layer panel: a double-click on a layer
-        // opens it there (AE).
-        if matches!(effective, Tool::Brush | Tool::CloneStamp | Tool::Eraser)
-            && resp.double_clicked()
-            && let Some(pos) = resp.interact_pointer_pos()
-            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, pos)
-        {
-            session.lock().selected_layers = vec![layer.clone()];
-            crate::layer_panel::open(cx, &session, &layer);
-        }
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.
@@ -1512,6 +1546,7 @@ impl Panel for CompositionViewer {
                 &view,
                 effective,
                 &painter,
+                &mut self.eval,
             ))
         };
         if resp.hovered()
@@ -1544,7 +1579,26 @@ impl Panel for CompositionViewer {
                 }
             }
         }
-        menu::frame(&mut self.menu_layers, &resp, cx, &session, &comp, &view);
+        if resp.secondary_clicked() {
+            self.menu_key = resp
+                .interact_pointer_pos()
+                .and_then(|p| self.motion_path.key_at(p));
+            if let Some(k) = &self.menu_key {
+                let mut s = session.lock();
+                if !s.selected_keys.contains(k) {
+                    s.selected_keys = vec![k.clone()];
+                }
+            }
+        }
+        menu::frame(
+            &mut self.menu_layers,
+            self.menu_key.as_ref(),
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+        );
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {

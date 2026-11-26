@@ -58,6 +58,7 @@ struct Scene {
 }
 
 struct Slot {
+    channels: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
     rect: IRect,
@@ -323,14 +324,21 @@ impl PlaybackPreview {
             effects: effects.map(|e| e.0.generation()),
         };
         let mut state = self.shared.state.lock().unwrap();
-        let budget_mib = resources
-            .get::<Arc<bae_prefs::PrefsStore>>()
-            .map_or(1024, |store| {
-                store.current().int(bae_prefs::keys::PREVIEW_CACHE_MIB)
-            });
-        state
-            .cache
-            .sync(stage, &key, (budget_mib.max(0) as u64) << 20);
+        let (budget_mib, reserved_gb) =
+            resources
+                .get::<Arc<bae_prefs::PrefsStore>>()
+                .map_or((1024, 0), |store| {
+                    let prefs = store.current();
+                    (
+                        prefs.int(bae_prefs::keys::PREVIEW_CACHE_MIB),
+                        prefs.int(bae_prefs::keys::RAM_RESERVED_GB),
+                    )
+                });
+        state.cache.sync(
+            stage,
+            &key,
+            cache_budget(budget_mib, reserved_gb, bae_platform::memory::total_bytes()),
+        );
         let frame_key = key.frame(time);
         let replaced = state.demand.as_ref().is_none_or(|d| d.scene.key != key);
         if replaced {
@@ -426,6 +434,10 @@ impl PlaybackPreview {
     }
 
     /// The texture and rect of the frame [`Self::poll`] returned last.
+    pub(super) fn shown_channels(&self) -> Option<Arc<crate::gpu_preview::ChannelFrame>> {
+        self.shown.as_ref()?.channels.clone()
+    }
+
     pub(super) fn shown_texture(&self) -> Option<(wgpu::Texture, IRect)> {
         let shown = self.shown.as_ref()?;
         Some((shown.texture.clone(), shown.rect))
@@ -726,13 +738,19 @@ fn render_worker(
                 };
                 drop(spares_now);
                 let texture = target.view().texture().clone();
+                let channels = engine.channels.clone();
+                let pick_bytes = channels
+                    .as_ref()
+                    .map_or(0, |c| c.layers.values().map(|l| l.pick_bytes()).sum());
                 let slot = Arc::new(Slot {
+                    channels,
                     registry: registry.clone(),
                     id: registry.create("playback frame"),
                     rect,
                     time: job.time,
                     errors: job.errors,
-                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
+                        + pick_bytes,
                     texture,
                     target: Some(target),
                     spares: spares.clone(),
@@ -793,8 +811,26 @@ fn render_worker(
     }
 }
 
+/// The preview cache's byte budget: the GPU Preview Cache setting, never more
+/// than the RAM left after Memory & CPU ▸ RAM Reserved for Other Applications.
+fn cache_budget(cache_mib: i64, reserved_gb: i64, installed: Option<u64>) -> u64 {
+    let budget = (cache_mib.max(0) as u64) << 20;
+    installed.map_or(budget, |total| {
+        budget.min(total.saturating_sub((reserved_gb.max(0) as u64) << 30))
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_cache_leaves_the_reserved_ram_alone() {
+        let gib = 1u64 << 30;
+        assert_eq!(super::cache_budget(1024, 6, Some(16 * gib)), 1 << 30);
+        assert_eq!(super::cache_budget(32768, 6, Some(16 * gib)), 10 * gib);
+        assert_eq!(super::cache_budget(512, 64, Some(16 * gib)), 0);
+        assert_eq!(super::cache_budget(512, 6, None), 512 << 20);
+    }
+
     use super::*;
 
     #[test]

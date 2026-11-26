@@ -106,6 +106,13 @@ pub struct Frame {
 }
 
 impl Frame {
+    fn close_others_button(&self, ui: &mut Ui) -> Response {
+        ui.add_enabled(
+            self.tabs.len() > 1,
+            egui::Button::new(tr("Close Other Panels in Group")),
+        )
+    }
+
     pub fn new(tabs: &[&str]) -> Self {
         Frame {
             id: FrameId(0),
@@ -1288,13 +1295,7 @@ impl Dock {
             if ui.button(tr("Undock Panel")).clicked() {
                 actions.push(Action::Undock(panel.clone(), None));
             }
-            let group_button = |ui: &mut Ui| {
-                ui.add_enabled(
-                    frame.tabs.len() > 1,
-                    egui::Button::new(tr("Close Other Panels in Group")),
-                )
-                .clicked()
-            };
+            let group_button = |ui: &mut Ui| frame.close_others_button(ui).clicked();
             if !context && host.tab(&panel).close_submenu {
                 crate::widgets::menu_button(ui, tr("Close Other Panels"), |ui| {
                     if group_button(ui) {
@@ -1358,8 +1359,16 @@ impl Dock {
                     actions.push(Action::ToggleSmallTabs(fid));
                 }
             });
-            ui.separator();
-            host.menu(ui, &panel);
+            // Measure the panel-specific section first. Empty menus (e.g. Align and
+            // Properties) end at Panel Group Settings without a trailing divider.
+            let mut bounds = ui.available_rect_before_wrap();
+            bounds.min.y += ui.spacing().item_spacing.y + 6.0;
+            let mut section = ui.new_child(egui::UiBuilder::new().max_rect(bounds));
+            host.menu(&mut section, &panel);
+            if section.min_rect().height() > 0.0 {
+                ui.separator();
+                ui.advance_cursor_after_rect(section.min_rect());
+            }
         });
         self.actions.extend(actions);
     }
@@ -2356,6 +2365,22 @@ mod tests {
         let id = PanelId::new("project");
         assert_eq!(id.kind(), "project");
         assert_eq!(id.instance(), None);
+    }
+
+    #[test]
+    fn close_others_uses_the_selected_tabs_group() {
+        let align = Frame::new(&["align"]);
+        let properties = Frame::new(&["properties", "info"]);
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            assert!(!align.close_others_button(ui).enabled());
+            assert!(properties.close_others_button(ui).enabled());
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            crate::i18n::translation("Close Other Panels in Group"),
+            Some("关闭组中的其他面板")
+        );
     }
 
     fn run(ctx: &egui::Context, dock: &mut Dock, events: Vec<Event>) {

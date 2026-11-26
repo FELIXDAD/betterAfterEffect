@@ -1718,6 +1718,40 @@ fn import_creates_footage_items_in_one_step() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Files dropped on the Composition or Timeline panel (AE): imported and added
+/// to the comp as layers, the first on top, in the same undo step.
+#[test]
+fn import_into_a_comp_adds_layers_in_the_same_step() {
+    let dir = std::env::temp_dir().join(format!("bae-import-comp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (clip, music) = (dir.join("clip.png"), dir.join("music.wav"));
+    std::fs::write(&clip, b"clip").unwrap();
+    std::fs::write(&music, b"music").unwrap();
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let out = fx.run(
+        "item.import",
+        json!({"comp": comp, "files": [
+            {"path": clip},
+            {"path": music, "attrs": {
+                "has_video": {"type": "bool", "value": false},
+                "has_audio": {"type": "bool", "value": true}}},
+        ]}),
+    );
+    let layers = query::comp_layers(&fx.stage, &comp);
+    assert_eq!(out["layers"], json!(layers));
+    let kinds: Vec<_> = layers
+        .iter()
+        .map(|l| query::layer_kind(&fx.stage, l).unwrap())
+        .collect();
+    assert_eq!(kinds, ["footage", "audio"]);
+    assert_eq!(query::display_name_of(&fx.stage, &layers[0]), "clip.png");
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(query::comp_layers(&fx.stage, &comp).is_empty());
+    assert!(!fx.stage.has_prim(&p(out["items"][0].as_str().unwrap())));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `layer.set_attr`: one undo step for several layers; only switches, quality
 /// and label.
 #[test]
@@ -2144,6 +2178,61 @@ fn set_track_matte_sets_type_source_and_hides_the_matte() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn auto_key_starts_a_track_and_preserves_existing_keys() {
+    let mut f = Fx::new();
+    let comp = f.comp();
+    let layer = f.layer(&comp, "solid", json!({}));
+    for (time, value) in [(SEC, 40.0), (2 * SEC, 65.0)] {
+        f.run("attr.set_many", json!({"auto_key": true, "edits": [{
+            "path": layer, "attr": "transform:opacity", "time": time, "value": Value::Float(value)
+        }]}));
+    }
+    let spec = query::attr_spec(&f.stage, &layer, "transform:opacity").unwrap();
+    assert_eq!(spec.keyframes[&Time(SEC)].value, Value::Float(40.0));
+    assert_eq!(spec.keyframes[&Time(2 * SEC)].value, Value::Float(65.0));
+}
+
+#[test]
+fn interpret_footage_sets_alpha_rate_aspect_and_loop() {
+    let dir = std::env::temp_dir().join(format!("bae-interpret-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run(
+        "item.import",
+        json!({"files": [{"path": clip, "attrs": {
+            "frame_rate": {"type": "frame_rate", "value": [24, 1]}}}]}),
+    );
+    let item = p(out["items"][0].as_str().unwrap());
+    fx.run(
+        "footage.interpret",
+        json!({"items": [item], "alpha_mode": "premultiplied", "frame_rate": 30.0,
+               "pixel_aspect": 2.0, "loop_count": 3}),
+    );
+    assert_eq!(
+        fx.value(&item, "alpha_mode"),
+        Some(Value::Enum("premultiplied".into()))
+    );
+    assert_eq!(
+        fx.value(&item, "frame_rate"),
+        Some(Value::FrameRate(FrameRate::FPS_30))
+    );
+    assert_eq!(fx.value(&item, "pixel_aspect"), Some(Value::Float(2.0)));
+    assert_eq!(fx.value(&item, "loop"), Some(Value::Int(3)));
+    // Back to the file's rate.
+    fx.run(
+        "footage.interpret",
+        json!({"items": [item], "use_file_frame_rate": true}),
+    );
+    assert_eq!(
+        fx.value(&item, "frame_rate"),
+        Some(Value::FrameRate(FrameRate::FPS_24))
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

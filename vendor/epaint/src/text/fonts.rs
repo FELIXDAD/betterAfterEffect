@@ -1198,6 +1198,7 @@ impl GalleyCache {
 
             let mut paragraph_job = LayoutJob {
                 text: job.text[start..end].to_owned(),
+                tab_stop_spaces: job.tab_stop_spaces,
                 wrap: crate::text::TextWrapping {
                     max_rows: max_rows_remaining,
                     ..job.wrap
@@ -1449,7 +1450,7 @@ mod tests {
 
                         // Don't compare for equaliity; but format with a specific precision and make sure we hit that.
                         // NOTE: we use a rather low precision, because as long as we're within a pixel I think it's good enough.
-                        similar_asserts::assert_eq!(
+                        assert_eq!(
                             format!("{:#.1?}", split),
                             format!("{:#.1?}", whole),
                             "pixels_per_point: {pixels_per_point:.2}, input text: '{}'",
@@ -1489,7 +1490,7 @@ mod tests {
                         let unwrapped_size = galley_unwrapped.size();
 
                         let difference = (intrinsic_size - unwrapped_size).length().abs();
-                        similar_asserts::assert_eq!(
+                        assert_eq!(
                             format!("{intrinsic_size:.4?}"),
                             format!("{unwrapped_size:.4?}"),
                             "Wrapped intrinsic size should almost match unwrapped size. Intrinsic: {intrinsic_size:.8?} vs unwrapped: {unwrapped_size:.8?}
@@ -1499,7 +1500,7 @@ mod tests {
                             galley_wrapped.rows.len(),
                             galley_unwrapped.rows.len()
                             );
-                        similar_asserts::assert_eq!(
+                        assert_eq!(
                             format!("{intrinsic_size:.4?}"),
                             format!("{unwrapped_size:.4?}"),
                             "Unwrapped galley intrinsic size should exactly match its size. \
