@@ -37,6 +37,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
+        last_visible: bool,
         switch_input: switches::SwitchInput,
         layers: &super::TimelineLayers,
         parent_items: &[&str],
@@ -369,10 +370,22 @@ impl TimelinePanel {
                         vec2(14.0, 14.0),
                     );
                     icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
-                    let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
-                        egui::WidgetType::Button,
-                        &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
-                    );
+                    let wresp = ui
+                        .interact(whip, rid("whip"), Sense::click_and_drag())
+                        .labeled(
+                            egui::WidgetType::Button,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
+                        );
+                    // Cmd/Ctrl-click: remove the parent (Alt too: the layer jumps).
+                    if wresp.clicked() && ui.input(|i| i.modifiers.command) {
+                        let layers = if layer_selected {
+                            session.lock().selected_layers.clone()
+                        } else {
+                            vec![layer.clone()]
+                        };
+                        let mods = ui.input(|i| i.modifiers);
+                        cx.invoke_with("layer.set_parent", parent_params(&layers, None, now, mods));
+                    }
                     if wresp.drag_started() {
                         let layers = if layer_selected {
                             session.lock().selected_layers.clone()
@@ -420,9 +433,15 @@ impl TimelinePanel {
                     if sel != before {
                         let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
                         if parent.as_ref() != Some(layer) {
+                            let mods = ui.input(|i| i.modifiers);
                             cx.invoke_with(
                                 "layer.set_parent",
-                                json!({"layers": [layer], "parent": parent, "time": now}),
+                                parent_params(
+                                    std::slice::from_ref(layer),
+                                    parent.as_ref(),
+                                    now,
+                                    mods,
+                                ),
                             );
                         }
                     }
@@ -651,6 +670,7 @@ impl TimelinePanel {
                     layer,
                     &layer_ctx,
                     (*line, *lines),
+                    last_visible,
                 );
             }
         }
@@ -733,7 +753,7 @@ impl TimelinePanel {
                             json!({"keys": [KeyRef::new(path.clone(), attr, key_now)]}),
                         );
                     } else if let Some(v) =
-                        common::current_value(self.eval.get(cx.resources), stage, path, attr, now)
+                        common::current_value(self.eval.get(cx.stage), stage, path, attr, now)
                     {
                         cx.invoke_with(
                             "attr.set_at",
@@ -877,7 +897,7 @@ impl TimelinePanel {
             .as_ref()
             .and_then(|s| s.value_for(path, attr))
             .cloned()
-            .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
+            .or_else(|| common::current_value(self.eval.get(cx.stage), stage, path, attr, now));
         if attr == "text:path" {
             // Path Options > Path: a popup of the layer's masks, even when unset.
             let vr = Rect::from_min_max(
@@ -1020,6 +1040,7 @@ impl TimelinePanel {
         layer: &PrimPath,
         layer_ctx: &str,
         (line, lines): (usize, usize),
+        last_visible: bool,
     ) {
         let stage = cx.stage;
         let Some(expr) = query::attr_spec(stage, path, attr).and_then(|s| s.expression.clone())
@@ -1146,14 +1167,15 @@ impl TimelinePanel {
                     ));
             }
         }
-        if line + 1 < lines {
+        if line + 1 < lines && !last_visible {
             return;
         }
         let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
+        let top = rect.top() - line as f32 * ROW_H;
         let field = Rect::from_min_max(
-            pos2(axis.left + 4.0, rect.bottom() - lines as f32 * ROW_H + 1.0),
-            pos2(rect.right() - 4.0, rect.bottom() - 1.0),
+            pos2(axis.left + 4.0, top),
+            pos2(rect.right() - 4.0, top + lines as f32 * ROW_H),
         );
         let mut buf = match &self.expr_edit {
             Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
@@ -1315,4 +1337,22 @@ fn footage_frame_blending(stage: &Stage, layer: &PrimPath) -> Option<FrameBlendi
     } else {
         None
     }
+}
+
+/// `layer.set_parent` for a pick whip or Parent & Link choice with `mods`
+/// held (AE): Shift moves the layers to the parent, Alt lets them jump
+/// instead of staying where they are.
+pub(super) fn parent_params(
+    layers: &[PrimPath],
+    parent: Option<&PrimPath>,
+    now: Time,
+    mods: egui::Modifiers,
+) -> serde_json::Value {
+    json!({
+        "layers": layers,
+        "parent": parent,
+        "time": now,
+        "keep_transform": !mods.alt,
+        "move_to_parent": mods.shift && parent.is_some(),
+    })
 }
