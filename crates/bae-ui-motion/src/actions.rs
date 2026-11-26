@@ -1677,18 +1677,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
         ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
-            let queue = crate::render_queue::shared(cx.resources);
-            let dir = crate::render_queue::default_output_dir();
-            let mut queue = queue.lock();
-            if id == ids::SAVE_FRAME_AS {
-                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
-            } else {
-                queue.add(&info, &dir);
-            }
-            queue.assign_output(
-                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
-            );
-            drop(queue);
+            let frame = (id == ids::SAVE_FRAME_AS).then(|| info.frame_rate.time_to_frame(now));
+            crate::render_queue::add_to_queue(cx, &info, frame);
             cx.open_panel("render_queue");
         }
         ids::SELECT_NEXT_LAYER | ids::SELECT_PREV_LAYER => {
