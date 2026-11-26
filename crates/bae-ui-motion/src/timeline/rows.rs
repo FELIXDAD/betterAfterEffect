@@ -956,8 +956,14 @@ impl TimelinePanel {
                 }
             } else if let bae_model::Value::Time(t) = value {
                 // Time Remap: the source time as hot timecode, a frame per point.
+                // The dragged value is kept here until the release, like the
+                // other hot numbers: another panel may drop the session's
+                // live value first (the viewer on pointer-up).
                 let rate = info.frame_rate;
-                let mut frames = rate.time_to_frame(t) as f64;
+                let scrub_key = id.with("time_scrub");
+                let mut frames = child
+                    .data(|d| d.get_temp::<f64>(scrub_key))
+                    .unwrap_or(rate.time_to_frame(t) as f64);
                 let display = |f: f64| widgets::timecode(f.round() as i64, rate.as_f64());
                 let parse = |s: &str| super::markers::parse_timecode(info, s).map(|f| f as f64);
                 let resp = child
@@ -976,10 +982,14 @@ impl TimelinePanel {
                     })
                     .inner;
                 let to = bae_model::Value::Time(rate.frame_to_time(frames.round() as i64));
-                if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                if resp.drag_stopped() {
+                    child.data_mut(|d| d.remove::<f64>(scrub_key));
                     common::Edit::Commit(to)
-                } else if resp.dragged() && resp.changed() {
+                } else if resp.dragged() {
+                    child.data_mut(|d| d.insert_temp(scrub_key, frames));
                     common::Edit::Live(to)
+                } else if resp.changed() {
+                    common::Edit::Commit(to)
                 } else {
                     common::Edit::None
                 }
