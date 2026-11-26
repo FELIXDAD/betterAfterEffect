@@ -140,6 +140,33 @@ fn snapping_reaches_inside_collapsed_precomps() {
     assert!(close3(p, [287.0, 103.0, 0.0]), "{p:?}");
 }
 
+#[test]
+fn collapsed_child_wireframe_follows_the_preference() {
+    let mut h = H::new();
+    let inner = path(&h.run("comp.create", json!({"width":640,"height":360}))["path"]);
+    h.run(
+        "layer.create",
+        json!({"comp":inner,"kind":"solid","size":[20,20],"position":[400,100]}),
+    );
+    let layer = path(
+        &h.run(
+            "layer.create",
+            json!({"comp":h.comp,"kind":"pre_comp","source":inner}),
+        )["path"],
+    );
+    h.select(&[&layer]);
+    for (collapse, show) in [(true, true), (true, false), (false, true)] {
+        h.run("layer.set_attr", json!({"layers":[layer],"attr":"collapse_transformation","value":{"type":"bool","value":collapse}}));
+        let mut p = bae_prefs::Preferences::default();
+        p.set("composition.show_bounding_box_precomp_layers", show);
+        h.resources
+            .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(p)));
+        h.frame(Vec::new(), Modifiers::NONE);
+        let corner = h.screen(390.0, 90.0);
+        assert_eq!(h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(path) if path.closed && path.fill == egui::Color32::TRANSPARENT && path.points.len() == 4 && path.points[0].distance(corner)<1.0)), collapse && show);
+    }
+}
+
 /// Right-clicking a keyframe square on a motion path opens AE's keyframe
 /// menu (and selects the keyframe), not the layer menu.
 #[test]
@@ -174,4 +201,30 @@ fn right_clicking_a_motion_path_keyframe_opens_the_keyframe_menu() {
     let keys = h.session().lock().selected_keys.clone();
     assert_eq!(keys.len(), 1);
     assert_eq!(keys[0].time, bae_model::Time(sec));
+}
+
+/// AE's snapping radius: 13.3 points (13 snaps, 14 does not).
+#[test]
+fn snapping_reaches_13_points_not_14() {
+    let mut h = H::new();
+    // B's right midpoint: (150, 180).
+    let _b = h.solid([100.0, 100.0], [100.0, 180.0]);
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.tools().lock().set(Tool::Selection);
+    h.tools().lock().options.snapping = true;
+    let scale = h.viewer.last_view.unwrap().scale * h.ctx.pixels_per_point();
+    assert!((scale - 1.0).abs() < 1e-4, "100 %: {scale}");
+    // A's left midpoint (220, 180) dropped `gap` points right of 150.
+    let drop = |h: &mut H, gap: f64| {
+        let r = h.drag((228.0, 180.0), (158.0 + gap, 180.0), Modifiers::NONE);
+        h.apply(&r);
+        let x = h.v3(&a, "transform:position")[0];
+        h.stage.undo(&h.author).unwrap();
+        x
+    };
+    assert!((drop(&mut h, 13.0) - 250.0).abs() < 1e-6, "13 points snaps");
+    assert!(
+        (drop(&mut h, 14.0) - 264.0).abs() < 1e-6,
+        "14 points does not"
+    );
 }
