@@ -146,6 +146,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
+        r.register(paint::ExtendStroke),
         r.register(tracker::CreateTracker),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),

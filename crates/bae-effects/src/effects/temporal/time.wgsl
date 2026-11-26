@@ -74,6 +74,31 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let p = u.roi.xy + vec2i(id.xy);
     if any(p >= u.roi.zw) { return; }
     let px = vec2f(p) + 0.5;
+    if u.flags.x == 5u {
+        let origin = vec2f(u.layer.xy);
+        let span = vec2f(u.layer.zw - u.layer.xy);
+        let lo = origin + floor(vec2f(u.data.x, 1.0-u.data.w) * span) + 0.5;
+        let hi = origin + ceil(vec2f(u.data.y, 1.0-u.data.z) * span) - 0.5;
+        if any(hi < lo) { textureStore(output_tex, id.xy, vec4f(0.0)); return; }
+        let pos = clamp(px, lo, hi);
+        let source = fx_sample(input_tex, u.input_image, pos, false);
+        var coverage = 1.0;
+        if u.flags.w != 0u {
+            var m = vec4f(0.0);
+            if u.flags.w == 1u { m = fx_sample(map_tex, u.map_image, pos, true); }
+            coverage = saturate(select(m.a, fx_luma(m.rgb), u.flags.z <= 2u));
+            if u.flags.z == 2u || u.flags.z == 4u { coverage = 1.0 - coverage; }
+        }
+        var out = source;
+        switch u.flags.y {
+            case 1u: { out = vec4f(vec3f(coverage), 1.0); }
+            case 2u: { out *= coverage; }
+            case 3u: { out *= 1.0-coverage; }
+            default: {}
+        }
+        textureStore(output_tex, id.xy, out);
+        return;
+    }
     if u.flags.x == 3u {
         textureStore(output_tex, id.xy, vec4f(f32(map_level(px)) / 255.0, 0.0, 0.0, 1.0));
         return;

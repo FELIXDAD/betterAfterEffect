@@ -51,6 +51,24 @@ pub fn group_prim(id: &str) -> Option<PrimPath> {
         .flatten()
 }
 
+/// The top-level shape groups of the shape layer `layer`.
+pub(crate) fn shape_groups(stage: &Stage, layer: &PrimPath) -> Vec<PrimPath> {
+    layer.child(query::CONTENTS).map_or_else(
+        |_| Vec::new(),
+        |contents| {
+            stage
+                .children(&contents)
+                .into_iter()
+                .filter(|g| {
+                    stage
+                        .prim(g)
+                        .is_some_and(|v| v.is_a(&bae_model::PrimType::SHAPE_GROUP))
+                })
+                .collect()
+        },
+    )
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
@@ -230,6 +248,15 @@ pub enum Pending {
     /// Open the comps a command creates (those not in `before`; New Comp
     /// from Selection) and, with `queue`, add them to the Render Queue.
     NewComps { before: Vec<PrimPath>, queue: bool },
+    /// Select the shape group a command adds to a shape layer (AE: a shape
+    /// tool's new group is selected, its box shown): the first of `layer`'s
+    /// groups not in `before`.
+    NewGroup {
+        /// The shape layer.
+        layer: PrimPath,
+        /// Its groups before the command.
+        before: Vec<PrimPath>,
+    },
     /// Keep these keys selected although they do not exist yet: the selection
     /// already names where a queued command (a keyframe drag) puts them, and
     /// panels drawn before it runs must not drop them (#551).
@@ -744,6 +771,17 @@ impl Session {
                 }
                 continue;
             }
+            if let Pending::NewGroup { layer, before } = &what {
+                match shape_groups(stage, layer)
+                    .into_iter()
+                    .find(|g| !before.contains(g))
+                {
+                    Some(g) => self.selected_groups = vec![format!("{layer}#{g}")],
+                    None if age < PENDING_FRAMES => self.pending.push((what, age + 1)),
+                    None => {}
+                }
+                continue;
+            }
             if let Pending::NewLayers { comp, before } = &what {
                 let added: Vec<PrimPath> = query::comp_layers(stage, comp)
                     .into_iter()
@@ -761,6 +799,7 @@ impl Session {
                 Pending::Comp(p) | Pending::Layer(p) => p,
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
+                | Pending::NewGroup { .. }
                 | Pending::Keys(_)
                 | Pending::NewComps { .. } => {
                     unreachable!("handled above")
@@ -778,6 +817,7 @@ impl Session {
                     }
                     Pending::NewLayers { .. }
                     | Pending::NewEffects { .. }
+                    | Pending::NewGroup { .. }
                     | Pending::Keys(_)
                     | Pending::NewComps { .. } => {}
                 }
@@ -793,6 +833,7 @@ impl Session {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
+                | Pending::NewGroup { .. }
                 | Pending::Keys(_)
                 | Pending::NewComps { .. } => None,
             })
