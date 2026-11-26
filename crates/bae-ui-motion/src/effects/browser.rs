@@ -95,7 +95,7 @@ impl Options {
     fn accepts(&self, capabilities: u8, depth: u8) -> bool {
         self.show_effects
             && (!self.gpu_only || capabilities & 8 != 0)
-            && (self.all_depths || capabilities & depth != 0)
+            && (depth == 1 || self.all_depths || capabilities & depth != 0)
     }
 }
 
@@ -176,21 +176,6 @@ impl Panel for EffectsPanel {
             crate::presets::browse(cx);
         }
         ui.separator();
-        ui.checkbox(
-            &mut self.options.all_depths,
-            tr("Show Effects for All Color Depths"),
-        );
-        ui.checkbox(
-            &mut self.options.gpu_only,
-            tr("Show GPU Capable Effects Only"),
-        );
-        ui.checkbox(&mut self.options.show_effects, tr("Show Effects"));
-        ui.checkbox(&mut self.options.show_presets, tr("Show Animation Presets"));
-        if ui.button(tr("Manage Effects...")).clicked() {
-            super::manager::open(cx);
-            ui.close();
-        }
-        ui.separator();
         for (value, label) in [
             (Grouping::Categories, "Categories"),
             (Grouping::Folders, FOLDERS),
@@ -203,6 +188,24 @@ impl Panel for EffectsPanel {
                 ui.close();
             }
         }
+        ui.separator();
+        let at_eight_bpc = project_depth(cx.stage) == 1;
+        let mut all_depths = at_eight_bpc || self.options.all_depths;
+        if ui
+            .add_enabled(
+                !at_eight_bpc,
+                egui::Checkbox::new(&mut all_depths, tr("Show Effects for All Color Depths")),
+            )
+            .changed()
+        {
+            self.options.all_depths = all_depths;
+        }
+        ui.checkbox(
+            &mut self.options.gpu_only,
+            tr("Show GPU Capable Effects Only"),
+        );
+        ui.checkbox(&mut self.options.show_effects, tr("Show Effects"));
+        ui.checkbox(&mut self.options.show_presets, tr("Show Animation Presets"));
         ui.separator();
         let path = self
             .selection
@@ -220,6 +223,11 @@ impl Panel for EffectsPanel {
             if let Some(index) = cx.resources.get::<Arc<PresetIndex>>() {
                 index.refresh(true);
             }
+            ui.close();
+        }
+        ui.separator();
+        if ui.button(tr("Manage Effects...")).clicked() {
+            super::manager::open(cx);
             ui.close();
         }
     }

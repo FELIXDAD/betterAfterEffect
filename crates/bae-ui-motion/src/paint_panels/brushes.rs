@@ -179,6 +179,12 @@ impl Panel for BrushesPanel {
     fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let tools = tools::shared(cx.resources);
         let mut state = tools.lock();
+        if !matches!(
+            state.current(),
+            Tool::Brush | Tool::CloneStamp | Tool::Eraser
+        ) {
+            ui.disable();
+        }
         let selected = state
             .brushes
             .selected
@@ -224,6 +230,12 @@ impl Panel for BrushesPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let tools = tools::shared(cx.resources);
         let mut state = tools.lock();
+        if !matches!(
+            state.current(),
+            Tool::Brush | Tool::CloneStamp | Tool::Eraser
+        ) {
+            ui.disable();
+        }
         let state = &mut *state;
         let lib = &mut state.brushes;
         if self

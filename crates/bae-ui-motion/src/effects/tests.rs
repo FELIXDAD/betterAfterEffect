@@ -380,7 +380,7 @@ fn animation_presets_save_and_apply_effects_with_their_values() {
 }
 
 /// The text and enabled state users get from the actual panel menu.
-fn menu_states(fx: &Fx, panel: &mut dyn Panel) -> std::collections::HashMap<String, bool> {
+fn menu_states(fx: &Fx, panel: &mut dyn Panel) -> Vec<(String, bool, bool)> {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let id = PanelId::new("menu-test");
@@ -401,11 +401,12 @@ fn menu_states(fx: &Fx, panel: &mut dyn Panel) -> std::collections::HashMap<Stri
         panel.menu(ui, &mut cx);
     });
     output.textures_delta.clear();
-    output
-        .platform_output
-        .accesskit_update
-        .unwrap()
-        .nodes
+    let mut nodes = output.platform_output.accesskit_update.unwrap().nodes;
+    nodes.sort_by(|(_, a), (_, b)| {
+        let y = |node: &egui::accesskit::Node| node.bounds().map_or(0.0, |r| r.y0);
+        y(a).total_cmp(&y(b))
+    });
+    nodes
         .into_iter()
         .filter_map(|(_, n)| {
             let label = n.label()?;
@@ -417,7 +418,11 @@ fn menu_states(fx: &Fx, panel: &mut dyn Panel) -> std::collections::HashMap<Stri
             } else {
                 bae_ui::i18n::translation(label).unwrap_or(label).to_owned()
             };
-            Some((zh, !n.is_disabled()))
+            Some((
+                zh,
+                !n.is_disabled(),
+                n.toggled() == Some(egui::accesskit::Toggled::True),
+            ))
         })
         .collect()
 }
@@ -432,28 +437,64 @@ fn panel_menus_match_chinese_and_selection() {
     let mut fx = Fx::new();
     let layer = fx.comp_with_layer();
     let mut browser = browser::EffectsPanel::default();
-    let before = menu_states(&fx, &mut browser);
-    assert_eq!(before.get("保存动画预设..."), Some(&false), "{before:?}");
-    for label in [
-        "浏览预设...",
-        "显示所有颜色深度的效果",
-        "仅显示 GPU 能够实现的效果",
-        "管理效果...",
-        "按字母顺序",
-        "刷新列表",
-    ] {
-        assert_eq!(before.get(label), Some(&true), "{label}");
-    }
+    fx.run("project.set_settings", json!({"bit_depth": "8"}));
     fx.run(
         "effect.apply",
         json!({"layers":[layer],"match_name":"ADBE Gaussian Blur 2"}),
     );
-    assert_eq!(
-        menu_states(&fx, &mut browser).get("保存动画预设..."),
-        Some(&true)
-    );
-
+    let before = menu_states(&fx, &mut browser);
+    let expected = [
+        ("保存动画预设...", true, false),
+        ("浏览预设...", true, false),
+        ("类别", true, true),
+        (
+            if cfg!(windows) {
+                "资源管理器文件夹"
+            } else {
+                "查找程序文件夹"
+            },
+            true,
+            false,
+        ),
+        ("按字母顺序", true, false),
+        ("显示所有颜色深度的效果", false, true),
+        ("仅显示 GPU 能够实现的效果", true, false),
+        ("显示效果", true, true),
+        ("显示动画预设", true, true),
+        (
+            if cfg!(windows) {
+                "在资源管理器中显示"
+            } else {
+                "在 Finder 中显示"
+            },
+            false,
+            false,
+        ),
+        ("刷新列表", true, false),
+        ("管理效果...", true, false),
+    ];
+    let observed: Vec<_> = before
+        .iter()
+        .map(|(label, enabled, checked)| (label.as_str(), *enabled, *checked))
+        .collect();
+    assert_eq!(observed, expected);
+    fx.run("project.set_settings", json!({"bit_depth": "32"}));
+    assert!(menu_states(&fx, &mut browser).contains(&(
+        "显示所有颜色深度的效果".into(),
+        true,
+        true
+    )));
+    let tools = crate::tools::SharedTools::default();
+    fx.resources.insert(tools.clone());
     let mut brushes = crate::paint_panels::BrushesPanel::default();
+    let brush = menu_states(&fx, &mut brushes);
+    assert_eq!(brush.len(), 9);
+    assert!(
+        brush
+            .iter()
+            .all(|(name, enabled, checked)| !enabled && *checked == (name == "小缩览图"))
+    );
+    tools.lock().set(crate::tools::Tool::Brush);
     let brush = menu_states(&fx, &mut brushes);
     for (label, enabled) in [
         ("新建画笔...", true),
@@ -462,10 +503,12 @@ fn panel_menus_match_chinese_and_selection() {
         ("大列表", true),
         ("重置画笔笔尖...", true),
     ] {
-        assert_eq!(brush.get(label), Some(&enabled), "{label}");
+        assert!(brush.contains(&(label.into(), enabled, false)), "{label}");
     }
-    assert_eq!(
-        menu_states(&fx, &mut crate::EffectControlsPanel::default()).get("显示动画预设"),
-        Some(&true)
+    assert!(menu_states(&fx, &mut crate::paint_panels::PaintPanel).is_empty());
+    assert!(
+        menu_states(&fx, &mut crate::EffectControlsPanel::default())
+            .iter()
+            .any(|(label, enabled, _)| label == "显示动画预设" && *enabled)
     );
 }
