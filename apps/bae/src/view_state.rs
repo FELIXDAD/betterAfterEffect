@@ -63,15 +63,23 @@ pub fn capture(app: &App) -> Option<ViewState> {
     })
 }
 
-/// A fresh motion session for the open project: the saved view where its comps
+/// A fresh motion view for the open project: the saved view where its comps
 /// still exist, otherwise the project's first composition (none for an empty
-/// project).
+/// project). The session object stays (with its open audio device).
 pub fn restore(app: &mut App, doc: &Document) {
     let stage = doc.stage();
     let saved = doc
         .manifest_field(MANIFEST_KEY)
         .and_then(|v| serde_json::from_value::<ViewState>(v.clone()).ok());
-    let session = SharedSession::default();
+    let session = match app.resource::<SharedSession>() {
+        Some(session) => session.clone(),
+        None => {
+            let session = SharedSession::default();
+            app.insert_resource(session.clone());
+            session
+        }
+    };
+    session.replace_project();
     {
         let mut s = session.lock();
         let mut opened = false;
@@ -92,7 +100,6 @@ pub fn restore(app: &mut App, doc: &Document) {
             }
         }
     }
-    app.insert_resource(session);
 }
 
 fn first_comp(stage: &Stage) -> Option<PrimPath> {
@@ -188,6 +195,31 @@ mod tests {
         assert_eq!(s.open_comps, [b.clone(), a.clone()]);
         assert_eq!(s.active_comp.as_ref(), Some(&a));
         assert_eq!(s.time(&b), Time(Time::FLICKS_PER_SECOND));
+    }
+
+    /// Opening a project keeps the session that the script host and the audio
+    /// warm-up hold (and with it the audio device opened at startup).
+    #[test]
+    fn opening_a_project_keeps_the_session_and_its_audio_device() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Audio.bae");
+        let (_, mut doc) = app_and_doc();
+        run(&mut doc, "comp.create", json!({"name": "Main", "fps": 30}));
+        doc.save_as(&path).unwrap();
+
+        let (mut app, mut doc) = app_and_doc();
+        let held = app.resource::<SharedSession>().unwrap().clone();
+        held.lock().loop_playback = false;
+        doc.open(&path).unwrap();
+        restore(&mut app, &doc);
+        let s = held.lock();
+        assert_eq!(
+            s.active_comp.as_ref().map(ToString::to_string).as_deref(),
+            Some("/comps/Main")
+        );
+        assert!(!s.loop_playback, "loop is the user's setting");
+        drop(s);
+        assert_eq!(active(&app).as_deref(), Some("/comps/Main"));
     }
 
     /// Issue #131: `.bae` → `bae pack` → `.baez` → open: the same comps, tab

@@ -583,8 +583,67 @@ impl TimelinePanel {
         graph_left: f32,
     ) {
         ui.painter().rect_filled(foot, 0.0, color::PANEL);
+        // AE's pane buttons at the bottom left: show or hide the Layer Switches,
+        // Transfer Controls (Modes), In/Out/Duration/Stretch and Render Time
+        // columns, highlighted while shown.
+        const PANES: [(Icon, &str, &[Column]); 4] = [
+            (
+                Icon::PaneSwitches,
+                "Expand or Collapse the Layer Switches pane",
+                &[Column::Switches],
+            ),
+            (
+                Icon::PaneModes,
+                "Expand or Collapse the Transfer Controls pane",
+                &[Column::Modes],
+            ),
+            (
+                Icon::PaneInOut,
+                "Expand or Collapse the In/Out/Duration/Stretch panes",
+                &[Column::In, Column::Out, Column::Duration, Column::Stretch],
+            ),
+            (
+                Icon::PaneRenderTime,
+                "Expand or Collapse the Render Time pane",
+                &[Column::RenderTime],
+            ),
+        ];
+        let size = (foot.height() - 4.0).min(20.0);
+        let mut x = foot.left() + 6.0;
+        for (i, (icon, label, cols)) in PANES.into_iter().enumerate() {
+            let r = Rect::from_min_size(pos2(x, foot.center().y - size / 2.0), vec2(size, size));
+            x += size + 2.0;
+            let shown = cols.iter().any(|c| self.columns.visible(*c));
+            let resp = ui
+                .interact(r, ui.id().with(("pane", i)), Sense::click())
+                .labeled_toggle(egui::WidgetType::Button, tr(label), shown)
+                .on_hover_text(tr(label));
+            if shown {
+                ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
+            }
+            icons::paint(
+                ui.painter(),
+                r.shrink(2.0),
+                icon,
+                if shown || resp.hovered() {
+                    color::ICON
+                } else {
+                    color::ICON_DIM
+                },
+            );
+            if resp.clicked() {
+                self.columns.toggle_pane(cols);
+            }
+            #[cfg(test)]
+            {
+                self.last_panes[i] = Some(r);
+            }
+        }
         // Toggle Switches / Modes (AE's button under the outline; F4).
-        let b = Rect::from_min_size(foot.min + vec2(8.0, 3.0), vec2(150.0, foot.height() - 6.0));
+        let b = Rect::from_min_size(
+            pos2(x + 8.0, foot.top() + 3.0),
+            vec2(150.0, foot.height() - 6.0),
+        );
         let resp = ui
             .interact(b, ui.id().with("toggle_switches_modes"), Sense::click())
             .labeled(egui::WidgetType::Button, tr("Toggle Switches / Modes"));

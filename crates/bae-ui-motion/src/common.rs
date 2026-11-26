@@ -506,6 +506,8 @@ pub(crate) fn apply_edit(
                 attr: attr.to_owned(),
                 value,
                 peers,
+                time: t,
+                committed: None,
             });
         }
         Edit::Commit(value) => {
@@ -513,10 +515,19 @@ pub(crate) fn apply_edit(
             let dragged = session
                 .lock()
                 .scrub
-                .take()
-                .is_some_and(|s| s.path == *path && s.attr == attr);
+                .as_ref()
+                .is_some_and(|s| s.path == *path && s.attr == attr && s.committed.is_none());
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
+            // Shown as committed until the command has run.
+            session.lock().scrub = Some(Scrub {
+                path: path.clone(),
+                attr: attr.to_owned(),
+                value: value.clone(),
+                peers: peers.clone(),
+                time: t,
+                committed: Some((cx.stage.revision(), std::time::Instant::now())),
+            });
             let edits: Vec<serde_json::Value> = std::iter::once((path.clone(), value))
                 .chain(peers)
                 .map(|(p, v)| {

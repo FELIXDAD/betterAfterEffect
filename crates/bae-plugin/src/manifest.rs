@@ -452,6 +452,12 @@ impl EffectDecl {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoiDecl {
+    /// Read the complete upstream image (e.g. a spherical reprojection).
+    #[serde(default)]
+    pub whole_input: bool,
+    /// Output width and height expressions in full-resolution pixels.
+    #[serde(default)]
+    pub size: Option<[String; 2]>,
     /// Extent of the result.
     #[serde(default)]
     pub extent: Option<RoiExtent>,
@@ -1533,7 +1539,13 @@ impl Validator {
                     expr(self, name, src);
                 }
             }
-            if style == ShaderStyle::Pixel && roi.margin_sources().iter().any(Option::is_some) {
+            if let Some([w, h]) = &roi.size {
+                expr(self, "output width", w);
+                expr(self, "output height", h);
+            }
+            if style == ShaderStyle::Pixel
+                && (roi.whole_input || roi.margin_sources().iter().any(Option::is_some))
+            {
                 self.err("pixel-style effects read only their own pixel; remove the read margins or use style = \"compute\"");
             }
         }
