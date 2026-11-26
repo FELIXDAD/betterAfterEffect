@@ -4,6 +4,15 @@ use crate::catalog::DefBuilder;
 
 pub(super) fn register(target: &Builtin, out: &mut Vec<Builtin>) {
     let alias = match target.info.match_name.as_str() {
+        "ADBE Color Balance 2" => balance(target),
+        "ADBE Apply Color LUT2" => Definition::inherit(
+            target,
+            "ADBE Apply Color LUT",
+            "apply-color-lut-legacy",
+            "Apply Color LUT",
+            "应用颜色 LUT",
+        )
+        .finish(target, None),
         "ADBE Brightness & Contrast 2" => brightness(target),
         "ADBE Exposure2" => exposure(target),
         "ADBE PhotoFilterPS" => photo_filter(target),
@@ -216,6 +225,34 @@ fn alpha_levels(target: &Builtin, old: &str, id: &str, white: f64) -> Builtin {
                 (8, Value::Int(1)),
                 (9, Value::Int(1)),
             ])
+        }),
+    )
+}
+
+fn balance(target: &Builtin) -> Builtin {
+    let mut alias = Definition::inherit(
+        target,
+        "ADBE Color Balance",
+        "color-balance-legacy",
+        "Color Balance",
+        "颜色平衡",
+    );
+    let mut b = DefBuilder::new(&alias.def.match_name, &alias.def.name, "Obsolete");
+    for (id, en, zh) in [
+        (1, "Red Balance", "红色平衡"),
+        (2, "Green Balance", "绿色平衡"),
+        (3, "Blue Balance", "蓝色平衡"),
+    ] {
+        b = b.slider(id, en, zh, 0., [-100., 100.], [-100., 100.], 1, "none");
+    }
+    (alias.def, alias.info.param_names_zh) = b.build();
+    alias.finish(
+        target,
+        Some(|p| {
+            // The legacy control applies across all three tonal ranges.
+            Translation::replace(std::array::from_fn::<_, 9, _>(|i| {
+                (1 + i as u32, Value::Float(p.f(1 + i as u32 % 3)))
+            }))
         }),
     )
 }

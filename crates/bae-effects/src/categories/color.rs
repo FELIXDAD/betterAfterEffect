@@ -1,4 +1,5 @@
 mod cc;
+mod three_way;
 
 use super::packages;
 use crate::Registry;
@@ -9,6 +10,7 @@ pub(crate) mod ocio;
 
 pub(crate) fn register(registry: &mut Registry) {
     cc::register(registry);
+    three_way::register(registry);
     super::packages(
         registry,
         &[embedded!("color", ["shaders/cc_color_neutralizer.wgsl"])],
