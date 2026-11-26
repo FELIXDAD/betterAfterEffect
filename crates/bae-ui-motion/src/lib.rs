@@ -59,6 +59,7 @@ pub mod scripts;
 pub mod session;
 mod timeline;
 pub mod tools;
+mod tracker;
 mod viewer;
 mod workspaces;
 
@@ -88,6 +89,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     effects::register,
     render_queue::register,
     layer_panel::register,
+    tracker::register,
     ae_panels::register,
     presets::register,
     scopes::register,
