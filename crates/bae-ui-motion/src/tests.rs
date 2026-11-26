@@ -2647,6 +2647,60 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// File ▸ Replace Footage ▸ File… and Reload Footage: the item takes the new
+/// file (and its name, unless it is reloaded); its layers stay.
+#[test]
+fn replace_footage_keeps_the_item_and_its_layers() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = import_fixture("replace");
+    let logo = dir.join("logo.png");
+    let other = dir.join("plates").join("shot_0001.png");
+    h.run(
+        "item.import",
+        json!({"files":[{"path":logo,"name":"logo.png"}]}),
+    );
+    let item = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "logo.png")
+        .unwrap();
+    let layer = h.run(
+        "layer.create",
+        json!({"kind":"footage","comp":comp,"source":item}),
+    )["path"]
+        .clone();
+    let original = |h: &Harness| {
+        bae_model::asset::AssetFile::from_prim(&h.stage.prim(&item).unwrap())
+            .unwrap()
+            .original
+    };
+    h.run(
+        "item.replace_file",
+        json!({"item":item,"file":{"path":other,"name":"shot_0001.png","attrs":{"width":{"type":"int","value":2}}}}),
+    );
+    assert_eq!(query::display_name_of(&h.stage, &item), "shot_0001.png");
+    assert!(original(&h).ends_with("shot_0001.png"));
+    let width = query::static_value(&h.stage.prim(&item).unwrap(), "width");
+    assert_eq!(width, Some(Value::Int(2)));
+    assert!(
+        h.stage
+            .has_prim(&PrimPath::new(layer.as_str().unwrap()).unwrap())
+    );
+    // Reload keeps the (renamed) item's name.
+    h.run(
+        "attr.set",
+        json!({"path":item,"attr":"name","value":{"type":"string","value":"Plate"}}),
+    );
+    h.run(
+        "item.replace_file",
+        json!({"item":item,"file":{"path":other,"name":"shot_0001.png"},"keep_name":true}),
+    );
+    assert_eq!(query::display_name_of(&h.stage, &item), "Plate");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Layer ▸ Transform ▸ Opacity… / Rotation…: the value dialog shows the first
 /// selected layer's value and OK sets it on every selected layer in one step.
 #[test]
