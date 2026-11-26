@@ -114,6 +114,15 @@ impl Effect for PaintEffect {
         if matches!(self.kind, Generator::Vegas) && Params::new(&self.def, p).popup(52) == 1 {
             return roi.union(&crate::effects::image_grid::layer_rect(p));
         }
+        // The Clone Stamp reads the layer elsewhere: the whole layer.
+        if matches!(self.kind, Generator::Paint)
+            && p.effect
+                .param(bae_render::paint::STROKES_PARAM)
+                .map(bae_render::paint::unpack)
+                .is_some_and(|s| s.iter().any(|s| s.tool == bae_render::paint::Tool::Clone))
+        {
+            return roi.union(&crate::effects::image_grid::layer_rect(p));
+        }
         roi
     }
 
