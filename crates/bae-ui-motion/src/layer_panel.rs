@@ -217,7 +217,7 @@ impl LayerPanel {
         let image = self
             .gpu
             .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None));
+            .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None, false));
         if let Some(img) = image {
             let r = img.rect;
             let at = |x: i32, y: i32| view.to_screen(DVec2::new(f64::from(x), f64::from(y)));

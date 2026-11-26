@@ -47,6 +47,7 @@ pub mod ids {
     /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
+    pub const MINI_FLOW: &str = "motion.comp.composition_mini_flowchart";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
@@ -234,6 +235,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
+    (ids::MINI_FLOW, "Composition Mini-Flowchart"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
@@ -458,6 +460,17 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
             format!("{name}: Add or Remove Keyframe"),
         );
     }
+    // E, Shift+E.
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": false }),
+        "Show Effects".to_owned(),
+    );
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": true }),
+        "Add Effects to Shown Properties".to_owned(),
+    );
     v
 }
 
@@ -467,9 +480,10 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
 /// `ae` keymap already binds. Commands other modules handle are bound when the
 /// app starts ([`late_bindings`]).
 pub fn bindings() -> KeymapBindings {
-    let v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
+    let mut v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
         k.status.works()
     }));
+    v.push(Binding::new("Tab", ids::MINI_FLOW).when("timeline"));
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
 }
 
@@ -985,6 +999,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
+        ids::MINI_FLOW => {
+            s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
+                stage, &info.path,
+            ));
+            cx.open_panel("timeline");
+        }
         ids::GO_START => s.set_time(&info, Time::ZERO),
         ids::GO_END => s.set_time(&info, info.duration),
         ids::STEP => {
@@ -1791,6 +1811,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp", "适合复合"),
     ("Fit to Comp Width", "适合复合宽度"),
     ("Fit to Comp Height", "适合复合高度"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

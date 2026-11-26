@@ -24,6 +24,7 @@
 pub mod actions;
 pub mod ae_panels;
 mod ae_shells;
+mod assist;
 mod audio_analysis;
 pub mod catalog;
 mod common;
@@ -87,6 +88,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     footage_panel::register,
     progress_metadata::register,
     paint_panels::register,
+    assist::register,
     // Chinese strings only.
     actions::register,
     context_menu::register,

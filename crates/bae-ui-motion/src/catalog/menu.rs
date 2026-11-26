@@ -501,7 +501,7 @@ const COMPOSITION: &[Node] = &[
     ),
     SEP,
     it(327701, "Composition Flowchart", "motion.comp.composition_flowchart", "", E, Later),
-    it(327702, "Composition Mini-Flowchart", "motion.comp.composition_mini_flowchart", "", E, Later),
+    it(327702, "Composition Mini-Flowchart", "motion.comp.composition_mini_flowchart", "", E, Done),
     SEP,
     sub(
         "VR",

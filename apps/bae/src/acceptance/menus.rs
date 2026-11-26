@@ -376,7 +376,7 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
     new_comp(&mut h);
     let targets: [(&str, egui::Vec2); 5] = [
         ("Name", egui::vec2(0.0, 420.0)), // Project panel, below the rows
-        ("Layer Name", egui::vec2(700.0, 120.0)), // Timeline graph
+        ("Source Name", egui::vec2(700.0, 120.0)), // Timeline graph
         ("Fit", egui::vec2(300.0, -250.0)), // Composition viewer
         ("Effects & Presets", egui::vec2(0.0, 40.0)), // Effects & Presets panel
         ("Render", egui::vec2(200.0, 0.0)), // Render Queue
@@ -466,7 +466,7 @@ fn text_fields_keep_delete_undo_and_select_all() {
     // Escape leaves the field; with the timeline focused, Delete deletes the
     // selected layer (AE).
     key(&mut h, Modifiers::NONE, Key::Escape);
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(&mut h, pos2(head.left() + 800.0, head.bottom() + 80.0));
     h.state().session().lock().selected_layers = vec![layer.clone()];
     key(&mut h, Modifiers::NONE, Key::Delete);
