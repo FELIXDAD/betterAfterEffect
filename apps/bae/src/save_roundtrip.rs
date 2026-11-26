@@ -683,8 +683,8 @@ mod ui_flow {
     }
 
     /// The 5090 final acceptance: keys go to the focused widget before the
-    /// motion shortcuts. Space plays with nothing focused; in the Render Queue's
-    /// output field it types a space (paths with spaces) and does not play.
+    /// motion shortcuts. Space plays with nothing focused; in a focused text
+    /// field it enters a space and leaves playback stopped.
     #[test]
     fn space_types_in_text_fields_and_plays_otherwise() {
         let mut ui = Ui::new();
@@ -708,7 +708,15 @@ mod ui_flow {
         ui.press(Key::Space, Modifiers::NONE);
         assert!(!session.lock().is_playing());
 
-        // Tab into a text field of the default workspace, then enter a space and two letters.
+        // Add to Render Queue uses Ctrl+M on Windows and Control+Command+M on macOS.
+        ui.press(Key::M, Modifiers::COMMAND | Modifiers::CTRL);
+        let queue = ui
+            .app
+            .resource::<bae_ui_motion::SharedRenderQueue>()
+            .unwrap()
+            .clone();
+        assert_eq!(queue.lock().items().len(), 1);
+        // The output link uses a native save dialog. Tab to a workspace text field.
         for _ in 0..300 {
             ui.press(Key::Tab, Modifiers::NONE);
             if ui.ctx.text_edit_focused() {
