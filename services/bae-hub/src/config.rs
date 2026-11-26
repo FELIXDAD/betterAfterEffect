@@ -134,7 +134,10 @@ pub struct HubConfig {
     /// Message size limit and write buffer cap of every client connection
     /// (`max_message_mib`). Clients use [`HubLimits::default`]; keep the
     /// message size the same, or messages between the two limits never get
-    /// through. A client that stops reading is dropped once the cap is reached.
+    /// through. The relay sends a client that does not keep up no new edits
+    /// while more than 1 MiB waits for it (session backpressure), so a
+    /// connection holds about one message plus 1 MiB; the cap only drops a
+    /// client that stopped reading for good.
     pub limits: HubLimits,
 }
 
@@ -316,8 +319,8 @@ pub fn default_config_text(token: &str) -> String {
 # idle_unload_secs = 600
 
 # 单条同步消息的上限（MiB，1–1024）。客户端固定用 256，两边要一致：
-# 改小后，超过它的工程层传不上来；改大也不会让客户端收得下更大的消息。
-# 不读数据的连接，积压超过"上限 + 16 MiB"就断开。
+# 改小后，需要发更大消息的客户端（第一次同步大的工程层）会反复断开重连；
+# 改大也不会让客户端收得下更大的消息。每个连接最多占约"上限 + 1 MiB"内存。
 # max_message_mib = 256
 
 # 团队令牌。客户端连接时带上其中一个。

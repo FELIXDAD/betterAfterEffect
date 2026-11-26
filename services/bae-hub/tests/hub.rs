@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use bae_hub::{Access, Anonymous};
 use bae_model::{Op, SublayerId, Value};
-use bae_sync::{DocKey, DocSet, PresenceState};
+use bae_sync::{DocKey, DocSet, HubLimits, HubTransport, PresenceState, SyncError};
 use common::*;
 
 const PROJECT: &str = "film";
@@ -319,6 +319,129 @@ fn updates_over_16_mib_go_through_the_hub() {
         .prim(&p("/comps/main/layers/title"))
         .and_then(|t| t.value("notes").cloned());
     assert!(got == Some(Value::String(big)), "bob got a different value");
+}
+
+/// `max_message_mib` in `hub.toml` (`HubConfig::limits`) is what the hub's
+/// WebSocket handshake uses: with 1 MiB, a client on the default limits that
+/// sends a 2 MiB edit is dropped and the edit goes nowhere, while small edits
+/// still go through. A client configured with the same limits refuses the edit
+/// itself and stays connected.
+#[test]
+fn max_message_mib_reaches_the_handshake() {
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.limits = HubLimits::with_max_message_size(1 << 20);
+    cfg.validate().unwrap();
+    let hub = start(cfg);
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "alice", &base),
+        Client::join(addr, PROJECT, WRITE, "bob", &base),
+    ];
+    let root = DocKey::sublayer(&SublayerId::root());
+    // A small edit goes through.
+    let small = paste(&mut clients[0], "small", 1000, 1);
+    pump_until(&mut clients, Duration::from_secs(10), |c| {
+        c[1].stage
+            .version(&root)
+            .is_some_and(|v| v.includes_vv(&small))
+    });
+    // A 2 MiB one is over the hub's limit: the hub drops the sender.
+    let big = paste(&mut clients[0], "big", 2 << 20, 2);
+    let (alice, others) = clients.split_at_mut(1);
+    let e = pump_until_dropped(&mut alice[0], others, Duration::from_secs(10));
+    eprintln!("alice: {e:?}");
+    assert!(e.is_some(), "the hub accepted a message over its limit");
+    pump_for(others, Duration::from_millis(300));
+    let bob = others[0].stage.version(&root).unwrap();
+    assert!(!bob.includes_vv(&big), "bob got the edit over the limit");
+
+    // A client with the hub's limits does not send it at all.
+    let link = HubTransport::connect_with(
+        &url(addr, PROJECT),
+        Some(WRITE),
+        Duration::from_secs(5),
+        HubLimits::with_max_message_size(1 << 20),
+    )
+    .unwrap();
+    let mut carol = Client::join(addr, PROJECT, WRITE, "carol", &base);
+    carol.link = bae_sync::ThreadedTransport::spawn(link, Duration::from_millis(1), || {});
+    paste(&mut carol, "big", 2 << 20, 3);
+    let start = Instant::now();
+    let refused = loop {
+        let out = carol.pump();
+        if let Some(e) = out.errors.into_iter().next() {
+            break e;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "carol sent it");
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    assert!(
+        matches!(refused, SyncError::MessageTooLarge { max, .. } if max == 1 << 20),
+        "{refused:?}"
+    );
+    pump_for(std::slice::from_mut(&mut carol), Duration::from_millis(200));
+}
+
+/// A large upload on a slow uplink takes longer than the hub's peer timeout,
+/// and the client's hellos wait behind it: the hub counts the bytes that keep
+/// arriving as signs of life and does not drop the client. (It used to count
+/// only whole messages.)
+#[test]
+fn a_slow_upload_is_not_taken_for_a_dead_link() {
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.peer_timeout = Duration::from_millis(500);
+    let hub = start(cfg);
+    let addr = hub.local_addr();
+    // 4 MB/s up: a 6 MiB edit takes about 1.5 s, three timeouts.
+    let slow = throttled_proxy(addr, 4_000_000);
+    let base = base_snapshots();
+    let mut clients = vec![
+        Client::join(slow, PROJECT, WRITE, "alice", &base),
+        Client::join(addr, PROJECT, WRITE, "bob", &base),
+    ];
+    for c in &mut clients {
+        // Idle clients stay well within the timeout.
+        c.session.config_mut().hello_interval = Some(Duration::from_millis(100));
+    }
+    pump_until(&mut clients, Duration::from_secs(10), |c| {
+        c.iter().all(|c| c.session.is_connected())
+    });
+    let want = paste(&mut clients[0], "notes", 6 << 20, 4);
+    let root = DocKey::sublayer(&SublayerId::root());
+    // `Client::pump` panics if the hub drops alice.
+    let took = pump_until(&mut clients, Duration::from_secs(30), |c| {
+        c[1].stage
+            .version(&root)
+            .is_some_and(|v| v.includes_vv(&want))
+    });
+    assert!(
+        took > Duration::from_millis(500),
+        "the upload was not slow: {took:?}"
+    );
+}
+
+/// Read-only connections may not send messages over 16 MiB: their edits are
+/// dropped anyway, so the hub does not buffer large ones. A larger message
+/// drops the connection; small edits are still only ignored.
+#[test]
+fn read_only_clients_cannot_send_large_messages() {
+    let data = tempfile::tempdir().unwrap();
+    let hub = start(config(data.path()));
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut others = vec![Client::join(addr, PROJECT, WRITE, "editor", &base)];
+    let mut viewer = Client::join(addr, PROJECT, READ, "viewer", &base);
+    paste(&mut viewer, "small", 1000, 5);
+    assert!(pump_until_dropped(&mut viewer, &mut others, Duration::from_millis(300)).is_none());
+    paste(&mut viewer, "big", 17 << 20, 6);
+    let e = pump_until_dropped(&mut viewer, &mut others, Duration::from_secs(20));
+    assert!(
+        e.is_some(),
+        "the hub took a 17 MiB message from a read-only client"
+    );
 }
 
 /// Acceptance (task book 10): ten clients, LAN latency < 100 ms. Here on

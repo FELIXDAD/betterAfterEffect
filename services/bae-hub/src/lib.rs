@@ -3,9 +3,10 @@
 //! A small server for a NAS or any always-on machine on the team's LAN:
 //!
 //! - **Real-time sync.** `GET /projects/<id>` with a WebSocket upgrade carries
-//!   the `bae-sync` protocol, one message per binary frame. The handshake and
-//!   framing are `bae_sync::HubTransport`, the same code the clients use; each
-//!   project is one [`bae_sync::Relay`] and every connection a transport on it.
+//!   the `bae-sync` protocol, one message per binary WebSocket message. The
+//!   handshake and framing are `bae_sync::HubTransport`, the same code the
+//!   clients use; each project is one [`bae_sync::Relay`] and every connection
+//!   a transport on it.
 //! - **Project logs.** Each project's documents are kept in
 //!   `<data>/projects/<id>/` in the shared-folder log format of `bae-sync`, so
 //!   the hub survives restarts and crashes with nothing lost but the last

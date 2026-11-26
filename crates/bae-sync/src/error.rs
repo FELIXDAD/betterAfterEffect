@@ -35,6 +35,11 @@ pub enum SyncError {
     NotADirectory(PathBuf),
     #[error("hub connection: {0}")]
     Hub(String),
+    /// An encoded message is larger than the transport may send (`HubLimits`).
+    /// Nothing was sent and the link is still usable: the session skips that
+    /// document (reported in `PumpOutcome::errors`) and sends the others.
+    #[error("message of {size} bytes is over the limit of {max} bytes")]
+    MessageTooLarge { size: usize, max: usize },
     #[error("no named version {0}")]
     UnknownCheckpoint(String),
     /// The version includes ops of sublayer `.0` that have not arrived here yet.

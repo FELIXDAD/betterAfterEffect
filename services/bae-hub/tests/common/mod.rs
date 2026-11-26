@@ -3,7 +3,8 @@
 //! random edits.
 #![allow(dead_code)]
 
-use std::net::SocketAddr;
+use std::io::{Read, Write};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -108,6 +109,89 @@ impl Client {
     pub fn fingerprint(&self) -> String {
         fingerprint(&self.stage)
     }
+}
+
+/// A TCP proxy to `target` on a random loopback port that passes at most
+/// `bytes_per_sec` from the client to `target` (the other way is not limited):
+/// a slow uplink.
+pub fn throttled_proxy(target: SocketAddr, bytes_per_sec: usize) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for client in listener.incoming() {
+            let Ok(client) = client else {
+                return;
+            };
+            let Ok(server) = TcpStream::connect(target) else {
+                return;
+            };
+            let (client2, server2) = (client.try_clone().unwrap(), server.try_clone().unwrap());
+            std::thread::spawn(move || relay_bytes(client, server, Some(bytes_per_sec)));
+            std::thread::spawn(move || relay_bytes(server2, client2, None));
+        }
+    });
+    addr
+}
+
+fn relay_bytes(mut from: TcpStream, mut to: TcpStream, rate: Option<usize>) {
+    let mut buf = vec![0u8; 16 << 10];
+    loop {
+        let n = match from.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        if to.write_all(&buf[..n]).is_err() {
+            break;
+        }
+        if let Some(rate) = rate {
+            std::thread::sleep(Duration::from_secs_f64(n as f64 / rate as f64));
+        }
+    }
+    let _ = to.shutdown(Shutdown::Write);
+}
+
+/// Set `attr` of the title layer to `len` random letters (Loro cannot compress
+/// them much). Returns the version that includes the edit.
+pub fn paste(c: &mut Client, attr: &str, len: usize, seed: u64) -> bae_model::loro::VersionVector {
+    use bae_sync::DocSet;
+    let mut rng = Rng::new(seed);
+    let text: String = (0..len)
+        .map(|_| char::from(b'a' + rng.below(26) as u8))
+        .collect();
+    c.stage.set_edit_target(&SublayerId::root()).unwrap();
+    let who = c.who.clone();
+    c.stage
+        .transact(&who, "paste", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: attr.into(),
+                value: Some(Value::String(text)),
+            })
+        })
+        .unwrap();
+    c.stage
+        .version(&bae_sync::DocKey::sublayer(&SublayerId::root()))
+        .unwrap()
+}
+
+/// Pump `c` (not panicking on a link error) until its link fails; `others`
+/// keep pumping meanwhile. Returns the error, or `None` after `timeout`.
+pub fn pump_until_dropped(
+    c: &mut Client,
+    others: &mut [Client],
+    timeout: Duration,
+) -> Option<SyncError> {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if let Err(e) = c.session.pump(&mut c.stage, &mut c.link) {
+            return Some(e);
+        }
+        for o in others.iter_mut() {
+            o.pump();
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    None
 }
 
 /// Pump every client until `done` holds (panics after `timeout`); returns how

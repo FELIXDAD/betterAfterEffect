@@ -37,9 +37,18 @@ pub struct SessionConfig {
     /// Others drop us after this long without a heartbeat (sent along with each
     /// update, so receivers do not need to agree on it).
     pub presence_ttl: Duration,
+    /// Backpressure: no local changes are sent while the transport has more than
+    /// this many bytes waiting ([`Transport::backlog`]); they go out on a later
+    /// pump. A slow link then gets one large message at a time, and what waits
+    /// for it stays in the documents instead of in memory.
+    pub max_backlog: usize,
 }
 
 impl SessionConfig {
+    /// Default [`max_backlog`](Self::max_backlog): 1 MiB.
+    pub const DEFAULT_MAX_BACKLOG: usize = 1 << 20;
+
+    /// Default settings for `client`.
     pub fn new(client: ClientId) -> Self {
         SessionConfig {
             client,
@@ -48,6 +57,7 @@ impl SessionConfig {
             min_send_interval: Duration::ZERO,
             presence_heartbeat: Duration::from_secs(5),
             presence_ttl: Duration::from_secs(20),
+            max_backlog: Self::DEFAULT_MAX_BACKLOG,
         }
     }
 }
@@ -71,8 +81,11 @@ pub struct PumpOutcome {
     pub unknown_docs: Vec<DocKey>,
     /// Problems with single documents that were skipped while the link stayed
     /// usable: received data that could not be imported (corrupt payload, model
-    /// error) or a document that could not be exported (for a reply or for
-    /// sending). Messages of unknown types never get here: transports skip them.
+    /// error), a document that could not be exported (for a reply or for
+    /// sending), or one whose update is larger than the transport may send
+    /// ([`SyncError::MessageTooLarge`]; tried again once the remote's version of
+    /// it changes, e.g. after a reconnect). Messages of unknown types never get
+    /// here: transports skip them.
     pub errors: Vec<SyncError>,
     /// Someone came online, went offline or changed their presence.
     pub presence_changed: bool,
@@ -124,6 +137,18 @@ pub struct SyncSession {
     /// What a pump that failed did before the error, until it is reported (by the
     /// next pump or [`SyncSession::take_interrupted`]).
     interrupted: Option<PumpOutcome>,
+    /// Data sent but not yet confirmed by a remote `Hello`: per document, the
+    /// version the remote has once it arrives, and when the oldest unconfirmed
+    /// part was sent. A `Hello` sent before the data arrived does not undo it
+    /// (see `handle`).
+    in_flight: BTreeMap<DocKey, (VersionVector, Instant)>,
+    /// The last pump that saw the transport's backlog above zero.
+    last_busy: Option<Instant>,
+    /// Documents listed in the remote's last `Hello`.
+    listed: BTreeSet<DocKey>,
+    /// Documents whose update did not fit in one message, with what the remote
+    /// had then: not exported again until that changes.
+    too_large: BTreeMap<DocKey, VersionVector>,
 }
 
 impl SyncSession {
@@ -144,6 +169,10 @@ impl SyncSession {
             last_presence: None,
             peers: PresenceTable::default(),
             interrupted: None,
+            in_flight: BTreeMap::new(),
+            last_busy: None,
+            listed: BTreeSet::new(),
+            too_large: BTreeMap::new(),
         }
     }
 
@@ -227,6 +256,10 @@ impl SyncSession {
         self.remote_protocol = None;
         self.last_hello = None;
         self.announced.clear();
+        self.in_flight.clear();
+        self.last_busy = None;
+        self.listed.clear();
+        self.too_large.clear();
     }
 
     /// Documents with local ops the remote is not known to have yet ("unsynced
@@ -312,6 +345,7 @@ impl SyncSession {
         incoming: &mut Incoming,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
+        self.note_backlog(transport, now);
         self.maybe_hello(docs, transport, now, out)?;
         for _ in 0..self.config.max_messages_per_pump {
             let Some(msg) = transport.recv()? else {
@@ -331,10 +365,29 @@ impl SyncSession {
         let send_due = self
             .last_send
             .is_none_or(|t| now.saturating_duration_since(t) >= self.config.min_send_interval);
-        if send_due && self.flush(docs, transport, out)? {
+        if send_due && self.flush(docs, transport, now, out)? {
             self.last_send = Some(now);
         }
+        self.note_backlog(transport, now);
         Ok(())
+    }
+
+    /// Remember when the transport last had data waiting (see `in_flight`).
+    fn note_backlog(&mut self, transport: &dyn Transport, now: Instant) {
+        if transport.backlog() > 0 {
+            self.last_busy = Some(now);
+        }
+    }
+
+    /// How long after it left this process data counts as on its way: a remote
+    /// `Hello` that arrives within this time and lacks it was probably sent
+    /// before the data arrived. Two of our hello intervals (the remote's is
+    /// usually the same), 10 s without one.
+    fn in_flight_grace(&self) -> Duration {
+        self.config
+            .hello_interval
+            .unwrap_or(Duration::from_secs(5))
+            .saturating_mul(2)
     }
 
     fn maybe_hello(
@@ -389,9 +442,34 @@ impl SyncSession {
                         out.unknown_docs.push(key.clone());
                     }
                 }
-                // Replace, not merge: after a hub restart it may have less than we
-                // sent, and then we must send it again.
-                self.remote = Some(versions.into_iter().collect());
+                // Replace, not merge: if the remote lacks something we sent (it
+                // was lost, refused, or dropped because the remote did not have
+                // the document yet), we must send it again.
+                let mut remote: BTreeMap<DocKey, VersionVector> = versions.into_iter().collect();
+                let listed: BTreeSet<DocKey> = remote.keys().cloned().collect();
+                // Except data still on its way: the remote sent this `Hello`
+                // before it arrived (a large message on a slow link takes many
+                // hello intervals). Sending it again would only double the
+                // transfer.
+                let grace = self.in_flight_grace();
+                let (busy, before) = (self.last_busy, &self.listed);
+                self.in_flight.retain(|doc, (version, sent)| {
+                    let has = remote.get(doc);
+                    let arrived = has.is_some_and(|v| v.includes_vv(version));
+                    // The remote just added the document: it may have dropped
+                    // what came before (2.5).
+                    let added = has.is_some() && !before.contains(doc);
+                    // Left this process long ago: lost, not late.
+                    let left = busy.map_or(*sent, |b| b.max(*sent));
+                    let overdue = now.saturating_duration_since(left) >= grace;
+                    if arrived || added || overdue {
+                        return false;
+                    }
+                    remote.entry(doc.clone()).or_default().merge(version);
+                    true
+                });
+                self.listed = listed;
+                self.remote = Some(remote);
             }
             Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
                 self.stats.bytes_received += data.len() as u64;
@@ -413,10 +491,22 @@ impl SyncSession {
                 };
                 match docs.export_snapshot(&doc) {
                     Ok(data) => {
-                        if let Some(remote) = &mut self.remote {
-                            remote.entry(doc.clone()).or_default().merge(&version);
+                        let msg = Message::Snapshot {
+                            doc: doc.clone(),
+                            version: version.clone(),
+                            data,
+                        };
+                        match send(&mut self.stats, transport, msg, out) {
+                            Ok(()) => {
+                                if let Some(remote) = &mut self.remote {
+                                    remote.entry(doc.clone()).or_default().merge(&version);
+                                }
+                                note_sent(&mut self.in_flight, doc, &version, now);
+                            }
+                            // Only this message was refused.
+                            Err(e @ SyncError::MessageTooLarge { .. }) => out.errors.push(e),
+                            Err(e) => return Err(e),
                         }
-                        self.send(transport, Message::Snapshot { doc, version, data }, out)?;
                     }
                     Err(e) => out.errors.push(e),
                 }
@@ -493,41 +583,59 @@ impl SyncSession {
         }
     }
 
-    /// Send every document's ops the remote is not known to have. Returns whether
-    /// anything was sent.
+    /// Send every document's ops the remote is not known to have, one document
+    /// at a time, until the transport's backlog is over
+    /// [`SessionConfig::max_backlog`]: the rest waits for a later pump. Returns
+    /// whether anything was sent.
     fn flush(
         &mut self,
         docs: &dyn DocSet,
         transport: &mut dyn Transport,
+        now: Instant,
         out: &mut PumpOutcome,
     ) -> Result<bool, SyncError> {
         let Some(remote) = &mut self.remote else {
             return Ok(false);
         };
-        let mut batch = Vec::new();
+        let mut sent = false;
         for key in docs.doc_keys() {
+            if transport.backlog() > self.config.max_backlog {
+                break;
+            }
             let Some(local) = docs.version(&key) else {
                 continue;
             };
             let known = remote.entry(key.clone()).or_default();
-            if known.includes_vv(&local) {
+            if known.includes_vv(&local) || self.too_large.get(&key) == Some(known) {
                 continue;
             }
-            match docs.export_updates(&key, known) {
-                Ok(data) => {
-                    known.merge(&local);
-                    batch.push(Message::Updates {
-                        doc: key,
-                        version: local,
-                        data,
-                    });
+            let data = match docs.export_updates(&key, known) {
+                Ok(data) => data,
+                Err(e) => {
+                    out.errors.push(e);
+                    continue;
                 }
-                Err(e) => out.errors.push(e),
+            };
+            let msg = Message::Updates {
+                doc: key.clone(),
+                version: local.clone(),
+                data,
+            };
+            match send(&mut self.stats, transport, msg, out) {
+                Ok(()) => {
+                    known.merge(&local);
+                    self.too_large.remove(&key);
+                    note_sent(&mut self.in_flight, key, &local, now);
+                    sent = true;
+                }
+                // Only this document is stuck (spec 3.1); the others go on. It
+                // is tried again when the remote's version of it changes.
+                Err(e @ SyncError::MessageTooLarge { .. }) => {
+                    self.too_large.insert(key, known.clone());
+                    out.errors.push(e);
+                }
+                Err(e) => return Err(e),
             }
-        }
-        let sent = !batch.is_empty();
-        for msg in batch {
-            self.send(transport, msg, out)?;
         }
         Ok(sent)
     }
@@ -538,12 +646,40 @@ impl SyncSession {
         msg: Message,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        if let Message::Updates { data, .. } | Message::Snapshot { data, .. } = &msg {
-            self.stats.bytes_sent += data.len() as u64;
-        }
-        transport.send(msg)?;
-        self.stats.messages_sent += 1;
-        out.sent += 1;
-        Ok(())
+        send(&mut self.stats, transport, msg, out)
     }
+}
+
+/// Record data of `doc` up to `version` as on its way. An earlier send that is
+/// not confirmed yet keeps its time: the grace for lost data counts from the
+/// oldest unconfirmed send, so steady edits do not put off its repair.
+fn note_sent(
+    in_flight: &mut BTreeMap<DocKey, (VersionVector, Instant)>,
+    doc: DocKey,
+    version: &VersionVector,
+    now: Instant,
+) {
+    in_flight
+        .entry(doc)
+        .or_insert_with(|| (VersionVector::default(), now))
+        .0
+        .merge(version);
+}
+
+/// Send `msg` and count it.
+fn send(
+    stats: &mut SyncStats,
+    transport: &mut dyn Transport,
+    msg: Message,
+    out: &mut PumpOutcome,
+) -> Result<(), SyncError> {
+    let data_len = match &msg {
+        Message::Updates { data, .. } | Message::Snapshot { data, .. } => data.len() as u64,
+        _ => 0,
+    };
+    transport.send(msg)?;
+    stats.bytes_sent += data_len;
+    stats.messages_sent += 1;
+    out.sent += 1;
+    Ok(())
 }

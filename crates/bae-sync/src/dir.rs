@@ -47,6 +47,9 @@ const MAX_DEPTH: usize = 16;
 const FOLDER_CLIENT: &str = "shared-folder";
 /// The cleanup of departed clients' logs runs at most this often.
 const LOG_GC_EVERY: Duration = Duration::from_secs(3600);
+/// What the cleanup writes into our lock file to read the folder's clock from
+/// its modification time (the same bytes every time).
+const LOCK_TEXT: &[u8] = b"bae sync session lock\n";
 
 /// Settings of a [`DirTransport`].
 #[derive(Clone, Debug)]
@@ -137,6 +140,9 @@ pub struct DirStats {
     pub repairs: u64,
     /// Other clients' logs deleted because they were no longer needed (§4.6).
     pub logs_removed: u64,
+    /// Logs read in full by that cleanup (it skips documents where nothing
+    /// changed since a pass that found nothing to delete).
+    pub logs_scanned: u64,
 }
 
 /// The shared-folder [`Transport`]. Its I/O is synchronous and may be slow on a
@@ -145,7 +151,8 @@ pub struct DirTransport {
     root: PathBuf,
     client: ClientId,
     config: DirConfig,
-    _lock: File,
+    /// `updates/<client>.lock`, held open (and locked) for the session.
+    lock: File,
     own: BTreeMap<DocKey, OwnLog>,
     sources: BTreeMap<PathBuf, Source>,
     /// Union of the versions of everything read from or written to the folder.
@@ -161,8 +168,22 @@ pub struct DirTransport {
     presence_seen: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
     /// When the cleanup of departed clients' logs last ran.
     last_gc: Option<Instant>,
+    /// Per document, what the cleanup's last full read of its logs saw when it
+    /// found nothing to delete: nothing to do until that changes.
+    gc_idle: BTreeMap<DocKey, GcSeen>,
     #[cfg(feature = "watch")]
     _watcher: Option<notify::RecommendedWatcher>,
+}
+
+/// `(len, mtime)` of a file, to notice changes without reading it.
+type Stamp = (u64, Option<SystemTime>);
+
+/// What decides a cleanup pass over one document: every log's path and stamp
+/// (`None`: unreadable) and which of them looked departed.
+#[derive(Debug, PartialEq)]
+struct GcSeen {
+    stamps: Vec<(PathBuf, Option<Stamp>)>,
+    candidates: Vec<usize>,
 }
 
 impl std::fmt::Debug for DirTransport {
@@ -210,7 +231,7 @@ impl DirTransport {
             root,
             client,
             config,
-            _lock: lock,
+            lock,
             own: BTreeMap::new(),
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
@@ -223,6 +244,7 @@ impl DirTransport {
             stats: DirStats::default(),
             presence_seen: BTreeMap::new(),
             last_gc: None,
+            gc_idle: BTreeMap::new(),
             #[cfg(feature = "watch")]
             _watcher: None,
         };
@@ -573,10 +595,24 @@ impl DirTransport {
 
     /// Read this client's existing log for `doc` (left by an earlier session):
     /// deliver its records, cut off a torn tail, and continue appending to it.
+    ///
+    /// A log from a newer version of the format stays as it is (newer clients
+    /// read it; it may hold ops nobody else has) and this fails, so nothing is
+    /// written over it. Only a log whose header is damaged is renamed aside: it
+    /// holds nothing anyone can read.
     fn adopt_own(&mut self, doc: &DocKey, path: &Path) -> Result<(), SyncError> {
         let mut f = File::open(path).map_err(SyncError::io(path))?;
-        let header = read_header(&mut f).map_err(SyncError::io(path))?;
-        let Some((header, header_len)) = header.filter(|(h, _)| h.doc == doc.as_str()) else {
+        let header = match read_header_record(&mut f).map_err(SyncError::io(path))? {
+            Header::Read(h, len) if h.doc == doc.as_str() => Some((h, len)),
+            Header::Newer(version) => {
+                return Err(SyncError::io(path)(io::Error::other(format!(
+                    "written by a newer version of BAE (log version {version}); \
+                     not reading or replacing it"
+                ))));
+            }
+            Header::Read(..) | Header::Damaged => None,
+        };
+        let Some((header, header_len)) = header else {
             // Unreadable: keep it for inspection, start a new log on the next write.
             let aside = path.with_extension(format!("corrupt-{}", new_generation()));
             fs::rename(path, &aside).map_err(SyncError::io(path))?;
@@ -701,7 +737,16 @@ impl DirTransport {
         let Some(after) = self.config.log_gc_after else {
             return 0;
         };
-        let now = SystemTime::now();
+        // Ages are measured with the folder's clock, not ours: a client whose
+        // clock runs ahead (or a file server whose clock is behind) must not
+        // see every log as old.
+        let now = match self.share_clock() {
+            Ok(now) => now,
+            Err(e) => {
+                self.note(Err(e));
+                return 0;
+            }
+        };
         let mut by_doc: BTreeMap<&DocKey, Vec<(&str, &Path)>> = BTreeMap::new();
         for (doc, owner, path) in logs {
             by_doc
@@ -739,12 +784,31 @@ impl DirTransport {
         if candidates.is_empty() {
             return 0;
         }
+        // A pass that reads every log of the document and deletes nothing comes
+        // to the same answer until a log changes or another one looks departed
+        // (e.g. a log nobody can delete: a torn tail, ops in nobody's snapshot).
+        let seen = GcSeen {
+            stamps: group
+                .iter()
+                .map(|&(_, path)| {
+                    let meta = fs::metadata(path).ok();
+                    (path.to_owned(), meta.map(|m| (m.len(), m.modified().ok())))
+                })
+                .collect(),
+            candidates: candidates.clone(),
+        };
+        if self.gc_idle.get(doc) == Some(&seen) {
+            return 0;
+        }
+        let mut failed = false;
         let mut scans = Vec::with_capacity(group.len());
         for &(owner, path) in group {
+            self.stats.logs_scanned += 1;
             scans.push(match scan_log(path, doc, owner) {
                 Ok(scan) => scan,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => None,
                 Err(e) => {
+                    failed = true;
                     self.note(Err(SyncError::io(path)(e)));
                     None
                 }
@@ -792,16 +856,42 @@ impl DirTransport {
                 }
                 // Someone else's cleanup was quicker.
                 Err(e) if e.kind() == io::ErrorKind::NotFound => removed[i] = true,
-                Err(e) => self.note(Err(SyncError::io(path)(e))),
+                Err(e) => {
+                    failed = true;
+                    self.note(Err(SyncError::io(path)(e)));
+                }
             }
+        }
+        if count == 0 && !failed {
+            self.gc_idle.insert(doc.clone(), seen);
+        } else {
+            self.gc_idle.remove(doc);
         }
         count
     }
 
+    /// The folder's clock: the modification time the file server gives our
+    /// lock file when we write to it now. Only file times from the folder are
+    /// compared with it. A time the server reports late (cached attributes)
+    /// is older, which only keeps logs longer.
+    fn share_clock(&self) -> Result<SystemTime, SyncError> {
+        let path = self
+            .root
+            .join(UPDATES)
+            .join(format!("{}.lock", self.client));
+        let mut f = &self.lock;
+        let stamp = f
+            .seek(SeekFrom::Start(0))
+            .and_then(|_| f.write_all(LOCK_TEXT))
+            .and_then(|()| f.flush())
+            .and_then(|()| fs::metadata(&path)?.modified());
+        stamp.map_err(SyncError::io(&path))
+    }
+
     /// Neither the log at `path` nor `owner`'s presence file changed for `after`
-    /// (no presence file counts as old). Both times come from the shared folder
-    /// and are compared with our clock; a time we cannot read, or one in the
-    /// future, counts as recent, so clock skew can only keep a log longer.
+    /// before `now`, the folder's clock (no presence file counts as old). All
+    /// three times come from the file server, so our own clock does not matter;
+    /// a time we cannot read, or one after `now`, counts as recent.
     fn departed(&self, owner: &str, path: &Path, now: SystemTime, after: Duration) -> bool {
         let old = |meta: fs::Metadata| {
             meta.modified()
@@ -824,12 +914,29 @@ impl DirTransport {
 
     // ---- writing ----
 
+    /// Before writing our log for `doc`: if a log of ours is there that no poll
+    /// took over (the listing missed it, or reading it failed), take it over now
+    /// instead of writing over it. It may be the only copy of ops, ours or (once
+    /// a compaction took them in, §4.6) a departed client's.
+    fn adopt_before_write(&mut self, doc: &DocKey) -> Result<(), SyncError> {
+        if self.own.contains_key(doc) {
+            return Ok(());
+        }
+        let path = self.log_path(doc);
+        match fs::metadata(&path) {
+            Ok(_) => self.adopt_own(doc, &path),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(SyncError::io(&path)(e)),
+        }
+    }
+
     fn append(
         &mut self,
         doc: &DocKey,
         version: &VersionVector,
         msg: &Message,
     ) -> Result<(), SyncError> {
+        self.adopt_before_write(doc)?;
         let record = encode_record(&msg.encode());
         let appended = match self.own.get_mut(doc) {
             Some(own) => append_checked(own, &record)?,
@@ -878,6 +985,7 @@ impl DirTransport {
         version: &VersionVector,
         msg: &Message,
     ) -> Result<(), SyncError> {
+        self.adopt_before_write(doc)?;
         self.write_fresh(doc, &encode_record(&msg.encode()))?;
         let own = self.own.get_mut(doc).expect("written");
         own.compacted_len = own.len;
@@ -1195,42 +1303,105 @@ pub(crate) fn parse_records(buf: &[u8]) -> (Vec<&[u8]>, usize) {
 /// The header record at the start of `f`, and its size; `None` if it is not
 /// (yet) complete and intact, or from a newer format version.
 fn read_header(f: &mut File) -> io::Result<Option<(LogHeader, u64)>> {
+    Ok(match read_header_record(f)? {
+        Header::Read(header, len) => Some((header, len)),
+        Header::Newer(_) | Header::Damaged => None,
+    })
+}
+
+/// What the start of a log holds.
+enum Header {
+    /// An intact header of this format version (or an older one), and its size.
+    Read(LogHeader, u64),
+    /// An intact header of a newer version of the format.
+    Newer(u32),
+    /// Too short, damaged, or not a log.
+    Damaged,
+}
+
+fn read_header_record(f: &mut File) -> io::Result<Header> {
     f.seek(SeekFrom::Start(0))?;
     let mut head = [0u8; RECORD_HEADER];
     if let Err(e) = f.read_exact(&mut head) {
         return if e.kind() == io::ErrorKind::UnexpectedEof {
-            Ok(None)
+            Ok(Header::Damaged)
         } else {
             Err(e)
         };
     }
     let len = u32::from_le_bytes(head[..4].try_into().expect("4 bytes")) as usize;
     if len > MAX_HEADER {
-        return Ok(None);
+        return Ok(Header::Damaged);
     }
     let mut payload = vec![0u8; len];
     if let Err(e) = f.read_exact(&mut payload) {
         return if e.kind() == io::ErrorKind::UnexpectedEof {
-            Ok(None)
+            Ok(Header::Damaged)
         } else {
             Err(e)
         };
     }
     if head[4..] != checksum(&payload) {
-        return Ok(None);
+        return Ok(Header::Damaged);
+    }
+    // Only the fields every version has: a newer header may differ in the rest.
+    #[derive(Deserialize)]
+    struct Version {
+        format: String,
+        version: u32,
+    }
+    match serde_json::from_slice::<Version>(&payload) {
+        Ok(v) if v.format == LOG_FORMAT && v.version > LOG_VERSION => {
+            return Ok(Header::Newer(v.version));
+        }
+        Ok(v) if v.format == LOG_FORMAT => {}
+        _ => return Ok(Header::Damaged),
     }
     let Ok(header) = serde_json::from_slice::<LogHeader>(&payload) else {
-        return Ok(None);
+        return Ok(Header::Damaged);
     };
-    if header.format != LOG_FORMAT || header.version > LOG_VERSION {
-        return Ok(None);
-    }
-    Ok(Some((header, (RECORD_HEADER + len) as u64)))
+    Ok(Header::Read(header, (RECORD_HEADER + len) as u64))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cleanup's "now" is the file server's: the time it stamps on our lock
+    /// file when we write to it, whatever our own clock says. File times are
+    /// compared only with it.
+    #[test]
+    fn cleanup_ages_logs_by_the_folder_clock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let client = ClientId::new("me").unwrap();
+        let t = DirTransport::open(tmp.path(), client, DirConfig::default()).unwrap();
+        let day = Duration::from_secs(24 * 3600);
+        let lock = tmp.path().join("updates/me.lock");
+        File::options()
+            .write(true)
+            .open(&lock)
+            .unwrap()
+            .set_modified(SystemTime::now() - day * 1000)
+            .unwrap();
+        let before = SystemTime::now() - Duration::from_secs(1);
+        let now = t.share_clock().unwrap();
+        assert_eq!(now, fs::metadata(&lock).unwrap().modified().unwrap());
+        assert!(now >= before, "the lock file was not written");
+
+        let log = tmp.path().join("updates/root/gone.log");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::write(&log, b"").unwrap();
+        File::options()
+            .write(true)
+            .open(&log)
+            .unwrap()
+            .set_modified(now - day * 3)
+            .unwrap();
+        let week = day * 7;
+        assert!(!t.departed("gone", &log, now, week));
+        // Whatever our clock says, only the folder's counts.
+        assert!(t.departed("gone", &log, now + day * 5, week));
+    }
 
     #[test]
     fn records_stop_at_torn_or_corrupt_data() {

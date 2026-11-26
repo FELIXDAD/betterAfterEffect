@@ -93,6 +93,10 @@
   - `hub.toml` 新增 `max_message_mib`（可选，默认 256，范围 1–1024；上限来自工程日志一条记录最多 1 GiB）。没有对应的环境变量，和 `idle_unload_secs` 一样。
   - 写缓冲上限跟着它走（上限 + 16 MiB）：只发不收的客户端积压超过上限就被断开，不用等 60 秒超时。
   - 测试：`config::tests::max_message_mib`（默认值、显式值、越界值拒绝启动）、`tests/hub.rs` 的 `updates_over_16_mib_go_through_the_hub`（20 MiB 的修改经 Hub 传给另一个客户端；用 tungstenite 默认设置时 Hub 断开发送方）。
+- 审查后（09 改的，同一分支）：
+  - 写缓冲上限不再是常态：会话有了背压（spec 2.4），给慢的或不读的客户端最多排约 1 MiB 加一条消息，不断开它，它恢复后补齐。Hub 内存：每个连接最多约一条消息 + 1 MiB，tungstenite 的缓冲只有几百 KiB（消息分成 256 KiB 的帧发送）。
+  - `link.rs`：超时按收到的字节算（`HubTransport::bytes_received()`），大的上传在慢链路上超过 60 秒也不会被当成断线；只读连接 `set_receive_limit(16 MiB)`，不再让 Hub 缓冲 256 MiB 的消息再丢掉；转发 `backlog()` 和 `max_message_size()`。
+  - 测试（`tests/hub.rs`）：`max_message_mib_reaches_the_handshake`（Hub 设 1 MiB 时，默认设置的客户端发 2 MiB 被断开、别人收不到，小修改照常；用同样上限的客户端自己就不发）、`a_slow_upload_is_not_taken_for_a_dead_link`（4 MB/s 的代理、6 MiB、超时 0.5 秒）、`read_only_clients_cannot_send_large_messages`（17 MiB 被断开）。去掉对应的修改时都失败。
 
 ## 请求（其他工作流在这里留言）
 

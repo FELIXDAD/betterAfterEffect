@@ -951,3 +951,148 @@ fn log_cleanup_can_be_turned_off() {
     // The same folder with cleanup on.
     assert_eq!(a.dir.remove_departed_logs(), 2);
 }
+
+/// A log of ours that the first poll did not take over (the listing missed it,
+/// or reading it failed for a moment) is read before anything is written to
+/// it, not replaced: after §4.6 it can be the only copy of ops (here: our own
+/// unsaved edits). It used to be renamed over with a new log.
+#[test]
+fn an_own_log_the_poll_missed_is_read_before_writing() {
+    let (_tmp, dir) = project_dir();
+    let mut d = Client::open(&dir, "d", fast(), 1);
+    mark(&mut d, "d_unsaved");
+    drop(d);
+    // The restarted client's first poll does not see its logs.
+    let logs = logs_of(&dir, "d");
+    let hidden: Vec<PathBuf> = logs.iter().map(|l| l.with_extension("hidden")).collect();
+    for (log, h) in logs.iter().zip(&hidden) {
+        fs::rename(log, h).unwrap();
+    }
+    let mut d = Client::open(&dir, "d", fast(), 2);
+    d.pump();
+    assert!(!has_mark(&d.stage, "d_unsaved"));
+    for (log, h) in logs.iter().zip(&hidden) {
+        fs::rename(h, log).unwrap();
+    }
+    // An edit reaches the transport before the next poll.
+    let root = DocKey::sublayer(&SublayerId::root());
+    let before = d.stage.sublayer(&SublayerId::root()).unwrap().version();
+    d.stage.set_edit_target(&SublayerId::root()).unwrap();
+    d.stage
+        .transact(&d.who, "edit", |tx| {
+            tx.apply(Op::SetValue {
+                path: p(&format!("{LAYERS}/title")),
+                attr: "note".into(),
+                value: Some(Value::String("after restart".into())),
+            })
+        })
+        .unwrap();
+    let layer = d.stage.sublayer(&SublayerId::root()).unwrap();
+    d.dir
+        .send(Message::Updates {
+            doc: root,
+            version: layer.version(),
+            data: layer.export_updates(&before).unwrap(),
+        })
+        .unwrap();
+    // Both the old records and the new one are in the folder.
+    let mut late = Client::open(&dir, "late", fast(), 3);
+    late.pump();
+    late.pump();
+    assert!(
+        has_mark(&late.stage, "d_unsaved"),
+        "the old records were lost"
+    );
+    let note = late
+        .stage
+        .prim(&p(&format!("{LAYERS}/title")))
+        .and_then(|t| t.value("note").cloned());
+    assert_eq!(note, Some(Value::String("after restart".into())));
+    // And the restarted client got its old edits back from its log.
+    d.pump();
+    assert!(has_mark(&d.stage, "d_unsaved"));
+}
+
+/// One encoded log record (spec §4.2).
+fn record(payload: &[u8]) -> Vec<u8> {
+    let mut out = (payload.len() as u32).to_le_bytes().to_vec();
+    out.extend_from_slice(&blake3::hash(payload).as_bytes()[..8]);
+    out.extend_from_slice(payload);
+    out
+}
+
+/// A log of ours written by a newer version of the format (e.g. the same client
+/// ID used by a newer BAE before): neither renamed aside nor replaced, since
+/// newer clients read it and it may hold ops nobody else has. Writing fails
+/// instead. It used to be renamed to `*.corrupt-*`, where nobody reads it.
+#[test]
+fn an_own_log_from_a_newer_version_is_left_alone() {
+    let (_tmp, dir) = project_dir();
+    let log = dir.join("updates/root/d.log");
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
+    let header = br#"{"format":"bae.sync.log","version":99,"doc":"root","client":"d","generation":"g","more":1}"#;
+    let mut bytes = record(header);
+    bytes.extend(record(b"a record of a newer kind"));
+    fs::write(&log, &bytes).unwrap();
+
+    let mut t = DirTransport::open(&dir, ClientId::new("d").unwrap(), fast()).unwrap();
+    while t.recv().unwrap().is_some() {}
+    let e = t.last_error().expect("the poll reports it").to_owned();
+    assert!(e.contains("newer version"), "{e}");
+    assert_eq!(fs::read(&log).unwrap(), bytes);
+    let root = DocKey::sublayer(&SublayerId::root());
+    let stage = client_stage(&base_snapshots());
+    let layer = stage.sublayer(&SublayerId::root()).unwrap();
+    let r = t.send(Message::Updates {
+        doc: root,
+        version: layer.version(),
+        data: layer.export_snapshot().unwrap(),
+    });
+    assert!(matches!(r, Err(SyncError::Io { .. })), "{r:?}");
+    assert_eq!(fs::read(&log).unwrap(), bytes, "written over");
+    let aside = fs::read_dir(log.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().contains("corrupt"));
+    assert!(!aside);
+}
+
+/// A departed client's log that cannot go (here: its ops are in nobody's
+/// snapshot) is not read again on every cleanup pass while nothing changes;
+/// a change to one document's logs makes only that document's logs be read.
+#[test]
+fn cleanup_reads_a_document_again_only_when_its_logs_change() {
+    let (_tmp, dir) = project_dir();
+    let (mut a, mut b, d) = three_clients(&dir);
+    drop(d);
+    let d_logs = logs_of(&dir, "d");
+    for log in &d_logs {
+        age(log, 30);
+    }
+    // No snapshot covers d's logs: nothing goes, every log is read once.
+    assert_eq!(a.dir.remove_departed_logs(), 0);
+    let first = a.dir.stats().logs_scanned;
+    assert_eq!(first, 6, "three logs of two documents");
+    assert_eq!(a.dir.remove_departed_logs(), 0);
+    assert_eq!(a.dir.stats().logs_scanned, first, "read again");
+    // b edits one document: only its three logs are read again.
+    b.stage.set_edit_target(&SublayerId::root()).unwrap();
+    b.stage
+        .transact(&b.who, "edit", |tx| {
+            tx.apply(Op::CreatePrim {
+                path: p(&format!("{LAYERS}/b_root_only")),
+                specifier: Specifier::Def,
+                prim_type: Some(PrimType::new("Layer")),
+                index: None,
+            })
+        })
+        .unwrap();
+    b.pump();
+    assert_eq!(a.dir.remove_departed_logs(), 0);
+    assert_eq!(a.dir.stats().logs_scanned, first + 3);
+    // Once a snapshot covers them, they go.
+    a.pump();
+    compact_now(&mut a);
+    assert_eq!(a.dir.remove_departed_logs(), 2);
+    assert!(d_logs.iter().all(|l| !l.exists()));
+}

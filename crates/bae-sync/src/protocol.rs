@@ -2,7 +2,7 @@
 //!
 //! The protocol is the same for every transport: shared-folder logs store encoded
 //! [`Message::Updates`] / [`Message::Snapshot`] records, and the hub carries every
-//! message as one WebSocket binary frame.
+//! message as one WebSocket binary message.
 
 use std::fmt;
 
@@ -198,14 +198,13 @@ impl Message {
                 }
             }
             Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
-                w.push(if matches!(self, Message::Updates { .. }) {
+                let tag = if matches!(self, Message::Updates { .. }) {
                     TAG_UPDATES
                 } else {
                     TAG_SNAPSHOT
-                });
-                put_bytes(&mut w, doc.as_str().as_bytes());
-                put_bytes(&mut w, &version.encode());
-                put_bytes(&mut w, data);
+                };
+                put_data_head(&mut w, tag, doc, version, data.len());
+                w.extend_from_slice(data);
             }
             Message::SnapshotRequest { doc } => {
                 w.push(TAG_SNAPSHOT_REQUEST);
@@ -231,6 +230,38 @@ impl Message {
             }
         }
         w
+    }
+
+    /// [`encode`](Self::encode) in two parts, `head` then `data`, without copying
+    /// the payload of `Updates` and `Snapshot` (`data` is that payload, empty for
+    /// other messages). For transports that send large messages piece by piece.
+    pub(crate) fn into_encoded_parts(self) -> (Vec<u8>, Vec<u8>) {
+        let tag = match &self {
+            Message::Updates { .. } => TAG_UPDATES,
+            Message::Snapshot { .. } => TAG_SNAPSHOT,
+            _ => return (self.encode(), Vec::new()),
+        };
+        match self {
+            Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
+                let mut head = Vec::with_capacity(64);
+                put_data_head(&mut head, tag, &doc, &version, data.len());
+                (head, data)
+            }
+            _ => unreachable!("data messages only"),
+        }
+    }
+
+    /// How many bytes [`encode`](Self::encode) produces, without copying the
+    /// payload of `Updates` and `Snapshot`.
+    pub fn encoded_len(&self) -> usize {
+        match self {
+            Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
+                let mut head = Vec::with_capacity(64);
+                put_data_head(&mut head, TAG_UPDATES, doc, version, data.len());
+                head.len() + data.len()
+            }
+            _ => self.encode().len(),
+        }
     }
 
     /// Decode one message. Bytes after the known fields are ignored, so later
@@ -301,6 +332,15 @@ pub(crate) fn put_varint(w: &mut Vec<u8>, mut v: u64) {
         }
         w.push(byte | 0x80);
     }
+}
+
+/// Everything of an `Updates` / `Snapshot` encoding before the payload bytes,
+/// including the payload's length.
+fn put_data_head(w: &mut Vec<u8>, tag: u8, doc: &DocKey, version: &VersionVector, len: usize) {
+    w.push(tag);
+    put_bytes(w, doc.as_str().as_bytes());
+    put_bytes(w, &version.encode());
+    put_varint(w, len as u64);
 }
 
 fn put_bytes(w: &mut Vec<u8>, b: &[u8]) {
@@ -420,6 +460,10 @@ mod tests {
         for m in msgs {
             let bytes = m.encode();
             assert_eq!(Message::decode(&bytes).unwrap(), m);
+            // The two-part encoding is the same bytes.
+            let (head, data) = m.clone().into_encoded_parts();
+            assert_eq!([head, data].concat(), bytes);
+            assert_eq!(m.encoded_len(), bytes.len(), "{m:?}");
             // Appended fields from a newer protocol version are ignored.
             let mut longer = bytes.clone();
             longer.extend_from_slice(&[9, 9, 9]);

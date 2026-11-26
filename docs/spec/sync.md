@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；传输出错时的处理（2.4）、按连接设置会话（第 3 节）、WebSocket 的大小上限和写缓冲上限（3.1）、清理离开的客户端的日志（4.6）在 `collab/hub-reliability`。分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；传输出错时的处理（2.4）、按连接设置会话（第 3 节）、WebSocket 的大小上限、分帧、写缓冲上限和会话层的背压（2.4、3.1）、清理离开的客户端的日志（4.6）在 `collab/hub-reliability`。分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -9,7 +9,7 @@
 |---|---|
 | `DocKey` | 同步的单位：一个工程层（`SublayerId`），或工程历史 `@history`（命名版本等）。`@` 不会出现在工程层 ID 里，所以不会冲突。 |
 | `Message` | 协议消息，所有传输方式通用（见第 2 节）。 |
-| `Transport` | 把消息送到"对方"：共享目录、Hub，或另一个客户端。`send` / `recv` 都不能阻塞。 |
+| `Transport` | 把消息送到"对方"：共享目录、Hub，或另一个客户端。`send` / `recv` 都不能阻塞。`backlog()` 是已经交给它、还没离开本进程的字节数（会话据此限速，见 2.4），`max_message_size()` 是一条消息的上限（没有上限时为 `None`）。 |
 | `DocSet` | 会话读写的一组文档。`Stage` 实现了它（各工程层）；`MemDocs` 是 Hub 用的纯 Loro 文档集合。 |
 | `SyncSession` | 把一个 `DocSet` 和一个远端保持同步。和传输方式无关。 |
 | `Relay` | Hub 端逻辑（不含网络）：每个连上的客户端一个会话，共用一份 `MemDocs`。10 hub-nas 用 WebSocket 包一层即可。 |
@@ -49,7 +49,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 ```
 
 - 当前协议版本 `PROTOCOL_VERSION = 1`。以后只以兼容的方式扩展：新字段追加在已有字段之后（旧版本解码时忽略多出来的字节），新消息用新的类型字节（旧版本收到未知类型时跳过，`SyncError::UnknownMessage`）。
-- Hub 模式一条消息就是一个 WebSocket 二进制帧；共享目录模式见第 4 节的记录格式。
+- Hub 模式一条消息就是一个 WebSocket 二进制消息，发送时切成最多 256 KiB 的帧（3.1）；共享目录模式见第 4 节的记录格式。
 
 ### 2.4 会话规则（`SyncSession`）
 
@@ -57,10 +57,15 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 1. 第一次，或距离上次超过 `hello_interval`，或本地出现了新文档：发 `Hello`（列出本地所有文档的版本）。
 2. 处理收到的消息（每次最多 `max_messages_per_pump` 条，避免卡住持有 Stage 的线程）：
-   - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方丢了数据时（比如 Hub 重启）能重新补发；代价最多是重复发送，CRDT 导入是幂等的。
+   - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方缺数据时能重新补发：丢了、被拒了，或者对方当时还没有这个文档、收到后丢掉了（2.5）。代价最多是重复发送，CRDT 导入是幂等的。
+     - 例外：**在途的数据**。发出去、还没被对方的 `Hello` 确认的数据，按文档记下（版本、最早一次没确认的发送时间），替换后再并回 `remote`。对方在收到之前发的 `Hello` 当然没有它；大消息在慢链路上要传很多个 hello 间隔，不这样做的话，每个 `Hello` 都会让会话再导出、再发一遍。
+     - 记录在三种情况下删掉，之后照常替换：对方的 `Hello` 已经包含它（确认了）；这个文档是对方刚加上的（上一个 `Hello` 里没有，之前发的可能被当成未知文档丢了）；数据离开本进程已经超过两个 `hello_interval`（没设时按 10 秒），这时还没有就是丢了。"离开本进程"从发送时间和最后一次看到传输有积压（`backlog() > 0`）的时间中较晚的那个算起。
+     - 代价：会丢包的传输（只有测试里的模拟网络）上，丢了的数据最多晚两个 hello 间隔补发。
    - `Updates` / `Snapshot`：`remote[doc]` 并入 `version`；本地已经包含 `version` 就跳过，否则导入。本地没有这个文档时不导入，在 `PumpOutcome::unknown_docs` 里报告（见 2.5）。
-   - `SnapshotRequest`：导出快照发回去。
+   - `SnapshotRequest`：导出快照发回去（也记为在途）。
 3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。
+   - **背压**：一个文档一个文档地导出、发送。每个文档之前先看传输的 `backlog()`，超过 `SessionConfig::max_backlog`（默认 1 MiB，`SessionConfig::DEFAULT_MAX_BACKLOG`）就停下，剩下的文档等之后的 `pump`。所以慢链路上一次只排一条大消息，没发的还在文档里，不占内存。新客户端第一次同步很大的工程、Hub 丢了数据后客户端重新上传，都一点一点发完，不会把写缓冲（3.1）撑满、断开、重连后再来一遍。`Hello`、在线状态和快照回复不受背压限制（都很小，快照只有共享目录会要）。
+   - **一条消息放不下**：`send` 返回 `SyncError::MessageTooLarge` 时（Hub 模式超过 `HubLimits::max_message_size`）只跳过这个文档：错误放进 `PumpOutcome::errors`，其他文档照发，链路不断。这个文档在 `remote[doc]` 变化之前（比如重连之后）不再导出，免得每次 `pump` 都导出几百 MiB。
 
 在收到对方第一个 `Hello` 之前不发任何数据（不知道对方有什么，全量发送太浪费）。
 
@@ -71,7 +76,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - 先导入，再报错：出错之前这一轮已经收到的数据照样导入，然后才返回错误。对方认为这些数据已经送到，重连之前不会重发。不导入的话，客户端发完最后几条修改马上断开时，Hub 就丢了这些修改。
 - 这一轮的结果不丢：出错之前做过的事（`events`、`unknown_docs`、`errors`、收发计数、`presence_changed`）留在会话里，下一次 `pump` 的结果里一起报告。想马上拿到（比如重连之前先让渲染缓存失效），调用 `take_interrupted()`。每一轮只报告一次；`reset()` 不会清掉它。
 - 出错那一轮收到的在线状态不交给 `Relay` 转发：Relay 会断开这个连接，并替它向其他人发"离开"。
-- `PumpOutcome::errors` 只放单个文档的问题，链路还能用：导入失败的数据（数据损坏、模型错误）、导出失败（回复快照或发送增量时）。未知类型的消息由传输层直接跳过，不会出现在这里。
+- `PumpOutcome::errors` 只放单个文档的问题，链路还能用：导入失败的数据（数据损坏、模型错误）、导出失败（回复快照或发送增量时）、一条消息放不下（`MessageTooLarge`，见上面第 3 步）。未知类型的消息由传输层直接跳过，不会出现在这里。
 
 ### 2.5 别人新建的工程层
 
@@ -87,7 +92,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 - `Relay` 持有一份 `MemDocs`（每个文档一个 Loro 文档，收到未知文档时自动创建），每个连接一个 `SyncSession`。一个客户端发来的增量导入后，其他客户端的会话在下一轮 `pump` 时发现本地版本变了，就把对方缺的部分发过去。
 - `Relay::pump` 在同一次调用里最多循环 4 轮，让一个客户端的修改在一次调用内转发给其他人。
-- Hub 用 `MemDocs::load` 恢复持久化的快照，用 `docs().export_snapshot` 保存。Hub 重启丢了数据也没关系：客户端重连后对方 `Hello` 里版本变小，客户端会把缺的重新上传。
+- Hub 用 `MemDocs::load` 恢复持久化的快照，用 `docs().export_snapshot` 保存。Hub 重启丢了数据也没关系：客户端重连后对方 `Hello` 里版本变小，客户端会把缺的重新上传（一个文档一个文档地传，见 2.4 的背压；单个文档超过消息上限的除外，见 3.1）。
 - 传输出错的连接会被断开（`RelayOutcome::disconnected`）。它出错之前发来的数据已经导入（见 2.4），同一次 `pump` 里就转发给其他人。
 - **按连接设置会话**：
   - `connect(transport)` 用默认设置：Relay 的 ID 和 `hello_interval`。`session_config()` 返回这份设置。
@@ -98,27 +103,39 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 
 - `HubTransport::connect(url, token, timeout)`：`url` 形如 `ws://nas.local:7341/projects/<工程>`，路径和查询参数怎么选工程由 Hub（10）决定；`token` 作为 `Authorization: Bearer <token>` 发送，Hub 拒绝时返回 `SyncError::Hub("... 401 ...")`。暂时只支持 `ws://`（局域网），`wss://` 报错。
-- 一条协议消息就是一个 WebSocket **二进制帧**；文本帧、ping/pong 忽略（pong 自动回复）；解码失败或未知类型的帧跳过；收到 close 帧或连接断开返回 `SyncError::Closed`。
-- 握手后套接字是非阻塞的，`send` 写不完的部分留在缓冲区，在之后的 `recv` 里继续发（缓冲区有上限，见下面"写缓冲上限"）。应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。
-- 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去）。
+- 一条协议消息就是一个 WebSocket **二进制消息**；文本帧、ping/pong 忽略（pong 自动回复）；解码失败或未知类型的消息跳过；收到 close 帧或连接断开返回 `SyncError::Closed`。
+- **发送队列和分帧**：
+  - 握手后套接字是非阻塞的。`send` 把编码好的消息放进 `HubTransport` 自己的队列（大消息的数据不复制，直接引用导出的那块内存），然后套接字收多少就交出去多少；`send` 和之后每次 `recv` 都继续写。`backlog()` 是队列里还没交给套接字的字节数。
+  - 一条消息切成最多 256 KiB 的帧（第一帧 binary，后面 continuation），tungstenite 写完上一帧才拿到下一帧。原因：tungstenite 把一帧整个复制进自己的写缓冲，这块缓冲只增不减，每写出一部分还要把剩下的整体前移。一条 200 MiB 的消息作为一帧发时，这 200 MiB 在连接存续期间一直占着，慢的对端还会让 Hub 的工程线程每一轮都搬动几百 MiB。分帧后它的写缓冲最多一帧。
+  - 应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。它的 `backlog()` 是排给后台线程的加上 `HubTransport` 自己的，会话的背压看得到。
+- 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去，一个文档一个文档地传）。`HubTransport` 被丢弃时，队列里没发出去的也丢掉，重连后的 `Hello` 会让它们重新发送。
+- 写出错（比如对方已经断开）时，`recv` 先把对方断开前发来、已经收到的消息读完，再报告错误。
 - `HubTransport::accept(tcp_stream, token)` 是服务端一侧，给测试和简单工具用：`tests/hub.rs` 里用 `Relay` + `accept` 写了一个几十行的阻塞式参考 Hub。
 - **消息大小上限**（`HubLimits`）：
-  - `connect_with(url, token, timeout, limits)`、`accept_with(stream, token, limits)` 传入上限；`connect` / `accept` 用 `HubLimits::default()`。
-  - `max_message_size`：一条消息（编码后的 `Message`）最多多少字节，默认 256 MiB。WebSocket 的单帧上限设成一样大：tungstenite 发送时不分片，一条消息就是一帧。（tungstenite 默认单帧 16 MiB，超过 16 MiB 的快照会被对方拒绝。）
-  - **两端必须一致。** 对方收不下的消息会让连接断开，重连后又发同一条，永远卡住。客户端和 Hub（`hub.toml` 的 `max_message_mib`）默认都是 256 MiB。
-  - 发送前先查自己的上限：超过就不发，`send` 返回 `SyncError::Hub("message of … bytes is over the limit …")`。收到超过上限的消息时（看帧头就拒绝，不读内容），`recv` 返回 `SyncError::Hub("received a message of … over the limit …")`。两种情况都要断开重连。
-  - 还没做：一个文档的全部数据超过上限时（比如新客户端第一次同步一个超过 256 MiB 的工程层），一条消息放不下。要等协议支持分块发送。
+  - `connect_with(url, token, timeout, limits)`、`accept_with(stream, token, limits)` 传入上限；`connect` / `accept` 用 `HubLimits::default()`。`HubTransport::limits()` 返回一个连接用的上限。
+  - `max_message_size`：一条消息（编码后的 `Message`）最多多少字节，默认 256 MiB（`HubLimits::DEFAULT_MAX_MESSAGE_SIZE`）。`HubLimits::with_max_message_size(n)` 给出 n 和对应的默认写缓冲上限（Hub 的 `max_message_mib` 用它）。
+  - 接收时 tungstenite 一帧一帧地累加检查消息大小。单帧上限是 16 MiB 和消息上限中较小的那个：更早的版本一条消息只发一帧，最多 16 MiB，照样收得下。
+  - **两端必须一致。** 对方收不下的消息会让连接断开，重连后又发同一条，这个客户端会一直断开重连，同步基本停住。客户端和 Hub（`hub.toml` 的 `max_message_mib`）默认都是 256 MiB。
+  - 发送前先查自己的上限：超过就不发，`send` 返回 `SyncError::MessageTooLarge { size, max }`，什么都没入队，链路照常可用；会话跳过这个文档（2.4）。`ThreadedTransport` 在 `send` 里马上做同样的检查（上限来自内层传输的 `max_message_size()`）。收到超过上限的消息时，`recv` 返回 `SyncError::Hub("received a message of … over the limit …")`，要断开重连。
+  - `set_receive_limit(n)`：之后只收不超过 n 字节的消息，发送的上限不变。Hub 给只读连接用（16 MiB）：它们的修改反正会被丢掉，不必让 Hub 缓冲 256 MiB 的消息。
+  - 还没做：一个文档要发的增量超过上限时（比如新客户端第一次同步一个超过 256 MiB 的工程层），这个文档同步不了，只报 `MessageTooLarge`。要等协议支持分块发送。
 - **写缓冲上限**（`HubLimits::max_write_buffer_size`）：
-  - 对方不读时，`send` 写不完的部分留在 tungstenite 的写缓冲里（不算操作系统的套接字缓冲）。这里限制它最多多大。
-  - 满了以后 `send` 返回 `SyncError::Hub("write buffer full: the peer is not reading")`，这条消息不入队。会话的 `pump` 随即出错，Relay 马上断开这个连接（`RelayOutcome::disconnected`），不用等 Hub 的超时，内存也不会一直涨。
-  - 默认是 `max_message_size` + 16 MiB（`HubLimits::WRITE_BUFFER_MARGIN`）。多出的 16 MiB 留给大消息发送期间排在后面的小消息（`Hello`、在线状态、修改，每条几 KB）。
-  - 下限：tungstenite 自己的写缓冲（128 KiB）加一条最大的消息（含 14 字节帧头），否则最大的消息永远发不出去。设得更小时自动提到下限（`min_write_buffer_size()`；实际生效的值是 `write_buffer_cap()`）。
-  - 注意：没写出去的都算。一次 `pump` 给一个慢的对端发出的总量超过上限时（比如新客户端第一次同步好几个大工程层），它也会被断开，重连后还是一样。要彻底解决，需要会话层的背压（传输有积压时先不发）。
+  - 限制 `backlog()`：放不下新消息时 `send` 返回 `SyncError::Hub("write buffer full: the peer is not reading …")`，这条消息不入队，链路要断开重连。Relay 随即断开这个连接（`RelayOutcome::disconnected`）。
+  - 会话正常情况下碰不到它：有背压，队列里最多约 1 MiB 加一条消息，再加排在后面的小消息（`Hello`、在线状态）。不读数据的对端不会让内存一直涨，Relay 只是先不给它发修改；它恢复读以后会补齐。只有它长期不读、小消息越积越多时才会到上限。
+  - 默认是 `max_message_size` + 16 MiB（`HubLimits::WRITE_BUFFER_MARGIN`）。下限 `min_write_buffer_size()` 是一条最大的消息 + 2 MiB（会话开始发它时队列里可能还有 1 MiB，后面还会排小消息）；设得更小时自动提到下限，实际生效的值是 `write_buffer_cap()`。
+- **内存**（每个连接）：发送队列最多约一条消息 + 1 MiB；tungstenite 的写缓冲最多一帧（256 KiB），读缓冲最多一帧加 128 KiB（来自旧版本的单帧消息时最多 16 MiB）。收一条大消息时临时占它的两倍左右（拼帧、解码），用完就释放。Hub 上 N 个客户端同时下载同一个大工程层时，最坏是 N 份；没有全 Hub 的总预算。
+- **收发计数**：`bytes_received()` / `bytes_sent()` 是这个连接收发过的字节数（含握手）。大消息在慢链路上要传很久，期间没有完整的消息；Hub 用收到的字节判断连接还活着（`services/bae-hub` 的 `PeerLink`）。
 - 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。
-- 上限的验证（`tests/hub_limits.rs`）：
-  - 20 MiB 的快照两个方向都能完整传过去。用 tungstenite 的默认设置时失败（对方报 16 MiB 帧上限）。
-  - 超过上限的消息：发送方不发；上限不一致时，接收方报错。
-  - 对方不读：写缓冲满时 `send` 失败（测试里约 4 MiB 后，主要是系统的套接字缓冲）；Relay 马上断开它，另一个连接不受影响。用默认设置时，发了 256 MiB 还不失败。
+- 上限和背压的验证（`tests/hub_limits.rs`，回环上的真实 WebSocket）：
+  - 20 MiB 的快照两个方向都能完整传过去（用 tungstenite 的默认设置时失败，对方报 16 MiB 帧上限）。
+  - 超过上限的消息：发送方不发，报 `MessageTooLarge`，同一个连接之后照常收发；上限不一致时，接收方报错。
+  - 直接调 `send`、对方不读：队列满时 `send` 失败（测试里上限约 2 MiB，发了约 6 MiB 后失败，其余在系统的套接字缓冲里）。
+  - 有会话时对方不读：编辑方发了 24 MiB 的修改（128 个文档），Relay 给不读的那一方排队的最多约 1 MiB（测试要求不超过 1.5 MiB），不断开它；它恢复读以后补齐。去掉背压时它被断开。
+  - 第一次同步 16 MiB（40 个文档，写缓冲上限 2.5 MiB）：上传到空的 Relay、再下载到新客户端，都不断开，每个文档只发一次。去掉背压时上传方断开。
+  - 一个文档超过消息上限：其他文档照常到达，错误只报告一次，不会每次 `pump` 都重新导出。
+- 慢链路模拟（`tests/backpressure.rs`，每个 tick 发 256 KiB，最后一个字节离开后 5 个 tick 到达）：
+  - 一条 8 MiB 的修改要传 32 个 tick，期间接收方每 5 个 tick 发一次 `Hello`，都说没有：只发一次。去掉在途记录时发两次，原来的代码每个 `Hello` 发一次。
+  - 12 个 1 MiB 的文档第一次同步：队列最多一个文档，每个只发一次。去掉背压时队列一下子到 12 MiB。
 
 ## 4. 共享目录模式（PR B）
 
@@ -157,7 +174,8 @@ sum     := BLAKE3(payload) 的前 8 字节
 ### 4.3 写（只有日志的主人写）
 
 - 追加：整条记录一次 `write` 写入，然后关闭文件（不逐条 `fsync`：关闭时数据交给 SMB 服务器；崩溃留下的半条记录下次启动时截掉；修改本身还在会话的文档里）。压缩重写的新文件先 `fsync` 再改名。写之前检查文件长度是否等于自己记的长度：更长且文件头没变，说明上次写了一半，先截掉；文件不见了或文件头变了，就重写整个文件。
-- 启动时主人也像读别人的日志一样读一遍自己的日志（里面可能有还没存进 `sublayers/*.loro` 的修改），并截掉末尾写了一半的记录。文件头都读不出来的日志改名为 `<client-id>.corrupt-<随机>` 留着排查，下次写入时新建。
+- 启动时主人也像读别人的日志一样读一遍自己的日志（里面可能有还没存进 `sublayers/*.loro` 的修改），并截掉末尾写了一半的记录。文件头损坏的日志改名为 `<client-id>.corrupt-<随机>` 留着排查，下次写入时新建（它里面没有谁能读出的记录）。更新版本的格式写的日志（文件头完好、`version` 更大）不改名、不覆盖：读的时候记一次错误，往里写时报错（`SyncError::Io`）。新版本的客户端读得懂它，里面可能有别人没有的操作。
+- 先读再写：要写的日志如果还没被轮询接管（列目录时漏了，或者读的时候出错），追加或压缩之前先读一遍、接管它，不会直接用新文件把它盖掉。清理（4.6）之后，它可能是某些操作的唯一一份。
 - **压缩**：日志超过阈值（默认 `max(1 MiB, 上次压缩结果 × 4)`）时，传输层向会话发 `SnapshotRequest`，拿到快照后写一个新文件（新 `generation`，文件头 + 一条 `Snapshot`），再改名覆盖旧日志。每个客户端只压缩自己的日志，所以多个客户端同时压缩不会互相破坏；目录总大小约为"客户端数 × 快照大小"，不随编辑次数增长。快照覆盖了旧日志的全部内容，因为会话的文档包含自己写过的一切。
 
 ### 4.4 读
@@ -186,7 +204,8 @@ sum     := BLAKE3(payload) 的前 8 字节
    - L 必须能完整读出：每个字节都属于校验通过的记录，每条记录都能解码、都属于这个文档、Loro 数据都能读。末尾有半条记录、有读不懂的新类型记录、读的过程中文件变了，都不删，下一轮再看。C 只要求文件头和第一条快照完好。
    - 读日志用和轮询同一套代码（`read_header`、`parse_records`、`Message::decode`）。
 2. **主人长时间不活跃**：L 的修改时间、主人的在线状态文件 `presence/<client-id>.presence` 的修改时间，都早于 `DirConfig::log_gc_after`（默认 7 天）。没有在线状态文件也算早。
-   - 两个时间都来自共享目录，和本机时钟比较。读不到的时间、在未来的时间都算"刚改过"，所以时钟差只会让日志多留一阵，不会提前删。
+   - "现在"也用共享目录的时钟，不用本机时钟：每轮清理先往自己的锁文件 `updates/<client-id>.lock` 写一行，读它的修改时间（文件服务器给的）。本机时钟快了、NAS 时钟慢了都不会让日志显得旧。写不了或读不到时间时这一轮不删。
+   - 读不到的修改时间、比"现在"还晚的修改时间，都算"刚改过"。服务器缓存的属性偏旧时，"现在"也偏旧，只会让日志多留一阵。
    - 在线状态文件超过一天没动就会被删（第 6.2 节），所以实际上就是：主人至少一天不在线，日志 7 天没写。
 3. **严格更小**：按"先比版本，版本相同时 ID 小的在前"排序，L 必须严格排在 C 前面。也就是 C 的下界包含 L 的上界，并且两者不相等；相等时只删 ID 大的那个。
    - 这样两个客户端不会同时删掉对方的日志。L 因为 C 被删、C 又因为 L 被删，需要 `下界(C) ⊇ 上界(L)` 和 `下界(L) ⊇ 上界(C)` 同时成立。每个日志都是下界 ⊆ 上界，所以四个版本只能全相等，这时只有 ID 大的那个能删。L 和 C 都很久没人动，所有客户端读到的内容一样，结论也一样。
@@ -196,10 +215,12 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 - 自己的日志永远不删。只删 `updates/<文档>/<client-id>.log`，每个文档只和同一文档的日志比较。不碰 `sublayers/`、`project.json`、`history.loro`、锁文件和在线状态文件（在线状态文件照旧按第 6.2 节清理）。
 - **频率**：打开后的第二次轮询做一次（第一次轮询要尽快发出 `Hello`），之后每小时最多一次，都在轮询里做，也就是在 `ThreadedTransport` 的后台线程上，不卡界面。先只看修改时间：没有候选的文档一个文件都不读。删之前再确认一次：文件的长度和修改时间和读的时候一样，主人仍然不活跃。
+- **不重复读**：一个文档的日志全部读过、什么都没删时（比如 L 末尾有半条记录，或者有别人快照里没有的操作），记住每个日志的长度、修改时间和哪些是候选。下一轮这些都没变就不再读这个文档的日志，否则每小时都要把它们整个读一遍、解码一遍，挡住后台线程上排队的写入。读过的日志个数记在 `DirStats::logs_scanned`。
 - 出错（读不了、删不掉）记到 `last_error`，跳过，不影响轮询。删掉的个数记在 `DirStats::logs_removed`。
 - `DirTransport::remove_departed_logs()` 立即做一轮（工具和测试用）。`log_gc_after = None` 时什么都不删。
 - **主人回来了**：
   - 还在运行的主人：每次轮询列目录时发现自己的日志不见了（而且确实不存在，不是列目录出错），就记一次修复（`DirStats::repairs`），向会话要一份快照，写成新的自包含日志。所以即使它不再修改，目录里也马上重新有它的全部内容；万一它最后一次追加正好和删除撞上（写进了已经删掉的文件），这一步也把它补回来。快照到之前就有修改要写时，照第 4.3 节的规则新建日志写这条修改，再要快照；追加时打开文件发现它刚被删掉，也这样处理，不当成传输错误。
+  - C 的主人不会把 C 盖掉：往自己的日志写之前，没接管的日志先读再写（4.3），所以一次读失败不会让它用只有新记录的文件换掉 C，C 里替 L 保存的操作不会丢。更新版本格式写的 C 不改名、不覆盖。
   - 重新启动的主人：和新客户端一样。以前的修改在 C 里，第一次轮询就读回来；之后的修改写进新日志。
   - 一直开着、但既不修改也不发在线状态的客户端（比如没设置在线状态的 Agent），日志可能每 7 天被删一次、再重写一次，不丢数据。
 
@@ -221,6 +242,11 @@ sum     := BLAKE3(payload) 的前 8 字节
   - 主人还在运行：下一次轮询就重新写出完整快照（两个文档各记一次修复），之后的修改别人都收到。主人重新启动：从别人的快照读回自己没保存的修改，之后的修改别人都收到。
   - `log_gc_after = None`：什么都不删。
   - 把实现里的每一条检查（自己的日志、修改时间、在线状态、半条记录、只认快照、同版本按 ID、发现自己的日志被删）分别去掉，都有测试失败。
+  - 删不掉的日志（没有快照包含它）：第一轮读 6 个日志（两个文档各 3 个），第二轮一个都不读；一个文档的日志变了，只重读那个文档的 3 个。
+  - "现在"取锁文件的修改时间（`dir.rs` 的单元测试：锁文件原来是 1000 天前的，写过之后是现在；日志的年龄按这个时间算）。
+- 主人自己的日志（4.3）：
+  - 第一次轮询没看到自己的日志，之后才出现：下一次写之前先读它，旧记录和新记录都在，客户端也拿回了旧修改。去掉"先读再写"时旧记录丢失。
+  - 更新版本格式写的自己的日志：不改名、不覆盖，轮询记一次错误，写入报错。原来会被改名成 `*.corrupt-*`。
 
 ### 4.8 还没做
 
@@ -320,5 +346,5 @@ sum     := BLAKE3(payload) 的前 8 字节
 ## 7. 给其他工作流
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
-- **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。握手用 `HubTransport::accept_with`，大小上限要和客户端一致（默认 256 MiB，见 3.1）。
+- **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。握手用 `HubTransport::accept_with`，大小上限要和客户端一致（默认 256 MiB，见 3.1）。包装 `HubTransport` 的传输要转发 `backlog()` 和 `max_message_size()`（背压靠它们）；超时按收到的字节算（`bytes_received()`），不要只看完整的消息；只读连接可以用 `set_receive_limit` 收小一点。
 - **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`pump` 出错时这一轮已导入的事件用 `take_interrupted()` 取（或等下一次 `pump` 报告，见 2.4）；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。
