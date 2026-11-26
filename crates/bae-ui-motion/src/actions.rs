@@ -72,6 +72,8 @@ pub mod ids {
     pub const TRIM_COMP: &str = "motion.trim_comp";
     /// Queue the active comp in the Render Queue (AE Cmd/Ctrl+M).
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
+    /// Composition > Save Frame As > File... (Cmd/Ctrl+Alt+S).
+    pub const SAVE_FRAME_AS: &str = "motion.comp.save_frame_as_file";
     /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
     pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
     /// Animation > Add Expression (AE Alt+Shift+=): toggles the selected
@@ -254,6 +256,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
+    (ids::SAVE_FRAME_AS, "Save Frame As File"),
     // Edit > Copy / Paste (Cmd+C / Cmd+V): selected keyframes.
     (ids::COPY, "Copy"),
     (ids::CUT, "Cut"),
@@ -1069,6 +1072,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::render_queue::shared(cx.resources)
                 .lock()
                 .add(&info, &crate::render_queue::default_output_dir());
+            cx.open_panel("render_queue");
+        }
+        ids::SAVE_FRAME_AS => {
+            let frame = info.frame_rate.time_to_frame(now);
+            crate::render_queue::shared(cx.resources).lock().add_frame(
+                &info,
+                &crate::render_queue::default_output_dir(),
+                frame,
+            );
             cx.open_panel("render_queue");
         }
         ids::TRIM_IN if !layers.is_empty() => {
