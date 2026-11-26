@@ -177,6 +177,13 @@ impl RenderComp {
             time: self.time,
         });
         for layer in &self.layers {
+            if layer.inert {
+                out.push(Dependency {
+                    path: layer.path.clone(),
+                    time: Dependency::INACTIVE,
+                });
+                continue;
+            }
             out.push(Dependency {
                 path: layer.path.clone(),
                 time: layer.time,
@@ -202,8 +209,29 @@ impl RenderComp {
 pub struct Dependency {
     /// The prim (its whole subtree counts unless a deeper dependency covers it).
     pub path: PrimPath,
-    /// The time the prim was evaluated at, in the prim's own time base.
+    /// The time the prim was evaluated at, in the prim's own time base, or
+    /// [`Dependency::INACTIVE`].
     pub time: Time,
+}
+
+impl Dependency {
+    /// The time of a layer that does not show in the frame
+    /// ([`RenderLayer::inert`]): only changes to its timing and visibility
+    /// switches ([`Dependency::SWITCHES`]) can affect the frame.
+    pub const INACTIVE: Time = Time::MIN;
+
+    /// The layer attributes that can make an inert layer show.
+    pub const SWITCHES: &[&str] = &[
+        "in_point",
+        "out_point",
+        "start_time",
+        "stretch",
+        "time_remap_enabled",
+        "time_remap",
+        "enabled",
+        "solo",
+        "guide",
+    ];
 }
 
 /// One evaluated layer.
@@ -240,6 +268,11 @@ pub struct RenderLayer {
     /// The comp time is within the layer's in/out range (and solo does not
     /// exclude it). An inactive layer draws nothing, also not as a matte.
     pub active: bool,
+    /// Nothing of the layer can show in this frame: not active and visible,
+    /// and neither a parent nor an active layer's track matte. The frame then
+    /// depends only on the switches that could make it show
+    /// ([`Dependency::INACTIVE`]), not on its content.
+    pub inert: bool,
     /// Adjustment layer: not drawn itself; its effects apply to the layers
     /// below, mixed back by its own pixels' coverage (see `graph`).
     pub adjustment: bool,
@@ -277,6 +310,7 @@ impl RenderLayer {
             track_matte: None,
             visible: true,
             active: true,
+            inert: false,
             adjustment: false,
             masks: Vec::new(),
             effects: Vec::new(),

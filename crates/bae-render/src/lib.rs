@@ -60,6 +60,7 @@ pub mod png_out;
 pub mod pool;
 mod renderer;
 pub mod request;
+mod sample;
 pub mod source;
 pub mod testing;
 pub mod three_d;
@@ -89,7 +90,9 @@ pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;
 pub use motion::{CompMotionBlur, LayerSample};
 pub use pool::PoolStats;
-pub use renderer::{Display, FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
+pub use renderer::{
+    Display, FrameStats, OutputAlpha, OutputTarget, RenderedFrame, Renderer, RendererConfig,
+};
 pub use request::{
     BitDepth, BlendSpace, ColorContext, RenderPurpose, RenderRequest, Resolution, WorkFormat,
 };

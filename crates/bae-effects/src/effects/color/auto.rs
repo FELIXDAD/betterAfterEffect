@@ -258,3 +258,21 @@ fn mapping(
     }
     Ok(map)
 }
+
+/// Reduce the selected source to one representative color on the GPU.
+pub(crate) fn linked_color(
+    target: &mut dyn EffectTarget,
+    image: &GpuImage,
+    sample: u32,
+    clip: f32,
+) -> Result<GpuImage, RenderError> {
+    let mut u = UniformWriter::with_size(80);
+    image_grid::image_coords(&mut u, 0, image, image.pixel_scale);
+    let mode = if matches!(sample, 3 | 4) { 5 } else { 4 };
+    u.u32(48, mode).u32(52, sample).f32(64, clip);
+    let bins = target.allocate(IRect::from_size(256, 256), 1.)?;
+    let color = target.allocate(IRect::from_size(1, 1), 1.)?;
+    super::dispatch(target, "auto_histogram", &u, &[image], &bins, [128, 128])?;
+    super::dispatch(target, "auto_mapping", &u, &[&bins], &color, [8, 8])?;
+    Ok(color)
+}
