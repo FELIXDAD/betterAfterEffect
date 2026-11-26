@@ -222,9 +222,26 @@ pub fn deform(mesh: &Mesh, pins: &[Pin], rounds: usize) -> Vec<DVec2> {
         })
         .collect();
     let mut x: Vec<DVec2> = (0..n).map(|i| fixed[i].unwrap_or(mesh.rest[i])).collect();
+    // Bend and Advanced pins: their Rotation and Scale turn the mesh around
+    // them (the vertex and its neighbours), as a scaled rotation.
+    let mut turns: Vec<Option<(f64, f64)>> = vec![None; n];
+    for pin in pins
+        .iter()
+        .filter(|p| matches!(p.kind, PinKind::Bend | PinKind::Advanced))
+        .filter(|p| p.rotation != 0.0 || p.scale != 100.0)
+    {
+        let k = mesh.nearest(pin.rest);
+        let (sin, cos) = pin.rotation.to_radians().sin_cos();
+        let scale = (pin.scale / 100.0).max(0.01);
+        for v in std::iter::once(k as u32).chain(mesh.neighbours[k].iter().copied()) {
+            turns[v as usize] = Some((scale * sin, scale * cos));
+        }
+    }
     // One pin: the mesh moves with it, unrotated.
     let pulled: Vec<usize> = (0..n).filter(|&i| fixed[i].is_some()).collect();
-    if let [k] = pulled[..] {
+    if let [k] = pulled[..]
+        && turns.iter().all(Option::is_none)
+    {
         let d = x[k] - mesh.rest[k];
         return mesh.rest.iter().map(|p| *p + d).collect();
     }
@@ -234,11 +251,50 @@ pub fn deform(mesh: &Mesh, pins: &[Pin], rounds: usize) -> Vec<DVec2> {
         index[i] = u;
     }
     let p = &mesh.rest;
-    let mut rot = vec![(0.0, 1.0); n];
+    // The first round starts from the turns spread over the mesh (inverse
+    // square distance; the other pulling pins hold theirs at none), so a
+    // large turn does not have to crawl out vertex by vertex.
+    let sources: Vec<(DVec2, f64, f64)> = pins
+        .iter()
+        .filter(|p| p.kind.pulls() || matches!(p.kind, PinKind::Bend | PinKind::Advanced))
+        .map(|p| {
+            let turned = matches!(p.kind, PinKind::Bend | PinKind::Advanced);
+            let (angle, scale) = if turned {
+                (p.rotation.to_radians(), (p.scale / 100.0).max(0.01))
+            } else {
+                (0.0, 1.0)
+            };
+            (p.rest, angle, scale)
+        })
+        .collect();
+    let any_turn = turns.iter().any(Option::is_some);
+    let mut rot: Vec<(f64, f64)> = (0..n)
+        .map(|i| {
+            if let Some(t) = turns[i] {
+                return t;
+            }
+            if !any_turn {
+                return (0.0, 1.0);
+            }
+            let (mut w_sum, mut angle, mut scale) = (0.0, 0.0, 0.0);
+            for (at, a, s) in &sources {
+                let w = 1.0 / mesh.rest[i].distance_squared(*at).max(1e-6);
+                w_sum += w;
+                angle += w * a;
+                scale += w * s;
+            }
+            let (sin, cos) = (angle / w_sum).sin_cos();
+            let scale = scale / w_sum;
+            (scale * sin, scale * cos)
+        })
+        .collect();
+    // Each vertex keeps its scale; the rounds only find its rotation.
+    let scales: Vec<f64> = rot.iter().map(|(s, c)| s.hypot(*c)).collect();
     for round in 0..rounds.max(1) {
-        // Local: each vertex's best rotation (none in the first round).
+        // Local: each vertex's best rotation (none in the first round; a
+        // Bend or Advanced pin's around it).
         if round > 0 {
-            for i in 0..n {
+            for i in (0..n).filter(|&i| turns[i].is_none()) {
                 let (mut dot, mut cross) = (0.0, 0.0);
                 for (k, &j) in mesh.neighbours[i].iter().enumerate() {
                     let j = j as usize;
@@ -246,8 +302,8 @@ pub fn deform(mesh: &Mesh, pins: &[Pin], rounds: usize) -> Vec<DVec2> {
                     dot += weights[i][k] * ep.dot(ex);
                     cross += weights[i][k] * (ep.x * ex.y - ep.y * ex.x);
                 }
-                let a = cross.atan2(dot);
-                rot[i] = a.sin_cos();
+                let (sin, cos) = cross.atan2(dot).sin_cos();
+                rot[i] = (scales[i] * sin, scales[i] * cos);
             }
         }
         // Global: the positions that best follow those rotations.
@@ -615,6 +671,25 @@ mod tests {
             extent: 15.0,
             in_front: 0.0,
         }
+    }
+
+    #[test]
+    fn a_bend_pin_turns_the_mesh_around_it() {
+        let mesh = Mesh::grid(DVec2::ZERO, DVec2::new(100.0, 20.0), 10.0);
+        let centre = mesh.rest[mesh.nearest(DVec2::new(50.0, 10.0))];
+        let mut bend = pin(PinKind::Bend, centre, centre);
+        bend.rotation = 90.0;
+        let turned = deform(&mesh, &[bend], 20);
+        // Clockwise on screen: the right end swings down below the pin.
+        let end = turned[mesh.nearest(DVec2::new(100.0, 10.0))];
+        let want = centre + DVec2::new(0.0, 100.0 - centre.x);
+        assert!(end.distance(want) < 12.0, "{end} vs {want}");
+        // Scale 50 %: the ends come in.
+        let mut small = pin(PinKind::Advanced, centre, centre);
+        small.scale = 50.0;
+        let shrunk = deform(&mesh, &[small], 20);
+        let end = shrunk[mesh.nearest(DVec2::new(100.0, 10.0))];
+        assert!(end.x < 90.0 && end.x > centre.x, "{end}");
     }
 
     #[test]

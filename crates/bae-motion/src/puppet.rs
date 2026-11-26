@@ -86,15 +86,26 @@ impl Command for AddPin {
         set(tx, &pin, "pin_type", Value::Enum(p.pin_type.clone()))?;
         set(tx, &pin, "rest", Value::Vec2(p.at))?;
         set(tx, &pin, "position", Value::Vec2(p.at))?;
-        if !matches!(p.pin_type.as_str(), "starch" | "overlap") {
+        // AE keys a new pin's properties at once: Position, and a Bend or
+        // Advanced pin's Rotation and Scale.
+        let keyed: &[(&str, Value)] = match p.pin_type.as_str() {
+            "starch" | "overlap" => &[],
+            "position" => &[("position", Value::Vec2(p.at))],
+            _ => &[
+                ("position", Value::Vec2(p.at)),
+                ("rotation", Value::Float(0.0)),
+                ("scale", Value::Float(100.0)),
+            ],
+        };
+        for (attr, value) in keyed {
             tx.apply(Op::SetKeyframe {
                 path: pin.clone(),
-                attr: "position".to_owned(),
+                attr: (*attr).to_owned(),
                 time: p.time,
                 keyframe: crate::keys::new_key(
-                    "position",
+                    attr,
                     &bae_model::AttrSpec::default(),
-                    Value::Vec2(p.at),
+                    value.clone(),
                 ),
             })?;
         }

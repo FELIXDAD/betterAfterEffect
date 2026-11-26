@@ -86,3 +86,68 @@ fn puppet_pins_are_added_on_a_click_and_dragged_in_one_step() {
     assert!(bae_motion::puppet::pins_of(&h.stage, &effects[0]).is_empty());
     assert_eq!(bae_motion::effect::effects_of(&h.stage, &solid).len(), 1);
 }
+
+/// A selected Advanced pin's ring rotates it, its square scales it (live,
+/// one undo step each).
+#[test]
+fn advanced_pins_turn_on_their_ring_and_scale_on_its_square() {
+    let mut h = H::new();
+    let solid = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.select(&[&solid]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.tools().lock().set(Tool::PuppetAdvanced);
+    let r = h.click(320.0, 180.0, Modifiers::NONE);
+    h.apply(&r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    let pin = bae_motion::puppet::pins_of(&h.stage, &effects[0])[0].clone();
+    // Select it: the ring appears (radius 24 points).
+    h.click(320.0, 180.0, Modifiers::NONE);
+    let centre = h.screen(320.0, 180.0);
+    let value = |h: &H, attr: &str| {
+        let ev = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+        ev.layer(&solid).unwrap().effects[0]
+            .children
+            .iter()
+            .find(|c| c.path == pin)
+            .and_then(|c| c.f64(attr))
+            .unwrap()
+    };
+    let drag = |h: &mut H, from: Pos2, to: Pos2| {
+        h.move_to(from, Modifiers::NONE, Vec::new());
+        h.pointer_button(from, true, Modifiers::NONE);
+        for i in 1..=6 {
+            h.move_to(
+                from + (to - from) * (i as f32 / 6.0),
+                Modifiers::NONE,
+                Vec::new(),
+            );
+        }
+        h.pointer_button(to, false, Modifiers::NONE)
+    };
+    // The ring below the pin, dragged a quarter turn back: −90°.
+    let r = drag(
+        &mut h,
+        centre + egui::vec2(0.0, 24.0),
+        centre + egui::vec2(24.0, 0.0),
+    );
+    assert_eq!(r.invocations.len(), 1, "one undo step");
+    h.apply(&r);
+    assert!(
+        (value(&h, "rotation") + 90.0).abs() < 1.0,
+        "{}",
+        value(&h, "rotation")
+    );
+    // The square now sits at −90° (above the pin): dragged out to twice the
+    // radius, 200 %.
+    let r = drag(
+        &mut h,
+        centre + egui::vec2(0.0, -24.0),
+        centre + egui::vec2(0.0, -48.0),
+    );
+    h.apply(&r);
+    assert!(
+        (value(&h, "scale") - 200.0).abs() < 2.0,
+        "{}",
+        value(&h, "scale")
+    );
+}

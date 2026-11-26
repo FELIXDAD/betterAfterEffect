@@ -468,11 +468,20 @@ fn puppet_mesh(stage: &Stage, layer: &PrimPath, effect: &PrimPath) -> Option<Nod
             })
             .collect(),
     };
+    // Bend and Advanced pins also turn and scale.
+    const TURNED: &[(&str, &str)] = &[
+        ("position", "Position"),
+        ("scale", "Scale"),
+        ("rotation", "Rotation"),
+    ];
     let group = |id: &str, label: &str, kinds: &[&str], attrs: &[(&str, &str)]| {
         let children: Vec<Node> = pins
             .iter()
             .filter(|p| kinds.contains(&kind(p).as_str()))
-            .map(|p| pin_node(p, attrs))
+            .map(|p| match kind(p).as_str() {
+                "bend" | "advanced" => pin_node(p, TURNED),
+                _ => pin_node(p, attrs),
+            })
             .collect();
         (!children.is_empty()).then(|| Node::Group {
             id: format!("{layer}#{effect}#{id}"),

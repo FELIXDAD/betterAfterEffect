@@ -2,7 +2,9 @@
 //! and Overlap Pin tools, Cmd/Ctrl+P): a click on a layer adds a pin there
 //! (`puppet.add_pin`; the first pin adds the Puppet effect); a click on a pin
 //! selects it (Shift: adds or removes it), a drag moves the selected pins
-//! together, previewed live, one undo step; Delete removes them. The selected
+//! together, previewed live, one undo step; Delete removes them. A selected
+//! Bend or Advanced pin shows AE's ring: drag the ring to rotate, the square
+//! on it to scale (live, one undo step). The selected
 //! layers' pins are drawn in AE's colours: yellow Position pins, red Starch,
 //! blue Overlap; selected pins are filled.
 
@@ -19,6 +21,8 @@ use crate::tools::Tool;
 
 /// Pointer distance (points) that grabs a pin.
 const HIT: f32 = 6.0;
+/// Radius (points) of a Bend / Advanced pin's rotation ring.
+const RING: f32 = 24.0;
 
 /// The pin type a Puppet tool adds.
 pub(crate) fn pin_type(tool: Tool) -> Option<&'static str> {
@@ -41,9 +45,21 @@ struct Drag {
     pins: Vec<(PrimPath, DVec2, DMat4)>,
 }
 
+/// A Bend / Advanced pin's ring or square being dragged.
+struct Turn {
+    pin: PrimPath,
+    centre: Pos2,
+    /// Rotating (else scaling).
+    rotate: bool,
+    /// The pin's value and the pointer's angle / distance at the press.
+    start: f64,
+    from: f32,
+}
+
 #[derive(Default)]
 pub(crate) struct PuppetState {
     drag: Option<Drag>,
+    turn: Option<Turn>,
     /// Selected pins.
     selected: Vec<PrimPath>,
 }
@@ -69,6 +85,8 @@ impl PuppetState {
 
 struct Handle {
     pin: PrimPath,
+    /// Bend or Advanced: rotation (degrees) and scale (percent).
+    turn: Option<(f64, f64)>,
     world: DMat4,
     /// Layer pixels.
     at: DVec2,
@@ -108,8 +126,15 @@ fn handles(session: &SharedSession, comp: &EvaluatedComp, view: &View) -> Vec<Ha
                     _ => "position",
                 };
                 let w = layer.world_matrix.transform_point3(at);
+                let turn = matches!(kind, "bend" | "advanced").then(|| {
+                    (
+                        pin.f64("rotation").unwrap_or(0.0),
+                        pin.f64("scale").unwrap_or(100.0),
+                    )
+                });
                 out.push(Handle {
                     pin: pin.path.clone(),
+                    turn,
                     world: layer.world_matrix,
                     at: at.truncate(),
                     pos: view.to_screen(DVec2::new(w.x, w.y)),
@@ -121,12 +146,13 @@ fn handles(session: &SharedSession, comp: &EvaluatedComp, view: &View) -> Vec<Ha
     out
 }
 
-/// Shows (`commit` false) or commits the pins' new positions: one value drag
+/// Shows (`commit` false) or commits the pins' new `attr` values: one value drag
 /// with the others as its peers, one `attr.set_many` at the end (one undo
 /// step), a keyframe at `now` where Position is animated.
 fn edit_pins(
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
+    attr: &str,
     values: &[(PrimPath, Value)],
     now: Time,
     commit: bool,
@@ -136,7 +162,7 @@ fn edit_pins(
     };
     session.lock().scrub = Some(Scrub {
         path: pin.clone(),
-        attr: "position".to_owned(),
+        attr: attr.to_owned(),
         value: value.clone(),
         peers: peers.to_vec(),
         time: now,
@@ -148,7 +174,7 @@ fn edit_pins(
             .map(|(p, v)| {
                 serde_json::json!({
                     "path": p,
-                    "attr": "position",
+                    "attr": attr,
                     "time": query::to_key_time(cx.stage, p, now),
                     "value": v,
                 })
@@ -233,12 +259,32 @@ pub(crate) fn frame(
         painter.circle(h.pos, 4.0, Color32::from_black_alpha(90), Stroke::NONE);
         painter.circle(h.pos, 3.5, fill, Stroke::new(1.5, h.color));
     }
+    // The ring of the one selected Bend / Advanced pin, its square at the
+    // pin's rotation.
+    let ringed = match &state.selected[..] {
+        [one] => handles.iter().find(|h| h.pin == *one && h.turn.is_some()),
+        _ => None,
+    };
+    let square = ringed.map(|h| {
+        let (rotation, _) = h.turn.unwrap_or_default();
+        let a = rotation.to_radians() as f32;
+        h.pos + egui::vec2(a.cos(), a.sin()) * RING
+    });
+    if let (Some(h), Some(sq)) = (ringed, square) {
+        painter.circle_stroke(h.pos, RING, Stroke::new(1.0, h.color));
+        painter.rect_filled(
+            egui::Rect::from_center_size(sq, egui::vec2(6.0, 6.0)),
+            0.0,
+            h.color,
+        );
+    }
     let mut out = PuppetFrame {
-        owns: state.drag.is_some(),
+        owns: state.drag.is_some() || state.turn.is_some(),
         cursor: None,
     };
     let Some(kind) = pin_type(tool) else {
         state.drag = None;
+        state.turn = None;
         return out;
     };
     out.owns = true;
@@ -250,7 +296,34 @@ pub(crate) fn frame(
     };
     let pressed = ui.input(|i| i.pointer.primary_pressed()) && resp.hovered();
     let origin = ui.input(|i| i.pointer.press_origin());
+    // The ring and its square come before the pins.
     if state.drag.is_none()
+        && state.turn.is_none()
+        && pressed
+        && let (Some(p), Some(h), Some(sq)) = (origin, ringed, square)
+    {
+        let (rotation, scale) = h.turn.unwrap_or((0.0, 100.0));
+        let d = p - h.pos;
+        if p.distance(sq) <= HIT {
+            state.turn = Some(Turn {
+                pin: h.pin.clone(),
+                centre: h.pos,
+                rotate: false,
+                start: scale,
+                from: d.length().max(1.0),
+            });
+        } else if (d.length() - RING).abs() <= 4.0 {
+            state.turn = Some(Turn {
+                pin: h.pin.clone(),
+                centre: h.pos,
+                rotate: true,
+                start: rotation,
+                from: d.y.atan2(d.x),
+            });
+        }
+    }
+    if state.drag.is_none()
+        && state.turn.is_none()
         && pressed
         && let Some(p) = origin
     {
@@ -311,6 +384,26 @@ pub(crate) fn frame(
             state.selected.clear();
         }
     }
+    if let Some(t) = &state.turn {
+        out.cursor = Some(CursorIcon::Grabbing);
+        let released = !ui.input(|i| i.pointer.primary_down());
+        let moved = resp.dragged() || resp.drag_stopped();
+        if moved && let Some(p) = resp.interact_pointer_pos().or(resp.hover_pos()) {
+            let d = p - t.centre;
+            let (attr, value) = if t.rotate {
+                // Clockwise on screen is positive, as AE's Rotation.
+                let delta = f64::from(d.y.atan2(d.x) - t.from).to_degrees();
+                ("rotation", t.start + delta)
+            } else {
+                ("scale", (t.start * f64::from(d.length() / t.from)).max(1.0))
+            };
+            let values = [(t.pin.clone(), Value::Float(value))];
+            edit_pins(cx, session, attr, &values, now, released);
+        }
+        if released {
+            state.turn = None;
+        }
+    }
     if let Some(d) = &state.drag {
         out.cursor = Some(CursorIcon::Move);
         let released = !ui.input(|i| i.pointer.primary_down());
@@ -327,7 +420,7 @@ pub(crate) fn frame(
                     (pin.clone(), Value::Vec2(v.to_array()))
                 })
                 .collect();
-            edit_pins(cx, session, &values, now, released);
+            edit_pins(cx, session, "position", &values, now, released);
         }
         if released {
             state.drag = None;
