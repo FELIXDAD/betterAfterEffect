@@ -994,6 +994,7 @@ dependencies = [
  "bae-ui",
  "bae-vector",
  "egui",
+ "egui-wgpu",
  "flate2",
  "serde",
  "serde_json",

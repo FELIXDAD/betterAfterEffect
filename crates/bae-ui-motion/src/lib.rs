@@ -47,12 +47,14 @@ mod paint_panels;
 mod panels;
 mod playback;
 mod prefs;
+mod presets;
 mod preview_snapshot;
 pub mod progress_metadata;
 mod project;
 mod props;
 mod render;
 pub mod render_queue;
+pub mod scopes;
 pub mod scripts;
 pub mod session;
 mod timeline;
@@ -89,6 +91,8 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     layer_panel::register,
     tracker::register,
     ae_panels::register,
+    presets::register,
+    scopes::register,
     media_browser::register,
     flowchart::register,
     footage_panel::register,
