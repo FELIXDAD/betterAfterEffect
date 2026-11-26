@@ -53,7 +53,7 @@ pub(crate) struct LiveFrame {
     pub size: [u32; 2],
     /// `None`: incomplete (something still warming up), the target is
     /// untouched.
-    pub rect: Option<IRect>,
+    pub source: Option<bae_render::GpuImage>,
     pub layer_times: Option<(PrimPath, Vec<(PrimPath, Duration)>)>,
 }
 
@@ -183,13 +183,13 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
             job.roi,
             target.take(),
         );
-        let Ok((out, rect, _)) = rendered else {
+        let Ok((out, source, _)) = rendered else {
             continue;
         };
         let frame = LiveFrame {
             view: out.view().clone(),
             size: out.size(),
-            rect,
+            source,
             layer_times: engine.layer_times.take(),
         };
         target = Some(out);
