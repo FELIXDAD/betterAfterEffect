@@ -492,9 +492,6 @@ impl egui::DroppedFile for DroppedFile {
 struct PickOnce(std::sync::Mutex<Vec<std::path::PathBuf>>);
 
 impl bae_ui::files::FilePicker for PickOnce {
-    fn save(&self, _: &str, _: &std::path::Path) -> Option<std::path::PathBuf> {
-        None
-    }
     fn open(&self, _: &bae_ui::files::OpenRequest) -> Vec<std::path::PathBuf> {
         std::mem::take(&mut *self.0.lock().unwrap())
     }

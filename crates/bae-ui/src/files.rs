@@ -22,12 +22,29 @@ pub struct OpenRequest {
     pub folders: bool,
 }
 
+/// What a save panel asks for.
+#[derive(Clone, Debug, Default)]
+pub struct SaveRequest {
+    /// Panel title (translated).
+    pub title: String,
+    /// File type filters: label and extensions without dots.
+    pub filters: Vec<(String, Vec<String>)>,
+    /// Folder the panel starts in.
+    pub directory: Option<PathBuf>,
+    /// Suggested file name.
+    pub file_name: String,
+}
+
 /// A native open panel.
 pub trait FilePicker: Send + Sync {
-    /// Choose a destination, keeping the platform's overwrite confirmation.
-    fn save(&self, title: &str, initial: &std::path::Path) -> Option<PathBuf>;
     /// The chosen files (and folders, when allowed); empty when cancelled.
     fn open(&self, request: &OpenRequest) -> Vec<PathBuf>;
+
+    /// A native save panel: the chosen path, `None` when cancelled (or when
+    /// the picker has none).
+    fn save(&self, _request: &SaveRequest) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// Where the open project is saved (`None`: not saved yet), as an app
@@ -60,6 +77,12 @@ impl SharedFilePicker {
             .get::<SharedFilePicker>()
             .map(|p| p.0.open(request))
             .unwrap_or_default()
+    }
+
+    /// Choose where to save with the app's picker; `None` when cancelled or
+    /// there is none.
+    pub fn save(resources: &bae_app::Resources, request: &SaveRequest) -> Option<PathBuf> {
+        resources.get::<SharedFilePicker>()?.0.save(request)
     }
 }
 

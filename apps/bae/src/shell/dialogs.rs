@@ -237,22 +237,6 @@ impl NativePicker {
 
 impl bae_ui::files::FilePicker for NativePicker {
     #[cfg(any(target_os = "macos", windows))]
-    fn save(&self, title: &str, initial: &std::path::Path) -> Option<PathBuf> {
-        let mut dialog = Native::new(self.parent.clone()).files().set_title(title);
-        if let Some(dir) = initial.parent() {
-            dialog = dialog.set_directory(dir);
-        }
-        if let Some(name) = initial.file_name() {
-            dialog = dialog.set_file_name(name.to_string_lossy());
-        }
-        dialog.save_file()
-    }
-    #[cfg(not(any(target_os = "macos", windows)))]
-    fn save(&self, _: &str, _: &std::path::Path) -> Option<PathBuf> {
-        None
-    }
-
-    #[cfg(any(target_os = "macos", windows))]
     fn open(&self, request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
         let mut dialog = Native::new(self.parent.clone())
             .files()
@@ -278,5 +262,20 @@ impl bae_ui::files::FilePicker for NativePicker {
     #[cfg(not(any(target_os = "macos", windows)))]
     fn open(&self, _request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
         Vec::new()
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    fn save(&self, request: &bae_ui::files::SaveRequest) -> Option<PathBuf> {
+        let mut dialog = Native::new(self.parent.clone())
+            .files()
+            .set_title(&request.title)
+            .set_file_name(&request.file_name);
+        if let Some(dir) = &request.directory {
+            dialog = dialog.set_directory(dir);
+        }
+        for (label, extensions) in &request.filters {
+            dialog = dialog.add_filter(label, extensions);
+        }
+        dialog.save_file()
     }
 }

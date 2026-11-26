@@ -1039,14 +1039,32 @@ impl Panel for RenderQueuePanel {
             return true;
         };
         let queue = shared(cx.resources);
-        let initial = queue
+        let request = queue
             .lock()
             .item_mut(id)
             .and_then(|i| i.outputs.get(index))
-            .map(|o| o.output.clone());
-        if let Some(initial) = initial
+            .map(|module| {
+                let initial = Path::new(&module.output);
+                bae_ui::files::SaveRequest {
+                    title: tr("Output Movie To").to_owned(),
+                    filters: vec![(
+                        tr(format_label(module.format)).to_owned(),
+                        vec![module.format.extension().to_owned()],
+                    )],
+                    directory: initial
+                        .parent()
+                        .filter(|dir| !dir.as_os_str().is_empty())
+                        .map(Path::to_owned),
+                    file_name: initial
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                }
+            });
+        if let Some(request) = request
             && let Some(picker) = cx.resources.get::<bae_ui::files::SharedFilePicker>()
-            && let Some(path) = picker.0.save(tr("Output Movie To"), Path::new(&initial))
+            && let Some(path) = picker.0.save(&request)
             && let Some(module) = queue
                 .lock()
                 .item_mut(id)
