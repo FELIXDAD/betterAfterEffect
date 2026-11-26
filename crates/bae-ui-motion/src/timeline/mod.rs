@@ -59,7 +59,7 @@ pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, select_children,
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
@@ -202,7 +202,10 @@ pub struct TimelinePanel {
     focus_search: bool,
     comment_edit: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
-    expr_edit: Option<(PrimPath, String, String)>,
+    /// The expression field being edited: its text, and the stored source it
+    /// started from (a pick whip or the language menu changing the stored
+    /// expression meanwhile replaces the text).
+    expr_edit: Option<(PrimPath, String, String, String)>,
     /// The field being edited: its text and selection (chars), for the pick whip
     /// and the language menu, which take its focus.
     expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
@@ -251,6 +254,10 @@ pub struct TimelinePanel {
     /// Where the last frame drew the layer bars, for tests.
     #[cfg(test)]
     pub(crate) last_bars: Vec<(PrimPath, Rect)>,
+    /// The bottom-left pane buttons (Layer Switches, Transfer Controls,
+    /// In/Out/Duration/Stretch, Render Time), for tests.
+    #[cfg(test)]
+    pub(crate) last_panes: [Option<Rect>; 4],
     /// Group rows: id, twirl arrow, name.
     #[cfg(test)]
     pub(crate) last_groups: Vec<(String, Pos2, Pos2)>,
@@ -281,6 +288,17 @@ impl TimeAxis {
     pub(crate) fn per_point(&self) -> f64 {
         self.span.0 as f64 / f64::from((self.width - 2.0 * PAD).max(1.0))
     }
+}
+
+/// The Timeline's Rename on empty space: the comp's name in the Project panel,
+/// selected for typing (AE 26).
+fn rename_comp(cx: &mut PanelContext<'_>, session: &SharedSession, comp: &PrimPath) {
+    {
+        let mut s = session.lock();
+        s.selected_items = vec![comp.clone()];
+        s.rename_item = Some(comp.clone());
+    }
+    cx.open_panel("project");
 }
 
 fn flatten_tree(
@@ -536,11 +554,14 @@ impl TimelinePanel {
                 out.push(row);
                 continue;
             };
+            let stored = query::attr_spec(stage, path, attr).and_then(|s| s.expression.as_ref());
             let lines = match &self.expr_edit {
-                Some((p, a, buf)) if p == path && a == attr => buf.split('\n').count(),
-                _ => query::attr_spec(stage, path, attr)
-                    .and_then(|s| s.expression.as_ref())
-                    .map_or(1, |e| e.source.split('\n').count()),
+                Some((p, a, buf, base))
+                    if p == path && a == attr && stored.is_some_and(|e| e.source == *base) =>
+                {
+                    buf.split('\n').count()
+                }
+                _ => stored.map_or(1, |e| e.source.split('\n').count()),
             }
             .clamp(1, MAX_EXPR_LINES);
             for line in 0..lines {
@@ -665,6 +686,7 @@ impl Panel for TimelinePanel {
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let full = ui.available_rect_before_wrap();
+        crate::import::drop_on_panel(ui, cx);
         let cols = self.columns.layout(ui, full);
         self.contents(ui, cx, &cols);
     }
@@ -692,14 +714,46 @@ impl TimelinePanel {
             );
             return;
         };
-        if session.lock().update_preview(cx, &info) {
-            ui.ctx().request_repaint();
-        }
+        session.lock().update_preview(cx, &info);
         let now = session.lock().time(&info.path);
         self.graph_mode = session.lock().graph_editor;
         let graph_left = full.left() + cols.viewport + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
-        let axis = self.axis(&info, graph_left, graph_w);
+        let mut axis = self.axis(&info, graph_left, graph_w);
+        if cfg!(target_os = "macos")
+            && ui.rect_contains_pointer(Rect::from_min_max(
+                pos2(graph_left, tabs.bottom()),
+                full.max,
+            ))
+            && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
+        {
+            let smart = crate::viewer::smart_zoom(ui.ctx());
+            let factor = ui.input(|i| i.zoom_delta());
+            if smart || factor != 1.0 {
+                let time = axis.t(pointer.x);
+                let full_span = info.duration.0 as f64;
+                let min_span = (info.frame_duration().0 * 10).min(info.duration.0) as f64;
+                let span = if smart {
+                    if self.zoom > 0.0 {
+                        full_span
+                    } else {
+                        full_span / 2.0
+                    }
+                } else {
+                    axis.span.0 as f64 / f64::from(factor)
+                };
+                if full_span > min_span {
+                    self.zoom = 1.0
+                        - ((span - min_span) / (full_span - min_span))
+                            .clamp(0.0, 1.0)
+                            .cbrt() as f32;
+                    let new_axis = self.axis(&info, graph_left, graph_w);
+                    self.scroll = time - (new_axis.t(pointer.x) - new_axis.start);
+                    axis = self.axis(&info, graph_left, graph_w);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
         #[cfg(test)]
         {
             self.last_axis = Some(axis);
@@ -796,9 +850,13 @@ impl TimelinePanel {
             }
             // Right-click on empty space: AE 26's comp menu (New ▸, Composition
             // Settings, Preview ▸ …).
+            let mut chosen = None;
             crate::common::context_menu(&bg, &mut |ui| {
-                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
+                chosen = crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
+            if chosen == Some("Rename") {
+                rename_comp(cx, &session, &info.path);
+            }
         }
 
         // Row widgets accept other drag types. Capture the project item before a
@@ -893,9 +951,13 @@ impl TimelinePanel {
                 s.selected_props.clear();
                 s.selected_groups.clear();
             }
+            let mut chosen = None;
             crate::common::context_menu(&bg, &mut |ui| {
-                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
+                chosen = crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
+            if chosen == Some("Rename") {
+                rename_comp(cx, &session, &info.path);
+            }
         }
 
         if let Some((item, pointer)) = project_drop {
@@ -930,9 +992,27 @@ impl TimelinePanel {
 
         let mut cti_body = graph_body;
         if self.graph_mode {
-            let out = self
-                .graph
-                .ui(ui, cx, &session, &info, &axis, graph_body, now);
+            let waveforms = &mut self.waveforms;
+            let stage = cx.stage;
+            let out = self.graph.ui(
+                ui,
+                cx,
+                &session,
+                &info,
+                &axis,
+                graph_body,
+                now,
+                &mut |ui, layer, area| {
+                    waveforms.draw(
+                        ui,
+                        stage,
+                        layer,
+                        &axis,
+                        area,
+                        color::TEXT_DIM.gamma_multiply(0.5),
+                    );
+                },
+            );
             if let Some((a, b)) = out.fit_time {
                 self.fit_time(&info, a, b);
             }
