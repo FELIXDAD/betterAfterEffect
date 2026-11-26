@@ -9,6 +9,7 @@ mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
+mod interpret_footage;
 mod layer_time;
 mod light_settings;
 mod mask_value;
@@ -54,6 +55,8 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// File > Interpret Footage > Main (Cmd/Ctrl+Alt+G).
+    InterpretFootage(Box<interpret_footage::InterpretFootage>),
     /// Layer > Time > Time Stretch.
     TimeStretch(Box<layer_time::TimeStretch>),
     /// Layer > Transform > Auto-Orient (Cmd/Ctrl+Alt+O).
@@ -287,6 +290,18 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Interpret Footage for the footage selected in the Project panel.
+pub(crate) fn interpret_footage(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    let selected = session.lock().selected_items.clone();
+    if d.open.is_none()
+        && let Some(f) = interpret_footage::InterpretFootage::new(cx.stage, &selected)
+    {
+        d.open = Some(Dialog::InterpretFootage(Box::new(f)));
+    }
+}
+
 /// Open Time Stretch for the selected layers.
 pub(crate) fn time_stretch(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -443,6 +458,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        interpret_footage::STRINGS,
         layer_time::STRINGS,
         go_to_time::STRINGS,
         project_settings::STRINGS,
@@ -480,6 +496,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::InterpretFootage(d) => d.ui(ctx, cx),
             Dialog::TimeStretch(d) => d.ui(ctx, cx),
             Dialog::AutoOrient(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
