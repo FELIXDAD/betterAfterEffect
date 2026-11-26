@@ -139,7 +139,11 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "edit.paste" => return Paste,
         "motion.select_all" | "motion.deselect_all" => return Comp,
         "motion.duplicate" | "motion.split" | "motion.order" => return Layers,
-        "motion.ease" | "motion.toggle_hold" | "motion.reverse_keys" => return Keys,
+        "motion.ease"
+        | "motion.toggle_hold"
+        | "motion.reverse_keys"
+        | "motion.anim.exponential_scale" => return Keys,
+        "motion.anim.sequence_layers" => return Layers,
         "motion.new_comp" => return Nothing,
         "motion.new_layer"
         | "motion.trim_comp"

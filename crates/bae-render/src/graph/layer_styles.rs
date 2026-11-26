@@ -162,6 +162,7 @@ impl Builder<'_, '_> {
         (output_rect, comp.time, scale.to_bits(), self.clamp).hash(&mut key);
         let out = self.push(Node {
             kind: NodeKind::Effect(Box::new(EffectNode {
+                feedback: None,
                 layer: layer.path.clone(),
                 effect,
                 instance,
