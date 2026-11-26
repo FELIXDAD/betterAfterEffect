@@ -528,7 +528,8 @@ impl Renderer {
         }
         let encode_start = Instant::now();
         let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
-        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
+        let tiles = (self.frames.stats().budget > 0 || feedback).then(|| crate::exec::TileCache {
+            whole_surfaces: request.roi.is_some(),
             feedback,
             frames: &mut self.frames,
             request: RenderRequest {
