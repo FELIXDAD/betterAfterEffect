@@ -78,3 +78,21 @@ fn zoom_keys_step_by_powers_of_two_and_slash_is_100() {
     h.frame(Vec::new(), Modifiers::NONE);
     assert!((mag(&h) - 1.0).abs() < 1e-4, "{}", mag(&h));
 }
+
+#[test]
+fn smart_zoom_keeps_pointer_fixed_then_restores_fit() {
+    let mut h = H::new();
+    h.viewer.zoom = None;
+    h.frame(Vec::new(), Modifiers::NONE);
+    let at = h.screen(100.0, 100.0);
+    h.move_to(at, Modifiers::NONE, Vec::new());
+    let fit = h.viewer.last_view.unwrap();
+    crate::request_smart_zoom(&h.ctx);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let zoomed = h.viewer.last_view.unwrap();
+    assert!(zoomed.scale > fit.scale);
+    assert!(zoomed.to_screen(fit.to_comp(at)).distance(at) < 0.01);
+    crate::request_smart_zoom(&h.ctx);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.viewer.last_view.unwrap().origin, fit.origin);
+}

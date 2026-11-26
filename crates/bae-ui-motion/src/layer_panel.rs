@@ -280,7 +280,15 @@ impl LayerPanel {
         if let Some(pointer) = resp.hover_pos() {
             let w = crate::viewer::wheel(ui);
             let around = if w.alt { area.center() } else { pointer };
-            if w.pinch != 1.0 {
+            if cfg!(target_os = "macos") && crate::viewer::smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = egui::Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, size, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), pointer, area, size, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, pointer, area, size, ppp);
             } else if w.notches != 0.0 {
                 let step = if w.notches > 0.0 {
