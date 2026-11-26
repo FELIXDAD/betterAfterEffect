@@ -321,7 +321,9 @@ impl Transport for HubTransport {
     /// A write that failed (the peer reset the connection, or stopped reading)
     /// is reported only once nothing that already arrived is left to read: the
     /// peer counts those messages as delivered (a client that sends its last
-    /// edits and closes at once while we are still sending to it).
+    /// edits and closes at once while we are still sending to it). Best effort:
+    /// some systems (Windows) drop unread data when a reset arrives, which is
+    /// why peers should end with [`Transport::close`].
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {
         if self.failed.is_none() {
             let flushed = match self.ws.flush() {
