@@ -249,6 +249,7 @@ impl Preferences {
 /// Keys features read (the schema has them all).
 pub mod keys {
     pub const PREVIEW_CACHE_MIB: &str = "memory_cpu.preview_cache_mib";
+    pub const RAM_RESERVED_GB: &str = "memory_cpu.ram_reserved_for_other_apps_gb";
     pub const LEVELS_OF_UNDO: &str = "general.levels_of_undo";
     // Appearance
     /// BAE: the UI language (`system`, `zh-CN`, `en`).
