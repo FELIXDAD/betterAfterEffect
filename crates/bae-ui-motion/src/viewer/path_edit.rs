@@ -257,32 +257,6 @@ pub(super) fn set_vertices_with_edit(
     cx.invoke_with("path.set_vertices", params);
 }
 
-/// Arrow keys with vertices selected: move them by `(dx, dy)` comp pixels.
-pub(super) fn nudge(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    info: &CompInfo,
-    paths: &[EditablePath],
-    sel: &VertexSelection,
-    d: DVec2,
-) -> bool {
-    let Some(p) = paths.iter().find(|p| sel.prim.as_ref() == Some(&p.prim)) else {
-        return false;
-    };
-    let mut drag = PathDrag::new(
-        p.clone(),
-        Hit::Vertex { path: 0, index: 0 },
-        sel,
-        DVec2::ZERO,
-    );
-    drag.update(d, false);
-    if !drag.changed() {
-        return false;
-    }
-    drag.commit(cx, session, info);
-    true
-}
-
 /// Delete with vertices selected: remove them (highest index first, one
 /// command each; AE keeps at least one vertex).
 pub(super) fn delete(
