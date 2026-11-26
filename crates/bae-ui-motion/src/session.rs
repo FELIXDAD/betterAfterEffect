@@ -26,6 +26,17 @@ pub enum Reveal {
     Props(Vec<(PrimPath, String)>),
 }
 
+/// Window > Motion Sketch, armed by Start Capture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchArm {
+    pub layer: PrimPath,
+    /// Capture speed, percent of real time.
+    pub speed: f64,
+    /// Smoothing: how far (pixels) the recorded path may stray from the kept
+    /// keyframes.
+    pub smoothing: f64,
+}
+
 /// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
 /// it stands for one (not Contents, Transform …).
 pub fn group_prim(id: &str) -> Option<PrimPath> {
@@ -152,10 +163,14 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    /// Last UI frame in which a visible timeline requested per-layer CPU timings.
+    pub(crate) timing_column_frame: Option<u64>,
+    pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
     /// Comp shown in the viewer and timeline.
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
     pub selected_keys: Vec<KeyRef>,
@@ -216,6 +231,9 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// When L was last pressed to reveal the audio waveform on a second press.
     pub(crate) last_l: Option<Instant>,
+    /// Motion Sketch armed (Start Capture): the next drag in the Composition
+    /// panel records this layer's position.
+    pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
     /// The footage item the Footage panel shows.
@@ -369,6 +387,7 @@ impl Session {
     /// Make `comp` the active comp (opening a timeline tab for it).
     pub fn open_comp(&mut self, comp: &PrimPath) {
         if self.active_comp.as_ref() != Some(comp) {
+            self.mini_flow = None;
             self.selected_layers.clear();
             self.selected_keys.clear();
             self.selected_props.clear();
@@ -384,6 +403,7 @@ impl Session {
     pub fn close_comp(&mut self, comp: &PrimPath) {
         self.open_comps.retain(|c| c != comp);
         if self.active_comp.as_ref() == Some(comp) {
+            self.mini_flow = None;
             self.active_comp = self.open_comps.last().cloned();
             self.selected_layers.clear();
             self.selected_keys.clear();
