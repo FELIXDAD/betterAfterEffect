@@ -41,6 +41,7 @@ use crate::request::RenderPurpose;
 pub struct AnimEvaluator {
     inner: Evaluator,
     scalar_tracks: crate::parameter_track::TrackCache,
+    attributes: AttributeCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
@@ -58,6 +59,7 @@ impl AnimEvaluator {
         Self {
             inner: Evaluator::new(),
             scalar_tracks: Default::default(),
+            attributes: AttributeCache::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
@@ -88,6 +90,7 @@ impl AnimEvaluator {
     /// Drops compiled animation when the caller observed edits without individual stage events.
     pub fn clear_compiled(&mut self) {
         self.inner.clear();
+        self.attributes = AttributeCache::default();
     }
 
     fn warn(&mut self, message: String) {
@@ -428,7 +431,31 @@ impl CompEvaluator for AnimEvaluator {
         name: &str,
         time: Time,
     ) -> Option<bae_model::Value> {
-        self.inner.evaluate_attribute(stage, path, name, time).ok()
+        let cache = &mut self.attributes;
+        if cache.revision != stage.revision() || cache.len > ATTRIBUTE_CACHE_LIMIT {
+            *cache = AttributeCache {
+                revision: stage.revision(),
+                ..AttributeCache::default()
+            };
+        }
+        if let Some(value) = cache
+            .values
+            .get(path)
+            .and_then(|attrs| attrs.get(name))
+            .and_then(|times| times.get(&time))
+        {
+            return value.clone();
+        }
+        let value = self.inner.evaluate_attribute(stage, path, name, time).ok();
+        cache
+            .values
+            .entry(path.clone())
+            .or_default()
+            .entry(name.to_owned())
+            .or_default()
+            .insert(time, value.clone());
+        cache.len += 1;
+        value
     }
 
     fn integral(
@@ -449,6 +476,7 @@ impl CompEvaluator for AnimEvaluator {
     }
 
     fn invalidate(&mut self, event: &StageEvent) {
+        self.attributes = AttributeCache::default();
         self.inner.invalidate(event);
     }
 
@@ -456,6 +484,22 @@ impl CompEvaluator for AnimEvaluator {
         std::mem::take(&mut self.warnings)
     }
 }
+
+/// Effect controls evaluated at other times (expressions of generate-mode
+/// effects sampled at every birth, the same births each frame), for one stage
+/// revision: an expression runs once per (control, time).
+#[derive(Debug, Default)]
+struct AttributeCache {
+    revision: u64,
+    len: usize,
+    values: rustc_hash::FxHashMap<
+        PrimPath,
+        rustc_hash::FxHashMap<String, rustc_hash::FxHashMap<Time, Option<bae_model::Value>>>,
+    >,
+}
+
+/// Entries before the cache starts over (a long scrub).
+const ATTRIBUTE_CACHE_LIMIT: usize = 16_384;
 
 /// Provider ID of shape layers (05's `bae_vector::SHAPE_PROVIDER`).
 pub const SHAPE_PROVIDER: &str = "bae.shape";
