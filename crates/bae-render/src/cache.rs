@@ -36,6 +36,7 @@ pub struct FrameKey {
 #[derive(Debug)]
 struct Entry<T> {
     value: T,
+    history: bool,
     bytes: u64,
     deps: Vec<Dependency>,
     content_hash: u64,
@@ -132,6 +133,19 @@ impl<T> FrameCache<T> {
         deps: Vec<Dependency>,
         content_hash: u64,
     ) {
+        self.insert_surface(key, value, bytes, deps, content_hash, false);
+    }
+
+    /// Feedback surfaces carry dependencies across earlier frames.
+    pub(crate) fn insert_surface(
+        &mut self,
+        key: FrameKey,
+        value: T,
+        bytes: u64,
+        deps: Vec<Dependency>,
+        content_hash: u64,
+        history: bool,
+    ) {
         if bytes > self.stats.budget {
             return;
         }
@@ -144,6 +158,7 @@ impl<T> FrameCache<T> {
         self.entries.insert(
             key,
             Entry {
+                history,
                 value,
                 bytes,
                 deps,
@@ -178,7 +193,14 @@ impl<T> FrameCache<T> {
         let before = self.entries.len();
         let mut freed = 0;
         self.entries.retain(|_, entry| {
-            let hit = event.changes.iter().any(|c| affects(c, &entry.deps));
+            let hit = event.changes.iter().any(|c| {
+                if entry.history
+                    && let Change::AttrChanged { path, .. } = c
+                {
+                    return entry.deps.iter().any(|d| related(&d.path, path));
+                }
+                affects(c, &entry.deps)
+            });
             if hit {
                 freed += entry.bytes;
             }
@@ -379,6 +401,20 @@ mod tests {
         }]));
         assert_eq!(n, 4);
         assert_eq!(cache.stats().entries, 0);
+    }
+
+    #[test]
+    fn editing_a_previous_keyframe_drops_accumulated_surfaces() {
+        let mut cache = filled();
+        cache.insert_surface(key(400), 400, 10, deps(400), 0, true);
+        let change = Change::AttrChanged {
+            path: p("/comps/main/layers/a"),
+            attr: "transform:opacity".into(),
+            range: TimeRange::new(Time::ZERO, Time::from_flicks(50)),
+        };
+        assert_eq!(cache.invalidate(&event(vec![change])), 2);
+        assert!(!cache.contains(&key(400)));
+        assert!(cache.contains(&key(300)));
     }
 
     #[test]

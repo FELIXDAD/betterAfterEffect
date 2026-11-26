@@ -355,3 +355,69 @@ fn footage_pixel_motion_uses_the_app_interpolator() {
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
     assert_eq!(bae_render::png_out::read_rgba8(&file).unwrap().2, motion);
 }
+
+#[test]
+fn time_blend_uses_the_previous_surface_and_fx_pastes_the_downstream_copy() {
+    let Some(mut r) = renderer() else { return };
+    for paired in [false, true] {
+        let scene = |time: Time| {
+            let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+            comp.time = time;
+            let mut layer = solid(
+                CLIP,
+                16,
+                if time == Time::ZERO {
+                    [1., 0., 0., 1.]
+                } else {
+                    [0., 0., 1., 1.]
+                },
+            );
+            layer.time = time;
+            layer.effects = if paired {
+                let mut tint = effect(
+                    "paint",
+                    "ADBE Fill",
+                    vec![(2, Value::Color([0., 1., 0., 1.]))],
+                );
+                tint.enabled = time == Time::ZERO;
+                vec![
+                    effect(
+                        "paste",
+                        "CC Time Blend FX",
+                        vec![
+                            (1, Value::Int(2)),
+                            (3, Value::Float(0.5)),
+                            (4, Value::Int(2)),
+                        ],
+                    ),
+                    tint,
+                    effect("copy", "CC Time Blend FX", vec![]),
+                ]
+            } else {
+                vec![effect(
+                    "blend",
+                    "CC Time Blend",
+                    vec![(2, Value::Float(0.5)), (3, Value::Int(2))],
+                )]
+            };
+            comp.layers.push(layer);
+            comp
+        };
+        let _first = pixels(&mut r, scene, 0.);
+        let second = pixels(&mut r, scene, 1. / 30.);
+        let expected = if paired {
+            [0, 128, 128, 255]
+        } else {
+            [128, 0, 128, 255]
+        };
+        for (channel, value) in second[..4].iter().zip(expected) {
+            assert!(
+                channel.abs_diff(value) <= 1,
+                "second frame {:?}",
+                &second[..4]
+            );
+        }
+
+        assert_eq!(&pixels(&mut r, scene, 4. / 30.)[..4], &[0, 0, 255, 255]);
+    }
+}
