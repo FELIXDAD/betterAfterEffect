@@ -296,6 +296,21 @@ impl Panel for EffectControlsPanel {
         actions::handle(action, cx, &session)
     }
 
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        ui.checkbox(
+            &mut self.controls.show_presets,
+            tr("Show Animation Presets"),
+        );
+        if ui.button(tr("Manage Effects...")).clicked() {
+            crate::effects::manager::open(cx);
+            ui.close();
+        }
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({"show_presets":self.controls.show_presets}))
+    }
+
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
@@ -674,8 +689,13 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "effect_controls",
-        bae_ui::PanelKind::new("Effect Controls", |_| {
-            Box::new(EffectControlsPanel::default())
+        bae_ui::PanelKind::new("Effect Controls", |spawn| {
+            let mut panel = EffectControlsPanel::default();
+            panel.controls.show_presets = spawn
+                .state
+                .and_then(|v| v["show_presets"].as_bool())
+                .unwrap_or(false);
+            Box::new(panel)
         }),
     );
     crate::register_panel(

@@ -58,6 +58,7 @@ pub enum Dialog {
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
+    EffectManager(Box<crate::effects::manager::EffectManager>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
     TransformValue(Box<TransformValue>),
@@ -66,7 +67,10 @@ pub enum Dialog {
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
-    Alert { title: String, message: String },
+    Alert {
+        title: String,
+        message: String,
+    },
 }
 
 /// Open dialog and remembered values.
@@ -419,6 +423,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::AutoOrient(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
+            Dialog::EffectManager(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),

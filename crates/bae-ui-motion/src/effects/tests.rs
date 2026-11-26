@@ -378,3 +378,94 @@ fn animation_presets_save_and_apply_effects_with_their_values() {
         Some(Value::Float(25.0))
     );
 }
+
+/// The text and enabled state users get from the actual panel menu.
+fn menu_states(fx: &Fx, panel: &mut dyn Panel) -> std::collections::HashMap<String, bool> {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let id = PanelId::new("menu-test");
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(700.0, 900.0))),
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(raw, |ui| {
+        let mut requests = PanelRequests::default();
+        let mut cx = PanelContext::new(
+            &id,
+            "Panel",
+            &fx.stage,
+            &fx.author,
+            &fx.resources,
+            &mut requests,
+        );
+        panel.menu(ui, &mut cx);
+    });
+    output.textures_delta.clear();
+    output
+        .platform_output
+        .accesskit_update
+        .unwrap()
+        .nodes
+        .into_iter()
+        .filter_map(|(_, n)| {
+            let label = n.label()?;
+            let zh = if label == "Save Animation Preset..." {
+                format!(
+                    "{}...",
+                    bae_ui::i18n::translation("Save Animation Preset").unwrap()
+                )
+            } else {
+                bae_ui::i18n::translation(label).unwrap_or(label).to_owned()
+            };
+            Some((zh, !n.is_disabled()))
+        })
+        .collect()
+}
+
+#[test]
+fn panel_menus_match_chinese_and_selection() {
+    let _app = {
+        let mut builder = AppBuilder::new();
+        builder.add_module(crate::MotionUiModule);
+        builder.build()
+    };
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    let mut browser = browser::EffectsPanel::default();
+    let before = menu_states(&fx, &mut browser);
+    assert_eq!(before.get("保存动画预设..."), Some(&false), "{before:?}");
+    for label in [
+        "浏览预设...",
+        "显示所有颜色深度的效果",
+        "仅显示 GPU 能够实现的效果",
+        "管理效果...",
+        "按字母顺序",
+        "刷新列表",
+    ] {
+        assert_eq!(before.get(label), Some(&true), "{label}");
+    }
+    fx.run(
+        "effect.apply",
+        json!({"layers":[layer],"match_name":"ADBE Gaussian Blur 2"}),
+    );
+    assert_eq!(
+        menu_states(&fx, &mut browser).get("保存动画预设..."),
+        Some(&true)
+    );
+
+    let mut brushes = crate::paint_panels::BrushesPanel::default();
+    let brush = menu_states(&fx, &mut brushes);
+    for (label, enabled) in [
+        ("新建画笔...", true),
+        ("重命名画笔...", false),
+        ("删除画笔", false),
+        ("大列表", true),
+        ("重置画笔笔尖...", true),
+    ] {
+        assert_eq!(brush.get(label), Some(&enabled), "{label}");
+    }
+    assert_eq!(
+        menu_states(&fx, &mut crate::EffectControlsPanel::default()).get("显示动画预设"),
+        Some(&true)
+    );
+}
