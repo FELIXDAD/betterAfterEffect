@@ -111,7 +111,7 @@ fn footage_replacement_reuses_or_resets_interpretation_and_ntsc_display() {
             serde_json::json!({"id":"footage"}),
         ));
         settle(&mut h);
-        assert!(find_text(&h, if drop { "00:00:00;00" } else { "00:00:00:00" }).is_some());
+        assert!(find_text(&h, if drop { "0;00;00;00" } else { "0:00:00:00" }).is_some());
         h.state_mut().dispatch(Invocation::with_params("footage.interpret", serde_json::json!({"items":[item],"frame_rate":12,"loop_count":4,"alpha_mode":"ignore"})));
         h.state().session().lock().selected_items = vec![item.clone()];
         pick(&mut h, "Replacement_001.png");

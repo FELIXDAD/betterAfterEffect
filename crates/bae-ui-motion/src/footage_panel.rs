@@ -368,8 +368,12 @@ impl FootagePanel {
             let frame = f
                 .start_frame
                 .saturating_add(rate.time_to_frame(self.time).max(0) as u64);
-            let code =
-                bae_media::time::Timecode::from_frame_number(frame, rate, f.drop_frame).to_string();
+            // As AE and the rest of BAE write it: 0:00:00:00, drop frame 0;00;00;00.
+            let code = crate::dialogs::fields::format_timecode(
+                i64::try_from(frame).unwrap_or(i64::MAX),
+                rate.as_f64(),
+                f.drop_frame,
+            );
             p.text(
                 pos2(r.left() + 70.0, y),
                 Align2::LEFT_CENTER,
