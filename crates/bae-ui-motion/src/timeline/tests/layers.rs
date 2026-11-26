@@ -302,3 +302,53 @@ fn empty_outline_space_and_deselect_all_clear_the_selection() {
     let s = s.lock();
     assert!(s.selected_layers.is_empty() && s.selected_props.is_empty());
 }
+
+#[test]
+fn e_reveals_the_effects_group_with_its_effects() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    let folder = layer.child("effects").unwrap();
+    h.run(
+        "prim.create",
+        json!({"path": folder, "prim_type": "Folder"}),
+    );
+    let blur = folder.child("Gaussian_Blur").unwrap();
+    h.run("prim.create", json!({"path": blur, "prim_type": "Effect"}));
+    h.run(
+        "attr.set",
+        json!({"path": blur, "attr": "name", "value": {"type": "string", "value": "Gaussian Blur"}}),
+    );
+    let mut tl = h.bars();
+    h.session().lock().reveal.clear();
+    let groups = |h: &mut H, tl: &mut TimelinePanel| {
+        let s = h.session();
+        let s = s.lock();
+        tl.group_rows(&h.stage, &h.comp, &s)
+    };
+    // E: Effects, open, with Gaussian Blur (collapsed) under it.
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::REVEAL, json!({"what": "effects", "add": false})),
+    );
+    assert!(r.invocations.is_empty());
+    let shown = groups(&mut h, &mut tl);
+    assert_eq!(
+        shown,
+        [format!("{layer}#effects"), format!("{layer}#{blur}")]
+    );
+    // E again hides it.
+    h.action(
+        &mut tl,
+        Invocation::with_params(ids::REVEAL, json!({"what": "effects", "add": false})),
+    );
+    assert!(groups(&mut h, &mut tl).is_empty());
+    // E and P keys are bound.
+    let bound = |key: &str| {
+        crate::actions::bindings()
+            .bindings
+            .iter()
+            .any(|b| b.chord == bae_ui::Chord::parse(key).unwrap() && b.action == ids::REVEAL)
+    };
+    assert!(bound("E") && bound("Shift+E"));
+}

@@ -456,6 +456,17 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
             format!("{name}: Add or Remove Keyframe"),
         );
     }
+    // E, Shift+E.
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": false }),
+        "Show Effects".to_owned(),
+    );
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": true }),
+        "Add Effects to Shown Properties".to_owned(),
+    );
     v
 }
 
@@ -1792,6 +1803,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp", "适合复合"),
     ("Fit to Comp Width", "适合复合宽度"),
     ("Fit to Comp Height", "适合复合高度"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

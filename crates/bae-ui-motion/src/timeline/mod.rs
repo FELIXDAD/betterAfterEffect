@@ -380,6 +380,24 @@ impl TimelinePanel {
         }
     }
 
+    /// The group rows (ids) the outline shows for `comp`, for tests.
+    #[cfg(test)]
+    pub(crate) fn group_rows(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        s: &Session,
+    ) -> Vec<String> {
+        let layers = self.layer_list(stage, comp);
+        self.rows(stage, &layers, s)
+            .into_iter()
+            .filter_map(|r| match r.kind {
+                RowKind::Group { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn layer_list(&mut self, stage: &Stage, comp: &PrimPath) -> Arc<TimelineLayers> {
         if let Some(layers) = &self.layers
             && layers.revision == stage.revision()
@@ -431,6 +449,29 @@ impl TimelinePanel {
                 depth: 0,
             });
             if let Some(r) = s.reveal.get(layer) {
+                // E: the Effects group, open, its effects as twirled (AE shows
+                // them above the revealed transform properties).
+                if let Reveal::Attrs(v) = r
+                    && v.iter().any(|a| a == "effects")
+                    && let Some(Node::Group {
+                        id,
+                        label,
+                        children,
+                    }) = props::layer_tree(stage, layer)
+                        .into_iter()
+                        .find(|n| matches!(n, Node::Group { id, .. } if id.ends_with("#effects")))
+                {
+                    out.push(Row {
+                        kind: RowKind::Group {
+                            id,
+                            label,
+                            open: true,
+                        },
+                        layer_index,
+                        depth: 1,
+                    });
+                    flatten_tree(&children, layer_index, 2, &self.expanded, stage, &mut out);
+                }
                 if matches!(r, Reveal::Attrs(attrs) if attrs.iter().any(|a| a == "audio:waveform"))
                     && bae_media::audio::layer_file(stage, layer).is_some()
                 {
@@ -794,7 +835,7 @@ impl TimelinePanel {
                 }
             });
         // Empty outline space below the layers (both modes): a click deselects
-        // everything, as in AE.
+        // everything, a right-click is AE's New menu, as on the empty graph.
         let rows_bottom =
             scrolled.inner_rect.top() + rows.len() as f32 * ROW_H - scrolled.state.offset.y;
         let outline_bg = Rect::from_min_max(
@@ -803,16 +844,18 @@ impl TimelinePanel {
             // around the time graph, whose background owns presses near its edge.
             pos2(body.left() + cols.end - 8.0, body.bottom()),
         );
-        if outline_bg.height() > 0.0
-            && ui
-                .interact(outline_bg, ui.id().with("outline_bg"), Sense::click())
-                .clicked()
-        {
-            let mut s = session.lock();
-            s.selected_keys.clear();
-            s.selected_layers.clear();
-            s.selected_props.clear();
-            s.selected_groups.clear();
+        if outline_bg.height() > 0.0 {
+            let bg = ui.interact(outline_bg, ui.id().with("outline_bg"), Sense::click());
+            if bg.clicked() {
+                let mut s = session.lock();
+                s.selected_keys.clear();
+                s.selected_layers.clear();
+                s.selected_props.clear();
+                s.selected_groups.clear();
+            }
+            crate::common::context_menu(&bg, &mut |ui| {
+                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
+            });
         }
 
         if let Some((item, pointer)) = project_drop {
