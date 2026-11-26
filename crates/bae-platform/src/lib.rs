@@ -39,6 +39,27 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// One-line version string for logs and crash reports, e.g.
 /// `BAE 0.1.0 (aarch64-macos, release)`.
+/// Shows `path` selected in Finder / Explorer (other systems: its folder).
+pub fn reveal(path: &std::path::Path) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+    } else if cfg!(windows) {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open")
+            .arg(path.parent().unwrap_or(path))
+            .spawn()
+    };
+    if let Err(error) = result {
+        tracing::warn!("could not reveal {}: {error}", path.display());
+    }
+}
+
 pub fn version_line() -> String {
     format!("{APP_NAME} {}", version_details())
 }

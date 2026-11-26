@@ -989,3 +989,142 @@ fn audio_levels_and_has_audio() {
          property or method named 'audioLevels' in Class 'Layer' is missing or does not exist"
     );
 }
+
+/// evaluate_attribute_traced reports what the value was read from: the
+/// attribute itself, same-layer and other-layer properties at the times read,
+/// and what nested expressions read; edits to anything else leave it valid.
+#[test]
+fn traced_attribute_reports_its_reads() {
+    use bae_anim::{ExprRead, ReadKind};
+    use bae_model::{Change, TimeRange};
+    let a = format!("{MAIN}/layers/A");
+    let fx = format!("{a}/effects/rate");
+    let s = stage(|b| {
+        b.layer(MAIN, "A", "null");
+        let l = b.layer(MAIN, "B", "null");
+        b.expr(
+            &l,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("C").transform.scale[0]"#,
+        );
+        b.layer(MAIN, "C", "null");
+        b.prim(&format!("{a}/effects"), PrimType::FOLDER)
+            .prim(&fx, PrimType::EFFECT)
+            .set(&fx, "match_name", "ADBE Slider Control")
+            .set(&fx, "name", "Rate")
+            .expr(
+                &fx,
+                "param:0001",
+                0.0,
+                r#"var b = thisComp.layer("B");
+                   transform.opacity + b.transform.position.valueAtTime(time - 1)[0] + b.transform.rotation
+                   + thisComp.layer("C").marker.numKeys"#,
+            );
+    });
+    let mut ev = bae_anim::Evaluator::new();
+    let (v, reads) = ev
+        .evaluate_attribute_traced(&s, &p(&fx), "param:0001", secs(2.0))
+        .unwrap();
+    assert_eq!(v, Value::Float(100.0 + 0.0 + 100.0));
+    let attr = |prim: &str, attr: &str, t: f64| ExprRead {
+        prim: p(prim),
+        kind: ReadKind::Attr(attr.into()),
+        time: Some(secs(t)),
+    };
+    let (b, c) = (format!("{MAIN}/layers/B"), format!("{MAIN}/layers/C"));
+    for want in [
+        attr(&fx, "param:0001", 2.0),
+        attr(&a, "transform:opacity", 2.0),
+        attr(&b, "transform:position", 1.0),
+        attr(&b, "transform:rotation", 2.0),
+        attr(&c, "transform:scale", 2.0),
+        ExprRead {
+            prim: p(&format!("{c}/markers")),
+            kind: ReadKind::Subtree,
+            time: None,
+        },
+    ] {
+        assert!(reads.contains(&want), "missing {want:?} in {reads:#?}");
+    }
+    let set = |path: &str, attr: &str| Change::AttrChanged {
+        path: p(path),
+        attr: attr.into(),
+        range: TimeRange::ALL,
+    };
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:scale")]
+    ));
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:opacity")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:position")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:rotation")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&b, "transform:opacity")]
+    ));
+    // Without an expression: the attribute itself.
+    let (_, plain) = ev
+        .evaluate_attribute_traced(&s, &p(&c), "transform:scale", secs(2.0))
+        .unwrap();
+    assert_eq!(plain, vec![attr(&c, "transform:scale", 2.0)]);
+}
+
+/// A live drag's values (overrides) reach everything that depends on them —
+/// children through parenting, expressions reading them — without changing the
+/// stage; clearing them shows the committed values again.
+#[test]
+fn overrides_show_uncommitted_values_everywhere() {
+    use bae_anim::{AttrOverride, Evaluator};
+    use bae_model::AttrSpec;
+    let s = stage(|b| {
+        let parent = b.layer(MAIN, "P", "null");
+        let child = b.layer(MAIN, "C", "null");
+        b.set(&child, "parent", Value::PrimRef(p(&parent))).set(
+            &child,
+            "transform:position",
+            Value::Vec3([10.0, 0.0, 0.0]),
+        );
+        let reader = b.layer(MAIN, "R", "null");
+        b.expr(
+            &reader,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("P").transform.position[0]"#,
+        );
+    });
+    let parent = p(&format!("{MAIN}/layers/P"));
+    let mut ev = Evaluator::new();
+    let world_x = |ev: &mut Evaluator| {
+        let ec = ev.evaluate_comp(&s, &p(MAIN), Time::ZERO).unwrap();
+        (
+            ec.layers[1].world_matrix.w_axis.x,
+            ec.layers[2].transform.rotation.z,
+        )
+    };
+    assert_eq!(world_x(&mut ev), (10.0, 0.0));
+    ev.set_overrides(vec![AttrOverride {
+        prim: parent.clone(),
+        attr: "transform:position".into(),
+        spec: AttrSpec {
+            value: Some(Value::Vec3([100.0, 0.0, 0.0])),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(
+        world_x(&mut ev),
+        (110.0, 100.0),
+        "child and expression follow"
+    );
+    ev.set_overrides(Vec::new());
+    assert_eq!(world_x(&mut ev), (10.0, 0.0), "committed values again");
+}

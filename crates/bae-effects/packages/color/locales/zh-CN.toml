@@ -1,0 +1,31 @@
+[effect.cc-color-neutralizer]
+name = "CC Color Neutralizer"
+keywords = ["颜色校正"]
+
+[effect.cc-color-neutralizer.params]
+shadows_unbalance = "Shadows Unbalance"
+shadows = "Shadows"
+red_shadows = "Red - Shadows"
+green_shadows = "Green - Shadows"
+blue_shadows = "Blue - Shadows"
+midtones_unbalance = "Midtones Unbalance"
+midtones = "Midtones"
+red_midtones = "Red - Midtones"
+green_midtones = "Green - Midtones"
+blue_midtones = "Blue - Midtones"
+highlights_unbalance = "Highlights Unbalance"
+highlights = "Highlights"
+red_highlights = "Red - Highlights"
+green_highlights = "Green - Highlights"
+blue_highlights = "Blue - Highlights"
+pinning = "Pinning"
+blend_w_original = "Blend w. Original"
+special = "Special"
+view = "View"
+black_point = "Black Point"
+white_point = "White Point"
+
+[effect.cc-color-neutralizer.choices.view]
+1 = "Final Result"
+2 = "Correction B to W"
+3 = "Correction Stair"

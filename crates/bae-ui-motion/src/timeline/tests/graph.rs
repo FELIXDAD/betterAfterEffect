@@ -20,8 +20,7 @@ fn shift_f3_and_the_switch_toggle_the_graph_editor() {
     let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
     h.click(&mut tl, sw, Modifiers::NONE);
     assert!(h.session().lock().graph_editor);
-    // The button bar is shown from the next frame.
-    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    // The graph and its button bar are visible on the release frame.
     assert!(!tl.graph_editor().last.buttons.is_empty());
 }
 
