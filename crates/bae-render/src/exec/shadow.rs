@@ -155,10 +155,14 @@ impl super::ExecCtx<'_> {
         } else {
             BlendKind::Replace
         };
-        pass.set_pipeline(
-            self.pipelines
-                .composite(device, self.format, kind, Variant::Plain),
-        );
+        let Some(pipeline) = self
+            .pipelines
+            .composite(device, self.format, kind, Variant::Plain)
+        else {
+            self.incomplete = true;
+            return Ok(());
+        };
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, self.draws_group, &[]);
         for (i, group) in groups.iter().enumerate() {
             pass.set_bind_group(1, group, &[]);
