@@ -28,11 +28,14 @@ wgpu-types = { workspace = true, features = ["serde"] }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 wgpu-hal = { workspace = true, features = ["metal"] }
+# Warm-up thread QoS (`warm_up::lower_priority`).
+libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 wgpu-hal = { workspace = true, features = ["dx12"] }
 # `windows::core::Interface::as_raw` for D3D12 handles (same 0.62 line as wgpu-hal).
-windows.workspace = true
+# Also the warm-up thread priority (`warm_up::lower_priority`).
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [target.'cfg(not(any(target_vendor = "apple", windows)))'.dependencies]
 wgpu-hal.workspace = true

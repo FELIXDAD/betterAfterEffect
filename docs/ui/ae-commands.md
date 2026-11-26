@@ -222,7 +222,7 @@
 | Responsive Design — Time ▸ Create Outro | 2097154 | `motion.comp.create_outro` |  |  |  | B | ⏸ |
 | Responsive Design — Time ▸ Create Protected Region from Work Area | 2097155 | `motion.comp.create_protected_region_from_work_area` |  |  |  | B | ⏸ |
 | Composition Flowchart | 327701 | `motion.comp.composition_flowchart` |  | Ctrl+Shift+F11 | Cmd+Shift+F11 | E | ⏸ |
-| Composition Mini-Flowchart | 327702 | `motion.comp.composition_mini_flowchart` |  | Tab | Tab | E | ⏸ |
+| Composition Mini-Flowchart | 327702 | `motion.comp.composition_mini_flowchart` |  | Tab | Tab | E | ✅ |
 | VR ▸ Create VR Environment... | 328466433 | `motion.comp.create_vr_environment` |  |  |  | B | ⏸ |
 | VR ▸ Extract Cubemap... | 328466434 | `motion.comp.extract_cubemap` |  |  |  | B | ⏸ |
 
@@ -301,17 +301,17 @@
 | Switches ▸ Collapse | 8847374 | `motion.layer.switch` | `{"switch":"collapse_transformation"}` |  |  | B | ✅ |
 | Switches ▸ Motion Blur | 8847375 | `motion.layer.switch` | `{"switch":"motion_blur"}` |  |  | B | ✅ |
 | Switches ▸ Adjustment Layer | 8847376 | `motion.layer.switch` | `{"switch":"adjustment_layer"}` |  |  | B | ✅ |
-| Transform ▸ Reset | 8912897 | `motion.layer.reset_transform` |  |  |  | B | ☐ |
-| Transform ▸ Anchor Point... | 8912899 | `motion.layer.transform_dialog` | `{"attr":"anchor_point"}` |  |  | E | ☐ |
-| Transform ▸ Position... | 8912900 | `motion.layer.transform_dialog` | `{"attr":"position"}` | Ctrl+Shift+P | Cmd+Shift+P | E | ☐ |
-| Transform ▸ Scale... | 8912901 | `motion.layer.transform_dialog` | `{"attr":"scale"}` |  |  | E | ☐ |
-| Transform ▸ Orientation... | 8912902 | `motion.layer.transform_dialog` | `{"attr":"orientation"}` | Ctrl+Alt+Shift+R | Cmd+Opt+Shift+R | E | ☐ |
-| Transform ▸ Rotation... | 8912903 | `motion.layer.transform_dialog` | `{"attr":"rotation"}` | Ctrl+Shift+R | Cmd+Shift+R | E | ☐ |
-| Transform ▸ Opacity... | 8912904 | `motion.layer.transform_dialog` | `{"attr":"opacity"}` | Ctrl+Shift+O | Cmd+Shift+O | E | ☐ |
+| Transform ▸ Reset | 8912897 | `motion.layer.reset_transform` |  |  |  | B | ✅ |
+| Transform ▸ Anchor Point... | 8912899 | `motion.layer.transform_dialog` | `{"attr":"anchor_point"}` |  |  | E | ✅ |
+| Transform ▸ Position... | 8912900 | `motion.layer.transform_dialog` | `{"attr":"position"}` | Ctrl+Shift+P | Cmd+Shift+P | E | ✅ |
+| Transform ▸ Scale... | 8912901 | `motion.layer.transform_dialog` | `{"attr":"scale"}` |  |  | E | ✅ |
+| Transform ▸ Orientation... | 8912902 | `motion.layer.transform_dialog` | `{"attr":"orientation"}` | Ctrl+Alt+Shift+R | Cmd+Opt+Shift+R | E | ✅ |
+| Transform ▸ Rotation... | 8912903 | `motion.layer.transform_dialog` | `{"attr":"rotation"}` | Ctrl+Shift+R | Cmd+Shift+R | E | ✅ |
+| Transform ▸ Opacity... | 8912904 | `motion.layer.transform_dialog` | `{"attr":"opacity"}` | Ctrl+Shift+O | Cmd+Shift+O | E | ✅ |
 | Transform ▸ Flip Horizontal | 8912906 | `motion.layer.flip_horizontal` |  |  |  | B | ✅ |
 | Transform ▸ Flip Vertical | 8912907 | `motion.layer.flip_vertical` |  |  |  | B | ✅ |
 | Transform ▸ Center In View | 8912908 | `motion.layer.center_in_view` |  | Ctrl+Home | Cmd+Home | B | ✅ |
-| Transform ▸ Center Anchor Point in Layer Content | 8912909 | `motion.layer.center_anchor_point_in_layer_content` |  | Ctrl+Alt+Home | Cmd+Opt+Home | B | ☐ |
+| Transform ▸ Center Anchor Point in Layer Content | 8912909 | `motion.layer.center_anchor_point_in_layer_content` |  | Ctrl+Alt+Home | Cmd+Opt+Home | B | ✅ |
 | Transform ▸ Fit to Comp | 8912911 | `motion.layer.fit_to_comp` |  | Ctrl+Alt+F | Cmd+Opt+F | B | ✅ |
 | Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ✅ |
 | Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ✅ |
@@ -740,8 +740,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTimeZoomIn` | `timeline.zoom_in` |  | = | = |  | C | ✅ |
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - |  | C | ✅ |
 | `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; |  | C | ☐ |
-| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ☐ |
-| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ☐ |
+| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ✅ |
+| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ✅ |
 | `CompToggleMaskFeathers` | `motion.reveal` | `{"what":"mask_feather","add":false}` | F | F |  | B | ☐ |
 | `CompToggleMaskFeathersAddState` | `motion.reveal` | `{"what":"mask_feather","add":true}` | Shift+F | Shift+F |  | B | ☐ |
 | `CompToggleMaskFeathersAddStateNewKF` | `motion.toggle_key` | `{"attr":"mask_feather"}` | Alt+Shift+F | Opt+Shift+F |  | B | ☐ |
@@ -765,8 +765,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTwirlAnchorPointAddState` | `motion.reveal` | `{"what":"transform:anchor_point","add":true}` | Shift+A | Shift+A |  | B | ✅ |
 | `CompTwirlAnchorPointAddStateNewKF` | `motion.toggle_key` | `{"attr":"transform:anchor_point"}` | Alt+Shift+A | Opt+Shift+A |  | B | ✅ |
 | `CompTwirlAnchorPointNewKF` | `motion.toggle_key` | `{"attr":"transform:anchor_point","only":true}` |  | Opt+A |  | B | ☐ |
-| `CompTwirlAudio` | `motion.reveal` | `{"what":"audio:levels","add":false}` | L | L |  | B | ☐ |
-| `CompTwirlAudioAddState` | `motion.reveal` | `{"what":"audio:levels","add":true}` | Shift+L | Shift+L |  | B | ☐ |
+| `CompTwirlAudio` | `motion.reveal` | `{"what":"audio:levels","add":false}` | L | L |  | B | ✅ |
+| `CompTwirlAudioAddState` | `motion.reveal` | `{"what":"audio:levels","add":true}` | Shift+L | Shift+L |  | B | ✅ |
 | `CompTwirlAudioAddStateNewKF` | `motion.toggle_key` | `{"attr":"audio:levels"}` | Alt+Shift+L | Opt+Shift+L |  | B | ☐ |
 | `CompTwirlAudioNewKF` | `motion.toggle_key` | `{"attr":"audio:levels","only":true}` |  | Opt+L |  | B | ☐ |
 | `CompTwirlOpacity` | `motion.reveal` | `{"what":"transform:opacity","add":false}` | T | T |  | B | ✅ |
@@ -937,7 +937,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `OpenMRUContext` | `motion.panel.activate_most_recent_viewer` |  | Shift+Esc | Shift+Esc |  | B | ⏸ |
 | `PreviewAudio` | `motion.comp.preview_audio` | `{"work_area":false}` | PadDecimal / PadComma / PadDelete | PadDecimal / PadComma / PadDelete / Control+. |  | B | ⏸ |
 | `PreviewAudioWorkArea` | `motion.comp.preview_audio` | `{"work_area":true}` | Alt+PadDecimal / Alt+PadComma / Alt+PadDelete | Opt+PadDecimal / Opt+PadComma / Opt+PadDelete / Control+Opt+. |  | B | ⏸ |
-| `PreviewNumpad0` | `motion.play` | `{"preview":"numpad0"}` | Pad0 / PadInsert | Pad0 / PadInsert / Control+0 |  | B | ☐ |
+| `PreviewNumpad0` | `motion.play` | `{"preview":"numpad0"}` | Pad0 / PadInsert | Pad0 / PadInsert / Control+0 |  | B | ✅ |
 | `PreviewNumpad0NFrames` | `motion.play` | `{"preview":"numpad0_n_frames"}` | Alt+Pad0 / Alt+PadInsert | Opt+Pad0 / Opt+PadInsert / Control+Opt+0 |  | B | ⏸ |
 | `PreviewShiftNumpad0` | `motion.play` | `{"preview":"shift_numpad0"}` | Shift+Pad0 / Shift+PadInsert | Shift+Pad0 / Shift+PadInsert / Control+Shift+0 |  | B | ☐ |
 | `ShowConsole` | `motion.window.console` |  | Ctrl+F12 | Cmd+F12 |  | B | ⏸ |
