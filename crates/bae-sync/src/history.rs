@@ -1,5 +1,6 @@
 //! Versions (`docs/spec/sync.md` §5): named checkpoints, read-only views of any
-//! version, and per-prim differences with authors.
+//! version, per-prim differences with authors, and rollback. Differences and
+//! rollback match prims by Loro tree node, not by path (`crate::identity`).
 //!
 //! Every sublayer's Loro document keeps its full history, so a version of the
 //! project is just one version vector per sublayer ([`ProjectVersion`]). Named
@@ -16,11 +17,15 @@ use bae_model::loro::{
     ContainerID, ExportMode, Index, JsonOpContent, JsonTreeOp, LoroDoc, LoroMap, LoroValue, TreeID,
     ValueOrContainer, VersionVector,
 };
-use bae_model::{AuthorId, PrimPath, PrimSpec, Stage, StageEvent, Sublayer, SublayerId};
-use rustc_hash::FxHashMap;
+use bae_model::{
+    AttrSpec, AuthorId, ModelError, Op, PrimPath, PrimSpec, PrimTree, PrimType, Reference,
+    Specifier, Stage, StageEvent, Sublayer, SublayerId, Transaction,
+};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::docs::{DocSet, Imported};
 use crate::error::SyncError;
+use crate::identity::{Matching, NodeIndex};
 use crate::protocol::DocKey;
 
 /// File name of the history document inside a `.bae` directory.
@@ -563,41 +568,43 @@ struct Touch {
     last: i64,
 }
 
+/// Differences of one sublayer between versions `a` (older) and `b`, matching
+/// prims by tree node ([`Matching`]), never by path.
 fn diff_layers(
     id: &SublayerId,
     a: &Sublayer,
     b: &Sublayer,
     touched: &FxHashMap<TreeID, Touch>,
 ) -> Vec<PrimDiff> {
+    let (old, new) = (NodeIndex::new(a), NodeIndex::new(b));
+    let m = Matching::new(&old, &new);
     let mut out = Vec::new();
-    let mut moved_from: BTreeSet<PrimPath> = BTreeSet::new();
-    let mut paths_b: Vec<&PrimPath> = b.paths().collect();
-    paths_b.sort();
-    for path in paths_b {
-        let spec_b = b.spec(path).expect("listed");
-        let node_b = b.node_id(path);
-        let (change, spec_a, node_a) = if let Some(spec_a) = a.spec(path) {
-            (PrimChange::Modified, Some(spec_a), a.node_id(path))
-        } else if let Some(old) = node_b
-            .and_then(|n| a.node_path(n))
-            .filter(|old| !b.has_spec(old))
-        {
-            moved_from.insert(old.clone());
-            (PrimChange::Moved { from: old.clone() }, a.spec(old), node_b)
-        } else {
-            (PrimChange::Added, None, None)
+    for (node, n) in new.iter() {
+        let (change, before) = match m.old_of(node) {
+            Some(o) => {
+                let was = old.get(o).expect("matched");
+                let change = if m.moved(&old, &new, node) {
+                    PrimChange::Moved {
+                        from: was.path.clone(),
+                    }
+                } else {
+                    PrimChange::Modified
+                };
+                (change, Some((o, was.spec)))
+            }
+            None => (PrimChange::Added, None),
         };
-        let (attrs, fields) = match spec_a {
-            Some(sa) => spec_diff(sa, spec_b),
-            None => (spec_b.attrs.keys().cloned().collect(), Vec::new()),
+        let (attrs, fields) = match before {
+            Some((_, spec)) => spec_diff(spec, n.spec),
+            None => (n.spec.attrs.keys().cloned().collect(), Vec::new()),
         };
         if change == PrimChange::Modified && attrs.is_empty() && fields.is_empty() {
             continue;
         }
-        let (authors, last_changed) = who(touched, [node_a, node_b]);
+        let (authors, last_changed) = who(touched, [before.map(|(o, _)| o), Some(node)]);
         out.push(PrimDiff {
             sublayer: id.clone(),
-            path: path.clone(),
+            path: n.path.clone(),
             change,
             attrs,
             fields,
@@ -605,24 +612,24 @@ fn diff_layers(
             last_changed,
         });
     }
-    let mut paths_a: Vec<&PrimPath> = a.paths().collect();
-    paths_a.sort();
-    for path in paths_a {
-        if b.has_spec(path) || moved_from.contains(path) {
+    for (node, was) in old.iter() {
+        if m.new_of(node).is_some() {
             continue;
         }
-        let spec_a = a.spec(path).expect("listed");
-        let (authors, last_changed) = who(touched, [a.node_id(path), None]);
+        let (authors, last_changed) = who(touched, [Some(node), None]);
         out.push(PrimDiff {
             sublayer: id.clone(),
-            path: path.clone(),
+            path: was.path.clone(),
             change: PrimChange::Removed,
-            attrs: spec_a.attrs.keys().cloned().collect(),
+            attrs: was.spec.attrs.keys().cloned().collect(),
             fields: Vec::new(),
             authors,
             last_changed,
         });
     }
+    // By path; where a removed prim's path is now another prim's, that one first.
+    let removed = |d: &PrimDiff| d.change == PrimChange::Removed;
+    out.sort_by(|x, y| x.path.cmp(&y.path).then(removed(x).cmp(&removed(y))));
     out
 }
 
@@ -729,11 +736,13 @@ impl RevertScope {
 /// step by `author`: history is never rewritten, collaborators receive the
 /// rollback like any other edit, and undo takes it back.
 ///
-/// Prims that did not exist then are deleted, prims that existed are restored
-/// with their whole subtree, and differing types, specifiers, references and
-/// attribute opinions are set back. Not restored: sibling order of prims that
-/// exist in both versions, and sublayers no longer in the stack. A sublayer that
-/// did not exist at `to` is emptied.
+/// Prims are matched by tree node, not by path (`crate::identity`). Prims that
+/// did not exist then are deleted, prims that existed are restored with their
+/// whole subtree, and differing types, specifiers, references and attribute
+/// opinions are set back. A prim that was moved or renamed since is deleted and
+/// restored where it was. Not restored: sibling order of prims that exist in both
+/// versions, and sublayers no longer in the stack. A sublayer that did not exist
+/// at `to` is emptied.
 pub fn revert(
     stage: &mut Stage,
     author: &AuthorId,
@@ -741,15 +750,11 @@ pub fn revert(
     to: &ProjectVersion,
     scope: &RevertScope,
 ) -> Result<StageEvent, SyncError> {
-    let edits = revert_edits(stage, to, scope)?;
+    let plan = revert_edits(stage, to, scope)?;
     // Like undo, a rollback restores locked layers too.
     let (_, event) = stage.transact(author, label, |tx| {
-        tx.allow_locked(|tx| {
-            for (layer, op) in edits {
-                tx.apply_to(&layer, op)?;
-            }
-            Ok::<_, SyncError>(())
-        })
+        tx.allow_locked(|tx| plan.apply(tx))?;
+        Ok::<_, SyncError>(())
     })?;
     Ok(event)
 }
@@ -759,110 +764,250 @@ pub(crate) fn revert_edits(
     stage: &Stage,
     to: &ProjectVersion,
     scope: &RevertScope,
-) -> Result<Vec<(SublayerId, bae_model::Op)>, SyncError> {
-    let mut edits = Vec::new();
+) -> Result<RevertPlan, SyncError> {
+    let mut steps = Vec::new();
     for id in stage.layer_stack() {
         if matches!(scope, RevertScope::Sublayer(s) if s != id) {
             continue;
         }
         let live = stage.sublayer(id).expect("in stack");
         let past = layer_at(live, &to.get(id))?;
-        for op in revert_ops(id, live, past.get(), scope) {
-            edits.push((id.clone(), op));
+        for step in revert_steps(id, live, past.get(), scope) {
+            steps.push((id.clone(), step));
         }
     }
-    Ok(edits)
+    Ok(RevertPlan(steps))
 }
 
-/// Ops that turn `live` into `past` within `scope`.
-fn revert_ops(
+/// The edits of a rollback, by tree node. Each becomes an [`Op`] only right
+/// before it is applied, with the paths of the mirror at that moment.
+pub(crate) struct RevertPlan(Vec<(SublayerId, Step)>);
+
+impl RevertPlan {
+    /// Apply every edit; returns how many ops were applied.
+    pub(crate) fn apply(self, tx: &mut Transaction<'_>) -> Result<usize, ModelError> {
+        let mut applied = 0;
+        for (layer, step) in self.0 {
+            let live = tx
+                .stage()
+                .sublayer(&layer)
+                .ok_or_else(|| ModelError::UnknownSublayer(layer.clone()))?;
+            if let Some(op) = step.op(&layer, live)? {
+                tx.apply_to(&layer, op)?;
+                applied += 1;
+            }
+        }
+        Ok(applied)
+    }
+}
+
+enum Step {
+    Delete(TreeID),
+    /// Re-create a prim of the old version under `parent` (a live node).
+    Restore {
+        parent: Parent,
+        name: String,
+        tree: PrimTree,
+        index: Option<usize>,
+    },
+    Set(TreeID, Field),
+}
+
+enum Parent {
+    Top,
+    Node(TreeID),
+    /// The old parent is gone and is not restored (outside the scope).
+    Gone(PrimPath),
+}
+
+enum Field {
+    Specifier(Specifier),
+    Type(Option<PrimType>),
+    References(Vec<Reference>),
+    Attr(String, Option<AttrSpec>),
+}
+
+impl Step {
+    fn op(self, layer: &SublayerId, live: &Sublayer) -> Result<Option<Op>, ModelError> {
+        let path = |n: TreeID| live.node_path(n).cloned();
+        Ok(match self {
+            Step::Delete(n) => path(n).map(|path| Op::DeletePrim { path }),
+            Step::Set(n, field) => path(n).map(|path| field.op(path)),
+            Step::Restore {
+                parent,
+                name,
+                tree,
+                index,
+            } => {
+                let missing = |path: PrimPath| ModelError::PrimNotFound {
+                    sublayer: layer.clone(),
+                    path,
+                };
+                let at = match parent {
+                    Parent::Top => PrimPath::root(),
+                    Parent::Node(n) => path(n).ok_or_else(|| missing(PrimPath::root()))?,
+                    Parent::Gone(old) => return Err(missing(old)),
+                };
+                // The name was chosen free of every remaining sibling's raw
+                // name; a mirror name can still take it only by an unlikely
+                // literal match with a collision suffix.
+                let mut path = at.child(&name)?;
+                let mut n = 2;
+                while live.has_spec(&path) {
+                    path = at.child(&format!("{name}_{n}"))?;
+                    n += 1;
+                }
+                Some(Op::RestorePrim { path, tree, index })
+            }
+        })
+    }
+}
+
+impl Field {
+    fn op(self, path: PrimPath) -> Op {
+        match self {
+            Field::Specifier(specifier) => Op::SetSpecifier { path, specifier },
+            Field::Type(prim_type) => Op::SetPrimType { path, prim_type },
+            Field::References(references) => Op::SetReferences { path, references },
+            Field::Attr(attr, spec) => Op::SetAttr { path, attr, spec },
+        }
+    }
+}
+
+/// Edits that turn `live` into `past` within `scope`.
+fn revert_steps(
     id: &SublayerId,
     live: &Sublayer,
     past: &Sublayer,
     scope: &RevertScope,
-) -> Vec<bae_model::Op> {
-    use bae_model::Op;
-    let in_scope = |p: &&PrimPath| scope.covers(id, p);
-    let mut ops = Vec::new();
+) -> Vec<Step> {
+    let (now, then) = (NodeIndex::new(live), NodeIndex::new(past));
+    let m = Matching::new(&then, &now);
+    let in_scope = |p: &PrimPath| scope.covers(id, p);
+    let mut steps = Vec::new();
 
-    // Delete what did not exist (top-most only: the subtree goes with it).
-    let mut gone: Vec<&PrimPath> = live
-        .paths()
-        .filter(in_scope)
-        .filter(|p| !past.has_spec(p))
-        .collect();
-    gone.sort();
-    let mut deleted: Vec<&PrimPath> = Vec::new();
-    for p in gone {
-        if !deleted.iter().any(|d| d.is_prefix_of(p)) {
-            ops.push(Op::DeletePrim { path: p.clone() });
-            deleted.push(p);
+    // Delete what did not exist then, or was elsewhere (top-most only: the
+    // subtree goes with it). `gone`: deleted, explicitly or with an ancestor.
+    let live_paths = now.by_path();
+    let mut gone: FxHashSet<TreeID> = FxHashSet::default();
+    for &(path, node) in &live_paths {
+        let n = now.get(node).expect("listed");
+        if n.parent.is_some_and(|p| gone.contains(&p)) {
+            gone.insert(node);
+        } else if in_scope(path) && (m.old_of(node).is_none() || m.moved(&then, &now, node)) {
+            steps.push(Step::Delete(node));
+            gone.insert(node);
         }
     }
 
-    // Restore what existed (top-most only, with its whole subtree), parents
-    // before children, each at its old position.
-    let mut back: Vec<&PrimPath> = past
-        .paths()
-        .filter(in_scope)
-        .filter(|p| !live.has_spec(p))
-        .collect();
-    back.sort();
-    let mut restored: Vec<&PrimPath> = Vec::new();
-    for p in back {
-        if restored.iter().any(|r| r.is_prefix_of(p)) {
+    // Restore what existed then and is gone or elsewhere now (top-most only,
+    // with its whole subtree), under the parent's node at its current path, at
+    // its old position. A name that a remaining sibling has is not reused.
+    let mut restored: FxHashSet<TreeID> = FxHashSet::default();
+    let mut taken: FxHashMap<Option<TreeID>, FxHashSet<String>> = FxHashMap::default();
+    for (path, node) in then.by_path() {
+        let n = then.get(node).expect("listed");
+        if n.parent.is_some_and(|p| restored.contains(&p)) {
+            restored.insert(node);
             continue;
         }
-        if let Some(tree) = past.subtree(p) {
-            ops.push(Op::RestorePrim {
-                path: p.clone(),
-                tree,
-                index: past.child_index(p),
-            });
-            restored.push(p);
+        let stays = m
+            .new_of(node)
+            .is_some_and(|l| !gone.contains(&l) && !m.moved(&then, &now, l));
+        if stays || !in_scope(path) {
+            continue;
         }
+        // The parent's live node (`Some(None)`: top level), if it remains.
+        let live_parent = match n.parent {
+            None => Some(None),
+            Some(p) => m.new_of(p).filter(|l| !gone.contains(l)).map(Some),
+        };
+        let (parent, name) = match live_parent {
+            Some(key) => {
+                let names = taken.entry(key).or_insert_with(|| {
+                    now.children(key)
+                        .iter()
+                        .filter(|c| !gone.contains(*c))
+                        .filter_map(|c| now.get(*c))
+                        .map(|c| c.name.to_owned())
+                        .collect()
+                });
+                let name = unique_name(n.name, names);
+                (key.map_or(Parent::Top, Parent::Node), name)
+            }
+            None => {
+                let old_parent = path.parent().unwrap_or_else(PrimPath::root);
+                (Parent::Gone(old_parent), n.name.to_owned())
+            }
+        };
+        steps.push(Step::Restore {
+            parent,
+            name,
+            tree: restore_tree(&then, node),
+            index: Some(n.index),
+        });
+        restored.insert(node);
     }
 
-    // Set back what differs on prims present in both.
-    let mut both: Vec<&PrimPath> = live
-        .paths()
-        .filter(in_scope)
-        .filter(|p| past.has_spec(p))
-        .collect();
-    both.sort();
-    for p in both {
-        let (now, then) = (live.spec(p).expect("listed"), past.spec(p).expect("listed"));
+    // Set back what differs on prims that stay.
+    for &(path, node) in &live_paths {
+        if gone.contains(&node) || !in_scope(path) {
+            continue;
+        }
+        let Some(was) = m.old_of(node).and_then(|o| then.get(o)) else {
+            continue;
+        };
+        let (now, then) = (now.get(node).expect("listed").spec, was.spec);
         if now.specifier != then.specifier {
-            ops.push(Op::SetSpecifier {
-                path: p.clone(),
-                specifier: then.specifier,
-            });
+            steps.push(Step::Set(node, Field::Specifier(then.specifier)));
         }
         if now.prim_type != then.prim_type {
-            ops.push(Op::SetPrimType {
-                path: p.clone(),
-                prim_type: then.prim_type.clone(),
-            });
+            steps.push(Step::Set(node, Field::Type(then.prim_type.clone())));
         }
         if now.references != then.references {
-            ops.push(Op::SetReferences {
-                path: p.clone(),
-                references: then.references.clone(),
-            });
+            steps.push(Step::Set(node, Field::References(then.references.clone())));
         }
         let names: BTreeSet<&String> = now.attrs.keys().chain(then.attrs.keys()).collect();
         for name in names {
             let old = then.attrs.get(name);
             if now.attrs.get(name) != old {
-                ops.push(Op::SetAttr {
-                    path: p.clone(),
-                    attr: name.clone(),
-                    spec: old.cloned(),
-                });
+                steps.push(Step::Set(node, Field::Attr(name.clone(), old.cloned())));
             }
         }
     }
-    ops
+    steps
+}
+
+/// `name`, or `name_2`, `name_3`, … if it is in `taken`; the result is added.
+fn unique_name(name: &str, taken: &mut FxHashSet<String>) -> String {
+    let mut out = name.to_owned();
+    let mut n = 2;
+    while taken.contains(&out) {
+        out = format!("{name}_{n}");
+        n += 1;
+    }
+    taken.insert(out.clone());
+    out
+}
+
+/// The subtree of `node` with raw names (unique among siblings), as it is
+/// re-created.
+fn restore_tree(index: &NodeIndex<'_>, node: TreeID) -> PrimTree {
+    let n = index.get(node).expect("listed");
+    let mut names = FxHashSet::default();
+    PrimTree {
+        name: n.name.to_owned(),
+        spec: n.spec.clone(),
+        children: index
+            .children(Some(node))
+            .iter()
+            .map(|c| {
+                let mut t = restore_tree(index, *c);
+                t.name = unique_name(&t.name, &mut names);
+                t
+            })
+            .collect(),
+    }
 }
 
 // ---- syncing the history document ----

@@ -69,16 +69,10 @@ impl Command for Revert {
         };
         let version =
             ProjectVersion::from_json(&params.version).map_err(|e| invalid(e.to_string()))?;
-        let edits = revert_edits(tx.stage(), &version, &scope)
+        let plan = revert_edits(tx.stage(), &version, &scope)
             .map_err(|e| CommandError::Failed(e.to_string()))?;
-        let n = edits.len();
         // Like undo, a rollback restores locked layers too.
-        tx.allow_locked(|tx| {
-            for (layer, op) in edits {
-                tx.apply_to(&layer, op)?;
-            }
-            Ok::<_, CommandError>(())
-        })?;
-        Ok(RevertOutput { edits: n })
+        let edits = tx.allow_locked(|tx| plan.apply(tx))?;
+        Ok(RevertOutput { edits })
     }
 }
