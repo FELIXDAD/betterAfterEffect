@@ -1,6 +1,8 @@
 //! Comp evaluation: compile a comp once (resolve opinions, decode keyframes into
 //! [`Curve`]s, resolve parents and mattes), then sample it at any time.
 
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -88,8 +90,8 @@ impl Prop {
         attr: &str,
         fallback: Value,
     ) -> Prop {
-        match view.attr(attr) {
-            Some(spec) => Prop::from_spec(spec, prim_type, view.path(), attr)
+        match spec_of(view, attr) {
+            Some(spec) => Prop::from_spec(&spec, prim_type, view.path(), attr)
                 .unwrap_or_else(|| Prop::Static(default_of(prim_type, attr).unwrap_or(fallback))),
             None => Prop::Static(default_of(prim_type, attr).unwrap_or(fallback)),
         }
@@ -202,6 +204,57 @@ fn vec3(v: &Value) -> DVec3 {
 }
 
 /// Static (non-animatable) setting: the winning opinion's value or the schema default.
+/// A value shown before it is committed (a live drag in a panel): `prim`'s
+/// `attr` evaluated as `spec`, without changing the stage
+/// ([`Evaluator::set_overrides`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttrOverride {
+    pub prim: PrimPath,
+    pub attr: String,
+    pub spec: AttrSpec,
+}
+
+thread_local! {
+    /// The overrides of the evaluator compiling on this thread.
+    static OVERRIDES: RefCell<Arc<[AttrOverride]>> = RefCell::new(Arc::from([]));
+}
+
+/// Runs `f` with `overrides` in effect for [`spec_of`].
+fn with_overrides<R>(overrides: &Arc<[AttrOverride]>, f: impl FnOnce() -> R) -> R {
+    if overrides.is_empty() {
+        return f();
+    }
+    let previous = OVERRIDES.with(|o| std::mem::replace(&mut *o.borrow_mut(), overrides.clone()));
+    let r = f();
+    OVERRIDES.with(|o| *o.borrow_mut() = previous);
+    r
+}
+
+/// `view`'s spec of `attr`, or the override in effect for it.
+fn spec_of<'a>(view: &PrimView<'a>, attr: &str) -> Option<Cow<'a, AttrSpec>> {
+    let found = OVERRIDES.with(|o| {
+        o.borrow()
+            .iter()
+            .find(|x| x.attr == attr && x.prim == *view.path())
+            .map(|x| x.spec.clone())
+    });
+    match found {
+        Some(spec) => Some(Cow::Owned(spec)),
+        None => view.attr(attr).map(Cow::Borrowed),
+    }
+}
+
+/// Attributes of `path` overridden although they may have no opinion yet.
+fn override_names(path: &PrimPath) -> Vec<String> {
+    OVERRIDES.with(|o| {
+        o.borrow()
+            .iter()
+            .filter(|x| x.prim == *path)
+            .map(|x| x.attr.clone())
+            .collect()
+    })
+}
+
 fn setting(view: &PrimView<'_>, prim_type: &PrimType, attr: &str) -> Option<Value> {
     view.value(attr)
         .cloned()
@@ -253,6 +306,8 @@ pub(crate) struct CompiledComp {
     pub(crate) height: u32,
     pub(crate) pixel_aspect: f64,
     pub(crate) frame_rate: FrameRate,
+    pub(crate) display_start: Time,
+    pub(crate) drop_frame: bool,
     pub(crate) duration: Time,
     pub(crate) bg_color: [f64; 4],
     pub(crate) motion_blur: MotionBlur,
@@ -572,6 +627,14 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         height: int(c::HEIGHT, 1080.0).max(0.0) as u32,
         pixel_aspect: int(c::PIXEL_ASPECT, 1.0),
         frame_rate,
+        display_start: setting_time(&view, ct, "display_start_time").unwrap_or(Time::ZERO),
+        drop_frame: view
+            .value("drop_frame")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| {
+                let fps = frame_rate.as_f64();
+                (fps - 29.97).abs() < 0.01 || (fps - 59.94).abs() < 0.01
+            }),
         duration,
         bg_color,
         motion_blur,
@@ -648,8 +711,7 @@ fn compile_layer(
     };
     let time_remap = setting_bool(v, lt, l::TIME_REMAP_ENABLED)
         .then(|| {
-            v.attr(l::TIME_REMAP)
-                .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TIME_REMAP))
+            spec_of(v, l::TIME_REMAP).and_then(|s| Prop::from_spec(&s, ty, v.path(), l::TIME_REMAP))
         })
         .flatten();
     let audio_levels = matches!(
@@ -797,13 +859,18 @@ fn compile_layer(
                 return None;
             }
             let et = &PrimType::EFFECT;
-            let params = ev
-                .attr_names()
-                .into_iter()
+            let mut names: Vec<String> = ev.attr_names().into_iter().map(str::to_owned).collect();
+            for n in override_names(&ep) {
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+            let params = names
+                .iter()
                 .filter_map(|name| {
                     let id = name.strip_prefix(fx::PARAM_PREFIX)?;
-                    let spec = ev.attr(name)?;
-                    Some((id.to_owned(), Prop::from_spec(spec, Some(et), &ep, name)?))
+                    let spec = spec_of(&ev, name)?;
+                    Some((id.to_owned(), Prop::from_spec(&spec, Some(et), &ep, name)?))
                 })
                 .collect();
             Some(CompiledEffect {
@@ -832,8 +899,8 @@ fn compile_layer(
         .collect();
     let text = (kind == LayerKind::Text)
         .then(|| {
-            v.attr(l::TEXT_SOURCE)
-                .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TEXT_SOURCE))
+            spec_of(v, l::TEXT_SOURCE)
+                .and_then(|s| Prop::from_spec(&s, ty, v.path(), l::TEXT_SOURCE))
         })
         .flatten();
     let text_animators: Vec<CompiledPrim> = child_prims(l::ANIMATORS)
@@ -908,6 +975,7 @@ fn project_info(stage: &Stage) -> expr::ProjectInfo {
             info.bit_depth = setting_str(&v, pt, "bit_depth")
                 .and_then(|d| d.parse().ok())
                 .unwrap_or(16);
+            info.display_frames = setting_str(&v, pt, "time_display").as_deref() == Some("frames");
             info.linear_blending = setting_bool(&v, pt, "blend_colors_using_gamma_1");
         } else if v.is_a(&PrimType::ASSET) {
             let name = v
@@ -968,8 +1036,8 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
     let attrs = names
         .into_iter()
         .filter_map(|name| {
-            let prop = match v.attr(name) {
-                Some(spec) => Prop::from_spec(spec, prim_type.as_ref(), path, name)?,
+            let prop = match spec_of(&v, name) {
+                Some(spec) => Prop::from_spec(&spec, prim_type.as_ref(), path, name)?,
                 None => Prop::Static(default_of(prim_type.as_ref(), name)?),
             };
             Some((name.to_owned(), prop))
@@ -1534,11 +1602,50 @@ pub struct Evaluator {
     /// Every comp of the stage (expressions can reach any comp); rebuilt after
     /// structural changes.
     comp_list: Option<Vec<PrimPath>>,
+    /// Layer pixels for `sampleImage`, filled by the renderer that shares it.
+    samples: Option<Arc<crate::ImageSamples>>,
+    /// Values shown before they are committed ([`Evaluator::set_overrides`]).
+    overrides: Arc<[AttrOverride]>,
 }
 
 impl Evaluator {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Serves `sampleImage` from `samples` (without one it reads transparent
+    /// black). The evaluator clears it whenever the project changes.
+    pub fn set_image_samples(&mut self, samples: Option<Arc<crate::ImageSamples>>) {
+        self.samples = samples;
+    }
+
+    /// The cache set by [`Evaluator::set_image_samples`].
+    pub fn image_samples(&self) -> Option<&Arc<crate::ImageSamples>> {
+        self.samples.as_ref()
+    }
+
+    /// Evaluates as if these attributes had these specs, without changing the
+    /// stage: what a value drag shows before it is committed (each frame of the
+    /// drag passes the values it has reached; an empty list ends it). Only the
+    /// compiled comps holding the overridden prims are rebuilt.
+    pub fn set_overrides(&mut self, overrides: Vec<AttrOverride>) {
+        if *self.overrides == overrides[..] {
+            return;
+        }
+        let touched: Vec<PrimPath> = self
+            .overrides
+            .iter()
+            .chain(&overrides)
+            .map(|o| o.prim.clone())
+            .collect();
+        self.comps.retain(|_, c| {
+            !c.deps.iter().any(|d| {
+                touched
+                    .iter()
+                    .any(|p| d.is_prefix_of(p) || p.is_prefix_of(d))
+            })
+        });
+        self.overrides = overrides.into();
     }
 
     /// Evaluate `comp` at comp time `time`.
@@ -1586,7 +1693,9 @@ impl Evaluator {
         if let Some(c) = self.comps.get(comp) {
             return Ok(c.clone());
         }
-        let c = Arc::new(compile_comp(stage, comp)?);
+        let c = Arc::new(with_overrides(&self.overrides, || {
+            compile_comp(stage, comp)
+        })?);
         self.comps.insert(comp.clone(), c.clone());
         Ok(c)
     }
@@ -1623,7 +1732,10 @@ impl Evaluator {
             .project
             .get_or_insert_with(|| Arc::new(project_info(stage)))
             .clone();
-        (expr::Scope::new(comps).with_project(project), id)
+        let scope = expr::Scope::new(comps)
+            .with_project(project)
+            .with_samples(self.samples.clone());
+        (scope, id)
     }
 
     fn evaluate_with_expressions(
@@ -1714,8 +1826,8 @@ impl Evaluator {
             None => time,
         };
         let prim_type = view.prim_type();
-        let prop = match view.attr(attr) {
-            Some(spec) => Prop::from_spec(spec, prim_type, prim, attr),
+        let prop = match with_overrides(&self.overrides, || spec_of(&view, attr)) {
+            Some(spec) => Prop::from_spec(&spec, prim_type, prim, attr),
             None => None,
         }
         .or_else(|| default_of(prim_type, attr).map(Prop::Static))
@@ -1806,6 +1918,9 @@ impl Evaluator {
             self.comp_list = None;
         }
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 
     /// Drop every compiled comp.
@@ -1813,6 +1928,9 @@ impl Evaluator {
         self.comps.clear();
         self.comp_list = None;
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 }
 
