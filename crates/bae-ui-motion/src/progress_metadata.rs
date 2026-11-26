@@ -293,15 +293,29 @@ impl MetadataPanel {
                         }
                         ui.horizontal(|ui| {
                             let caption = ui.label(tr(label));
-                            let edit = egui::TextEdit::singleline(&mut value)
+                            // Typing edits a local copy; Enter or clicking away
+                            // commits it as one step (one undo), Esc drops it.
+                            let key = egui::Id::new(("metadata-edit", items, field));
+                            let mut text = ui
+                                .data(|d| d.get_temp::<String>(key))
+                                .unwrap_or_else(|| value.clone());
+                            let edit = egui::TextEdit::singleline(&mut text)
                                 .id_salt((items, field))
                                 .hint_text(if mixed { tr("<Multiple Values>") } else { "" })
                                 .desired_width(ui.available_width());
-                            if ui.add(edit).labelled_by(caption.id).changed() {
-                                cx.invoke_with(
-                                    "item.set_metadata",
-                                    serde_json::json!({"items":items,"field":field,"text":value}),
-                                );
+                            let resp = ui.add(edit).labelled_by(caption.id);
+                            if resp.changed() {
+                                ui.data_mut(|d| d.insert_temp(key, text.clone()));
+                            }
+                            if resp.lost_focus() {
+                                ui.data_mut(|d| d.remove::<String>(key));
+                                let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                if !cancelled && text != value {
+                                    cx.invoke_with(
+                                        "item.set_metadata",
+                                        serde_json::json!({"items":items,"field":field,"text":text}),
+                                    );
+                                }
                             }
                         });
                     }
@@ -461,9 +475,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Author", "作者"),
     ("Description", "描述"),
     ("Keywords", "关键字"),
-    ("Copyright Notice", "版权声明"),
+    ("Copyright Notice", "版权公告"),
     ("Scene", "场景"),
-    ("Shot Name", "镜头名称"),
+    ("Shot Name", "拍摄名称"),
     ("Log Comment", "日志注释"),
     ("Rendering", "渲染"),
     ("Done", "完成"),
