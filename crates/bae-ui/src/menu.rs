@@ -176,6 +176,8 @@ pub struct MenuItemSpec {
     pub is_placeholder: bool,
     /// Greyed until a module handles the action ([`MenuItemSpec::needs_handler`]).
     pub handler_needed: bool,
+    /// The letter Alt picks on Windows (AE's underlined letter), if any.
+    pub mnemonic: Option<char>,
     enabled: Option<Arc<MenuEnabled>>,
     checked: Option<Arc<MenuChecked>>,
     label: Option<Arc<MenuLabel>>,
@@ -223,10 +225,17 @@ impl MenuItemSpec {
             levels: Vec::new(),
             is_placeholder: false,
             handler_needed: false,
+            mnemonic: None,
             enabled: None,
             checked: None,
             label: None,
         }
+    }
+
+    /// The Windows menu mnemonic (Alt+letter).
+    pub fn mnemonic(mut self, letter: Option<char>) -> Self {
+        self.mnemonic = letter;
+        self
     }
 
     pub fn params(mut self, params: serde_json::Value) -> Self {

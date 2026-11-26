@@ -22,10 +22,12 @@ struct H {
     resources: Resources,
     ctx: egui::Context,
     time: f64,
+    width: f32,
     comp: PrimPath,
     layer: PrimPath,
     /// Tessellate each frame too (the perf probe measures the full CPU cost).
     tessellate: bool,
+    painted_text: Option<Vec<(String, Rect)>>,
 }
 
 impl H {
@@ -42,9 +44,11 @@ impl H {
             resources,
             ctx: bae_ui::testing::ctx_with_fonts(),
             time: 0.0,
+            width: 1280.0,
             comp: PrimPath::new("/x").unwrap(),
             layer: PrimPath::new("/x").unwrap(),
             tessellate: false,
+            painted_text: None,
         };
         h.comp = path(
             &h.run(
@@ -106,7 +110,7 @@ impl H {
         let mut all = vec![Event::ModifiersChanged(mods)];
         all.extend(events);
         let raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 800.0))),
             events: all,
             time: Some(self.time),
             predicted_dt: 1.0 / 60.0,
@@ -122,6 +126,22 @@ impl H {
             cx.focused = true;
             tl.ui(ui, &mut cx);
         });
+        if let Some(text) = &mut self.painted_text {
+            fn collect(shape: &egui::Shape, text: &mut Vec<(String, Rect)>) {
+                match shape {
+                    egui::Shape::Text(t) => text.push((
+                        t.galley.text().to_owned(),
+                        Rect::from_min_size(t.pos, t.galley.size()),
+                    )),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| collect(s, text)),
+                    _ => {}
+                }
+            }
+            text.clear();
+            for s in &out.shapes {
+                collect(&s.shape, text);
+            }
+        }
         out.textures_delta.clear();
         if self.tessellate {
             let shapes = std::mem::take(&mut out.shapes);
@@ -382,6 +402,7 @@ impl H {
     }
 }
 
+mod columns;
 mod expressions;
 mod graph;
 mod keyframes;
@@ -390,4 +411,5 @@ mod layers;
 mod markers;
 mod multi_edit;
 mod outline;
+mod search;
 mod switches;

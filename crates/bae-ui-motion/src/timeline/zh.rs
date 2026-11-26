@@ -258,5 +258,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Open a composition from the Project panel, or create one.",
         "从项目面板打开合成，或新建一个合成。",
     ),
+    ("Composition Mini-Flowchart", "合成微型流程图"),
     ("Select", "选择"),
+    ("Frame Mix", "帧混合"),
+    ("Pixel Motion", "像素运动"),
 ];
