@@ -723,6 +723,8 @@ impl LayerPanel {
                 "clone_source": p.clone_source,
                 "clone_offset": [offset.x, offset.y],
                 "clone_time_shift": flicks(p.clone_time_shift),
+                "clone_lock_time": p.lock_source_time,
+                "clone_time": flicks(p.clone_source_time),
             });
             // Shift-drag continues the previous stroke of the same tool.
             match self
