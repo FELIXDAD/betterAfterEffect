@@ -54,6 +54,8 @@ pub enum Kind {
         options: &'static [Opt],
         style: Style,
     },
+    /// System default or the stable ID of a native audio output device.
+    AudioOutput,
     /// Label index 0..=16, shown as label names with swatches.
     Label,
     /// `#rrggbb` color swatch.
@@ -233,6 +235,9 @@ pub(crate) const fn choice(
         Kind::Choice { options, style },
         DefaultValue::Str(v),
     )
+}
+pub(crate) const fn audio_output(key: &'static str, text: &'static str, v: &'static str) -> Pref {
+    Pref::new(key, text, Kind::AudioOutput, DefaultValue::Str(v))
 }
 pub(crate) const fn label(key: &'static str, text: &'static str, v: i64) -> Pref {
     Pref::new(key, text, Kind::Label, DefaultValue::Int(v))

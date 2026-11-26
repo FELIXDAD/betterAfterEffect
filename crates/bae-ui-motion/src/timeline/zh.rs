@@ -2,6 +2,12 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Show Cache Indicators", "显示缓存指示器"),
+    ("Rectified Audio Waveforms", "调整的音频波形"),
+    ("Enable Auto-keyframe", "启用自动关键帧"),
+    ("Live Update", "实时更新"),
+    ("Use Keyframe Icons", "使用关键帧图标"),
+    ("Use Keyframe Indices", "使用关键帧索引"),
     ("Close Other Timeline Panels", "关闭其他时间轴面板"),
     ("Close Timeline Panels to the Left", "关闭左侧的时间轴面板"),
     ("Close Timeline Panels to the Right", "关闭右侧的时间轴面板"),
@@ -16,6 +22,149 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Exponential Scale", "指数比例"),
+    ("Select Next Layer", "选择下一个图层"),
+    ("Extend Selection to Next Layer", "扩展选区到下一图层"),
+    ("Select Previous Layer", "选择上一个图层"),
+    ("Extend Selection to Previous Layer", "扩展选区到上一图层"),
+    ("Move Layer 1 Frame Earlier", "将图层提前移动 1 个帧"),
+    ("Move Layer 10 Frames Earlier", "将图层提前移动 10 个帧"),
+    ("Move Layer 1 Frame Later", "将图层往后移动 1 个帧"),
+    ("Move Layer 10 Frames Later", "将图层往后移动 10 个帧"),
+    (
+        "Move Selected Keyframes 1 Frame Earlier",
+        "将所选关键帧提前移动 1 个帧",
+    ),
+    (
+        "Move Selected Keyframes 10 Frames Earlier",
+        "将所选关键帧提前移动 10 个帧",
+    ),
+    (
+        "Move Selected Keyframes 1 Frame Later",
+        "将所选关键帧往后移动 1 个帧",
+    ),
+    (
+        "Move Selected Keyframes 10 Frames Later",
+        "将所选关键帧往后移动 10 个帧",
+    ),
+    ("Rotate Layer 1 Degree Clockwise", "顺时针旋转图层 1 度"),
+    ("Rotate Layer 10 Degrees Clockwise", "顺时针旋转图层 10 度"),
+    (
+        "Rotate Layer 1 Degree Counterclockwise",
+        "逆时针旋转图层 1 度",
+    ),
+    (
+        "Rotate Layer 10 Degrees Counterclockwise",
+        "逆时针旋转图层 10 度",
+    ),
+    ("Scale Layer Up 1%", "将图层放大 1%"),
+    ("Scale Layer Up 10%", "将图层放大 10%"),
+    ("Scale Layer Down 1%", "将图层缩小 1%"),
+    ("Scale Layer Down 10%", "将图层缩小 10%"),
+    ("Increase Layer Opacity 1%", "将图层透明度增加 1%"),
+    ("Increase Layer Opacity 10%", "将图层透明度增加 10%"),
+    ("Decrease Layer Opacity 1%", "将图层透明度降低 1%"),
+    ("Decrease Layer Opacity 10%", "将图层透明度降低 10%"),
+    ("Select Layer by Number: 1", "按数字选择图层: 1"),
+    (
+        "Toggle Layer Selection by Number: 1",
+        "按数字切换图层选择: 1",
+    ),
+    ("Select Layer by Number: 2", "按数字选择图层: 2"),
+    (
+        "Toggle Layer Selection by Number: 2",
+        "按数字切换图层选择: 2",
+    ),
+    ("Select Layer by Number: 3", "按数字选择图层: 3"),
+    (
+        "Toggle Layer Selection by Number: 3",
+        "按数字切换图层选择: 3",
+    ),
+    ("Select Layer by Number: 4", "按数字选择图层: 4"),
+    (
+        "Toggle Layer Selection by Number: 4",
+        "按数字切换图层选择: 4",
+    ),
+    ("Select Layer by Number: 5", "按数字选择图层: 5"),
+    (
+        "Toggle Layer Selection by Number: 5",
+        "按数字切换图层选择: 5",
+    ),
+    ("Select Layer by Number: 6", "按数字选择图层: 6"),
+    (
+        "Toggle Layer Selection by Number: 6",
+        "按数字切换图层选择: 6",
+    ),
+    ("Select Layer by Number: 7", "按数字选择图层: 7"),
+    (
+        "Toggle Layer Selection by Number: 7",
+        "按数字切换图层选择: 7",
+    ),
+    ("Select Layer by Number: 8", "按数字选择图层: 8"),
+    (
+        "Toggle Layer Selection by Number: 8",
+        "按数字切换图层选择: 8",
+    ),
+    ("Select Layer by Number: 9", "按数字选择图层: 9"),
+    (
+        "Toggle Layer Selection by Number: 9",
+        "按数字切换图层选择: 9",
+    ),
+    ("Set Work Area to Selected Layers", "将工作区域设为所选图层"),
+    ("Go to Work Area Start", "转到工作区域的开头"),
+    ("Go to Work Area End", "转到工作区域的结尾"),
+    (
+        "Go to Previous Layer In or Out Point",
+        "转到上一图层入点或出点",
+    ),
+    ("Go to Next Layer In or Out Point", "转到下一图层入点或出点"),
+    (
+        "Align Selected Layers' In Points to Composition Start",
+        "将所选图层的入点对齐到合成开头",
+    ),
+    (
+        "Align Selected Layers' Out Points to Composition End",
+        "将所选图层的出点对齐到合成末端",
+    ),
+    (
+        "Stretch Layer In Point to Current Time",
+        "将图层入点拉伸到当前时间",
+    ),
+    (
+        "Stretch Layer Out Point to Current Time",
+        "将图层出点拉伸到当前时间",
+    ),
+    (
+        "Set Layer In Point (Relative to Selection)",
+        "设置图层入点（相对于选区）",
+    ),
+    (
+        "Set Layer Out Point (Relative to Selection)",
+        "设置图层出点（相对于选区）",
+    ),
+    (
+        "Trim Layer In Point (Relative to Selection)",
+        "修剪图层入点（相对于选区）",
+    ),
+    (
+        "Trim Layer Out Point (Relative to Selection)",
+        "修剪图层出点（相对于选区）",
+    ),
+    (
+        "Select All Visible Keyframes and Revealed Properties",
+        "选择全部可见的关键帧和显示的属性",
+    ),
+    (
+        "Deselect All Keyframes and Properties",
+        "取消选择全部关键帧和属性",
+    ),
+    (
+        "Go to Previous Keyframe on Selected Layers/Properties",
+        "转到“选定图层/属性”上的“上一个关键帧”",
+    ),
+    (
+        "Go to Next Keyframe on Selected Layers/Properties",
+        "转到“选定图层/属性”上的“下一个关键帧”",
+    ),
     ("Sequence Layers...", "序列图层..."),
     ("Set Expressions", "设置多个表达式"),
     (
@@ -205,6 +354,16 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Animator", "动画制作工具"),
     ("Based On", "依据"),
     ("Amount", "数量"),
+    // A Paint effect's strokes (`props::paint_strokes`, AE 26's words).
+    ("Brush", "画笔"),
+    ("Clone", "仿制"),
+    ("Eraser", "橡皮擦"),
+    ("Diameter", "直径"),
+    ("Angle", "角度"),
+    ("Hardness", "硬度"),
+    ("Spacing", "间距"),
+    ("Flow", "流量"),
+    ("Transform:", "变换:"),
     ("Smoothness", "平滑度"),
     ("Ease High", "缓和高"),
     ("Ease Low", "缓和低"),
@@ -273,6 +432,29 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Go to Next Keyframe", "转到下一个关键帧"),
     ("Reveal Animated Properties", "显示动画属性"),
+    (
+        "Add Animated Properties to Revealed Properties",
+        "同时显示动画属性",
+    ),
+    ("Reveal Mask Path", "显示蒙版路径"),
+    ("Add Mask Path to Revealed Properties", "同时显示蒙版路径"),
+    ("Reveal Mask Feather", "显示蒙版羽化"),
+    (
+        "Add Mask Feather to Revealed Properties",
+        "同时显示蒙版羽化",
+    ),
+    (
+        "Mask Path: Add or Remove Keyframe",
+        "蒙版路径：添加或移除关键帧",
+    ),
+    (
+        "Mask Feather: Add or Remove Keyframe",
+        "蒙版羽化：添加或移除关键帧",
+    ),
+    (
+        "Audio Levels: Add or Remove Keyframe",
+        "音频电平：添加或移除关键帧",
+    ),
     ("Reveal Modified Properties", "显示修改的属性"),
     // Timeline
     ("Layer Name", "图层名称"),

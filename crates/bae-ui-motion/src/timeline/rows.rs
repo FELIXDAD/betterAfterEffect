@@ -163,14 +163,20 @@ impl TimelinePanel {
                     .filter(|c| cols.visible(*c))
                     .collect();
                 if let (Some(first), Some(last)) = (lead_cols.first(), lead_cols.last()) {
-                    let lead = ui.interact(
-                        Rect::from_min_max(
-                            pos2(l + cols.x(*first), rect.top()),
-                            pos2(l + cols.right(*last), rect.bottom()),
-                        ),
-                        rid("lead"),
-                        Sense::click(),
-                    );
+                    let lead = ui
+                        .interact(
+                            Rect::from_min_max(
+                                pos2(l + cols.x(*first), rect.top()),
+                                pos2(l + cols.right(*last), rect.bottom()),
+                            ),
+                            rid("lead"),
+                            Sense::click(),
+                        )
+                        .labeled_toggle(
+                            egui::WidgetType::SelectableLabel,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Label and Layer Number")]),
+                            layer_selected,
+                        );
                     if lead.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
@@ -268,10 +274,15 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    // AE: a double-click opens a pre-comp's comp, any other layer
-                    // in the Layer panel; Enter renames.
-                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) {
-                        crate::layer_panel::open(cx, session, layer);
+                    if resp.double_clicked() {
+                        crate::layer_panel::open_clicked(
+                            cx,
+                            session,
+                            layer,
+                            ui.input(|i| i.modifiers.alt),
+                            crate::tools::shared(cx.resources).current(),
+                            &mut self.eval,
+                        );
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {
@@ -531,8 +542,15 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
-                self.waveforms
-                    .draw(ui, stage, layer, axis, graph, color::TEXT);
+                self.waveforms.draw(
+                    ui,
+                    stage,
+                    layer,
+                    axis,
+                    graph,
+                    color::TEXT,
+                    self.display.rectified,
+                );
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
@@ -934,7 +952,10 @@ impl TimelinePanel {
                 _ => &[],
             };
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
-            let edit = if let bae_model::Value::Bool(on) = value {
+            let style_edit = crate::layer_styles::edit(&mut child, id, path, attr, &value);
+            let edit = if let Some(edit) = style_edit {
+                edit
+            } else if let bae_model::Value::Bool(on) = value {
                 // AE's timeline switches On/Off with hot text, not a checkbox.
                 let text = tr(if on { "On" } else { "Off" });
                 if widgets::link(&mut child, text)
