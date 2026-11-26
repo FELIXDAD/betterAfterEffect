@@ -2,6 +2,8 @@
 //! stopwatches, values and keyframes; expression rows.
 
 use super::*;
+use bae_anim::FrameBlending;
+use switches::SwitchValue;
 
 /// AE's name of a layer switch, for screen readers.
 pub(super) fn switch_name(icon: Icon) -> &'static str {
@@ -130,7 +132,7 @@ impl TimelinePanel {
                         &layer_ctx,
                         attr,
                         icon,
-                        on,
+                        on.into(),
                         locked,
                     );
                 }
@@ -308,7 +310,7 @@ impl TimelinePanel {
                             icon,
                             on,
                             locked,
-                        );
+                        )
                     };
                     for (i, attr, icon) in [
                         (0, "shy", Icon::Shy),
@@ -317,7 +319,15 @@ impl TimelinePanel {
                         (6, "adjustment_layer", Icon::Adjustment),
                         (7, "three_d", Icon::Cube),
                     ] {
-                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr));
+                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr).into());
+                    }
+                    if let Some(mode) = footage_frame_blending(stage, layer) {
+                        cell(
+                            sw(4),
+                            "frame_blending",
+                            Icon::FrameBlend,
+                            SwitchValue::Frames(mode),
+                        );
                     }
                     // Effect switch (fx): only on layers with effects, like AE.
                     if !bae_motion::effect::effects_of(stage, layer).is_empty() {
@@ -326,13 +336,13 @@ impl TimelinePanel {
                             .and_then(|v| query::static_value(&v, "effects_enabled"))
                             .and_then(|v| v.as_bool())
                             .unwrap_or(true);
-                        cell(sw(3), "effects_enabled", Icon::Fx, on);
+                        cell(sw(3), "effects_enabled", Icon::Fx, on.into());
                     }
                     let draft = stage
                         .prim(layer)
                         .and_then(|v| query::static_value(&v, "quality"))
                         .is_some_and(|v| v.as_str() == Some("draft"));
-                    cell(sw(2), "quality", Icon::Quality, !draft);
+                    cell(sw(2), "quality", Icon::Quality, (!draft).into());
                 }
                 // Modes: Mode, T, Track Matte.
                 if cols.visible(Column::Modes) {
@@ -1192,4 +1202,26 @@ fn option_label(token: &str) -> &'static str {
         .iter()
         .find(|(t, _, _)| *t == token)
         .map_or("", |(_, en, z)| if zh { z } else { en })
+}
+
+/// The media importer writes a frame rate only for moving footage. Still and audio layers
+/// have no temporal video samples to mix.
+fn footage_frame_blending(stage: &Stage, layer: &PrimPath) -> Option<FrameBlending> {
+    let view = stage.prim(layer)?;
+    if view.value("kind")?.as_str()? != "footage" {
+        return None;
+    }
+    let asset = stage.prim(view.value("source")?.as_prim_ref()?)?;
+    let kind = asset.value("kind")?.as_str()?;
+    if kind == "sequence" || (kind == "footage" && asset.value("frame_rate").is_some()) {
+        Some(
+            match view.value("frame_blending").and_then(|v| v.as_str()) {
+                Some("frame_mix") => FrameBlending::FrameMix,
+                Some("pixel_motion") => FrameBlending::PixelMotion,
+                _ => FrameBlending::Off,
+            },
+        )
+    } else {
+        None
+    }
 }

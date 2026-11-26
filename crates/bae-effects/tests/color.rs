@@ -507,3 +507,34 @@ fn identity_skips_the_pass() {
         assert_close(&got, &input, RECT, 0.0, name);
     }
 }
+
+#[test]
+fn linked_channel_average_and_neutralizer_preserve_alpha() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(16, 8);
+    let image = Pixels::new(r, |x, _| {
+        if x < 8 {
+            [1., 0., 0., 1.]
+        } else {
+            [0., 0., 1., 1.]
+        }
+    });
+    let linked = run(&gpu, F32, builtin("ADBE Color Link"), vec![], &image, r, 1.);
+    assert_close(
+        &linked,
+        &Pixels::new(r, |_, _| [0.5, 0., 0.5, 1.]),
+        r,
+        0.005,
+        "linked average",
+    );
+    let a = run(
+        &gpu,
+        F32,
+        builtin("CS Color Neutralizer"),
+        vec![],
+        &image,
+        r,
+        1.,
+    );
+    assert_close(&a, &image, r, 0.0001, "neutral controls");
+}

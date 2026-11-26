@@ -411,4 +411,5 @@ mod layers;
 mod markers;
 mod multi_edit;
 mod outline;
+mod search;
 mod switches;

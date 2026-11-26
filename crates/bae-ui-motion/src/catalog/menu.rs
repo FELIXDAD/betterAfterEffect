@@ -187,7 +187,7 @@ const FILE: &[Node] = &[
         "Save As",
         &[
             it(21889025, "Save As...", "file.save_as", "", B, Done),
-            it(21889026, "Save a Copy...", "motion.file.save_a_copy", "", B, Todo),
+            it(21889026, "Save a Copy...", "file.save_a_copy", "", B, Done),
             it(21889027, "Save a Copy As XML...", "motion.file.save_a_copy_as_xml", "", B, Adobe),
             it(21889028, "Save a Copy As 25.x...", "motion.file.save_a_copy_as_25_x", "", B, Adobe),
             it(21889029, "Save a Copy As 24.x...", "motion.file.save_a_copy_as_24_x", "", B, Adobe),
@@ -234,7 +234,7 @@ const FILE: &[Node] = &[
         ],
     ),
     SEP,
-    it(131093, "Find", "motion.file.find", "", E, Todo),
+    it(131093, "Find", "motion.file.find", "", E, Done),
     SEP,
     it(131095, "Add Footage to Comp", "motion.file.add_footage_to_comp", "", E, Todo),
     it(131096, "New Comp from Selection...", "motion.file.new_comp_from_selection", "", E, Todo),
@@ -311,19 +311,19 @@ const FILE: &[Node] = &[
     sub(
         "Replace Footage",
         &[
-            it(11141121, "File...", "motion.file.replace_footage_file", "", E, Todo),
+            it(11141121, "File...", "motion.file.replace_footage_file", "", E, Done),
             it(11141122, "With Layered Comp", "motion.file.replace_footage_with_layered_comp", "", B, Adobe),
             SEP,
             it(11141124, "Placeholder...", "motion.file.replace_footage_placeholder", "", E, Later),
             it(11141125, "Solid...", "motion.file.replace_footage_solid", "", E, Later),
         ],
     ),
-    it(131107, "Reload Footage", "motion.file.reload_footage", "", E, Todo),
+    it(131107, "Reload Footage", "motion.file.reload_footage", "", E, Done),
     it(131108, "License...", "motion.file.license", "", B, Adobe),
-    it(131109, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Todo),
+    it(131109, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
     it(131110, "Reveal in Bridge", "motion.file.reveal_in_bridge", "", B, Adobe),
     SEP,
-    it(131112, "Project Settings...", "motion.file.project_settings", "", E, Todo),
+    it(131112, "Project Settings...", "motion.file.project_settings", "", E, Done),
     SEP,
     win(it(131114, "Exit", "app.quit", "", B, Done)),
 ];
@@ -481,7 +481,7 @@ const COMPOSITION: &[Node] = &[
     sub(
         "Save Frame As",
         &[
-            it(15335425, "File...", "motion.comp.save_frame_as_file", "", B, Todo),
+            it(15335425, "File...", "motion.comp.save_frame_as_file", "", B, Done),
             SEP,
             it(15335427, "Photoshop Layers...", "motion.comp.save_frame_as_photoshop_layers", "", B, Later),
             it(15335428, "ProEXR...", "motion.comp.save_frame_as_proexr", "", B, Adobe),
@@ -541,7 +541,7 @@ const LAYER: &[Node] = &[
     SEP,
     it(393220, "Open Layer", "motion.layer.open_layer", "", E, Later),
     it(393221, "Open Layer Source", "motion.layer.open_layer_source", "", B, Todo),
-    it(393222, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Todo),
+    it(393222, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
     SEP,
     sub(
         "Mask",
@@ -662,7 +662,7 @@ const LAYER: &[Node] = &[
             it(8912912, "Fit to Comp Width", "motion.layer.fit_to_comp_width", "", B, Done),
             it(8912913, "Fit to Comp Height", "motion.layer.fit_to_comp_height", "", B, Done),
             SEP,
-            it(8912915, "Auto-Orient...", "motion.layer.auto_orient", "", E, Todo),
+            it(8912915, "Auto-Orient...", "motion.layer.auto_orient", "", E, Done),
         ],
     ),
     sub(
@@ -670,7 +670,7 @@ const LAYER: &[Node] = &[
         &[
             it(1966081, "Enable Time Remapping", "motion.layer.enable_time_remapping", "", B, Todo),
             it(1966082, "Time-Reverse Layer", "motion.layer.time_reverse_layer", "", B, Todo),
-            it(1966083, "Time Stretch...", "motion.layer.time_stretch", "", E, Todo),
+            it(1966083, "Time Stretch...", "motion.layer.time_stretch", "", E, Done),
             it(1966084, "Freeze Frame", "motion.layer.freeze_frame", "", B, Todo),
             it(1966085, "Freeze On Last Frame", "motion.layer.freeze_on_last_frame", "", B, Todo),
             it(1966086, "Align Video to Data", "motion.layer.align_video_to_data", "", B, Later),
@@ -799,7 +799,7 @@ const LAYER: &[Node] = &[
     sub(
         "Reveal",
         &[
-            it(23003137, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Todo),
+            it(23003137, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
             it(23003138, "Reveal Layer Source in Project", "motion.layer.reveal_layer_source_in_project", "", B, Todo),
             it(23003139, "Reveal Layer in Project Flowchart", "motion.layer.reveal_layer_in_project_flowchart", "", E, Later),
             it(23003140, "Reveal Composition in Project", "motion.layer.reveal_composition_in_project", "", B, Todo),
@@ -888,7 +888,7 @@ const ANIMATION: &[Node] = &[
             s(it(11075586, "Create Keyframes from Data", "motion.anim.create_keyframes_from_data", "", B, Later)),
             s(it(11075587, "Null Controllers for Positional Points", "motion.anim.null_controllers_for_positional_points", "", B, Later)),
             s(it(11075588, "Convert Expression to Keyframes", "motion.anim.convert_expression_to_keyframes", "", C, Later)),
-            s(it(11075589, "Convert Audio to Keyframes", "motion.anim.convert_audio_to_keyframes", "", B, Later)),
+            s(it(11075589, "Convert Audio to Keyframes", "motion.anim.convert_audio_to_keyframes", "", B, Done)),
             s(it(11075590, "Sequence Layers...", "motion.anim.sequence_layers", "", E, Later)),
             s(it(11075591, "Exponential Scale", "motion.anim.exponential_scale", "", B, Later)),
             s(it(11075592, "Time-Reverse Keyframes", "motion.reverse_keys", "", B, Done)),
@@ -1089,7 +1089,7 @@ const VIEW: &[Node] = &[
     it(589858, "Look at Selected Layers", "motion.view.look_at_selected_layers", "", A, Later),
     it(589859, "Look at All Layers", "motion.view.look_at_all_layers", "", A, Later),
     SEP,
-    it(589861, "Go to Time...", "motion.view.go_to_time", "", B, Todo),
+    it(589861, "Go to Time...", "motion.view.go_to_time", "", B, Done),
 ];
 
 /// Window.
@@ -1163,7 +1163,7 @@ const WINDOW: &[Node] = &[
     s(it(524316, "Mask Interpolation", "window.panel", r#"{"id":"mask_interpolation","toggle":true}"#, E, Later)),
     s(it(524317, "Tracker", "window.panel", r#"{"id":"tracker","toggle":true}"#, E, Later)),
     s(it(524318, "Progress", "window.panel", r#"{"id":"progress","toggle":true}"#, E, Later)),
-    s(it(524319, "Audio", "window.panel", r#"{"id":"audio","toggle":true}"#, E, Todo)),
+    s(it(524319, "Audio", "window.panel", r#"{"id":"audio","toggle":true}"#, E, Done)),
     s(it(524320, "Preview", "window.panel", r#"{"id":"preview","toggle":true}"#, B, Done)),
     SEP,
     s(it(524322, "Composition", "window.panel", r#"{"id":"composition","toggle":true}"#, B, Done)),

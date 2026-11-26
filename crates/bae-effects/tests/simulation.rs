@@ -3,7 +3,7 @@ mod common;
 use bae_effects::Standalone;
 use bae_gpu::wgpu::TextureFormat;
 use bae_model::{Time, Value};
-use bae_render::{EffectParams, IRect};
+use bae_render::{EffectParams, IRect, RenderComp, Renderer};
 use common::{Pixels, builtin, context, instance, test_image};
 
 #[test]
@@ -82,6 +82,42 @@ fn particle_world_seek_reproduces_pixels_and_cropped_tiles() {
 }
 
 #[test]
+fn long_lived_floor_particles_match_after_a_backward_seek() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(80, 64);
+    let input = test_image(rect).upload(&gpu, TextureFormat::Rgba16Float);
+    let inst = instance(
+        "CC Particle World",
+        vec![
+            (4, Value::Float(0.00001)),
+            (5, Value::Float(3000.)),
+            (16, Value::Float(0.)),
+            (18, Value::Float(0.02)),
+            (23, Value::Int(4)),
+            (24, Value::Float(2.)),
+            (25, Value::Float(2.)),
+            (66, Value::Int(4)),
+        ],
+    );
+    let mut target = Standalone::new(gpu.clone(), TextureFormat::Rgba16Float);
+    let mut render = |seconds| {
+        let p = EffectParams {
+            time: Time::from_seconds(seconds),
+            ..EffectParams::new(&inst)
+        };
+        let out = builtin(&inst.effect)
+            .render(&mut target, &p, &input, rect)
+            .unwrap();
+        target.finish().unwrap();
+        Pixels::download(&gpu, &out).data
+    };
+    let late = render(2999.);
+    assert!(late.iter().any(|p| p[3] > 0.1));
+    assert_ne!(render(10.), late);
+    assert_eq!(render(2999.), late);
+}
+
+#[test]
 fn simulation_presets_render_finite_pixels_in_both_working_formats() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(80, 64);
@@ -111,5 +147,67 @@ fn simulation_presets_render_finite_pixels_in_both_working_formats() {
             );
             assert!(image.data.iter().any(|p| p[3] > 0.), "{}", inst.effect);
         }
+    }
+}
+
+#[path = "common/time_scene.rs"]
+mod time_scene;
+use time_scene::{CLIP, effect, path, pixels, renderer, solid};
+
+#[test]
+fn particle_texture_clocks_match_in_playback_and_after_a_seek() {
+    let Some(mut r) = renderer() else { return };
+    for mode in [1, 2, 3] {
+        let scene = |t: Time| {
+            let mut comp = RenderComp::new(path("/comps/main"), 64, 8);
+            comp.time = t;
+            let mut emitter = solid(CLIP, 64, [1.; 4]);
+            emitter.time = t;
+            // Exactly one particle, born at 0.5 s, stationary for its whole life.
+            let mut params = vec![
+                (4, Value::Float(0.001)),
+                (23, Value::Int(24)),
+                (24, Value::Float(4.)),
+                (25, Value::Float(4.)),
+                (29, Value::Color([1.; 4])),
+                (30, Value::Color([1.; 4])),
+                (45, Value::PrimRef(path("/comps/main/layers/texture"))),
+                (47, Value::Int(mode)),
+            ];
+            params.extend([10, 11, 12, 16, 18, 26, 42, 43].map(|id| (id, Value::Float(0.))));
+            emitter
+                .effects
+                .push(effect("particles", "CC Particle World", params));
+            let color = match t.as_seconds() {
+                s if s < 0.5 => [1., 0., 0., 1.],
+                s if s < 0.9 => [0., 1., 0., 1.],
+                _ => [0., 0., 1., 1.],
+            };
+            let mut texture = solid("/comps/main/layers/texture", 64, color);
+            texture.visible = false;
+            texture.time = t;
+            comp.layers = vec![emitter, texture];
+            comp
+        };
+        let render = |r: &mut Renderer, frame| pixels(r, scene, f64::from(frame) / 24.);
+        let cold = render(&mut r, 30);
+        let channel = match mode {
+            1 => 0,
+            2 => 2,
+            _ => 1,
+        };
+        assert!(
+            cold.as_chunks::<4>().0.iter().any(|p| p[channel] > 128),
+            "texture mode {mode}"
+        );
+        for frame in 0..30 {
+            let image = render(&mut r, frame);
+            if mode == 1 && frame > 12 {
+                assert_eq!(image, cold, "birth texture changed at frame {frame}");
+            }
+        }
+        assert_eq!(render(&mut r, 30), cold);
+        let _ = render(&mut r, 180);
+        assert_eq!(render(&mut r, 30), cold);
     }
 }
