@@ -40,6 +40,23 @@ pub enum SyncError {
     /// document (reported in `PumpOutcome::errors`) and sends the others.
     #[error("message of {size} bytes is over the limit of {max} bytes")]
     MessageTooLarge { size: usize, max: usize },
+    /// Our own log of `doc` in the shared folder was written by a newer
+    /// version of the log format (`docs/spec/sync.md` §4.3). This build
+    /// neither reads nor replaces it, so nothing of `doc` is written to the
+    /// folder. Only that document is refused and the link is still usable:
+    /// `send` returns this (or `recv`, for a write that failed in the
+    /// background of a `ThreadedTransport`), and the session reports it once
+    /// (`PumpOutcome::errors`), keeps the document's changes unsynced and
+    /// sends none of them on that link until `SyncSession::reset`.
+    #[error(
+        "cannot write {doc}: our log {path} was written by a newer version of BAE \
+         (log version {version}); not reading or replacing it"
+    )]
+    NewerLogVersion {
+        doc: crate::DocKey,
+        path: PathBuf,
+        version: u32,
+    },
     #[error("no named version {0}")]
     UnknownCheckpoint(String),
     /// The version includes ops of sublayer `.0` that have not arrived here yet.
@@ -48,6 +65,15 @@ pub enum SyncError {
 }
 
 impl SyncError {
+    /// The document the remote refuses to store for as long as this link
+    /// lasts ([`SyncError::NewerLogVersion`]); the link is still usable.
+    pub(crate) fn refused_doc(&self) -> Option<&crate::DocKey> {
+        match self {
+            SyncError::NewerLogVersion { doc, .. } => Some(doc),
+            _ => None,
+        }
+    }
+
     pub(crate) fn io(path: &std::path::Path) -> impl FnOnce(std::io::Error) -> SyncError + '_ {
         move |source| SyncError::Io {
             path: path.to_owned(),

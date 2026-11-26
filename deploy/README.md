@@ -123,6 +123,7 @@ curl -H "Authorization: Bearer <令牌>" http://<NAS 地址>:7341/v1/projects   
 
 - **备份**：备份数据目录即可，最好用 NAS 的快照功能，或者停服务后复制。
 - **升级**：换新镜像或新程序后重启服务。工程日志带格式版本号，以后如果有不兼容的变化，版本说明里会写明迁移方法。
+- **降级**（换回旧版本）：如果新版本已经用新格式写了某个工程层的日志，旧版本不读、不改它，这个工程层的修改不存盘（日志里 `edits of a document are not being saved`），其他工程层照常保存。这些修改在团队成员的电脑上都有：换回新版本、重启服务后，他们（可写令牌）连上时会把 Hub 缺的部分补传上来。
 - **迁移到另一台 NAS**：把数据目录整个拷过去，在新机器上指向它启动即可（令牌都在 `hub.toml` 里）。
 - **万一数据目录丢了**：
   - 每个团队成员电脑上都有完整的工程。
@@ -140,6 +141,7 @@ curl -H "Authorization: Bearer <令牌>" http://<NAS 地址>:7341/v1/projects   
 | 日志里 `another bae-hub is already using the data directory` | 两个容器或进程用了同一个数据目录。停掉其中一个 |
 | 日志里 `project directory failed` | 数据目录写不进去（满了、权限、卷没挂好）。服务会每 30 秒重试，修好后自动恢复 |
 | 日志里 `write buffer full: the peer is not reading` | 某个客户端很久不收数据（程序卡住），排队的数据超过上限，Hub 断开了它。网络慢不会这样：Hub 会等它收完再发。客户端恢复后会自动重连 |
+| 日志里 `edits of a document are not being saved` | 这个工程层的日志是更新版本的 bae-hub 写的（换回了旧版本），旧版本不读、不改它，只有这个工程层不存盘，其他照常。换回新版本后重启服务；客户端连上后会把没存的修改补上 |
 | 日志里 `over the limit` | 一条同步消息超过了上限（默认 256 MiB）。`hub.toml` 里改过 `max_message_mib` 的话，改回 256，和客户端一致。只读令牌的客户端发来超过 16 MiB 的修改也会这样（它的修改本来就会被丢掉） |
 | 容器启动后马上退出 | `docker logs bae-hub` 查看原因，常见的是 `hub.toml` 写错（会指出哪一行） |
 

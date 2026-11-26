@@ -421,7 +421,13 @@ impl RelayThread {
                 }
             }
             for (handle, e) in out.errors {
-                tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
+                if Some(handle) == store && matches!(e, SyncError::NewerLogVersion { .. }) {
+                    // Reported once per document; the other documents are
+                    // still saved (`docs/spec/sync.md` §4.3).
+                    tracing::error!(project = %self.id, error = %e, "edits of a document are not being saved");
+                } else {
+                    tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
+                }
             }
             if store.is_none() && retry_store_at.is_some_and(|t| Instant::now() >= t) {
                 match open_store(&self.dir, &self.waker) {

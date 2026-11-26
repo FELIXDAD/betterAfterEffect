@@ -68,6 +68,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。
    - **背压**：一个文档一个文档地导出、发送。每个文档之前先看传输的 `backlog()`，超过 `SessionConfig::max_backlog`（默认 1 MiB，`SessionConfig::DEFAULT_MAX_BACKLOG`）就停下，剩下的文档等之后的 `pump`。所以慢链路上一次只排一条大消息，没发的还在文档里，不占内存。新客户端第一次同步很大的工程、Hub 丢了数据后客户端重新上传，都一点一点发完，不会把写缓冲（3.1）撑满、断开、重连后再来一遍。`Hello`、在线状态和快照回复不受背压限制（都很小，快照只有共享目录会要）。
    - **一条消息放不下**：`send` 返回 `SyncError::MessageTooLarge` 时（Hub 模式超过 `HubLimits::max_message_size`）只跳过这个文档：错误放进 `PumpOutcome::errors`，其他文档照发，链路不断。会话记下这段增量由哪些 peer（Loro 的 `PeerID`，每个编辑端一个）的操作组成：本地有、对方没有的 peer，以及对方当时有到哪里。之后这个文档只在两种情况下再试：对方的版本里这些 peer 中某一个的操作变多了（对方从别的途径拿到了一部分，比如共享目录、Hub 的另一个客户端），或者 `reset()` 之后（重连）。其他变化都只会让增量变大：本地的新修改、对方从协作者那里收到的修改（对方在 `Updates` 和 `Hello` 里告诉我们的版本随之变化）、对方丢了数据。所以协作者一直在改这个文档时，会话也不会每次都再导出几百 MiB、再失败、再报一次错（Hub 每次都要写日志）。原来的规则是 `remote[doc]` 一变就再试，正好就是每次。
+   - **对方不肯存的文档**：`SyncError::NewerLogVersion { doc, path, version }`，共享目录里自己这个文档的日志是更新版本的格式写的（4.3），这个版本不往里写。直接用 `DirTransport` 时 `send` 返回它；放在 `ThreadedTransport` 里时写盘在后台线程，错误和收到的消息排在一起由 `recv` 返回（这个文档已经排队的每条消息各一个）。两种都只影响这个文档，链路不断：会话记下它，错误放进 `PumpOutcome::errors`（只报一次），这个连接上不再发它的修改，直到 `reset()`；期间 `unsynced()` 里一直有它（发出去了，对方没存）。其他文档照发。重新连接（共享目录重新打开）之后，对方的 `Hello` 里没有这些修改，会话照常补发。
 
 在收到对方第一个 `Hello` 之前不发任何数据（不知道对方有什么，全量发送太浪费）。
 
@@ -78,7 +79,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - 先导入，再报错：出错之前这一轮已经收到的数据照样导入，然后才返回错误。对方认为这些数据已经送到，重连之前不会重发。不导入的话，客户端发完最后几条修改马上断开时，Hub 就丢了这些修改。
 - 这一轮的结果不丢：出错之前做过的事（`events`、`unknown_docs`、`errors`、收发计数、`presence_changed`）留在会话里，下一次 `pump` 的结果里一起报告。想马上拿到（比如重连之前先让渲染缓存失效），调用 `take_interrupted()`。每一轮只报告一次；`reset()` 不会清掉它。
 - 出错那一轮收到的在线状态不交给 `Relay` 转发：Relay 会断开这个连接，并替它向其他人发"离开"。
-- `PumpOutcome::errors` 只放单个文档的问题，链路还能用：导入失败的数据（数据损坏、模型错误）、导出失败（回复快照或发送增量时）、一条消息放不下（`MessageTooLarge`，见上面第 3 步）。未知类型的消息由传输层直接跳过，不会出现在这里。
+- `PumpOutcome::errors` 只放单个文档的问题，链路还能用：导入失败的数据（数据损坏、模型错误）、导出失败（回复快照或发送增量时）、一条消息放不下（`MessageTooLarge`）、对方不肯存的文档（`NewerLogVersion`，后两种见上面第 3 步）。未知类型的消息由传输层直接跳过，不会出现在这里。
 
 ### 2.5 别人新建的工程层
 
@@ -101,7 +102,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
   - `connect_with(transport, config)` 给一个连接单独的设置。从 `session_config()` 改起；`config.client` 保持 Relay 的 ID，对端在 `Hello` 里看到的就是它。
   - 例子：Hub 存盘用的对端（工程目录的 `DirTransport`，放在 `ThreadedTransport` 里）`min_send_interval` 设成 250 ms，客户端拖动一个值时少写几次盘；`max_backlog` 设成 `usize::MAX`，不受背压（2.4）限制。背压是给慢链路用的，存盘的队列只在进程内存里，本机磁盘几毫秒就写完；限制它只会让修改晚写盘，关闭工程时还压着的修改就丢了。
   - `peer_config_mut(handle)` 改已连接的对端的设置，下一次 `pump` 生效。Hub 关闭（或卸载）工程前用它去掉存盘对端的节流和背压，然后 `pump` 到 `unsynced(handle)` 为空为止（最多 8 次）：所有修改都交给了存盘对端。丢掉 Relay 时 `ThreadedTransport` 把队列里的全部写完才结束。
-  - `unsynced(handle)`：这个对端还没收到的文档（它的会话的 `SyncSession::unsynced`；它还没发 `Hello` 时是全部文档），对端不在时返回 `None`。
+  - `unsynced(handle)`：这个对端还没收到的文档（它的会话的 `SyncSession::unsynced`；它还没发 `Hello` 时是全部文档），对端不在时返回 `None`。对端不肯存的文档（2.4）也一直在里面，所以这时 Hub 关闭前的 `pump` 做满 8 次，其他文档照样都交给了存盘对端。
+- **工程目录不肯存一个文档**（Hub 自己的日志是更新版本的格式写的，比如 Hub 降级了，4.3）：只有这个文档的修改不存盘，Hub 记一条错误日志（`edits of a document are not being saved`，工程每次加载后每个文档一次），工程目录照常连着（状态里 `saving` 仍是 true），其他文档照常存盘。原来往这个文档写一次就让整个工程目录断开（`project directory failed`），5 秒后重新打开、把所有日志和快照重读一遍，再写又断开，一直循环，断开期间的修改都没存盘。
 
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 
@@ -184,7 +186,12 @@ sum     := BLAKE3(payload) 的前 8 字节
 ### 4.3 写（只有日志的主人写）
 
 - 追加：整条记录一次 `write` 写入，然后关闭文件（不逐条 `fsync`：关闭时数据交给 SMB 服务器；崩溃留下的半条记录下次启动时截掉；修改本身还在会话的文档里）。压缩重写的新文件先 `fsync` 再改名。写之前检查文件长度是否等于自己记的长度：更长且文件头没变，说明上次写了一半，先截掉；文件不见了或文件头变了，就重写整个文件。
-- 启动时主人也像读别人的日志一样读一遍自己的日志（里面可能有还没存进 `sublayers/*.loro` 的修改），并截掉末尾写了一半的记录。文件头损坏的日志改名为 `<client-id>.corrupt-<随机>` 留着排查，下次写入时新建（它里面没有谁能读出的记录）。更新版本的格式写的日志（文件头完好、`version` 更大）不改名、不覆盖：读的时候记一次错误，往里写时报错（`SyncError::Io`）。新版本的客户端读得懂它，里面可能有别人没有的操作。
+- 启动时主人也像读别人的日志一样读一遍自己的日志（里面可能有还没存进 `sublayers/*.loro` 的修改），并截掉末尾写了一半的记录。文件头损坏的日志改名为 `<client-id>.corrupt-<随机>` 留着排查，下次写入时新建（它里面没有谁能读出的记录）。
+- 更新版本的格式写的自己的日志（文件头完好、`version` 更大）：新版本的客户端读得懂它，里面可能有别人没有的操作，所以不改名、不覆盖、不往里写。只影响这一个文档：
+  - 发现时（轮询，或写之前先读，见下一条）记住这个文档，记一次错误（`last_error`）；之后的轮询不再读它、不再报。
+  - 会话发来的这个文档的 `Updates` / `Snapshot` 都不写：`send` 返回 `SyncError::NewerLogVersion`（放在 `ThreadedTransport` 里时由 `recv` 返回），`DirStats::records_refused` 加一，`last_error` 记这个错误。不算写进了目录：目录的版本（它发的 `Hello`）里没有这些修改。会话跳过这个文档，链路不断（2.4），其他文档照常写。
+  - 修好之后（换回新版本，或者把那个日志挪走）重新打开目录（重启应用或 Hub）：目录的 `Hello` 里没有这些修改，会话还有，照常补写进新日志。同一个 `DirTransport` 打开期间一直不写这个文档。
+  - 原来往这个文档写就返回 `SyncError::Io`，会话当成链路断了：Hub 断开工程目录，5 秒后重新打开、重读所有日志和快照，再写又出错，一直循环（3 节）。
 - 先读再写：要写的日志如果还没被轮询接管（列目录时漏了，或者读的时候出错），追加或压缩之前先读一遍、接管它，不会直接用新文件把它盖掉。清理（4.6）之后，它可能是某些操作的唯一一份。
 - **压缩**：日志超过阈值（默认 `max(1 MiB, 上次压缩结果 × 4)`）时，传输层向会话发 `SnapshotRequest`，拿到快照后写一个新文件（新 `generation`，文件头 + 一条 `Snapshot`），再改名覆盖旧日志。每个客户端只压缩自己的日志，所以多个客户端同时压缩不会互相破坏；目录总大小约为"客户端数 × 快照大小"，不随编辑次数增长。快照覆盖了旧日志的全部内容，因为会话的文档包含自己写过的一切。
 
@@ -256,7 +263,10 @@ sum     := BLAKE3(payload) 的前 8 字节
   - "现在"取锁文件的修改时间（`dir.rs` 的单元测试：锁文件原来是 1000 天前的，写过之后是现在；日志的年龄按这个时间算）。
 - 主人自己的日志（4.3）：
   - 第一次轮询没看到自己的日志，之后才出现：下一次写之前先读它，旧记录和新记录都在，客户端也拿回了旧修改。去掉"先读再写"时旧记录丢失。
-  - 更新版本格式写的自己的日志：不改名、不覆盖，轮询记一次错误，写入报错。原来会被改名成 `*.corrupt-*`。
+  - 更新版本格式写的自己的日志（`an_own_log_from_a_newer_version_is_left_alone`）：不改名、不覆盖，轮询记一次错误；写这个文档返回 `NewerLogVersion`（记在 `records_refused`），别的文档照写；目录的 `Hello` 里有写进去的修改，没有被拒的。原来会被改名成 `*.corrupt-*`，后来写入时返回 `SyncError::Io`。
+  - 会话在这样的目录上（`only_the_document_with_a_newer_own_log_is_not_written`）：`pump` 不出错，拒绝只报一次，这个文档一直在 `unsynced()` 里、不再发（`records_refused` 是 1），另一个文档的修改照常写，别的客户端读得到；把那个日志挪走、重新打开目录（`reset()`）后，之前被拒的修改都写进去了。修改前第一次 `pump` 就出错。
+  - Hub 的情形（`a_newer_own_log_does_not_disconnect_the_relay_from_the_folder`）：目录作为 `Relay` 的对端放在 `ThreadedTransport` 里，拒绝从后台线程经 `recv` 回来。目录一直连着，拒绝只报一次，另一个文档两轮修改都存盘。修改前 Relay 在第一次写这个文档时就断开目录。`bae-hub` 的 `a_newer_log_of_one_document_does_not_stop_saving_the_others` 在真的 Hub 上验证同样的事：状态里 `saving` 一直是 true，关闭 Hub 后另一个文档的最后一次修改在目录里，那个日志没变；修改前两点都不成立。
+  - `tests/transport_errors.rs` 的 `a_document_refused_in_the_background_is_skipped_until_reset`：后台写盘的传输把同一个文档排队的两条消息各拒一次，会话只报一次，不再发它，`unsynced()` 里有它（只在 `unsynced` 里去掉这条规则、或者不去重时都失败）；`reset()` 后照常发。
 
 ### 4.8 还没做
 

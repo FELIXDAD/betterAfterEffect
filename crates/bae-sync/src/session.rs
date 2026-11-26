@@ -86,8 +86,11 @@ pub struct PumpOutcome {
     /// sending), or one whose update is larger than the transport may send
     /// ([`SyncError::MessageTooLarge`]; tried again only once the remote got more
     /// of the ops it lacked, e.g. another way, or after [`SyncSession::reset`],
-    /// so it is reported once, not on every edit of the document). Messages of
-    /// unknown types never get here: transports skip them.
+    /// so it is reported once, not on every edit of the document), or one the
+    /// remote refuses to store ([`SyncError::NewerLogVersion`]; reported once,
+    /// not sent again until [`SyncSession::reset`], and listed by
+    /// [`SyncSession::unsynced`] meanwhile). Messages of unknown types never
+    /// get here: transports skip them.
     pub errors: Vec<SyncError>,
     /// Someone came online, went offline or changed their presence.
     pub presence_changed: bool,
@@ -152,6 +155,9 @@ pub struct SyncSession {
     /// Documents whose update did not fit in one message: not exported again
     /// until it can have become smaller (see `TooLarge`).
     too_large: BTreeMap<DocKey, TooLarge>,
+    /// Documents the remote refuses to store ([`SyncError::refused_doc`]): not
+    /// sent again until `reset`, and unsynced meanwhile.
+    refused: BTreeSet<DocKey>,
 }
 
 impl SyncSession {
@@ -176,6 +182,7 @@ impl SyncSession {
             in_flight: BTreeMap::new(),
             listed: BTreeSet::new(),
             too_large: BTreeMap::new(),
+            refused: BTreeSet::new(),
         }
     }
 
@@ -262,10 +269,13 @@ impl SyncSession {
         self.in_flight.clear();
         self.listed.clear();
         self.too_large.clear();
+        self.refused.clear();
     }
 
     /// Documents with local ops the remote is not known to have yet ("unsynced
-    /// changes"). Everything counts as unsynced before the remote said hello.
+    /// changes"). Everything counts as unsynced before the remote said hello,
+    /// and so does a document the remote refused to store
+    /// ([`SyncError::NewerLogVersion`]), until [`reset`](Self::reset).
     pub fn unsynced(&self, docs: &dyn DocSet) -> Vec<DocKey> {
         docs.doc_keys()
             .into_iter()
@@ -278,7 +288,10 @@ impl SyncSession {
                 }
                 match &self.remote {
                     None => true,
-                    Some(r) => !r.get(key).is_some_and(|k| k.includes_vv(&local)),
+                    Some(r) => {
+                        self.refused.contains(key)
+                            || !r.get(key).is_some_and(|k| k.includes_vv(&local))
+                    }
                 }
             })
             .collect()
@@ -350,8 +363,16 @@ impl SyncSession {
         self.note_written(transport, now);
         self.maybe_hello(docs, transport, now, out)?;
         for _ in 0..self.config.max_messages_per_pump {
-            let Some(msg) = transport.recv()? else {
-                break;
+            let msg = match transport.recv() {
+                Ok(Some(msg)) => msg,
+                Ok(None) => break,
+                // A write that failed in the background (`ThreadedTransport`):
+                // only that document is refused.
+                Err(e) if e.refused_doc().is_some() => {
+                    refuse(&mut self.refused, &mut self.in_flight, e, out);
+                    continue;
+                }
+                Err(e) => return Err(e),
             };
             out.received += 1;
             self.stats.messages_received += 1;
@@ -515,6 +536,9 @@ impl SyncSession {
                             }
                             // Only this message was refused.
                             Err(e @ SyncError::MessageTooLarge { .. }) => out.errors.push(e),
+                            Err(e) if e.refused_doc().is_some() => {
+                                refuse(&mut self.refused, &mut self.in_flight, e, out);
+                            }
                             Err(e) => return Err(e),
                         }
                     }
@@ -616,6 +640,7 @@ impl SyncSession {
             };
             let known = remote.entry(key.clone()).or_default();
             if known.includes_vv(&local)
+                || self.refused.contains(&key)
                 || self.too_large.get(&key).is_some_and(|t| !t.may_fit(known))
             {
                 continue;
@@ -645,6 +670,11 @@ impl SyncSession {
                     self.too_large.insert(key, TooLarge::new(&local, known));
                     out.errors.push(e);
                 }
+                // The remote will not store this document (spec 2.4); the
+                // others go on.
+                Err(e) if e.refused_doc().is_some() => {
+                    refuse(&mut self.refused, &mut self.in_flight, e, out);
+                }
                 Err(e) => return Err(e),
             }
         }
@@ -673,6 +703,26 @@ impl SyncSession {
         self.accepted += len;
         Ok(())
     }
+}
+
+/// The remote refuses to store a document for as long as the link lasts
+/// (`e` has a [`SyncError::refused_doc`]): send none of it until `reset`,
+/// stop waiting for what was sent of it, and report it once (a transport that
+/// writes in the background may refuse several messages that were already
+/// queued).
+fn refuse(
+    refused: &mut BTreeSet<DocKey>,
+    in_flight: &mut BTreeMap<DocKey, InFlight>,
+    e: SyncError,
+    out: &mut PumpOutcome,
+) {
+    if let Some(doc) = e.refused_doc() {
+        in_flight.remove(doc);
+        if !refused.insert(doc.clone()) {
+            return;
+        }
+    }
+    out.errors.push(e);
 }
 
 /// What a document's update that did not fit in one message consisted of: for

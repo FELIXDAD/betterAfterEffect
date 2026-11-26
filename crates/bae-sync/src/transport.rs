@@ -14,7 +14,9 @@ use crate::protocol::Message;
 /// periodic `Hello`s. Problems a transport can recover from itself (a corrupt log
 /// record, a dropped frame) should not be returned as errors; an error means the
 /// link is unusable until the caller reconnects, except
-/// [`SyncError::MessageTooLarge`] from `send`, which refuses only that message.
+/// [`SyncError::MessageTooLarge`] from `send`, which refuses only that message,
+/// and [`SyncError::NewerLogVersion`] (from `send`, or from `recv` when the write
+/// happens in the background), which refuses only that document.
 pub trait Transport {
     /// Queue `msg` for the remote.
     fn send(&mut self, msg: Message) -> Result<(), SyncError>;

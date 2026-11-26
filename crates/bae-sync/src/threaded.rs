@@ -23,7 +23,10 @@ type Notify = Box<dyn Fn() + Send>;
 /// [`Transport::backlog`] counts what waits for the worker plus the inner
 /// transport's own backlog, so the session's backpressure sees through the queue.
 /// A message over the inner transport's [`Transport::max_message_size`] is
-/// refused by `send` right away, as the inner transport would.
+/// refused by `send` right away, as the inner transport would. Other errors of
+/// the inner `send` come back from `recv`, in order with the messages; the
+/// session skips the document of a [`SyncError::NewerLogVersion`] and keeps
+/// the link.
 pub struct ThreadedTransport {
     /// Messages for the worker, with their encoded size.
     tx: Option<Sender<(Message, usize)>>,

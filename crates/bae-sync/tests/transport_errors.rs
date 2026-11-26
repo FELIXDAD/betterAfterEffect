@@ -6,7 +6,7 @@ mod common;
 use std::collections::VecDeque;
 
 use bae_model::loro::VersionVector;
-use bae_model::{EventOrigin, Op, Stage, SublayerId, Value};
+use bae_model::{EventOrigin, Op, PrimType, Specifier, Stage, SublayerId, Value};
 use bae_sync::{
     ClientId, DocKey, DocSet, MemoryTransport, Message, Relay, SessionConfig, SyncError,
     SyncSession, Transport,
@@ -224,4 +224,93 @@ fn the_relay_forwards_what_a_failing_peer_sent() {
     // The same relay pump already sent it on to Bob.
     bob_session.pump(&mut bob, &mut bob_link).unwrap();
     assert!(has(&bob, &want), "alice's last edit did not reach bob");
+}
+
+/// Create the layer `name` in sublayer `id` of `stage`.
+fn create_layer(stage: &mut Stage, id: &SublayerId, name: &str) {
+    stage.set_edit_target(id).unwrap();
+    stage
+        .transact(&author("user:me"), "edit", |tx| {
+            tx.apply(Op::CreatePrim {
+                path: p(&format!("{LAYERS}/{name}")),
+                specifier: Specifier::Def,
+                prim_type: Some(PrimType::new("Layer")),
+                index: None,
+            })
+        })
+        .unwrap();
+}
+
+/// `Updates` of `doc` among `sent`.
+fn updates_of(sent: &[Message], doc: &DocKey) -> usize {
+    sent.iter()
+        .filter(|m| matches!(m, Message::Updates { doc: d, .. } if d == doc))
+        .count()
+}
+
+/// A transport that writes in the background (`ThreadedTransport` over the
+/// shared folder) reports a document the folder refuses to store
+/// (`NewerLogVersion`) from `recv`, once for every message of it that was
+/// already queued. The pump does not fail, the refusal is reported once, the
+/// document is not sent again and stays unsynced until `reset`, and the other
+/// documents go on.
+#[test]
+fn a_document_refused_in_the_background_is_skipped_until_reset() {
+    let base = base_snapshots();
+    let mut stage = client_stage(&base);
+    let anim = DocKey::sublayer(&sl("anim/a"));
+    let hello = Message::hello(
+        ClientId::new("shared-folder").unwrap(),
+        stage
+            .doc_keys()
+            .into_iter()
+            .map(|k| {
+                let v = stage.version(&k).unwrap();
+                (k, v)
+            })
+            .collect(),
+    );
+    let mut s = session("me");
+    let mut t = Scripted::new(vec![Ok(Some(hello.clone()))]);
+    s.pump(&mut stage, &mut t).unwrap();
+    assert!(s.is_connected());
+    // Two edits of the root sublayer go out before the first refusal is back.
+    for name in ["one", "two"] {
+        create_layer(&mut stage, &SublayerId::root(), name);
+        s.pump(&mut stage, &mut t).unwrap();
+    }
+    assert_eq!(updates_of(&t.sent, &root()), 2);
+    let refusal = || {
+        Err(SyncError::NewerLogVersion {
+            doc: root(),
+            path: "updates/root/me.log".into(),
+            version: 2,
+        })
+    };
+    t.script.extend([refusal(), refusal()]);
+    create_layer(&mut stage, &sl("anim/a"), "three");
+    let out = s
+        .pump(&mut stage, &mut t)
+        .expect("only the document is refused");
+    assert_eq!(out.errors.len(), 1, "{:?}", out.errors);
+    assert!(
+        matches!(&out.errors[0], SyncError::NewerLogVersion { doc, .. } if doc == &root()),
+        "{:?}",
+        out.errors
+    );
+    assert_eq!(updates_of(&t.sent, &root()), 2, "sent again");
+    assert_eq!(updates_of(&t.sent, &anim), 1);
+    // Sent, but not stored.
+    assert_eq!(s.unsynced(&stage), vec![root()]);
+    create_layer(&mut stage, &SublayerId::root(), "four");
+    let out = s.pump(&mut stage, &mut t).unwrap();
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    assert_eq!(updates_of(&t.sent, &root()), 2, "sent again");
+    assert_eq!(s.unsynced(&stage), vec![root()]);
+    // Reconnected (e.g. the folder reopened): sent again.
+    s.reset();
+    t.push(hello);
+    s.pump(&mut stage, &mut t).unwrap();
+    assert_eq!(updates_of(&t.sent, &root()), 3);
+    assert!(s.unsynced(&stage).is_empty());
 }

@@ -7,11 +7,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
+use bae_model::loro::VersionVector;
 use bae_model::project::Project;
 use bae_model::{AuthorId, Op, PrimType, Specifier, Stage, SublayerId, Value};
 use bae_sync::{
-    ClientId, DirConfig, DirTransport, DocKey, MemoryTransport, Message, PresenceState,
-    SessionConfig, SyncError, SyncSession, ThreadedTransport, Transport,
+    ClientId, DirConfig, DirTransport, DocKey, MemoryTransport, Message, PeerHandle, PresenceState,
+    Relay, SessionConfig, SyncError, SyncSession, ThreadedTransport, Transport,
 };
 use common::*;
 
@@ -1021,40 +1022,272 @@ fn record(payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A log of ours written by a newer version of the format (e.g. the same client
-/// ID used by a newer BAE before): neither renamed aside nor replaced, since
-/// newer clients read it and it may hold ops nobody else has. Writing fails
-/// instead. It used to be renamed to `*.corrupt-*`, where nobody reads it.
+/// Write a log of `client`'s for the root sublayer in a newer version of the
+/// format (e.g. the same client ID used by a newer BAE before, or the hub
+/// downgraded). Returns its path and bytes.
+fn newer_root_log(dir: &Path, client: &str) -> (PathBuf, Vec<u8>) {
+    let log = dir.join(format!("updates/root/{client}.log"));
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
+    let header = format!(
+        r#"{{"format":"bae.sync.log","version":99,"doc":"root","client":"{client}","generation":"g","more":1}}"#
+    );
+    let mut bytes = record(header.as_bytes());
+    bytes.extend(record(b"a record of a newer kind"));
+    fs::write(&log, &bytes).unwrap();
+    (log, bytes)
+}
+
+/// Create the layer `name` in sublayer `id` only.
+fn create_layer(stage: &mut Stage, who: &AuthorId, id: &SublayerId, name: &str) {
+    stage.set_edit_target(id).unwrap();
+    stage
+        .transact(who, "create", |tx| {
+            tx.apply(Op::CreatePrim {
+                path: p(&format!("{LAYERS}/{name}")),
+                specifier: Specifier::Def,
+                prim_type: Some(PrimType::new("Layer")),
+                index: None,
+            })
+        })
+        .unwrap();
+}
+
+fn has_layer(stage: &Stage, id: &SublayerId, name: &str) -> bool {
+    stage
+        .sublayer(id)
+        .unwrap()
+        .has_spec(&p(&format!("{LAYERS}/{name}")))
+}
+
+/// Whether `e` is the refusal of `doc` because our log of it is newer.
+fn refused(e: &SyncError, doc: &DocKey) -> bool {
+    matches!(e, SyncError::NewerLogVersion { doc: d, version: 99, .. } if d == doc)
+}
+
+/// A log of ours written by a newer version of the format: neither renamed
+/// aside nor replaced, since newer clients read it and it may hold ops nobody
+/// else has. Writes to that document are refused, and only those: the error
+/// names the document (the session skips it and keeps the link), the refused
+/// data does not count as being in the folder, and other documents are
+/// written as usual. It used to be renamed to `*.corrupt-*`, where nobody
+/// reads it; then every write to it was an I/O error, which fails the link.
 #[test]
 fn an_own_log_from_a_newer_version_is_left_alone() {
     let (_tmp, dir) = project_dir();
-    let log = dir.join("updates/root/d.log");
-    fs::create_dir_all(log.parent().unwrap()).unwrap();
-    let header = br#"{"format":"bae.sync.log","version":99,"doc":"root","client":"d","generation":"g","more":1}"#;
-    let mut bytes = record(header);
-    bytes.extend(record(b"a record of a newer kind"));
-    fs::write(&log, &bytes).unwrap();
-
+    let (log, bytes) = newer_root_log(&dir, "d");
     let mut t = DirTransport::open(&dir, ClientId::new("d").unwrap(), fast()).unwrap();
     while t.recv().unwrap().is_some() {}
     let e = t.last_error().expect("the poll reports it").to_owned();
     assert!(e.contains("newer version"), "{e}");
     assert_eq!(fs::read(&log).unwrap(), bytes);
+
+    let mut stage = Project::open(&dir).unwrap().stage;
+    let who = author("user:d");
+    // `(message, version)` of an edit of each sublayer: root, then anim/a.
+    let mut sent = Vec::new();
+    for id in layers() {
+        let before = stage.sublayer(&id).unwrap().version();
+        create_layer(&mut stage, &who, &id, "after");
+        let layer = stage.sublayer(&id).unwrap();
+        let msg = Message::Updates {
+            doc: DocKey::sublayer(&id),
+            version: layer.version(),
+            data: layer.export_updates(&before).unwrap(),
+        };
+        sent.push((msg, layer.version()));
+    }
+    let [(root_msg, root_version), (anim_msg, anim_version)]: [(Message, VersionVector); 2] =
+        sent.try_into().unwrap();
     let root = DocKey::sublayer(&SublayerId::root());
-    let stage = client_stage(&base_snapshots());
-    let layer = stage.sublayer(&SublayerId::root()).unwrap();
-    let r = t.send(Message::Updates {
-        doc: root,
-        version: layer.version(),
-        data: layer.export_snapshot().unwrap(),
-    });
-    assert!(matches!(r, Err(SyncError::Io { .. })), "{r:?}");
+    let anim = DocKey::sublayer(&sl("anim/a"));
+    for _ in 0..2 {
+        let r = t.send(root_msg.clone());
+        assert!(r.as_ref().is_err_and(|e| refused(e, &root)), "{r:?}");
+    }
+    assert_eq!(t.stats().records_refused, 2);
+    assert!(t.last_error().unwrap().contains("newer version"));
     assert_eq!(fs::read(&log).unwrap(), bytes, "written over");
     let aside = fs::read_dir(log.parent().unwrap())
         .unwrap()
         .flatten()
         .any(|e| e.file_name().to_string_lossy().contains("corrupt"));
     assert!(!aside);
+    // The other document is written.
+    t.send(anim_msg).unwrap();
+    assert_eq!(t.stats().records_written, 1);
+    assert!(dir.join("updates/anim/a/d.log").is_file());
+    // The folder says it has the written data, not the refused data.
+    t.send(Message::hello(ClientId::new("d").unwrap(), Vec::new()))
+        .unwrap();
+    let mut hello = None;
+    while let Some(m) = t.recv().unwrap() {
+        if let Message::Hello { versions, .. } = m {
+            hello = Some(versions);
+        }
+    }
+    let folder: std::collections::BTreeMap<DocKey, VersionVector> =
+        hello.expect("the folder answers").into_iter().collect();
+    assert!(folder[&anim].includes_vv(&anim_version));
+    assert!(!folder[&root].includes_vv(&root_version));
+}
+
+/// A session on a folder where its own log of one document is from a newer
+/// version: the pump does not fail, the refusal is reported once, that
+/// document stays unsynced and is not sent again, and the other document's
+/// edits keep being written. Once the newer log is moved away and the folder
+/// reopened (`reset`), what was refused is written. Before, the first pump
+/// after an edit of that document failed: for the hub, the whole project
+/// directory was disconnected and reopened over and over.
+#[test]
+fn only_the_document_with_a_newer_own_log_is_not_written() {
+    let (_tmp, dir) = project_dir();
+    let (log, bytes) = newer_root_log(&dir, "d");
+    let root = DocKey::sublayer(&SublayerId::root());
+    let mut stage = Project::open(&dir).unwrap().stage;
+    let mut s = session("d");
+    let who = author("user:d");
+    let mut folder = DirTransport::open(&dir, ClientId::new("d").unwrap(), fast()).unwrap();
+    let mut errors = Vec::new();
+    let mut pump = |stage: &mut Stage, s: &mut SyncSession, folder: &mut DirTransport| {
+        for _ in 0..3 {
+            let out = s.pump(stage, folder).expect("the link stays up");
+            errors.extend(out.errors);
+        }
+    };
+    pump(&mut stage, &mut s, &mut folder);
+    for name in ["one", "two"] {
+        for id in layers() {
+            create_layer(&mut stage, &who, &id, name);
+        }
+        pump(&mut stage, &mut s, &mut folder);
+        assert_eq!(s.unsynced(&stage), vec![root.clone()]);
+    }
+    let errors = std::mem::take(&mut errors);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(refused(&errors[0], &root), "{errors:?}");
+    assert_eq!(folder.stats().records_refused, 1, "sent again");
+    assert_eq!(fs::read(&log).unwrap(), bytes);
+    let mut late = Client::open(&dir, "late", fast(), 1);
+    late.pump();
+    late.pump();
+    let anim = sl("anim/a");
+    assert!(has_layer(&late.stage, &anim, "one") && has_layer(&late.stage, &anim, "two"));
+    assert!(!has_layer(&late.stage, &SublayerId::root(), "one"));
+    drop(late);
+
+    // Fixed, and the folder reopened: nothing was lost.
+    fs::rename(&log, log.with_extension("newer")).unwrap();
+    drop(folder);
+    let mut folder = DirTransport::open(&dir, ClientId::new("d").unwrap(), fast()).unwrap();
+    s.reset();
+    let start = Instant::now();
+    while !s.unsynced(&stage).is_empty() {
+        let out = s.pump(&mut stage, &mut folder).expect("pump");
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert!(start.elapsed() < Duration::from_secs(60), "not written");
+    }
+    let mut late = Client::open(&dir, "late", fast(), 2);
+    late.pump();
+    late.pump();
+    assert!(has_layer(&late.stage, &SublayerId::root(), "one"));
+    assert!(has_layer(&late.stage, &SublayerId::root(), "two"));
+}
+
+/// The hub's case: the project directory is a relay peer behind a
+/// `ThreadedTransport` (as in `services/bae-hub`), and the hub's own log of
+/// one document is from a newer version (the hub was downgraded). The refusal
+/// comes back from the background thread; only that document is skipped and
+/// it is reported once. The directory stays connected and the other
+/// document's edits keep being saved. Before, the refused write failed the
+/// whole link: the relay disconnected the directory at the first edit of that
+/// document (the hub then reopened it every 5 s and read everything again).
+#[test]
+fn a_newer_own_log_does_not_disconnect_the_relay_from_the_folder() {
+    struct Alice {
+        stage: Stage,
+        session: SyncSession,
+        link: MemoryTransport,
+        who: AuthorId,
+    }
+    /// Rounds of alice and the relay, a simulated 50 ms each, until the relay
+    /// has all of alice's edits and sent the folder (`store`) all but the
+    /// root sublayer; panics if a connection drops. Returns the relay's
+    /// per-document errors. Real time only bounds the wait for the folder's
+    /// background thread.
+    fn save(
+        relay: &mut Relay,
+        store: PeerHandle,
+        a: &mut Alice,
+        now: &mut Instant,
+    ) -> Vec<SyncError> {
+        let root = DocKey::sublayer(&SublayerId::root());
+        let mut errors = Vec::new();
+        let start = Instant::now();
+        loop {
+            *now += Duration::from_millis(50);
+            let out = a
+                .session
+                .pump_at(&mut a.stage, &mut a.link, *now)
+                .expect("alice's link");
+            assert!(out.errors.is_empty(), "{:?}", out.errors);
+            let out = relay.pump_at(*now);
+            assert!(out.disconnected.is_empty(), "{:?}", out.disconnected);
+            errors.extend(out.errors.into_iter().map(|(_, e)| e));
+            if a.session.unsynced(&a.stage).is_empty()
+                && relay.unsynced(store) == Some(vec![root.clone()])
+            {
+                return errors;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(120),
+                "not saved: {:?}",
+                relay.unsynced(store)
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    let (_tmp, dir) = project_dir();
+    let (log, bytes) = newer_root_log(&dir, "hub");
+    let hub = ClientId::new("hub").unwrap();
+    let mut relay = Relay::new(hub.clone());
+    let folder = DirTransport::open(&dir, hub, fast()).unwrap();
+    let store = relay.connect(Box::new(ThreadedTransport::spawn(
+        folder,
+        Duration::from_millis(1),
+        || {},
+    )));
+    let (link, hub_end) = MemoryTransport::pair();
+    relay.connect(Box::new(hub_end));
+    let mut alice = Alice {
+        stage: Project::open(&dir).unwrap().stage,
+        session: SyncSession::new(SessionConfig::new(ClientId::new("alice").unwrap())),
+        link,
+        who: author("user:alice"),
+    };
+    let mut now = Instant::now();
+    let root = DocKey::sublayer(&SublayerId::root());
+    let anim = sl("anim/a");
+    for (round, name) in ["one", "two"].into_iter().enumerate() {
+        for id in layers() {
+            create_layer(&mut alice.stage, &alice.who, &id, name);
+        }
+        let errors = save(&mut relay, store, &mut alice, &mut now);
+        if round == 0 {
+            assert_eq!(errors.len(), 1, "{errors:?}");
+            assert!(refused(&errors[0], &root), "{errors:?}");
+        } else {
+            assert!(errors.is_empty(), "reported again: {errors:?}");
+        }
+    }
+    // Dropping the relay writes what is still queued for the folder.
+    drop(relay);
+    assert_eq!(fs::read(&log).unwrap(), bytes);
+    let mut late = Client::open(&dir, "late", fast(), 1);
+    late.pump();
+    late.pump();
+    assert!(has_layer(&late.stage, &anim, "one") && has_layer(&late.stage, &anim, "two"));
+    assert!(!has_layer(&late.stage, &SublayerId::root(), "one"));
 }
 
 /// A departed client's log that cannot go (here: its ops are in nobody's

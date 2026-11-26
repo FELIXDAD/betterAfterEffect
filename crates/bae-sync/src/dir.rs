@@ -135,6 +135,9 @@ pub struct DirStats {
     pub polls: u64,
     pub records_read: u64,
     pub records_written: u64,
+    /// Records not written because our own log of their document is from a
+    /// newer version of the format ([`SyncError::NewerLogVersion`]).
+    pub records_refused: u64,
     pub compactions: u64,
     /// Own logs that had to be rewritten because they were changed underneath us.
     pub repairs: u64,
@@ -154,6 +157,9 @@ pub struct DirTransport {
     /// `updates/<client>.lock`, held open (and locked) for the session.
     lock: File,
     own: BTreeMap<DocKey, OwnLog>,
+    /// Documents whose own log is from a newer version of the format, with
+    /// that version: left alone, and nothing is written for them (§4.3).
+    newer: BTreeMap<DocKey, u32>,
     sources: BTreeMap<PathBuf, Source>,
     /// Union of the versions of everything read from or written to the folder.
     folder: BTreeMap<DocKey, VersionVector>,
@@ -233,6 +239,7 @@ impl DirTransport {
             config,
             lock,
             own: BTreeMap::new(),
+            newer: BTreeMap::new(),
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
             inbox: VecDeque::new(),
@@ -369,7 +376,8 @@ impl DirTransport {
                 continue;
             };
             if stem == self.client.as_str() {
-                if !self.own.contains_key(&doc) {
+                // A newer log was reported when it was found: not again.
+                if !self.own.contains_key(&doc) && !self.newer.contains_key(&doc) {
                     let r = self.adopt_own(&doc, &path);
                     self.note(r);
                 }
@@ -597,18 +605,17 @@ impl DirTransport {
     /// deliver its records, cut off a torn tail, and continue appending to it.
     ///
     /// A log from a newer version of the format stays as it is (newer clients
-    /// read it; it may hold ops nobody else has) and this fails, so nothing is
-    /// written over it. Only a log whose header is damaged is renamed aside: it
-    /// holds nothing anyone can read.
+    /// read it; it may hold ops nobody else has): the document is remembered,
+    /// nothing is written for it while this transport is open, and this
+    /// returns [`SyncError::NewerLogVersion`]. Only a log whose header is
+    /// damaged is renamed aside: it holds nothing anyone can read.
     fn adopt_own(&mut self, doc: &DocKey, path: &Path) -> Result<(), SyncError> {
         let mut f = File::open(path).map_err(SyncError::io(path))?;
         let header = match read_header_record(&mut f).map_err(SyncError::io(path))? {
             Header::Read(h, len) if h.doc == doc.as_str() => Some((h, len)),
             Header::Newer(version) => {
-                return Err(SyncError::io(path)(io::Error::other(format!(
-                    "written by a newer version of BAE (log version {version}); \
-                     not reading or replacing it"
-                ))));
+                self.newer.insert(doc.clone(), version);
+                return Err(self.newer_log(doc).expect("just noted"));
             }
             Header::Read(..) | Header::Damaged => None,
         };
@@ -918,16 +925,47 @@ impl DirTransport {
     /// took over (the listing missed it, or reading it failed), take it over now
     /// instead of writing over it. It may be the only copy of ops, ours or (once
     /// a compaction took them in, §4.6) a departed client's.
+    ///
+    /// Fails with [`SyncError::NewerLogVersion`] if our log of `doc` is from a
+    /// newer version of the format: nothing is written for that document
+    /// (`DirStats::records_refused`), and the message's version is not added
+    /// to what the folder has, so the folder's `Hello` still lacks it and a
+    /// session sends it again once the folder is reopened. Other documents
+    /// are not affected.
     fn adopt_before_write(&mut self, doc: &DocKey) -> Result<(), SyncError> {
         if self.own.contains_key(doc) {
             return Ok(());
         }
-        let path = self.log_path(doc);
-        match fs::metadata(&path) {
-            Ok(_) => self.adopt_own(doc, &path),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(SyncError::io(&path)(e)),
+        let r = match self.newer_log(doc) {
+            Some(e) => Err(e),
+            None => {
+                let path = self.log_path(doc);
+                match fs::metadata(&path) {
+                    Ok(_) => self.adopt_own(doc, &path),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                    Err(e) => Err(SyncError::io(&path)(e)),
+                }
+            }
+        };
+        if let Err(e) = &r
+            && e.refused_doc().is_some()
+        {
+            self.stats.records_refused += 1;
+            self.last_error = Some(e.to_string());
         }
+        r
+    }
+
+    /// [`SyncError::NewerLogVersion`] if our log of `doc` is from a newer
+    /// version of the format.
+    fn newer_log(&self, doc: &DocKey) -> Option<SyncError> {
+        self.newer
+            .get(doc)
+            .map(|&version| SyncError::NewerLogVersion {
+                doc: doc.clone(),
+                path: self.log_path(doc),
+                version,
+            })
     }
 
     fn append(

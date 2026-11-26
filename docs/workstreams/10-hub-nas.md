@@ -101,6 +101,7 @@
   - 关闭、卸载工程时修改全部写盘。存盘对端原来也受背压限制（每次最多排 1 MiB），最后一次 pump 写不完，大的上传刚结束就关闭时会丢文档。现在它不受背压限制，关闭时 pump 到 `Relay::unsynced` 为空。测试：`stopping_the_hub_saves_every_edit`、`unloading_an_idle_project_saves_every_edit`（24 个 512 KiB 的文档，修改前丢约 20 个）。
   - `a_slow_upload_is_not_taken_for_a_dead_link` 在负载高的机器上偶尔失败（`pump: Closed`）：测试线程生成 6 MiB 文字、做修改的 0.5 秒以上里两个客户端都没 pump，Hub 按 0.5 秒的超时断开了其中一个。现在文字在连接前生成，超时 2 秒，代理限速 1 MB/s（上传约 6.3 秒，仍然是三个超时）。4 个 `yes > /dev/null` 占满 4 核时：修改前 5 次失败 1 次，修改后 10 次全过（做修改最长 0.25 秒，一轮 pump 最长 0.05 秒）；去掉"按字节算存活"时仍然失败。
   - 上面"每个连接最多约一条消息 + 1 MiB"只算了发送。收一条大消息时还要临时占它的两倍左右（09 去掉了解码时的一次复制，原来约三倍）；旧版本客户端的单帧消息收过以后，读缓冲在连接期间一直占着那么大。README、`deploy/README.md` 和自动生成的 `hub.toml` 注释已改成发送、接收分开写。
+  - 降级后的新格式日志：某个工程层的 `hub.log` 是更新版本的格式写的时，原来往这一层写一次就让工程目录断开（`project directory failed`），5 秒后重开、重读全部日志，再写又断开，一直循环，断开期间别的层的修改也不存盘。现在只有这一层不存盘（09 的 `SyncError::NewerLogVersion`，spec 4.3），`project.rs` 记一条错误日志 `edits of a document are not being saved`，目录不断开，其他层照常存盘。README、`deploy/README.md`（升级/降级、常见问题）已写明。测试：`tests/hub.rs` 的 `a_newer_log_of_one_document_does_not_stop_saving_the_others`（`saving` 一直是 true；停掉 Hub 后另一层最后的修改在目录里，那个日志没变），修改前失败。
 
 ## 请求（其他工作流在这里留言）
 

@@ -3,11 +3,12 @@
 
 mod common;
 
+use std::fs;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use bae_hub::{Access, Anonymous};
-use bae_model::{Op, SublayerId, Value};
+use bae_model::{Op, PrimType, Specifier, SublayerId, Value};
 use bae_sync::{DocKey, DocSet, HubLimits, HubTransport, MemDocs, PresenceState, SyncError};
 use common::*;
 
@@ -602,5 +603,100 @@ fn one_hub_per_data_directory() {
     assert!(
         matches!(second, Err(bae_hub::HubError::DataDirInUse(_))),
         "{second:?}"
+    );
+}
+
+/// One record of the shared-folder log format (`docs/spec/sync.md` §4.2).
+fn record(payload: &[u8]) -> Vec<u8> {
+    let mut out = (payload.len() as u32).to_le_bytes().to_vec();
+    out.extend_from_slice(&blake3::hash(payload).as_bytes()[..8]);
+    out.extend_from_slice(payload);
+    out
+}
+
+/// Create the layer `name` in sublayer `id` of `c`'s stage.
+fn create_layer(c: &mut Client, id: &SublayerId, name: &str) {
+    c.stage.set_edit_target(id).unwrap();
+    let who = c.who.clone();
+    c.stage
+        .transact(&who, "create", |tx| {
+            tx.apply(Op::CreatePrim {
+                path: p(&format!("{LAYERS}/{name}")),
+                specifier: Specifier::Def,
+                prim_type: Some(PrimType::new("Layer")),
+                index: None,
+            })
+        })
+        .unwrap();
+}
+
+/// The hub's own log of one document was written by a newer version of the
+/// log format (the hub was downgraded after a newer build ran): only that
+/// document's edits are not saved, and its log is left as it is. The project
+/// directory stays attached (`saving` in `/v1/projects`) and the other
+/// document is saved, up to the last edit before the hub stops. Before, every
+/// write to that document failed the whole directory link: the hub detached
+/// it ("project directory failed"), reopened it 5 s later, read everything
+/// again and failed again; edits made while it was detached were not saved.
+#[test]
+fn a_newer_log_of_one_document_does_not_stop_saving_the_others() {
+    let data = tempfile::tempdir().unwrap();
+    let dir = data.path().join("projects").join(PROJECT);
+    let log = dir.join("updates/root/hub.log");
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
+    let header =
+        br#"{"format":"bae.sync.log","version":99,"doc":"root","client":"hub","generation":"g"}"#;
+    let mut bytes = record(header);
+    bytes.extend(record(b"a record of a newer kind"));
+    fs::write(&log, &bytes).unwrap();
+
+    let hub = start(config(data.path()));
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    // Bob only watches: once he has an edit, the hub has it.
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "alice", &base),
+        Client::join(addr, PROJECT, READ, "bob", &base),
+    ];
+    let saving = || {
+        let list = http_get(addr, "/v1/projects", Some(WRITE));
+        let json: serde_json::Value = serde_json::from_str(&list.body).unwrap();
+        json["projects"][0]["saving"] == true
+    };
+    let root = DocKey::sublayer(&SublayerId::root());
+    let anim = DocKey::sublayer(&sl("anim/a"));
+    for name in ["one", "two"] {
+        for id in [SublayerId::root(), sl("anim/a")] {
+            create_layer(&mut clients[0], &id, name);
+        }
+        let want = clients[0].stage.version(&anim).unwrap();
+        pump_until(&mut clients, Duration::from_secs(30), |c| {
+            c[1].stage
+                .version(&anim)
+                .is_some_and(|v| v.includes_vv(&want))
+        });
+        // The hub writes to the directory every 250 ms: give it time to try.
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            assert!(saving(), "the project directory was detached");
+            pump_for(&mut clients, Duration::from_millis(50));
+        }
+    }
+    let alice = &clients[0].stage;
+    let (want_anim, want_root) = (alice.version(&anim).unwrap(), alice.version(&root).unwrap());
+    drop(clients);
+    hub.shutdown();
+    assert_eq!(fs::read(&log).unwrap(), bytes, "the newer log was changed");
+    let saved = read_project_dir(&dir);
+    assert!(
+        saved
+            .version(&anim)
+            .is_some_and(|v| v.includes_vv(&want_anim)),
+        "the other document was not saved"
+    );
+    assert!(
+        !saved
+            .version(&root)
+            .is_some_and(|v| v.includes_vv(&want_root))
     );
 }
