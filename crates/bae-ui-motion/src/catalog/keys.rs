@@ -457,7 +457,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "ExecuteScriptMenuItem19", "", "motion.file.run_script", "", B, Dynamic, 0),
     k("CSwitchboard", "ExecuteScriptMenuItem20", "", "motion.file.run_script", "", B, Dynamic, 0),
     k("CSwitchboard", "FilterNone", "Ctrl+Shift+E", "motion.effect.remove_all", "", B, Done, 0),
-    k("CSwitchboard", "Find", "Ctrl+F", "motion.file.find", "", E, Todo, 0),
+    k("CSwitchboard", "Find", "Ctrl+F", "motion.file.find", "", E, Done, 0),
     k("CSwitchboard", "ForceScanForChangedFootage", "Ctrl+Alt+L", "motion.file.reload_footage", "", E, Todo, 0),
     k("CSwitchboard", "GoToTime", "Alt+Shift+J", "motion.view.go_to_time", "", B, Todo, 0),
     k("CSwitchboard", "Group", "Ctrl+G", "motion.layer.group_shapes", "", A, Todo, 0),
