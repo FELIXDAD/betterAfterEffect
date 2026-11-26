@@ -9,8 +9,9 @@ struct Params {
     // Samples per waveform bin if the frame were spread evenly, over the
     // brightness setting.
     unit: f32,
-    // Waveform type: 0 YC No Chroma (luma), 1 RGB.
-    wave_rgb: u32,
+    // Waveform type: 0 luma, 1 RGB, 2 YC.
+    wave_mode: u32,
+    parade: u32, // RGB, RGB white, YUV, YUV white.
 }
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -23,6 +24,9 @@ const PARADE: u32 = 65536u;
 const VECTOR: u32 = 262144u;
 const HIST: u32 = 327680u;
 const PEAK: u32 = 328704u;
+const CB: u32 = PEAK + 1u;
+const CR: u32 = CB + 65536u;
+const CHROMA: u32 = CR + 65536u;
 
 fn luma(c: vec3f) -> f32 {
     return dot(c, vec3f(0.2126, 0.7152, 0.0722));
@@ -55,6 +59,15 @@ fn accumulate(@builtin(global_invocation_id) id: vec3u) {
     // Rec. 709 Cb / Cr in -0.5 … 0.5: blue to the right, red up.
     let cb = (c.b - y) / 1.8556;
     let cr = (c.r - y) / 1.5748;
+    if p.wave_mode == 2u {
+        let chroma = length(vec2f(cb, cr));
+        atomicAdd(&bins[CHROMA + (255u - level(y - chroma)) * 256u + col], 1u);
+        atomicAdd(&bins[CHROMA + (255u - level(y + chroma)) * 256u + col], 1u);
+    }
+    if p.parade >= 2u {
+        atomicAdd(&bins[CB + (255u - level(cb + 0.5)) * 256u + col], 1u);
+        atomicAdd(&bins[CR + (255u - level(cr + 0.5)) * 256u + col], 1u);
+    }
     let vx = u32(clamp(round((cb + 0.5) * 255.0), 0.0, 255.0));
     let vy = u32(clamp(round((0.5 - cr) * 255.0), 0.0, 255.0));
     atomicAdd(&bins[VECTOR + vy * 256u + vx], 1u);
@@ -108,9 +121,18 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
     } else if tile == 2u {
         let ch = min(x / 86u, 2u);
         let col = min((x - ch * 86u) * 256u / 86u, 255u);
-        let g = glow(atomicLoad(&bins[PARADE + ch * 65536u + y * 256u + col]));
-        rgb = vec3f(select(0.0, g, ch == 0u), select(0.0, g, ch == 1u), select(0.0, g, ch == 2u));
-    } else if p.wave_rgb == 1u {
+        let bases = vec3u(WAVE, CB, CR);
+        let yuv = p.parade >= 2u;
+        let start = select(PARADE + ch * 65536u, bases[ch], yuv);
+        let g = glow(atomicLoad(&bins[start + y * 256u + col]));
+        if (p.parade & 1u) != 0u || (yuv && ch == 0u) {
+            rgb = vec3f(g);
+        } else if yuv {
+            rgb = select(vec3f(0.0, 0.0, g), vec3f(g, 0.0, 0.0), ch == 2u);
+        } else {
+            rgb = vec3f(select(0.0, g, ch == 0u), select(0.0, g, ch == 1u), select(0.0, g, ch == 2u));
+        }
+    } else if p.wave_mode == 1u {
         let at = y * 256u + x;
         rgb = vec3f(
             glow(atomicLoad(&bins[PARADE + at])),
@@ -118,8 +140,13 @@ fn draw(@builtin(global_invocation_id) id: vec3u) {
             glow(atomicLoad(&bins[PARADE + 131072u + at])),
         );
     } else {
-        let g = glow(atomicLoad(&bins[WAVE + y * 256u + x]));
-        rgb = vec3f(g * 0.85, g, g * 0.85);
+        let at = y * 256u + x;
+        let g = glow(atomicLoad(&bins[WAVE + at]));
+        if p.wave_mode == 2u {
+            rgb = vec3f(0.0, g, glow(atomicLoad(&bins[CHROMA + at])));
+        } else {
+            rgb = vec3f(g * 0.85, g, g * 0.85);
+        }
     }
     textureStore(dst, vec2i(id.xy), vec4f(rgb, 1.0));
 }

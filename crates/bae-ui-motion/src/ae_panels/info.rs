@@ -44,8 +44,8 @@ pub enum ColorMode {
 impl ColorMode {
     const ALL: [(ColorMode, &'static str); 8] = [
         (ColorMode::Auto, "Auto Color Display"),
-        (ColorMode::Percent, "Percent"),
-        (ColorMode::Web, "Web"),
+        (ColorMode::Percent, "Percent (0-100)"),
+        (ColorMode::Web, "Web (00-FF)"),
         (ColorMode::Hsb, "HSB"),
         (ColorMode::Bpc8, "8-bpc (0-255)"),
         (ColorMode::Bpc10, "10-bpc (0-1023)"),
@@ -329,6 +329,30 @@ fn radio_item(ui: &mut Ui, text: &str, on: bool) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn info_modes_show_the_ae_ranges_and_default_selection_in_chinese() {
+        bae_ui::i18n::register(super::super::ZH);
+        let entries = ColorMode::ALL.map(|(mode, title)| {
+            (
+                bae_ui::i18n::translation(title).unwrap(),
+                mode == ColorMode::default(),
+            )
+        });
+        assert_eq!(
+            entries,
+            [
+                ("自动颜色显示", true),
+                ("百分比 (0-100)", false),
+                ("Web (00-FF)", false),
+                ("HSB", false),
+                ("8-bpc (0-255)", false),
+                ("10-bpc (0-1023)", false),
+                ("16-bpc (0-32768)", false),
+                ("小数 (0.0-1.0)", false)
+            ]
+        );
+    }
 
     #[test]
     fn colors_read_like_ae() {

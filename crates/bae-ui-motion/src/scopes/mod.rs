@@ -17,7 +17,7 @@ use crate::common;
 
 /// Bins: luma waveform, RGB parade (3×), vectorscope (256 × 256 each),
 /// histogram (R, G, B, luma × 256) and the histogram peak.
-const BINS: u64 = 65536 * 5 + 1024 + 1;
+const BINS: u64 = 65536 * 8 + 1024 + 1;
 /// The scope image: four 256 × 256 tiles.
 const IMAGE: [u32; 2] = [1024, 256];
 /// At most this many pixels are sampled (a 640 × 360 grid).
@@ -60,10 +60,11 @@ impl Scope {
     }
 }
 
-/// Waveform Type (AE: RGB, YC, YC No Chroma; YC shows as YC No Chroma here).
+/// Waveform Type in AE: RGB overlay, YC or luma alone.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 enum Wave {
     Rgb,
+    Yc,
     #[default]
     Luma,
 }
@@ -72,8 +73,31 @@ impl Wave {
     fn title(self) -> &'static str {
         match self {
             Wave::Rgb => "RGB",
+            Wave::Yc => "YC",
             Wave::Luma => "YC No Chroma",
         }
+    }
+}
+
+/// The channel set and trace colors in the parade.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+enum Parade {
+    #[default]
+    Rgb,
+    RgbWhite,
+    Yuv,
+    YuvWhite,
+}
+impl Parade {
+    const ALL: [(Self, &'static str); 4] = [
+        (Self::Rgb, "RGB"),
+        (Self::RgbWhite, "RGB-White"),
+        (Self::Yuv, "YUV"),
+        (Self::YuvWhite, "YUV-White"),
+    ];
+
+    fn title(self) -> &'static str {
+        Self::ALL[self as usize].1
     }
 }
 
@@ -110,6 +134,7 @@ impl Brightness {
 struct State {
     shown: Vec<Scope>,
     wave: Wave,
+    parade: Parade,
     brightness: Brightness,
 }
 
@@ -118,6 +143,7 @@ impl Default for State {
         State {
             shown: Scope::ALL.to_vec(),
             wave: Wave::default(),
+            parade: Parade::default(),
             brightness: Brightness::default(),
         }
     }
@@ -126,7 +152,7 @@ impl Default for State {
 impl State {
     /// What the scope image depends on besides the frame.
     fn key(&self) -> u64 {
-        (self.wave as u64) << 8 | self.brightness as u64
+        (self.parade as u64) << 16 | (self.wave as u64) << 8 | self.brightness as u64
     }
 }
 
@@ -143,7 +169,7 @@ struct Gpu {
     bins: wgpu::Buffer,
     image: wgpu::Texture,
     /// Key of the frame the image shows.
-    shown: Option<u64>,
+    shown: Option<(u64, u64)>,
 }
 
 impl Gpu {
@@ -259,7 +285,7 @@ impl Gpu {
     /// Recomputes the scopes of `frame` when it changed; the published image's
     /// egui handle (none until the shell registered it).
     fn update(&mut self, frame: &wgpu::Texture, key: u64, state: &State) -> Option<u64> {
-        let key = key ^ state.key().rotate_left(48);
+        let key = (key, state.key());
         if self.shown != Some(key) {
             self.compute(frame, state);
             if self
@@ -283,7 +309,13 @@ impl Gpu {
         params[4..8].copy_from_slice(&h.to_le_bytes());
         params[8..12].copy_from_slice(&step.to_le_bytes());
         params[12..16].copy_from_slice(&unit.max(1e-3).to_le_bytes());
-        params[16..20].copy_from_slice(&u32::from(state.wave == Wave::Rgb).to_le_bytes());
+        let wave: u32 = match state.wave {
+            Wave::Luma => 0,
+            Wave::Rgb => 1,
+            Wave::Yc => 2,
+        };
+        params[16..20].copy_from_slice(&wave.to_le_bytes());
+        params[20..24].copy_from_slice(&(state.parade as u32).to_le_bytes());
         let queue = self.gpu.queue();
         queue.write_buffer(&self.params, 0, &params);
         let device = self.gpu.device();
@@ -343,6 +375,14 @@ impl Drop for Gpu {
 /// Registers the panel and its Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    if let Some(registry) = app.resource::<Arc<ViewportTextureRegistry>>().cloned() {
+        let scopes = Arc::new(ScopesWarmUp {
+            registry,
+            gpu: std::sync::Mutex::default(),
+        });
+        app.insert_resource(scopes.clone());
+        let _ = app.register_arc::<dyn bae_gpu::WarmUp>("bae.ui-motion/lumetri-scopes", scopes);
+    }
     crate::register_panel(
         app,
         "lumetri_scopes",
@@ -352,11 +392,25 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     );
 }
 
+struct ScopesWarmUp {
+    registry: Arc<ViewportTextureRegistry>,
+    gpu: std::sync::Mutex<Option<Gpu>>,
+}
+impl bae_gpu::WarmUp for ScopesWarmUp {
+    fn name(&self) -> &str {
+        "Lumetri Scopes"
+    }
+    fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
+        let ready = Gpu::new(gpu.clone(), self.registry.clone());
+        *self.gpu.lock().unwrap_or_else(|e| e.into_inner()) = Some(ready);
+        Ok(())
+    }
+}
+
 /// The Lumetri Scopes panel.
 #[derive(Default)]
 pub struct ScopesPanel {
     state: State,
-    gpu: Option<Gpu>,
 }
 
 impl ScopesPanel {
@@ -365,24 +419,7 @@ impl ScopesPanel {
             state: state
                 .and_then(|s| serde_json::from_value(s.clone()).ok())
                 .unwrap_or_default(),
-            gpu: None,
         }
-    }
-
-    fn gpu(&mut self, cx: &PanelContext<'_>) -> Option<&mut Gpu> {
-        let context = cx.resources.get::<Arc<GpuContext>>()?.clone();
-        let stale = self
-            .gpu
-            .as_ref()
-            .is_some_and(|g| !Arc::ptr_eq(&g.gpu, &context) || context.is_lost());
-        if stale {
-            self.gpu = None;
-        }
-        if self.gpu.is_none() && !context.is_lost() {
-            let registry = cx.resources.get::<Arc<ViewportTextureRegistry>>()?.clone();
-            self.gpu = Some(Gpu::new(context, registry));
-        }
-        self.gpu.as_mut()
     }
 }
 
@@ -395,11 +432,15 @@ impl Panel for ScopesPanel {
         resp.context_menu(|ui| self.menu_items(ui));
         let p = ui.painter_at(full);
         p.rect_filled(full, 0.0, Color32::from_gray(18));
-        let state = self.state.clone();
-        let handle = match (&frame, self.gpu(cx)) {
-            (Some((texture, key)), Some(gpu)) => gpu.update(texture, *key, &state),
-            _ => None,
-        };
+        let handle = frame.and_then(|(texture, key)| {
+            let context = cx.resources.get::<Arc<GpuContext>>()?;
+            let warm = cx.resources.get::<Arc<ScopesWarmUp>>()?;
+            let mut lock = warm.gpu.try_lock().ok()?;
+            let gpu = lock
+                .as_mut()
+                .filter(|g| Arc::ptr_eq(&g.gpu, context) && !context.is_lost())?;
+            gpu.update(&texture, key, &self.state)
+        });
         let shown = self.state.shown.clone();
         if shown.is_empty() {
             return;
@@ -411,7 +452,7 @@ impl Panel for ScopesPanel {
         for (i, scope) in shown.iter().enumerate() {
             let min = full.min + vec2((i % cols) as f32 * cell.x, (i / cols) as f32 * cell.y);
             let r = Rect::from_min_size(min, cell).shrink(10.0);
-            draw_scope(&p, *scope, r, handle);
+            draw_scope(&p, *scope, r, handle, self.state.parade);
         }
     }
 
@@ -430,6 +471,9 @@ impl ScopesPanel {
         for scope in Scope::ALL {
             let mut on = self.state.shown.contains(&scope);
             let title = match scope {
+                Scope::Parade => {
+                    tr("Parade ({type})").replace("{type}", tr(self.state.parade.title()))
+                }
                 Scope::Waveform => {
                     tr("Waveform ({type})").replace("{type}", tr(self.state.wave.title()))
                 }
@@ -447,8 +491,18 @@ impl ScopesPanel {
             }
         }
         ui.separator();
+        bae_ui::widgets::menu_button(ui, tr("Parade Type"), |ui| {
+            for (mode, name) in Parade::ALL {
+                if ui
+                    .radio_value(&mut self.state.parade, mode, tr(name))
+                    .clicked()
+                {
+                    ui.close();
+                }
+            }
+        });
         bae_ui::widgets::menu_button(ui, tr("Waveform Type"), |ui| {
-            for wave in [Wave::Rgb, Wave::Luma] {
+            for wave in [Wave::Rgb, Wave::Yc, Wave::Luma] {
                 ui.radio_value(&mut self.state.wave, wave, tr(wave.title()));
             }
         });
@@ -462,7 +516,7 @@ impl ScopesPanel {
 
 /// One scope: its tile of the scope image (a square for the vectorscope) and
 /// AE's graticule.
-fn draw_scope(p: &egui::Painter, scope: Scope, area: Rect, handle: Option<u64>) {
+fn draw_scope(p: &egui::Painter, scope: Scope, area: Rect, handle: Option<u64>, parade: Parade) {
     let r = match scope {
         Scope::Vectorscope => {
             let s = area.width().min(area.height());
@@ -535,7 +589,11 @@ fn draw_scope(p: &egui::Painter, scope: Scope, area: Rect, handle: Option<u64>) 
                 );
             }
             if scope == Scope::Parade {
-                for (k, name) in ["R", "G", "B"].into_iter().enumerate() {
+                let channels = match parade {
+                    Parade::Rgb | Parade::RgbWhite => ["R", "G", "B"],
+                    Parade::Yuv | Parade::YuvWhite => ["Y", "U", "V"],
+                };
+                for (k, name) in channels.into_iter().enumerate() {
                     let x = r.left() + r.width() * (k as f32 + 0.5) / 3.0;
                     p.text(
                         pos2(x, r.bottom() + 2.0),
@@ -561,6 +619,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Vectorscope YUV", "矢量示波器 YUV"),
     ("Histogram", "直方图"),
     ("Parade (RGB)", "分量 (RGB)"),
+    ("Parade ({type})", "分量 ({type})"),
+    ("Parade Type", "分量类型"),
+    ("RGB-White", "RGB-白色"),
+    ("YUV-White", "YUV-白色"),
     ("Waveform ({type})", "波形 ({type})"),
     ("YC No Chroma", "YC 无色度"),
     ("Waveform Type", "波形类型"),
@@ -572,6 +634,30 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parade_menu_modes_select_distinct_images_and_localized_titles() {
+        bae_ui::i18n::register(ZH);
+        let mut state = State::default();
+        let mut keys = std::collections::BTreeSet::new();
+        let choices = Parade::ALL.map(|(mode, en)| {
+            state.parade = mode;
+            assert!(keys.insert(state.key()));
+            (
+                bae_ui::i18n::translation(en).unwrap_or(en),
+                mode == Parade::default(),
+            )
+        });
+        assert_eq!(
+            choices,
+            [
+                ("RGB", true),
+                ("RGB-白色", false),
+                ("YUV", false),
+                ("YUV-白色", false)
+            ]
+        );
+    }
 
     #[test]
     fn color_targets_sit_where_ae_draws_them() {
@@ -613,10 +699,7 @@ mod tests {
         scopes.update(&frame, 1, &State::default());
         let error = pollster_block(scope.pop());
         assert!(error.is_none(), "{error:?}");
-        assert_eq!(
-            scopes.shown,
-            Some(1 ^ State::default().key().rotate_left(48))
-        );
+        assert_eq!(scopes.shown, Some((1, State::default().key())));
     }
 
     fn pollster_block<F: std::future::Future>(f: F) -> F::Output {

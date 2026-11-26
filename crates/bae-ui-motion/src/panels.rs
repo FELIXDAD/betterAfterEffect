@@ -11,7 +11,7 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
-mod audio;
+pub(crate) mod audio;
 
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
@@ -565,6 +565,10 @@ fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::Co
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Audio Options", "音频选项"),
+    ("Decibels (dB)", "分贝 (dB)"),
+    ("Slider Minimum", "滑块最小值"),
+    ("Percentage", "百分比"),
     // Preview panel (AE 26's Time_Palette strings).
     ("Spacebar", "空格键"),
     ("Include:", "包含:"),
@@ -664,7 +668,9 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "audio",
-        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+        bae_ui::PanelKind::new("Audio", |spawn| {
+            Box::new(audio::AudioPanel::from_state(spawn.state))
+        }),
     );
     crate::register_panel(
         app,
