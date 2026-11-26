@@ -18,7 +18,7 @@ use std::time::SystemTime;
 #[derive(Clone, PartialEq, Eq)]
 struct Config {
     dir: PathBuf,
-    limit: u64,
+    limit: Option<u64>,
     enabled: bool,
     preview: bool,
     compressed: bool,
@@ -28,7 +28,7 @@ impl Config {
     fn new(base: &Path, p: &Preferences) -> Self {
         Self {
             dir: p.preview_cache_dir(base),
-            limit: (p.int("disk.max_disk_cache_size_gb") as u64) << 30,
+            limit: p.explicit_disk_limit_gb().map(|gib| gib << 30),
             enabled: p.bool("disk.enable_disk_cache"),
             preview: p.bool("disk.enable_preview_from_disk_cache"),
             compressed: p.bool("disk.enable_compressed_frames_lossless"),
@@ -38,6 +38,7 @@ impl Config {
 
 #[derive(Default)]
 struct Index {
+    limit: u64,
     files: HashMap<u64, (SystemTime, u64)>,
     order: BTreeSet<(SystemTime, u64)>,
     bytes: u64,
@@ -177,7 +178,7 @@ impl DiskFrames {
     }
     pub(crate) fn enabled(&self) -> bool {
         let state = self.state.lock().unwrap();
-        state.ready && state.cfg.limit > 0 && state.index.is_some()
+        state.ready && state.index.as_ref().is_some_and(|index| index.limit > 0)
     }
     pub(crate) fn read(&self, key: u64, gpu: &GpuContext) -> Option<(OutputTarget, IRect)> {
         let (path, epoch) = {
@@ -229,7 +230,7 @@ impl DiskFrames {
         let state = self.state.lock().unwrap();
         let Some(index) = &state.index else { return };
         if !state.ready
-            || state.cfg.limit == 0
+            || index.limit == 0
             || index.files.contains_key(&key)
             || self.busy.swap(true, Ordering::AcqRel)
         {
@@ -324,7 +325,14 @@ fn refresh(state: &Mutex<State>) {
             return;
         }
     };
-    index.trim(&cfg.dir, cfg.limit);
+    let Some(limit) = cfg.limit.or_else(|| {
+        bae_platform::disk::available_bytes(&cfg.dir)
+            .map(|free| bae_prefs::automatic_disk_limit_gb(free) << 30)
+    }) else {
+        return;
+    };
+    index.limit = limit;
+    index.trim(&cfg.dir, limit);
     let mut s = state.lock().unwrap();
     if s.epoch == epoch {
         s.ready = true;
@@ -342,12 +350,13 @@ fn save_frame(
     texture: &wgpu::Texture,
     rect: IRect,
 ) {
-    let cfg = {
+    let (cfg, limit) = {
         let s = state.lock().unwrap();
         if s.epoch != epoch {
             return;
         }
-        s.cfg.clone()
+        let Some(index) = &s.index else { return };
+        (s.cfg.clone(), index.limit)
     };
     let Ok(image) = transfer::read_texture(gpu, texture) else {
         return;
@@ -369,7 +378,7 @@ fn save_frame(
         return;
     };
     let bytes = meta.len();
-    if bytes > cfg.limit {
+    if bytes > limit {
         return;
     }
     let path = file_path(&cfg.dir, key);
@@ -392,7 +401,7 @@ fn save_frame(
         i
     };
     index.add(key, SystemTime::now(), bytes);
-    index.trim(&cfg.dir, cfg.limit);
+    index.trim(&cfg.dir, limit);
     let mut s = state.lock().unwrap();
     if s.epoch == epoch {
         s.index = Some(index);
@@ -491,7 +500,9 @@ mod tests {
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
-        let store = PrefsStore::default();
+        let mut prefs = Preferences::default();
+        prefs.set(bae_prefs::keys::DISK_LIMIT_GB, 1);
+        let store = PrefsStore::new(prefs);
         let setup = || {
             let cache = DiskFrames::new(tmp.path().to_owned(), &store);
             cache.run(&gpu).unwrap();

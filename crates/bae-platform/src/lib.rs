@@ -18,6 +18,7 @@ pub mod cli;
 pub mod console;
 pub mod crash;
 pub mod dirs;
+pub mod disk;
 pub mod logging;
 pub mod memory;
 pub mod settings;
