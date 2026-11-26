@@ -44,6 +44,7 @@
 //! | `path.delete_vertex` | Delete Vertex tool (every keyframe) |
 //! | `text.create` | typing new point or paragraph text with the Type tool |
 //! | `text.set_text` | editing a text layer's characters with the Type tool |
+//! | `text.set_style` | Character / Paragraph panel settings on text layers |
 //! | `effect.apply` | Effect menu; double-click or drag in Effects & Presets |
 //! | `effect.remove`, `effect.remove_all` | Delete with effects selected; Effect > Remove All |
 //! | `effect.reorder` | dragging effects in Effect Controls or the timeline |
@@ -125,7 +126,7 @@ pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
 pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
-pub use text::{CreateText, SetText};
+pub use text::{CreateText, SetText, SetTextStyle, TextStyleChange};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
 pub use text_path::SetTextPath;
 pub use time::{
@@ -190,6 +191,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(AutoOrient),
         r.register(SetProjectSettings),
         r.register(SetText),
+        r.register(SetTextStyle),
         r.register(SetExpressions),
         r.register(DuplicateContent),
         r.register(PasteContent),

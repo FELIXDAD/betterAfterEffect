@@ -991,6 +991,7 @@ dependencies = [
  "bae-prefs",
  "bae-render",
  "bae-script",
+ "bae-text",
  "bae-ui",
  "bae-vector",
  "egui",
