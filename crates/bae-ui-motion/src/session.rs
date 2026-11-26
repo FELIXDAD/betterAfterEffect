@@ -373,6 +373,7 @@ pub struct Session {
     pub playback: Option<Playback>,
     pub(crate) playback_stats: PlaybackStats,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    audio_mapping: (bool, bool),
     pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
@@ -476,6 +477,7 @@ impl SharedSession {
         s.stop();
         let fresh = Session {
             output: s.output.take(),
+            audio_mapping: s.audio_mapping,
             retry_audio_after: s.retry_audio_after.take(),
             opening_audio: s.opening_audio,
             preview: s.preview.clone(),
@@ -491,6 +493,7 @@ impl SharedSession {
         s.opening_audio = false;
         match device {
             Ok(output) => {
+                output.set_channel_mapping(s.audio_mapping.0, s.audio_mapping.1);
                 output.set_gain(10.0_f32.powf(s.master_db / 20.0));
                 let previous = s.output.replace(output);
                 s.mix_revision = None;
@@ -575,6 +578,21 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    /// Apply the channel mapping to the active stream and any replacement device.
+    pub fn set_audio_mapping(&mut self, left_to_second: bool, right_to_first: bool) {
+        self.audio_mapping = (left_to_second, right_to_first);
+        if let Some(output) = &self.output {
+            output.set_channel_mapping(left_to_second, right_to_first);
+        }
+    }
+
+    /// The warmed device the preview is currently using.
+    pub fn audio_output_info(&self) -> Option<(&str, u16, u32)> {
+        let output = self.output.as_ref().filter(|o| !o.device_lost())?;
+        let (name, channels) = output.device_info();
+        Some((name, channels, output.sample_rate()))
+    }
+
     pub(crate) fn text_range(&self, layer: Option<&PrimPath>) -> Option<std::ops::Range<usize>> {
         let (owner, time, range) = self.text_selection.as_ref()?;
         (Some(owner) == layer

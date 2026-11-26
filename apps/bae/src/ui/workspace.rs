@@ -202,6 +202,16 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
+            let apply = move |p: &bae_prefs::Preferences| {
+                session.lock().set_audio_mapping(
+                    p.str("audio.audio_map_left") == "channel_2",
+                    p.str("audio.audio_map_right") == "channel_1",
+                );
+            };
+            apply(&prefs.current());
+            prefs.subscribe(apply);
+        }
         let mut workbench = Workbench::new(app, state);
         // Keyboard Shortcuts presets are files in the config folder (AE: aeks/).
         workbench.set_shortcut_presets_dir(
@@ -333,19 +343,21 @@ impl Workspace {
                 };
             });
         }
-        let fullscreen = resources
-            .get::<bae_ui_motion::SharedSession>()
-            .is_some_and(|session| {
-                let mut s = session.lock();
-                s.sync_playback(doc.stage());
-                s.tick(std::time::Instant::now());
-                if s.fullscreen_preview()
-                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-                {
-                    s.stop();
-                }
-                s.fullscreen_preview()
-            });
+        let mut fullscreen = false;
+        if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
+            let mut s = session.lock();
+            s.sync_playback(doc.stage());
+            s.tick(std::time::Instant::now());
+            if self.settings.is_open() && self.settings.page() == "audio" {
+                self.settings.set_audio_output(s.audio_output_info());
+            }
+            if s.fullscreen_preview()
+                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
+                s.stop();
+            }
+            fullscreen = s.fullscreen_preview();
+        }
         if fullscreen && self.fullscreen_before_preview.is_none() {
             self.fullscreen_before_preview =
                 Some(ui.input(|i| i.viewport().fullscreen.unwrap_or(false)));

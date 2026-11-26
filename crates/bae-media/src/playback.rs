@@ -39,6 +39,8 @@ struct Monitor {
     clock: clock::Clock,
     gain: AtomicU32,
     peaks: AtomicU64,
+    // Bit 0 routes L to output 2, bit 1 routes R to output 1. Zero is stereo.
+    routing: AtomicU32,
 }
 
 struct Sink {
@@ -58,6 +60,7 @@ impl Sink {
             self.consumed = 0;
         }
         let gain = f32::from_bits(self.monitor.gain.load(Ordering::Relaxed));
+        let routing = self.monitor.routing.load(Ordering::Relaxed);
         let mut peaks = [0.0_f32; 2];
         let first = self.consumed;
         let mut output = data.chunks_exact_mut(channels);
@@ -91,8 +94,11 @@ impl Sink {
                 if channels == 1 {
                     out[0] = T::from_sample(((frame[0] + frame[1]) * 0.5).clamp(-1.0, 1.0));
                 } else {
-                    out[0] = T::from_sample(frame[0].clamp(-1.0, 1.0));
-                    out[1] = T::from_sample(frame[1].clamp(-1.0, 1.0));
+                    let mut mapped = [0.0; 2];
+                    mapped[usize::from(routing & 1 != 0)] += frame[0];
+                    mapped[usize::from(routing & 2 == 0)] += frame[1];
+                    out[0] = T::from_sample(mapped[0].clamp(-1.0, 1.0));
+                    out[1] = T::from_sample(mapped[1].clamp(-1.0, 1.0));
                 }
             }
             self.consumed += count as u64;
@@ -121,6 +127,8 @@ pub struct AudioOutput {
     commands: Sender<producer::Command>,
     monitor: Arc<Monitor>,
     rate: u32,
+    device_name: String,
+    channels: u16,
 }
 impl std::fmt::Debug for AudioOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -138,6 +146,11 @@ impl AudioOutput {
             .ok_or("No audio output device")?;
         let config = device.default_output_config().map_err(|e| e.to_string())?;
         let rate = config.sample_rate();
+        let channels = config.channels();
+        let device_name = device
+            .description()
+            .map(|d| d.name().to_owned())
+            .unwrap_or_default();
         let (writer, reader) = RingBuffer::new(8);
         let monitor = Arc::new(Monitor {
             gain: AtomicU32::new(1.0_f32.to_bits()),
@@ -177,6 +190,8 @@ impl AudioOutput {
             commands,
             monitor,
             rate,
+            device_name,
+            channels,
         })
     }
 
@@ -208,6 +223,17 @@ impl AudioOutput {
     /// The negotiated device sample rate, in Hz.
     pub fn sample_rate(&self) -> u32 {
         self.rate
+    }
+
+    /// Name and channel count of the stream negotiated during device warm-up.
+    pub fn device_info(&self) -> (&str, u16) {
+        (&self.device_name, self.channels)
+    }
+
+    /// Route the left and right program channels on the running output stream.
+    pub fn set_channel_mapping(&self, left_to_second: bool, right_to_first: bool) {
+        let routing = u32::from(left_to_second) | (u32::from(right_to_first) << 1);
+        self.monitor.routing.store(routing, Ordering::Relaxed);
     }
     /// The operating system invalidated the audio stream.
     pub fn device_lost(&self) -> bool {
@@ -324,5 +350,18 @@ mod tests {
         let bits = monitor.peaks.load(Ordering::Relaxed);
         assert_eq!(f32::from_bits(bits as u32), 1.5);
         assert_eq!(f32::from_bits((bits >> 32) as u32), 0.5);
+
+        // Routing changes on the existing stream. The two sources may share an output.
+        for (routing, expected) in [(3, [0.5, -1.0]), (1, [0.0, -1.0]), (2, [-1.0, 0.0])] {
+            monitor.routing.store(routing, Ordering::Relaxed);
+            let mut chunk = writer.write_chunk(1).unwrap();
+            let block = &mut chunk.as_mut_slices().0[0];
+            block.epoch = 2;
+            block.len = 1;
+            block.samples[0] = [-0.75, 0.25];
+            chunk.commit_all();
+            sink.pull(&mut stereo, 2, 10_000_000);
+            assert_eq!(stereo, expected);
+        }
     }
 }
