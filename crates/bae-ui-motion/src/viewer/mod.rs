@@ -1035,13 +1035,27 @@ impl Panel for CompositionViewer {
         if self.nudge.is_some() && !ui.input(|i| arrows.iter().any(|k| i.key_down(*k))) {
             self.finish_nudge(cx, &session, &info);
         }
-        // Ctrl+T knows a path is selected (Free Transform Points).
-        session.lock().vertex_path = self
-            .select
-            .vertices
-            .prim
-            .clone()
-            .filter(|_| !self.select.vertices.is_empty());
+        // Ctrl+T and Layer ▸ Mask and Shape Path know which vertices are
+        // selected.
+        {
+            let mut s = session.lock();
+            if let Some(indices) = s.vertex_request.take()
+                && self.select.vertices.prim.is_some()
+            {
+                self.select.vertices.indices = indices;
+            }
+            s.vertex_path = self
+                .select
+                .vertices
+                .prim
+                .clone()
+                .filter(|_| !self.select.vertices.is_empty());
+            s.vertex_indices = if s.vertex_path.is_some() {
+                self.select.vertices.indices.clone()
+            } else {
+                Vec::new()
+            };
+        }
         let scrub = session.lock().scrub.clone();
         let editing = scrub.is_some()
             || self.nudge.is_some()

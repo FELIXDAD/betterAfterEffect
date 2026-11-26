@@ -49,6 +49,7 @@ pub mod menus;
 mod paint_panels;
 mod panel_columns;
 mod panels;
+mod path_menu;
 mod path_nulls;
 mod playback;
 mod prefs;

@@ -468,6 +468,13 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
         }
 
+        crate::path_menu::ROTOBEZIER => spec
+            .enabled_when(crate::path_menu::any_target)
+            .checked_when(crate::path_menu::all_roto),
+        crate::path_menu::CLOSED => spec
+            .enabled_when(crate::path_menu::any_open)
+            .checked_when(crate::path_menu::all_closed),
+        crate::path_menu::SET_FIRST_VERTEX => spec.enabled_when(crate::path_menu::one_vertex),
         crate::viewer::view3d::ids::LAYOUT => {
             let n = item
                 .params

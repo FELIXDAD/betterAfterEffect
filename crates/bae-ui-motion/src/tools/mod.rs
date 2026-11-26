@@ -543,6 +543,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::FREE_TRANSFORM, "Free Transform Points"),
             (crate::viewer::ZOOM_100, "Zoom to 100%"),
         ])
+        .chain(crate::path_menu::ACTIONS.iter().copied())
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::view_options::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
@@ -1235,6 +1236,9 @@ impl ActionHandler for ToolActions {
             let mut t = tools.lock();
             t.set(Tool::Selection);
             t.free_transform_request = true;
+            return true;
+        }
+        if crate::path_menu::handle(&inv.id, cx) {
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {

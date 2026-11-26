@@ -127,7 +127,7 @@ pub use layer::{
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 pub use matte::SetTrackMatte;
 pub use orient::AutoOrient;
-pub use path::{DeleteVertex, InsertVertex, SetVertices};
+pub use path::{DeleteVertex, EditWhole, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
 pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
@@ -198,6 +198,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SetVertices),
         r.register(InsertVertex),
         r.register(DeleteVertex),
+        r.register(EditWhole),
         r.register(CreateText),
         r.register(InterpretFootage),
         r.register(AutoOrient),
