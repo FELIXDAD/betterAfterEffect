@@ -1,0 +1,21 @@
+schema_version = 1
+
+[plugin]
+id = "org.bae.vr-editor"
+version = "0.1.0"
+api = "0.1"
+name = "VR Comp Editor"
+
+[script]
+entry = "main.js"
+
+[permissions]
+project = "write"
+
+[[command]]
+id = "edit"
+name = "VR Comp Editor"
+description = "Create and update VR edit, cubemap and output compositions."
+implementation = "script"
+entry = "edit"
+schema = "args.json"
