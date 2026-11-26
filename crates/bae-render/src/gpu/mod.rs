@@ -113,6 +113,8 @@ pub(crate) mod flags {
     pub const MOTION: u32 = 512;
     /// Lit by the comp's lights: lighting record at vec4 `extra.w`.
     pub const LIT: u32 = 1024;
+    /// Motion blur: a lighting record per sample.
+    pub const LIT_SAMPLES: u32 = 2048;
 }
 
 /// Which fragment entry point a composite pipeline uses: plain draws never pay
@@ -440,6 +442,7 @@ pub(crate) struct Shared {
     composite: Mutex<FxHashMap<CompositeKey, Option<wgpu::RenderPipeline>>>,
     pub masks: Arc<Mutex<Option<MaskPipelines>>>,
     pub mix: Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>>,
+    pub dof: Arc<Mutex<Option<crate::exec::dof::DofPipelines>>>,
 }
 
 static SHARED: Mutex<Vec<(std::sync::Weak<bae_gpu::GpuContext>, Arc<Shared>)>> =
@@ -463,6 +466,7 @@ impl Shared {
             composite: Mutex::new(FxHashMap::default()),
             masks: Arc::new(Mutex::new(None)),
             mix: Arc::new(Mutex::new(None)),
+            dof: Arc::new(Mutex::new(None)),
         });
         all.push((Arc::downgrade(gpu), shared.clone()));
         shared
@@ -568,6 +572,13 @@ impl Shared {
                 mix.warm(&self.device, format);
             }
             self.mix.lock().get_or_insert(mix);
+        }
+        if self.dof.lock().is_none() {
+            let mut dof = crate::exec::dof::DofPipelines::new(&self.device);
+            for &(format, _) in formats {
+                dof.warm(&self.device, format);
+            }
+            self.dof.lock().get_or_insert(dof);
         }
     }
 }
@@ -838,6 +849,14 @@ impl Pipelines {
         self.shared
             .as_ref()
             .map(|s| s.mix.clone())
+            .unwrap_or_default()
+    }
+
+    /// The shared depth-of-field pipelines (created on first use).
+    pub fn dof(&self) -> Arc<Mutex<Option<crate::exec::dof::DofPipelines>>> {
+        self.shared
+            .as_ref()
+            .map(|s| s.dof.clone())
             .unwrap_or_default()
     }
 

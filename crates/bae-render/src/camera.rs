@@ -56,7 +56,8 @@ pub struct Camera {
     /// Comp pixels: the distance at which a plane facing the camera appears at
     /// 100 % (AE's Zoom property).
     pub zoom: f64,
-    /// Depth of field switch (data only: depth-of-field blur is not rendered yet).
+    /// Depth of field switch: 3D layers away from the focus plane blur
+    /// (`graph::DepthBlurNode`).
     pub depth_of_field: bool,
     /// Pixels from the camera to the plane in focus.
     pub focus_distance: f64,
@@ -64,6 +65,8 @@ pub struct Camera {
     pub aperture: f64,
     /// Blur level in percent.
     pub blur_level: f64,
+    /// The blur's iris and highlights.
+    pub iris: bae_anim::Iris,
     /// Perspective (camera layers, the default camera, custom views) or
     /// orthographic (AE's Front, Left, Top … views).
     pub projection: Projection,
@@ -140,6 +143,7 @@ impl Camera {
             focus_distance: zoom,
             aperture: 0.0,
             blur_level: 100.0,
+            iris: bae_anim::Iris::default(),
             projection: Projection::Perspective,
         }
     }
