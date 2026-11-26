@@ -186,6 +186,7 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "Layer" if path.get(1) == Some(&"New") => Comp,
         "Layer" | "Effect" => Layers,
         "Animation" => match item.action {
+            "motion.anim.convert_audio_to_keyframes" => Comp,
             a if a.starts_with("motion.anim.recent_animation_preset")
                 || a == "motion.anim.browse_presets"
                 || a == "motion.anim.apply_animation_preset" =>
@@ -461,6 +462,11 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             let view = spec_param(item.params, "view").unwrap_or_default();
             spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
         }
+        actions::ids::TIME_REMAP => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let first = session.lock().selected_layers.first().cloned();
+            first.is_some_and(|l| actions::switch_on(cx.stage, &l, "time_remap_enabled"))
+        }),
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
             spec.checked_when(move |cx| cx.panel_open(&panel))

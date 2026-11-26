@@ -8,6 +8,7 @@
 
 pub(crate) mod browser;
 pub(crate) mod controls;
+mod eq_response;
 mod lumetri_curve;
 mod warp_grid;
 

@@ -563,8 +563,10 @@ impl bae_gpu::WarmUp for TextProvider {
         "fonts"
     }
 
+    /// First of all: text needs it and the scan takes well under a
+    /// millisecond (it must never wait behind the compositor or effects).
     fn priority(&self) -> u8 {
-        10
+        0
     }
 
     fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {

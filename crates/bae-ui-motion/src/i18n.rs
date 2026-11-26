@@ -4,9 +4,30 @@
 //! table (`<module>::ZH` / `<module>/zh.rs`); only common words stay here.
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Command title (`layer.auto_orient`).
+    ("Auto-Orient", "自动定向"),
+    // Command title (`project.set_settings`).
+    ("Project Settings", "项目设置"),
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
     // (#136). The command crate stays UI-free; its titles are translated here.
+    ("Waveform Audio (WAV)", "波形音频（WAV）"),
+    ("Stereo, 48 kHz, 24-bit PCM", "立体声，48 kHz，24 位 PCM"),
+    ("Convert Audio to Keyframes", "将音频转换为关键帧"),
+    ("Audio Amplitude", "音频振幅"),
+    ("Left Channel", "左声道"),
+    ("Right Channel", "右声道"),
+    ("Both Channels", "两个声道"),
+    ("Analyzing audio…", "正在分析音频…"),
+    ("Audio analysis stopped.", "音频分析已停止。"),
+    (
+        "The composition has no enabled audio layers.",
+        "合成中没有开启声音的图层。",
+    ),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
+    ("Apply Motion Tracker", "应用动态跟踪器"),
+    ("Edit Motion Tracker", "编辑动态跟踪器"),
+    ("Analyze Motion", "分析运动"),
+    ("Reset Tracker", "重置跟踪器"),
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
