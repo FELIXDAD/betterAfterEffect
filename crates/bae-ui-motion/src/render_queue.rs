@@ -36,8 +36,8 @@ use item_menu::{ItemAction, LogMode, RenderLog};
 use templates::{Library, NameDialog, Span, Store, Template};
 
 /// Formats offered in the panel and by `bae render --format`.
+/// WAV comes last, as in AE's Format menu.
 pub const FORMATS: &[ExportFormat] = &[
-    ExportFormat::Wav,
     ExportFormat::Png,
     ExportFormat::Tiff,
     ExportFormat::Exr,
@@ -51,6 +51,7 @@ pub const FORMATS: &[ExportFormat] = &[
     ExportFormat::ProRes422,
     ExportFormat::ProRes,
     ExportFormat::ProRes4444,
+    ExportFormat::Wav,
 ];
 
 /// AE 26's Render Settings templates in its menu order; BAE renders at Best

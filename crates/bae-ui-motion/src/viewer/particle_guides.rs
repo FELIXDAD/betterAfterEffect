@@ -21,8 +21,18 @@ struct Timeline<'a> {
     stage: &'a Stage,
     eval: &'a mut Evaluator,
     comp: &'a EvaluatedComp,
+    paths: &'a mut PathCache,
 }
 
+/// Producer motion paths (up to 2001 frames x 3 controls, each possibly an
+/// expression) for one project revision and comp time: repaints reuse them.
+#[derive(Default)]
+pub(super) struct PathCache {
+    key: Option<(u64, bae_model::Time)>,
+    paths: std::collections::HashMap<(PrimPath, i64), Vec<DVec3>>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn paint(
     painter: &Painter,
     stage: &Stage,
@@ -31,8 +41,19 @@ pub(super) fn paint(
     view: &View,
     selected: &[PrimPath],
     view_camera: Option<Camera>,
+    paths: &mut PathCache,
 ) {
-    let mut timeline = Timeline { stage, eval, comp };
+    let key = (stage.revision(), comp.time);
+    if paths.key != Some(key) {
+        paths.paths.clear();
+        paths.key = Some(key);
+    }
+    let mut timeline = Timeline {
+        stage,
+        eval,
+        comp,
+        paths,
+    };
     for path in selected {
         let Some(layer) = comp.layer(path) else {
             continue;
@@ -268,36 +289,45 @@ fn motion_path(
         return;
     }
     let curves = specs.map(|s| s.and_then(|s| Curve::new(&s.keyframes, CurveKind::PerDimension)));
-    let mut prev = None;
-    for offset in -radius_frames..=radius_frames {
-        let time = comp.time + comp.frame_rate.frame_to_time(offset);
-        if time < bae_model::Time::ZERO || time >= comp.duration || !layer.timing.is_active(time) {
-            continue;
-        }
-        let mut pos = producer;
-        for i in 0..3 {
-            let v = if specs[i]
-                .and_then(|s| s.expression.as_ref())
-                .is_some_and(|e| e.enabled)
-            {
-                timeline
-                    .eval
-                    .evaluate_attribute(stage, &fx.path, attrs[i], time)
-                    .ok()
-            } else {
-                curves[i]
-                    .as_ref()
-                    .map(|c| c.sample(layer.timing.layer_time(time)))
-            };
-            if let Some(v) = v.and_then(|v| v.as_f64()) {
-                pos[i] = v;
+    let eval = &mut *timeline.eval;
+    let points = timeline
+        .paths
+        .paths
+        .entry((fx.path.clone(), radius_frames))
+        .or_insert_with(|| {
+            let mut points = Vec::new();
+            for offset in -radius_frames..=radius_frames {
+                let time = comp.time + comp.frame_rate.frame_to_time(offset);
+                if time < bae_model::Time::ZERO
+                    || time >= comp.duration
+                    || !layer.timing.is_active(time)
+                {
+                    continue;
+                }
+                let mut pos = producer;
+                for i in 0..3 {
+                    let v = if specs[i]
+                        .and_then(|s| s.expression.as_ref())
+                        .is_some_and(|e| e.enabled)
+                    {
+                        eval.evaluate_attribute(stage, &fx.path, attrs[i], time)
+                            .ok()
+                    } else {
+                        curves[i]
+                            .as_ref()
+                            .map(|c| c.sample(layer.timing.layer_time(time)))
+                    };
+                    if let Some(v) = v.and_then(|v| v.as_f64()) {
+                        pos[i] = v;
+                    }
+                }
+                points.push(pos);
             }
+            points
+        });
+    for pair in points.windows(2) {
+        if pair[0] != pair[1] {
+            guides.segment(pair[0], pair[1], GUIDE);
         }
-        if let Some(p) = prev
-            && p != pos
-        {
-            guides.segment(p, pos, GUIDE);
-        }
-        prev = Some(pos);
     }
 }
