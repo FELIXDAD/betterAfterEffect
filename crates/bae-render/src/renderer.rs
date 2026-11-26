@@ -142,12 +142,97 @@ fn output_params_display(
     params
 }
 
+/// `frames` for one call (the trait object's lifetime shortened to the borrow).
+fn reborrow<'s>(
+    frames: &'s mut Option<&mut dyn crate::graph::CompFrames>,
+) -> Option<&'s mut dyn crate::graph::CompFrames> {
+    match frames {
+        Some(f) => Some(&mut **f),
+        None => None,
+    }
+}
+
+/// Exact-sized display output. Keep the view with the texture so repeated
+/// presentations never sample the padding of a working texture.
+pub struct OutputTarget(wgpu::TextureView);
+
+impl OutputTarget {
+    /// The persistent sampled view used by the viewer registration.
+    pub fn view(&self) -> &wgpu::TextureView {
+        &self.0
+    }
+
+    /// Exact pixel dimensions of this RGBA8 display target.
+    pub fn size(&self) -> [u32; 2] {
+        [self.0.texture().width(), self.0.texture().height()]
+    }
+}
+
+pub(crate) struct DisplayOutput {
+    available: Option<OutputTarget>,
+    uniform: wgpu::Buffer,
+}
+
+impl DisplayOutput {
+    /// Records the conversion of `image`. An `incomplete` frame (something
+    /// still warming up) is never shown, so an available target comes back
+    /// untouched: it may still be on screen with the last complete frame.
+    pub(crate) fn record(
+        self,
+        device: &wgpu::Device,
+        pipelines: &mut Pipelines,
+        encoder: &mut wgpu::CommandEncoder,
+        image: &GpuImage,
+        incomplete: bool,
+    ) -> OutputTarget {
+        if incomplete && let Some(target) = self.available {
+            return target;
+        }
+        let [w, h] = image.texel_size();
+        let target = self
+            .available
+            .filter(|t| t.size() == [w.max(1), h.max(1)])
+            .unwrap_or_else(|| {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("bae-render.output"),
+                    size: wgpu::Extent3d {
+                        width: w.max(1),
+                        height: h.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                OutputTarget(view)
+            });
+        crate::exec::record_output_pass(
+            device,
+            pipelines,
+            encoder,
+            image,
+            target.view(),
+            wgpu::TextureFormat::Rgba8Unorm,
+            &self.uniform,
+        );
+        target
+    }
+}
+
 /// The GPU compositor.
 pub struct Renderer {
     gpu: Arc<GpuContext>,
     pipelines: Pipelines,
     pool: TexturePool,
     draws: DrawBuffer,
+    output_uniform: Option<([u8; OUTPUT_PARAMS_SIZE as usize], wgpu::Buffer)>,
+    readback_target: Option<OutputTarget>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
     footage: FootageCache,
@@ -155,6 +240,8 @@ pub struct Renderer {
     effects: EffectLibrary,
     /// Measure per-layer render times ([`RenderedFrame::layer_times`]).
     layer_times: bool,
+    /// `sampleImage` read-backs in flight.
+    sample_jobs: crate::sample::SampleJobs,
     /// Timestamp queries for per-layer GPU times (created when needed).
     gpu_timer: Option<crate::gpu_timer::GpuTimer>,
     /// The newest per-layer GPU times read back.
@@ -207,17 +294,20 @@ impl Renderer {
 
     /// A renderer with explicit settings.
     pub fn with_config(gpu: Arc<GpuContext>, config: RendererConfig) -> Self {
-        let pipelines = Pipelines::new(gpu.device());
+        let pipelines = Pipelines::new(&gpu);
         Self {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
+            output_uniform: None,
+            readback_target: None,
             mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
             footage: FootageCache::new(gpu.clone()),
             providers: SourceProviders::new(),
             effects: EffectLibrary::new(),
             layer_times: false,
+            sample_jobs: Default::default(),
             gpu_timer: None,
             gpu_times: Vec::new(),
             gpu,
@@ -346,21 +436,19 @@ impl Renderer {
     }
 
     /// [`Renderer::render_frame_with`] followed by [`Renderer::output_texture`]
-    /// in one GPU submission (the viewer path).
+    /// in one GPU submission (the viewer path). When the frame is incomplete,
+    /// `available` comes back untouched (still holding the frame shown).
     pub fn render_frame_output(
         &mut self,
         comp: &RenderComp,
         request: &RenderRequest,
         frames: Option<&mut dyn crate::graph::CompFrames>,
         alpha: OutputAlpha,
-    ) -> Result<(RenderedFrame, wgpu::Texture), RenderError> {
-        let (frame, output) = self.render(comp, request, frames, Some(alpha))?;
-        let texture = match output {
-            Some(texture) => texture,
-            // From the frame cache: only the conversion is submitted.
-            None => self.output_texture(&frame, alpha)?,
-        };
-        Ok((frame, texture))
+        available: Option<OutputTarget>,
+    ) -> Result<(RenderedFrame, OutputTarget), RenderError> {
+        let output = self.display_output(alpha, Display::default(), available);
+        let (frame, target) = self.render(comp, request, frames, Some(output))?;
+        Ok((frame, target.expect("display output requested")))
     }
 
     fn render(
@@ -368,20 +456,27 @@ impl Renderer {
         comp: &RenderComp,
         request: &RenderRequest,
         frames: Option<&mut dyn crate::graph::CompFrames>,
-        output: Option<OutputAlpha>,
-    ) -> Result<(RenderedFrame, Option<wgpu::Texture>), RenderError> {
-        let key = FrameKey {
-            comp: comp.path.clone(),
-            time: comp.time,
-            request: request.fingerprint(),
-        };
-        let hash = self.content_hash(comp);
-        if self.frames.content_hash(&key) == Some(hash)
-            && let Some(image) = self.frames.get(&key)
+        output: Option<DisplayOutput>,
+    ) -> Result<(RenderedFrame, Option<OutputTarget>), RenderError> {
+        let lookup = (self.frames.stats().budget > 0).then(|| {
+            (
+                FrameKey {
+                    comp: comp.path.clone(),
+                    time: comp.time,
+                    request: request.fingerprint(),
+                },
+                self.content_hash(comp),
+            )
+        });
+        if let Some((key, hash)) = &lookup
+            && self.frames.content_hash(key) == Some(*hash)
+            && let Some(image) = self.frames.get(key)
         {
+            let image = image.clone();
+            let output = output.map(|out| self.submit_output(&image, out, false));
             return Ok((
                 RenderedFrame {
-                    image: image.clone(),
+                    image,
                     comp: comp.path.clone(),
                     time: comp.time,
                     from_cache: true,
@@ -391,7 +486,7 @@ impl Renderer {
                     layer_times: Vec::new(),
                     layer_gpu_times: Vec::new(),
                 },
-                None,
+                output,
             ));
         }
 
@@ -447,7 +542,11 @@ impl Renderer {
         let output = executed.output;
         let image = executed.image;
         let incomplete = graph.incomplete || executed.incomplete;
-        if !graph.time_dependent && !incomplete {
+        if !graph.time_dependent
+            && !incomplete
+            && image.byte_size() <= self.frames.stats().budget
+            && let Some((key, hash)) = lookup
+        {
             self.frames.insert(
                 key,
                 image.clone(),
@@ -482,6 +581,196 @@ impl Renderer {
         ))
     }
 
+    /// Serves the `sampleImage` requests waiting in `samples` (expressions of
+    /// `comp` or of comps `frames` evaluates): draws each sampled layer in its
+    /// layer space at full resolution (its source, or with masks and effects) and
+    /// starts reading the sample areas back, without waiting for the GPU.
+    /// [`Renderer::poll_samples`] stores the values once they arrive.
+    pub fn read_samples(
+        &mut self,
+        samples: &bae_anim::ImageSamples,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        mut frames: Option<&mut dyn crate::graph::CompFrames>,
+    ) -> Result<(), RenderError> {
+        use crate::effect::{LayerDependency, LayerStage};
+        let taken = samples.take_requests();
+        if taken.keys.is_empty() {
+            return Ok(());
+        }
+        let mut groups: Vec<(LayerDependency, PrimPath, Vec<bae_anim::SampleKey>)> = Vec::new();
+        for key in taken.keys {
+            let stage = if key.post_effect {
+                LayerStage::EffectsAndMasks
+            } else {
+                LayerStage::Source
+            };
+            match groups.iter_mut().find(|(d, c, _)| {
+                d.layer == key.layer && d.time == key.time && d.stage == stage && *c == key.comp
+            }) {
+                Some((_, _, keys)) => keys.push(key),
+                None => groups.push((
+                    LayerDependency {
+                        layer: key.layer.clone(),
+                        time: key.time,
+                        stage,
+                    },
+                    key.comp.clone(),
+                    vec![key],
+                )),
+            }
+        }
+        let request = RenderRequest {
+            resolution: crate::request::Resolution::Full,
+            roi: None,
+            ..*request
+        };
+        let format = self.work_format(&request);
+        let mut encoder =
+            self.gpu
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("bae-render.samples"),
+                });
+        let mut started = Vec::new();
+        let mut failed = None;
+        for (dep, comp_path, keys) in groups {
+            match self.sample_group(
+                comp,
+                &request,
+                format,
+                &mut frames,
+                &dep,
+                &comp_path,
+                &keys,
+                &mut encoder,
+            ) {
+                Ok(Some((readback, image))) => started.push((readback, image, keys)),
+                // Nothing to draw (or it failed): transparent black.
+                result => {
+                    if let Err(e) = result {
+                        failed.get_or_insert(e);
+                    }
+                    for key in keys {
+                        samples.fulfil(taken.generation, key, [0.0; 4]);
+                    }
+                }
+            }
+        }
+        self.pool.end_frame();
+        self.gpu.queue().submit([encoder.finish()]);
+        // The images stayed leased until their copies were submitted (the pool
+        // could otherwise hand a texture to the next group's draws first).
+        for (readback, image, keys) in started {
+            self.sample_jobs
+                .push(taken.generation, readback.map(), image.rect, keys);
+        }
+        failed.map_or(Ok(()), Err)
+    }
+
+    /// Draws one sampled layer and records the read-back of its sample region.
+    #[allow(clippy::too_many_arguments)]
+    fn sample_group(
+        &mut self,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        format: wgpu::TextureFormat,
+        frames: &mut Option<&mut dyn crate::graph::CompFrames>,
+        dep: &crate::effect::LayerDependency,
+        comp_path: &PrimPath,
+        keys: &[bae_anim::SampleKey],
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Option<(bae_gpu::transfer::TextureReadback, GpuImage)>, RenderError> {
+        {
+            let owned;
+            let at = match crate::sample::find_comp(comp, comp_path, dep.time, &dep.layer) {
+                Some(c) => Some(c),
+                None => match reborrow(frames) {
+                    Some(f) => {
+                        owned = f.comp_at(comp_path, dep.time)?;
+                        owned.as_ref()
+                    }
+                    None => None,
+                },
+            };
+            let region = crate::sample::region(keys);
+            let graph = match at {
+                Some(at) => {
+                    let mut resolver = Resolver {
+                        footage: &mut self.footage,
+                        providers: &self.providers,
+                        warnings: Vec::new(),
+                    };
+                    graph::build_layer_image(
+                        at,
+                        request,
+                        &mut resolver,
+                        &self.effects,
+                        reborrow(frames),
+                        dep,
+                        region,
+                    )?
+                }
+                None => None,
+            };
+            let Some(graph) = graph else {
+                return Ok(None);
+            };
+            let image = execute(
+                &self.gpu,
+                &mut self.pipelines,
+                &mut self.pool,
+                &mut self.draws,
+                &mut self.mask_buffers,
+                &graph,
+                format,
+                None,
+                crate::exec::Timing {
+                    cpu: false,
+                    gpu: None,
+                },
+                None,
+            )?
+            .image;
+            let [w, h] = image.texel_size();
+            let readback = bae_gpu::transfer::TextureReadback::record(
+                &self.gpu,
+                encoder,
+                &image.texture,
+                bae_gpu::transfer::TextureRegion {
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                },
+            )?;
+            Ok(Some((readback, image)))
+        }
+    }
+
+    /// Stores the `sampleImage` values whose read-back finished, without
+    /// blocking. True when any arrived (evaluate the comp again to use them).
+    pub fn poll_samples(&mut self, samples: &bae_anim::ImageSamples) -> bool {
+        if self.sample_jobs.is_empty() {
+            return false;
+        }
+        self.gpu.poll();
+        self.sample_jobs.finish(samples)
+    }
+
+    /// Waits for every `sampleImage` read-back (export, tests).
+    pub fn wait_samples(&mut self, samples: &bae_anim::ImageSamples) -> Result<(), RenderError> {
+        self.sample_jobs.wait(&self.gpu, samples)
+    }
+
+    /// Whether `sampleImage` read-backs are in flight.
+    pub fn samples_pending(&self) -> bool {
+        !self.sample_jobs.is_empty()
+    }
+
     /// Blocks until the GPU has finished all submitted work.
     pub fn wait_idle(&self) -> Result<(), RenderError> {
         Ok(self.gpu.wait_idle()?)
@@ -493,69 +782,78 @@ impl Renderer {
         frame: &RenderedFrame,
         alpha: OutputAlpha,
     ) -> Result<ImageData, RenderError> {
-        let target = self.output_texture(frame, alpha)?;
-        Ok(bae_gpu::transfer::read_texture(&self.gpu, &target)?)
+        let available = self.readback_target.take();
+        let target = self.output_texture(frame, alpha, available)?;
+        let pixels = bae_gpu::transfer::read_texture(&self.gpu, target.view().texture());
+        self.readback_target = Some(target);
+        Ok(pixels?)
     }
 
-    /// Converts a frame to an 8-bit RGBA texture on the GPU, without reading it
-    /// back (what [`Renderer::read_rgba8`] reads): `Rgba8Unorm`, usable as a copy
-    /// source and as a sampled texture, e.g. published to the viewport registry for
-    /// a viewer. The work is submitted; the texture is ready for later commands.
+    /// Converts to RGBA8. Return the display target here only after its consumers have released it.
     pub fn output_texture(
         &mut self,
         frame: &RenderedFrame,
         alpha: OutputAlpha,
-    ) -> Result<wgpu::Texture, RenderError> {
-        self.output_texture_display(frame, alpha, Display::default())
+        available: Option<OutputTarget>,
+    ) -> Result<OutputTarget, RenderError> {
+        self.output_texture_display(frame, alpha, Display::default(), available)
     }
 
-    /// [`Renderer::output_texture`] as a viewer shows it ([`Display`]).
+    /// [`Renderer::output_texture`] as a viewer shows it ([`Display`]). When
+    /// the frame is incomplete, `available` comes back untouched.
     pub fn output_texture_display(
         &mut self,
         frame: &RenderedFrame,
         alpha: OutputAlpha,
         display: Display,
-    ) -> Result<wgpu::Texture, RenderError> {
+        available: Option<OutputTarget>,
+    ) -> Result<OutputTarget, RenderError> {
+        let out = self.display_output(alpha, display, available);
+        Ok(self.submit_output(&frame.image, out, frame.incomplete))
+    }
+
+    fn submit_output(
+        &mut self,
+        image: &GpuImage,
+        output: DisplayOutput,
+        incomplete: bool,
+    ) -> OutputTarget {
         let device = self.gpu.device();
-        let [w, h] = frame.image.texel_size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bae-render.output"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.output"),
-            size: OUTPUT_PARAMS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.gpu
-            .queue()
-            .write_buffer(&uniform, 0, &output_params_display(alpha, false, display));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("bae-render.output"),
         });
-        self.record_output(
-            &mut encoder,
-            frame,
-            &view,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &uniform,
-        );
+        let target = output.record(device, &mut self.pipelines, &mut encoder, image, incomplete);
         self.gpu.queue().submit([encoder.finish()]);
-        Ok(target)
+        target
+    }
+
+    fn display_output(
+        &mut self,
+        alpha: OutputAlpha,
+        display: Display,
+        available: Option<OutputTarget>,
+    ) -> DisplayOutput {
+        let params = output_params_display(alpha, false, display);
+        let device = self.gpu.device();
+        let (previous, uniform) = self.output_uniform.get_or_insert_with(|| {
+            use wgpu::util::DeviceExt;
+            (
+                params,
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bae-render.output"),
+                    contents: &params,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                }),
+            )
+        });
+        if *previous != params {
+            self.gpu.queue().write_buffer(uniform, 0, &params);
+            *previous = params;
+        }
+        DisplayOutput {
+            available,
+            uniform: uniform.clone(),
+        }
     }
 
     /// Records the output conversion of `frame` into `target` (a `format`

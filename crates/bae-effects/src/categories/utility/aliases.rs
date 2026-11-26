@@ -1,11 +1,28 @@
 use crate::catalog::DefBuilder;
 use crate::{
     Builtin,
-    categories::{color::ocio::Operation, controls::Control as BoundsAlias},
+    categories::color::ocio::Operation,
     effects::lut::ocio_effect,
+    effects::sampled::{Sampled, Shader, unchanged},
+    params::Params,
     rust_builtin,
 };
+use bae_render::IRect;
 use std::sync::Arc;
+
+pub(super) static GROW_BOUNDS: Shader = Shader {
+    label: "bae.effects/grow_bounds",
+    source: concat!(
+        include_str!("../../effects/sampled.wgsl"),
+        include_str!("grow_bounds.wgsl")
+    ),
+};
+
+/// AE grows the layer's buffer by Pixels on every side (at the render scale),
+/// so effects after it can draw outside the original bounds.
+fn grown(v: Params<'_>, input: IRect) -> IRect {
+    input.inflate((v.f(1).max(0.) * v.p.scale).ceil() as i32)
+}
 
 fn cineon_converter() -> Builtin {
     let mut b = DefBuilder::new("ADBE Cineon Converter2", "Cineon Converter", "Utility");
@@ -184,7 +201,17 @@ fn grow_bounds() -> Builtin {
     );
     let (def, labels) = b.build();
     rust_builtin(
-        (Arc::new(BoundsAlias(def)), labels),
+        (
+            Arc::new(Sampled {
+                def,
+                shader: &GROW_BOUNDS,
+                mode: 0,
+                inputs: &[],
+                read: unchanged,
+                bounds: grown,
+            }),
+            labels,
+        ),
         "grow-bounds",
         "范围扩散",
         &["范围扩散"],
@@ -599,6 +626,21 @@ mod tests {
                 .apply_f64(rgb),
             rgb
         );
-        assert!(!grow_bounds().effect().renders_pixels());
+        let fx = grow_bounds().effect();
+        assert!(fx.renders_pixels());
+        let instance = bae_render::RenderEffect {
+            path: bae_model::PrimPath::new("/fx").unwrap(),
+            effect: "ADBE GROW BOUNDS".into(),
+            enabled: true,
+            params: vec![(1, bae_model::Value::Float(10.))],
+        };
+        let p = bae_render::EffectParams {
+            scale: 0.5,
+            ..bae_render::EffectParams::new(&instance)
+        };
+        assert_eq!(
+            fx.output_bounds(&p, IRect::new(0, 0, 20, 20)),
+            IRect::new(-5, -5, 25, 25)
+        );
     }
 }

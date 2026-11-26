@@ -349,7 +349,9 @@ pub(crate) fn frame(
         owns: state.drag.is_some() || state.pressed.is_some(),
         cursor: None,
     };
-    if mode == PathMode::None {
+    // View Options: Motion Paths, Keyframes, Motion Path Tangents.
+    let shown = session.lock().layer_controls;
+    if mode == PathMode::None || !shown.motion_paths {
         state.drag = None;
         state.pressed = None;
         return out;
@@ -367,7 +369,15 @@ pub(crate) fn frame(
     } else {
         base
     };
-    let drawn = geometry(cx, info, view, &paths, mode, now);
+    let mut drawn = geometry(cx, info, view, &paths, mode, now);
+    for (_, d) in &mut drawn {
+        if !shown.tangents {
+            d.handles.clear();
+        }
+        if !shown.keyframes {
+            d.keys.clear();
+        }
+    }
     let selected = session.lock().selected_keys.clone();
 
     // Paint: dots, handles and their lines, squares (filled when selected).

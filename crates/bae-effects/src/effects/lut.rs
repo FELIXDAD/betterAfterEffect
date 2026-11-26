@@ -67,17 +67,47 @@ struct Prepared {
     format: wgpu::TextureFormat,
     data: Vec<u8>,
     processor: Option<Processor>,
+    /// `None` for an identity transform: cached too, so it is not rebuilt
+    /// (and a CDL file reparsed) every frame.
+    pass: Option<Pass>,
+}
+
+#[derive(Debug)]
+struct Pass {
     kernel: Arc<Kernel>,
     values: Vec<u8>,
     views: Vec<wgpu::TextureView>,
 }
 
 impl Prepared {
+    /// `live`: the values change every frame, so even an identity keeps a pass.
     fn new(
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
         data: &[u8],
         processor: Option<Processor>,
+        transform: bae_color::ColorTransform,
+        live: bool,
+    ) -> Result<Self, RenderError> {
+        let pass = if transform.is_identity() && !live {
+            None
+        } else {
+            Some(Pass::new(gpu, format, transform)?)
+        };
+        Ok(Self {
+            device: gpu.device().clone(),
+            format,
+            data: data.into(),
+            processor,
+            pass,
+        })
+    }
+}
+
+impl Pass {
+    fn new(
+        gpu: &Arc<GpuContext>,
+        format: wgpu::TextureFormat,
         transform: bae_color::ColorTransform,
     ) -> Result<Self, RenderError> {
         let snippet = transform.to_wgsl("lut");
@@ -165,10 +195,6 @@ impl Prepared {
             views.push(texture.create_view(&Default::default()));
         }
         Ok(Self {
-            device: gpu.device().clone(),
-            format,
-            data: data.into(),
-            processor,
             kernel,
             values,
             views,
@@ -240,30 +266,40 @@ impl LutCache {
         if (needs_data && data.is_empty()) || roi.is_empty() || intensity == 0. {
             return Ok(input.clone());
         }
+        // Animated Cineon settings change only the uniform values: one entry per
+        // conversion type, with this frame's values.
+        let live =
+            processor.filter(|(op, _)| *op == crate::categories::color::ocio::Operation::Cineon);
+        let key = live.map_or(processor, |(op, s)| {
+            Some((op, [s[0], 0, 0, 0, 0, 0, 0, 0, 0]))
+        });
+        let now = live.map(|(op, s)| op.transform(data, s)).transpose()?;
+        if now.as_ref().is_some_and(|t| t.is_identity()) {
+            return Ok(input.clone());
+        }
         let lut = {
             let mut cache = self.0.lock();
             if let Some(entry) = cache.iter().find(|l| {
                 &l.device == target.gpu().device()
                     && l.format == target.format()
                     && l.data == data
-                    && l.processor == processor
+                    && l.processor == key
             }) {
                 entry.clone()
             } else {
-                let transform = match processor {
-                    Some((op, selection)) => op.transform(data, selection)?,
-                    None => bae_color::lutfile::from_embedded(data)
+                let transform = match (now.clone(), processor) {
+                    (Some(t), _) => t,
+                    (None, Some((op, selection))) => op.transform(data, selection)?,
+                    (None, None) => bae_color::lutfile::from_embedded(data)
                         .map_err(|e| RenderError::Other(e.to_string()))?,
                 };
-                if transform.is_identity() {
-                    return Ok(input.clone());
-                }
                 let entry = Arc::new(Prepared::new(
                     target.gpu(),
                     target.format(),
                     data,
-                    processor,
+                    key,
                     transform,
+                    live.is_some(),
                 )?);
                 // Keep adjacent looks in a stack resident across frames.
                 if cache.len() == 4 {
@@ -273,28 +309,33 @@ impl LutCache {
                 entry
             }
         };
+        let Some(pass) = &lut.pass else {
+            return Ok(input.clone());
+        };
+        let values = now.map(|t| t.to_wgsl("lut").params_bytes());
+        let values = values.as_deref().unwrap_or(&pass.values);
         let grid = image_grid::grid_scale(p, input);
         let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let rt = gpu::runtime(target.gpu());
-        let mut w = UniformWriter::with_size(64 + lut.values.len());
+        let mut w = UniformWriter::with_size(64 + values.len());
         image_grid::image_coords(&mut w, 0, input, grid);
         w.i32s(32, &[roi.x0, roi.y0])
             .u32(40, roi.width())
             .u32(44, roi.height())
             .u32(48, u32::from(p.float))
             .f32(52, intensity);
-        w.bytes[64..].copy_from_slice(&lut.values);
+        w.bytes[64..].copy_from_slice(values);
         let mut resources = vec![
             Resource::Uniform,
             Resource::View(&input.view),
             Resource::View(&out.view),
         ];
-        resources.extend(lut.views.iter().map(Resource::View));
-        let group = rt.bind_group(&lut.kernel, &resources);
+        resources.extend(pass.views.iter().map(Resource::View));
+        let group = rt.bind_group(&pass.kernel, &resources);
         let offset = gpu::push_uniform(&rt, &w);
-        let mut pass = target.encoder().begin_compute_pass(&Default::default());
-        gpu::dispatch(&mut pass, &lut.kernel, &group, &[offset], roi.size());
-        drop(pass);
+        let mut compute = target.encoder().begin_compute_pass(&Default::default());
+        gpu::dispatch(&mut compute, &pass.kernel, &group, &[offset], roi.size());
+        drop(compute);
         Ok(out)
     }
 }

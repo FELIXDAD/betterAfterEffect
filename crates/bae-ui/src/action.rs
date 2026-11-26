@@ -174,6 +174,9 @@ pub mod ids {
     /// Save a copy elsewhere; the open project keeps its location and stays
     /// unsaved if it was (AE File > Save As > Save a Copy...).
     pub const SAVE_A_COPY: &str = "file.save_a_copy";
+    /// Show the saved project file in Finder / Explorer (Project panel ▸
+    /// Reveal Project in Finder).
+    pub const REVEAL_PROJECT: &str = "file.reveal_project";
     /// Switch workspace; params `{"id": "<workspace id>"}`.
     pub const SWITCH_WORKSPACE: &str = "workspace.switch";
     /// Restore the active workspace's saved layout.
@@ -191,6 +194,9 @@ pub mod ids {
     pub const CLOSE_PANEL: &str = "window.close_panel";
     /// Maximize / restore the focused panel group (AE: `~`).
     pub const MAXIMIZE_FRAME: &str = "window.maximize_frame";
+    /// Minimize the main window (macOS ⌘M, a system shortcut AE keeps without a
+    /// menu item).
+    pub const MINIMIZE: &str = "window.minimize";
     /// Switch the UI language; params `{"id": "en" | "zh"}`.
     pub const SET_LANGUAGE: &str = "app.language";
     /// Open the help documentation.
@@ -210,6 +216,7 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::SAVE, "Save"),
     (ids::SAVE_AS, "Save As..."),
     (ids::SAVE_A_COPY, "Save a Copy..."),
+    (ids::REVEAL_PROJECT, "Reveal Project"),
     (ids::SWITCH_WORKSPACE, "Switch Workspace"),
     (ids::RESET_WORKSPACE, "Reset to Saved Layout"),
     (ids::SAVE_WORKSPACE, "Save Changes to this Workspace"),
@@ -218,6 +225,7 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::OPEN_PANEL, "Open Panel"),
     (ids::CLOSE_PANEL, "Close Panel"),
     (ids::MAXIMIZE_FRAME, "Maximize Panel Group"),
+    (ids::MINIMIZE, "Minimize"),
     (ids::SET_LANGUAGE, "Language"),
     (ids::HELP, "BAE Help"),
 ];
