@@ -326,6 +326,7 @@ pub struct RenderQueue {
     /// Items of the running render (queued when Render was pressed; later ones
     /// wait for the next Render, the snapshot does not have their edits).
     batch: Vec<u64>,
+    sequence_files_per_folder: Option<usize>,
     repaint: Option<egui::Context>,
 }
 
@@ -338,6 +339,46 @@ impl RenderQueue {
     /// Mutable access to an item (output settings of queued items).
     pub fn item_mut(&mut self, id: u64) -> Option<&mut QueueItem> {
         self.items.iter_mut().find(|i| i.id == id)
+    }
+
+    /// Apply the output preference to the item just added from the workbench.
+    pub(super) fn assign_output(&mut self, automatic: bool) {
+        let Some((item, previous)) = self.items.split_last_mut() else {
+            return;
+        };
+        if !automatic {
+            item.output.clear();
+            return;
+        }
+        let Some(last) = previous.iter().rev().find(|i| !i.output.trim().is_empty()) else {
+            return;
+        };
+        let last_path = Path::new(&last.output);
+        let dir = if last.output.ends_with(['/', '\\']) {
+            last_path
+        } else {
+            last_path.parent().unwrap_or(Path::new(""))
+        };
+        let current = Path::new(&item.output);
+        let filename = current.file_name().unwrap_or_default().to_string_lossy();
+        let split = filename
+            .find('#')
+            .map(|i| filename[..i].trim_end_matches(['[', '_']).len())
+            .unwrap_or_else(|| {
+                current
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .len()
+            });
+        let (prefix, suffix) = filename.split_at(split);
+        let mut candidate = dir.join(filename.as_ref());
+        let mut copy = 1;
+        while previous.iter().any(|i| Path::new(&i.output) == candidate) {
+            candidate = dir.join(format!("{prefix}_{copy}{suffix}"));
+            copy += 1;
+        }
+        item.output = candidate.to_string_lossy().into_owned();
     }
 
     /// Whether the worker is rendering.
@@ -514,6 +555,7 @@ impl RenderQueue {
             channels: item.channels,
             bit_rate_mbps: item.bit_rate_mbps,
             pcm_audio: item.pcm_audio,
+            sequence_files_per_folder: self.sequence_files_per_folder,
             start: item.start,
             end: item.end,
             cancel: item.cancel.clone(),
@@ -598,6 +640,7 @@ pub(crate) struct Job {
     channels: Channels,
     bit_rate_mbps: f64,
     pcm_audio: bool,
+    sequence_files_per_folder: Option<usize>,
     start: i64,
     end: i64,
     cancel: Arc<AtomicBool>,
@@ -687,40 +730,57 @@ pub(crate) fn render_job(
     progress(0, total);
     // A `#` run in the name numbers the frames, one frame too (#207);
     // export_frames decides, like `bae render`.
-    let settings = export_settings(job, output);
+    let segment = job
+        .sequence_files_per_folder
+        .filter(|limit| job.format.is_image() && *limit < total);
+    let segment_name = segment.map(|_| {
+        let pattern = bae_render::export::explicit_pattern(&output);
+        let stem = without_frame_run(&pattern.file_stem().unwrap_or_default().to_string_lossy());
+        (pattern, stem)
+    });
+    let mut settings = export_settings(job, output);
     let request = RenderRequest {
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
     };
     settings.validate(job.rate, &request)?;
-    let report = export_frames(
-        renderer,
-        evaluator,
-        &ExportJob {
-            stage,
-            comp: &job.comp,
-            times: &times,
-            rate: job.rate,
-            request: &request,
-            settings: &settings,
-            encoders: None,
-        },
-        Some(&job.cancel),
-        &mut |frame| progress(frame.index + 1, total),
-    )?;
-    let first = report.frames.first().map(|f| f.file.clone());
-    Ok(if report.stopped {
-        ItemStatus::Stopped {
-            done: report.frames.len(),
-            total: times.len(),
-            first,
+    let mut first = None;
+    let mut done = 0;
+    let mut files = 0;
+    for (index, chunk) in times.chunks(segment.unwrap_or(total)).enumerate() {
+        if let Some((pattern, stem)) = &segment_name {
+            settings.path = pattern
+                .with_file_name(format!("{stem}_{:04}", index + 1))
+                .join(pattern.file_name().unwrap());
         }
-    } else {
-        ItemStatus::Done {
-            files: report.stats.files,
-            first: first.unwrap_or_default(),
-            seconds: started.elapsed().as_secs_f64(),
+        let report = export_frames(
+            renderer,
+            evaluator,
+            &ExportJob {
+                stage,
+                comp: &job.comp,
+                times: chunk,
+                rate: job.rate,
+                request: &request,
+                settings: &settings,
+                encoders: None,
+            },
+            Some(&job.cancel),
+            &mut |frame| progress(done + frame.index + 1, total),
+        )?;
+        if first.is_none() {
+            first = report.frames.first().map(|f| f.file.clone());
         }
+        done += report.frames.len();
+        files += report.stats.files;
+        if report.stopped {
+            return Ok(ItemStatus::Stopped { done, total, first });
+        }
+    }
+    Ok(ItemStatus::Done {
+        files,
+        first: first.unwrap_or_default(),
+        seconds: started.elapsed().as_secs_f64(),
     })
 }
 
@@ -781,8 +841,15 @@ pub fn start(
         .map(|s| provider_list(&s.0))
         .unwrap_or_default();
     let effects = resources.get::<PreviewEffects>().map(|e| e.0.clone());
-    if !queue.lock().begin() {
-        return Ok(());
+    {
+        let mut queue = queue.lock();
+        if !queue.begin() {
+            return Ok(());
+        }
+        let prefs = crate::prefs::current(resources);
+        queue.sequence_files_per_folder = prefs
+            .bool("export.segment_sequences_enabled")
+            .then(|| prefs.int("export.segment_sequences_files").clamp(1, 99999) as usize);
     }
     let snapshot = crate::preview_snapshot::PreviewSnapshot::take(stage);
     let queue = queue.clone();
@@ -2010,6 +2077,7 @@ mod tests {
             pcm_audio: true,
             start: 0,
             end: 0,
+            sequence_files_per_folder: None,
             cancel: Arc::default(),
         };
         let s = |format, channels| export_settings(&job(format, channels), PathBuf::from("/r/x"));
