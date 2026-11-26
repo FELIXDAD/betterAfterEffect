@@ -515,6 +515,9 @@ impl Shell {
 
         let egui_ctx = egui::Context::default();
         bae_ui::theme::apply(&egui_ctx);
+        // Double-clicks follow the system setting, as in AE (egui's 0.3 s,
+        // measured between frames, missed ordinary double-clicks, #735).
+        egui_ctx.options_mut(|o| o.input_options.max_double_click_delay = double_click_time());
         // Extra egui viewports (floating panels) render embedded in the main
         // window until native multi-window support lands.
         egui_ctx.set_embed_viewports(true);
@@ -1303,6 +1306,30 @@ fn screenshot(
         [data.width as usize, data.height as usize],
         pixels,
     ))
+}
+
+/// The system's double-click interval, seconds (Windows: Mouse settings,
+/// 500 ms by default; macOS: Double-click speed). 0.5 s elsewhere.
+fn double_click_time() -> f64 {
+    #[cfg(windows)]
+    {
+        // SAFETY: no arguments; reads a per-user system setting.
+        let ms = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+        if ms > 0 {
+            return f64::from(ms) / 1000.0;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::{class, msg_send};
+        // SAFETY: `+[NSEvent doubleClickInterval]` returns an NSTimeInterval
+        // (double) and has no preconditions.
+        let s: f64 = unsafe { msg_send![class!(NSEvent), doubleClickInterval] };
+        if s > 0.0 {
+            return s;
+        }
+    }
+    0.5
 }
 
 /// The command for projects Finder asked to open: one project at a time, like AE and

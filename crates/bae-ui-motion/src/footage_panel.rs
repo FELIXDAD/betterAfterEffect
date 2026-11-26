@@ -33,6 +33,8 @@ struct Footage {
     size: [u32; 2],
     frame_rate: Option<FrameRate>,
     duration: Option<Time>,
+    start_frame: u64,
+    drop_frame: bool,
 }
 
 impl Footage {
@@ -43,7 +45,7 @@ impl Footage {
             Some(Value::String(s) | Value::Enum(s)) => s,
             _ => "footage".into(),
         };
-        if !matches!(kind.as_str(), "footage" | "sequence") {
+        if !matches!(kind.as_str(), "footage" | "sequence" | "solid") {
             return None;
         }
         let dim = |attr: &str| get(attr).and_then(|v| v.as_f64()).unwrap_or(0.0).max(0.0) as u32;
@@ -56,12 +58,27 @@ impl Footage {
                 Some(v) => v.as_f64().filter(|f| *f > 0.0).map(FrameRate::from_fps),
                 None => None,
             },
+            start_frame: match get("timecode:start_frame") {
+                Some(Value::Int(n)) => n.max(0) as u64,
+                _ => 0,
+            },
+            drop_frame: get("timecode:drop_frame")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             duration: match get("duration") {
                 Some(Value::Time(t)) => Some(t),
                 _ => None,
             },
             kind,
         })
+    }
+
+    /// A solid's color (AE shows solids in the Footage panel too).
+    fn solid_color(&self, stage: &Stage) -> Option<[f32; 4]> {
+        (self.kind == "solid")
+            .then(|| bae_motion::solid::solid_info(stage, &self.asset))
+            .flatten()
+            .map(|s| s.color.map(|v| v as f32))
     }
 
     /// A movie or sequence (has a time ruler).
@@ -112,9 +129,13 @@ impl Gpu {
             let file = self.assets.file(&view).ok().flatten();
             let [w, h] = footage.size;
             let mut comp = RenderComp::new(footage.asset.clone(), w.max(1), h.max(1));
-            let mut layer = RenderLayer::new(
-                footage.asset.clone(),
-                LayerContent::Footage(FootageRef {
+            let content = match footage.solid_color(stage) {
+                Some(color) => LayerContent::Solid {
+                    color,
+                    width: w.max(1),
+                    height: h.max(1),
+                },
+                None => LayerContent::Footage(FootageRef {
                     asset: footage.asset.clone(),
                     file_revision: bae_model::asset::file_revision(&view),
                     psd_layer: bae_model::psd::LayerImage::from_asset(&view),
@@ -125,7 +146,8 @@ impl Gpu {
                     // The footage panel shows source frames as they are.
                     blend: None,
                 }),
-            );
+            };
+            let mut layer = RenderLayer::new(footage.asset.clone(), content);
             layer.resolve_photoshop_mask(stage);
             if let Ok(path) = footage.asset.child(bae_model::layer_styles::PRIM)
                 && let Some(style) = stage.prim(&path)
@@ -358,7 +380,15 @@ impl FootagePanel {
         );
         if let Some(f) = f.filter(|f| f.timed()) {
             let rate = f.rate();
-            let code = bae_ui::widgets::timecode(rate.time_to_frame(self.time), rate.as_f64());
+            let frame = f
+                .start_frame
+                .saturating_add(rate.time_to_frame(self.time).max(0) as u64);
+            // As AE and the rest of BAE write it: 0:00:00:00, drop frame 0;00;00;00.
+            let code = crate::dialogs::fields::format_timecode(
+                i64::try_from(frame).unwrap_or(i64::MAX),
+                rate.as_f64(),
+                f.drop_frame,
+            );
             p.text(
                 pos2(r.left() + 70.0, y),
                 Align2::LEFT_CENTER,

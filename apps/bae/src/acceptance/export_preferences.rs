@@ -41,9 +41,9 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
         assert_eq!(q.items().len(), 1);
         let id = q.items()[0].id;
         let item = q.item_mut(id).unwrap();
-        assert!(item.output.is_empty());
-        item.set_format(bae_render::ExportFormat::Png);
-        item.output = tmp
+        assert!(item.outputs[0].output.is_empty());
+        item.outputs[0].set_format(bae_render::ExportFormat::Png);
+        item.outputs[0].output = tmp
             .path()
             .join("镜头_[###].png")
             .to_string_lossy()
@@ -84,8 +84,8 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = queue.lock();
     let items = queue.items();
-    let auto = Path::new(&items[1].output);
-    let repeated = Path::new(&items[2].output);
+    let auto = Path::new(&items[1].outputs[0].output);
+    let repeated = Path::new(&items[2].outputs[0].output);
     assert_eq!(auto.parent(), Some(tmp.path()));
     assert_eq!(repeated.parent(), Some(tmp.path()));
     assert_ne!(auto, repeated);
