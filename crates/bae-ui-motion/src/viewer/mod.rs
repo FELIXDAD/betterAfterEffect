@@ -1178,7 +1178,7 @@ impl Panel for CompositionViewer {
                 s.scope_source = crate::scopes::needs_working_frame(ui.ctx())
                     .then(|| gpu.scope_source())
                     .flatten();
-            } else {
+            } else if !self.on_gpu {
                 s.scope_frame = None;
                 s.scope_source = None;
             }

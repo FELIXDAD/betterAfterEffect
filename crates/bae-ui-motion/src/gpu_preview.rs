@@ -249,6 +249,7 @@ pub(crate) struct GpuPreview {
     live_sent: Option<LiveKey>,
     /// The live target the registry shows.
     live_texture: Option<wgpu::Texture>,
+    live_generation: u64,
     /// Layer pixels for `sampleImage`, shared with the evaluator that evaluates
     /// the comps this preview shows.
     samples: Arc<bae_anim::ImageSamples>,
@@ -298,6 +299,7 @@ impl GpuPreview {
             live_scene: None,
             live_sent: None,
             live_texture: None,
+            live_generation: 0,
             samples,
             waiting: false,
         }
@@ -529,6 +531,9 @@ impl GpuPreview {
             t.hash(&mut h);
             return Some((t.clone(), h.finish()));
         }
+        if let Some(texture) = &self.live_texture {
+            return Some((texture.clone(), self.live_generation));
+        }
         let (hash, time, resolution) = self.last?;
         let key = hash ^ (time.flicks() as u64).rotate_left(17) ^ u64::from(resolution);
         Some((self.target.as_ref()?.view().texture().clone(), key))
@@ -673,8 +678,8 @@ impl GpuPreview {
             self.live_sent = Some(sent);
         }
         if let Some(frame) = self.live.take() {
-            self.preparing = frame.rect.is_none();
-            if let Some(rect) = frame.rect {
+            self.preparing = frame.source.is_none();
+            if let Some(source) = frame.source {
                 if self.live_texture.as_ref() != Some(frame.view.texture()) {
                     if let Err(e) = self.registry.publish_view(
                         self.id,
@@ -689,7 +694,9 @@ impl GpuPreview {
                     self.live_texture = Some(frame.view.texture().clone());
                     self.target_shown = false;
                 }
-                self.rect = Some(rect);
+                self.rect = Some(source.rect);
+                self.direct_source = Some(source);
+                self.live_generation = self.live_generation.wrapping_add(1);
                 self.sampled = None;
             }
             if measure_layer_times
