@@ -591,13 +591,13 @@
 | Workspace ▸ Save Changes to this Workspace | 9961491 | `workspace.save` |  |  |  | B | ✅ |
 | Workspace ▸ Save as New Workspace... | 9961492 | `workspace.new` |  |  |  | B | ✅ |
 | Workspace ▸ Edit Workspaces... | 9961494 | `workspace.edit` |  |  |  | B | ✅ |
-| Assign Shortcut to Workspace ▸ Shift+F10 | 12779521 | `motion.window.assign_workspace_shortcut` | `{"slot":0}` |  |  | B | ☐ |
-| Assign Shortcut to Workspace ▸ Shift+F11 | 12779522 | `motion.window.assign_workspace_shortcut` | `{"slot":1}` |  |  | B | ☐ |
-| Assign Shortcut to Workspace ▸ Shift+F12 | 12779523 | `motion.window.assign_workspace_shortcut` | `{"slot":2}` |  |  | B | ☐ |
+| Assign Shortcut to Workspace ▸ Shift+F10 | 12779521 | `workspace.assign_shortcut` | `{"slot":0}` |  |  | B | ✅ |
+| Assign Shortcut to Workspace ▸ Shift+F11 | 12779522 | `workspace.assign_shortcut` | `{"slot":1}` |  |  | B | ✅ |
+| Assign Shortcut to Workspace ▸ Shift+F12 | 12779523 | `workspace.assign_shortcut` | `{"slot":2}` |  |  | B | ✅ |
 | Find Extensions on Exchange... | 524292 | `motion.window.find_extensions_on_exchange` |  |  |  | B | Ⓐ |
 | Extensions ▸ (extensions) |  | `motion.window.extension` |  |  |  | B | ⋯ |
 | Lumetri Scopes | 524296 | `window.panel` | `{"id":"lumetri_scopes","toggle":true}` |  |  | E | ⏸ |
-| Review with Frame.io | 524297 | `window.panel` | `{"id":"frame_io","toggle":true}` |  |  | B | Ⓐ |
+| Review with Frame.io | 524297 | `window.panel` | `{"id":"frame_io","toggle":true}` |  |  | B | ✅ |
 | Info | 524298 | `window.panel` | `{"id":"info","toggle":true}` | Ctrl+2 | Cmd+2 | E | ☐ |
 | Metadata | 524299 | `window.panel` | `{"id":"metadata","toggle":true}` |  |  | E | ⏸ |
 | Content-Aware Fill | 524300 | `window.panel` | `{"id":"content_aware_fill","toggle":true}` |  |  | E | ⏸ |
@@ -711,7 +711,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `AddLayerMarkerWithDialog` | `motion.timeline.add_marker_with_dialog` |  | Alt+PadMultiply | Opt+PadMultiply / Control+Opt+8 |  | C | ✅ |
 | `ClearMask` | `motion.layer.delete_mask_or_vertices` |  | Alt+Backspace / Alt+Delete | Opt+Backspace / Opt+Delete |  | A | ⏸ |
 | `OpenSource` | `motion.layer.open_source` |  | PadEnter / Enter | PadEnter / Enter |  | B | ☐ |
-| `PasteAlt` | `motion.edit.paste_at_current_time` |  | Ctrl+Alt+V | Cmd+Opt+V |  | B | ☐ |
+| `PasteAlt` | `motion.edit.paste_at_current_time` |  | Ctrl+Alt+V | Cmd+Opt+V |  | B | ✅ |
 | `SelectNext` | `motion.layer.select_next` | `{"add":false}` | Ctrl+Down | Cmd+Down |  | B | ✅ |
 | `SelectNextAdd` | `motion.layer.select_next` | `{"add":true}` | Ctrl+Shift+Down | Cmd+Shift+Down |  | B | ✅ |
 | `SelectPrevious` | `motion.layer.select_previous` | `{"add":false}` | Ctrl+Up | Cmd+Up |  | B | ✅ |
@@ -725,8 +725,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | `CompOpenCompStuff` | `motion.panel.toggle_viewer_timeline` |  | \\ | \\ |  | B | ☐ |
-| `CompScollSelectedLayerToTop` | `motion.timeline.scroll_selected_layer_to_top` |  | X | X |  | C | ☐ |
-| `CompScrollToCurrentTime` | `motion.timeline.scroll_to_current_time` |  | D | D |  | C | ☐ |
+| `CompScollSelectedLayerToTop` | `motion.timeline.scroll_selected_layer_to_top` |  | X | X |  | C | ✅ |
+| `CompScrollToCurrentTime` | `motion.timeline.scroll_to_current_time` |  | D | D |  | C | ✅ |
 | `CompSelectLayer1` | `motion.timeline.select_layer` | `{"index":1}` | Pad1 | Pad1 |  | B | ✅ |
 | `CompSelectLayer2` | `motion.timeline.select_layer` | `{"index":2}` | Pad2 | Pad2 |  | B | ✅ |
 | `CompSelectLayer3` | `motion.timeline.select_layer` | `{"index":3}` | Pad3 | Pad3 |  | B | ✅ |
@@ -736,10 +736,10 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompSelectLayer7` | `motion.timeline.select_layer` | `{"index":7}` | Pad7 | Pad7 |  | B | ✅ |
 | `CompSelectLayer8` | `motion.timeline.select_layer` | `{"index":8}` | Pad8 | Pad8 |  | B | ✅ |
 | `CompSelectLayer9` | `motion.timeline.select_layer` | `{"index":9}` | Pad9 | Pad9 |  | B | ✅ |
-| `CompTimeZoomFrames` | `motion.timeline.zoom_to_frames` |  | ; | ; |  | C | ☐ |
+| `CompTimeZoomFrames` | `motion.timeline.zoom_to_frames` |  | ; | ; |  | C | ✅ |
 | `CompTimeZoomIn` | `timeline.zoom_in` |  | = | = |  | C | ✅ |
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - |  | C | ✅ |
-| `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; |  | C | ☐ |
+| `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; |  | C | ✅ |
 | `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ✅ |
 | `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ✅ |
 | `CompToggleMaskFeathers` | `motion.reveal` | `{"what":"mask_feather","add":false}` | F | F |  | B | ✅ |
@@ -823,7 +823,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ✅ |
 | `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ✅ |
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  |  | C | ⏸ |
-| `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Control+\` |  | C | ☐ |
+| `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Control+\` |  | C | ✅ |
 | `TwirlPreserveSolo` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":true}` | Shift+\` | Shift+\` |  | C | ☐ |
 | `TwirlPreserveSoloExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":true}` | Ctrl+Shift+\` | Control+Shift+\` |  | C | ☐ |
 | `CompTimeZoomWorkArea`（只在 macOS 26.2 的快捷键文件里） | `motion.timeline.zoom_to_work_area` |  |  | Opt+; |  | C | ☐ |
@@ -898,7 +898,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ |  | B | ✅ |
 | `TimeSetOut` | `motion.move_out` |  | ] | ] |  | B | ✅ |
 | `TimeSetOutRelative` | `motion.move_out` | `{"relative":true}` | Shift+] | Shift+] |  | B | ✅ |
-| `TimeShiftSpacebarPlay` | `motion.play` | `{"alternate":true}` | Shift+Space | Shift+Space |  | B | ☐ |
+| `TimeShiftSpacebarPlay` | `motion.play` | `{"alternate":true}` | Shift+Space | Shift+Space |  | B | ✅ |
 | `TimeStepBack` | `motion.step` | `{"frames":-1}` | Ctrl+Left / PageUp | Cmd+Left / PageUp |  | B | ✅ |
 | `TimeStepBackMore` | `motion.step` | `{"frames":-10}` | Shift+PageUp / Ctrl+Shift+Left | Shift+PageUp / Cmd+Shift+Left |  | B | ✅ |
 | `TimeStepForward` | `motion.step` | `{"frames":1}` | Ctrl+Right / PageDown | Cmd+Right / PageDown |  | B | ✅ |
@@ -916,7 +916,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 |---|---|---|---|---|---|---|---|
 | `TimeFastForward` | `motion.go_end` |  | Ctrl+Alt+Right / PadEnd / End | Cmd+Opt+Right / PadEnd / End | footage | B | ✅ |
 | `TimeRewind` | `motion.go_start` |  | Ctrl+Alt+Left / PadHome / Home | Cmd+Opt+Left / PadHome / Home | footage | B | ✅ |
-| `TimeShiftSpacebarPlay` | `motion.play` | `{"alternate":true}` | Shift+Space | Shift+Space | footage | B | ☐ |
+| `TimeShiftSpacebarPlay` | `motion.play` | `{"alternate":true}` | Shift+Space | Shift+Space | footage | B | ✅ |
 | `TimeStepBack` | `motion.step` | `{"frames":-1}` | Ctrl+Left / PadPageUp / PageUp | Cmd+Left / PadPageUp / PageUp | footage | B | ✅ |
 | `TimeStepBackMore` | `motion.step` | `{"frames":-10}` | Shift+PageUp / Ctrl+Shift+Left | Shift+PageUp / Cmd+Shift+Left | footage | B | ✅ |
 | `TimeStepForward` | `motion.step` | `{"frames":1}` | Ctrl+Right / PadPageDown / PageDown | Cmd+Right / PadPageDown / PageDown | footage | B | ✅ |
@@ -1156,7 +1156,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  | timeline | C | ⏸ |
-| `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Cmd+\` | timeline | C | ☐ |
+| `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Cmd+\` | timeline | C | ✅ |
 | `TwirlPreserveSolo` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":true}` | Shift+\` | Shift+\` | timeline | C | ☐ |
 | `TwirlPreserveSoloExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":true}` | Ctrl+Shift+\` | Cmd+Shift+\` | timeline | C | ☐ |
 
@@ -1211,10 +1211,10 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `CompTimeZoomFrames` | `motion.timeline.zoom_to_frames` |  | ; | ; | timeline | C | ☐ |
+| `CompTimeZoomFrames` | `motion.timeline.zoom_to_frames` |  | ; | ; | timeline | C | ✅ |
 | `CompTimeZoomIn` | `timeline.zoom_in` |  | = | = | timeline | C | ✅ |
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - | timeline | C | ✅ |
-| `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; | timeline | C | ☐ |
+| `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; | timeline | C | ✅ |
 | `TimeSetIn` | `motion.move_in` |  | [ | [ | timeline | B | ✅ |
 | `TimeSetInRelative` | `motion.move_in` | `{"relative":true}` | Shift+[ | Shift+[ | timeline | B | ✅ |
 | `TimeSetOut` | `motion.move_out` |  | ] | ] | timeline | B | ✅ |
