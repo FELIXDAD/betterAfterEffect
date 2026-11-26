@@ -144,6 +144,11 @@ pub(crate) fn frame(
             cursor: None,
         };
     }
+    if tool == Tool::Selection
+        && let Some(hit) = crypto_pick(ui, resp, cx, session, comp, view, now)
+    {
+        return hit;
+    }
     let handles = handles(cx, session, comp, view, prefs);
     for h in &handles {
         paint(painter, h.pos, h.color);
@@ -208,4 +213,80 @@ pub(crate) fn frame(
         out.cursor = Some(CursorIcon::Move);
     }
     out
+}
+
+/// Pick the first-ranked ID from the displayed frame, then store that ID in
+/// the effect. A moving object keeps its matte when the playhead advances.
+fn crypto_pick(
+    ui: &Ui,
+    resp: &Response,
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    comp: &EvaluatedComp,
+    view: &View,
+    now: Time,
+) -> Option<PointsFrame> {
+    use bae_effects::exr_controls::{self, CryptoSelection};
+    let pos = resp.hover_pos()?;
+    let (selected, frame) = {
+        let s = session.lock();
+        (s.selected_layers.clone(), s.channel_frame.clone()?)
+    };
+    if frame.comp != comp.path || frame.time != now {
+        return None;
+    }
+    for layer in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+        let Some(info) = frame.layers.get(&layer.path) else {
+            continue;
+        };
+        let Some(effect) = layer.effects.iter().find(|e| {
+            e.enabled
+                && e.match_name == "Cryptomatte"
+                && matches!(e.param(3), Some(Value::Bool(true) | Value::Int(1)))
+        }) else {
+            continue;
+        };
+        let mut sel: CryptoSelection = exr_controls::read(effect.param(1));
+        let group = if sel.layer.is_empty() {
+            info.crypto.first()
+        } else {
+            info.crypto.iter().find(|l| l.name == sel.layer)
+        }?;
+        if ui.input(|i| i.pointer.primary_pressed()) {
+            let p = view.to_comp(pos);
+            let inverse = layer.world_matrix.inverse();
+            let q = if let Some((camera, size)) = view.camera.filter(|_| layer.switches.three_d) {
+                let (origin, dir) = super::gizmo3d::ray(&camera, size, p);
+                let origin = inverse.transform_point3(origin);
+                let dir = inverse.transform_vector3(dir);
+                let distance = -origin.z / dir.z;
+                if !distance.is_finite() || distance < 0. {
+                    continue;
+                }
+                origin + distance * dir
+            } else {
+                inverse.transform_point3(p.extend(0.))
+            };
+            if q.is_finite()
+                && let Some(id) = info.pick(group, [q.x.floor() as i32, q.y.floor() as i32])
+            {
+                sel.layer = group.name.clone();
+                sel.object = Some(id);
+                common::apply_edit(
+                    cx,
+                    session,
+                    &effect.path,
+                    &param_attr(1),
+                    now,
+                    Edit::Commit(exr_controls::value(&sel)),
+                );
+                ui.ctx().request_repaint();
+            }
+        }
+        return Some(PointsFrame {
+            owns: true,
+            cursor: Some(CursorIcon::Crosshair),
+        });
+    }
+    None
 }
