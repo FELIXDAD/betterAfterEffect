@@ -67,22 +67,73 @@ pub struct LayerPanel {
     pan: egui::Vec2,
 }
 
-/// Double-clicking a layer (AE): a pre-comp layer opens its composition, any
-/// other layer opens in the Layer panel.
-pub(crate) fn open(cx: &mut PanelContext<'_>, session: &SharedSession, layer: &PrimPath) {
-    let source = cx
-        .stage
-        .prim(layer)
-        .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned())
-        .filter(|s| query::comp_info(cx.stage, s).is_some());
-    if let Some(comp) = source {
-        session.lock().open_comp(&comp);
-        cx.open_panel("timeline");
-        cx.open_panel("composition");
-    } else {
-        session.lock().layer_panel = Some(layer.clone());
-        cx.open_panel("layer");
+/// Resolve a timeline or Composition viewer double-click with AE's Composition preferences.
+pub(crate) fn open_clicked(
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    layer: &PrimPath,
+    alt: bool,
+    tool: crate::tools::Tool,
+    eval: &mut EvalCache,
+) {
+    let prefs = crate::prefs::current(cx.resources);
+    let paint =
+        tool.is_layer_paint() && prefs.bool("composition.double_click_paint_roto_opens_layer");
+    if !paint {
+        if let Some(source) = query::precomp_source(cx.stage, layer) {
+            if (prefs.str("composition.double_click_comp_layer") == "source_comp_panel") != alt {
+                let mut s = session.lock();
+                if prefs.bool("composition.synchronize_time_all_related_items")
+                    && let Some(info) = query::comp_info(cx.stage, &source)
+                {
+                    let now = s.active_time();
+                    let remap = cx
+                        .stage
+                        .prim(layer)
+                        .and_then(|p| query::static_value(&p, "time_remap_enabled"))
+                        .and_then(|v| v.as_bool())
+                        == Some(true);
+                    let time = if remap {
+                        eval.get(cx.stage)
+                            .evaluate_attribute(cx.stage, layer, "time_remap", now)
+                            .ok()
+                            .and_then(|v| {
+                                v.as_time().or_else(|| v.as_f64().map(Time::from_seconds))
+                            })
+                    } else {
+                        None
+                    };
+                    s.set_time(
+                        &info,
+                        time.unwrap_or_else(|| {
+                            query::layer_timing(cx.stage, layer).layer_time(now)
+                        }),
+                    );
+                }
+                s.open_comp(&source);
+                drop(s);
+                cx.open_panel("composition");
+                cx.open_panel("timeline");
+                return;
+            }
+        } else if (prefs.str("composition.double_click_footage_layer") == "source_footage_panel")
+            != alt
+            && matches!(
+                query::layer_kind(cx.stage, layer).as_deref(),
+                Some("footage" | "audio")
+            )
+            && let Some(asset) = cx
+                .stage
+                .prim(layer)
+                .and_then(|p| p.value("source")?.as_prim_ref().cloned())
+        {
+            session.lock().footage_view = Some(asset);
+            cx.open_panel("footage");
+            return;
+        }
     }
+    session.lock().layer_panel = Some(layer.clone());
+    cx.open_panel("layer");
 }
 
 /// The layer the panel shows: the one opened last, or the selected one.
