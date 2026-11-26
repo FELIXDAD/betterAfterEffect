@@ -12,6 +12,10 @@
 | `ADBE Fill` | 填充 | Rust |
 | `ADBE Ramp` | 梯度渐变 | 声明式像素 |
 | `ADBE Grid` | 网格 | 声明式像素 |
+| `ADBE Stroke` | 描边 | Rust 路径和 GPU 笔刷 |
+| `ADBE Write-on` | 写入 | Rust 历史求值和 GPU 笔刷 |
+| `ADBE Scribble Fill` | 涂写 | Rust 路径和 GPU 光栅化 |
+| `APC Vegas` | 勾画 | 蒙版路径或图像等高线 |
 
 ## 图层与蒙版输入
 
@@ -41,3 +45,33 @@
 ## 填充蒙版
 
 指定蒙版和全部蒙版的覆盖图由渲染器生成，GPU 对覆盖图分别做水平与垂直羽化，再将颜色叠到原画面。指定、全部和反转用例逐像素一致，方向羽化最大差为 3/255。图测试验证选择一个蒙版时保留其他蒙版中的原画面。见[图层与蒙版输入复测](channel.md#图层与蒙版输入复测)。
+
+
+## 描边、写入、涂写和勾画
+
+在 macOS 的 AE 26.2.1（8 bpc、无项目色彩管理、非线性混合）上探测画笔和路径。描边的大小是半径，间距按直径的百分比换算，实际下限为 1%。起止值从同一个固定落点序列裁切。写入的时间参数按 16.16 定点秒采样。永久路径从图层入点累计，有限路径从当前时间减去描边长度的位置重排落点。当前帧恰好是落点时刻时，AE 在下一帧才纳入该落点。首个采样时刻会画出落点。
+
+涂写的静态探针确认了基于投影包围盒的扫描顺序与连接方向。角度为 0° 时扫描竖线，90° 时扫描横线。硬边以 4×4 子像素采样。复杂边缘分段、转弯形状与随机序列近似，随机开启后不能按位置重现 AE 的笔迹。勾画的开口蒙版探针中，AE 忽略最后一段。均匀分布沿弧长划分，成簇分布把各段相接，旋转按整条路径长度换算。勾画的轮廓链接、边缘和透明度过渡是近似。 [Adobe 生成效果说明](https://helpx.adobe.com/after-effects/desktop/apply-effects-and-animation-presets/list-of-effects/generate-effects.html)
+
+勾画的图像模式在 GPU 上提取阈值场，用 marching squares 连接等高线、按弧长分段并绘制。蒙版模式直接使用求值后的贝塞尔数据。
+
+27 张参考图的误差如下。色阶单位为 1/255，平均值按全幅统计。
+
+| 用例 | 最大差 | 最大全幅平均差 |
+|---|---:|---:|
+| 描边，笔刷、顺序裁切、斜线与贝塞尔揭示 | 10 | 0.100 |
+| 写入，亚像素落点、时间窗与逐落点历史属性 | 2 | 0.024 |
+| 涂写，静态内部与边缘填充 | 255 | 6.347 |
+| 勾画，开口蒙版、闭合蒙版与图像等高线 | 217 | 1.272 |
+
+额外探针里，描边半径 0.9 px、间距 1% 时，笔刷重叠的整数舍入差异使最大差升至 67，全幅平均差为 0.323。大半径、高硬度的静态写入最大差为 8。涂写的随机摆动和重叠探针全幅平均差最高为 25.837，主要来自两边随机序列产生的笔迹位置不同。勾画硬边的最大差集中在边缘。图像等高线应用轮廓简化，宽、窄两组的全幅平均差分别为 1.131 和 1.272。
+
+重新生成：
+
+```sh
+export BAE_07_ROOT=/private/tmp/bae-stroke-golden
+BAE_07_CASES=crates/bae-effects/tests/ae/cases-stroke-family.json cargo run -p bae-effects --example ae_compare -- prepare
+printf 'var BAE_07_ROOT = "/private/tmp/bae-stroke-golden";\n$.evalFile("%s/crates/bae-effects/tests/ae/render_cases.jsx");\n' "$PWD" > "$BAE_07_ROOT/render.jsx"
+tools/ae/aectl lock -- tools/ae/aectl run "$BAE_07_ROOT/render.jsx"
+cargo run -p bae-effects --example ae_compare -- compare
+```

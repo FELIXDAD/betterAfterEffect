@@ -44,9 +44,7 @@ pub struct PluginRuntime {
 }
 
 impl PluginRuntime {
-    /// A runtime publishing into `registries`.
-    pub fn new(registries: AppEffectRegistries) -> Self {
-        let host = PluginHost::new();
+    fn new(registries: AppEffectRegistries, host: PluginHost) -> Self {
         let notices = host.notices().clone();
         Self {
             host: Mutex::new(host),
@@ -159,12 +157,6 @@ impl AppModule for PluginModule {
     }
 
     fn build(&self, app: &mut AppBuilder) {
-        let runtime = PluginRuntime::new(AppEffectRegistries {
-            definitions: app.registry::<EffectDef>(),
-            effects: app.registry::<dyn Effect>(),
-        });
-        app.insert_resource(runtime);
-
         let registry = app.registry::<CliSubcommand>();
         let plugin = CliSubcommand::new("plugin", "Check and list plugins")
             .with_args(args)
@@ -187,6 +179,29 @@ impl AppModule for PluginModule {
         if let Err(error) = cli::implement(&registry, app.current_owner(), plugin) {
             tracing::warn!("plugin subcommand not registered: {error}");
         }
+    }
+
+    fn finish(&self, app: &mut AppBuilder) {
+        let defs = app.registry::<EffectDef>();
+        let view = app
+            .resource::<std::sync::Arc<dyn bae_script::ScriptView>>()
+            .cloned();
+        let scripts = crate::scripts::ScriptCommands::new(
+            app.registry::<dyn bae_model::DynCommand>(),
+            defs.clone(),
+            view,
+        );
+        let bindings = app
+            .resource::<std::sync::Arc<dyn crate::scripts::ScriptBindings>>()
+            .cloned();
+        let runtime = PluginRuntime::new(
+            AppEffectRegistries {
+                definitions: defs,
+                effects: app.registry::<dyn Effect>(),
+            },
+            PluginHost::with_scripts(scripts, bindings),
+        );
+        app.insert_resource(runtime);
     }
 }
 
