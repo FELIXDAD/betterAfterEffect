@@ -1191,7 +1191,7 @@ fn camera_light_material_and_property_names() {
             "text:source",
             Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
             r#"var c = thisComp.layer("Cam"), k = thisComp.layer("Key"), p = thisComp.layer("Plate");
-               [c.zoom.value, c.cameraOption.zoom.value, c.depthOfField.value, c.irisShape,
+               [c.zoom.value, c.cameraOption.zoom.value, c.depthOfField.value, c.irisShape.value,
                 k.intensity.value, k.castsShadows.value, p.castsShadows.value, p.acceptsLights.value,
                 p.transform.position.name, p.transform.rotation.name, p.mask(1).maskPath.name,
                 p.transform.position.propertyGroup(1).name, p.transform.position.propertyGroup(2).name,
