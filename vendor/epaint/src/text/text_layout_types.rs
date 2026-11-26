@@ -62,6 +62,9 @@ pub struct LayoutJob {
     /// Controls the text wrapping and elision.
     pub wrap: TextWrapping,
 
+    /// Editor tab stops measured in spaces. With no override the font supplies the tab width.
+    pub tab_stop_spaces: Option<std::num::NonZeroU8>,
+
     /// The first row must be at least this high.
     /// This is in case we lay out text that is the continuation
     /// of some earlier text (sharing the same row),
@@ -103,6 +106,7 @@ impl Default for LayoutJob {
             text: Default::default(),
             sections: Default::default(),
             wrap: Default::default(),
+            tab_stop_spaces: None,
             first_row_min_height: 0.0,
             break_on_newline: true,
             halign: Align::LEFT,
@@ -311,6 +315,7 @@ impl core::hash::Hash for LayoutJob {
             text,
             sections,
             wrap,
+            tab_stop_spaces,
             first_row_min_height,
             break_on_newline,
             halign,
@@ -322,6 +327,7 @@ impl core::hash::Hash for LayoutJob {
         text.hash(state);
         sections.hash(state);
         wrap.hash(state);
+        tab_stop_spaces.hash(state);
         emath::OrderedFloat(*first_row_min_height).hash(state);
         break_on_newline.hash(state);
         halign.hash(state);

@@ -1,6 +1,6 @@
 use super::*;
 use bae_ui_motion::render_queue::ItemStatus;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::Queryable as _;
 
 #[test]
 fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
