@@ -555,6 +555,71 @@ fn gpu_preview_renders_a_value_drag_in_the_background() {
     assert_eq!(shown(&registry, &preview), own);
 }
 
+/// During a value drag the sampleImage reads run on the live renderer's thread
+/// too: the viewer keeps the last frame, the samples arrive, then the live
+/// frame (with the sampled value) shows.
+#[test]
+fn value_drag_reads_samples_on_the_live_thread() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let name = query::display_name_of(&h.stage, &solid);
+    h.run(
+        "attr.set_expression",
+        json!({"path": shape, "attr": "transform:rotation",
+               "source": format!("thisComp.layer(\"{name}\").sampleImage([2, 2])[3] * 90")}),
+    );
+    // A history log as in the app: without one every frame counts as an edit
+    // (which drops compiled comps and samples).
+    h.resources
+        .insert(std::sync::Arc::new(bae_ui::history::HistoryLog::new()));
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let mut eval = bae_anim::Evaluator::new();
+    eval.set_image_samples(Some(preview.samples().clone()));
+    h.session().lock().scrub = Some(crate::session::Scrub {
+        path: solid.clone(),
+        attr: "transform:opacity".into(),
+        value: Value::Float(50.0),
+        peers: Vec::new(),
+        time: Time::ZERO,
+        committed: None,
+    });
+    let rotation = |eval: &mut bae_anim::Evaluator, h: &Harness| {
+        let overrides = h
+            .session()
+            .lock()
+            .scrub
+            .as_ref()
+            .map(|s| s.overrides(&h.stage))
+            .unwrap_or_default();
+        eval.set_overrides(overrides);
+        let ec = eval.evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+        let r = ec.layer(&shape).unwrap().transform.rotation.z;
+        (ec, r)
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let (ec, r) = rotation(&mut eval, &h);
+        preview.frame(&h.resources, &h.stage, &ec, 1, None, false);
+        // The solid is opaque where it is sampled: 1 × 90 once read back.
+        if !preview.samples().is_waiting() && (r - 90.0).abs() < 1e-3 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "samples never arrived ({r})"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!preview.waiting_for_samples() || preview.samples().is_waiting());
+    h.session().lock().scrub = None;
+}
+
 /// The viewer's GPU path: 04's renderer draws the comp, the 8-bit texture is
 /// published, and the viewer gets the egui handle the shell set.
 #[test]
