@@ -112,3 +112,36 @@ pub(crate) fn kernel_at(
         })
     })
 }
+
+/// Reduce a premultiplied texture on a layer-aligned two-by-two grid.
+pub(crate) fn half_level(
+    target: &mut dyn crate::EffectTarget,
+    source: &GpuImage,
+    layer: IRect,
+    grid: f64,
+    repeat: bool,
+) -> Result<GpuImage, RenderError> {
+    let scale = source.pixel_scale;
+    let [x, y] = [source.rect.x0, source.rect.y0];
+    let grid_offset = |origin: i32, bound: i32| {
+        ((f64::from(origin) - f64::from(bound) * grid) / scale).round() as i32
+    };
+    let lx = grid_offset(x, layer.x0);
+    let ly = grid_offset(y, layer.y0);
+    let [w, h] = source.texel_size();
+    let mut texels = source.clone();
+    texels.rect = IRect::new(lx, ly, lx + w as i32, ly + h as i32);
+    texels.pixel_scale = 1.;
+    let mut base = crate::blur::reduce_level(target, &texels, [2, 2], repeat)?;
+    let in_layer = |v: i32, offset: i32, origin: i32| {
+        (f64::from(2 * v - offset) * scale + f64::from(origin)).round() as i32
+    };
+    base.rect = IRect::new(
+        in_layer(base.rect.x0, lx, x),
+        in_layer(base.rect.y0, ly, y),
+        in_layer(base.rect.x1, lx, x),
+        in_layer(base.rect.y1, ly, y),
+    );
+    base.pixel_scale = 2. * scale;
+    Ok(base)
+}
