@@ -19,6 +19,28 @@ use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// A parameter lookup can borrow the evaluated values and shadow individual IDs.
+/// A shadow with no value hides that ID from the target effect.
+#[derive(Clone, Copy, Debug)]
+pub struct EffectValues<'a> {
+    source: &'a [(u32, Value)],
+    changes: &'a [(u32, Option<Value>)],
+}
+
+impl<'a> EffectValues<'a> {
+    /// Read the changed IDs first, then the borrowed source values.
+    pub fn new(source: &'a [(u32, Value)], changes: &'a [(u32, Option<Value>)]) -> Self {
+        Self { source, changes }
+    }
+
+    fn value(&self, id: u32) -> Option<&Value> {
+        if let Some((_, value)) = self.changes.iter().find(|(n, _)| *n == id) {
+            return value.as_ref();
+        }
+        self.source.iter().find(|(n, _)| *n == id).map(|(_, v)| v)
+    }
+}
+
 /// Composition projection and lighting for effects with an internal 3D scene.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EffectScene {
@@ -41,7 +63,6 @@ pub struct EffectScene {
 #[derive(Debug, Clone, Default)]
 pub struct ScalarTrack {
     knots: Vec<ScalarKnot>,
-    fingerprint: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +72,7 @@ struct ScalarKnot {
     incoming: f64,
     area: f64,
     peak: f64,
+    fingerprint: u64,
 }
 
 impl ScalarTrack {
@@ -65,26 +87,32 @@ impl ScalarTrack {
             .knots
             .last()
             .map_or(value, |p| p.peak.max(value).max(incoming));
+        let mut h = rustc_hash::FxHasher::default();
+        (
+            self.fingerprint(),
+            time.to_bits(),
+            value.to_bits(),
+            incoming.to_bits(),
+        )
+            .hash(&mut h);
         self.knots.push(ScalarKnot {
             time,
             value,
             incoming,
             area,
             peak,
+            fingerprint: h.finish(),
         });
-        let mut h = rustc_hash::FxHasher::default();
-        (
-            self.fingerprint,
-            time.to_bits(),
-            value.to_bits(),
-            incoming.to_bits(),
-        )
-            .hash(&mut h);
-        self.fingerprint = h.finish();
     }
 
     pub(crate) fn fingerprint(&self) -> u64 {
-        self.fingerprint
+        self.knots.last().map_or(0, |last| last.fingerprint)
+    }
+    pub(crate) fn truncate_from(&mut self, time: Time) {
+        // The expression VM rounds property reads to its subframe grid. When
+        // the edited segment starts between samples, resample its left neighbor.
+        let through = self.knots.partition_point(|k| k.time <= time.as_seconds());
+        self.knots.truncate(through.saturating_sub(1));
     }
     pub(crate) fn len(&self) -> usize {
         self.knots.len()
@@ -133,7 +161,7 @@ impl ScalarTrack {
 pub struct ParameterSample {
     /// Layer time of the sample.
     pub time: Time,
-    /// Requested controls authored on the instance.
+    /// Sampled controls. An omitted control keeps its current instance value.
     pub values: Vec<(u32, Value)>,
 }
 
@@ -143,6 +171,8 @@ pub struct ParameterSample {
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
+    /// Values the implementation reads, after any effect alias translation.
+    pub translated_values: Option<&'a EffectValues<'a>>,
     /// Prior values of animated controls requested by this effect.
     pub parameter_samples: &'a [ParameterSample],
     /// Cumulative scalar controls requested by the effect, in layer time.
@@ -203,6 +233,7 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            translated_values: None,
             parameter_samples: &[],
             tracks: &[],
             scene: None,
@@ -230,7 +261,10 @@ impl<'a> EffectParams<'a> {
 impl EffectParams<'_> {
     /// Raw value of parameter `id`.
     pub fn value(&self, id: u32) -> Option<&Value> {
-        self.effect.param(id)
+        match self.translated_values {
+            Some(values) => values.value(id),
+            None => self.effect.param(id),
+        }
     }
 
     /// A slider / angle value.
@@ -345,6 +379,13 @@ pub trait Effect: Send + Sync {
     /// are registered so their definitions are available without encoding GPU work.
     fn renders_pixels(&self) -> bool {
         true
+    }
+
+    /// An alias that renders through another effect with translated parameters
+    /// (obsolete AE identities). The planner calls this once per frame and plans
+    /// the returned effect and instance in its place. Default: not an alias.
+    fn resolve_alias(&self, _instance: &RenderEffect) -> Option<(Arc<dyn Effect>, RenderEffect)> {
+        None
     }
 
     /// Output bounds for input bounds (layer pixels at the request scale).

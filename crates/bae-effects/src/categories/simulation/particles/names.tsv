@@ -75,8 +75,49 @@ X、Y 位置	X,Y Position
 侧面模式	Side Mode
 侧面图层	Side Layer
 背面模式	Back Mode
+发射	Cannon
+圆筒半径	Barrel Radius
+每秒粒子数	Particles Per Second
+随机扩散方向	Direction Random Spread
+速率	Velocity
+随机扩散速率	Velocity Random Spread
+粒子半径	Particle Radius
+网格	Grid
 宽度	Width
 高度	Height
+粒子交叉	Particles Across
+粒子下降	Particles Down
+图层爆炸	Layer Exploder
+引爆图层	Explode Layer
+新粒子的半径	Radius of New Particles
+分散速度	Velocity Dispersion
+粒子爆炸	Particle Exploder
+影响	Affect
+粒子来源	Particles From
+选区映射	Selection Map
+字符	Character
+更老/更年轻，相比:	Older/Younger Than:
+年限羽化	Age Feather
+图层映射	Layer Map
+使用图层	Use Layer
+时间偏移类型	Time Offset Type
+时间偏移	Time Offset
+力	Force
+随机扩散力	Force Random Spread
+排斥	Repel
+力半径	Force Radius
+排斥物	Repeller
+墙	Wall
+边界	Boundary
+永久属性映射器	Persistent Property Mapper
+使用图层作为映射	Use Layer As Map
+将红色映射为	Map Red To
+最小值	Min
+最大值	Max
+将绿色映射为	Map Green To
+将蓝色映射为	Map Blue To
+短暂属性映射器	Ephemeral Property Mapper
+运算符	Operator
 底部	Bottom
 缩放	Zoom
 重复模式	Repeat Mode

@@ -196,10 +196,13 @@ impl Command for CreateLayer {
             }
             None => None,
         };
-        if let (LayerKind::PreComp, Some(src)) = (kind, &p.source)
-            && (src == &p.comp || query::comp_info(tx.stage(), src).is_none())
-        {
-            return Err(fail("a pre-comp layer's source must be another comp"));
+        if let (LayerKind::PreComp, Some(src)) = (kind, &p.source) {
+            if query::comp_info(tx.stage(), src).is_none() {
+                return Err(fail("a pre-comp layer's source must be another comp"));
+            }
+            if query::would_nest_recursively(tx.stage(), &p.comp, src) {
+                return Err(fail("a composition cannot contain itself"));
+            }
         }
         let name = match p.name.filter(|n| !n.trim().is_empty()) {
             Some(n) => n,

@@ -373,6 +373,22 @@ impl H {
         r2
     }
 
+    /// Cmd/Ctrl+Enter: commit the text being typed (AE).
+    fn commit_text(&mut self) -> PanelRequests {
+        let ev = |pressed| Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::COMMAND,
+        };
+        let r = self.frame(vec![ev(true)], Modifiers::COMMAND);
+        let mut r2 = self.frame(vec![ev(false)], Modifiers::COMMAND);
+        self.frame(Vec::new(), Modifiers::NONE);
+        r2.invocations.splice(0..0, r.invocations);
+        r2
+    }
+
     fn doc(&self, layer: &PrimPath) -> bae_model::TextDocument {
         match self.value(layer, "text:source") {
             Some(Value::TextDocument(d)) => *d,
@@ -444,9 +460,11 @@ fn tool_action(h: &H, id: &str, params: serde_json::Value) -> PanelRequests {
 }
 
 mod context_menu;
+mod display;
 mod effect_points;
 mod free_transform;
 mod guides;
+mod motion_sketch;
 mod navigation;
 mod pen;
 mod resolution;

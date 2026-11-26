@@ -28,6 +28,11 @@ struct Frame {
 @group(0) @binding(8) var map2: texture_2d<f32>;
 @group(0) @binding(9) var map3: texture_2d<f32>;
 @group(0) @binding(10) var side_map: texture_2d<f32>;
+@group(0) @binding(11) var select_explosion:texture_2d<f32>;
+@group(0) @binding(12) var select_sprite:texture_2d<f32>;
+@group(0) @binding(13) var select_gravity:texture_2d<f32>;
+@group(0) @binding(14) var select_repeller:texture_2d<f32>;
+@group(0) @binding(15) var select_repelled:texture_2d<f32>;
 const WORLD = 0u;
 const SYSTEMS = 1u;
 const RAIN = 2u;
@@ -39,6 +44,11 @@ const STARS = 6u;
 const POLLY = 8u;
 const SHATTER = 9u;
 const CARDS = 10u;
+const PLAYGROUND=11u;
+const BALL=12u;
+const MERCURY=13u;
+const HAIR=14u;
+const MERCURY_FIELD=12.;
 const TAU = 6.28318530718;
 fn f(i: u32) -> f32 {
     return cfg.control[i].x;
@@ -46,6 +56,21 @@ fn f(i: u32) -> f32 {
 
 fn pt(i: u32) -> vec2f {
     return cfg.control[i].xy * cfg.size;
+}
+
+// An animated emitter where it was at `birth`, from the sampled trajectory:
+// particles already emitted stay on their paths. `current` when not animated.
+fn emitter_at(birth: f32, current: vec2f) -> vec2f {
+    if cfg.history.x <= 1u { return current; }
+    var lo = 0u;
+    var hi = cfg.history.x - 1u;
+    while hi > lo + 1u {
+        let mid = (lo + hi) / 2u;
+        if cfg.trajectory[mid].w <= birth { lo = mid; } else { hi = mid; }
+    }
+    let a = cfg.trajectory[lo];
+    let b = cfg.trajectory[hi];
+    return mix(a.xy, b.xy, clamp((birth - a.w) / max(.000001, b.w - a.w), 0., 1.));
 }
 
 fn rgb(i: u32) -> vec3f {

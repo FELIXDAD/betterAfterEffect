@@ -7,7 +7,7 @@ const SPRITE_BYTES: u64 = 64;
 const LABEL: &str = "bae.effects.particles";
 
 pub(crate) struct Engine {
-    advance: [wgpu::ComputePipeline; 4],
+    advance: [wgpu::ComputePipeline; 8],
     draw: [wgpu::RenderPipeline; 5],
     scratch: wgpu::Buffer,
     unused_intervals: wgpu::Buffer,
@@ -101,6 +101,9 @@ impl Engine {
             include_str!("sprites.wgsl"),
             include_str!("foam.wgsl"),
             include_str!("tiles.wgsl"),
+            include_str!(concat!(env!("OUT_DIR"), "/playground_slots.wgsl")),
+            include_str!("playground.wgsl"),
+            include_str!("surfaces.wgsl"),
             include_str!("draw.wgsl")
         );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -138,13 +141,17 @@ impl Engine {
             (3, Stage::COMPUTE, write),
             (4, Stage::COMPUTE, viewport),
         ];
-        entries.extend((5..=10).map(|n| (n, Stage::COMPUTE, tex)));
+        entries.extend((5..=15).map(|n| (n, Stage::COMPUTE, tex)));
         let advance_layout = layout(device, &entries);
         let advance = [
             "advance_emitter",
             "advance_weather",
             "advance_drizzle",
             "advance_tiles",
+            "advance_ball",
+            "advance_hair",
+            "advance_mercury",
+            "advance_playground",
         ]
         .map(|entry| compute(device, &module, entry, Some(&advance_layout)));
         let draw_layout = layout(
@@ -303,6 +310,10 @@ pub(super) fn render(
         Kind::World | Kind::Systems => 0,
         Kind::Rain | Kind::Snow | Kind::Bubbles => 1,
         Kind::Drizzle | Kind::Foam => 2,
+        Kind::Ball => 4,
+        Kind::Hair => 5,
+        Kind::Mercury => 6,
+        Kind::Playground => 7,
         _ => 3,
     };
     let mut batches = super::emission::batches(kind, scene);
@@ -324,6 +335,7 @@ pub(super) fn render(
                 p.popup(28)
             }
         }
+        Kind::Mercury => 4,
         Kind::Rain if p.popup(15) == 2 => 5,
         Kind::Snow if p.popup(25) == 2 => 5,
         _ => 1,
@@ -363,6 +375,12 @@ pub(super) fn render(
         viewport.clone(),
     ];
     compute_entries.extend_from_slice(&textures);
+    for i in 5..10 {
+        compute_entries.push(view_entry(
+            6 + i as u32,
+            &maps.get(i).and_then(Option::as_ref).unwrap_or(input).view,
+        ));
+    }
     let compute_layout = advance.get_bind_group_layout(0);
     let inline_bind = group(&rt.device, &compute_layout, &compute_entries);
     let mut entries = vec![config, viewport];
@@ -372,7 +390,12 @@ pub(super) fn render(
         &engine.draw[blend].get_bind_group_layout(0),
         &entries,
     );
-    let group_size = if kind == Kind::Foam { 1 } else { usize::MAX };
+    // These emitters consume one inline birth interval per draw, including animated rates.
+    let group_size = if matches!(kind, Kind::Mercury | Kind::Playground | Kind::Foam) {
+        1
+    } else {
+        usize::MAX
+    };
     let pages = batches
         .chunks(group_size)
         .flat_map(|group| emission::pages(group, max));

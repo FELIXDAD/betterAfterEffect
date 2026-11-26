@@ -11,6 +11,7 @@ fn checkbox(effect: &str, id: u32) -> bool {
             | ("CSSnowfall", 15 | 26)
             | ("APC Shatter", 22 | 96 | 144)
             | ("APC CardDanceCam", 90)
+            | ("CC Hair", 4)
             | ("APC Foam", 12)
             | ("APC Wave World", 92)
     )
@@ -22,6 +23,7 @@ fn control(effect: &str, id: u32, p: &Value, english: &HashMap<&str, &str>) -> S
     match p["propertyValueType"].as_str().unwrap() {
         "NO_VALUE" if p["name"] == "" => "GroupEnd".into(),
         "NO_VALUE" => "GroupStart".into(),
+        "MASK_INDEX" => "Mask".into(),
         "LAYER_INDEX" => "Layer".into(),
         "COLOR" => format!(
             "Color({:?})",
@@ -68,11 +70,12 @@ fn main() {
         println!("cargo:rerun-if-changed={path}");
         fs::read_to_string(path).unwrap()
     });
-    let english: HashMap<_, _> = names
-        .iter()
-        .flat_map(|s| s.lines())
-        .filter_map(|line| line.split_once('\t'))
-        .collect();
+    let [control_names, option_names] = names.each_ref().map(|table| {
+        table
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .collect::<HashMap<_, _>>()
+    });
     for effect in reference["effects"].as_array().unwrap() {
         let name = effect["matchName"].as_str().unwrap();
         if !matches!(
@@ -88,12 +91,18 @@ fn main() {
                 | "CC Pixel Polly"
                 | "APC Shatter"
                 | "APC CardDanceCam"
+                | "ADBE Playgnd"
+                | "CC Ball Action"
+                | "CC Mr. Mercury"
+                | "CC Hair"
                 | "APC Foam"
                 | "APC Wave World"
                 | "APC Caustics"
         ) {
             continue;
         }
+        let mut slots = String::new();
+        let mut slot = 0;
         let mut rows = String::from("&[\n");
         for p in effect["properties"].as_array().unwrap() {
             let Some(id) = p["matchName"]
@@ -104,11 +113,18 @@ fn main() {
             else {
                 continue;
             };
+            if name == "ADBE Playgnd" {
+                writeln!(slots, "const P{id}:u32={slot}u;").unwrap();
+                slot += 1;
+            }
             let zh = p["name"].as_str().unwrap();
-            let en = english.get(zh).copied().unwrap_or(zh);
-            let kind = control(name, id, p, &english);
+            let en = control_names.get(zh).copied().unwrap_or(zh);
+            let kind = control(name, id, p, &option_names);
             let varies = p["canVaryOverTime"].as_bool().unwrap();
             writeln!(rows, "Control {{ id: {id}, en: {en:?}, zh: {zh:?}, kind: ControlKind::{kind}, varies: {varies} }},").unwrap();
+        }
+        if name == "ADBE Playgnd" {
+            fs::write(directory.join("playground_slots.wgsl"), slots).unwrap();
         }
         rows.push_str("]\n");
         fs::write(directory.join(format!("{name}.rs")), rows).unwrap();

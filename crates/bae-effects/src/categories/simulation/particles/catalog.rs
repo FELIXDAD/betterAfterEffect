@@ -15,6 +15,7 @@ struct Control {
 enum ControlKind {
     GroupStart,
     GroupEnd,
+    Mask,
     Layer,
     Color([f64; 4]),
     Point([f64; 2]),
@@ -48,6 +49,10 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
             "CC Particle Systems II"
         ),
 
+        Kind::Playground => reference!("ADBE Playgnd", "Particle Playground", "粒子运动场"),
+        Kind::Ball => reference!("CC Ball Action", "CC Ball Action", "CC Ball Action"),
+        Kind::Mercury => reference!("CC Mr. Mercury", "CC Mr. Mercury", "CC Mr. Mercury"),
+        Kind::Hair => reference!("CC Hair", "CC Hair", "CC Hair"),
         Kind::Wave => reference!("APC Wave World", "Wave World", "波形环境"),
         Kind::Caustics => reference!("APC Caustics", "Caustics", "焦散"),
         Kind::Foam => reference!("APC Foam", "Foam", "泡沫"),
@@ -68,6 +73,7 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
         let (kind, value) = match c.kind {
             GroupStart => (ParamKind::GroupStart, None),
             GroupEnd => (ParamKind::GroupEnd, None),
+            Mask => (ParamKind::Path, None),
             Layer => (ParamKind::Layer, None),
             Color(v) => (ParamKind::Color, Some(Value::Color(v))),
             Point(v) => (ParamKind::Point, Some(Value::Vec2(v))),
@@ -93,7 +99,12 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
         };
         let layer = matches!(kind, ParamKind::Layer);
         builder.push(c.id, c.en, c.zh, kind, value);
-        if layer && matches!(id, "APC Foam" | "APC Wave World" | "APC Caustics") {
+        if layer
+            && matches!(
+                id,
+                "ADBE Playgnd" | "CC Hair" | "APC Foam" | "APC Wave World" | "APC Caustics"
+            )
+        {
             builder = builder.layer_stage(c.id);
         }
     }
@@ -101,7 +112,7 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
     for (param, control) in def
         .params
         .iter_mut()
-        .filter(|p| p.match_name.is_some())
+        .filter(|c| c.match_name.is_some())
         .zip(controls)
     {
         param.flags.cannot_animate = !control.varies;
