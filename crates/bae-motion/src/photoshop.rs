@@ -293,6 +293,7 @@ fn stack(
         set(tx, &path, "transform:opacity", Value::Float(l.opacity))?;
         if l.clipped {
             if let Some(base) = &base {
+                set(tx, &path, "psd:clip_base", Value::PrimRef(base.clone()))?;
                 set(tx, &path, "track_matte", Value::Enum("alpha".into()))?;
                 set(tx, &path, "track_matte_layer", Value::PrimRef(base.clone()))?;
             }

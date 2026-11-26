@@ -17,6 +17,10 @@ def layer(name, index, x, y, w, h, *, tags=b"", clip=0, hidden=False, mask=None)
     if mask is not None:
         planes.append((-2,b"\0\0"+mask))
         m=bounds+bytes(4)
+        if b"vmsk" in tags:
+            planes[-1]=(-2,b"\0\0"+bytes([255])*len(mask))
+            planes.append((-3,b"\0\0"+mask))
+            m=bounds+bytes([0,8,0,0])+bounds
     pascal=bytes([len(name)])+name.encode()
     extra=u(len(m))+m+u(0)+pascal+bytes(-len(pascal)%4)+tag("lyid",u(index))+tags
     record=bounds+pack(">H",len(planes))+b"".join(pack(">hI",i,len(v)) for i,v in planes)

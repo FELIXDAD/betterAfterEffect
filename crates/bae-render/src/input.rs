@@ -81,6 +81,23 @@ impl RenderComp {
         }
     }
 
+    /// In Photoshop a hidden clipping base hides its clipped layers as well.
+    pub(crate) fn photoshop_clipping_visibility(&mut self, stage: &bae_model::Stage) {
+        for index in 0..self.layers.len() {
+            let layer = &self.layers[index];
+            let Some(matte) = layer.track_matte.and_then(|m| self.layers.get(m.layer)) else {
+                continue;
+            };
+            if !matte.visible
+                && stage.prim(&layer.path).is_some_and(|p| {
+                    p.value("psd:clip_base").and_then(Value::as_prim_ref) == Some(&matte.path)
+                })
+            {
+                self.layers[index].visible = false;
+            }
+        }
+    }
+
     /// The camera 3D layers are seen through: the active camera or AE's default
     /// camera for this comp size.
     pub fn view_camera(&self) -> Camera {

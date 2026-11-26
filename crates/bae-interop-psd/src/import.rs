@@ -137,22 +137,13 @@ fn describe_node(file: &PsdFile, node: &LayerNode, size: [u32; 2]) -> format::Re
         size: extent,
         visible: rec.is_visible(),
         opacity: f64::from(rec.opacity) * 100. / 255.,
-        pixel_mask: rec
-            .layer_mask()
-            .filter(|_| rec.channel(-2).is_some())
-            .map(|m| {
-                (
-                    m.flags & 2 == 0,
-                    m.flags & 4 != 0,
-                    f64::from(
-                        m.parameters
-                            .as_ref()
-                            .and_then(|p| p.user_density)
-                            .unwrap_or(255),
-                    ) * 100.
-                        / 255.,
-                )
-            }),
+        pixel_mask: crate::raster_mask(rec).map(|m| {
+            (
+                m.flags & 2 == 0,
+                m.flags & 4 != 0,
+                f64::from(m.density) * 100. / 255.,
+            )
+        }),
         blend: token(mode).into(),
         clipped: rec.clipping != 0,
         children,

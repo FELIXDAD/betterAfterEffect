@@ -1,6 +1,6 @@
 //! PSD and PSB footage. Source channels stay at their original precision until upload.
 use bae_model::psd::{LayerImage, LayerKey, PixelMask};
-use format::{ColorMode, LayerRecord, MaskData, PsdError, PsdFile, Rect, Result};
+use format::{ColorMode, LayerRecord, PsdError, PsdFile, Rect, Result};
 pub use rust_motion_psd as format;
 use std::borrow::Cow;
 pub mod import;
@@ -55,6 +55,42 @@ pub fn bounds(file: &PsdFile, selection: Option<LayerImage>) -> Result<Rect> {
     }
 }
 
+struct RasterMask {
+    channel: i16,
+    rect: Rect,
+    flags: u8,
+    background: u8,
+    density: u8,
+}
+
+/// When Photoshop saves a rendered mask and its editable inputs, channel -3 is
+/// the original user mask. Applying the rendered copy as well would mask twice.
+fn raster_mask(layer: &LayerRecord) -> Option<RasterMask> {
+    let m = layer.layer_mask()?;
+    let (channel, rect, flags, background) = if let Some(real) = m.real
+        && layer.channel(-3).is_some()
+    {
+        (-3, real.rect, real.flags, real.background)
+    } else {
+        layer.channel(-2)?;
+        if m.flags & 8 != 0 && (layer.block(b"vmsk").is_some() || layer.block(b"vsms").is_some()) {
+            return None;
+        }
+        (-2, m.rect, m.flags, m.default_color)
+    };
+    let density = m
+        .parameters
+        .as_ref()
+        .and_then(|p| p.user_density)
+        .unwrap_or(255);
+    Some(RasterMask {
+        channel,
+        rect,
+        flags,
+        background,
+        density,
+    })
+}
 pub struct Pixels {
     pub width: u32,
     pub height: u32,
@@ -127,17 +163,16 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
                 planes.push(Cow::Owned(l.decode_channel(-1, depth, header.version)?));
             }
         }
-        if let MaskData::Mask(m) = &l.mask
+        if let Some(m) = raster_mask(l)
             && !matches!(mask_setting, PixelMask::Disabled)
             && (m.flags & 2 == 0
                 || matches!(
                     mask_setting,
                     PixelMask::Channel { .. } | PixelMask::Group { .. }
                 ))
-            && l.channel(-2).is_some()
         {
             let (mw, mh) = m.rect.size()?;
-            let data = l.decode_channel(-2, depth, header.version)?;
+            let data = l.decode_channel(m.channel, depth, header.version)?;
             if data.len() != mw * mh * usize::from(depth / 8) {
                 return Err(PsdError::Invalid("PSD mask size".into()));
             }
@@ -178,19 +213,14 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
                             (y - m.rect.top) as usize * mw + (x - m.rect.left) as usize,
                         )
                     } else {
-                        f32::from(m.default_color) / 255.
+                        f32::from(m.background) / 255.
                     };
-                    let density = m
-                        .parameters
-                        .as_ref()
-                        .and_then(|p| p.user_density)
-                        .unwrap_or(255);
                     let (inverted, density) = match mask_setting {
                         PixelMask::Channel { inverted, density }
                         | PixelMask::Group {
                             inverted, density, ..
                         } => (inverted, f32::from(density) / 65535.),
-                        _ => (m.flags & 4 != 0, f32::from(density) / 255.),
+                        _ => (m.flags & 4 != 0, f32::from(m.density) / 255.),
                     };
                     let value = if inverted { 1. - strength } else { strength };
                     a *= 1. - (1. - value) * density;

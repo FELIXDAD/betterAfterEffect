@@ -167,6 +167,7 @@ impl AnimEvaluator {
             }
             rc.layers.push(out);
         }
+        rc.photoshop_clipping_visibility(stage);
         // Layers that cannot show in this frame (outside their in/out points,
         // hidden, not a parent or an active layer's matte): the frame does not
         // depend on their content (cache invalidation, `RenderLayer::inert`).

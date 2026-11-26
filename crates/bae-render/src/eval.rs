@@ -355,6 +355,7 @@ impl<'a> MockPass<'a> {
             }
             comp.layers.push(out);
         }
+        comp.photoshop_clipping_visibility(self.stage);
         Ok(comp)
     }
 
