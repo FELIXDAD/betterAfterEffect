@@ -486,10 +486,17 @@ pub struct MotionDialogs;
 impl bae_ui::DialogHost for MotionDialogs {
     fn is_open(&self, resources: &Resources) -> bool {
         shared(resources).is_open()
+            || crate::common::session(resources)
+                .lock()
+                .loading_lut
+                .is_some()
     }
 
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
         crate::ae_panels::character::font_menu::upload(ctx);
+        if crate::effects::lut::poll(ctx, cx) {
+            return;
+        }
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
         let open = {
