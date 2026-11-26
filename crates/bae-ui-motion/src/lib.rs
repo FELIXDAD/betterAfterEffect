@@ -48,6 +48,7 @@ mod panels;
 mod playback;
 mod prefs;
 mod presets;
+pub use presets::register_preset_index;
 mod preview_snapshot;
 pub mod progress_metadata;
 mod project;
