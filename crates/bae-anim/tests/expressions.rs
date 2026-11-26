@@ -910,3 +910,171 @@ fn camera_light_material_and_property_names() {
         "1500|1500|1|1|80|1|0|0|Position|Z Rotation|Mask Path|Transform|Plate|Mask 1|Masks"
     );
 }
+
+/// footage(name), a footage layer's source, colorDepth / thisProject, NTSC and
+/// feet + frames timecode, and fromCompToSurface on a 2D layer.
+#[test]
+fn footage_project_and_timecodes() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT)
+            .set("/project", "bit_depth", Value::Enum("32".into()))
+            .prim("/assets", PrimType::FOLDER)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .set("/assets/clip", "kind", Value::Enum("footage".into()))
+            .set("/assets/clip", "width", 640.0)
+            .set("/assets/clip", "height", 360.0)
+            .set("/assets/clip", "duration", Value::Time(secs(4.0)));
+        let l = b.layer(MAIN, "Shot", "footage");
+        b.set(&l, "source", Value::AssetRef(p("/assets/clip")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var s = thisComp.layer("Shot");
+               [s.source.width, footage("Clip").duration, footage("Clip").name, colorDepth,
+                thisProject.bitsPerChannel, timeToNTSCTimecode(61, true), timeToNTSCTimecode(1),
+                timeToFeetAndFrames(1, 30), thisComp.ntscDropFrame,
+                fromCompToSurface([10, 20])[0] == fromComp([10, 20])[0]].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[1].text.as_ref().unwrap().text,
+        "640|4|Clip|32|32|00;01;01;00|00:00:00:29|0001+14|false|true"
+    );
+}
+
+/// hasVideo / hasAudio follow the layer's source (a pre-comp has audio when a
+/// layer inside it does), and audioLevels exists only on layers with audio.
+#[test]
+fn audio_levels_and_has_audio() {
+    let s = stage(|b| {
+        b.prim("/assets", PrimType::FOLDER)
+            .prim("/assets/song", PrimType::ASSET)
+            .set("/assets/song", "name", "Song")
+            .set("/assets/song", "has_video", false)
+            .set("/assets/song", "has_audio", true)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .comp("/comps/other", "Other");
+        let a = b.layer("/comps/other", "Music", "audio");
+        b.set(&a, "source", Value::AssetRef(p("/assets/song")));
+        let music = b.layer(MAIN, "Music", "audio");
+        b.set(&music, "source", Value::AssetRef(p("/assets/song")))
+            .set(&music, "audio:levels", Value::Vec2([-6.0, -3.0]));
+        let clip = b.layer(MAIN, "Clip", "footage");
+        b.set(&clip, "source", Value::AssetRef(p("/assets/clip")));
+        let pre = b.layer(MAIN, "Pre", "pre_comp");
+        b.set(&pre, "source", Value::PrimRef(p("/comps/other")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var m = thisComp.layer("Music"), c = thisComp.layer("Clip"), p = thisComp.layer("Pre");
+               var e = "";
+               try { c.audioLevels; } catch (err) { e = err.message.split(".")[0]; }
+               [m.audioLevels.value.join(","), m.hasAudio, m.hasVideo, m.audioActive, c.hasAudio,
+                c.hasVideo, p.hasAudio, p.audioLevels.value.join(","), e].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "-6,-3|true|false|true|false|true|true|0,0|\
+         property or method named 'audioLevels' in Class 'Layer' is missing or does not exist"
+    );
+}
+
+/// evaluate_attribute_traced reports what the value was read from: the
+/// attribute itself, same-layer and other-layer properties at the times read,
+/// and what nested expressions read; edits to anything else leave it valid.
+#[test]
+fn traced_attribute_reports_its_reads() {
+    use bae_anim::{ExprRead, ReadKind};
+    use bae_model::{Change, TimeRange};
+    let a = format!("{MAIN}/layers/A");
+    let fx = format!("{a}/effects/rate");
+    let s = stage(|b| {
+        b.layer(MAIN, "A", "null");
+        let l = b.layer(MAIN, "B", "null");
+        b.expr(
+            &l,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("C").transform.scale[0]"#,
+        );
+        b.layer(MAIN, "C", "null");
+        b.prim(&format!("{a}/effects"), PrimType::FOLDER)
+            .prim(&fx, PrimType::EFFECT)
+            .set(&fx, "match_name", "ADBE Slider Control")
+            .set(&fx, "name", "Rate")
+            .expr(
+                &fx,
+                "param:0001",
+                0.0,
+                r#"var b = thisComp.layer("B");
+                   transform.opacity + b.transform.position.valueAtTime(time - 1)[0] + b.transform.rotation
+                   + thisComp.layer("C").marker.numKeys"#,
+            );
+    });
+    let mut ev = bae_anim::Evaluator::new();
+    let (v, reads) = ev
+        .evaluate_attribute_traced(&s, &p(&fx), "param:0001", secs(2.0))
+        .unwrap();
+    assert_eq!(v, Value::Float(100.0 + 0.0 + 100.0));
+    let attr = |prim: &str, attr: &str, t: f64| ExprRead {
+        prim: p(prim),
+        kind: ReadKind::Attr(attr.into()),
+        time: Some(secs(t)),
+    };
+    let (b, c) = (format!("{MAIN}/layers/B"), format!("{MAIN}/layers/C"));
+    for want in [
+        attr(&fx, "param:0001", 2.0),
+        attr(&a, "transform:opacity", 2.0),
+        attr(&b, "transform:position", 1.0),
+        attr(&b, "transform:rotation", 2.0),
+        attr(&c, "transform:scale", 2.0),
+        ExprRead {
+            prim: p(&format!("{c}/markers")),
+            kind: ReadKind::Subtree,
+            time: None,
+        },
+    ] {
+        assert!(reads.contains(&want), "missing {want:?} in {reads:#?}");
+    }
+    let set = |path: &str, attr: &str| Change::AttrChanged {
+        path: p(path),
+        attr: attr.into(),
+        range: TimeRange::ALL,
+    };
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:scale")]
+    ));
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:opacity")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:position")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:rotation")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&b, "transform:opacity")]
+    ));
+    // Without an expression: the attribute itself.
+    let (_, plain) = ev
+        .evaluate_attribute_traced(&s, &p(&c), "transform:scale", secs(2.0))
+        .unwrap();
+    assert_eq!(plain, vec![attr(&c, "transform:scale", 2.0)]);
+}
