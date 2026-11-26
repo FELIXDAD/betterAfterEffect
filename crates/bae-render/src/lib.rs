@@ -54,6 +54,7 @@ pub mod light;
 pub mod mask;
 mod module;
 pub mod motion;
+pub mod paint;
 mod parameter_track;
 pub mod png_out;
 pub mod pool;
@@ -88,7 +89,7 @@ pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;
 pub use motion::{CompMotionBlur, LayerSample};
 pub use pool::PoolStats;
-pub use renderer::{FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
+pub use renderer::{Display, FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
 pub use request::{
     BitDepth, BlendSpace, ColorContext, RenderPurpose, RenderRequest, Resolution, WorkFormat,
 };

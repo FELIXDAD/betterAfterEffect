@@ -100,12 +100,33 @@ pub enum OutputAlpha {
     Over([f32; 3]),
 }
 
+/// How a viewer shows a frame (AE's Show Channel and Exposure); display only,
+/// never in exports.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Display {
+    /// 0 RGB, 1 Red, 2 Green, 3 Blue, 4 Alpha, 5 RGB Straight.
+    pub channel: u32,
+    /// Show a colour channel in its colour, not grey.
+    pub colorize: bool,
+    /// Exposure in stops.
+    pub exposure: f32,
+}
+
 /// Size of the output pass's uniform block.
 pub(crate) const OUTPUT_PARAMS_SIZE: u64 = 32;
 
 /// The output pass's uniform block (`output.wgsl` `Params`). `float`: the
 /// target is a float format, so colour outside `[0, alpha]` is kept.
 pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARAMS_SIZE as usize] {
+    output_params_display(alpha, float, Display::default())
+}
+
+/// [`output_params`] with a viewer's [`Display`].
+fn output_params_display(
+    alpha: OutputAlpha,
+    float: bool,
+    display: Display,
+) -> [u8; OUTPUT_PARAMS_SIZE as usize] {
     let (mode, bg) = match alpha {
         OutputAlpha::Premultiplied => (0u32, [0.0f32; 3]),
         OutputAlpha::Straight => (1, [0.0; 3]),
@@ -115,6 +136,9 @@ pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARA
     params[..12].copy_from_slice(bytemuck::cast_slice(&bg));
     params[16..20].copy_from_slice(&mode.to_ne_bytes());
     params[20..24].copy_from_slice(&u32::from(float).to_ne_bytes());
+    params[12..16].copy_from_slice(&display.exposure.to_ne_bytes());
+    params[24..28].copy_from_slice(&display.channel.to_ne_bytes());
+    params[28..32].copy_from_slice(&u32::from(display.colorize).to_ne_bytes());
     params
 }
 
@@ -482,6 +506,16 @@ impl Renderer {
         frame: &RenderedFrame,
         alpha: OutputAlpha,
     ) -> Result<wgpu::Texture, RenderError> {
+        self.output_texture_display(frame, alpha, Display::default())
+    }
+
+    /// [`Renderer::output_texture`] as a viewer shows it ([`Display`]).
+    pub fn output_texture_display(
+        &mut self,
+        frame: &RenderedFrame,
+        alpha: OutputAlpha,
+        display: Display,
+    ) -> Result<wgpu::Texture, RenderError> {
         let device = self.gpu.device();
         let [w, h] = frame.image.texel_size();
         let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -509,7 +543,7 @@ impl Renderer {
         });
         self.gpu
             .queue()
-            .write_buffer(&uniform, 0, &output_params(alpha, false));
+            .write_buffer(&uniform, 0, &output_params_display(alpha, false, display));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("bae-render.output"),
         });
