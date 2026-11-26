@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use bae_gpu::wgpu;
-use bae_render::{GpuImage, ImageAlpha, RenderError};
+use bae_render::{GpuImage, IRect, ImageAlpha, RenderError};
 
 use crate::gpu::{self, Binding, KernelKey, KernelSource, Resource, UniformWriter};
 use crate::target::EffectTarget;
@@ -64,4 +64,31 @@ pub(crate) fn premultiplied(
     gpu::dispatch(&mut pass, &kernel, &group, &[offset], r.size());
     drop(pass);
     Ok(out)
+}
+
+/// `image` under the shared Gaussian (repeat edges) of `radius` space pixels,
+/// run in texture coordinates and placed back on the layer.
+pub(crate) fn blurred(
+    target: &mut dyn EffectTarget,
+    image: &GpuImage,
+    radius: f64,
+) -> Result<GpuImage, RenderError> {
+    let sigma = radius * 0.5 / image.pixel_scale;
+    if crate::blur::radius(sigma) == 0 {
+        return Ok(image.clone());
+    }
+    let mut local = premultiplied(target, image)?;
+    let [w, h] = local.texel_size();
+    local.rect = IRect::from_size(w, h);
+    local.pixel_scale = 1.;
+    let mut result = crate::blur::plan_gaussian(
+        local.rect,
+        [sigma; 2],
+        crate::blur::Edge::Repeat,
+        local.rect,
+    )
+    .encode(target, &local)?;
+    result.rect = image.rect;
+    result.pixel_scale = image.pixel_scale;
+    Ok(result)
 }
