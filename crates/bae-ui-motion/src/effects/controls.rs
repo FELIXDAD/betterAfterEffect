@@ -100,7 +100,7 @@ fn header(
         .and_then(|v| query::static_value(&v, "enabled"))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let name = query::display_name_of(stage, effect);
+    let name = super::instance_name(stage, effect);
     let session = common::session(cx.resources);
     let selected = session.lock().selected_effects.contains(effect);
     ui.add_space(2.0);
@@ -157,7 +157,7 @@ fn header(
         }
         title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let about = ui.add(egui::Label::new(tr("About...")).sense(Sense::click()));
+            let about = widgets::link(ui, tr("About..."));
             egui::Popup::menu(&about).show(|ui| {
                 let shown = super::effect_name(match_name, def);
                 ui.label(egui::RichText::new(shown).strong());
@@ -168,11 +168,7 @@ fn header(
                 };
                 ui.label(source);
             });
-            if def.is_some()
-                && ui
-                    .add(egui::Label::new(tr("Reset")).sense(Sense::click()))
-                    .clicked()
-            {
+            if def.is_some() && widgets::link(ui, tr("Reset")).clicked() {
                 reset(cx, effect, now);
             }
         });
@@ -212,6 +208,13 @@ fn params(
     def: &EffectDef,
     now: Time,
 ) {
+    if def.match_name == "ADBE Deflicker" && ui.button(tr("Set Frame")).clicked() {
+        let local = query::to_key_time(cx.stage, effect, now);
+        cx.invoke_with(
+            "attr.set_at",
+            json!({"path":effect,"attr":param_attr(9001),"time":local,"value":Value::Time(local)}),
+        );
+    }
     let mut depth = 1usize;
     // Depth at which a closed group hides its contents.
     let mut hidden_from: Option<usize> = None;

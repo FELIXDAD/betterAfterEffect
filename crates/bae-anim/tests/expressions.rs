@@ -89,6 +89,41 @@ fn eval(s: &Stage, t: f64) -> bae_anim::EvaluatedComp {
 }
 
 #[test]
+fn vector_and_interpolation_examples() {
+    let samples = [
+        ("add([4,5],[1,2,3])[2]", 3.0),
+        ("sub(5,[2,3])[1]", -3.0),
+        ("mul([2,3],4)[1]", 12.0),
+        ("div([2,3],4)[1]", 0.75),
+        ("clamp([1,2],[0],[3,4])[1]", 2.0),
+        ("dot([1,2],[3,4,5])", 11.0),
+        ("cross([1,2],[3,4])[0]", 0.0),
+        ("length([1,2],[4,6])", 5.0),
+        ("normalize([3,4])[0]", 0.6),
+        ("lookAt([0,0,0],[1,1,1])[2]", 30.0),
+        ("linear(0.4,1,0,10,20)", 14.0),
+        ("ease(.25,0,1)", 0.15625),
+        ("easeIn(.25,0,1)", 0.109375),
+        ("easeOut(.25,0,1)", 0.296875),
+    ];
+    let s = stage(|b| {
+        for (i, (source, _)) in samples.iter().enumerate() {
+            let layer = b.layer(MAIN, &format!("case{i}"), "null");
+            b.expr(&layer, "transform:rotation", 0.0, source);
+        }
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    for (layer, (source, want)) in comp.layers.iter().zip(samples) {
+        assert!(
+            (layer.transform.rotation.z - want).abs() < 1e-8,
+            "{source}: {}",
+            layer.transform.rotation.z
+        );
+    }
+}
+
+#[test]
 fn vector_arithmetic_on_2d_position() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");
@@ -227,6 +262,74 @@ fn cycles_terminate() {
 }
 
 #[test]
+fn keys_groups_and_loop_segments_use_composition_time() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "Source", "null");
+        b.set(&l, "out_point", Value::Time(secs(5.0)));
+        let mut pos = AttrSpec::default();
+        for (t, x) in [(1.0, 0.0), (3.0, 100.0)] {
+            pos.keyframes
+                .insert(secs(t), Keyframe::linear(Value::Vec3([x, 10.0, 0.0])));
+        }
+        b.spec(&l, "transform:position", pos);
+        let text = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &text,
+            "text:source",
+            doc(""),
+            r#"var p=thisComp.layer("Source").position;
+            [p.key(1).value.length,p.nearestKey(2.9).index,p.propertyIndex,
+             propertyGroup(1).name,p.valueAtTime(2)[0],Math.round(p.velocityAtTime(2)[0]),
+             Math.round(p.speedAtTime(2)),Math.round(p.smooth(1,3,2)[0]),
+             p.loopInDuration()[0],p.loopOutDuration()[0]].join("|")"#,
+        );
+    });
+    for (t, suffix) in [(0.5, "100|0"), (3.5, "100|0")] {
+        let comp = eval(&s, t);
+        assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+        assert_eq!(
+            comp.layers[1].text.as_ref().unwrap().text,
+            format!("2|2|2|Text|50|50|50|50|{suffix}")
+        );
+    }
+}
+
+#[test]
+fn loops_cover_each_mode_in_both_directions() {
+    let modes = [
+        ("cycle", 75.0, 25.0),
+        ("pingpong", 25.0, 75.0),
+        ("offset", -25.0, 125.0),
+        ("continue", -25.0, 125.0),
+    ];
+    for (mode, before, after) in modes {
+        for (method, arg, time, expected) in [
+            ("loopIn", 1, 0.5, before),
+            ("loopInDuration", 2, 0.5, before),
+            ("loopOut", 1, 3.5, after),
+            ("loopOutDuration", 2, 3.5, after),
+        ] {
+            let s = stage(|b| {
+                let l = b.layer(MAIN, "Animated", "null");
+                let mut rotation = AttrSpec::default();
+                rotation.keyframes.insert(secs(1.0), Keyframe::linear(0.0));
+                rotation
+                    .keyframes
+                    .insert(secs(3.0), Keyframe::linear(100.0));
+                rotation.expression = Some(Expression::new(format!("{method}('{mode}',{arg})")));
+                b.spec(&l, "transform:rotation", rotation);
+            });
+            let comp = eval(&s, time);
+            assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+            assert!(
+                (comp.layers[0].transform.rotation.z - expected).abs() < 0.01,
+                "{method} {mode}"
+            );
+        }
+    }
+}
+
+#[test]
 fn value_at_time_and_loop_out() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");
@@ -339,8 +442,22 @@ fn noise_varies_across_the_plane_and_volume() {
 }
 
 #[test]
+fn noise_accepts_one_component_and_color_arrays() {
+    let src = "var x=.25; (noise([x])===noise(x) && noise([x,.2,.3,1])===noise([x,.2,.3])) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
 fn wiggle_uses_the_offset_independently_of_timeless() {
     let src = "seedRandom(2,true);var a=wiggle(2,4);seedRandom(2,false);var b=wiggle(2,4);seedRandom(3,true); (a===b && a!==wiggle(2,4)) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn wiggle_takes_properties_for_octaves_and_amplitude_multiplier() {
+    // wiggle(2, 10, effect("Oct")("Slider")): a property, not a number, reaches the host.
+    let src = "var o=transform.opacity, m=transform.opacity; \
+               (isFinite(wiggle(2,10,o,m/200)) && isFinite(temporalWiggle(2,0.1,o,m/200))) ? 1 : 0";
     assert_eq!(rotation_expression(src, 0.0), 1.0);
 }
 
@@ -434,7 +551,21 @@ fn time_conversions_follow_the_display_settings_and_rounding_mode() {
     assert!(comp.errors.is_empty(), "{:?}", comp.errors);
     assert_eq!(
         comp.layers[0].text.as_ref().unwrap().text,
-        "0|48|0.25|1|-00:00:00:01|0000+-3|00;01;00;02|3|true"
+        "0|48|0.25|1|-00:00:00:01|-0000+03|00;01;00;02|3|true"
+    );
+}
+
+#[test]
+fn project_timecode_and_signed_footage_display() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "Format", "text");
+        b.expr(&l,"text:source",doc(""),r#"[timeToCurrentFormat(60,24),timeToTimecode(60,24),timeToFeetAndFrames(-1,30)].join("|")"#);
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "0:01:00:00|00:01:00:00|-0001+14"
     );
 }
 

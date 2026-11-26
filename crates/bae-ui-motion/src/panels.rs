@@ -11,7 +11,7 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
-mod audio;
+pub(crate) mod audio;
 
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
@@ -98,6 +98,39 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
         .first()
         .cloned()
         .filter(|l| stage.has_prim(l))
+}
+
+impl EffectControlsPanel {
+    /// AE's line under the tab: the lock, the layer's label color and
+    /// "<comp> • <layer>".
+    fn layer_header(&mut self, ui: &mut Ui, stage: &Stage, layer: &PrimPath) {
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            let locked = self.locked.is_some();
+            let lock = icons::button(ui, Icon::Lock, 14.0, locked).labeled_toggle(
+                egui::WidgetType::Checkbox,
+                tr("Lock"),
+                locked,
+            );
+            if lock.clicked() {
+                self.locked = if locked { None } else { Some(layer.clone()) };
+            }
+            let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            icons::swatch(
+                ui.painter(),
+                r.center(),
+                9.0,
+                theme::label_color(actions::label_of(stage, layer).max(0) as usize),
+            );
+            let comp = query::owning_comp(stage, layer)
+                .map(|c| query::display_name_of(stage, &c))
+                .unwrap_or_default();
+            ui.label(
+                egui::RichText::new(format!("{comp} • {}", self.title)).color(color::TEXT_DIM),
+            );
+        });
+        ui.separator();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -273,10 +306,14 @@ pub struct EffectControlsPanel {
     eval: EvalCache,
     title: String,
     controls: crate::effects::controls::ControlsState,
+    /// The layer the panel is locked to (its lock button, AE): it stays on it
+    /// whatever is selected.
+    locked: Option<PrimPath>,
 }
 
 impl Panel for EffectControlsPanel {
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
+        // AE: "Effect Controls <layer>".
         if self.title.is_empty() {
             TabInfo::new(tr("Effect Controls"))
         } else {
@@ -293,20 +330,23 @@ impl Panel for EffectControlsPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
-        let Some(layer) = selected_layer(stage, &session) else {
+        if self.locked.as_ref().is_some_and(|l| !stage.has_prim(l)) {
+            self.locked = None;
+        }
+        // Nothing selected: AE's panel is empty ("Effect Controls (none)").
+        let Some(layer) = self
+            .locked
+            .clone()
+            .or_else(|| selected_layer(stage, &session))
+        else {
             self.title.clear();
-            common::empty_hint(
-                ui,
-                tr("No layer selected"),
-                tr("Select a layer to see its properties."),
-            );
             return;
         };
         self.title = query::display_name_of(stage, &layer);
+        self.layer_header(ui, stage, &layer);
         let now = session.lock().active_time();
         let effects = props::effect_nodes(stage, &layer);
         if effects.is_empty() {
-            common::empty_hint(ui, &self.title.clone(), tr("No effects applied"));
             return;
         }
         // Controls from the effect definitions (07's built-ins, plugins).
@@ -368,6 +408,19 @@ const PREVIEW_MIN_H: f32 = 56.0;
 const PREVIEW_OPTIONS_H: f32 = 240.0;
 
 impl Panel for PreviewPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let session = common::session(cx.resources);
+        if ui
+            .checkbox(
+                &mut session.lock().preview.favor_active_camera,
+                tr("Previews Favor Active Camera"),
+            )
+            .clicked()
+        {
+            ui.close();
+        }
+    }
+
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         // The transport row and the timecode line below it, never cut off.
         TabInfo::new(tr("Preview")).min_size(egui::vec2(PREVIEW_MIN_W, PREVIEW_MIN_H))
@@ -557,6 +610,11 @@ fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::Co
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Previews Favor Active Camera", "预览支持活动摄像机"),
+    ("Audio Options", "音频选项"),
+    ("Decibels (dB)", "分贝 (dB)"),
+    ("Slider Minimum", "滑块最小值"),
+    ("Percentage", "百分比"),
     // Preview panel (AE 26's Time_Palette strings).
     ("Spacebar", "空格键"),
     ("Include:", "包含:"),
@@ -656,7 +714,9 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "audio",
-        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+        bae_ui::PanelKind::new("Audio", |spawn| {
+            Box::new(audio::AudioPanel::from_state(spawn.state))
+        }),
     );
     crate::register_panel(
         app,
