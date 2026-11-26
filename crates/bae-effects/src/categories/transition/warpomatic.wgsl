@@ -18,4 +18,3 @@ fn warp(p:vec2f,t:f32)->vec4f {
     let blend=smoothstep(0.5-width,0.5+width,t);
     return mix(original(p+t*delta),reveal(p+(1.0-t)*delta*select(1.0,-1.0,value(6u)!=1.0)),blend);
 }
-fn evaluate(p:vec2f)->vec4f { return warp(p,value(1u)*0.01); }

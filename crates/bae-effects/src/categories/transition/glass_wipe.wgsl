@@ -14,4 +14,3 @@ fn glass(p:vec2f,t:f32)->vec4f {
     let offset=vec2f(right-left,bottom-top)*value(5u)*u.scale;
     return mix(original(p+offset*k),reveal(p-offset*(1.0-k)),k);
 }
-fn evaluate(p:vec2f)->vec4f { return glass(p,value(1u)*0.01); }

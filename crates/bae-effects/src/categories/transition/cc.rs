@@ -15,30 +15,15 @@ fn layer(p: Params<'_>, roi: IRect) -> IRect {
     roi.union(&image_grid::layer_rect(p.p))
 }
 
-static GLASS_WIPE: Shader = Shader {
-    label: "bae.effects.transition.glass_wipe",
+static SHADER: Shader = Shader {
+    label: "bae.effects.transition.cc",
     source: concat!(
         include_str!("../../effects/sampled.wgsl"),
         include_str!("sampling.wgsl"),
-        include_str!("glass_wipe.wgsl")
-    ),
-};
-
-static TWISTER: Shader = Shader {
-    label: "bae.effects.transition.twister",
-    source: concat!(
-        include_str!("../../effects/sampled.wgsl"),
-        include_str!("sampling.wgsl"),
-        include_str!("twister.wgsl")
-    ),
-};
-
-static WARPOMATIC: Shader = Shader {
-    label: "bae.effects.transition.warpomatic",
-    source: concat!(
-        include_str!("../../effects/sampled.wgsl"),
-        include_str!("sampling.wgsl"),
-        include_str!("warpomatic.wgsl")
+        include_str!("glass_wipe.wgsl"),
+        include_str!("twister.wgsl"),
+        include_str!("warpomatic.wgsl"),
+        include_str!("cc.wgsl")
     ),
 };
 
@@ -50,9 +35,7 @@ pub(super) fn register(registry: &mut Registry) {
 }
 
 fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
-    for shader in [&GLASS_WIPE, &TWISTER, &WARPOMATIC] {
-        shader.kernel(rt, format)?;
-    }
+    SHADER.kernel(rt, format)?;
     Ok(())
 }
 
@@ -99,7 +82,7 @@ fn cc_glass_wipe() -> Builtin {
         (
             Arc::new(Sampled {
                 def,
-                shader: &GLASS_WIPE,
+                shader: &SHADER,
                 mode: 0,
                 inputs: &[(2, true), (3, true)],
                 read: layer,
@@ -146,7 +129,7 @@ fn cc_twister() -> Builtin {
         (
             Arc::new(Sampled {
                 def,
-                shader: &TWISTER,
+                shader: &SHADER,
                 mode: 1,
                 inputs: &[(1, true)],
                 read: layer,
@@ -229,7 +212,7 @@ fn cc_warpomatic() -> Builtin {
         (
             Arc::new(Sampled {
                 def,
-                shader: &WARPOMATIC,
+                shader: &SHADER,
                 mode: 2,
                 inputs: &[(2, true)],
                 read: layer,
