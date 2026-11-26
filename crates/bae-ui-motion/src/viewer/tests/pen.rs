@@ -218,3 +218,29 @@ fn command_makes_the_pen_the_selection_tool() {
         "the tool stays the Pen"
     );
 }
+
+#[test]
+fn vertex_tool_can_add_a_vertex_to_only_the_current_mask_key() {
+    let mut h = H::new();
+    let solid = h.layer("solid");
+    h.run(
+        "mask.create",
+        json!({"layer": solid, "kind":"rect","position":[200.0,150.0],"size":[200.0,100.0]}),
+    );
+    let mask = h.children(&solid.child("masks").unwrap())[0].clone();
+    h.run(
+        "attr.set_animated",
+        json!({"path":mask, "attr":"path","animated":true,"time":0}),
+    );
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set("composition.preserve_constant_vertex_feather_count", false);
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
+    h.select(&[&solid]);
+    h.tools().lock().set(Tool::AddVertex);
+    let actions = h.click(200.0, 100.0, Modifiers::NONE);
+    let args = one(&actions, "path.set_vertices");
+    assert_eq!(args["vertices"].as_array().unwrap().len(), 5);
+    assert!(args.get("topology").is_none());
+    h.apply(&actions);
+}

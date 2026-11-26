@@ -225,10 +225,35 @@ pub(super) fn set_vertices(
     prim: &PrimPath,
     path: &BezierPath,
 ) {
+    set_vertices_with_edit(cx, session, info, prim, path, None);
+}
+
+pub(super) fn edit_only_current_mask(cx: &PanelContext<'_>, prim: &PrimPath) -> bool {
+    cx.stage
+        .prim(prim)
+        .is_some_and(|v| v.is_a(&bae_model::PrimType::MASK))
+        && !crate::prefs::current(cx.resources)
+            .bool("composition.preserve_constant_vertex_feather_count")
+}
+
+pub(super) fn set_vertices_with_edit(
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    info: &CompInfo,
+    prim: &PrimPath,
+    path: &BezierPath,
+    edit: Option<bae_motion::path::MaskTopologyEdit>,
+) {
     let time = session.lock().time(&info.path);
     let mut params = serde_json::to_value(path).unwrap_or_default();
     params["path"] = json!(prim);
     params["time"] = json!(query::to_key_time(cx.stage, prim, time));
+    if let Some(edit) = edit
+        && crate::prefs::current(cx.resources)
+            .bool("composition.preserve_constant_vertex_feather_count")
+    {
+        params["topology"] = json!(edit);
+    }
     cx.invoke_with("path.set_vertices", params);
 }
 
@@ -262,6 +287,8 @@ pub(super) fn nudge(
 /// command each; AE keeps at least one vertex).
 pub(super) fn delete(
     cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    info: &CompInfo,
     paths: &[EditablePath],
     sel: &VertexSelection,
 ) -> bool {
@@ -288,9 +315,14 @@ pub(super) fn delete(
         path = bae_motion::path::remove(&path, i);
     }
     // One undo step: the whole path at once.
-    let mut params = serde_json::to_value(&path).unwrap_or_default();
-    params["path"] = json!(p.prim);
-    cx.invoke_with("path.set_vertices", params);
+    set_vertices_with_edit(
+        cx,
+        session,
+        info,
+        &p.prim,
+        &path,
+        Some(bae_motion::path::MaskTopologyEdit::RemoveVertices(idx)),
+    );
     true
 }
 
