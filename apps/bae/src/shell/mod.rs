@@ -447,6 +447,26 @@ impl Shell {
             })
         };
         self.app.insert_resource(gpu.clone());
+        // The UI thread never waits for the warm-up (see `warm_up`).
+        bae_render::set_interactive_thread(true);
+        {
+            let tasks = self
+                .app
+                .get_registry::<dyn bae_gpu::WarmUp>()
+                .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
+                .unwrap_or_default();
+            // Frames drawn without something still warming up are incomplete
+            // (not remembered by the viewers): repaint when work finishes.
+            let proxy = std::sync::Mutex::new(self.proxy.clone());
+            bae_gpu::warm_up::set_redraw(move || {
+                if let Ok(proxy) = proxy.lock() {
+                    let _ = proxy.send_event(UserEvent::Repaint {
+                        delay: Duration::ZERO,
+                    });
+                }
+            });
+            bae_gpu::warm_up::spawn(gpu.clone(), tasks);
+        }
 
         let egui_ctx = egui::Context::default();
         bae_ui::theme::apply(&egui_ctx);
@@ -1256,7 +1276,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             && let Some(pad) = numpad::key(code, &key.logical_key)
         {
             // egui-winit sends no event for numpad `*`: the modifiers held now.
-            let modifiers = view.egui_ctx.input(|i| i.modifiers);
+            let modifiers = numpad::current_modifiers(
+                &view.egui_state.egui_input().events,
+                view.egui_ctx.input(|i| i.modifiers),
+            );
             numpad::rewrite(
                 &mut view.egui_state.egui_input_mut().events,
                 before,

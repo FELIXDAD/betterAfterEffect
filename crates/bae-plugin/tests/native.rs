@@ -347,6 +347,22 @@ fn user_plugins_run_out_of_process_unless_trusted() {
     assert!(trusted.out_of_process("c.d", Scope::User, Isolation::InProcess));
 }
 
+fn render_runner(
+    runner: &bae_plugin::native::RunnerClient,
+    frame: &FrameRequest,
+    input: &[u8],
+    output: &mut [u8],
+) -> Result<RenderOut, CallError> {
+    runner.render(
+        frame,
+        |dst| dst.copy_from_slice(input),
+        |result, src| {
+            output.copy_from_slice(src);
+            result
+        },
+    )
+}
+
 #[test]
 fn rust_example_renders_out_of_process() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -379,8 +395,7 @@ fn rust_example_renders_out_of_process() {
         ParamWire::Float(100.0),
     ];
     let runner = native.runner().unwrap();
-    let out = runner
-        .render(&frame(0, params, rect), &input, &mut output)
+    let out = render_runner(runner, &frame(0, params, rect), &input, &mut output)
         .expect("render out of process");
     assert_eq!(out, RenderOut::Rendered(rect));
     for y in 0..3 {
@@ -398,6 +413,39 @@ fn rust_example_renders_out_of_process() {
     }
     let pid = runner.pid().expect("runner running");
     assert_ne!(pid, std::process::id());
+    if std::thread::available_parallelism().is_ok_and(|n| n.get() > 1) {
+        // Hold one mapped input while the same CONCURRENT effect completes
+        // another frame. Each render must see only its own pixels.
+        let params = vec![
+            ParamWire::Color(dark),
+            ParamWire::Color(light),
+            ParamWire::Float(0.0),
+        ];
+        let frame = frame(0, params, rect);
+        let (started, busy) = std::sync::mpsc::channel();
+        let (complete, resume) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                runner.render(
+                    &frame,
+                    move |dst| {
+                        dst.fill(0);
+                        started.send(()).unwrap();
+                        resume
+                            .recv_timeout(std::time::Duration::from_secs(10))
+                            .unwrap();
+                    },
+                    |_, pixels| assert!(pixels.iter().all(|v| *v == 0)),
+                )
+            });
+            busy.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+            render_runner(runner, &frame, &input, &mut output).unwrap();
+            complete.send(()).unwrap();
+            first.join().unwrap().unwrap();
+            assert!(close(pixel(&output, rect, 2, 1), source(2, 1), 1e-5));
+        });
+    }
     // Grow on the next frame, then reuse the same segment for a smaller one.
     for rect in [[0, 0, 64, 12], [0, 0, 4, 2]] {
         let input = image(rect, source);
@@ -407,9 +455,7 @@ fn rust_example_renders_out_of_process() {
             ParamWire::Color(light),
             ParamWire::Float(0.0),
         ];
-        let out = runner
-            .render(&frame(0, params, rect), &input, &mut output)
-            .unwrap();
+        let out = render_runner(runner, &frame(0, params, rect), &input, &mut output).unwrap();
         assert_eq!(out, RenderOut::Rendered(rect));
         assert!(close(pixel(&output, rect, 2, 1), source(2, 1), 1e-5));
         assert_eq!(runner.pid(), Some(pid));
@@ -437,12 +483,12 @@ fn crashes_and_hard_errors_never_reach_the_host() {
     let mut output = vec![0u8; input.len()];
     let mode = |m: i32| frame(0, vec![ParamWire::Int(m)], rect);
 
-    runner.render(&mode(0), &input, &mut output).expect("copy");
+    render_runner(runner, &mode(0), &input, &mut output).expect("copy");
     assert!(close(pixel(&output, rect, 2, 1), source(2, 1), 0.0));
     let first = runner.pid().unwrap();
 
     // An error status is reported with the plugin's message; the runner lives on.
-    let e = runner.render(&mode(2), &input, &mut output).unwrap_err();
+    let e = render_runner(runner, &mode(2), &input, &mut output).unwrap_err();
     assert!(
         matches!(&e, CallError::Status { message, .. } if message.contains("mode 2 always fails")),
         "{e:?}"
@@ -450,7 +496,7 @@ fn crashes_and_hard_errors_never_reach_the_host() {
     assert_eq!(runner.pid(), Some(first));
 
     // A segfault kills only the runner; the next call starts a new one.
-    let e = runner.render(&mode(1), &input, &mut output).unwrap_err();
+    let e = render_runner(runner, &mode(1), &input, &mut output).unwrap_err();
     assert!(
         matches!(
             e,
@@ -462,13 +508,11 @@ fn crashes_and_hard_errors_never_reach_the_host() {
         "{e:?}"
     );
     assert_eq!(runner.pid(), None);
-    runner
-        .render(&mode(0), &input, &mut output)
-        .expect("restarted");
+    render_runner(runner, &mode(0), &input, &mut output).expect("restarted");
     assert_ne!(runner.pid(), Some(first));
 
     // abort() too; the third crash within a minute disables the plugin.
-    let e = runner.render(&mode(3), &input, &mut output).unwrap_err();
+    let e = render_runner(runner, &mode(3), &input, &mut output).unwrap_err();
     assert!(
         matches!(
             e,
@@ -479,12 +523,12 @@ fn crashes_and_hard_errors_never_reach_the_host() {
         ),
         "{e:?}"
     );
-    let e = runner.render(&mode(1), &input, &mut output).unwrap_err();
+    let e = render_runner(runner, &mode(1), &input, &mut output).unwrap_err();
     assert!(
         matches!(e, CallError::Crashed { disabled: true, .. }),
         "{e:?}"
     );
-    let e = runner.render(&mode(0), &input, &mut output).unwrap_err();
+    let e = render_runner(runner, &mode(0), &input, &mut output).unwrap_err();
     assert_eq!(e, CallError::Disabled);
     host.unload("com.example.crash", &mut reg);
 }

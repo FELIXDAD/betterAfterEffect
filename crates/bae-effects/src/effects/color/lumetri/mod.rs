@@ -1,7 +1,10 @@
 mod definition;
 
 use crate::blur::{self, Edge};
-use crate::effects::{image_grid, lut::LutCache};
+use crate::effects::{
+    image_grid,
+    lut::{LutCache, LutSource},
+};
 use crate::gpu::{self, Resource, UniformWriter};
 use crate::{Builtin, EffectTarget, TargetEffect, params::Params, rust_builtin};
 use bae_model::{EffectDef, Value};
@@ -369,7 +372,9 @@ impl TargetEffect for Lumetri {
         let mut image = input.clone();
         if v.b(3) {
             if let Some(Value::Bytes(data)) = p.value(125) {
-                image = self.lut.apply(target, p, &image, read, data, 1.)?;
+                image = self
+                    .lut
+                    .apply(target, p, &image, read, LutSource::File(data), 1.)?;
             }
             if [7, 8, 11, 12, 13, 14, 15, 16]
                 .iter()
@@ -397,9 +402,14 @@ impl TargetEffect for Lumetri {
         if v.b(23)
             && let Some(Value::Bytes(data)) = p.value(126)
         {
-            image = self
-                .lut
-                .apply(target, p, &image, read, data, (v.f(26) * 0.01) as f32)?;
+            image = self.lut.apply(
+                target,
+                p,
+                &image,
+                read,
+                LutSource::File(data),
+                (v.f(26) * 0.01) as f32,
+            )?;
         }
         let creative = v.b(23)
             && ([28, 29, 30].iter().any(|&id| v.f(id) != 0.)

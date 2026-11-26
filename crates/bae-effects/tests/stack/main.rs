@@ -149,6 +149,7 @@ mod generate;
 mod noise_grain;
 mod perspective;
 mod relative_points;
+mod simulation;
 mod stylize;
 
 fn assert_reference_points(rows: &[(&str, u32, [f64; 2])]) {

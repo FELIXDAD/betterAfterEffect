@@ -207,7 +207,7 @@ impl AppMenu {
                 }
                 continue;
             }
-            let sub = Submenu::new(native_text(tr(title)), true);
+            let sub = Submenu::new(menu_text(tr(title), menu_mnemonic(title)), true);
             append_entries(&sub, entries, &mut items)?;
             menu.append(&sub)?;
         }
@@ -379,6 +379,42 @@ impl AppMenu {
 /// A title as the native menu needs it: muda reads a single `&` as a mnemonic
 /// marker and drops it (Windows and macOS), so "Effects & Presets" showed as
 /// "Effects  Presets" (#226); `&&` shows one `&`.
+/// AE's Windows mnemonic of a menu or submenu (Alt+letter).
+fn menu_mnemonic(title: &str) -> Option<char> {
+    bae_ui_motion::catalog::menu_mnemonic(title)
+}
+
+/// A title as the native menu shows it, with AE's mnemonic on Windows
+/// (`文件(&F)`, `&File`); macOS menus have none.
+fn menu_text(text: &str, mnemonic: Option<char>) -> String {
+    let zh = bae_ui::i18n::lang() == bae_ui::Lang::Zh;
+    mnemonic_text(text, mnemonic.filter(|_| cfg!(windows)), zh)
+}
+
+/// `text` (escaped for the native menu) with `mnemonic`: AE's Chinese menus
+/// put `(&X)` after the title, before a trailing `...`; English ones mark the
+/// letter in the word (`Effec&t`), else add ` (&X)`.
+fn mnemonic_text(text: &str, mnemonic: Option<char>, zh: bool) -> String {
+    let escaped = native_text(text);
+    let Some(c) = mnemonic else {
+        return escaped;
+    };
+    if zh {
+        let (base, tail) = match escaped.strip_suffix("...") {
+            Some(base) => (base, "..."),
+            None => (escaped.as_str(), ""),
+        };
+        return format!("{base}(&{c}){tail}");
+    }
+    match escaped
+        .char_indices()
+        .find(|(_, ch)| ch.eq_ignore_ascii_case(&c))
+    {
+        Some((i, _)) => format!("{}&{}", &escaped[..i], &escaped[i..]),
+        None => format!("{escaped} (&{c})"),
+    }
+}
+
 fn native_text(text: &str) -> String {
     text.replace('&', "&&")
 }
@@ -418,7 +454,7 @@ fn append_entries(
                 let item = if spec.is_checkable() {
                     let item = CheckMenuItem::with_id(
                         menu_id,
-                        native_text(spec.display_title()),
+                        menu_text(spec.display_title(), spec.mnemonic),
                         true,
                         false,
                         None,
@@ -426,8 +462,12 @@ fn append_entries(
                     menu.append(&item)?;
                     Native::Check(item)
                 } else {
-                    let item =
-                        MenuItem::with_id(menu_id, native_text(spec.display_title()), true, None);
+                    let item = MenuItem::with_id(
+                        menu_id,
+                        menu_text(spec.display_title(), spec.mnemonic),
+                        true,
+                        None,
+                    );
                     menu.append(&item)?;
                     Native::Plain(item)
                 };
@@ -444,7 +484,10 @@ fn append_entries(
             }
             MenuEntry::Submenu { title, entries } => {
                 // AE shows a submenu with nothing in it (History) greyed.
-                let sub = Submenu::new(native_text(tr(title)), !entries.is_empty());
+                let sub = Submenu::new(
+                    menu_text(tr(title), menu_mnemonic(title)),
+                    !entries.is_empty(),
+                );
                 append_entries(&sub, entries, items)?;
                 menu.append(&sub)?;
             }
@@ -726,6 +769,38 @@ mod tests {
 
     /// #226: titles with `&` (Effects & Presets, Blur & Sharpen, Startup & Repair…)
     /// keep it in the native menu.
+    #[test]
+    fn windows_menus_get_ae_mnemonics() {
+        assert_eq!(mnemonic_text("文件", Some('F'), true), "文件(&F)");
+        assert_eq!(
+            mnemonic_text("打开项目...", Some('O'), true),
+            "打开项目(&O)..."
+        );
+        assert_eq!(mnemonic_text("Effect", Some('T'), false), "Effec&t");
+        assert_eq!(mnemonic_text("File", Some('F'), false), "&File");
+        assert_eq!(
+            mnemonic_text("Effects & Presets", None, false),
+            "Effects && Presets"
+        );
+        // Every top-level AE menu has its letter (the Chinese Window menu has
+        // none in AE 26).
+        let _app = crate::acceptance::build_app();
+        crate::i18n::register_tables();
+        assert_eq!(menu_mnemonic("Window"), None);
+        for (title, letter) in [
+            ("File", 'F'),
+            ("Edit", 'E'),
+            ("Composition", 'C'),
+            ("Layer", 'L'),
+            ("Effect", 'T'),
+            ("Animation", 'A'),
+            ("View", 'V'),
+            ("Help", 'H'),
+        ] {
+            assert_eq!(menu_mnemonic(title), Some(letter), "{title}");
+        }
+    }
+
     #[test]
     fn ampersands_survive_the_native_menu() {
         assert_eq!(native_text("Effects & Presets"), "Effects && Presets");
