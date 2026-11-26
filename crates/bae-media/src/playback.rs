@@ -205,6 +205,10 @@ impl AudioOutput {
     pub fn elapsed(&self) -> Time {
         sample_to_time(self.heard() as i64, self.rate)
     }
+    /// The negotiated device sample rate, in Hz.
+    pub fn sample_rate(&self) -> u32 {
+        self.rate
+    }
     /// The operating system invalidated the audio stream.
     pub fn device_lost(&self) -> bool {
         self.monitor.failed.load(Ordering::Relaxed)
