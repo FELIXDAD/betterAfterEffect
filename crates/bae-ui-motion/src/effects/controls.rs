@@ -155,20 +155,7 @@ fn header(
                 json!({"effects": [moved.0], "index": index}),
             );
         }
-        title.context_menu(|ui| {
-            if ui.button(tr("Reset")).clicked() {
-                reset(cx, effect, now);
-                ui.close();
-            }
-            if ui.button(tr("Duplicate")).clicked() {
-                cx.invoke_with("effect.duplicate", json!({"effects": [effect]}));
-                ui.close();
-            }
-            if ui.button(tr("Remove Effect")).clicked() {
-                cx.invoke_with("effect.remove", json!({"effects": [effect]}));
-                ui.close();
-            }
-        });
+        title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let about = ui.add(egui::Label::new(tr("About...")).sense(Sense::click()));
             egui::Popup::menu(&about).show(|ui| {
@@ -784,4 +771,20 @@ fn hot_number(
         return Num::Commit(v);
     }
     Num::None
+}
+
+/// Context actions shared by the effect header and the flowchart effect icon.
+pub(crate) fn effect_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, effect: &PrimPath, now: Time) {
+    if ui.button(tr("Reset")).clicked() {
+        reset(cx, effect, now);
+        ui.close();
+    }
+    if ui.button(tr("Duplicate")).clicked() {
+        cx.invoke_with("effect.duplicate", json!({"effects": [effect]}));
+        ui.close();
+    }
+    if ui.button(tr("Remove Effect")).clicked() {
+        cx.invoke_with("effect.remove", json!({"effects": [effect]}));
+        ui.close();
+    }
 }

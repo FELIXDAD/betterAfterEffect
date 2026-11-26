@@ -206,3 +206,48 @@ fn stabilization_keeps_both_attachment_points_fixed_in_comp_space() {
         assert!((after - before).length() < 1e-8, "{before} -> {after}");
     }
 }
+
+#[test]
+fn property_tracking_adds_independent_points_and_preserves_active_transform_points() {
+    let mut reg = CommandRegistry::with_builtins();
+    bae_motion::register_commands(&mut reg);
+    let author = AuthorId::new("user:tracker").unwrap();
+    let mut stage = Stage::new();
+    let run = |s: &mut Stage, id: &str, p: Json| reg.execute(s, &author, id, p).unwrap().output;
+    let comp = run(
+        &mut stage,
+        "comp.create",
+        json!({"width":128,"height":128,"fps":30}),
+    )["path"]
+        .clone();
+    let src = run(
+        &mut stage,
+        "layer.create",
+        json!({"comp":comp,"kind":"solid"}),
+    )["path"]
+        .clone();
+    let target = run(
+        &mut stage,
+        "layer.create",
+        json!({"comp":comp,"kind":"solid"}),
+    )["path"]
+        .clone();
+    let track = run(
+        &mut stage,
+        "tracker.create",
+        json!({"layer":src,"center":[32,32],"property_target":[target,"transform:rotation"]}),
+    );
+    let path = PrimPath::new(track.as_str().unwrap()).unwrap();
+    let points = bae_motion::tracker::points(&stage, &path);
+    assert_eq!(points.len(), 2);
+    assert_eq!(
+        bae_motion::tracker::setting(&stage, &path, "position"),
+        Some(Value::Bool(false))
+    );
+    let extra = run(&mut stage, "tracker.add_point", json!({"tracker":track}));
+    let all = bae_motion::tracker::points(&stage, &path);
+    assert_eq!(&all[..2], points.as_slice());
+    assert_eq!(all[2].as_str(), extra.as_str().unwrap());
+    stage.undo(&author).unwrap();
+    assert_eq!(bae_motion::tracker::points(&stage, &path), points);
+}
