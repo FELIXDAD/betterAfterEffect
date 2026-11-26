@@ -701,8 +701,15 @@ impl SettingsDialog {
         let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = draft.bool(p.key);
-                if widgets::checkbox(ui, &mut v, label).changed() {
+                // A setting BAE does not support shows AE's default (greyed;
+                // Mercury Transmit: off), whatever a preferences file saved for
+                // it; the saved value stays.
+                let mut v = if p.unsupported {
+                    matches!(p.default, bae_prefs::DefaultValue::Bool(true))
+                } else {
+                    draft.bool(p.key)
+                };
+                if widgets::checkbox(ui, &mut v, label).changed() && !p.unsupported {
                     self.set(p.key, v);
                 }
             }

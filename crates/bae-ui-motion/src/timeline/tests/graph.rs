@@ -644,3 +644,111 @@ fn graph_editor_shows_layer_markers() {
     assert!(tl.graph_editor().last.markers.is_empty());
     assert!(crate::graph::GraphSettings::default().show_waveforms);
 }
+
+/// #593: a keyframe drag in the Graph Editor, or of layer-bar keyframes, is
+/// evaluated live everywhere (the viewer's evaluator sees the value at the
+/// CTI change during the drag), and the preview stays until the edit lands.
+#[test]
+fn keyframe_drags_are_evaluated_live() {
+    use crate::common::EvalCache;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let layer = h.layer.clone();
+    h.keys(ROT, &[(0.0, float(0.0)), (1.0, float(90.0))]);
+    let mut eval = EvalCache::default();
+    // Rotation as the viewer evaluates it at `secs`.
+    let rot_at = |h: &H, eval: &mut EvalCache, secs: f64| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("composition");
+        let cx = PanelContext::new(
+            &id,
+            "composition",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        crate::viewer::live_evaluator(eval, &cx, &h.session())
+            .evaluate_attribute(&h.stage, &layer, ROT, Time::from_seconds(secs))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap()
+    };
+    assert_eq!(rot_at(&h, &mut eval, 1.0), 90.0);
+    // Graph Editor: drag the 1 s key up to about 150°, check mid-drag.
+    let mut tl = h.graph();
+    let k = h.key(ROT, 1.0);
+    let from = key_pos(&mut tl, &k, 0);
+    let va = vaxis(&mut tl, ROT);
+    let to = pos2(from.x, va.y(150.0));
+    h.frame(&mut tl, vec![Event::PointerMoved(from)], Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![button(from, true, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    for i in 1..=4 {
+        let p = from + (to - from) * (i as f32 / 4.0);
+        h.frame(&mut tl, vec![Event::PointerMoved(p)], Modifiers::NONE);
+    }
+    let live = rot_at(&h, &mut eval, 1.0);
+    assert!((live - 150.0).abs() < 5.0, "live {live}");
+    let r = h.frame(
+        &mut tl,
+        vec![button(to, false, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    assert_eq!(r.invocations.len(), 1);
+    // Sent, not run yet: still shown.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!((rot_at(&h, &mut eval, 1.0) - live).abs() < 1e-6);
+    h.apply(&r);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(h.session().lock().key_preview.is_none());
+    assert!((rot_at(&h, &mut eval, 1.0) - live).abs() < 1e-6);
+
+    // Layer bars: drag the 1 s key to 2 s; at 1 s the value is then halfway.
+    h.session().lock().graph_editor = false;
+    let mut tl = h.bars();
+    let k = h.key(ROT, 1.0);
+    h.session().lock().selected_keys = vec![k.clone()];
+    let from = bar_key(&tl, &k);
+    let to = pos2(x_of(&tl, 2.0), from.y);
+    h.frame(&mut tl, vec![Event::PointerMoved(from)], Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![button(from, true, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    for i in 1..=4 {
+        let p = from + (to - from) * (i as f32 / 4.0);
+        h.frame(&mut tl, vec![Event::PointerMoved(p)], Modifiers::NONE);
+    }
+    let mid = rot_at(&h, &mut eval, 1.0);
+    assert!(
+        (mid - live / 2.0).abs() < live * 0.1,
+        "{mid} vs {}",
+        live / 2.0
+    );
+    let _ = comp;
+}
+
+/// #466: the Timeline's empty-space menu runs Reveal Composition in Project
+/// and Composition Flowchart (AE enables both).
+#[test]
+fn reveal_comp_in_project_and_flowchart() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let mut tl = TimelinePanel::default();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let r = h.action(&mut tl, Invocation::new(ids::REVEAL_COMP_IN_PROJECT));
+    assert!(r.open.iter().any(|p| p.kind() == "project"), "{:?}", r.open);
+    assert_eq!(h.session().lock().selected_items, vec![comp]);
+    let r = h.action(&mut tl, Invocation::new(ids::COMP_FLOWCHART));
+    assert!(
+        r.open.iter().any(|p| p.kind() == "flowchart"),
+        "{:?}",
+        r.open
+    );
+}
