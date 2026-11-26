@@ -605,6 +605,7 @@ fn gpu_preview_renders_a_value_drag_in_the_background() {
     preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
     let own = shown(&registry, &preview);
     h.session().lock().scrub = Some(crate::session::Scrub {
+        auto_key: false,
         path: solid.clone(),
         attr: "transform:opacity".into(),
         value: Value::Float(0.0),
@@ -654,6 +655,7 @@ fn value_drag_reads_samples_on_the_live_thread() {
     let mut eval = bae_anim::Evaluator::new();
     eval.set_image_samples(Some(preview.samples().clone()));
     h.session().lock().scrub = Some(crate::session::Scrub {
+        auto_key: false,
         path: solid.clone(),
         attr: "transform:opacity".into(),
         value: Value::Float(50.0),
