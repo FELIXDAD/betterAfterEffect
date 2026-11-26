@@ -478,7 +478,11 @@ impl Transport for HubTransport {
         let written = self.write_out();
         loop {
             match self.ws.read() {
-                Ok(WsMessage::Binary(bytes)) => match Message::decode(&bytes) {
+                // The payload is not copied when the buffer is ours alone: a
+                // message assembled from frames (every large one from this
+                // build). A single frame shares tungstenite's read buffer and
+                // is copied once.
+                Ok(WsMessage::Binary(bytes)) => match Message::decode_owned(bytes.into()) {
                     Ok(m) => return Ok(Some(m)),
                     // Newer message types and garbage are skipped.
                     Err(_) => continue,

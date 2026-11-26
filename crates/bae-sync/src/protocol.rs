@@ -5,6 +5,7 @@
 //! message as one WebSocket binary message.
 
 use std::fmt;
+use std::ops::Range;
 
 use bae_model::SublayerId;
 use bae_model::loro::VersionVector;
@@ -289,14 +290,8 @@ impl Message {
                 }
             }
             TAG_UPDATES | TAG_SNAPSHOT => {
-                let doc = DocKey::parse(r.str()?)?;
-                let version = r.vv()?;
-                let data = r.bytes()?.to_vec();
-                if tag == TAG_UPDATES {
-                    Message::Updates { doc, version, data }
-                } else {
-                    Message::Snapshot { doc, version, data }
-                }
+                let (doc, version, data) = r.data_fields()?;
+                data_message(tag, doc, version, bytes[data].to_vec())
             }
             TAG_SNAPSHOT_REQUEST => Message::SnapshotRequest {
                 doc: DocKey::parse(r.str()?)?,
@@ -320,6 +315,34 @@ impl Message {
             }
             other => return Err(SyncError::UnknownMessage(other)),
         })
+    }
+
+    /// [`decode`](Self::decode) from an owned buffer: the payload of `Updates`
+    /// and `Snapshot` keeps the buffer (moved to its start) instead of being
+    /// copied out of it, so a large received message is not held twice.
+    #[cfg(any(feature = "hub", test))]
+    pub(crate) fn decode_owned(mut bytes: Vec<u8>) -> Result<Self, SyncError> {
+        let mut r = Reader {
+            bytes: &bytes,
+            pos: 0,
+        };
+        let tag = r.u8()?;
+        if tag != TAG_UPDATES && tag != TAG_SNAPSHOT {
+            return Self::decode(&bytes);
+        }
+        let (doc, version, data) = r.data_fields()?;
+        bytes.truncate(data.end);
+        bytes.drain(..data.start);
+        Ok(data_message(tag, doc, version, bytes))
+    }
+}
+
+/// An `Updates` (`tag` [`TAG_UPDATES`]) or `Snapshot` message.
+fn data_message(tag: u8, doc: DocKey, version: VersionVector, data: Vec<u8>) -> Message {
+    if tag == TAG_UPDATES {
+        Message::Updates { doc, version, data }
+    } else {
+        Message::Snapshot { doc, version, data }
     }
 }
 
@@ -396,6 +419,15 @@ impl<'a> Reader<'a> {
         VersionVector::decode(self.bytes()?)
             .map_err(|e| SyncError::Decode(format!("version vector: {e}")))
     }
+
+    /// The fields of `Updates` / `Snapshot` after the tag; the payload as its
+    /// position in the message.
+    fn data_fields(&mut self) -> Result<(DocKey, VersionVector, Range<usize>), SyncError> {
+        let doc = DocKey::parse(self.str()?)?;
+        let version = self.vv()?;
+        let len = self.bytes()?.len();
+        Ok((doc, version, self.pos - len..self.pos))
+    }
 }
 
 #[cfg(test)]
@@ -461,6 +493,7 @@ mod tests {
         for m in msgs {
             let bytes = m.encode();
             assert_eq!(Message::decode(&bytes).unwrap(), m);
+            assert_eq!(Message::decode_owned(bytes.clone()).unwrap(), m);
             // The two-part encoding is the same bytes.
             let (head, data) = m.clone().into_encoded_parts();
             assert_eq!([head, data].concat(), bytes);
@@ -469,14 +502,39 @@ mod tests {
             let mut longer = bytes.clone();
             longer.extend_from_slice(&[9, 9, 9]);
             assert_eq!(Message::decode(&longer).unwrap(), m);
+            assert_eq!(Message::decode_owned(longer).unwrap(), m);
             // Every truncation is an error, never a panic.
             for cut in 0..bytes.len() {
                 assert!(Message::decode(&bytes[..cut]).is_err(), "cut at {cut}");
+                assert!(Message::decode_owned(bytes[..cut].to_vec()).is_err());
             }
         }
         assert!(matches!(
             Message::decode(&[200, 1, 2]),
             Err(SyncError::UnknownMessage(200))
         ));
+        assert!(matches!(
+            Message::decode_owned(vec![200, 1, 2]),
+            Err(SyncError::UnknownMessage(200))
+        ));
+    }
+
+    /// The payload of a received data message stays in the received buffer.
+    #[test]
+    fn decode_owned_does_not_copy_the_payload() {
+        let msg = Message::Snapshot {
+            doc: DocKey::parse("root").unwrap(),
+            version: vv_with_ops(),
+            data: (0..=255).cycle().take(100_000).collect(),
+        };
+        let mut bytes = msg.encode();
+        bytes.extend_from_slice(&[9, 9, 9]);
+        let buffer = bytes.as_ptr();
+        let got = Message::decode_owned(bytes).unwrap();
+        assert_eq!(got, msg);
+        let Message::Snapshot { data, .. } = got else {
+            unreachable!()
+        };
+        assert_eq!(data.as_ptr(), buffer, "the payload was copied");
     }
 }

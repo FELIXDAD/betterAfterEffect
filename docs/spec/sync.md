@@ -124,7 +124,11 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
   - 限制 `backlog()`：放不下新消息时 `send` 返回 `SyncError::Hub("write buffer full: the peer is not reading …")`，这条消息不入队，链路要断开重连。Relay 随即断开这个连接（`RelayOutcome::disconnected`）。
   - 会话正常情况下碰不到它：有背压，队列里最多约 1 MiB 加一条消息，再加排在后面的小消息（`Hello`、在线状态）。不读数据的对端不会让内存一直涨，Relay 只是先不给它发修改；它恢复读以后会补齐。只有它长期不读、小消息越积越多时才会到上限。
   - 默认是 `max_message_size` + 16 MiB（`HubLimits::WRITE_BUFFER_MARGIN`）。下限 `min_write_buffer_size()` 是一条最大的消息 + 2 MiB（会话开始发它时队列里可能还有 1 MiB，后面还会排小消息）；设得更小时自动提到下限，实际生效的值是 `write_buffer_cap()`。
-- **内存**（每个连接）：发送队列最多约一条消息 + 1 MiB；tungstenite 的写缓冲最多一帧（256 KiB），读缓冲最多一帧加 128 KiB（旧版本发来的单帧消息是整条消息那么大）。收一条大消息时临时占它的两倍左右（拼帧、解码），用完就释放。Hub 上 N 个客户端同时下载同一个大工程层时，最坏是 N 份；没有全 Hub 的总预算。
+- **内存**（每个连接），发送和接收分开算：
+  - 发送：`HubTransport` 的队列最多约 1 MiB 加一条消息（会话在积压不超过 `max_backlog` 时才开始下一个文档，见 2.4），后面可能还排着几条小消息。大消息的数据就是导出的那块内存，不另外复制。客户端外面的 `ThreadedTransport` 交给后台线程的部分也算在 `backlog()` 里。tungstenite 的写缓冲最多一帧（256 KiB）。
+  - 接收：收一条大消息时最多临时占它大小的两倍左右，收完就释放（之后导入文档另算）。新版本发来的消息是一串 256 KiB 的帧，tungstenite 把它们拼成一整块（按倍数扩容，扩容时新旧两块可能同时存在）；解码直接用这一块（`Message::decode_owned`），不再复制数据。旧版本发来的单帧消息先整个读进 tungstenite 的读缓冲，解码时复制一份，也是两倍。
+  - tungstenite 的读缓冲平时最多一帧加 128 KiB。它不会缩小：收过旧版本的一个大的单帧消息后，这个连接存续期间一直占着那么大。
+  - 合起来，一个连接最坏约"一条消息 + 1 MiB"（发）加"两条消息"（收）。Hub 上 N 个客户端同时下载同一个大工程层时，最坏是 N 份；没有全 Hub 的总预算。
 - **收发计数**：`bytes_received()` / `bytes_sent()` 是这个连接收发过的字节数（含握手）。大消息在慢链路上要传很久，期间没有完整的消息；Hub 用收到的字节判断连接还活着（`services/bae-hub` 的 `PeerLink`）。
 - 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。
 - 上限和背压的验证（`tests/hub_limits.rs`，回环上的真实 WebSocket）：
