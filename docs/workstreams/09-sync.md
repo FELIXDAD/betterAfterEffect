@@ -81,6 +81,7 @@
   - 没做：Hub 没有全局的内存预算（N 个客户端同时下载同一个大工程层，最坏 N 份）；一个文档的增量超过消息上限时仍然同步不了（要协议支持分块）。
 - 第二次审查后的修改（同一分支）：
   - **Hub 关闭、卸载工程时丢修改**：存盘对端（工程目录）也受了背压限制，每 250 ms 只写约 1.5 MiB，最后一次 `pump` 只写得进 1 MiB 以内，其余的丢了（24 个 512 KiB 的文档丢约 20 个）。现在存盘对端 `max_backlog = usize::MAX`（不是慢链路，队列在进程内存里）；关闭前去掉节流和背压，`pump` 到 `Relay::unsynced(store)` 为空（新 API，最多 8 次）。测试：`bae-hub` 的 `stopping_the_hub_saves_every_edit`、`unloading_an_idle_project_saves_every_edit`（直接读工程目录）；`tests/relay.rs` 的 `unsynced_lists_what_a_peer_was_not_sent_yet`。两条 Hub 测试在修改前都失败，两半修改各自都能让它们通过。
+  - **和旧版本不兼容**：上一轮把接收的单帧上限设成了 16 MiB，而旧版本（`origin/dev`，tungstenite 默认设置）一条消息只发一帧、收的消息最大 64 MiB。旧 Hub 转发来的 16–64 MiB 的消息，新客户端在帧头就拒收，重连后又是同一帧。现在单帧上限又等于消息上限（只读连接两者都是 16 MiB）；自己发送仍然是 256 KiB 的帧。超限的报错不再提示"两端用同样的 HubLimits"（只读连接、旧版本也会触发），改成说明发送方的上限更大。测试：`tests/hub_limits.rs` 的 `a_single_large_frame_from_an_older_build_is_received`（用 tungstenite 默认设置模拟旧 Hub、旧客户端，各发一个 20 MiB 的帧），修改前失败。
 
 ## 请求（其他工作流在这里留言）
 

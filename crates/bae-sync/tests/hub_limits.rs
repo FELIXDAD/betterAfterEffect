@@ -189,6 +189,72 @@ fn messages_over_16_mib_go_through_both_ways() {
     assert!(got == msg, "hub → client: the snapshot arrived damaged");
 }
 
+/// Pump `to` until a message arrives.
+fn receive(to: &mut HubTransport) -> Result<Message, SyncError> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some(m) = to.recv()? {
+            return Ok(m);
+        }
+        assert!(Instant::now() < deadline, "message not delivered");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Builds before `HubLimits` use tungstenite's default settings: they send
+/// each message as one frame and accept messages up to 64 MiB, so a hub of
+/// that kind relays a 20 MiB edit to a new client as a single 20 MiB frame.
+/// New builds accept frames up to their message limit (they only send 256 KiB
+/// frames themselves). Before, they refused frames over 16 MiB at the frame
+/// header, and the client reconnected and got the same frame again, forever.
+#[test]
+fn a_single_large_frame_from_an_older_build_is_received() {
+    let msg = snapshot(noise(20 << 20, 5));
+    let bytes = msg.encode();
+    assert!(bytes.len() > 16 << 20);
+
+    // Old hub → new client.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let old_hub = std::thread::spawn({
+        let bytes = bytes.clone();
+        move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut ws = tungstenite::accept(stream).unwrap();
+            ws.send(tungstenite::Message::Binary(bytes.into())).unwrap();
+            // Until the client hangs up.
+            while ws.read().is_ok() {}
+        }
+    });
+    let url = format!("ws://{addr}/projects/film");
+    let mut client = HubTransport::connect(&url, None, Duration::from_secs(5)).unwrap();
+    let got = receive(&mut client).expect("old hub → new client");
+    assert!(
+        got == msg,
+        "old hub → new client: the snapshot arrived damaged"
+    );
+    drop(client);
+    old_hub.join().unwrap();
+
+    // Old client → new hub.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("ws://{}/projects/film", listener.local_addr().unwrap());
+    let old_client = std::thread::spawn(move || {
+        let (mut ws, _) = tungstenite::connect(url).unwrap();
+        ws.send(tungstenite::Message::Binary(bytes.into())).unwrap();
+        while ws.read().is_ok() {}
+    });
+    let (stream, _) = listener.accept().unwrap();
+    let mut hub = HubTransport::accept(stream, None).unwrap();
+    let got = receive(&mut hub).expect("old client → new hub");
+    assert!(
+        got == msg,
+        "old client → new hub: the snapshot arrived damaged"
+    );
+    drop(hub);
+    old_client.join().unwrap();
+}
+
 #[test]
 fn messages_over_the_limit_are_refused() {
     // The sender checks its own limit before sending anything; only that

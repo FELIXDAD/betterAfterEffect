@@ -9,9 +9,10 @@ use crate::config::Access;
 /// Largest message accepted from a read-only connection. Its `Updates` and
 /// `Snapshot`s are dropped anyway, so it need not make the hub buffer messages of
 /// the full size (`HubLimits::max_message_size`, 256 MiB). 16 MiB still fits
-/// the `Hello` of a very large project, and is what every connection accepted
-/// before `HubLimits`. A read-only client that sends a larger edit is
-/// disconnected (and reconnects).
+/// the `Hello` of a very large project, and is the largest message builds
+/// before `HubLimits` could exchange (one frame each, frames up to 16 MiB).
+/// Frames are limited to the same size. A read-only client that sends a larger
+/// edit is disconnected (and reconnects).
 pub(crate) const READ_ONLY_MAX_MESSAGE: usize = 16 << 20;
 
 /// Wraps the WebSocket ([`HubTransport`], non-blocking after the handshake):

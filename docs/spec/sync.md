@@ -115,20 +115,21 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - **消息大小上限**（`HubLimits`）：
   - `connect_with(url, token, timeout, limits)`、`accept_with(stream, token, limits)` 传入上限；`connect` / `accept` 用 `HubLimits::default()`。`HubTransport::limits()` 返回一个连接用的上限。
   - `max_message_size`：一条消息（编码后的 `Message`）最多多少字节，默认 256 MiB（`HubLimits::DEFAULT_MAX_MESSAGE_SIZE`）。`HubLimits::with_max_message_size(n)` 给出 n 和对应的默认写缓冲上限（Hub 的 `max_message_mib` 用它）。
-  - 接收时 tungstenite 一帧一帧地累加检查消息大小。单帧上限是 16 MiB 和消息上限中较小的那个：更早的版本一条消息只发一帧，最多 16 MiB，照样收得下。
+  - 接收时单帧上限和消息上限相同。自己发的帧只有 256 KiB，但更早的版本（`HubLimits` 之前，用 tungstenite 的默认设置）一条消息只发一帧、收的消息最大 64 MiB：旧客户端发来、或者旧 Hub 转发来的一条 20 MiB 的修改就是一个 20 MiB 的帧，照样收得下。（单帧上限曾经是 16 MiB，那时新客户端在帧头就拒收这样的帧，断开重连后又是同一帧，一直卡住。）tungstenite 收到帧头就按帧长预留内存，帧长先和上限比过，所以预留的也不超过消息上限。超过上限的帧在帧头就拒收，分成多帧的消息在累计超过上限时拒收。
   - **两端必须一致。** 对方收不下的消息会让连接断开，重连后又发同一条，这个客户端会一直断开重连，同步基本停住。客户端和 Hub（`hub.toml` 的 `max_message_mib`）默认都是 256 MiB。
-  - 发送前先查自己的上限：超过就不发，`send` 返回 `SyncError::MessageTooLarge { size, max }`，什么都没入队，链路照常可用；会话跳过这个文档（2.4）。`ThreadedTransport` 在 `send` 里马上做同样的检查（上限来自内层传输的 `max_message_size()`）。收到超过上限的消息时，`recv` 返回 `SyncError::Hub("received a message of … over the limit …")`，要断开重连。
-  - `set_receive_limit(n)`：之后只收不超过 n 字节的消息，发送的上限不变。Hub 给只读连接用（16 MiB）：它们的修改反正会被丢掉，不必让 Hub 缓冲 256 MiB 的消息。
+  - 发送前先查自己的上限：超过就不发，`send` 返回 `SyncError::MessageTooLarge { size, max }`，什么都没入队，链路照常可用；会话跳过这个文档（2.4）。`ThreadedTransport` 在 `send` 里马上做同样的检查（上限来自内层传输的 `max_message_size()`）。收到超过上限的消息时，`recv` 返回 `SyncError::Hub("received a message of at least … bytes, over the limit of … on this side (the sender allows larger messages)")`，要断开重连。发送方的上限更大：`HubLimits` 不一致、对方是旧版本，或者是 Hub 上的只读连接。
+  - `set_receive_limit(n)`：之后只收不超过 n 字节的消息（单帧上限也是 n），发送的上限不变。Hub 给只读连接用（16 MiB）：它们的修改反正会被丢掉，不必让 Hub 缓冲 256 MiB 的消息。
   - 还没做：一个文档要发的增量超过上限时（比如新客户端第一次同步一个超过 256 MiB 的工程层），这个文档同步不了，只报 `MessageTooLarge`。要等协议支持分块发送。
 - **写缓冲上限**（`HubLimits::max_write_buffer_size`）：
   - 限制 `backlog()`：放不下新消息时 `send` 返回 `SyncError::Hub("write buffer full: the peer is not reading …")`，这条消息不入队，链路要断开重连。Relay 随即断开这个连接（`RelayOutcome::disconnected`）。
   - 会话正常情况下碰不到它：有背压，队列里最多约 1 MiB 加一条消息，再加排在后面的小消息（`Hello`、在线状态）。不读数据的对端不会让内存一直涨，Relay 只是先不给它发修改；它恢复读以后会补齐。只有它长期不读、小消息越积越多时才会到上限。
   - 默认是 `max_message_size` + 16 MiB（`HubLimits::WRITE_BUFFER_MARGIN`）。下限 `min_write_buffer_size()` 是一条最大的消息 + 2 MiB（会话开始发它时队列里可能还有 1 MiB，后面还会排小消息）；设得更小时自动提到下限，实际生效的值是 `write_buffer_cap()`。
-- **内存**（每个连接）：发送队列最多约一条消息 + 1 MiB；tungstenite 的写缓冲最多一帧（256 KiB），读缓冲最多一帧加 128 KiB（来自旧版本的单帧消息时最多 16 MiB）。收一条大消息时临时占它的两倍左右（拼帧、解码），用完就释放。Hub 上 N 个客户端同时下载同一个大工程层时，最坏是 N 份；没有全 Hub 的总预算。
+- **内存**（每个连接）：发送队列最多约一条消息 + 1 MiB；tungstenite 的写缓冲最多一帧（256 KiB），读缓冲最多一帧加 128 KiB（旧版本发来的单帧消息是整条消息那么大）。收一条大消息时临时占它的两倍左右（拼帧、解码），用完就释放。Hub 上 N 个客户端同时下载同一个大工程层时，最坏是 N 份；没有全 Hub 的总预算。
 - **收发计数**：`bytes_received()` / `bytes_sent()` 是这个连接收发过的字节数（含握手）。大消息在慢链路上要传很久，期间没有完整的消息；Hub 用收到的字节判断连接还活着（`services/bae-hub` 的 `PeerLink`）。
 - 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。
 - 上限和背压的验证（`tests/hub_limits.rs`，回环上的真实 WebSocket）：
   - 20 MiB 的快照两个方向都能完整传过去（用 tungstenite 的默认设置时失败，对方报 16 MiB 帧上限）。
+  - 和旧版本互通：用 tungstenite 默认设置的旧 Hub 把 20 MiB 的快照作为一个帧发给新客户端，旧客户端同样发给新 Hub，都能完整收到（单帧上限是 16 MiB 时，新的一方在帧头就拒收）。
   - 超过上限的消息：发送方不发，报 `MessageTooLarge`，同一个连接之后照常收发；上限不一致时，接收方报错。
   - 直接调 `send`、对方不读：队列满时 `send` 失败（测试里上限约 2 MiB，发了约 6 MiB 后失败，其余在系统的套接字缓冲里）。
   - 有会话时对方不读：编辑方发了 24 MiB 的修改（128 个文档），Relay 给不读的那一方排队的最多约 1 MiB（测试要求不超过 1.5 MiB），不断开它；它恢复读以后补齐。去掉背压时它被断开。

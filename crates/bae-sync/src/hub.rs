@@ -35,10 +35,6 @@ use crate::transport::Transport;
 /// memory for the life of the connection (and be moved byte by byte on every
 /// partial write).
 const FRAME_SIZE: usize = 256 << 10;
-/// Largest frame accepted (tungstenite's default). Ours are [`FRAME_SIZE`];
-/// builds before `HubLimits` sent each message as one frame and accepted at most
-/// this, so it stays the same for them.
-const MAX_FRAME_SIZE: usize = 16 << 20;
 /// What the smallest write buffer cap allows on top of one message of the
 /// largest size: the session starts a message with up to
 /// [`crate::SessionConfig::DEFAULT_MAX_BACKLOG`] (1 MiB) still queued, and small
@@ -105,13 +101,19 @@ impl HubLimits {
         self.max_write_buffer_size.max(self.min_write_buffer_size())
     }
 
-    /// tungstenite's settings: frames and messages up to the limits on receipt.
-    /// Its own write buffer stays unbounded but never holds more than one of our
-    /// frames ([`HubTransport`] hands it the next only once it wrote the last).
+    /// tungstenite's settings: messages, and frames, up to `max_message_size`
+    /// on receipt. Ours are [`FRAME_SIZE`], but builds before `HubLimits` send
+    /// each message as one frame (and accept messages up to 64 MiB): a message
+    /// one of them sends or relays arrives as a single frame of its full size.
+    /// tungstenite reserves a frame's length when its header arrives, after
+    /// checking it against this limit, so the reservation is bounded like the
+    /// message. Its own write buffer stays unbounded but never holds more than
+    /// one of our frames ([`HubTransport`] hands it the next only once it wrote
+    /// the last).
     fn ws_config(&self) -> WebSocketConfig {
         WebSocketConfig::default()
             .max_message_size(Some(self.max_message_size))
-            .max_frame_size(Some(self.max_message_size.min(MAX_FRAME_SIZE)))
+            .max_frame_size(Some(self.max_message_size))
     }
 }
 
@@ -345,16 +347,17 @@ impl HubTransport {
         self.limits
     }
 
-    /// From now on accept messages of at most `max` bytes (at most
-    /// [`HubLimits::max_message_size`]); a larger one closes the link once that
-    /// much of it has arrived. Messages sent keep the limit of
+    /// From now on accept messages (and frames) of at most `max` bytes (at most
+    /// [`HubLimits::max_message_size`]); a larger one closes the link as soon
+    /// as its size shows: at the header of a frame that large, or once that
+    /// much of a message has arrived. Messages sent keep the limit of
     /// [`limits`](Self::limits). The hub uses it for read-only connections,
     /// whose edits it drops anyway, so they cannot make it buffer large ones.
     pub fn set_receive_limit(&mut self, max: usize) {
         let max = max.min(self.limits.max_message_size);
         self.ws.set_config(|c| {
             c.max_message_size = Some(max);
-            c.max_frame_size = Some(max.min(MAX_FRAME_SIZE));
+            c.max_frame_size = Some(max);
         });
     }
 
@@ -426,12 +429,15 @@ fn link_err(e: WsError) -> SyncError {
         {
             SyncError::Closed
         }
-        // Received a frame or message over the limit (a frame is checked on its
-        // header, a message as its frames arrive).
+        // Received a frame or message over this side's limit (both limits are
+        // the same: a frame is checked on its header, a message as its frames
+        // arrive, so `size` may be only what arrived so far). The sender
+        // allows larger messages: other `HubLimits`, an older build, or a
+        // read-only link on the hub (`set_receive_limit`).
         WsError::Capacity(CapacityError::MessageTooLong { size, max_size }) => {
             SyncError::Hub(format!(
-                "received a message of {size} bytes, over the limit of {max_size} \
-                 (client and hub must use the same HubLimits)"
+                "received a message of at least {size} bytes, over the limit of \
+                 {max_size} on this side (the sender allows larger messages)"
             ))
         }
         other => hub_err(other),
