@@ -433,6 +433,8 @@ pub(crate) struct CompiledLayer {
     pub(crate) switches: LayerSwitches,
     pub(crate) source: CompiledSource,
     pub(crate) time_remap: Option<Prop>,
+    /// Audio Levels (dB, left/right) of layers that can carry audio.
+    pub(crate) audio_levels: Option<Prop>,
     pub(crate) parent: Option<usize>,
     pub(crate) blend_mode: Arc<str>,
     pub(crate) track_matte: TrackMatte,
@@ -637,6 +639,8 @@ fn compile_layer(
                     frame_rate: None,
                     duration: None,
                     solid_color: None,
+                    has_video: true,
+                    has_audio: false,
                 },
             ),
         },
@@ -648,6 +652,11 @@ fn compile_layer(
                 .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TIME_REMAP))
         })
         .flatten();
+    let audio_levels = matches!(
+        kind,
+        LayerKind::Audio | LayerKind::Footage | LayerKind::PreComp
+    )
+    .then(|| Prop::read(v, ty, l::AUDIO_LEVELS, Value::Vec2([0.0; 2])));
 
     // Only an authored opinion counts here: without one, AE's per-kind default applies.
     let auto_orient = match v.value(l::AUTO_ORIENT).and_then(Value::as_str) {
@@ -856,6 +865,7 @@ fn compile_layer(
         switches,
         source,
         time_remap,
+        audio_levels,
         parent: None,
         blend_mode: setting_str(v, lt, l::BLEND_MODE)
             .unwrap_or_else(|| "normal".into())
@@ -884,6 +894,32 @@ fn compile_layer(
     })
 }
 
+/// The project's settings and footage items, as expressions read them.
+fn project_info(stage: &Stage) -> expr::ProjectInfo {
+    let mut info = expr::ProjectInfo {
+        bit_depth: 8,
+        ..Default::default()
+    };
+    for p in stage.traverse() {
+        let Some(v) = stage.prim(&p) else { continue };
+        if v.is_a(&PrimType::PROJECT) {
+            let pt = &PrimType::PROJECT;
+            info.bit_depth = setting_str(&v, pt, "bit_depth")
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(16);
+            info.linear_blending = setting_bool(&v, pt, "blend_colors_using_gamma_1");
+        } else if v.is_a(&PrimType::ASSET) {
+            let name = v
+                .value(schema::layer::NAME)
+                .and_then(Value::as_str)
+                .unwrap_or(v.name())
+                .to_owned();
+            info.assets.push((name, p.clone(), asset_info(&v)));
+        }
+    }
+    info
+}
+
 fn asset_info(av: &PrimView<'_>) -> AssetInfo {
     let at = &PrimType::ASSET;
     let kind = setting_str(av, at, asset::KIND).unwrap_or_else(|| "footage".into());
@@ -901,6 +937,8 @@ fn asset_info(av: &PrimView<'_>) -> AssetInfo {
             Some(Value::Color(c)) => c,
             _ => [0.5, 0.5, 0.5, 1.0],
         }),
+        has_video: kind == "solid" || setting_bool(av, at, asset::HAS_VIDEO),
+        has_audio: kind != "solid" && setting_bool(av, at, asset::HAS_AUDIO),
         kind,
     }
 }
@@ -1489,6 +1527,9 @@ const MAX_NESTING: usize = 64;
 #[derive(Debug, Default)]
 pub struct Evaluator {
     comps: HashMap<PrimPath, Arc<CompiledComp>>,
+    /// Project settings and items for expressions (`colorDepth`, `footage()`);
+    /// rebuilt after any edit.
+    project: Option<Arc<expr::ProjectInfo>>,
     /// Every comp of the stage (expressions can reach any comp); rebuilt after
     /// structural changes.
     comp_list: Option<Vec<PrimPath>>,
@@ -1577,7 +1618,11 @@ impl Evaluator {
                 comps.len() - 1
             }
         };
-        (expr::Scope::new(comps), id)
+        let project = self
+            .project
+            .get_or_insert_with(|| Arc::new(project_info(stage)))
+            .clone();
+        (expr::Scope::new(comps).with_project(project), id)
     }
 
     fn evaluate_with_expressions(
@@ -1718,12 +1763,14 @@ impl Evaluator {
         if structural {
             self.comp_list = None;
         }
+        self.project = None;
     }
 
     /// Drop every compiled comp.
     pub fn clear(&mut self) {
         self.comps.clear();
         self.comp_list = None;
+        self.project = None;
     }
 }
 
@@ -1825,6 +1872,7 @@ impl CompiledLayer {
                 tr::OPACITY => Some(&t.opacity),
                 tr::POINT_OF_INTEREST => Some(&t.point_of_interest),
                 l::TIME_REMAP => self.time_remap.as_ref(),
+                l::AUDIO_LEVELS => self.audio_levels.as_ref(),
                 l::TEXT_SOURCE => self.text.as_ref(),
                 l::TEXT_FIRST_MARGIN => self.text_path.as_ref().map(|t| &t.first_margin),
                 l::TEXT_LAST_MARGIN => self.text_path.as_ref().map(|t| &t.last_margin),
@@ -1974,6 +2022,30 @@ impl CompiledLayer {
         match &self.source {
             CompiledSource::Asset(_, info) => (info.width, info.height),
             CompiledSource::Comp { .. } | CompiledSource::None => (comp.width, comp.height),
+        }
+    }
+
+    /// AE's `hasVideo` / `hasAudio`: what the layer's source carries (a pre-comp
+    /// has audio when a layer inside it does). `comp_of` finds nested comps.
+    pub(crate) fn has_video_audio(
+        &self,
+        comp_of: &dyn Fn(&PrimPath) -> Option<Arc<CompiledComp>>,
+        depth: usize,
+    ) -> (bool, bool) {
+        match (&self.source, self.kind) {
+            (_, LayerKind::Camera | LayerKind::Light) => (false, false),
+            (_, LayerKind::Audio) => (false, true),
+            (CompiledSource::Asset(_, info), _) => (info.has_video, info.has_audio),
+            (CompiledSource::Comp { path, .. }, _) => {
+                let audio = depth < 64
+                    && comp_of(path).is_some_and(|c| {
+                        c.layers
+                            .iter()
+                            .any(|l| l.has_video_audio(comp_of, depth + 1).1)
+                    });
+                (true, audio)
+            }
+            (CompiledSource::None, _) => (true, false),
         }
     }
 
