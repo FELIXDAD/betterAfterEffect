@@ -50,6 +50,7 @@ mod render_autosave;
 mod render_queue;
 #[cfg(target_os = "macos")]
 mod settings;
+mod shape_anchor;
 mod shortcut_sweep;
 #[cfg(target_os = "macos")]
 mod shortcuts_dialog;
