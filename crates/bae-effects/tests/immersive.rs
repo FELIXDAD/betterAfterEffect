@@ -78,3 +78,6 @@ fn plane_projection_and_viewer_share_the_forward_direction() {
     assert!((view.get(128, 64)[0] - 0.7).abs() < 0.001);
     assert_eq!(view.get(0, 64)[3], 0.);
 }
+
+#[path = "immersive/filters.rs"]
+mod filters;
