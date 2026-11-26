@@ -306,6 +306,8 @@ pub(crate) struct CompiledComp {
     pub(crate) height: u32,
     pub(crate) pixel_aspect: f64,
     pub(crate) frame_rate: FrameRate,
+    pub(crate) display_start: Time,
+    pub(crate) drop_frame: bool,
     pub(crate) duration: Time,
     pub(crate) bg_color: [f64; 4],
     pub(crate) motion_blur: MotionBlur,
@@ -625,6 +627,14 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         height: int(c::HEIGHT, 1080.0).max(0.0) as u32,
         pixel_aspect: int(c::PIXEL_ASPECT, 1.0),
         frame_rate,
+        display_start: setting_time(&view, ct, "display_start_time").unwrap_or(Time::ZERO),
+        drop_frame: view
+            .value("drop_frame")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| {
+                let fps = frame_rate.as_f64();
+                (fps - 29.97).abs() < 0.01 || (fps - 59.94).abs() < 0.01
+            }),
         duration,
         bg_color,
         motion_blur,
@@ -965,6 +975,7 @@ fn project_info(stage: &Stage) -> expr::ProjectInfo {
             info.bit_depth = setting_str(&v, pt, "bit_depth")
                 .and_then(|d| d.parse().ok())
                 .unwrap_or(16);
+            info.display_frames = setting_str(&v, pt, "time_display").as_deref() == Some("frames");
             info.linear_blending = setting_bool(&v, pt, "blend_colors_using_gamma_1");
         } else if v.is_a(&PrimType::ASSET) {
             let name = v
