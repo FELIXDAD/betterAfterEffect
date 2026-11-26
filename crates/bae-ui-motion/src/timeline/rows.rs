@@ -1213,9 +1213,9 @@ impl TimelinePanel {
             _ => expr.source.clone(),
         };
         let mut editor_rows = lines;
-        if buf == expr.source
-            && expr.enabled
-            && let Some(error) = crate::expr_menu::inline_error(cx.resources, path, attr)
+        if expr.enabled
+            && let Some(error) =
+                crate::expr_menu::inline_error(ui, cx.resources, path, attr, &buf, &expr.source)
         {
             let annotation =
                 Rect::from_min_max(pos2(field.left(), field.bottom() - ROW_H), field.max);

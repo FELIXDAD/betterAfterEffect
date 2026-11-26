@@ -2957,8 +2957,11 @@ impl GraphEditor {
         } else {
             expr.source.clone()
         };
-        let error = (buf == expr.source && expr.enabled)
-            .then(|| crate::expr_menu::inline_error(cx.resources, &path, &attr))
+        let error = expr
+            .enabled
+            .then(|| {
+                crate::expr_menu::inline_error(ui, cx.resources, &path, &attr, &buf, &expr.source)
+            })
             .flatten();
         let field = if let Some(error) = error {
             crate::expr_menu::error_line(ui, strip, &error);

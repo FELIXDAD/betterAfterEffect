@@ -45,6 +45,11 @@ pub use evaluated::{
     LightState, LightType, MaterialState, TextPathOptions, TrackMatte,
 };
 pub use expr::prewarm as prewarm_expressions;
+
+/// Parse an editor draft using the expression compiler, without executing it.
+pub fn expression_syntax_error(source: &str) -> Option<String> {
+    expr::rewrite::rewrite(source).err().map(|e| e.to_string())
+}
 pub use reads::{ExprRead, ReadKind, reads_touched};
 pub use samples::{ImageSamples, SampleKey, SampleRequests};
 pub use time::{LayerTiming, MotionBlur};

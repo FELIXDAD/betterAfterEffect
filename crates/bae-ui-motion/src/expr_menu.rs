@@ -11,21 +11,36 @@ use egui::Ui;
 
 use crate::common;
 
-/// A diagnostic for the expression the viewer evaluated.
+/// The evaluated property's diagnostic, or a syntax error in its uncommitted draft.
 pub(crate) fn inline_error(
+    ui: &egui::Ui,
     resources: &bae_app::Resources,
     path: &bae_model::PrimPath,
     attr: &str,
+    source: &str,
+    stored: &str,
 ) -> Option<String> {
-    let session = resources.get::<crate::SharedSession>()?;
-    let session = session.lock();
-    let error = session
+    if !crate::prefs::current(resources).bool("scripting_expressions.expr_inline_errors") {
+        return None;
+    }
+    if source != stored {
+        let id = egui::Id::new(("expression-draft-diagnostic", path, attr));
+        return ui.data_mut(|d| {
+            let previous = d.get_temp_mut_or_default::<(String, Option<String>)>(id);
+            if previous.0 != source {
+                source.clone_into(&mut previous.0);
+                previous.1 = bae_anim::expression_syntax_error(source);
+            }
+            previous.1.clone()
+        });
+    }
+    resources
+        .get::<crate::SharedSession>()?
+        .lock()
         .expr_errors
         .iter()
-        .find(|e| e.prim == *path && e.attr == attr)?;
-    crate::prefs::current(resources)
-        .bool("scripting_expressions.expr_inline_errors")
-        .then(|| error.message.clone())
+        .find(|e| e.prim == *path && e.attr == attr)
+        .map(|e| e.message.clone())
 }
 
 /// One row of the editor, with the complete diagnostic available on hover.
