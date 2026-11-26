@@ -2245,10 +2245,11 @@ mod tests {
         let align = Frame::new(&["align"]);
         let properties = Frame::new(&["properties", "info"]);
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let mut output = ctx.run_ui(Default::default(), |ui| {
             assert!(!align.close_others_button(ui).enabled());
             assert!(properties.close_others_button(ui).enabled());
         });
+        output.textures_delta.clear();
         assert_eq!(
             crate::i18n::translation("Close Other Panels in Group"),
             Some("关闭组中的其他面板")
