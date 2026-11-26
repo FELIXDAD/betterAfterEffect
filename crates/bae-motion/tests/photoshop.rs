@@ -92,7 +92,7 @@ fn import_preserves_stack_masks_type_and_source_styles_and_undoes_once() {
         panic!("expected an editable point text layer")
     };
     assert_eq!(
-        (text.text.as_str(), text.font.as_str(), text.font_size),
+        (text.text.as_str(), text.style.font.as_str(), text.style.font_size),
         ("Hello", "TestPS", 18.)
     );
     let group = stage.prim(&layers[1]).unwrap();

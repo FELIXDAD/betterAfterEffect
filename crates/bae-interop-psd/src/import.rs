@@ -270,17 +270,17 @@ fn read_text(rec: &LayerRecord) -> Option<(TextDocument, [f64; 2])> {
         style.size?,
     );
     if let Some([r, g, b]) = style.color {
-        doc.fill_color = [r, g, b, 1.];
+        doc.style.fill_color = [r, g, b, 1.];
     }
-    doc.justification = match style.justification {
+    doc.paragraph.justification = match style.justification {
         Some(1) => "right",
         Some(2) => "center",
         _ => "left",
     }
     .into();
-    doc.leading = style.leading;
-    doc.tracking = style.tracking.unwrap_or_default();
-    doc.faux_bold = style.faux_bold;
-    doc.faux_italic = style.faux_italic;
+    doc.style.leading = style.leading;
+    doc.style.tracking = style.tracking.unwrap_or_default();
+    doc.style.faux_bold = style.faux_bold;
+    doc.style.faux_italic = style.faux_italic;
     Some((doc, [t[4], t[5]]))
 }
