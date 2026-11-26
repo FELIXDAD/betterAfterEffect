@@ -132,11 +132,11 @@ impl Panel for LayerPanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         let session = common::session(cx.resources);
         match shown_layer(&session) {
-            Some(l) if cx.stage.prim(&l).is_some() => TabInfo::new(format!(
-                "{} {}",
-                tr("Layer"),
-                query::display_name_of(cx.stage, &l)
-            )),
+            Some(l) if cx.stage.prim(&l).is_some() => crate::prefs::related_tab(
+                cx,
+                format!("{} {}", tr("Layer"), query::display_name_of(cx.stage, &l)),
+                &l,
+            ),
             _ => TabInfo::new(tr("Layer")),
         }
     }

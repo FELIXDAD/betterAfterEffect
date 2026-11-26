@@ -69,7 +69,7 @@ pub fn show(ui: &mut Ui, title: &str, dirty: bool) -> Response {
         .allocate_rect(rect, Sense::click_and_drag())
         .labeled(egui::WidgetType::Other, title);
     let p = ui.painter();
-    p.rect_filled(rect, 0.0, color::TITLE_BAR);
+    crate::theme::bar_fill(p, rect, color::TITLE_BAR);
     p.hline(
         rect.x_range(),
         rect.top() + 0.25,

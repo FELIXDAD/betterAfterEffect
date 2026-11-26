@@ -298,6 +298,8 @@ pub struct CompositionViewer {
     escape: bool,
     /// The current time and since when it has not changed (idle prefetch).
     idle: Option<(Time, std::time::Instant)>,
+    /// Pixel at primary press, before the pointer crosses the drag threshold.
+    mask_start_color: Option<[u8; 4]>,
     /// A camera tool drag.
     camera_drag: Option<camera_tool::CameraDrag>,
 }
@@ -603,11 +605,16 @@ impl Panel for CompositionViewer {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // Read from the session every frame, so New / Open / Close Project
         // update the tab (and its accessible name) at once (issue #215).
-        let title = match common::active_comp(cx.stage, &common::session(cx.resources)) {
-            Some(info) => format!("{} {}", tr("Composition"), info.name),
-            None => tr("Composition").to_owned(),
-        };
-        TabInfo::new(title).viewer().locked(self.locked)
+        match common::active_comp(cx.stage, &common::session(cx.resources)) {
+            Some(info) => crate::prefs::related_tab(
+                cx,
+                format!("{} {}", tr("Composition"), info.name),
+                &info.path,
+            ),
+            None => TabInfo::new(tr("Composition")),
+        }
+        .viewer()
+        .locked(self.locked)
     }
 
     fn set_locked(&mut self, locked: bool) {
@@ -1169,7 +1176,8 @@ impl Panel for CompositionViewer {
         }
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
-        if let Some(h) = resp.hover_pos() {
+        let tool = tools.lock().current();
+        if let Some(h) = resp.interact_pointer_pos().or(resp.hover_pos()) {
             let p = view.to_comp(h);
             let mut s = session.lock();
             s.info.pos = Some([p.x, p.y]);
@@ -1178,9 +1186,35 @@ impl Panel for CompositionViewer {
                 .cumulative_frame_nr()
                 .saturating_sub(s.info.shown_at)
                 < 3;
-            if shown && let Some(g) = self.gpu.as_mut() {
-                // Outside the rendered frame the comp is transparent (AE: A 0).
-                s.info.color = Some(g.pixel([p.x, p.y]).unwrap_or([0; 4]));
+            let mask = self.prefs.contrasting_masks
+                && (tool.is_shape() || tool == Tool::Pen)
+                && self.shape.is_none()
+                && !self.pen.busy()
+                && !s.selected_layers.is_empty();
+            if shown || mask {
+                let origin = ui.input(|i| i.pointer.press_origin());
+                let pressed = ui.input(|i| i.pointer.primary_pressed());
+                let down = ui.input(|i| i.pointer.primary_down());
+                if pressed {
+                    self.mask_start_color = None;
+                }
+                if mask
+                    && down
+                    && self.mask_start_color.is_none()
+                    && let Some(origin) = origin
+                {
+                    let p = view.to_comp(origin);
+                    self.mask_start_color = self
+                        .gpu
+                        .as_mut()
+                        .and_then(|g| g.pixel([p.x, p.y], ui.ctx()));
+                }
+                if shown || !down || pressed {
+                    s.info.color = self
+                        .gpu
+                        .as_mut()
+                        .and_then(|g| g.pixel([p.x, p.y], ui.ctx()));
+                }
             }
         }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
@@ -1298,7 +1332,6 @@ impl Panel for CompositionViewer {
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
         let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-        let tool = tools.lock().current();
         let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
         if !space {
             self.space_hold = None;
@@ -1360,6 +1393,7 @@ impl Panel for CompositionViewer {
             &comp,
             &view,
             effective,
+            self.mask_start_color,
         );
         if let Some(d) = &self.shape {
             d.paint(&painter, &view);

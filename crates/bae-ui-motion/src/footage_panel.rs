@@ -196,8 +196,12 @@ impl FootagePanel {
 impl Panel for FootagePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Footage <name>", "Footage (none)" when empty.
-        let name = Self::footage(cx).map_or_else(|| tr("(none)").to_owned(), |f| f.name);
-        TabInfo::new(format!("{} {name}", tr("Footage")))
+        match Self::footage(cx) {
+            Some(f) => {
+                crate::prefs::related_tab(cx, format!("{} {}", tr("Footage"), f.name), &f.asset)
+            }
+            None => TabInfo::new(format!("{} {}", tr("Footage"), tr("(none)"))),
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {

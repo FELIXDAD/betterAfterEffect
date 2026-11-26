@@ -675,7 +675,11 @@ impl Panel for TimelinePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
         match common::active_comp(cx.stage, &common::session(cx.resources)) {
-            Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
+            Some(info) => crate::prefs::related_tab(
+                cx,
+                format!("{} {}", tr("Timeline"), info.name),
+                &info.path,
+            ),
             None => TabInfo::new(tr("Timeline")),
         }
         .close_submenu()

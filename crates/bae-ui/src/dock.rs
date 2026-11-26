@@ -1002,6 +1002,7 @@ impl Dock {
     fn tab_bar(&mut self, ui: &Ui, rect: Rect, frame: &Frame, host: &mut impl PanelHost) -> Rect {
         let compact = if frame.small_tabs { 4.0 } else { 0.0 };
         let bar = Rect::from_min_size(rect.min, vec2(rect.width(), metrics::TAB_BAR_H - compact));
+        theme::bar_fill(ui.painter(), bar, color::PANEL);
         let font = theme::body();
         let multi = frame.tabs.len() > 1;
         let tabs_right = if multi {
@@ -1408,6 +1409,7 @@ impl Dock {
             }
             self.panel_menu(&resp, frame, i, host, true);
             let painter = ui.painter_at(header);
+            theme::bar_fill(&painter, header, color::PANEL);
             let tc = if is_open || resp.hovered() {
                 color::TAB_ACTIVE
             } else {
@@ -1416,7 +1418,16 @@ impl Dock {
             let baseline_off = if is_open { geom::BASELINE } else { 15.0 } - compact * 0.5;
             let galley = painter.layout_no_wrap(tr(&info.title).to_owned(), font.clone(), tc);
             let top = y + baseline_off - theme::baseline_offset(&galley);
-            painter.galley(pos2(header.left() + 13.0, top), galley, tc);
+            let mut text_x = header.left() + 13.0;
+            if let Some(label) = info.label {
+                let r = Rect::from_center_size(
+                    pos2(text_x + geom::SWATCH * 0.5, header.center().y),
+                    Vec2::splat(geom::SWATCH),
+                );
+                painter.rect_filled(r, 0.0, label);
+                text_x += geom::SWATCH + geom::SWATCH_GAP;
+            }
+            painter.galley(pos2(text_x, top), galley, tc);
             if is_open {
                 let mr = Rect::from_center_size(
                     pos2(

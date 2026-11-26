@@ -591,10 +591,15 @@ const LABEL_RGB: [[u8; 3]; 16] = [
 /// Peach); the rest in label order (待核).
 const MASK_CYCLE: [usize; 16] = [6, 10, 12, 0, 1, 5, 2, 3, 4, 7, 8, 9, 11, 13, 14, 15];
 
+/// One-based label index used by the mask color cycle.
+pub fn mask_label(n: usize) -> usize {
+    MASK_CYCLE[n % MASK_CYCLE.len()] + 1
+}
+
 /// Color of the `n`-th mask (0-based) of a layer.
 pub fn mask_color(n: usize, cycle: bool) -> [f64; 4] {
     // Cycling off: every mask gets the first color of the cycle (待核).
-    let i = MASK_CYCLE[if cycle { n % MASK_CYCLE.len() } else { 0 }];
+    let i = mask_label(if cycle { n } else { 0 }) - 1;
     let [r, g, b] = LABEL_RGB[i];
     [
         f64::from(r) / 255.0,
