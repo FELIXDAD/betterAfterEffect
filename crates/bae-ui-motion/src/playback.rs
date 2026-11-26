@@ -63,6 +63,8 @@ struct Slot {
     time: Time,
     errors: Vec<AttrError>,
     bytes: u64,
+    /// The published texture (the Info panel and snapshots read it).
+    texture: wgpu::Texture,
 }
 
 impl Drop for Slot {
@@ -361,6 +363,12 @@ impl PlaybackPreview {
         let shown = self.shown.as_ref()?;
         Some((shown.image()?, shown.time, &shown.errors))
     }
+
+    /// The texture and rect of the frame [`Self::poll`] returned last.
+    pub(super) fn shown_texture(&self) -> Option<(wgpu::Texture, IRect)> {
+        let shown = self.shown.as_ref()?;
+        Some((shown.texture.clone(), shown.rect))
+    }
 }
 
 impl Drop for PlaybackPreview {
@@ -570,7 +578,13 @@ fn render_worker(
             synced = Some(generations);
         }
         let result = engine
-            .render(&job.stage, &job.rc, job.scene.key.resolution)
+            .render(
+                &job.stage,
+                &job.rc,
+                job.scene.key.resolution,
+                bae_render::Display::default(),
+                None,
+            )
             .map_err(|e| e.to_string())
             // Not an interactive thread: it waits for the warm-up instead.
             .and_then(|r| r.ok_or_else(|| "incomplete frame".to_owned()))
@@ -582,9 +596,10 @@ fn render_worker(
                     time: job.time,
                     errors: job.errors,
                     bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+                    texture,
                 });
                 registry
-                    .publish(slot.id, &texture, wgpu::FilterMode::Linear)
+                    .publish(slot.id, &slot.texture, wgpu::FilterMode::Linear)
                     .map_err(|e| e.to_string())?;
                 Ok((slot, temporal))
             });
