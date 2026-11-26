@@ -431,6 +431,102 @@ fn property_name_menu_matches_ae() {
     }
 }
 
+/// #596: a right-click on a property's value shows the property name's menu;
+/// one on the Parent & Link column pops the parent list, the layer itself
+/// greyed (AE 26, #591 batches 14/15).
+#[test]
+fn value_and_parent_column_right_click_menus() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let first = h.layer.clone();
+    let second = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    let mut tl = TimelinePanel::default();
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.graph_editor = false;
+        s.reveal.insert(
+            first.clone(),
+            crate::session::Reveal::Attrs(vec![POS.into()]),
+        );
+    }
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let find = |h: &H, text: &str| {
+        h.painted_text
+            .as_ref()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(s, _)| s == text)
+            .map(|(_, r)| r.center())
+    };
+    let right_click = |h: &mut H, tl: &mut TimelinePanel, p: Pos2| {
+        let right = |down| Event::PointerButton {
+            pos: p,
+            button: PointerButton::Secondary,
+            pressed: down,
+            modifiers: Modifiers::NONE,
+        };
+        h.frame(
+            tl,
+            vec![Event::PointerMoved(p), right(true)],
+            Modifiers::NONE,
+        );
+        h.frame(tl, vec![right(false)], Modifiers::NONE);
+        h.frame(tl, Vec::new(), Modifiers::NONE);
+    };
+    // Position's value text (the solid sits at the comp centre).
+    let value = h
+        .painted_text
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|(s, _)| s.starts_with("320"))
+        .map(|(_, r)| r.center())
+        .expect("position value");
+    let edit_value = bae_ui::tr("Edit Value...");
+    assert!(find(&h, edit_value).is_none());
+    right_click(&mut h, &mut tl, value);
+    assert!(find(&h, edit_value).is_some(), "property menu on the value");
+    h.frame(&mut tl, vec![press(egui::Key::Escape)], Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+
+    // The solid (layer 2 after the null) under its own Parent & Link "None".
+    let none = bae_ui::tr("None");
+    let nones: Vec<Pos2> = h
+        .painted_text
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|(s, _)| s == none)
+        .map(|(_, r)| r.center())
+        .collect();
+    assert_eq!(nones.len(), 2, "one dropdown per layer");
+    let solid_row = *nones.iter().max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+    right_click(&mut h, &mut tl, solid_row);
+    let solid_name = query::display_name_of(&h.stage, &first);
+    let null_name = query::display_name_of(&h.stage, &second);
+    let own = find(&h, &format!("2. {solid_name}")).expect("own entry");
+    // Greyed: picking the layer itself does nothing.
+    h.click(&mut tl, own, Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let parent = |h: &H| {
+        h.stage
+            .prim(&first)
+            .and_then(|p| p.value("parent").and_then(|v| v.as_prim_ref().cloned()))
+    };
+    assert_eq!(parent(&h), None);
+    if find(&h, &format!("1. {null_name}")).is_none() {
+        right_click(&mut h, &mut tl, solid_row);
+    }
+    let other = find(&h, &format!("1. {null_name}")).expect("other layer entry");
+    let r = h.click(&mut tl, other, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(parent(&h), Some(second));
+}
+
 /// #596: the Graph Editor's empty-space menu matches AE 26 zh_CN.
 #[test]
 fn graph_area_menu_matches_ae() {
