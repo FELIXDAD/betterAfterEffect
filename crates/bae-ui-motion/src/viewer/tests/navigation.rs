@@ -79,6 +79,26 @@ fn zoom_keys_step_by_powers_of_two_and_slash_is_100() {
     assert!((mag(&h) - 1.0).abs() < 1e-4, "{}", mag(&h));
 }
 
+/// Fit (Shift+/) fills the panel past 100 %; Fit up to 100 % (Alt/Option+/,
+/// the default) stops at 100 % (AE's two magnification popup entries).
+#[test]
+fn fit_fills_the_panel_and_fit_up_to_100_stops_at_100() {
+    let mut h = H::new();
+    h.frame(Vec::new(), Modifiers::NONE);
+    let mag = |h: &H| h.viewer.last_view.unwrap().scale * h.ctx.pixels_per_point();
+    assert!((mag(&h) - 1.0).abs() < 1e-4, "default: {}", mag(&h));
+    assert!(h.action("viewer.fit"));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(
+        mag(&h) > 1.5,
+        "a 640 × 360 comp fills the panel: {}",
+        mag(&h)
+    );
+    assert!(h.action(crate::viewer::FIT_UP_TO_100));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!((mag(&h) - 1.0).abs() < 1e-4, "{}", mag(&h));
+}
+
 #[test]
 fn smart_zoom_keeps_pointer_fixed_then_restores_fit() {
     let mut h = H::new();
