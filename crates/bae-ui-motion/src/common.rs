@@ -5,10 +5,9 @@ use std::sync::Arc;
 
 use bae_anim::Evaluator;
 use bae_app::Resources;
-use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
+use bae_model::{LayerKind, PrimPath, PrimType, Stage, StageEvent, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
-use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
@@ -75,33 +74,48 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
         })
 }
 
-/// An [`Evaluator`] whose compiled comps are dropped whenever the stage changed
-/// (detected through the shell's history log; without one, every frame).
+/// A panel evaluator that invalidates only the compositions touched by an edit.
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
     changes: StageChanges,
 }
 
-/// Panels observe the same committed edits, undo/redo and project replacements.
 #[derive(Default)]
 pub(crate) struct StageChanges {
-    seq: Option<u64>,
+    revision: Option<u64>,
 }
 
 impl StageChanges {
-    pub(crate) fn changed(&mut self, resources: &Resources) -> bool {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        let previous = std::mem::replace(&mut self.seq, seq);
-        seq.is_none() || seq != previous
+    /// Visit new edits once. A missing event means the project was replaced or
+    /// the consumer fell behind the stage's retained history.
+    pub(crate) fn sync(
+        &mut self,
+        stage: &Stage,
+        mut apply: impl FnMut(Option<&StageEvent>),
+    ) -> bool {
+        let revision = stage.revision();
+        if self.revision == Some(revision) {
+            return false;
+        }
+        let previous = self.revision.replace(revision).unwrap_or(revision);
+        if let Some(events) = stage.changes_since(previous) {
+            for event in events {
+                apply(Some(event));
+            }
+        } else {
+            apply(None);
+        }
+        true
     }
 }
 
 impl EvalCache {
-    pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        if self.changes.changed(resources) {
-            self.eval.clear();
-        }
+    pub(crate) fn get(&mut self, stage: &Stage) -> &mut Evaluator {
+        self.changes.sync(stage, |event| match event {
+            Some(event) => self.eval.invalidate(event),
+            None => self.eval.clear(),
+        });
         &mut self.eval
     }
 }
