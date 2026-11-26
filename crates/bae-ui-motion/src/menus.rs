@@ -384,7 +384,8 @@ impl Builder {
 fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpec {
     let mut spec = MenuItemSpec::new(path, catalog::shown_title(item.title), item.action)
         .workspace(WORKSPACE)
-        .at(levels);
+        .at(levels)
+        .mnemonic(catalog::item_mnemonic(item.ae));
     if !item.params.is_empty() {
         spec = spec.params(serde_json::from_str(item.params).expect("catalog params are JSON"));
     }
@@ -434,6 +435,27 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .position(|x| *x == q)
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
+        }
+        id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
+            && id != "motion.view.clear_guides" =>
+        {
+            spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
+        }
+
+        crate::viewer::view3d::ids::LAYOUT => {
+            let n = item
+                .params
+                .trim_start_matches("{\"views\":")
+                .trim_end_matches('}');
+            let n: usize = n.parse().unwrap_or(1);
+            spec.checked_when(move |cx| crate::viewer::view3d::layout(cx.resources) == n)
+        }
+
+        "motion.view.look_at_selected_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, false))
+        }
+        "motion.view.look_at_all_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, true))
         }
         crate::viewer::view3d::ids::SWITCH => {
             let view = spec_param(item.params, "view").unwrap_or_default();

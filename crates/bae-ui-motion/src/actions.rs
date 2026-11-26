@@ -47,6 +47,7 @@ pub mod ids {
     /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
+    pub const MINI_FLOW: &str = "motion.comp.composition_mini_flowchart";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
@@ -214,6 +215,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
+    ("motion.file.find", "Find"),
     (ids::STEP, "Next Frame"),
     (ids::PREV_KEY, "Go to Previous Keyframe"),
     (ids::NEXT_KEY, "Go to Next Keyframe"),
@@ -237,6 +239,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
+    (ids::MINI_FLOW, "Composition Mini-Flowchart"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
@@ -312,6 +315,11 @@ const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
 /// table rather than `json!` calls keeps the code small (parsed once at startup).
 const VARIANTS: &[(&str, &str, &str)] = &[
     (
+        ids::PLAY,
+        r#"{"preview":"numpad0"}"#,
+        "Play/Stop (Numpad 0)",
+    ),
+    (
         ids::BLENDING_MODE_STEP,
         r#"{"step":1}"#,
         "Next Blending Mode",
@@ -339,6 +347,16 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         ids::REVEAL,
         r#"{"what":"animated","add":false}"#,
         "Reveal Animated Properties",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"audio:levels","add":false}"#,
+        "Reveal Audio Levels",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"audio:levels","add":true}"#,
+        "Add Audio Levels to Revealed Properties",
     ),
 ];
 
@@ -450,6 +468,17 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
             format!("{name}: Add or Remove Keyframe"),
         );
     }
+    // E, Shift+E.
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": false }),
+        "Show Effects".to_owned(),
+    );
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": true }),
+        "Add Effects to Shown Properties".to_owned(),
+    );
     v
 }
 
@@ -459,9 +488,10 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
 /// `ae` keymap already binds. Commands other modules handle are bound when the
 /// app starts ([`late_bindings`]).
 pub fn bindings() -> KeymapBindings {
-    let v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
+    let mut v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
         k.status.works()
     }));
+    v.push(Binding::new("Tab", ids::MINI_FLOW).when("timeline"));
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
 }
 
@@ -820,6 +850,30 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             common::new_layer(cx, session, kind, extra);
             return true;
         }
+        "motion.effect.open_color_file" => {
+            use bae_ui::files::{OpenRequest, SharedFilePicker};
+            let cdl = inv.params["cdl"].as_bool() == Some(true);
+            let extensions = if cdl {
+                vec!["cc", "ccc", "cdl"]
+            } else {
+                vec!["cube", "spi1d", "spi3d"]
+            };
+            let request = OpenRequest {
+                title: bae_ui::tr("Open...").into(),
+                filters: vec![(
+                    if cdl { "ASC CDL" } else { "LUT" }.into(),
+                    extensions.into_iter().map(str::to_owned).collect(),
+                )],
+                ..Default::default()
+            };
+            if let Some(path) = SharedFilePicker::open(cx.resources, &request).first() {
+                match bae_effects::embed_color_file(path,cdl){
+                    Ok(bytes)=>cx.invoke_with("attr.set_at",json!({"path":inv.params["path"],"attr":bae_model::effect::param_attr(if cdl{6}else{5}),"time":inv.params["time"],"value":bae_model::Value::Bytes(bytes)})),
+                    Err(error)=>crate::dialogs::alert(cx,"OCIO",error.to_string()),
+                }
+            }
+            return true;
+        }
         ids::IMPORT_FILE => {
             crate::import::import_file(cx, session);
             return true;
@@ -884,20 +938,77 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let Some(info) = common::active_comp(stage, session) else {
         return true;
     };
+    if id == ids::PLAY {
+        session.retry_audio();
+    }
     let mut s = session.lock();
     let now = s.time(&info.path);
     let frame = info.frame_duration();
     let layers = target_layers(stage, &s);
     let keys = s.selected_keys.clone();
+    // Selected layer contents (shape groups, masks, effects, text animators).
+    let content: Vec<PrimPath> = s
+        .selected_groups
+        .iter()
+        .filter_map(|g| crate::session::group_prim(g))
+        // Only inside the selected layers (the viewer may have changed them).
+        .filter(|p| {
+            stage.has_prim(p)
+                && s
+                    .selected_layers
+                    .iter()
+                    .any(|l| p.as_str().starts_with(&format!("{l}/")))
+        })
+        .collect();
     match id {
+        ids::COPY if keys.is_empty() && !content.is_empty() => {
+            s.content_clipboard = bae_motion::copy_content(stage, &content);
+            s.layer_clipboard.clear();
+            s.clipboard = None;
+        }
+        ids::DUPLICATE if !content.is_empty() => {
+            cx.invoke_with("content.duplicate", json!({ "prims": content }));
+        }
+        ids::DELETE if keys.is_empty() && !content.is_empty() => {
+            cx.invoke_with("content.delete", json!({ "prims": content }));
+            s.selected_groups.clear();
+        }
+        ids::PASTE if !s.content_clipboard.is_empty() => {
+            // After the selected group, else into each selected layer's
+            // container of the same kind (contents, masks, effects …).
+            let items = s.content_clipboard.clone();
+            let targets: Vec<(PrimPath, Option<PrimPath>)> = match content.last() {
+                Some(g) => g
+                    .parent()
+                    .map(|p| vec![(p, Some(g.clone()))])
+                    .unwrap_or_default(),
+                None => layers
+                    .iter()
+                    .filter_map(|l| content_container(stage, l, &items[0].path))
+                    .map(|c| (c, None))
+                    .collect(),
+            };
+            for (parent, at) in targets {
+                cx.invoke_with(
+                    "content.paste",
+                    json!({"parent": parent, "items": items, "at": at}),
+                );
+            }
+        }
         ids::PLAY => {
             if s.is_playing() {
-                s.stop();
+                s.stop_preview(&info);
             } else {
-                s.play(&info);
+                s.preview(cx, &info);
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
+        ids::MINI_FLOW => {
+            s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
+                stage, &info.path,
+            ));
+            cx.open_panel("timeline");
+        }
         ids::GO_START => s.set_time(&info, Time::ZERO),
         ids::GO_END => s.set_time(&info, info.duration),
         ids::STEP => {
@@ -1149,6 +1260,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::DESELECT_ALL => {
             s.selected_layers.clear();
             s.selected_keys.clear();
+            s.selected_props.clear();
+            s.selected_groups.clear();
         }
         ids::REVEAL => {
             let what = inv
@@ -1161,6 +1274,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 query::comp_layers(stage, &info.path)
             } else {
                 layers.clone()
+            };
+            let what = if what == "audio:levels" && !add {
+                let previous = s.last_l.take();
+                if previous.is_some_and(|at| at.elapsed() < Duration::from_millis(450)) {
+                    "audio:waveform"
+                } else {
+                    s.last_l = Some(Instant::now());
+                    what
+                }
+            } else {
+                what
             };
             let reveal = if what == "animated" {
                 let double = s
@@ -1618,6 +1742,36 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     true
 }
 
+/// Where `copied` (a content prim of some layer) goes on `layer`: the same
+/// container relative to its layer (`contents`, `masks`, `effects` …, or a
+/// nested group's contents when `layer` has it), else the top one (`None`:
+/// `layer` cannot take it, e.g. shape contents on a solid).
+fn content_container(
+    stage: &bae_model::Stage,
+    layer: &PrimPath,
+    copied: &PrimPath,
+) -> Option<PrimPath> {
+    let s = copied.as_str();
+    // `/comps/<comp>/layers/<layer>/<rest…>/<name>`
+    let after = s.find("/layers/")? + "/layers/".len();
+    let rest = &s[after..];
+    let rel = &rest[rest.find('/')? + 1..];
+    let rel = rel.rsplit_once('/').map(|(dir, _)| dir)?;
+    let nested = PrimPath::new(&format!("{layer}/{rel}")).ok()?;
+    if stage.has_prim(&nested) {
+        return Some(nested);
+    }
+    let folder = rel.split('/').next()?;
+    let top = PrimPath::new(&format!("{layer}/{folder}")).ok()?;
+    // Masks, effects and text animators make the folder on the first paste.
+    let creatable = match folder {
+        "masks" | "effects" => true,
+        "animators" => bae_motion::query::layer_kind(stage, layer).as_deref() == Some("text"),
+        _ => false,
+    };
+    (stage.has_prim(&top) || creatable).then_some(top)
+}
+
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
@@ -1694,7 +1848,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Out Point to Current Time", "将出点移到当前时间"),
     ("Set Work Area Start", "将工作区域开头设置为当前时间"),
     ("Set Work Area End", "将工作区域结尾设置为当前时间"),
-    ("Trim Comp to Work Area", "将合成修剪至工作区域"),
+    ("Trim Comp to Work Area", "将合成裁剪到工作区"),
     // Layer > Transform (AE 26's Chinese menu).
     ("Flip Horizontal", "水平翻转"),
     ("Flip Vertical", "垂直翻转"),
@@ -1702,6 +1856,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp", "适合复合"),
     ("Fit to Comp Width", "适合复合宽度"),
     ("Fit to Comp Height", "适合复合高度"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
+    ("Find", "查找"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

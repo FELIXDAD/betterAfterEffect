@@ -234,7 +234,7 @@ const FILE: &[Node] = &[
         ],
     ),
     SEP,
-    it(131093, "Find", "motion.file.find", "", E, Todo),
+    it(131093, "Find", "motion.file.find", "", E, Done),
     SEP,
     it(131095, "Add Footage to Comp", "motion.file.add_footage_to_comp", "", E, Todo),
     it(131096, "New Comp from Selection...", "motion.file.new_comp_from_selection", "", E, Todo),
@@ -501,7 +501,7 @@ const COMPOSITION: &[Node] = &[
     ),
     SEP,
     it(327701, "Composition Flowchart", "motion.comp.composition_flowchart", "", E, Later),
-    it(327702, "Composition Mini-Flowchart", "motion.comp.composition_mini_flowchart", "", E, Later),
+    it(327702, "Composition Mini-Flowchart", "motion.comp.composition_mini_flowchart", "", E, Done),
     SEP,
     sub(
         "VR",
