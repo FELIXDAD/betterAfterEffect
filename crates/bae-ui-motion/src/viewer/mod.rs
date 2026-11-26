@@ -37,6 +37,7 @@ mod look_at;
 mod menu;
 mod motion_path;
 mod motion_sketch;
+mod navigator;
 mod overlay;
 mod particle_guides;
 mod path_edit;
@@ -280,6 +281,8 @@ pub struct CompositionViewer {
     mag: f32,
     /// Layers under the pointer when the context menu opened (topmost first).
     menu_layers: Vec<PrimPath>,
+    /// Arrow-key nudges while a key is held (one undo step on release).
+    nudge: Option<Nudge>,
     /// The motion path keyframe the context menu opened on (AE: the keyframe
     /// menu instead of the layer menu).
     menu_key: Option<bae_motion::KeyRef>,
@@ -426,19 +429,88 @@ impl CompositionViewer {
         }
     }
 
-    fn nudge_vertices(
+    /// An arrow-key nudge by `d` comp pixels: the selected vertices, the
+    /// anchor point with the Pan Behind tool, or the selected layers. While an
+    /// arrow key stays down the nudges add up, previewed live, and become one
+    /// undo step when the keys come up ([`Self::finish_nudge`]).
+    fn nudge_by(
         &mut self,
-        cx: &mut PanelContext<'_>,
+        cx: &PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
         d: DVec2,
     ) -> bool {
+        match &mut self.nudge {
+            Some(Nudge::Vertices(drag, total)) => {
+                *total += d;
+                drag.update(*total, false);
+                return true;
+            }
+            Some(Nudge::Layers(drag, total)) => {
+                *total += d;
+                drag.update(*total, false, None);
+                return true;
+            }
+            None => {}
+        }
         let Some(comp) = self.evaluate(cx, session, info) else {
             return false;
         };
         let selected = session.lock().selected_layers.clone();
-        let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
-        path_edit::nudge(cx, session, info, &paths, &self.select.vertices, d)
+        if !self.select.vertices.is_empty() {
+            let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
+            let Some(p) = paths
+                .iter()
+                .find(|p| self.select.vertices.prim.as_ref() == Some(&p.prim))
+            else {
+                return false;
+            };
+            let mut drag = path_edit::PathDrag::new(
+                p.clone(),
+                path_edit::Hit::Vertex { path: 0, index: 0 },
+                &self.select.vertices,
+                DVec2::ZERO,
+            );
+            drag.update(d, false);
+            self.nudge = Some(Nudge::Vertices(drag, d));
+            return true;
+        }
+        if selected.is_empty() {
+            return false;
+        }
+        // Pan Behind: the anchor point moves, the layer stays (AE).
+        let kind = if crate::tools::shared(cx.resources).lock().current() == Tool::PanBehind {
+            transform::Kind::Anchor {
+                start: DVec2::ZERO,
+                compensate: true,
+            }
+        } else {
+            transform::Kind::Move { start: DVec2::ZERO }
+        };
+        let mut drag = transform::TransformDrag::new(cx.stage, &comp, &selected, kind);
+        drag.update(d, false, None);
+        self.nudge = Some(Nudge::Layers(drag, d));
+        true
+    }
+
+    /// The arrow keys are up: the nudges so far become one undo step.
+    fn finish_nudge(
+        &mut self,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        info: &CompInfo,
+    ) {
+        match self.nudge.take() {
+            Some(Nudge::Vertices(drag, _)) if drag.changed() => drag.commit(cx, session, info),
+            Some(Nudge::Layers(drag, _)) => {
+                let time = session.lock().time(&info.path);
+                let edits = drag.commit(cx.stage, time);
+                if !edits.is_empty() {
+                    cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+                }
+            }
+            _ => {}
+        }
     }
 
     fn delete_vertices(
@@ -452,7 +524,7 @@ impl CompositionViewer {
         };
         let selected = session.lock().selected_layers.clone();
         let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
-        if path_edit::delete(cx, &paths, &self.select.vertices) {
+        if path_edit::delete(cx, session, info, &paths, &self.select.vertices) {
             self.select.vertices.clear();
         }
     }
@@ -547,15 +619,17 @@ pub(crate) fn live_evaluator<'a>(
     cx: &PanelContext<'_>,
     session: &SharedSession,
 ) -> &'a mut bae_anim::Evaluator {
-    let overrides = session
-        .lock()
-        .scrub
-        .as_ref()
-        .map(|s| s.overrides(cx.stage))
-        .unwrap_or_default();
+    let overrides = session.lock().live_overrides(cx.stage);
     let eval = eval.get(cx.stage);
     eval.set_overrides(overrides);
     eval
+}
+
+/// Arrow-key nudges held down: the drag they add up to and its total offset
+/// (comp pixels).
+enum Nudge {
+    Layers(transform::TransformDrag, DVec2),
+    Vertices(path_edit::PathDrag, DVec2),
 }
 
 /// Apply the viewer's own transform drag to an evaluated comp and recompute
@@ -608,23 +682,39 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
+/// The transparency grid: one rectangle tiled with a cached 2×2 texture
+/// (a rectangle per cell was tens of thousands of shapes at the small size).
 pub(crate) fn checkerboard(p: &egui::Painter, r: Rect, resources: &bae_app::Resources) {
     let prefs = prefs::ViewerPrefs::current(resources);
-    let s = prefs.checker_size;
+    let s = prefs.checker_size.max(1.0);
     let colors = prefs.checker_colors;
-    p.rect_filled(r, 0.0, colors[1]);
-    let mut y = r.top();
-    let mut row = 0;
-    while y < r.bottom() {
-        let mut x = r.left() + if row % 2 == 0 { 0.0 } else { s };
-        while x < r.right() {
-            let cell = Rect::from_min_size(pos2(x, y), vec2(s, s)).intersect(r);
-            p.rect_filled(cell, 0.0, colors[0]);
-            x += 2.0 * s;
-        }
-        y += s;
-        row += 1;
-    }
+    let ctx = p.ctx();
+    let id = egui::Id::new("bae.checkerboard");
+    let cached = ctx
+        .data(|d| d.get_temp::<([egui::Color32; 2], egui::TextureHandle)>(id))
+        .filter(|(c, _)| *c == colors)
+        .map(|(_, t)| t);
+    let texture = cached.unwrap_or_else(|| {
+        let image = egui::ColorImage::new([2, 2], vec![colors[0], colors[1], colors[1], colors[0]]);
+        let texture = ctx.load_texture(
+            "bae.checkerboard",
+            image,
+            egui::TextureOptions {
+                magnification: egui::TextureFilter::Nearest,
+                minification: egui::TextureFilter::Nearest,
+                wrap_mode: egui::TextureWrapMode::Repeat,
+                mipmap_mode: None,
+            },
+        );
+        ctx.data_mut(|d| d.insert_temp(id, (colors, texture.clone())));
+        texture
+    });
+    // Each texel is one cell: 2 cells per texture repeat.
+    let uv = Rect::from_min_max(
+        pos2(0.0, 0.0),
+        pos2(r.width() / (2.0 * s), r.height() / (2.0 * s)),
+    );
+    p.image(texture.id(), r, uv, egui::Color32::WHITE);
 }
 
 impl Panel for CompositionViewer {
@@ -679,6 +769,18 @@ impl Panel for CompositionViewer {
                 self.display.shortcut(&action.params);
                 true
             }
+            display::FAST_PREVIEWS => {
+                // Draft 3D is the 3D renderer's switch (not here yet).
+                if let Some(f) = action
+                    .params
+                    .get("mode")
+                    .and_then(|m| m.as_str())
+                    .and_then(display::Fast::parse)
+                {
+                    self.display.fast = f;
+                }
+                true
+            }
             display::TAKE_SNAPSHOT | display::SHOW_SNAPSHOT | display::PURGE_SNAPSHOT => {
                 let slot = action
                     .params
@@ -700,14 +802,11 @@ impl Panel for CompositionViewer {
             crate::tools::ids::NUDGE => {
                 let p = |k: &str| action.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let mag = f64::from(if self.mag > 0.0 { self.mag } else { 1.0 });
-                if !self.select.vertices.is_empty()
-                    && let Some(info) = common::active_comp(cx.stage, &session)
-                {
-                    let d = DVec2::new(p("dx") / mag, p("dy") / mag);
-                    return self.nudge_vertices(cx, &session, &info, d);
+                let d = DVec2::new(p("dx") / mag, p("dy") / mag);
+                match common::active_comp(cx.stage, &session) {
+                    Some(info) => self.nudge_by(cx, &session, &info, d),
+                    None => false,
                 }
-                nudge_layers(cx, &session, p("dx"), p("dy"), mag);
-                true
             }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
@@ -764,7 +863,12 @@ impl Panel for CompositionViewer {
 
         let full = ui.available_rect_before_wrap();
         let bar_h = 28.0;
-        let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
+        // The Composition Navigator along the top.
+        let nav = Rect::from_min_max(full.min, pos2(full.right(), full.top() + navigator::HEIGHT));
+        let area = Rect::from_min_max(
+            pos2(full.left(), nav.bottom()),
+            pos2(full.right(), full.bottom() - bar_h),
+        );
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
         // View layout: the active view is the viewer, the others are drawn below.
         let (panes, active) = {
@@ -789,6 +893,7 @@ impl Panel for CompositionViewer {
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
+        navigator::bar(ui, cx, &session, nav);
         if std::mem::take(&mut self.escape) {
             ui.input_mut(|i| {
                 i.events.push(egui::Event::Key {
@@ -899,7 +1004,7 @@ impl Panel for CompositionViewer {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources, ui.ctx());
         }
-        let resolution = {
+        let mut resolution = {
             let s = session.lock();
             // Preview ▸ Resolution overrides the viewer's while playing.
             match s.preview.resolution.filter(|_| s.is_playing()) {
@@ -907,6 +1012,12 @@ impl Panel for CompositionViewer {
                 None => render_factor(cx.stage, &info.path, s.auto_resolution, mag),
             }
         };
+        // Fast Previews while something is dragged.
+        let interacting = resp.dragged() || self.select.busy() || session.lock().scrub.is_some();
+        if interacting && self.display.fast == display::Fast::Adaptive {
+            resolution = resolution.max(4);
+        }
+        let wireframe = interacting && self.display.fast == display::Fast::Wireframe;
         self.render_factor = resolution;
         // Paint.
         let painter = ui.painter_at(area);
@@ -950,8 +1061,26 @@ impl Panel for CompositionViewer {
                 s.scrub = None;
             }
         }
+        // Nudges end when no arrow key is down (one undo step).
+        let arrows = [
+            egui::Key::ArrowLeft,
+            egui::Key::ArrowRight,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowDown,
+        ];
+        if self.nudge.is_some() && !ui.input(|i| arrows.iter().any(|k| i.key_down(*k))) {
+            self.finish_nudge(cx, &session, &info);
+        }
+        // Ctrl+T knows a path is selected (Free Transform Points).
+        session.lock().vertex_path = self
+            .select
+            .vertices
+            .prim
+            .clone()
+            .filter(|_| !self.select.vertices.is_empty());
         let scrub = session.lock().scrub.clone();
         let editing = scrub.is_some()
+            || self.nudge.is_some()
             || self.select.drag.is_some()
             || self.type_tool.edited_layer().is_some();
         let playback = session
@@ -1080,7 +1209,11 @@ impl Panel for CompositionViewer {
                 s.expr_errors = comp.errors.clone();
             }
         }
-        apply_overrides(&mut comp, self.select.drag.as_ref());
+        let nudged = match &self.nudge {
+            Some(Nudge::Layers(d, _)) => Some(d),
+            _ => None,
+        };
+        apply_overrides(&mut comp, self.select.drag.as_ref().or(nudged));
         // A shape group being dragged.
         if let Some(d) = &self.select.group_drag
             && let Some(l) = comp.layers.iter_mut().find(|l| l.path == d.layer)
@@ -1089,11 +1222,16 @@ impl Panel for CompositionViewer {
         }
         // A mask or shape path being edited shows in the picture, not only as
         // its outline (#593).
+        let nudged_path = match &self.nudge {
+            Some(Nudge::Vertices(d, _)) => Some((d.prim().clone(), d.preview().path)),
+            _ => None,
+        };
         if let Some((prim, path)) = self
             .select
             .path_preview()
             .or(self.pen.path_preview())
             .or(self.feather.path_preview())
+            .or(nudged_path)
         {
             overlay::apply_path_preview(&mut comp, &prim, &path);
         }
@@ -1162,13 +1300,15 @@ impl Panel for CompositionViewer {
         // Live edits, other 3D views than the active camera, the Render Time
         // column (it times this render), Show Channel / Exposure and a region
         // of interest render here; otherwise the frame comes from the
-        // background renderer and its cache.
+        // background renderer and its cache. Wireframe draws no picture.
         let direct = editing
             || view_camera.is_some()
             || measure
             || self.display.render() != bae_render::Display::default()
             || self.display.roi().is_some();
-        let image = if direct {
+        let image = if wireframe {
+            None
+        } else if direct {
             self.gpu.as_mut().and_then(|g| {
                 g.frame(
                     cx.resources,
@@ -1268,6 +1408,22 @@ impl Panel for CompositionViewer {
             }
             vector = std::borrow::Cow::Owned(text_only);
         }
+        if wireframe {
+            // Wireframe: the layers' outlines only.
+            let outer = Affine::new(DMat4::IDENTITY);
+            for l in comp.layers.iter().filter(|l| l.visible) {
+                if let Some(q) = render::bounds_quad(l, &view, &outer) {
+                    clip.add(egui::Shape::closed_line(
+                        q.to_vec(),
+                        Stroke::new(1.0, Color32::WHITE),
+                    ));
+                }
+            }
+            vector = std::borrow::Cow::Owned(EvaluatedComp {
+                layers: Vec::new(),
+                ..comp.clone()
+            });
+        }
         // Something is still warming up (an effect pipeline, the text
         // renderer): the last complete frame stays (none yet: nothing, not the
         // simplified drawing) with a small hint, like AE's render progress.
@@ -1303,6 +1459,9 @@ impl Panel for CompositionViewer {
         // layer's label color).
         let selected = session.lock().selected_layers.clone();
         let outer = Affine::new(DMat4::IDENTITY);
+        // View ▸ Show Layer Controls off: the tools still work, unseen.
+        let hidden = painter.with_clip_rect(Rect::NOTHING);
+        let painter = if opts.layer_controls { painter } else { hidden };
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
             let label = cx
                 .stage
@@ -1343,7 +1502,8 @@ impl Panel for CompositionViewer {
             );
         }
 
-        if controls.masks {
+        // View Options' masks and the bar's Toggle Mask and Shape Path Visibility.
+        if controls.masks && opts.paths {
             overlay::masks(&painter, cx.stage, &comp, &view, &selected);
         }
         particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected, view_camera);
@@ -1769,6 +1929,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
     bae_ui::i18n::register(view_options::ZH);
     bae_ui::i18n::register(display::ZH);
+    bae_ui::i18n::register(navigator::ZH);
     crate::register_panel(
         app,
         "composition",

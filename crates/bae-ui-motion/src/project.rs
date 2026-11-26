@@ -567,8 +567,10 @@ impl Panel for ProjectPanel {
                     if resp.double_clicked() {
                         match row.kind {
                             ItemKind::Comp => open_comp = Some(row.path.clone()),
-                            // AE: footage opens in the Footage panel.
-                            ItemKind::Footage => open_footage = Some(row.path.clone()),
+                            // AE: footage and solids open in the Footage panel.
+                            ItemKind::Footage | ItemKind::Solid => {
+                                open_footage = Some(row.path.clone())
+                            }
                             ItemKind::Folder if !self.collapsed.remove(&row.path) => {
                                 self.collapsed.insert(row.path.clone());
                             }

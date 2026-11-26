@@ -1616,6 +1616,7 @@ impl GraphEditor {
             );
             (edits, vline, hline) = (e, v, h);
             if !edits.is_empty() {
+                let mut specs = Vec::new();
                 for p in &mut props {
                     let mine: Vec<&KeyEdit> = edits
                         .iter()
@@ -1623,8 +1624,19 @@ impl GraphEditor {
                         .collect();
                     if !mine.is_empty() {
                         p.spec = bae_motion::apply_key_edits(&p.attr, &p.spec, &mine).0;
+                        specs.push(bae_anim::AttrOverride {
+                            prim: p.path.clone(),
+                            attr: p.attr.clone(),
+                            spec: p.spec.clone(),
+                        });
                     }
                 }
+                // The comp follows the drag (#593).
+                session.lock().key_preview = Some(crate::session::KeyPreview {
+                    owner: "graph",
+                    specs,
+                    committed: None,
+                });
                 let moved: Vec<KeyRef> = selected
                     .iter()
                     .map(|k| {
@@ -1919,6 +1931,9 @@ impl GraphEditor {
                 .collect();
             cx.invoke_with("key.edit", json!({ "edits": edits }));
             let mut s = session.lock();
+            if let Some(k) = s.key_preview.as_mut().filter(|k| k.owner == "graph") {
+                k.committed = Some((stage.revision(), std::time::Instant::now()));
+            }
             for k in &mut s.selected_keys {
                 if let Some((_, t)) = moved.iter().find(|(m, _)| m == k) {
                     k.time = *t;
@@ -1940,6 +1955,16 @@ impl GraphEditor {
                 .collect();
         }
 
+        // A drag that ended without an edit (or was cancelled) shows nothing.
+        if self.drag.is_none() {
+            let mut s = session.lock();
+            if s.key_preview
+                .as_ref()
+                .is_some_and(|k| k.owner == "graph" && k.committed.is_none())
+            {
+                s.key_preview = None;
+            }
+        }
         self.button_bar(ui, cx, session, info, bar, &frame, &mut out);
         #[cfg(test)]
         {

@@ -12,6 +12,16 @@ fn alpha(rgba: &[u8]) -> Vec<u8> {
 }
 
 fn export_alpha(gpu: &Arc<GpuContext>, stage: &Stage, comp: &PrimPath, frame: i64) -> Vec<u8> {
+    export_with_switches(gpu, stage, comp, frame, true)
+}
+
+fn export_with_switches(
+    gpu: &Arc<GpuContext>,
+    stage: &Stage,
+    comp: &PrimPath,
+    frame: i64,
+    nested_switches: bool,
+) -> Vec<u8> {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("frame.png");
     let queue = SharedRenderQueue::default();
@@ -22,9 +32,9 @@ fn export_alpha(gpu: &Arc<GpuContext>, stage: &Stage, comp: &PrimPath, frame: i6
             dir.path(),
         );
         let item = q.item_mut(id).unwrap();
-        item.set_format(bae_render::ExportFormat::Png);
-        item.output = file.to_string_lossy().into_owned();
-        item.channels = Channels::RgbAlpha;
+        item.outputs[0].set_format(bae_render::ExportFormat::Png);
+        item.outputs[0].output = file.to_string_lossy().into_owned();
+        item.outputs[0].channels = Channels::RgbAlpha;
         (item.start, item.end) = (frame, frame);
         assert!(q.begin());
     }
@@ -34,6 +44,7 @@ fn export_alpha(gpu: &Arc<GpuContext>, stage: &Stage, comp: &PrimPath, frame: i6
         gpu.clone(),
         &[],
         None,
+        nested_switches,
     );
     let (w, h, rgba) = bae_render::png_out::read_rgba8(&file).unwrap();
     assert_eq!((w, h), (120, 40));
@@ -141,4 +152,70 @@ fn motion_blur_preview_and_export() {
     stage.redo(&author).unwrap();
     assert_eq!(export_alpha(&gpu, &stage, &comp, 1), stopped);
     assert_eq!(preview_alpha(&stage, 1), stopped, "redo");
+}
+
+#[test]
+fn nested_switches_update_the_same_preview_frame_and_exported_png() {
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let rate = FrameRate::FPS_30;
+    let mut scene = SceneBuilder::new();
+    let outer = scene
+        .comp("outer", 120, 40, rate, Time::ONE_SECOND)
+        .unwrap();
+    let middle = scene
+        .comp("middle", 120, 40, rate, Time::ONE_SECOND)
+        .unwrap();
+    let inner = scene
+        .comp("inner", 120, 40, rate, Time::ONE_SECOND)
+        .unwrap();
+    let top = scene
+        .layer(&outer, "Middle", "pre_comp", Some(&middle))
+        .unwrap();
+    let sub = scene
+        .layer(&middle, "Inner", "pre_comp", Some(&inner))
+        .unwrap();
+    let solid = scene
+        .solid_layer(&inner, "moving", [1.; 4], [20, 20], [20., 10.])
+        .unwrap();
+    for item in [&outer, &middle, &inner, &sub, &solid] {
+        scene.set(item, "motion_blur", Value::Bool(true)).unwrap();
+    }
+    scene.set(&top, "motion_blur", Value::Bool(false)).unwrap();
+    for (frame, x) in [(0, 20.), (2, 80.)] {
+        scene
+            .key(
+                &solid,
+                "transform:position",
+                rate.frame_to_time(frame),
+                Value::Vec3([x, 20., 0.]),
+            )
+            .unwrap();
+    }
+    let stage = scene.into_stage();
+    let mut resources = Resources::new();
+    let prefs = Arc::new(bae_prefs::PrefsStore::new(bae_prefs::Preferences::default()));
+    resources.insert(prefs.clone());
+    let registry = Arc::new(ViewportTextureRegistry::new());
+    let mut preview = GpuPreview::with(gpu.clone(), registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(1));
+    let ec = bae_anim::evaluate_comp(&stage, &outer, rate.frame_to_time(1)).unwrap();
+    for enabled in [true, false, true] {
+        let mut settings = (*prefs.current()).clone();
+        settings.set("composition.switches_affect_nested_comps", enabled);
+        prefs.set(settings).unwrap();
+        preview
+            .frame(&resources, &stage, &ec, 1, None, false)
+            .unwrap();
+        let published = registry.get(preview.viewport()).unwrap();
+        let pixels = bae_gpu::transfer::read_texture(&gpu, published.view.texture()).unwrap();
+        let shown = alpha(&pixels.data);
+        assert!(shown.iter().any(|&a| a > 0));
+        assert_eq!(shown.iter().any(|&a| (1..255).contains(&a)), !enabled);
+        assert_eq!(
+            shown,
+            export_with_switches(&gpu, &stage, &outer, 1, enabled)
+        );
+    }
 }

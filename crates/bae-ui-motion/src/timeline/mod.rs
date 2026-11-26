@@ -74,6 +74,9 @@ const TABS_H: f32 = 22.0;
 const HEAD_H: f32 = 34.0;
 const COLS_H: f32 = 20.0;
 const FOOT_H: f32 = 22.0;
+/// The shortest the Timeline lays out: tabs, header, column titles, footer and
+/// three rows; a shorter panel scrolls.
+const MIN_PANEL_H: f32 = TABS_H + HEAD_H + COLS_H + FOOT_H + 3.0 * ROW_H;
 const SW: f32 = 15.0;
 /// Rows an expression field grows to.
 const MAX_EXPR_LINES: usize = 30;
@@ -946,6 +949,21 @@ impl Panel for TimelinePanel {
         }
         let full = ui.available_rect_before_wrap();
         crate::import::drop_on_panel(ui, cx);
+        // Too short for the header and a few rows (a small window, #750): the
+        // whole panel scrolls, so the rows and their scroll bar stay reachable.
+        if full.height() < MIN_PANEL_H {
+            egui::ScrollArea::vertical()
+                .id_salt("timeline_short")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(vec2(full.width(), MIN_PANEL_H), Sense::hover());
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                    let cols = self.columns.layout(&child, rect);
+                    self.contents(&mut child, cx, &cols);
+                });
+            return;
+        }
         let cols = self.columns.layout(ui, full);
         self.contents(ui, cx, &cols);
     }
@@ -1090,6 +1108,29 @@ impl TimelinePanel {
             pointer_x,
             shift,
         );
+        // The comp follows a keyframe drag (#593).
+        {
+            let preview = self
+                .key_plan
+                .as_ref()
+                .map(|p| p.preview(stage))
+                .unwrap_or_default();
+            let mut s = session.lock();
+            let mine = |s: &crate::session::Session| {
+                s.key_preview
+                    .as_ref()
+                    .is_some_and(|k| k.owner == "bars" && k.committed.is_none())
+            };
+            if !preview.is_empty() {
+                s.key_preview = Some(crate::session::KeyPreview {
+                    owner: "bars",
+                    specs: preview,
+                    committed: None,
+                });
+            } else if mine(&s) {
+                s.key_preview = None;
+            }
+        }
         // Background of the graph body: marquee selection and deselect (the Graph
         // Editor has its own).
         if !self.graph_mode {

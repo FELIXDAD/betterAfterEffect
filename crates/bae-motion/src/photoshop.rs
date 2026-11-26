@@ -40,6 +40,8 @@ pub struct Params {
     pub replace: Option<PrimPath>,
     #[serde(default)]
     pub keep_name: bool,
+    #[serde(default)]
+    pub keep_interpretation: bool,
     /// In compositions copy the source style onto each instance; otherwise let the
     /// instance inherit the source style (AE's merged-styles footage).
     pub editable: bool,
@@ -72,7 +74,7 @@ impl Command for ImportPhotoshop {
             assets
         };
         if let Some(rel) = &p.folder {
-            parent = crate::import::folder_path(tx, &parent, rel)?;
+            parent = crate::import::folder_path(tx, &parent, rel, p.folder_label)?;
         }
         let (item, kind) = if p.kind == ImportKind::Footage {
             let layer = if let Some(sel) = p.selection {
@@ -172,6 +174,7 @@ fn footage(
                 item: item.clone(),
                 file,
                 keep_name: p.keep_name,
+                keep_interpretation: p.keep_interpretation,
             },
         )?;
         item.clone()
@@ -180,6 +183,7 @@ fn footage(
             .run(
                 tx,
                 ImportParams {
+                    folder_label: p.folder_label,
                     parent: Some(parent.clone()),
                     comp: None,
                     files: vec![file],

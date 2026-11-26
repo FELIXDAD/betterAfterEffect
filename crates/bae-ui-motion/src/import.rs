@@ -78,6 +78,8 @@ fn file_name(path: &Path) -> String {
 pub struct ImportDefaults {
     /// Frames per second of image sequences.
     pub sequence_fps: f64,
+    /// Drop-frame counting for unlabeled NTSC footage.
+    pub ntsc_drop_frame: bool,
     /// Duration given to stills (`None`: the length of the composition).
     pub still_duration: Option<bae_model::Time>,
     /// Labels of stills, moving footage and audio.
@@ -93,6 +95,7 @@ impl Default for ImportDefaults {
     fn default() -> Self {
         ImportDefaults {
             sequence_fps: 30.0,
+            ntsc_drop_frame: true,
             still_duration: None,
             labels: None,
             report_missing: true,
@@ -106,6 +109,7 @@ impl ImportDefaults {
         use bae_media::MediaKind;
         ImportDefaults {
             sequence_fps: crate::prefs::sequence_fps(prefs),
+            ntsc_drop_frame: prefs.str("import.indeterminate_media_ntsc") == "drop_frame",
             report_missing: prefs.bool("import.report_missing_frames"),
             verify_frames: prefs.bool("import.verify_individual_frames"),
             still_duration: crate::prefs::still_duration(prefs),
@@ -178,6 +182,9 @@ fn probe_file(
                 .map(|(k, v)| (k.to_owned(), v))
                 .collect();
             use bae_media::MediaKind;
+            if info.timecode.is_none() && info.video.as_ref().and_then(|v| v.frame_rate).is_some_and(bae_media::time::is_ntsc) {
+                attrs.insert("timecode:drop_frame".into(), bae_model::Value::Bool(defaults.ntsc_drop_frame));
+            }
             if info.kind == MediaKind::Still
                 && let Some(d) = defaults.still_duration
             {
@@ -332,7 +339,7 @@ fn import_into(
             ));
     }
     if !probed.files.is_empty() {
-        let mut params = json!({ "files": probed.files });
+        let mut params = json!({ "files": probed.files, "folder_label": crate::prefs::current(cx.resources).int("labels.label_default_folder") });
         if let Some(p) = parent {
             params["parent"] = json!(p);
         }
@@ -443,7 +450,7 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         if let Some(file) = probed.files.pop() {
             cx.invoke_with(
                 "item.replace_file",
-                json!({ "item": item, "file": file, "keep_name": true }),
+                json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }),
             );
         }
         verify::report(cx, tr("Reload Footage"), probed);
@@ -489,7 +496,13 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
     }
     let mut probed = probe(&[path], &defaults);
     if let Some(file) = probed.files.pop() {
-        cx.invoke_with("item.replace_file", json!({ "item": item, "file": file }));
+        let keep = crate::prefs::current(cx.resources)
+            .str("import.footage_interpretation_on_replace")
+            == "remember";
+        cx.invoke_with(
+            "item.replace_file",
+            json!({ "item": item, "file": file, "keep_interpretation": keep }),
+        );
     }
     verify::report(cx, tr("Replace Footage File"), probed);
 }

@@ -254,11 +254,13 @@ pub(super) fn frame(
         )
     });
     let selected = session.lock().selected_layers.clone();
-    let mut paths: Vec<EditablePath> = if tool == Tool::Selection {
-        overlay::editable_paths(stage, comp, &selected, None)
-    } else {
-        Vec::new()
-    };
+    // The bar's Toggle Mask and Shape Path Visibility off: no paths to edit.
+    let mut paths: Vec<EditablePath> =
+        if tool == Tool::Selection && session.lock().view_options.paths {
+            overlay::editable_paths(stage, comp, &selected, None)
+        } else {
+            Vec::new()
+        };
     // A shape layer's path in Free Transform (double-clicked) stays editable.
     let prefs = super::prefs::ViewerPrefs::current(cx.resources);
     if state
@@ -293,10 +295,19 @@ pub(super) fn frame(
     }
     let request = std::mem::take(&mut tools.lock().free_transform_request);
     if request && tool == Tool::Selection {
+        // The path with selected vertices, else the one selected in the
+        // Timeline, else the first.
+        let in_timeline = session
+            .lock()
+            .selected_props
+            .iter()
+            .find(|(p, attr)| attr == "path" && paths.iter().any(|e| &e.prim == p))
+            .map(|(p, _)| p.clone());
         let prim = state
             .vertices
             .prim
             .clone()
+            .or(in_timeline)
             .or_else(|| paths.first().map(|p| p.prim.clone()));
         if let Some(p) = prim.and_then(|prim| paths.iter().find(|p| p.prim == prim)) {
             let sel = if state.vertices.prim.as_ref() == Some(&p.prim) {
@@ -362,10 +373,15 @@ pub(super) fn frame(
                 {
                     // A parametric shape (rectangle, ellipse, polystar): AE
                     // selects its group and shows the group's box.
-                    session.lock().selected_layers = vec![layer.clone()];
                     state.group = comp
                         .layer(layer)
                         .and_then(|l| group_edit::group_at(l, view, pos));
+                    let mut s = session.lock();
+                    s.selected_layers = vec![layer.clone()];
+                    // The Timeline selects its row too.
+                    if let Some(g) = &state.group {
+                        s.selected_groups = vec![format!("{layer}#{g}")];
+                    }
                 }
                 Some(bae_model::LayerKind::Shape) => {
                     let own = overlay::editable_paths(
@@ -401,7 +417,20 @@ pub(super) fn frame(
         }
     }
 
-    // The selected shape group: only while its layer stays selected.
+    // The shape group selected in the Timeline shows its box (AE: a shape
+    // tool's new group, a group row clicked); the viewer selects groups there.
+    state.group = session
+        .lock()
+        .selected_groups
+        .iter()
+        .rev()
+        .filter_map(|id| crate::session::group_prim(id))
+        .find(|g| {
+            stage
+                .prim(g)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::SHAPE_GROUP))
+        });
+    // Only while its layer stays selected.
     if state
         .group
         .as_ref()
@@ -503,8 +532,13 @@ pub(super) fn frame(
             _ if !shift => state.vertices.clear(),
             _ => {}
         }
-        if !matches!(t, Press::Group | Press::GroupHandle(_)) {
-            state.group = None;
+        if !matches!(t, Press::Group | Press::GroupHandle(_))
+            && let Some(g) = state.group.take()
+        {
+            session
+                .lock()
+                .selected_groups
+                .retain(|id| crate::session::group_prim(id).as_ref() != Some(&g));
         }
         state.press = Some((t, pos));
     }
