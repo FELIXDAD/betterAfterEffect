@@ -1028,6 +1028,7 @@ impl Panel for RenderQueuePanel {
 
 impl RenderQueuePanel {
     fn contents(&mut self, ui: &mut egui::Ui, cx: &PanelContext<'_>) {
+        ui.spacing_mut().item_spacing.y = 2.0;
         let queue = shared(cx.resources);
         let (running, queued) = {
             let mut q = queue.lock();
@@ -1271,8 +1272,13 @@ fn item_ui(
             );
         }
     });
-    // Name, status and actions wrap in a narrow panel instead of running
-    // off its edge.
+
+    if let ItemStatus::Failed(message) = &item.status {
+        ui.colored_label(ui.visuals().error_fg_color, message);
+    }
+    // Render Settings and Log (AE's templates; BAE renders at Best Settings).
+    // AE's template links: Render Settings and Output Module open their
+    // dialogs; Log keeps AE's default.
     ui.horizontal_wrapped(|ui| {
         match &item.status {
             ItemStatus::Queued | ItemStatus::Failed(_) => {}
@@ -1323,15 +1329,7 @@ fn item_ui(
         {
             *remove = Some(item.id);
         }
-    });
-    if let ItemStatus::Failed(message) = &item.status {
-        ui.colored_label(ui.visuals().error_fg_color, message);
-    }
-    // Render Settings and Log (AE's templates; BAE renders at Best Settings).
-    // AE's template links: Render Settings and Output Module open their
-    // dialogs; Log keeps AE's default.
-    ui.add_enabled_ui(editable, |ui| {
-        ui.horizontal_wrapped(|ui| {
+        ui.add_enabled_ui(editable, |ui| {
             let rs: Vec<(&str, bool)> = RS_TEMPLATES
                 .iter()
                 .map(|t| (*t, *t == "Best Settings"))
@@ -1386,7 +1384,16 @@ fn item_ui(
         });
     });
     ui.add_enabled_ui(editable, |ui| {
-        egui::Grid::new("output").num_columns(2).show(ui, |ui| {
+        let view_width = ui.clip_rect().width();
+        let pair_fields = view_width >= 720.0;
+        let output_width = if pair_fields {
+            view_width * 0.35
+        } else {
+            f32::INFINITY
+        };
+        let columns = if pair_fields { 4 } else { 2 };
+        let grid = egui::Grid::new("output").num_columns(columns);
+        grid.show(ui, |ui| {
             // Fields are named after the label in front of them and the item
             // (screen readers read "… · Format: PNG", issue #128).
             ui.label(tr("Format"));
@@ -1429,7 +1436,9 @@ fn item_ui(
             if format != item.format {
                 item.set_format(format);
             }
-            ui.end_row();
+            if !pair_fields {
+                ui.end_row();
+            }
             // AE: Channels RGB / RGB + Alpha (RGB + Alpha only where the
             // codec has alpha).
             if item.format == ExportFormat::Wav {
@@ -1493,7 +1502,7 @@ fn item_ui(
             ui.label(tr("Output To"));
             ui.vertical(|ui| {
                 let output = item.output.clone();
-                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY))
+                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(output_width))
                     .labeled_value(egui::WidgetType::TextEdit, &name("Output To"), &output);
                 // AE: the format decides the extension.
                 if let Some(ext) = extension_follows_format(&item.output, item.format) {
@@ -1503,7 +1512,9 @@ fn item_ui(
                     );
                 }
             });
-            ui.end_row();
+            if !pair_fields {
+                ui.end_row();
+            }
             ui.label(tr("Frames"));
             // Typed and dragged values stay inside the comp (AE); a range set
             // otherwise (or a comp shortened later) is limited, or refused when

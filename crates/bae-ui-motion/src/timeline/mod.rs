@@ -1156,7 +1156,9 @@ impl TimelinePanel {
             pos2(body.left() + cols.end - 8.0, body.bottom()),
         );
         if outline_bg.height() > 0.0 {
-            let bg = ui.interact(outline_bg, ui.id().with("outline_bg"), Sense::click());
+            let bg = ui
+                .interact(outline_bg, ui.id().with("outline_bg"), Sense::click())
+                .labeled(egui::WidgetType::Other, tr("Timeline Layer List"));
             if bg.clicked() {
                 let mut s = session.lock();
                 s.selected_keys.clear();
