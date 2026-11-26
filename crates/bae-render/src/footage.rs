@@ -161,7 +161,9 @@ mod imp {
                 AlphaMode::Ignore => ImageAlpha::Opaque,
                 AlphaMode::Premultiplied | AlphaMode::Opaque => ImageAlpha::Premultiplied,
             };
-            Ok(GpuImage::from_texture(frame.texture, alpha))
+            let mut image = GpuImage::from_texture(frame.texture, alpha);
+            image.channels = frame.channels;
+            Ok(image)
         }
     }
 

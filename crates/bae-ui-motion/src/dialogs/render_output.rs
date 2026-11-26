@@ -192,6 +192,15 @@ fn work_area(info: &CompInfo) -> (i64, i64) {
     )
 }
 
+/// QuickTime is a container; the video codec is a separate output setting.
+const QT_CODECS: [(ExportFormat, &str); 5] = [
+    (ExportFormat::ProRes422, "Apple ProRes 422"),
+    (ExportFormat::ProRes, "Apple ProRes 422 HQ"),
+    (ExportFormat::ProRes4444, "Apple ProRes 4444"),
+    (ExportFormat::QuickTimeH264, "H.264"),
+    (ExportFormat::QuickTimeHevc, "HEVC"),
+];
+
 /// The open Output Module Settings dialog.
 #[derive(Clone, Debug)]
 pub struct OutputModule {
@@ -199,6 +208,7 @@ pub struct OutputModule {
     format: ExportFormat,
     channels: Channels,
     bit_rate: f64,
+    pcm_audio: bool,
 }
 
 impl OutputModule {
@@ -210,6 +220,7 @@ impl OutputModule {
             format: it.format,
             channels: it.channels,
             bit_rate: it.bit_rate_mbps,
+            pcm_audio: it.pcm_audio,
         })
     }
 
@@ -230,6 +241,7 @@ impl OutputModule {
                     } else {
                         Channels::Rgb
                     };
+                    it.pcm_audio = self.pcm_audio;
                     it.bit_rate_mbps = self.bit_rate;
                 }
                 false
@@ -244,25 +256,50 @@ impl OutputModule {
         ui.set_width(520.0);
         dialog::row(ui, LW, tr("Format:"), |ui| {
             let available: Vec<ExportFormat> = FORMATS
-                .into_iter()
-                .filter(|f| render_queue::format_available(*f))
+                .iter()
+                .copied()
+                .filter(|f| {
+                    render_queue::format_available(*f)
+                        && (!f.is_quicktime() || *f == ExportFormat::ProRes)
+                })
                 .collect();
             let names: Vec<&str> = available
                 .iter()
-                .map(|f| tr(render_queue::format_label(*f)))
+                .map(|f| {
+                    if f.is_quicktime() {
+                        "QuickTime"
+                    } else {
+                        tr(render_queue::format_label(*f))
+                    }
+                })
                 .collect();
             let mut i = available
                 .iter()
-                .position(|f| *f == self.format)
+                .position(|f| *f == self.format || (f.is_quicktime() && self.format.is_quicktime()))
                 .unwrap_or(0);
             if bae_ui::widgets::dropdown(ui, "om-format", &mut i, &names, 220.0).changed() {
                 self.format = available[i];
+                self.channels = render_queue::default_channels(self.format);
             }
         });
         fixed(ui, "Post-Render Action:", "None");
         ui.add_space(4.0);
         ui.label(egui::RichText::new(tr("Video Output")).strong());
         ui.indent(id.with("video"), |ui| {
+            if self.format.is_quicktime() {
+                dialog::row(ui, LW, tr("Video Codec"), |ui| {
+                    let names = QT_CODECS.map(|(_, name)| name);
+                    let mut i = QT_CODECS
+                        .iter()
+                        .position(|(f, _)| *f == self.format)
+                        .unwrap_or(1);
+                    if bae_ui::widgets::dropdown(ui, "om-qt-codec", &mut i, &names, 220.0).changed()
+                    {
+                        self.format = QT_CODECS[i].0;
+                        self.channels = render_queue::default_channels(self.format);
+                    }
+                });
+            }
             dialog::row(ui, LW, tr("Channels:"), |ui| {
                 let alpha = render_queue::supports_alpha(self.format);
                 let options = if alpha {
@@ -301,8 +338,25 @@ impl OutputModule {
             let mut off = false;
             bae_ui::widgets::checkbox(ui, &mut off, tr("Resize"));
             bae_ui::widgets::checkbox(ui, &mut off, tr("Crop"));
-            fixed(ui, "Audio Output", "Audio Output Auto");
         });
+        if self.format.is_quicktime() {
+            dialog::row(ui, LW, tr("Audio Output"), |ui| {
+                let mut i = usize::from(!self.pcm_audio);
+                if bae_ui::widgets::dropdown(
+                    ui,
+                    "om-audio-codec",
+                    &mut i,
+                    &[tr("24-bit PCM"), "AAC"],
+                    170.0,
+                )
+                .changed()
+                {
+                    self.pcm_audio = i == 0;
+                }
+            });
+        } else {
+            fixed(ui, "Audio Output", "Audio Output Auto");
+        }
         ui.add_space(6.0);
         dialog::buttons(ui, true)
     }

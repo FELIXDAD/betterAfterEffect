@@ -5,6 +5,8 @@
 //! undo step (`effect.apply_preset`).
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use bae_model::{PrimPath, Stage, Time};
 use bae_motion::effect::PresetEffect;
@@ -47,6 +49,129 @@ pub(crate) fn list(folder: &Path) -> Vec<(String, PathBuf)> {
         .unwrap_or_default();
     out.sort_by_key(|a| a.0.to_lowercase());
     out
+}
+
+#[derive(Clone)]
+pub(crate) struct IndexedPreset {
+    pub name: String,
+    pub path: PathBuf,
+    pub effects: Arc<[PresetEffect]>,
+    stamp: Option<(std::time::SystemTime, u64)>,
+}
+
+type PresetList = Arc<[IndexedPreset]>;
+
+#[derive(Default)]
+struct IndexState {
+    entries: PresetList,
+    scanned: Option<Instant>,
+    busy: bool,
+    refresh_again: bool,
+}
+
+/// The startup worker and all panels share one directory snapshot.
+pub(crate) struct PresetIndex {
+    folder: PathBuf,
+    state: Mutex<IndexState>,
+}
+
+impl PresetIndex {
+    pub(crate) fn entries(&self) -> PresetList {
+        self.state.lock().unwrap().entries.clone()
+    }
+
+    fn begin(&self, force: bool) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if state.busy {
+            state.refresh_again |= force;
+            return false;
+        }
+        if !force
+            && state
+                .scanned
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+        {
+            return false;
+        }
+        state.busy = true;
+        true
+    }
+
+    fn scan(&self) {
+        loop {
+            let previous = self.entries();
+            let entries = list(&self.folder)
+                .into_iter()
+                .filter_map(|(name, path)| {
+                    let stamp = std::fs::metadata(&path)
+                        .ok()
+                        .and_then(|m| Some((m.modified().ok()?, m.len())));
+                    if stamp.is_some()
+                        && let Some(entry) =
+                            previous.iter().find(|e| e.path == path && e.stamp == stamp)
+                    {
+                        return Some(entry.clone());
+                    }
+                    let preset = read(&path)?;
+                    Some(IndexedPreset {
+                        name,
+                        path,
+                        effects: preset.effects.into(),
+                        stamp,
+                    })
+                })
+                .collect();
+            let mut state = self.state.lock().unwrap();
+            state.entries = entries;
+            state.scanned = Some(Instant::now());
+            if !std::mem::take(&mut state.refresh_again) {
+                state.busy = false;
+                break;
+            }
+        }
+        bae_gpu::warm_up::request_redraw();
+    }
+
+    pub(crate) fn refresh(self: &Arc<Self>, force: bool) {
+        if self.begin(force) {
+            let index = self.clone();
+            if std::thread::Builder::new()
+                .name("bae-preset-index".into())
+                .spawn(move || index.scan())
+                .is_err()
+            {
+                self.state.lock().unwrap().busy = false;
+            }
+        }
+    }
+}
+
+impl bae_gpu::WarmUp for PresetIndex {
+    fn name(&self) -> &str {
+        "animation preset directory"
+    }
+    fn run(&self, _: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        if self.begin(false) {
+            self.scan();
+        }
+        Ok(())
+    }
+}
+
+/// Registers the directory selected by the shell before the first GUI frame.
+pub fn register_preset_index(app: &mut bae_app::App, directory: PathBuf) {
+    let index = Arc::new(PresetIndex {
+        folder: directory,
+        state: Mutex::default(),
+    });
+    app.registry::<dyn bae_gpu::WarmUp>()
+        .register_arc(
+            bae_app::Owner::module("bae-ui-motion"),
+            "bae.motion/preset-index",
+            index.clone(),
+        )
+        .expect("unique preset warm-up");
+    app.insert_resource(index);
 }
 
 /// The effects to save: the selected ones, else every effect of the one
@@ -120,14 +245,41 @@ pub(crate) fn save(cx: &PanelContext<'_>, session: &SharedSession) {
     let Some(path) = SharedFilePicker::save(cx.resources, &request) else {
         return;
     };
-    if let Ok(text) = serde_json::to_string_pretty(&preset)
-        && std::fs::write(&path, text).is_err()
+    if serde_json::to_vec_pretty(&preset)
+        .map_err(std::io::Error::other)
+        .and_then(|data| std::fs::write(&path, data))
+        .is_err()
     {
         crate::dialogs::alert(
             cx,
             tr("Save Animation Preset"),
             tr("The preset could not be saved.").to_owned(),
         );
+    } else if let Some(index) = cx.resources.get::<Arc<PresetIndex>>() {
+        index.refresh(true);
+    }
+}
+
+/// Opens the user preset library in the platform's file browser.
+pub(crate) fn browse(cx: &PanelContext<'_>) {
+    let Some(dir) = folder(cx.resources) else {
+        return;
+    };
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let result = std::fs::create_dir_all(&dir).and_then(|()| {
+        std::process::Command::new(opener)
+            .arg(&dir)
+            .spawn()
+            .map(|_| ())
+    });
+    if let Err(error) = result {
+        crate::dialogs::alert(cx, tr("Browse Presets..."), error.to_string());
     }
 }
 
@@ -144,22 +296,31 @@ pub(crate) fn apply_file(cx: &mut PanelContext<'_>, session: &SharedSession, pat
         return;
     }
     match read(path) {
-        Some(p) => {
-            cx.invoke_with(
-                "effect.apply_preset",
-                json!({"layers": layers, "effects": p.effects}),
-            );
-            cx.invoke_with(
-                bae_ui::action::ids::OPEN_PANEL,
-                json!({"id": "effect_controls"}),
-            );
-        }
+        Some(p) => apply_to_layers(cx, &layers, &p.effects),
         None => crate::dialogs::alert(
             cx,
             tr("Apply Animation Preset"),
             tr("The file is not an animation preset.").to_owned(),
         ),
     }
+}
+
+pub(crate) fn apply_to_layers(
+    cx: &mut PanelContext<'_>,
+    layers: &[PrimPath],
+    effects: &[PresetEffect],
+) {
+    if layers.is_empty() {
+        return;
+    }
+    cx.invoke_with(
+        "effect.apply_preset",
+        json!({"layers":layers,"effects":effects}),
+    );
+    cx.invoke_with(
+        bae_ui::action::ids::OPEN_PANEL,
+        json!({"id":"effect_controls"}),
+    );
 }
 
 /// Animation ▸ Apply Animation Preset...: the open panel, then the preset.
