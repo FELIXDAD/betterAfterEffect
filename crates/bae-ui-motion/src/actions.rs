@@ -57,6 +57,7 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const INTERPRET_FOOTAGE: &str = "motion.file.interpret_footage_main";
     pub const MANAGE_EFFECTS: &str = "motion.effect.manage_effects";
     pub const BROWSE_PRESETS: &str = "motion.anim.browse_presets";
     pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
@@ -235,6 +236,7 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::INTERPRET_FOOTAGE, "Interpret Footage: Main..."),
     (ids::MANAGE_EFFECTS, "Manage Effects..."),
     (ids::BROWSE_PRESETS, "Browse Presets..."),
     (ids::SAVE_PRESET, "Save Animation Preset..."),
@@ -1075,6 +1077,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::INTERPRET_FOOTAGE => {
+            crate::dialogs::interpret_footage(cx, session);
             return true;
         }
         ids::MANAGE_EFFECTS => {
@@ -2038,6 +2044,7 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Interpret Footage: Main...", "解释素材：主要..."),
     ("Manage Effects...", "管理效果..."),
     ("Browse Presets...", "浏览预设..."),
     ("Save Animation Preset...", "保存动画预设..."),

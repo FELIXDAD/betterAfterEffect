@@ -2,6 +2,9 @@
 # itself when this file changes in the runner worktree.
 
 repo = "FELIXDAD/betterAfterEffects"
+# Only these accounts may queue a PR with the merge-ready label (collaborators with write
+# access can add labels too). Empty or missing: anyone.
+label_actors = ["FELIXDAD"]
 base = "dev"
 
 # Orca repo name used to match worktrees in `orca worktree ps` (local and remote hosts).

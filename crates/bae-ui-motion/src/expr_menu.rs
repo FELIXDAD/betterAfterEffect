@@ -4,6 +4,7 @@
 
 pub(crate) mod assist;
 mod field;
+mod typing;
 pub(crate) use field::height as field_height;
 
 use egui::Ui;
