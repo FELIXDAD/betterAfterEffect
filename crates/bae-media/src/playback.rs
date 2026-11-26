@@ -217,13 +217,20 @@ impl AudioOutput {
         let requested_frames =
             (u64::from(rate) * u64::from(request.latency_ms.clamp(1, 500))).div_ceil(1000) as u32;
         let mut stream_config = config.config();
-        let mut frames = requested_frames;
-        if let cpal::SupportedBufferSize::Range { min, max } = *config.buffer_size() {
+        // Audio Hardware > Latency caps the device buffer (AE): the device's
+        // own buffer unless the setting asks for less, so the default never
+        // plays later than the device would by itself.
+        let device_frames = default_buffer_frames(&device, &stream_config, config.sample_format());
+        let mut frames = device_frames.unwrap_or(requested_frames);
+        if let cpal::SupportedBufferSize::Range { min, max } = *config.buffer_size()
+            && device_frames.is_none_or(|d| requested_frames < d)
+        {
             frames = requested_frames.clamp(min, max);
             stream_config.buffer_size = cpal::BufferSize::Fixed(frames);
         }
+        // The ring only feeds the device buffer: no latency of its own.
         let (writer, reader) = RingBuffer::new(
-            (frames.max(requested_frames) as usize)
+            (frames as usize)
                 .div_ceil(BLOCK_FRAMES)
                 .saturating_mul(2)
                 .max(4),
@@ -352,6 +359,18 @@ impl AudioOutput {
         self.monitor.epoch.fetch_add(1, Ordering::AcqRel);
         let _ = self.commands.send(producer::Command::Stop);
     }
+}
+
+/// The buffer the device picks on its own (a silent probe stream).
+fn default_buffer_frames(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    format: SampleFormat,
+) -> Option<u32> {
+    let probe = device
+        .build_output_stream_raw(config.clone(), format, |_, _| {}, |_| {}, None)
+        .ok()?;
+    probe.buffer_size().ok().filter(|n| *n > 0)
 }
 
 fn stream<T: SizedSample + FromSample<f32>>(
