@@ -865,6 +865,25 @@ pub(crate) fn active_comp(stage: &Stage, session: &SharedSession) -> Option<Comp
     query::comp_info(stage, &comp)
 }
 
+/// A viewer tab uses the same swatch as its project item or layer.
+pub(crate) fn related_tab(
+    cx: &PanelContext<'_>,
+    panel: &str,
+    path: &PrimPath,
+    name: &str,
+) -> bae_ui::TabInfo {
+    let tab = bae_ui::TabInfo::new(format!("{} {name}", tr(panel)));
+    if !crate::prefs::current(cx.resources).bool("appearance.use_label_color_for_related_tabs") {
+        return tab;
+    }
+    let label = crate::actions::label_of(cx.stage, path);
+    if (1..=16).contains(&label) {
+        tab.label(theme::label_color(label as usize))
+    } else {
+        tab
+    }
+}
+
 /// Whether a layer is 3D (`three_d` switch; cameras and lights always are).
 pub(crate) fn is_3d(stage: &Stage, layer: &PrimPath) -> bool {
     let Some(v) = stage.prim(layer) else {
