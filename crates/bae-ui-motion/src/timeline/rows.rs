@@ -1125,20 +1125,14 @@ impl TimelinePanel {
         let keypad = ui.memory(|m| m.has_focus(field_id))
             && bae_ui::keypad_enter()
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        let (font, text, bg) = crate::common::expression_style(cx.resources);
-        let shown = ui
-            .scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
-                egui::TextEdit::multiline(&mut buf)
-                    .id(field_id)
-                    .font(font)
-                    .text_color(text)
-                    .background_color(bg)
-                    .desired_width(field.width())
-                    .desired_rows(lines)
-                    .min_size(field.size())
-                    .show(ui)
-            })
-            .inner;
+        let shown = crate::expr_menu::assist::show(
+            ui,
+            cx.resources,
+            field,
+            field_id,
+            &mut buf,
+            Some(lines),
+        );
         let r = shown.response.response.labeled(
             egui::WidgetType::TextEdit,
             &bae_ui::a11y::context(&[&name, tr("Expression")]),

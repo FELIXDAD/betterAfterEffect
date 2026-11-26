@@ -347,7 +347,21 @@ fn time_conversions_follow_the_display_settings_and_rounding_mode() {
     assert!(comp.errors.is_empty(), "{:?}", comp.errors);
     assert_eq!(
         comp.layers[0].text.as_ref().unwrap().text,
-        "0|48|0.25|1|-00:00:00:01|0000+-3|00;01;00;02|3|true"
+        "0|48|0.25|1|-00:00:00:01|-0000+03|00;01;00;02|3|true"
+    );
+}
+
+#[test]
+fn project_timecode_and_signed_footage_display() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "Format", "text");
+        b.expr(&l,"text:source",doc(""),r#"[timeToCurrentFormat(60,24),timeToTimecode(60,24),timeToFeetAndFrames(-1,30)].join("|")"#);
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "0:01:00:00|00:01:00:00|-0001+14"
     );
 }
 
