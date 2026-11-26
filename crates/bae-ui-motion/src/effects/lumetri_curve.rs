@@ -136,7 +136,13 @@ pub(super) fn graph(
             if nearest(cursor).is_some() || points.iter().any(|p| (p[0] - axis_x).abs() < 1e-6) {
                 return Edit::None;
             }
-            points.push([axis_x, y]);
+            // A click adds a point on the curve where it already is (AE):
+            // the cursor's height would make the curve jump.
+            let at = axis_x * 255.;
+            let k = (at.floor() as usize).min(255);
+            let t = at - k as f64;
+            let on_curve = samples[k] * (1. - t) + samples[(k + 1).min(255)] * t;
+            points.push([axis_x, on_curve]);
             points.sort_by(|a, b| a[0].total_cmp(&b[0]));
         }
         return Edit::Commit(LumetriCurve::value(&points));
@@ -226,5 +232,23 @@ mod tests {
             panic!("missing point removal");
         };
         assert_eq!(curve.points(Some(&removed)), vec![knots[0], knots[2]]);
+        // A click above the curve adds a point on the curve, not at the cursor.
+        let above = pos2(plot.left() + plot.width() * 2. / 3., plot.top() + 10.);
+        frame(
+            vec![Event::PointerMoved(above), press(above, true, none)],
+            none,
+            &removed,
+        );
+        let Edit::Commit(added) = frame(vec![press(above, false, none)], none, &removed) else {
+            panic!("missing point insertion");
+        };
+        let samples = curve.samples(&curve.points(Some(&removed)));
+        let new = curve
+            .points(Some(&added))
+            .into_iter()
+            .find(|p| (p[0] - 2. / 3.).abs() < 0.01)
+            .expect("inserted point");
+        let expected = samples[(new[0] * 255.).round() as usize];
+        assert!((new[1] - expected).abs() < 0.01, "{new:?} vs {expected}");
     }
 }

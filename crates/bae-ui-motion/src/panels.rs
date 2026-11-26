@@ -61,7 +61,7 @@ fn prop_line(
             .as_ref()
             .and_then(|s| s.value_for(path, attr))
             .cloned()
-            .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
+            .or_else(|| common::current_value(eval.get(cx.stage), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
@@ -71,7 +71,7 @@ fn prop_line(
     });
     // An expression pick whip dragged from the Timeline.
     if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
-        crate::expr::link(cx, eval.get(cx.resources), &whip, path, Some(attr), now);
+        crate::expr::link(cx, eval.get(cx.stage), &whip, path, Some(attr), now);
     }
 }
 
@@ -191,7 +191,7 @@ impl Panel for PropertiesPanel {
             // Text.
             if query::layer_kind(stage, &layer).as_deref() == Some("text") {
                 section(ui, tr("Text"));
-                let doc = common::current_value(self.eval.get(cx.resources), stage, &layer, "text:source", now);
+                let doc = common::current_value(self.eval.get(cx.stage), stage, &layer, "text:source", now);
                 if let Some(Value::TextDocument(doc)) = doc {
                     let key = ui.id().with(("text_src", layer.as_str()));
                     let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| doc.text.clone());
@@ -202,32 +202,30 @@ impl Panel for PropertiesPanel {
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(key, text.clone()));
                     }
-                    let mut d2 = (*doc).clone();
-                    let mut commit = false;
+                    let range=session.lock().text_range(Some(&layer));
+                    let selected=common::SelectedStyles{doc:&doc,range:range.clone().unwrap_or(0..usize::MAX)};
+                    let mut change=json!({});
                     if r.lost_focus() {
                         ui.data_mut(|d| d.remove::<String>(key));
                         if text != doc.text {
-                            d2.set_text(&text);
-                            commit = true;
+                            cx.invoke_with("text.set_text",json!({"layer":layer,"text":text,"time":query::to_key_time(stage,&layer,now)}));
                         }
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        let mut size = d2.style.font_size;
-                        let px = format!(" {}", tr("px")); // 像素 in Chinese (#197)
-                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(&px).range(1.0..=2000.0).label(tr("Font Size")));
-                        if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                            d2.style.font_size = size;
-                            commit = true;
+                        if let Some(v)=crate::ae_panels::character::number(ui,key.with("size"),selected.character(|s|s.font_size),tr("px"),0.1..=1296.,1,tr("Font Size")) {
+                            change["font_size"]=json!(v);
                         }
                     });
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Fill Color")).color(color::TEXT));
-                        let mut c = d2.style.fill_color.map(|v| v as f32);
-                        if ui.color_edit_button_rgba_unmultiplied(&mut c).changed() {
-                            d2.style.fill_color = c.map(f64::from);
-                            commit = true;
+                        let fill=selected.character(|s|s.fill_color);
+                        let mut c=fill.unwrap_or([0.;4]);
+                        let edit=ui.scope(|ui|bae_ui::color_picker::color_button(ui,key.with("fill"),&mut c,egui::vec2(30.,16.),tr("Fill Color"),tr("Fill Color")));
+                        if fill.is_none() {
+                            ui.painter().rect_filled(edit.response.rect.shrink(1.),0.,color::PANEL);
                         }
+                        if let bae_ui::color_picker::ColorEdit::Commit(c)=edit.inner { change["fill_color"]=json!(c); }
                     });
                     // Paragraph alignment.
                     ui.horizontal(|ui| {
@@ -237,22 +235,17 @@ impl Panel for PropertiesPanel {
                             (Icon::TextAlignCenter, "center", "Center Text"),
                             (Icon::TextAlignRight, "right", "Right Align Text"),
                         ] {
-                            let on = d2.paragraph.justification == value;
+                            let on = selected.paragraph(|p|p.justification.clone()).as_deref()==Some(value);
                             let r = icons::button(ui, icon, 20.0, on)
                                 .labeled_toggle(egui::WidgetType::Button, tr(name), on)
                                 .on_hover_text(tr(name));
                             if r.clicked() && !on {
-                                d2.paragraph.justification = value.to_owned();
-                                commit = true;
+                                change["justification"]=json!(value);
                             }
                         }
                     });
-                    if commit {
-                        let key_now = query::to_key_time(stage, &layer, now);
-                        cx.invoke_with(
-                            "attr.set_at",
-                            json!({"path": layer, "attr": "text:source", "time": key_now, "value": Value::TextDocument(Box::new(d2))}),
-                        );
+                    if change.as_object().is_some_and(|o|!o.is_empty()) {
+                        cx.invoke_with("text.set_style",json!({"layers":[layer],"time":now,"range":range,"style":change}));
                     }
                 }
             }
@@ -319,12 +312,20 @@ pub struct EffectControlsPanel {
 }
 
 impl Panel for EffectControlsPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        // AE: "Effect Controls <layer>".
-        if self.title.is_empty() {
-            TabInfo::new(tr("Effect Controls"))
-        } else {
-            TabInfo::new(format!("{} {}", tr("Effect Controls"), self.title))
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        let layer = self
+            .locked
+            .clone()
+            .filter(|l| cx.stage.has_prim(l))
+            .or_else(|| selected_layer(cx.stage, &common::session(cx.resources)));
+        match layer {
+            Some(l) => common::related_tab(
+                cx,
+                "Effect Controls",
+                &l,
+                &query::display_name_of(cx.stage, &l),
+            ),
+            None => TabInfo::new(tr("Effect Controls")),
         }
     }
 
@@ -338,6 +339,7 @@ impl Panel for EffectControlsPanel {
             &mut self.controls.show_presets,
             tr("Show Animation Presets"),
         );
+        ui.separator();
         if ui.button(tr("Manage Effects...")).clicked() {
             crate::effects::manager::open(cx);
             ui.close();

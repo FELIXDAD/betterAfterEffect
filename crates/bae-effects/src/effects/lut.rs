@@ -249,6 +249,64 @@ impl TargetEffect for ApplyLut {
 }
 
 impl LutCache {
+    pub(super) fn prepare_file(
+        &self,
+        gpu: &Arc<GpuContext>,
+        format: wgpu::TextureFormat,
+        data: &[u8],
+    ) -> Result<(), RenderError> {
+        self.prepare(gpu, format, data, None, None).map(|_| ())
+    }
+
+    fn prepare(
+        &self,
+        gpu: &Arc<GpuContext>,
+        format: wgpu::TextureFormat,
+        data: &[u8],
+        processor: Option<Processor>,
+        frame_transform: Option<&bae_color::ColorTransform>,
+    ) -> Result<Arc<Prepared>, RenderError> {
+        // Animated Cineon controls share one pipeline per conversion type.
+        let key = if frame_transform.is_some() {
+            processor.map(|(op, s)| (op, [s[0], 0, 0, 0, 0, 0, 0, 0, 0]))
+        } else {
+            processor
+        };
+        let matches = |entry: &&Arc<Prepared>| {
+            &entry.device == gpu.device()
+                && entry.format == format
+                && entry.data == data
+                && entry.processor == key
+        };
+        if let Some(entry) = self.0.lock().iter().find(matches) {
+            return Ok(entry.clone());
+        }
+        // Parse files and build pipelines outside the lock used by the renderer.
+        let transform = match (frame_transform, processor) {
+            (Some(t), _) => t.clone(),
+            (None, Some((op, selection))) => op.transform(data, selection)?,
+            (None, None) => bae_color::lutfile::from_embedded(data)
+                .map_err(|e| RenderError::Other(e.to_string()))?,
+        };
+        let entry = Arc::new(Prepared::new(
+            gpu,
+            format,
+            data,
+            key,
+            transform,
+            frame_transform.is_some(),
+        )?);
+        let mut cache = self.0.lock();
+        if let Some(existing) = cache.iter().find(matches) {
+            return Ok(existing.clone());
+        }
+        if cache.len() == 4 {
+            cache.pop_front();
+        }
+        cache.push_back(entry.clone());
+        Ok(entry)
+    }
+
     pub(super) fn apply(
         &self,
         target: &mut dyn EffectTarget,
@@ -270,45 +328,11 @@ impl LutCache {
         // conversion type, with this frame's values.
         let live =
             processor.filter(|(op, _)| *op == crate::categories::color::ocio::Operation::Cineon);
-        let key = live.map_or(processor, |(op, s)| {
-            Some((op, [s[0], 0, 0, 0, 0, 0, 0, 0, 0]))
-        });
         let now = live.map(|(op, s)| op.transform(data, s)).transpose()?;
         if now.as_ref().is_some_and(|t| t.is_identity()) {
             return Ok(input.clone());
         }
-        let lut = {
-            let mut cache = self.0.lock();
-            if let Some(entry) = cache.iter().find(|l| {
-                &l.device == target.gpu().device()
-                    && l.format == target.format()
-                    && l.data == data
-                    && l.processor == key
-            }) {
-                entry.clone()
-            } else {
-                let transform = match (now.clone(), processor) {
-                    (Some(t), _) => t,
-                    (None, Some((op, selection))) => op.transform(data, selection)?,
-                    (None, None) => bae_color::lutfile::from_embedded(data)
-                        .map_err(|e| RenderError::Other(e.to_string()))?,
-                };
-                let entry = Arc::new(Prepared::new(
-                    target.gpu(),
-                    target.format(),
-                    data,
-                    key,
-                    transform,
-                    live.is_some(),
-                )?);
-                // Keep adjacent looks in a stack resident across frames.
-                if cache.len() == 4 {
-                    cache.pop_front();
-                }
-                cache.push_back(entry.clone());
-                entry
-            }
-        };
+        let lut = self.prepare(target.gpu(), target.format(), data, processor, now.as_ref())?;
         let Some(pass) = &lut.pass else {
             return Ok(input.clone());
         };

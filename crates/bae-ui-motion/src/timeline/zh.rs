@@ -2,6 +2,12 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Show Cache Indicators", "显示缓存指示器"),
+    ("Rectified Audio Waveforms", "调整的音频波形"),
+    ("Enable Auto-keyframe", "启用自动关键帧"),
+    ("Live Update", "实时更新"),
+    ("Use Keyframe Icons", "使用关键帧图标"),
+    ("Use Keyframe Indices", "使用关键帧索引"),
     ("Close Other Timeline Panels", "关闭其他时间轴面板"),
     ("Close Timeline Panels to the Left", "关闭左侧的时间轴面板"),
     ("Close Timeline Panels to the Right", "关闭右侧的时间轴面板"),
@@ -261,6 +267,16 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Animator", "动画制作工具"),
     ("Based On", "依据"),
     ("Amount", "数量"),
+    // A Paint effect's strokes (`props::paint_strokes`, AE 26's words).
+    ("Brush", "画笔"),
+    ("Clone", "仿制"),
+    ("Eraser", "橡皮擦"),
+    ("Diameter", "直径"),
+    ("Angle", "角度"),
+    ("Hardness", "硬度"),
+    ("Spacing", "间距"),
+    ("Flow", "流量"),
+    ("Transform:", "变换:"),
     ("Smoothness", "平滑度"),
     ("Ease High", "缓和高"),
     ("Ease Low", "缓和低"),

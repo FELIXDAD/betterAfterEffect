@@ -75,7 +75,7 @@
 | Adobe Dynamic Link ▸ New Premiere Sequence... | 12845057 | `motion.file.new_premiere_sequence` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
 | Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ✅ |
-| Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ☐ |
+| Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ✅ |
 | New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ☐ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ⏸ |
@@ -105,7 +105,7 @@
 | Create Proxy ▸ Movie... | 10813442 | `motion.file.create_proxy_movie` |  |  |  | E | ⏸ |
 | Set Proxy ▸ File... | 9830401 | `motion.file.set_proxy_file` |  | Ctrl+Alt+P | Cmd+Opt+P | E | ⏸ |
 | Set Proxy ▸ None | 9830403 | `motion.file.set_proxy_none` |  |  |  | E | ⏸ |
-| Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ☐ |
+| Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ✅ |
 | Interpret Footage ▸ Proxy... | 10420226 | `motion.file.interpret_footage_proxy` |  |  |  | E | ⏸ |
 | Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ☐ |
 | Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ☐ |
@@ -160,7 +160,7 @@
 | Label ▸ Cyan | 16646162 | `motion.edit.label` | `{"label":14}` |  |  | B | ✅ |
 | Label ▸ Sandstone | 16646163 | `motion.edit.label` | `{"label":15}` |  |  | B | ✅ |
 | Label ▸ Dark Green | 16646164 | `motion.edit.label` | `{"label":16}` |  |  | B | ✅ |
-| Label ▸ Edit Label Colors... | 16646166 | `motion.edit.edit_label_colors` |  |  |  | D | ⏸ |
+| Label ▸ Edit Label Colors... | 16646166 | `motion.edit.edit_label_colors` |  |  |  | D | ✅ |
 | Select Keyframe Label Group ▸ On Selected Layers | 23592961 | `motion.edit.select_keyframe_label_group` | `{"scope":"selected_layers"}` |  |  | C | ✅ |
 | Select Keyframe Label Group ▸ On All Layers | 23592962 | `motion.edit.select_keyframe_label_group` | `{"scope":"all_layers"}` |  |  | C | ✅ |
 | Select Keyframe Label Group ▸ Visible Keyframes on Selected Layers | 23592964 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_selected_layers"}` |  |  | C | ◐ |
@@ -173,7 +173,7 @@
 | Purge ▸ Undo | 11403270 | `motion.edit.purge` | `{"what":"undo"}` |  |  | B | ☐ |
 | Purge ▸ Image Cache Memory | 11403271 | `motion.edit.purge` | `{"what":"image_cache_memory"}` |  |  | B | ⏸ |
 | Purge ▸ Snapshot | 11403272 | `motion.edit.purge` | `{"what":"snapshot"}` |  |  | B | ⏸ |
-| Edit Original... | 196636 | `motion.edit.edit_original` |  | Ctrl+E | Cmd+E | B | ⏸ |
+| Edit Original... | 196636 | `motion.edit.edit_original` |  | Ctrl+E | Cmd+E | B | ✅ |
 | Edit in Adobe Audition | 196637 | `motion.edit.edit_in_adobe_audition` |  |  |  | B | Ⓐ |
 | Templates ▸ Render Settings... | 16252929 | `motion.edit.templates_render_settings` |  |  |  | E | ⏸ |
 | Templates ▸ Output Module... | 16252930 | `motion.edit.templates_output_module` |  |  |  | E | ⏸ |
@@ -412,7 +412,7 @@
 | Camera ▸ Link Focus Distance to Point of Interest | 21954566 | `motion.layer.link_focus_distance_to_point_of_interest` |  |  |  | B | ⏸ |
 | Camera ▸ Link Focus Distance to Layer | 21954567 | `motion.layer.link_focus_distance_to_layer` |  |  |  | B | ⏸ |
 | Camera ▸ Set Focus Distance to Layer | 21954568 | `motion.layer.set_focus_distance_to_layer` |  |  |  | B | ⏸ |
-| Camera ▸ Camera Settings... | 21954570 | `motion.layer.camera_settings` |  |  |  | E | ☐ |
+| Camera ▸ Camera Settings... | 21954570 | `motion.layer.camera_settings` |  |  |  | E | ✅ |
 | Camera ▸ Reset 3D View | 21954571 | `motion.view.reset_3d_view` |  |  |  | A | ⏸ |
 | Light ▸ Create Lights from 3D Model | 328990721 | `motion.layer.create_lights_from_3d_model` |  |  |  | B | ⏸ |
 | Light ▸ Control Light with Camera | 328990722 | `motion.layer.control_light_with_camera` |  |  |  | B | ⏸ |
@@ -489,7 +489,7 @@
 | Add Text Selector ▸ Expression | 1245187 | `motion.anim.add_text_selector` | `{"selector":"expression"}` |  |  | A | ⏸ |
 | Remove All Text Animators | 851984 | `motion.anim.remove_all_text_animators` |  |  |  | A | ✅ |
 | Add Expression | 851986 | `motion.anim.add_expression` |  | Alt+Shift+= | Opt+Shift+= | C | ☐ |
-| Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ☐ |
+| Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ✅ |
 | Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
 | Warp Stabilizer VFX | 851989 | `motion.anim.warp_stabilizer_vfx` |  |  |  | B | ⏸ |
 | Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ✅ |
@@ -539,8 +539,8 @@
 | Show Grid | 589845 | `motion.view.show_grid` |  | Ctrl+' | Cmd+' | B | ☐ |
 | Snap to Grid | 589846 | `motion.view.snap_to_grid` |  | Ctrl+Shift+' | Cmd+Shift+' | B | ☐ |
 | View Options... | 589848 | `motion.view.view_options` |  | Ctrl+Alt+U | Cmd+Opt+U | E | ⏸ |
-| Show Layer Controls | 589849 | `motion.view.show_layer_controls` |  | Ctrl+Shift+H | Cmd+Shift+H | B | ☐ |
-| Camera Settings... | 589851 | `motion.layer.camera_settings` |  |  |  | E | ☐ |
+| Show Layer Controls | 589849 | `motion.view.show_layer_controls` |  | Ctrl+Shift+H | Cmd+Shift+H | B | ✅ |
+| Camera Settings... | 589851 | `motion.layer.camera_settings` |  |  |  | E | ✅ |
 | Reset 3D View | 589852 | `motion.view.reset_3d_view` |  |  |  | A | ⏸ |
 | Create Camera from 3D View | 589853 | `motion.view.create_camera_from_3d_view` |  |  |  | A | ⏸ |
 | Switch View Layout ▸ 1 View | 23396353 | `motion.view.view_layout` | `{"views":1}` |  |  | A | ⏸ |
@@ -630,7 +630,7 @@
 | Footage | 524328 | `window.panel` | `{"id":"footage","toggle":true}` |  |  | E | ⏸ |
 | Project | 524329 | `window.panel` | `{"id":"project","toggle":true}` | Ctrl+0 | Cmd+0 | B | ✅ |
 | Create Nulls From Paths.jsx（仅 Windows） | 524331 | `window.panel` | `{"id":"create_nulls_from_paths","toggle":true}` |  |  | B | ✅ |
-| VR Comp Editor.jsx（仅 Windows） | 524338 | `motion.window.script_panel` | `{"script":"VR Comp Editor.jsx"}` |  |  | B | ⏸ |
+| VR Comp Editor.jsx（仅 Windows） | 524338 | `window.panel` | `{"id":"vr_comp_editor","toggle":true}` |  |  | B | ✅ |
 
 ### Help
 

@@ -11,10 +11,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use bae_model::asset::AssetFile;
-use bae_model::{Command, CommandError, PrimPath, PrimType, Transaction, Value};
+use bae_model::{Command, CommandError, LayerKind, PrimPath, PrimType, Time, Transaction, Value};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::layer::{CreateLayer, CreateLayerParams};
 use crate::query::{self, ASSETS_FOLDER};
 use crate::util::{child, create, ensure_folder, fail, set};
 
@@ -46,6 +47,11 @@ pub struct ImportParams {
     /// Project folder to import into (default the assets folder).
     #[serde(default)]
     pub parent: Option<PrimPath>,
+    /// Also add the files (not those inside a dropped folder) to this comp as
+    /// layers, the first on top: files dropped on the Composition or
+    /// Timeline panel (AE), in the same undo step.
+    #[serde(default)]
+    pub comp: Option<PrimPath>,
 }
 
 /// Output of `item.import`.
@@ -53,10 +59,17 @@ pub struct ImportParams {
 pub struct ImportOutput {
     /// The new footage items, in the order of `files`.
     pub items: Vec<PrimPath>,
+    /// The layers added to `comp`, top first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<PrimPath>,
 }
 
 /// The Asset attributes an importer may set.
 const ATTRS: &[&str] = &[
+    bae_model::psd::LayerImage::KEY,
+    bae_model::psd::LayerImage::CANVAS,
+    "psd:ignore_styles",
+    "psd:layer_name",
     "kind",
     "width",
     "height",
@@ -75,7 +88,7 @@ const ATTRS: &[&str] = &[
 
 /// The folder `rel` (`a/b`) under `parent`, created as needed (matched by
 /// display name, like the Project panel shows it).
-fn folder_path(
+pub(crate) fn folder_path(
     tx: &mut Transaction<'_>,
     parent: &PrimPath,
     rel: &str,
@@ -125,6 +138,7 @@ impl Command for ImportItems {
             }
         };
         let mut items = Vec::with_capacity(p.files.len());
+        let mut add = Vec::new();
         for f in p.files {
             let path = Path::new(&f.path);
             let file = AssetFile::from_path(path, None, false)
@@ -141,6 +155,8 @@ impl Command for ImportItems {
                 .filter(|n| !n.trim().is_empty())
                 .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "Footage".to_owned());
+            let flag = |k: &str| f.attrs.get(k).and_then(Value::as_bool);
+            let audio_only = flag("has_audio") == Some(true) && flag("has_video") == Some(false);
             let item = child(
                 &folder,
                 &query::unique_child_name(tx.stage(), &folder, &name),
@@ -156,10 +172,37 @@ impl Command for ImportItems {
             for op in file.to_ops(&item) {
                 tx.apply(op)?;
             }
+            if f.folder.is_none() {
+                add.push((item.clone(), audio_only));
+            }
             items.push(item);
         }
-        Ok(ImportOutput { items })
+        let mut layers = Vec::new();
+        if let Some(comp) = p.comp {
+            // Added bottom-up at the top of the stack: the first file ends on top.
+            for (item, audio_only) in add.into_iter().rev() {
+                let kind = if audio_only {
+                    LayerKind::Audio
+                } else {
+                    LayerKind::Footage
+                };
+                layers.insert(0, add_imported_layer(tx, &comp, kind, &item)?);
+            }
+        }
+        Ok(ImportOutput { items, layers })
     }
+}
+
+pub(crate) fn add_imported_layer(
+    tx: &mut Transaction<'_>,
+    comp: &PrimPath,
+    kind: LayerKind,
+    item: &PrimPath,
+) -> Result<PrimPath, CommandError> {
+    let mut params = CreateLayerParams::with_source(comp, kind, item, Time::ZERO);
+    params.name = Some(query::display_name_of(tx.stage(), item));
+    params.index = Some(0);
+    Ok(CreateLayer.run(tx, params)?.path)
 }
 
 /// File ▸ Replace Footage ▸ File… (Cmd/Ctrl+H): a footage or placeholder item
@@ -191,6 +234,10 @@ impl Command for ReplaceFile {
             .unwrap_or_default();
         if !view.is_a(&PrimType::ASSET) || kind == "solid" {
             return Err(fail(format!("{} is not a footage item", p.item)));
+        }
+        if bae_model::psd::LayerImage::from_asset(&view).is_some() {
+            let styles = child(&p.item, bae_model::layer_styles::PRIM)?;
+            crate::effect::delete_all(tx, &[styles, child(&p.item, "masks")?])?;
         }
         let path = Path::new(&p.file.path);
         let file = AssetFile::from_path(path, None, false)
@@ -224,6 +271,12 @@ impl Command for ReplaceFile {
         for (attr, value) in p.file.attrs {
             set(tx, &p.item, &attr, value)?;
         }
+        set(
+            tx,
+            &p.item,
+            bae_model::asset::FILE_REVISION,
+            Value::Int(tx.stage().revision() as i64 + 1),
+        )?;
         for op in file.to_ops(&p.item) {
             tx.apply(op)?;
         }

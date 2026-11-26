@@ -168,6 +168,65 @@ fn fix_refs(
     Ok(())
 }
 
+/// Wrap a project source once and redirect all of its layer instances to the
+/// same composition, retaining their masks, effects, timing and transforms.
+pub struct ReplaceWithPrecomp;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReplaceWithPrecompParams {
+    pub item: PrimPath,
+}
+
+impl Command for ReplaceWithPrecomp {
+    type Params = ReplaceWithPrecompParams;
+    type Output = PrecomposeOutput;
+    const ID: &'static str = "item.replace_with_precomp";
+    const TITLE: &'static str = "Replace with Precomp";
+    const DESCRIPTION: &'static str =
+        "Wrap a footage or solid source in a composition and replace all uses in one undo step.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<Self::Output, CommandError> {
+        let stage = tx.stage();
+        if !stage
+            .prim(&p.item)
+            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+        {
+            return Err(fail("expected a project source"));
+        }
+        let uses: Vec<_> = query::comps(stage)
+            .iter()
+            .flat_map(|c| query::comp_layers(stage, c))
+            .filter(|l| source_of(stage, l).as_ref() == Some(&p.item))
+            .collect();
+        let (first, others) = uses
+            .split_first()
+            .ok_or_else(|| fail("the source is no longer used"))?;
+        ensure_unlocked(stage, &uses)?;
+        let name = query::display_name_of(stage, &p.item);
+        let result = Precompose.run(
+            tx,
+            PrecomposeParams {
+                layers: vec![first.clone()],
+                name: None,
+                mode: PrecomposeMode::Leave,
+                adjust_duration: false,
+                time: None,
+            },
+        )?;
+        let new_name = query::display_name_of(tx.stage(), &result.comp);
+        for layer in others {
+            if query::display_name_of(tx.stage(), layer) == name {
+                set(tx, layer, "name", Value::String(new_name.clone()))?;
+            }
+            set(tx, layer, "source", Value::PrimRef(result.comp.clone()))?;
+            if query::layer_kind(tx.stage(), layer).as_deref() != Some("adjustment") {
+                set(tx, layer, "kind", Value::Enum("pre_comp".into()))?;
+            }
+        }
+        Ok(result)
+    }
+}
+
 impl Command for Precompose {
     type Params = PrecomposeParams;
     type Output = PrecomposeOutput;
@@ -329,6 +388,7 @@ impl Command for Precompose {
                             parent: None,
                             keep_transform: true,
                             time,
+                            move_to_parent: false,
                         },
                     )
                 })?;
