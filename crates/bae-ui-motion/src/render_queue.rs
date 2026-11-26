@@ -28,8 +28,8 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
 /// Formats offered in the panel and by `bae render --format`.
+/// WAV comes last, as in AE's Format menu.
 pub const FORMATS: [ExportFormat; 8] = [
-    ExportFormat::Wav,
     ExportFormat::Png,
     ExportFormat::Tiff,
     ExportFormat::Exr,
@@ -37,6 +37,7 @@ pub const FORMATS: [ExportFormat; 8] = [
     ExportFormat::Hevc,
     ExportFormat::ProRes,
     ExportFormat::ProRes4444,
+    ExportFormat::Wav,
 ];
 
 /// AE 26's Render Settings templates; BAE renders at Best Settings, the
