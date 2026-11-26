@@ -59,3 +59,47 @@ fn the_mesh_moves_where_pixels_are_read() {
     let moved = row(Some(&m)).unwrap();
     assert_eq!((moved[4], moved[20], moved[28]), (255, 255, 0), "{moved:?}");
 }
+
+#[test]
+fn brushes_deform_the_gpu_mesh_and_leave_frozen_vertices_in_place() {
+    use bae_effects::effects::liquify::{Brush, BrushStroke};
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut mesh = Mesh::new(DVec2::ZERO, DVec2::splat(64.));
+    let center = DVec2::splat(32.);
+    // A source deformation for Clone and Reconstruction.
+    mesh.offsets[2 * mesh.cols + 2] = DVec2::new(8., 4.);
+    mesh.offsets[4 * mesh.cols + 4] = DVec2::new(2., 1.);
+    for tool in 0..10 {
+        let mut stroke =
+            BrushStroke::new(&gpu, mesh.clone(), |p| if p.y < 25. { 0. } else { 1. }).unwrap();
+        stroke.dab(&Brush {
+            tool,
+            center,
+            radius: 24.,
+            pressure: 1.,
+            drag: DVec2::new(8., 0.),
+            source: DVec2::splat(16.),
+            jitter: 0.7,
+            reconstruction: 0,
+        });
+        let start = std::time::Instant::now();
+        let value = loop {
+            if let Some((v, true)) = stroke.poll().unwrap() {
+                break v;
+            }
+            assert!(start.elapsed().as_secs() < 10);
+            std::thread::yield_now();
+        };
+        let changed = Mesh::from_value(&value).unwrap();
+        assert_ne!(changed.offsets, mesh.offsets, "tool {tool}");
+        assert_eq!(
+            &changed.offsets[..4 * mesh.cols],
+            &mesh.offsets[..4 * mesh.cols]
+        );
+        if tool == 8 {
+            assert_eq!(changed.offsets[4 * mesh.cols + 4], DVec2::new(8., 4.));
+        }
+    }
+}

@@ -369,10 +369,14 @@ fn mask_params_pick_a_mask_of_the_layer() {
 #[test]
 fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
     let mut fx = Fx::new();
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    fx.resources.insert(gpu);
     let layer = fx.comp_with_layer();
     fx.run(
         "effect.apply",
-        json!({"layers": [layer], "match_name": "ADBE Liquify"}),
+        json!({"layers": [layer], "match_name": "ADBE LIQUIFY"}),
     );
     let session = fx.resources.get::<SharedSession>().unwrap().clone();
     session.lock().layer_panel = Some(layer.clone());
@@ -409,28 +413,54 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
         pressed,
         modifiers: Default::default(),
     };
-    let mut last = PanelRequests::default();
     for events in [
         vec![egui::Event::PointerMoved(at(20.0))],
         vec![button(20.0, true)],
         vec![egui::Event::PointerMoved(at(30.0))],
         vec![egui::Event::PointerMoved(at(40.0))],
-        vec![button(40.0, false)],
     ] {
-        last = frame(&fx, &mut panel, events);
+        assert!(frame(&fx, &mut panel, events).invocations.is_empty());
+    }
+    let start = std::time::Instant::now();
+    loop {
+        if session
+            .lock()
+            .scrub
+            .as_ref()
+            .and_then(|s| bae_effects::effects::liquify::Mesh::from_value(&s.value))
+            .is_some_and(|m| m.reach() > 1.)
+        {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "no live deformation during drag"
+        );
+        assert!(frame(&fx, &mut panel, vec![]).invocations.is_empty());
+    }
+    let mut last = frame(&fx, &mut panel, vec![button(40.0, false)]);
+    let start = std::time::Instant::now();
+    while !last.invocations.iter().any(|v| v.id == "attr.set_at") && start.elapsed().as_secs() < 10
+    {
+        last = frame(&fx, &mut panel, Vec::new());
     }
     let set = last
         .invocations
         .iter()
         .find(|i| i.id == "attr.set_at")
         .expect("the mesh is set");
-    assert_eq!(set.params["attr"], "param:0010");
+    assert_eq!(set.params["attr"], "param:0014");
     fx.exec_all(last);
     let effect = bae_motion::effect::effects_of(&fx.stage, &layer)[0].clone();
     let v =
-        bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0010").unwrap();
+        bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0014").unwrap();
     let mesh = bae_effects::effects::liquify::Mesh::from_value(&v).expect("a mesh");
     assert!(mesh.reach() > 1.0, "warped");
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0014"),
+        Some(Value::FloatList(vec![]))
+    );
 }
 
 #[test]

@@ -292,6 +292,8 @@ pub struct Session {
     pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
+    pub(crate) open_liquify: Option<PrimPath>,
+    pub(crate) liquify_tool: usize,
     /// An expression just added (Alt+click on the stopwatch, Animation ▸ Add
     /// Expression): the Timeline focuses its field with the text selected, so
     /// typing replaces it (AE). Dropped after a second if never shown.
