@@ -13,7 +13,7 @@ use bae_motion::query;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
-use egui::{Sense, Ui, pos2, vec2};
+use egui::{Key, Modifiers, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::common::{self, Edit, EvalCache};
@@ -555,18 +555,37 @@ fn value_control(
             Edit::None
         }
         ParamKind::Text => {
-            let mut text = match value {
-                Some(Value::String(s)) => s.clone(),
-                _ => String::new(),
+            // Previewed while typing, one command on Enter or when focus
+            // leaves (one undo step, no relayout per key); Shift+Enter breaks
+            // the line.
+            let model = match value {
+                Some(Value::String(s)) => s.as_str(),
+                _ => "",
             };
-            if ui
-                .add(egui::TextEdit::multiline(&mut text).id(id).desired_rows(1))
-                .changed()
+            let key = id.with("typing");
+            let mut text = ui
+                .data(|d| d.get_temp::<String>(key))
+                .unwrap_or_else(|| model.to_owned());
+            let resp = ui.add(
+                egui::TextEdit::multiline(&mut text)
+                    .id(id)
+                    .desired_rows(1)
+                    .return_key(egui::KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter)),
+            );
+            if resp.has_focus() && ui.input(|i| i.modifiers.is_none() && i.key_pressed(Key::Enter))
             {
-                Edit::Commit(Value::String(text))
-            } else {
-                Edit::None
+                ui.memory_mut(|m| m.surrender_focus(id));
             }
+            if resp.lost_focus() {
+                ui.data_mut(|d| d.remove::<String>(key));
+                if text != model {
+                    return Edit::Commit(Value::String(text));
+                }
+            } else if resp.changed() {
+                ui.data_mut(|d| d.insert_temp(key, text.clone()));
+                return Edit::Live(Value::String(text));
+            }
+            Edit::None
         }
         ParamKind::ArbitraryData | ParamKind::CurvePoints => {
             ui.colored_label(color::TEXT_DISABLED, "—");
