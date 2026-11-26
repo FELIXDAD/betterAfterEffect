@@ -216,6 +216,8 @@ const ZH: &[(&str, &str)] = &[
     ("Save", "保存"),
     ("Save As...", "另存为..."),
     ("Save a Copy...", "保存副本..."),
+    ("Increment and Save", "增量保存"),
+    ("Revert", "恢复"),
     ("Reveal Project", "显示项目"),
     ("Switch Workspace", "切换工作区"),
     ("Open Panel", "打开面板"),
