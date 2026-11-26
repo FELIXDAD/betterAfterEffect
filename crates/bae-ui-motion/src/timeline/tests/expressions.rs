@@ -120,7 +120,12 @@ fn typing_and_accepting_an_expression_completion_edits_the_draft() {
         ],
         Modifiers::NONE,
     );
+    assert_eq!(tl.expr_edit.as_ref().map(|e| e.2.as_str()), Some("wig"));
     h.frame(&mut tl, vec![press(egui::Key::Tab)], Modifiers::NONE);
+    assert_eq!(
+        tl.expr_edit.as_ref().map(|e| e.2.as_str()),
+        Some("wiggle()")
+    );
     h.frame(&mut tl, vec![Event::Text("2, 10".into())], Modifiers::NONE);
     assert_eq!(
         tl.expr_edit.as_ref().map(|e| e.2.as_str()),

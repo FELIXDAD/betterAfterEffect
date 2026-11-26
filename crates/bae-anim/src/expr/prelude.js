@@ -256,9 +256,11 @@ function __noise1(seed, x) {
 function noise(v) {
   v = __val(v);
   if (!__isArr(v)) return __noise1(12345, v);
+  if (v.length === 1) return __noise1(12345, v[0]);
+  if (v.length === 4) v = v.slice(0, 3);
   // Interpolate the gradient at each lattice corner along each input axis.
   var dims = v.length, cell = v.map(Math.floor);
-  if (dims !== 2 && dims !== 3) throw new Error("noise expects a number or a 2D or 3D point");
+  if (dims !== 2 && dims !== 3) throw new Error("noise expects a number or an array of one to four components");
   var f = v.map(function (x, i) { return x - cell[i]; });
   var u = f.map(function (x) { return x * x * x * (x * (x * 6 - 15) + 10); });
   var sum = 0;

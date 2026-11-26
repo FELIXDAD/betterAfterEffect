@@ -339,6 +339,12 @@ fn noise_varies_across_the_plane_and_volume() {
 }
 
 #[test]
+fn noise_accepts_one_component_and_color_arrays() {
+    let src = "var x=.25; (noise([x])===noise(x) && noise([x,.2,.3,1])===noise([x,.2,.3])) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
 fn wiggle_uses_the_offset_independently_of_timeless() {
     let src = "seedRandom(2,true);var a=wiggle(2,4);seedRandom(2,false);var b=wiggle(2,4);seedRandom(3,true); (a===b && a!==wiggle(2,4)) ? 1 : 0";
     assert_eq!(rotation_expression(src, 0.0), 1.0);

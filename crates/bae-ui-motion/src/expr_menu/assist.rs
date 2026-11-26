@@ -320,6 +320,18 @@ pub(crate) fn show(
                 .unwrap_or_default();
             let mut choice = None;
             if !hits.is_empty() || !overloads.is_empty() {
+                // egui routes focus navigation before widgets process the next frame.
+                ui.memory_mut(|m| {
+                    m.set_focus_lock_filter(
+                        id,
+                        egui::EventFilter {
+                            tab: !hits.is_empty(),
+                            escape: true,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                        },
+                    )
+                });
                 let anchor = shown
                     .galley
                     .pos_from_cursor(range.primary)
