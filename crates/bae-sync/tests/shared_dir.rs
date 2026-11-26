@@ -940,6 +940,15 @@ fn logs_of_clients_that_may_still_be_running_are_kept() {
     set_mtime(&log(&dir, "root", "x"), SystemTime::now());
     keep(&mut a);
 
+    // 3b. A sign of life spelled `X`: on case-insensitive file systems (macOS,
+    // Windows, SMB shares) that is x's own presence file as a listing may spell
+    // it, so the cleanup ignores case everywhere.
+    age_client(&dir, "x", true);
+    let other_case = dir.join("presence/X.presence");
+    fs::write(&other_case, b"").unwrap();
+    keep(&mut a);
+    fs::remove_file(&other_case).unwrap();
+
     // 4. All quiet: gone.
     age_client(&dir, "x", true);
     a.pump();

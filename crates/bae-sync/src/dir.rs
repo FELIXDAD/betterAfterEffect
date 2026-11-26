@@ -1045,7 +1045,8 @@ impl DirTransport {
             return;
         };
         // Logs by document, lock files, and how long each client has been idle
-        // (the youngest of its logs and presence file).
+        // (the youngest of its logs and presence file). Clients are told apart
+        // by `owner_key`, ignoring case.
         let mut logs: BTreeMap<DocKey, Vec<(String, PathBuf)>> = BTreeMap::new();
         let mut locks: Vec<(String, PathBuf)> = Vec::new();
         let mut idle: BTreeMap<String, Duration> = BTreeMap::new();
@@ -1090,24 +1091,25 @@ impl DirTransport {
                 }
             }
         }
-        let us = self.client.as_str().to_owned();
+        let us = owner_key(self.client.as_str());
         let gone = |owner: &str| {
-            owner != us
+            let key = owner_key(owner);
+            key != us
                 && ClientId::new(owner).is_ok()
-                && idle.get(owner).is_none_or(|&age| age > after)
+                && idle.get(&key).is_none_or(|&age| age > after)
         };
         let all: BTreeSet<&PathBuf> = logs.values().flatten().map(|(_, p)| p).collect();
         self.summaries.retain(|p, _| all.contains(p));
         let mut left: BTreeMap<String, usize> = BTreeMap::new();
         for (owner, _) in logs.values().flatten() {
-            *left.entry(owner.clone()).or_default() += 1;
+            *left.entry(owner_key(owner)).or_default() += 1;
         }
         for (doc, entries) in logs {
             if !entries.iter().any(|(owner, _)| gone(owner)) {
                 continue;
             }
             for owner in self.cleanup_doc(&doc, entries, &gone, now, after) {
-                if let Some(n) = left.get_mut(&owner) {
+                if let Some(n) = left.get_mut(&owner_key(&owner)) {
                     *n -= 1;
                 }
             }
@@ -1118,7 +1120,7 @@ impl DirTransport {
         // new one (`lock_client`).
         for (owner, path) in locks {
             if !gone(&owner)
-                || left.get(&owner).is_some_and(|&n| n > 0)
+                || left.get(&owner_key(&owner)).is_some_and(|&n| n > 0)
                 || file_age(&path, now).is_none_or(|age| age <= after)
             {
                 continue;
@@ -1480,6 +1482,13 @@ impl Transport for DirTransport {
 fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
     let path = own.path.clone();
     let actual = match fs::metadata(&path) {
+        // Something other than a file in the log's place is an error, not a log
+        // that was cut short: a directory's length means nothing (0 on Windows,
+        // 64 plus 32 per entry on APFS, 4096 on ext4), so comparing it with
+        // ours below would tell a different story on each file system.
+        Ok(m) if !m.is_file() => {
+            return Err(SyncError::io(&path)(io::Error::other("not a regular file")));
+        }
         Ok(m) => m.len(),
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(SyncError::io(&path)(e)),
@@ -1533,10 +1542,23 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
     // a last append before quitting without saving could be lost. That is
     // acceptable. Unverifiable (another error): assume it is fine; the next
     // append checks again.
+    //
+    // Through a new handle, like the cleaner's last look, and not a bare stat:
+    // on Windows a log deleted while someone else still has it open stays
+    // "delete pending" under its name until they close it, and std's
+    // `fs::metadata` then falls back to the directory entry and succeeds, while
+    // opening it fails with access denied. That is a deleted log too.
     let expected = own.len + record.len() as u64;
-    match fs::metadata(&path) {
+    match File::open(&path).and_then(|f| f.metadata()) {
         Ok(m) if m.len() < expected => return Ok(false),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            return Ok(false);
+        }
         _ => {}
     }
     own.len = expected;
@@ -1548,12 +1570,24 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
 fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
     let deadline = Instant::now() + LOCK_WAIT;
     loop {
-        let lock = OpenOptions::new()
+        let opened = OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
-            .open(path)
-            .map_err(SyncError::io(path))?;
+            .open(path);
+        let lock = match opened {
+            Ok(f) => f,
+            // A cleanup pass deletes a lock file while it still holds it open
+            // (§4.7). On Windows (and SMB shares served by it) the name then
+            // stays "delete pending" until that handle is closed, a moment
+            // later, and opening it meanwhile fails with access denied; on POSIX
+            // the open just creates a new file. So wait like for a held lock.
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && Instant::now() < deadline => {
+                std::thread::sleep(LOCK_RETRY);
+                continue;
+            }
+            Err(e) => return Err(SyncError::io(path)(e)),
+        };
         match lock.try_lock() {
             Ok(()) => match fs::metadata(path) {
                 // A cleanup pass deleted the file we opened while it held the lock
@@ -1659,9 +1693,21 @@ fn file_age(path: &Path, now: SystemTime) -> Option<Duration> {
 
 /// Record a sign of life of `owner` `age` ago (keeping the youngest).
 fn note_idle(idle: &mut BTreeMap<String, Duration>, owner: &str, age: Duration) {
-    idle.entry(owner.to_owned())
+    idle.entry(owner_key(owner))
         .and_modify(|a| *a = (*a).min(age))
         .or_insert(age);
+}
+
+/// The client a file of `owner` (as a directory listing spells it) belongs to,
+/// for the cleanup pass. Client IDs are case-sensitive, but on case-insensitive
+/// file systems (APFS by default, NTFS, most SMB shares) `Bob` and `bob` share
+/// one log, lock and presence file, and a listing shows the case the file was
+/// created with: so `bob`'s log may be listed as `Bob.log` next to
+/// `bob.presence`. Ignoring case keeps one client's signs of life (and the
+/// cleaner's own files) together. Where case matters (Linux) it only makes two
+/// such clients look like one, so the pass deletes less, never more.
+fn owner_key(owner: &str) -> String {
+    owner.to_ascii_lowercase()
 }
 
 /// Whether the log `m` (owner `y`) holds everything in the log `l` (owner `x`), so
