@@ -371,8 +371,10 @@ impl GpuPreview {
             .unwrap_or_default();
         let live = (!overrides.is_empty()).then(|| overrides.clone());
         self.engine.anim.set_overrides(overrides);
-        if self.changes.changed(resources) {
-            self.engine.anim.clear_compiled();
+        if self.changes.sync(stage, |event| match event {
+            Some(event) => bae_render::CompEvaluator::invalidate(&mut self.engine.anim, event),
+            None => self.engine.anim.clear_compiled(),
+        }) {
             self.last = None;
         }
         let mut rc = match self.engine.anim.convert(stage, comp, 0) {
