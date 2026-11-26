@@ -249,8 +249,10 @@ impl Panel for FootagePanel {
 
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Footage <name>", "Footage (none)" when empty.
-        let name = Self::footage(cx).map_or_else(|| tr("(none)").to_owned(), |f| f.name);
-        TabInfo::new(format!("{} {name}", tr("Footage")))
+        match Self::footage(cx) {
+            Some(f) => common::related_tab(cx, "Footage", &f.asset, &f.name),
+            None => TabInfo::new(format!("{} {}", tr("Footage"), tr("(none)"))),
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
@@ -280,7 +282,7 @@ impl Panel for FootagePanel {
                     .clamp(0.01, 1.0);
                 let r = Rect::from_center_size(view.center(), vec2(w, h) * scale);
                 if self.display.grid {
-                    crate::viewer::checkerboard(&p, r.intersect(view));
+                    crate::viewer::checkerboard(&p, r.intersect(view), cx.resources);
                 }
                 p.image(
                     egui::TextureId::User(handle),

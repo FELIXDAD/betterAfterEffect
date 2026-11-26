@@ -67,6 +67,8 @@ pub enum ParamKind {
     CurvePoints,
     /// Opaque plugin-defined data (value: bytes).
     ArbitraryData,
+    /// Editable Unicode text.
+    Text,
     /// A mask of the layer (value: prim_ref to a Mask prim).
     Path,
     /// A button (no value; clicking triggers the plugin).
@@ -92,6 +94,7 @@ impl ParamKind {
             ParamKind::Popup { .. } => ValueType::Int,
             ParamKind::Layer | ParamKind::Path => ValueType::PrimRef,
             ParamKind::CurvePoints => ValueType::FloatList,
+            ParamKind::Text => ValueType::String,
             ParamKind::ArbitraryData => ValueType::Bytes,
             ParamKind::GroupStart
             | ParamKind::GroupEnd
