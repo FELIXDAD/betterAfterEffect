@@ -378,17 +378,6 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         r#"{"what":"animated","add":false}"#,
         "Reveal Animated Properties",
     ),
-    // E / Shift+E (AE: the layer's Effects group).
-    (
-        ids::REVEAL,
-        r#"{"what":"effects","add":false}"#,
-        "Show Effects",
-    ),
-    (
-        ids::REVEAL,
-        r#"{"what":"effects","add":true}"#,
-        "Add Effects to Shown Properties",
-    ),
     (
         ids::REVEAL,
         r#"{"what":"audio:levels","add":false}"#,
@@ -1983,8 +1972,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Fit to Comp", "适合复合"),
     ("Fit to Comp Width", "适合复合宽度"),
     ("Fit to Comp Height", "适合复合高度"),
-    ("Show Effects", "显示效果"),
-    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Find", "查找"),
 ];
 
