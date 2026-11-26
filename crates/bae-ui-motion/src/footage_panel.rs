@@ -81,7 +81,7 @@ struct Gpu {
     id: ViewportTextureId,
     renderer: Renderer,
     assets: AssetFiles,
-    last: Option<(PrimPath, Time)>,
+    last: Option<(PrimPath, Time, u64)>,
 }
 
 impl Gpu {
@@ -106,16 +106,18 @@ impl Gpu {
 
     /// The frame of `footage` at `time` (rendered when it changed); its egui handle.
     fn frame(&mut self, stage: &Stage, footage: &Footage, time: Time) -> Option<u64> {
-        let key = (footage.asset.clone(), time);
+        let key = (footage.asset.clone(), time, stage.revision());
         if self.last.as_ref() != Some(&key) {
             let view = stage.prim(&footage.asset)?;
             let file = self.assets.file(&view).ok().flatten();
             let [w, h] = footage.size;
             let mut comp = RenderComp::new(footage.asset.clone(), w.max(1), h.max(1));
-            comp.layers.push(RenderLayer::new(
+            let mut layer = RenderLayer::new(
                 footage.asset.clone(),
                 LayerContent::Footage(FootageRef {
                     asset: footage.asset.clone(),
+                    file_revision: bae_model::asset::file_revision(&view),
+                    psd_layer: bae_model::psd::LayerImage::from_asset(&view),
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: time,
@@ -123,7 +125,26 @@ impl Gpu {
                     // The footage panel shows source frames as they are.
                     blend: None,
                 }),
-            ));
+            );
+            layer.resolve_photoshop_mask(stage);
+            if let Ok(path) = footage.asset.child(bae_model::layer_styles::PRIM)
+                && let Some(style) = stage.prim(&path)
+            {
+                let params = style
+                    .attr_names()
+                    .into_iter()
+                    .filter_map(|key| {
+                        Some((bae_model::effect::param_id(key)?, style.value(key)?.clone()))
+                    })
+                    .collect();
+                layer.effects.push(bae_render::RenderEffect {
+                    path: path.clone(),
+                    effect: bae_model::layer_styles::RENDER_ID.into(),
+                    enabled: true,
+                    params,
+                });
+            }
+            comp.layers.push(layer);
             let request = RenderRequest {
                 purpose: RenderPurpose::Preview,
                 ..RenderRequest::full()
@@ -156,7 +177,15 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "footage",
-        PanelKind::new("Footage", |_| Box::new(FootagePanel::default())),
+        PanelKind::new("Footage", |spawn| {
+            Box::new(FootagePanel {
+                display: spawn
+                    .state
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default(),
+                ..Default::default()
+            })
+        }),
     );
 }
 
@@ -164,6 +193,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 #[derive(Default)]
 pub struct FootagePanel {
     gpu: Option<Gpu>,
+    display: crate::source_view_menu::SourceView,
     /// Time inside the footage.
     time: Time,
     /// The footage the time belongs to.
@@ -184,7 +214,13 @@ impl FootagePanel {
             let registry = cx.resources.get::<Arc<ViewportTextureRegistry>>()?.clone();
             self.gpu = Some(Gpu::new(context, registry));
         }
-        self.gpu.as_mut()
+        let gpu = self.gpu.as_mut()?;
+        if let Some(crate::PreviewEffects(registry)) = cx.resources.get::<crate::PreviewEffects>()
+            && gpu.renderer.sync_effects(registry)
+        {
+            gpu.last = None;
+        }
+        Some(gpu)
     }
 
     fn footage(cx: &PanelContext<'_>) -> Option<Footage> {
@@ -194,6 +230,14 @@ impl FootagePanel {
 }
 
 impl Panel for FootagePanel {
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        self.display.menu(ui);
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(&self.display).ok()
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Footage <name>", "Footage (none)" when empty.
         let name = Self::footage(cx).map_or_else(|| tr("(none)").to_owned(), |f| f.name);
@@ -212,19 +256,23 @@ impl Panel for FootagePanel {
         let bottom = BAR + if timed { RULER } else { 0.0 };
         let view = Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - bottom));
         let p = ui.painter_at(full);
-        p.rect_filled(view, 0.0, Color32::from_gray(35));
+        p.rect_filled(view, 0.0, self.display.background(ui));
         let mut zoom = None;
         if let Some(f) = &footage {
             let stage = cx.stage;
             let time = self.time;
             if let Some(handle) = self.gpu(cx).and_then(|g| g.frame(stage, f, time)) {
                 let [w, h] = f.size.map(|v| v.max(1) as f32);
+                let w = w * self.display.aspect(stage, Some(&f.asset));
                 // Fit (AE's default magnification for the Footage panel), never
                 // above 100 %.
                 let scale = ((view.width() - 20.0) / w)
                     .min((view.height() - 20.0) / h)
                     .clamp(0.01, 1.0);
                 let r = Rect::from_center_size(view.center(), vec2(w, h) * scale);
+                if self.display.grid {
+                    crate::viewer::checkerboard(&p, r.intersect(view));
+                }
                 p.image(
                     egui::TextureId::User(handle),
                     r,

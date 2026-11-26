@@ -161,6 +161,7 @@ impl AnimEvaluator {
             }
             rc.layers.push(out);
         }
+        rc.photoshop_clipping_visibility(stage);
         // Layers that cannot show in this frame (outside their in/out points,
         // hidden, not a parent or an active layer's matte): the frame does not
         // depend on their content (cache invalidation, `RenderLayer::inert`).
@@ -294,6 +295,20 @@ impl AnimEvaluator {
                     expansion: m.expansion as f32,
                 })
                 .collect();
+            out.layer_styles =
+                l.layer_styles
+                    .as_ref()
+                    .filter(|e| e.enabled)
+                    .map(|e| RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: true,
+                        params: e
+                            .params
+                            .iter()
+                            .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
+                            .collect(),
+                    });
             // The fx switch turns the whole effect stack off.
             out.effects = l
                 .effects
@@ -319,6 +334,8 @@ impl AnimEvaluator {
                 })
                 .collect();
         }
+        out.resolve_photoshop_mask(stage);
+        out.resolve_photoshop_group(stage, &self.assets);
         Ok(out)
     }
 
@@ -367,7 +384,8 @@ impl AnimEvaluator {
                     }
                 })
             })),
-            LayerSource::None if l.kind == LayerKind::Text => Ok(self.reuse(l, |l| {
+            // A Photoshop text layer retains original footage for its inherited styles.
+            _ if l.kind == LayerKind::Text => Ok(self.reuse(l, |l| {
                 custom(TEXT_PROVIDER, l, |h| {
                     if let Some(doc) = &l.text {
                         serde_json::to_vec(doc).unwrap_or_default().hash(h);
@@ -405,6 +423,12 @@ impl AnimEvaluator {
                 },
                 "footage" | "sequence" => LayerContent::Footage(FootageRef {
                     asset: asset.clone(),
+                    file_revision: stage
+                        .prim(asset)
+                        .map_or(0, |v| bae_model::asset::file_revision(&v)),
+                    psd_layer: stage
+                        .prim(asset)
+                        .and_then(|v| bae_model::psd::LayerImage::from_asset(&v)),
                     file: match stage.prim(asset).map(|view| self.assets.file(&view)) {
                         Some(Ok(file)) => file,
                         Some(Err(message)) => {

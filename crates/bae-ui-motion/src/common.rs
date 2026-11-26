@@ -46,7 +46,7 @@ pub(crate) fn expression_style(
     let rgb = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
     match resources.get::<Arc<bae_prefs::PrefsStore>>() {
         Some(store) => {
-            let p = store.current();
+            let p = store.display();
             (
                 egui::FontId::monospace(p.int(bae_prefs::keys::EXPR_FONT_SIZE).clamp(6, 72) as f32),
                 rgb(p.color("scripting_expressions.expr_color_default")),
@@ -516,7 +516,9 @@ pub(crate) fn apply_edit(
         Edit::Live(value) => {
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value,
@@ -535,7 +537,9 @@ pub(crate) fn apply_edit(
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
             // Shown as committed until the command has run.
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value: value.clone(),

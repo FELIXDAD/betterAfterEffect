@@ -200,11 +200,12 @@ impl Editor {
             }
         }
         if let Some(pos) = resp.hover_pos() {
-            painter.circle_stroke(
+            let radius = (radius as f32 * view.scale).max(1.);
+            painter.add(egui::Shape::ellipse_stroke(
                 pos,
-                (radius as f32 * view.scale).max(1.),
+                egui::vec2(radius * view.aspect, radius),
                 Stroke::new(1., Color32::WHITE),
-            );
+            ));
         }
         if tool == 8
             && let Some(p) = ui.input(|i| {
