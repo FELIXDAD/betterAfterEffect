@@ -263,6 +263,10 @@ pub mod ids {
     pub const FOCUS_TO_POI: &str = "motion.layer.link_focus_distance_to_point_of_interest";
     pub const LINK_FOCUS_TO_LAYER: &str = "motion.layer.link_focus_distance_to_layer";
     pub const SET_FOCUS_TO_LAYER: &str = "motion.layer.set_focus_distance_to_layer";
+    /// Help ▸ Enable Logging (a toggle: debug-level lines in the session log)
+    /// and Reveal Logging File.
+    pub const ENABLE_LOGGING: &str = "motion.help.enable_logging";
+    pub const REVEAL_LOG: &str = "motion.help.reveal_logging_file";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -489,6 +493,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ),
     (ids::LINK_FOCUS_TO_LAYER, "Link Focus Distance to Layer"),
     (ids::SET_FOCUS_TO_LAYER, "Set Focus Distance to Layer"),
+    (ids::ENABLE_LOGGING, "Enable Logging"),
+    (ids::REVEAL_LOG, "Reveal Logging File"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -1468,6 +1474,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::CAMERA_SETTINGS => {
             if let Some(camera) = camera_settings_target(stage, session) {
                 crate::dialogs::layer_settings(cx, session, &camera);
+            }
+            return true;
+        }
+        ids::ENABLE_LOGGING => {
+            bae_platform::logging::set_verbose(!bae_platform::logging::verbose());
+            return true;
+        }
+        ids::REVEAL_LOG => {
+            if let Some(file) = bae_platform::logging::current_log_file() {
+                bae_platform::logging::flush();
+                bae_platform::reveal(&file);
             }
             return true;
         }
@@ -3108,6 +3125,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Link Focus Distance to Layer", "将焦距链接到图层"),
     ("Set Focus Distance to Layer", "将焦距设置为图层"),
+    ("Enable Logging", "启用日志记录"),
+    ("Reveal Logging File", "显示日志记录文件"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
