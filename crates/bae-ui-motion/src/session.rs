@@ -242,6 +242,10 @@ pub struct Session {
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
+    /// View ▸ View Options: the layer controls the viewers draw.
+    pub(crate) layer_controls: crate::viewer::view_options::LayerControls,
+    /// View ▸ Panel Background Color.
+    pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
     /// An expression just added (Alt+click on the stopwatch, Animation ▸ Add
