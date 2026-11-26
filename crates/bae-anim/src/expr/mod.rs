@@ -1333,8 +1333,8 @@ fn apply_style(doc: &mut bae_model::TextStyle, c: &Object<'_>) {
     };
     if let Ok(mode) = c.get::<_, String>("baselineOption") {
         doc.baseline_option = match mode.as_str() {
-            "superScript" => bae_model::BaselineOption::Superscript,
-            "subScript" => bae_model::BaselineOption::Subscript,
+            "superscript" => bae_model::BaselineOption::Superscript,
+            "subscript" => bae_model::BaselineOption::Subscript,
             _ => bae_model::BaselineOption::Normal,
         };
     }
@@ -1402,8 +1402,8 @@ fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextStyle) -> rquickjs::Resu
         "baselineOption",
         match doc.baseline_option {
             bae_model::BaselineOption::Normal => "default",
-            bae_model::BaselineOption::Superscript => "superScript",
-            bae_model::BaselineOption::Subscript => "subScript",
+            bae_model::BaselineOption::Superscript => "superscript",
+            bae_model::BaselineOption::Subscript => "subscript",
         },
     )?;
     o.set("font", doc.font.as_str())?;
