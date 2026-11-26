@@ -9,16 +9,33 @@ use bae_render::EffectParams;
 pub(crate) struct Params<'a> {
     pub def: &'a EffectDef,
     pub p: &'a EffectParams<'a>,
+    sampled: &'a [(u32, Value)],
 }
 
 impl<'a> Params<'a> {
     pub fn new(def: &'a EffectDef, p: &'a EffectParams<'a>) -> Self {
-        Self { def, p }
+        Self {
+            def,
+            p,
+            sampled: &[],
+        }
+    }
+
+    pub fn at_time(self, time: bae_model::Time) -> Self {
+        let history = self.p.parameter_samples;
+        let sampled = history
+            .binary_search_by_key(&time, |sample| sample.time)
+            .map(|i| history[i].values.as_slice())
+            .unwrap_or(&[]);
+        Self { sampled, ..self }
     }
 
     pub fn value(&self, id: u32) -> Option<&'a Value> {
-        self.p
-            .value(id)
+        self.sampled
+            .iter()
+            .find(|(param, _)| *param == id)
+            .map(|(_, value)| value)
+            .or_else(|| self.p.value(id))
             .or_else(|| self.def.param(id).and_then(|d| d.default.as_ref()))
     }
 

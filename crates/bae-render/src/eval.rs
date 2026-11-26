@@ -87,6 +87,9 @@ impl crate::graph::CompFrames for EvaluatorFrames<'_> {
             let Some(attr) = view.attr(&name) else {
                 continue;
             };
+            if !attr.is_animated() && attr.expression.is_none() {
+                continue;
+            }
             let curve =
                 bae_anim::Curve::new(&attr.keyframes, bae_anim::schema::curve_kind(&name, attr));
             for sample in &mut samples {
@@ -307,6 +310,7 @@ impl<'a> MockPass<'a> {
 
             let mut out = RenderLayer::new(layer.path().clone(), LayerContent::None);
             out.time = local;
+            out.start_time = start;
             out.time_scale = if stretch == 0.0 { 1.0 } else { stretch / 100.0 };
             out.in_point = in_point;
             out.active = in_point <= time && time < out_point && solo_ok && guide_ok;

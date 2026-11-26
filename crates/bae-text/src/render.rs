@@ -434,6 +434,12 @@ impl TextProvider {
         }
     }
 
+    /// Expressions' `sourceRectAtTime` measures text and shapes with this
+    /// provider (process-wide).
+    pub fn measure_expressions(self: &Arc<Self>) {
+        bae_anim::set_source_bounds(self.clone());
+    }
+
     /// Scans the system fonts now (the app's warm-up) instead of at the first
     /// text layer.
     pub fn load_fonts(&self) {
@@ -529,13 +535,38 @@ impl SourceProvider for TextProvider {
     }
 }
 
+/// `sourceRectAtTime` for the expression engine: text laid out with the
+/// provider's fonts, shapes from their geometry (the app registers the
+/// provider with `bae_anim::set_source_bounds`).
+impl bae_anim::SourceBounds for TextProvider {
+    fn text(&self, doc: &TextDocument, include_extents: bool) -> Option<bae_anim::SourceRect> {
+        // Expressions run on the UI thread: never wait for the font warm-up.
+        let mut fonts = self.render_fonts().ok()?;
+        let r = layout_text(fonts.as_mut()?, doc).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
+    }
+
+    fn shapes(
+        &self,
+        contents: &[bae_anim::EvaluatedPrim],
+        include_extents: bool,
+    ) -> Option<bae_anim::SourceRect> {
+        let mut warnings = Vec::new();
+        let group = bae_vector::ShapeGroup::from_evaluated(contents, &mut warnings);
+        let r = bae_vector::VectorScene::from_group(&group).bounds(include_extents)?;
+        Some([r.x0, r.y0, r.width(), r.height()])
+    }
+}
+
 impl bae_gpu::WarmUp for TextProvider {
     fn name(&self) -> &str {
         "fonts"
     }
 
+    /// First of all: text needs it and the scan takes well under a
+    /// millisecond (it must never wait behind the compositor or effects).
     fn priority(&self) -> u8 {
-        10
+        0
     }
 
     fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {

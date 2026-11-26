@@ -78,6 +78,8 @@ fn app_builder() -> AppBuilder {
         tracing::warn!("shape layer source not registered: {error}");
     }
     let text = std::sync::Arc::new(bae_text::render::TextProvider::new());
+    // Expressions' `sourceRectAtTime` measures text and shapes with it.
+    text.measure_expressions();
     if let Err(error) = builder
         .register_arc::<dyn bae_render::SourceProvider>(bae_text::TEXT_PROVIDER, text.clone())
     {
