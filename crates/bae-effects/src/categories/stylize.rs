@@ -1,9 +1,15 @@
+mod cc;
 mod filters;
 use super::packages;
 use crate::Registry;
 use crate::effects::spatial;
 
 pub(crate) fn register(registry: &mut Registry) {
+    super::packages(
+        registry,
+        &[embedded!("stylize", ["shaders/cc_burn_film.wgsl"])],
+    );
+    cc::register(registry);
     registry.effects.extend(filters::entries());
     registry.prewarm.push(filters::prewarm);
     registry
