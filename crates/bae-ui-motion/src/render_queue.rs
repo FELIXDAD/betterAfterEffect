@@ -344,7 +344,7 @@ impl RenderQueue {
         self.running
     }
 
-    /// Queues `comp` with AE's defaults: PNG sequence, the work area, a folder
+    /// Queues `comp` over its work area, using H.264 on macOS and PNG elsewhere, in a folder
     /// named after the comp under `output_dir`. Returns the item id.
     pub fn add(&mut self, comp: &CompInfo, output_dir: &Path) -> u64 {
         let format = if cfg!(target_os = "macos") {
@@ -1073,8 +1073,8 @@ fn item_ui(
                 }
             }
             ItemStatus::Failed(message) => {
-                ui.colored_label(ui.visuals().error_fg_color, tr("Failed"))
-                    .on_hover_text(message);
+                ui.colored_label(ui.visuals().error_fg_color, tr("Failed"));
+                ui.colored_label(ui.visuals().error_fg_color, message);
             }
             ItemStatus::Stopped { done, total, first } => {
                 ui.label(
@@ -1111,9 +1111,6 @@ fn item_ui(
             *remove = Some(item.id);
         }
     });
-    if let ItemStatus::Failed(message) = &item.status {
-        ui.colored_label(ui.visuals().error_fg_color, message);
-    }
     // AE's Render Time column (time so far while rendering).
     if let Some(started) = item.started {
         let time = match &item.status {
@@ -1368,6 +1365,8 @@ pub(crate) fn channels_label(channels: Channels) -> &'static str {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Video Codec", "视频编码器"),
+    ("24-bit PCM", "24 位 PCM"),
     ("Save Frame As File", "帧另存为文件"),
     // AE 26's Render Queue (渲染队列) terms.
     ("Unqueued", "未加入队列"),

@@ -44,6 +44,8 @@
 
 ## 进度
 
+- 2026-11-25，Mac 渲染队列支持 QuickTime 的 ProRes 422、422 HQ、4444、H.264 和 HEVC，音轨可选 AAC 或 24 位 PCM。已在 Apple Silicon 写出影片并重新解码音轨。
+
 - [x] 公共接口（`crates/bae-media`）：`MediaFormat` / `MediaSource`（按帧号随机访问，`decode_gpu` / `decode_cpu`）、`MediaInfo`（色彩标签按 H.273/CICP、时码、帧率、帧数、像素长宽比、alpha 直通/预乘/忽略）、`FrameRequest`、`GpuFrame`（RGBA16F 工作格式，默认预乘）/ `CpuFrame`、`MediaFormats`（先按文件头识别、再按扩展名）、`FrameCache`（按显存字节的 LRU）、`MediaModule`（内置格式注册到 `Registry<dyn MediaFormat>`，插件注册到同一处）。时间用 `bae-model` 的 `Time`（flicks）和 `FrameRate`。
 - [x] 序列帧：`name_0001.png` / `shot.1001.exr` 识别（数字取文件名最后一段，补零位宽固定），缺帧报告，目录扫描分组；`ImageSequenceSource`（序列默认 30 fps，可设）。
 - [x] 图像格式：PNG（8/16 位、调色板、tRNS、cICP/sRGB/gAMA/cHRM/iCCP、像素比）、JPEG（zune-jpeg，ICC、JFIF 像素比）、WebP（image-webp）、OpenEXR（half/float，数据窗口放进显示窗口，色度、时码、像素比）。GPU 上传后用 compute pass 转成 RGBA16F 并处理 alpha（预乘/反预乘/强制不透明）。

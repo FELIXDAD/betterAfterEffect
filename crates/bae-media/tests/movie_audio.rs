@@ -57,6 +57,7 @@ fn movie_has_decodable_audio_aligned_with_ntsc_frames() {
         }
         assert_eq!(writer.finish().unwrap().frames, 30);
         let mut source = FileAudio::open(&path).unwrap();
+        assert_eq!(source.info().codec, codec);
         let pcm = source.read(0, 60_000).unwrap();
         assert_eq!((pcm.sample_rate, pcm.channels), (48000, 2));
         assert!(
