@@ -71,6 +71,120 @@ pub fn point_at(p: &BezierPath, seg: usize, t: f64) -> P {
     lerp(lerp(ab, bc, t), lerp(bc, cd, t), t)
 }
 
+/// Steps per segment when measuring an outline.
+const STEPS: usize = 32;
+
+/// The outline as a polyline: (point, arc length from vertex 0, path parameter).
+fn polyline(p: &BezierPath) -> Vec<(P, f64, f64)> {
+    let mut out = Vec::new();
+    let segs = segment_count(p);
+    if segs == 0 {
+        return out;
+    }
+    let mut len = 0.0;
+    let mut last = p.vertices[0];
+    out.push((last, 0.0, 0.0));
+    for seg in 0..segs {
+        for k in 1..=STEPS {
+            let t = k as f64 / STEPS as f64;
+            let q = point_at(p, seg, t);
+            len += (q[0] - last[0]).hypot(q[1] - last[1]);
+            out.push((q, len, seg as f64 + t));
+            last = q;
+        }
+    }
+    out
+}
+
+/// Length of the outline (closed paths include the closing segment).
+pub fn outline_length(p: &BezierPath) -> f64 {
+    polyline(p).last().map_or(0.0, |l| l.1)
+}
+
+/// The path resampled to `count` corner vertices spaced evenly along its
+/// outline from vertex 0 (Smart Mask Interpolation's added vertices); feather
+/// points keep their place on the outline.
+pub fn resample(p: &BezierPath, count: usize) -> BezierPath {
+    let line = polyline(p);
+    let total = line.last().map_or(0.0, |l| l.1);
+    if count < 2 || total <= 0.0 {
+        return p.clone();
+    }
+    let spacing = total / if p.closed { count } else { count - 1 } as f64;
+    // Point and parameter at arc length `s`.
+    let at = |s: f64| -> (P, f64) {
+        let i = line.partition_point(|l| l.1 < s).clamp(1, line.len() - 1);
+        let (a, b) = (line[i - 1], line[i]);
+        let f = if b.1 > a.1 {
+            (s - a.1) / (b.1 - a.1)
+        } else {
+            0.0
+        };
+        (lerp(a.0, b.0, f), a.2 + (b.2 - a.2) * f)
+    };
+    let vertices: Vec<P> = (0..count).map(|k| at(k as f64 * spacing).0).collect();
+    // Arc length of a path parameter.
+    let length_at = |u: f64| -> f64 {
+        let i = line.partition_point(|l| l.2 < u).clamp(1, line.len() - 1);
+        let (a, b) = (line[i - 1], line[i]);
+        let f = if b.2 > a.2 {
+            (u - a.2) / (b.2 - a.2)
+        } else {
+            0.0
+        };
+        a.1 + (b.1 - a.1) * f
+    };
+    let feather = p
+        .feather
+        .iter()
+        .map(|f| {
+            let pos = length_at(f64::from(f.segment) + f.t) / spacing;
+            let seg = (pos.floor() as usize).min(count - 1);
+            bae_model::FeatherPoint {
+                segment: seg as u32,
+                t: pos - seg as f64,
+                ..*f
+            }
+        })
+        .collect();
+    BezierPath {
+        in_tangents: vec![[0.0, 0.0]; count],
+        out_tangents: vec![[0.0, 0.0]; count],
+        vertices,
+        closed: p.closed,
+        feather,
+    }
+}
+
+/// Per-vertex linear blend of two paths with the same vertex count (feather
+/// points too when their counts match).
+pub fn blend(a: &BezierPath, b: &BezierPath, f: f64) -> BezierPath {
+    let mix =
+        |x: &[P], y: &[P]| -> Vec<P> { x.iter().zip(y).map(|(u, v)| lerp(*u, *v, f)).collect() };
+    let mix1 = |x: f64, y: f64| x + (y - x) * f;
+    BezierPath {
+        vertices: mix(&a.vertices, &b.vertices),
+        in_tangents: mix(&a.in_tangents, &b.in_tangents),
+        out_tangents: mix(&a.out_tangents, &b.out_tangents),
+        closed: a.closed,
+        feather: if a.feather.len() == b.feather.len() {
+            a.feather
+                .iter()
+                .zip(&b.feather)
+                .map(|(u, v)| bae_model::FeatherPoint {
+                    t: mix1(u.t, v.t),
+                    radius: mix1(u.radius, v.radius),
+                    tension: mix1(u.tension, v.tension),
+                    corner_angle: mix1(u.corner_angle, v.corner_angle),
+                    ..*u
+                })
+                .collect()
+        } else {
+            a.feather.clone()
+        },
+    }
+}
+
 /// Insert a vertex at parameter `t` of segment `seg`, splitting the cubic (de
 /// Casteljau), so the outline does not change. The new vertex is `seg + 1`.
 pub fn split(p: &BezierPath, seg: usize, t: f64) -> BezierPath {

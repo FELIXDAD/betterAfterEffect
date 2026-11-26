@@ -819,6 +819,12 @@ fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
         0,
     );
     settle(&mut h);
+    // The Render Queue shares the short Timeline frame (AE): maximize it (`)
+    // to see the whole item.
+    to_front(&mut h, "render_queue");
+    h.state_mut()
+        .dispatch(Invocation::new(bae_ui::action::ids::MAXIMIZE_FRAME));
+    settle(&mut h);
     assert!(
         find_text(&h, "The file will be saved as .tif to match the format.").is_some(),
         "no hint for the mismatched extension"
@@ -834,10 +840,12 @@ fn typed_frame_numbers_stay_inside_the_comp() {
     comp_with(&mut h, &["motion.layer.new.solid"]);
     key(&mut h, Modifiers::COMMAND, Key::M);
     // The start and end fields: the Render Queue's two spin buttons (the first
-    // two in the tree; the Properties panel has more further on).
+    // two in the tree apart from the viewer bar's exposure; the Properties
+    // panel has more further on).
     let fields = |h: &Ui| -> Vec<(Rect, String)> {
         h.root()
             .query_all_by_role(egui::accesskit::Role::SpinButton)
+            .filter(|n| n.accesskit_node().label().as_deref() != Some("Adjust Exposure"))
             .map(|n| (n.rect(), n.value().unwrap_or_default()))
             .take(2)
             .collect()

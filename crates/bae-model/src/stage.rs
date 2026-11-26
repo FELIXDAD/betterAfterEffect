@@ -15,6 +15,14 @@ use crate::sublayer::Sublayer;
 /// Default maximum of undo steps kept per author ([`Stage::set_undo_limit`]).
 pub const DEFAULT_UNDO_LIMIT: usize = 1000;
 
+/// Timeline switches that can change without unlocking or selecting the layer.
+pub fn editable_on_locked_layer(attr: &str) -> bool {
+    matches!(
+        attr,
+        "locked" | "enabled" | "audio_enabled" | "solo" | "shy" | "motion_blur"
+    )
+}
+
 /// Sublayer IDs that differ only in case map to the same file on macOS/Windows.
 fn same_file_name(a: &SublayerId, b: &SublayerId) -> bool {
     a.as_str().eq_ignore_ascii_case(b.as_str())
@@ -617,7 +625,7 @@ impl Transaction<'_> {
     /// Every transaction (commands, agents, scripts) refuses ops on a layer
     /// that was locked when the transaction first touched it and still is:
     /// the layer itself, its properties, keyframes and children. Allowed: the
-    /// layer's own `locked` attribute, and pure reorders (another layer moved
+    /// layer's lock and its static timeline switches, and pure reorders (another layer moved
     /// past it). Undo / redo replay history directly and are not checked.
     fn check_locks(&mut self, op: &Op) -> Result<()> {
         if self.allow_locked {
@@ -647,15 +655,21 @@ impl Transaction<'_> {
             if !(locked_at_start && locked_now) {
                 continue;
             }
-            let lock_switch = match op {
-                Op::SetValue { path, attr, .. }
-                | Op::SetAttr { path, attr, .. }
-                | Op::SetKeyframe { path, attr, .. }
-                | Op::RemoveKeyframe { path, attr, .. }
-                | Op::SetExpression { path, attr, .. } => *path == layer && attr == "locked",
-                _ => false,
-            };
-            if !lock_switch {
+            let switch_edit = path == &layer
+                && match op {
+                    Op::SetValue {
+                        attr,
+                        value: Some(crate::Value::Bool(_)),
+                        ..
+                    } => editable_on_locked_layer(attr),
+                    Op::SetValue { attr, .. }
+                    | Op::SetAttr { attr, .. }
+                    | Op::SetKeyframe { attr, .. }
+                    | Op::RemoveKeyframe { attr, .. }
+                    | Op::SetExpression { attr, .. } => attr == "locked",
+                    _ => false,
+                };
+            if !switch_edit {
                 let name = self
                     .stage
                     .prim(&layer)

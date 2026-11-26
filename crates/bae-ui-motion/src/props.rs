@@ -295,6 +295,13 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             children: effects,
         });
     }
+    if bae_media::audio::layer_file(stage, layer).is_some() {
+        out.push(Node::Group {
+            id: format!("{layer}#audio"),
+            label: tr("Audio").to_owned(),
+            children: vec![prop(stage, layer, "audio:levels", false)],
+        });
+    }
     out.push(Node::Group {
         id: format!("{layer}#transform"),
         label: tr("Transform").to_owned(),

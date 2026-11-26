@@ -4,12 +4,15 @@
 //! The View popup chooses what the panel shows and edits: nothing, the masks,
 //! or one effect. With Render on, the picture includes the effects up to the
 //! chosen one; paint is drawn on the Paint effect. The time ruler under the
-//! picture is the layer's: its in and out points and the current time.
+//! picture is the layer's: its in and out points (drag an end to trim the
+//! layer; the { and } buttons set them to the current time) and the current
+//! time, with AE's In, Out and Duration readouts.
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
 use bae_model::{PrimPath, Time};
 use bae_motion::query::{self, CompInfo};
+use bae_ui::Accessible as _;
 use bae_ui::theme::{self, color};
 use bae_ui::{Panel, PanelContext, TabInfo, tr, widgets};
 use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
@@ -38,6 +41,9 @@ pub struct LayerPanel {
     pub(crate) show: Show,
     /// Render: the picture includes the effects up to the shown one.
     pub(crate) render: bool,
+    /// An end of the layer being dragged on the ruler: the in point (`true`)
+    /// or the out point, and where it would go.
+    trim: Option<(bool, Time)>,
 }
 
 /// Double-clicking a layer (AE): a pre-comp layer opens its composition, any
@@ -84,7 +90,7 @@ pub(crate) fn alone(
     l.opacity = 1.0;
     l.visible = true;
     l.active = true;
-    l.blend_mode = "normal".to_owned();
+    l.blend_mode = "normal".into();
     l.track_matte = Default::default();
     l.track_matte_layer = None;
     l.switches.three_d = false;
@@ -163,13 +169,17 @@ impl Panel for LayerPanel {
             self.picture(ui, cx, area, &one, min, evaluated);
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
-        time_ruler(ui, &session, &info, ruler, time, in_out);
+        if let Some(edit) = self.time_ruler(ui, &session, &info, ruler, time, in_out) {
+            trim(cx, &layer, edit);
+        }
         let names: Vec<String> = evaluated
             .effects
             .iter()
             .map(|e| query::display_name_of(cx.stage, &e.path))
             .collect();
-        self.bar(ui, bar, &info, time, &names);
+        if let Some(edit) = self.bar(ui, bar, &info, time, &names, in_out) {
+            trim(cx, &layer, edit);
+        }
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
@@ -218,7 +228,7 @@ impl LayerPanel {
         let image = self
             .gpu
             .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None));
+            .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None, false));
         if let Some(img) = image {
             let r = img.rect;
             let at = |x: i32, y: i32| view.to_screen(DVec2::new(f64::from(x), f64::from(y)));
@@ -261,7 +271,16 @@ impl LayerPanel {
         }
     }
 
-    fn bar(&mut self, ui: &mut Ui, bar: Rect, info: &CompInfo, time: Time, effects: &[String]) {
+    /// The bar under the ruler; returns a trim the { or } button asked for.
+    fn bar(
+        &mut self,
+        ui: &mut Ui,
+        bar: Rect,
+        info: &CompInfo,
+        time: Time,
+        effects: &[String],
+        (in_point, out_point): (Time, Time),
+    ) -> Option<Trim> {
         ui.painter().rect_filled(bar, 0.0, color::PANEL);
         let mut child = ui.new_child(
             egui::UiBuilder::new()
@@ -296,56 +315,189 @@ impl LayerPanel {
                 .font(theme::body())
                 .color(color::ACCENT),
         );
+        // Set In / Out Point to Current Time, each with its time, then the
+        // duration (the out point is exclusive; AE shows the last frame).
+        let mut out = None;
+        let frame = info.frame_duration();
+        let last = |out_point: Time, in_point: Time| {
+            if out_point > in_point + frame {
+                out_point - frame
+            } else {
+                in_point
+            }
+        };
+        let (shown_in, shown_out) = match self.trim {
+            Some((true, t)) => (t, last(out_point, t)),
+            Some((false, t)) => (in_point, last(t, in_point)),
+            None => (in_point, last(out_point, in_point)),
+        };
+        let readout = |ui: &mut Ui, text: String| {
+            ui.label(
+                egui::RichText::new(text)
+                    .font(theme::small())
+                    .color(color::TEXT),
+            );
+        };
+        for (glyph, tip, edit, shown) in [
+            (
+                "{",
+                "Set In Point to Current Time",
+                Trim::In(time),
+                shown_in,
+            ),
+            (
+                "}",
+                "Set Out Point to Current Time",
+                Trim::Out(time + frame),
+                shown_out,
+            ),
+        ] {
+            if ui
+                .add(egui::Button::new(egui::RichText::new(glyph).font(theme::body())).small())
+                .labeled(egui::WidgetType::Button, tr(tip))
+                .on_hover_text(tr(tip))
+                .clicked()
+            {
+                out = Some(edit);
+            }
+            readout(ui, common::timecode(info, shown));
+        }
+        readout(
+            ui,
+            format!("Δ {}", common::timecode(info, shown_out + frame - shown_in)),
+        );
+        out
     }
 }
 
-/// The layer's time ruler: the comp's duration, the layer's span between its
-/// in and out points, the current time; clicking or dragging moves the time.
-fn time_ruler(
-    ui: &Ui,
-    session: &SharedSession,
-    info: &CompInfo,
-    rect: Rect,
-    time: Time,
-    (in_point, out_point): (Time, Time),
-) {
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, color::PANEL);
-    let track = rect.shrink2(vec2(10.0, 6.0));
-    let total = info.duration.as_seconds().max(1e-6);
-    let x = |t: Time| track.left() + (t.as_seconds() / total) as f32 * track.width();
-    painter.rect_filled(track, 2.0, Color32::from_gray(55));
-    let (a, b) = if in_point <= out_point {
-        (in_point, out_point)
-    } else {
-        (out_point, in_point)
+/// A trim the ruler or a button asks for (comp time; the out point exclusive).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Trim {
+    In(Time),
+    Out(Time),
+}
+
+/// Trim the layer (one `layer.trim`, one undo step).
+fn trim(cx: &mut PanelContext<'_>, layer: &PrimPath, edit: Trim) {
+    let t = query::layer_timing(cx.stage, layer);
+    let params = match edit {
+        Trim::In(at) if at < t.out_point && at != t.in_point => {
+            serde_json::json!({"layers": [layer], "in_point": at})
+        }
+        Trim::Out(at) if at > t.in_point && at != t.out_point => {
+            serde_json::json!({"layers": [layer], "out_point": at})
+        }
+        _ => return,
     };
-    painter.rect_filled(
-        Rect::from_min_max(pos2(x(a), track.top()), pos2(x(b), track.bottom())),
-        2.0,
-        Color32::from_gray(110),
-    );
-    let cti = x(time);
-    painter.line_segment(
-        [pos2(cti, rect.top()), pos2(cti, rect.bottom())],
-        Stroke::new(1.5, color::ACCENT),
-    );
-    let resp = ui.interact(rect, ui.id().with("layer_ruler"), Sense::click_and_drag());
-    if (resp.clicked() || resp.dragged())
-        && let Some(p) = resp.interact_pointer_pos()
-    {
-        let f = f64::from(((p.x - track.left()) / track.width()).clamp(0.0, 1.0));
-        let mut s = session.lock();
-        s.stop();
-        s.set_time(info, Time::from_seconds(f * total));
+    cx.invoke_with("layer.trim", params);
+}
+
+/// Pick distance for the ruler's in and out ends.
+const END_PICK: f32 = 5.0;
+
+impl LayerPanel {
+    /// The layer's time ruler: the comp's duration, the layer's span between
+    /// its in and out points, the current time. Clicking or dragging moves the
+    /// time; dragging an end of the span trims the layer (on release).
+    fn time_ruler(
+        &mut self,
+        ui: &Ui,
+        session: &SharedSession,
+        info: &CompInfo,
+        rect: Rect,
+        time: Time,
+        (in_point, out_point): (Time, Time),
+    ) -> Option<Trim> {
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, color::PANEL);
+        let track = rect.shrink2(vec2(10.0, 6.0));
+        let total = info.duration.as_seconds().max(1e-6);
+        let x = |t: Time| track.left() + (t.as_seconds() / total) as f32 * track.width();
+        let frame = info.frame_duration().as_seconds().max(1e-9);
+        let time_at = |px: f32| {
+            let f = f64::from(((px - track.left()) / track.width()).clamp(0.0, 1.0));
+            Time::from_seconds((f * total / frame).round() * frame)
+        };
+        let (a, b) = match self.trim {
+            Some((true, t)) => (t, out_point),
+            Some((false, t)) => (in_point, t),
+            None => (in_point, out_point),
+        };
+        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        painter.rect_filled(track, 2.0, Color32::from_gray(55));
+        painter.rect_filled(
+            Rect::from_min_max(pos2(x(a), track.top()), pos2(x(b), track.bottom())),
+            2.0,
+            Color32::from_gray(110),
+        );
+        // The ends: brackets the pointer can grab.
+        for t in [a, b] {
+            painter.line_segment(
+                [
+                    pos2(x(t), track.top() - 2.0),
+                    pos2(x(t), track.bottom() + 2.0),
+                ],
+                Stroke::new(2.0, Color32::from_gray(170)),
+            );
+        }
+        let cti = x(time);
+        painter.line_segment(
+            [pos2(cti, rect.top()), pos2(cti, rect.bottom())],
+            Stroke::new(1.5, color::ACCENT),
+        );
+        let resp = ui.interact(rect, ui.id().with("layer_ruler"), Sense::click_and_drag());
+        let near = |p: egui::Pos2, t: Time| (p.x - x(t)).abs() <= END_PICK;
+        if let Some(p) = resp.hover_pos()
+            && (self.trim.is_some() || near(p, in_point) || near(p, out_point))
+        {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        // Where the press began (egui reports the drag a few points later).
+        if resp.drag_started()
+            && let Some(p) = ui.input(|i| i.pointer.press_origin())
+        {
+            if near(p, in_point) {
+                self.trim = Some((true, in_point));
+            } else if near(p, out_point) {
+                self.trim = Some((false, out_point));
+            }
+        }
+        if let Some((is_in, _)) = self.trim {
+            if let Some(p) = resp.interact_pointer_pos() {
+                self.trim = Some((is_in, time_at(p.x)));
+            }
+            if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+                let edit = self
+                    .trim
+                    .take()
+                    .map(|(is_in, t)| if is_in { Trim::In(t) } else { Trim::Out(t) });
+                return edit;
+            }
+            return None;
+        }
+        if (resp.clicked() || resp.dragged())
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let mut s = session.lock();
+            s.stop();
+            s.set_time(info, time_at(p.x));
+        }
+        None
     }
 }
 
 /// Registers this module's panel (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
     crate::register_panel(
         app,
         "layer",
         bae_ui::PanelKind::new("Layer", |spawn| Box::new(LayerPanel::new(spawn.state))),
     );
 }
+
+/// Chinese (AE's zh_CN dictionary).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Set In Point to Current Time", "将入点设置为当前时间"),
+    ("Set Out Point to Current Time", "将出点设置为当前时间"),
+];
