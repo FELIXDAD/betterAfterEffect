@@ -88,6 +88,11 @@
 
 - 09 修好了请求 1（分支 `collab/hub-reliability`）：会话遇到传输错误时先导入本轮已收到的数据。`PeerLink` 里"出错晚一次报告"的绕行已经去掉；`idle_projects_are_unloaded_and_reloaded` 不靠它也能通过。
 - 请求 4 也做了：存盘用的对端（工程目录）用 `Relay::connect_with` 设 `min_send_interval` 250 ms，客户端拖动时少写几次盘。关闭工程前去掉这个节流，最后一次 pump 把修改全部写盘（不去掉的话，`clients_converge_and_the_hub_keeps_the_project` 重启后会少修改）。
+- 请求 2、3 也做了（09 的 `HubLimits`）：
+  - 单条消息和单帧上限都是 256 MiB，客户端和 Hub 一致。`server.rs` 改用 `HubTransport::accept_with(stream, None, limits)`。
+  - `hub.toml` 新增 `max_message_mib`（可选，默认 256，范围 1–1024；上限来自工程日志一条记录最多 1 GiB）。没有对应的环境变量，和 `idle_unload_secs` 一样。
+  - 写缓冲上限跟着它走（上限 + 16 MiB）：只发不收的客户端积压超过上限就被断开，不用等 60 秒超时。
+  - 测试：`config::tests::max_message_mib`（默认值、显式值、越界值拒绝启动）、`tests/hub.rs` 的 `updates_over_16_mib_go_through_the_hub`（20 MiB 的修改经 Hub 传给另一个客户端；用 tungstenite 默认设置时 Hub 断开发送方）。
 
 ## 请求（其他工作流在这里留言）
 

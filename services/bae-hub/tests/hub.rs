@@ -268,6 +268,59 @@ fn idle_projects_are_unloaded_and_reloaded() {
     assert_eq!(again[0].fingerprint(), expected);
 }
 
+/// An edit larger than tungstenite's default 16 MiB frame limit (e.g. the first
+/// upload of a big sublayer) goes client → hub → client: both ends use the same
+/// `HubLimits` (256 MiB by default).
+#[test]
+fn updates_over_16_mib_go_through_the_hub() {
+    let data = tempfile::tempdir().unwrap();
+    let hub = start(config(data.path()));
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "alice", &base),
+        Client::join(addr, PROJECT, WRITE, "bob", &base),
+    ];
+    pump_until(&mut clients, Duration::from_secs(10), |c| {
+        c.iter().all(|c| c.session.is_connected())
+    });
+    let root = DocKey::sublayer(&SublayerId::root());
+    let mut rng = Rng::new(3);
+    // Letters from a random sequence: Loro cannot squeeze it under 16 MiB.
+    let big: String = (0..20 << 20)
+        .map(|_| char::from(b'a' + rng.below(26) as u8))
+        .collect();
+    let alice = &mut clients[0];
+    let before = alice.stage.version(&root).unwrap();
+    alice.stage.set_edit_target(&SublayerId::root()).unwrap();
+    let who = alice.who.clone();
+    alice
+        .stage
+        .transact(&who, "paste", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: "notes".into(),
+                value: Some(Value::String(big.clone())),
+            })
+        })
+        .unwrap();
+    let size = alice.stage.export_updates(&root, &before).unwrap().len();
+    assert!(size > 16 << 20, "the update is only {size} bytes");
+    let want = alice.stage.version(&root).unwrap();
+    // `Client::pump` panics if the hub drops the link (as it did with a 16 MiB
+    // frame limit).
+    pump_until(&mut clients, Duration::from_secs(30), |c| {
+        c[1].stage
+            .version(&root)
+            .is_some_and(|v| v.includes_vv(&want))
+    });
+    let got = clients[1]
+        .stage
+        .prim(&p("/comps/main/layers/title"))
+        .and_then(|t| t.value("notes").cloned());
+    assert!(got == Some(Value::String(big)), "bob got a different value");
+}
+
 /// Acceptance (task book 10): ten clients, LAN latency < 100 ms. Here on
 /// loopback: one client changes a value, measure until all nine others have it.
 /// Clients poll their link every 1 ms (`ThreadedTransport`), as the app does.

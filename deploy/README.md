@@ -102,6 +102,7 @@ projects = ["film-a"]      # 只能打开这个工程
 | 不想写配置文件 | 用环境变量 `BAE_HUB_TOKEN`（可写）、`BAE_HUB_READ_TOKEN`（只读） |
 | 局域网完全可信，不想要令牌 | `anonymous = "read"` 或 `"write"`（不推荐） |
 | 换端口 | 改 Docker 的端口映射（例如 `-p 8000:7341`），或者 `hub.toml` 里的 `listen` |
+| NAS 内存很小 | `max_message_mib = 64`（默认 256，范围 1–1024）：每个连接积压的数据最多约 80 MiB。代价是超过 64 MiB 的工程层同步不了。客户端用的是 256，改大没有用 |
 
 **权限**（容器用普通用户运行时）：数据目录必须归这个用户所有，或者对它可写。
 
@@ -138,6 +139,8 @@ curl -H "Authorization: Bearer <令牌>" http://<NAS 地址>:7341/v1/projects   
 | 连不上 | 防火墙或端口映射。NAS 的防火墙要放行 TCP 7341；`curl http://<NAS 地址>:7341/healthz` 应该返回 ok |
 | 日志里 `another bae-hub is already using the data directory` | 两个容器或进程用了同一个数据目录。停掉其中一个 |
 | 日志里 `project directory failed` | 数据目录写不进去（满了、权限、卷没挂好）。服务会每 30 秒重试，修好后自动恢复 |
+| 日志里 `write buffer full: the peer is not reading` | 某个客户端不收数据（程序卡住，或网络太慢），积压超过上限，Hub 断开了它。客户端恢复后会自动重连 |
+| 日志里 `over the limit` | 一条同步消息超过了上限（默认 256 MiB）。`hub.toml` 里改过 `max_message_mib` 的话，改回 256，和客户端一致 |
 | 容器启动后马上退出 | `docker logs bae-hub` 查看原因，常见的是 `hub.toml` 写错（会指出哪一行） |
 
 **目前不支持**：公网访问和 HTTPS（只用于局域网）。需要远程协作时，请用 VPN（例如群晖 VPN Server、Tailscale、ZeroTier）连回办公室局域网。

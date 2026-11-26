@@ -45,6 +45,7 @@ bae-hub healthcheck                   # 本机的服务正常就返回 0（Docke
 | 额外的可写令牌 | — | `BAE_HUB_TOKEN` | — | — |
 | 额外的只读令牌 | — | `BAE_HUB_READ_TOKEN` | — | — |
 | 空闲卸载（秒，0 不卸载） | `idle_unload_secs` | — | — | 600 |
+| 单条同步消息上限（MiB，1–1024） | `max_message_mib` | — | — | 256 |
 
 令牌：
 
@@ -57,6 +58,14 @@ projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*"
 ```
 
 一个数据目录同时只能被一个 `bae-hub` 使用（靠 `hub.lock` 保证）。
+
+`max_message_mib`：
+
+- 一条同步消息（比如一个工程层的快照）最大多少 MiB。客户端固定用 256，**要和客户端一致**：
+  - 改小：超过它的工程层传不上来，客户端会反复重连。好处是每个连接占的内存上限更小。
+  - 改大：客户端仍然收不下超过 256 MiB 的消息，没有用处。
+- 写缓冲上限跟着它走：一个连接积压的待发数据超过"上限 + 16 MiB"，Hub 就断开它（见下一节）。
+- 最大 1024：工程目录的日志一条记录最多 1 GiB。
 
 ## HTTP 接口
 
@@ -98,6 +107,9 @@ Authorization: Bearer <令牌>
 - **在线状态**（`Presence`）由 `Relay` 转发：新连接马上收到所有人的状态；连接断开时，Hub 替它向其他人发"离开"。
 - **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。
 - **超时**：Hub 60 秒没有收到某个客户端的任何消息，就断开这个连接。正常客户端每 5 秒发一次 `Hello`，所以只有死掉的链路（比如合上盖子的笔记本）才会被断开。
+- **大小上限**（`bae_sync::HubLimits`，`docs/spec/sync.md` 3.1）：
+  - 一条消息最大 256 MiB（`max_message_mib`），单帧上限一样大。客户端和 Hub 默认相同；超过的消息发送方直接不发，接收方断开连接。
+  - 只发不收的客户端：发给它的数据积压在 Hub 的写缓冲里，超过"上限 + 16 MiB"时发送失败，Relay 马上断开它，不用等 60 秒超时。
 - **重连**：断线后重新 `connect`，再调用 `SyncSession::reset()`。双方交换 `Hello` 后各自补发对方缺的部分，什么都不会丢。
 - **延迟**：
   - 有消息往来时，Hub 每 1 毫秒查看一次各个连接；安静下来后逐步放慢到每 10 毫秒一次。
@@ -122,12 +134,12 @@ Authorization: Bearer <令牌>
 
 | 文件 | 内容 |
 |---|---|
-| `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept(stream, None)` 完成握手，然后挂到工程的 Relay 上。 |
+| `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept_with(stream, None, limits)` 完成握手（`limits` 来自 `max_message_mib`），然后挂到工程的 Relay 上。 |
 | `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。发给目录的修改最多每 250 ms 一次（`Relay::connect_with`），拖动时少写几次盘；关闭工程时最后一次 pump 不节流，修改全部写盘。 |
 | `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
 | `src/auth.rs` | 令牌只保存 BLAKE3 哈希，比较用常数时间。 |
-| `src/config.rs` | `hub.toml`、环境变量。 |
+| `src/config.rs` | `hub.toml`、环境变量；`max_message_mib` 换算成 `HubLimits`，超出 1–1024 时拒绝启动。 |
 
 **链路出错。** 客户端发完最后的修改马上断开时，`SyncSession::pump` 先导入这一轮已经收到的修改，再报告错误（`docs/spec/sync.md` 2.4），Relay 随即把它们转发给其他连接和工程目录。所以 `PeerLink` 出错时直接报告，不需要绕行。
 
@@ -147,3 +159,4 @@ Authorization: Bearer <令牌>
 - **空闲卸载**：空闲的工程被卸载，再次连接时从磁盘重新加载，内容一致。
 - **10 个客户端的延迟**：一个客户端改一个值，测到其他 9 个全部收到为止，中间故意让 Hub 安静下来，覆盖放慢轮询的情况。本机回环、debug 构建下中位数约 5.5 ms，最大约 21 ms（验收要求局域网 < 100 ms）。
 - **数据目录锁**：同一个数据目录不能启动两个 Hub。
+- **大消息**：一次 20 MiB 的修改（超过 tungstenite 默认的 16 MiB 单帧上限）经 Hub 传给另一个客户端，内容一致。用 tungstenite 的默认设置时，Hub 断开发送方。

@@ -6,6 +6,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bae_sync::HubLimits;
 use serde::{Deserialize, Serialize};
 
 use crate::error::HubError;
@@ -21,6 +22,10 @@ pub const ENV_TOKEN: &str = "BAE_HUB_TOKEN";
 pub const ENV_READ_TOKEN: &str = "BAE_HUB_READ_TOKEN";
 /// Environment variable overriding `anonymous` (`none`, `read`, `write`).
 pub const ENV_ANONYMOUS: &str = "BAE_HUB_ANONYMOUS";
+
+/// Allowed values of `max_message_mib`. Above 1 GiB the project directory could
+/// not read the message back (its log records are at most 1 GiB).
+pub const MAX_MESSAGE_MIB: std::ops::RangeInclusive<u64> = 1..=1024;
 
 /// What a connection may do with a project.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -93,6 +98,9 @@ pub struct FileConfig {
     /// Unload a project from memory after this many seconds without connections
     /// (0: never).
     pub idle_unload_secs: Option<u64>,
+    /// Largest sync message in MiB (default 256, as in the clients; see
+    /// [`HubConfig::limits`]).
+    pub max_message_mib: Option<u64>,
     #[serde(default, rename = "token")]
     pub tokens: Vec<TokenConfig>,
 }
@@ -123,6 +131,11 @@ pub struct HubConfig {
     /// Poll interval while a project has no connections (hellos to the project
     /// directory, presence expiry).
     pub empty_tick: Duration,
+    /// Message size limit and write buffer cap of every client connection
+    /// (`max_message_mib`). Clients use [`HubLimits::default`]; keep the
+    /// message size the same, or messages between the two limits never get
+    /// through. A client that stops reading is dropped once the cap is reached.
+    pub limits: HubLimits,
 }
 
 impl HubConfig {
@@ -138,6 +151,7 @@ impl HubConfig {
             active_tick: Duration::from_millis(1),
             quiet_tick: Duration::from_millis(10),
             empty_tick: Duration::from_millis(500),
+            limits: HubLimits::default(),
         }
     }
 
@@ -151,6 +165,11 @@ impl HubConfig {
         }
         if let Some(secs) = file.idle_unload_secs {
             self.idle_unload = (secs > 0).then(|| Duration::from_secs(secs));
+        }
+        if let Some(mib) = file.max_message_mib {
+            // Out-of-range values are reported by `validate`.
+            let bytes = usize::try_from(mib.saturating_mul(1 << 20)).unwrap_or(usize::MAX);
+            self.limits = HubLimits::with_max_message_size(bytes);
         }
         self.tokens.extend(file.tokens);
     }
@@ -180,8 +199,17 @@ impl HubConfig {
         Ok(())
     }
 
-    /// Check the settings (tokens long enough and unique, names present).
+    /// Check the settings (tokens long enough and unique, names present, message
+    /// size limit in [`MAX_MESSAGE_MIB`]).
     pub fn validate(&self) -> Result<(), HubError> {
+        let size = self.limits.max_message_size as u64;
+        let (lo, hi) = (*MAX_MESSAGE_MIB.start(), *MAX_MESSAGE_MIB.end());
+        if !(lo << 20..=hi << 20).contains(&size) {
+            return Err(HubError::Config(format!(
+                "max_message_mib must be between {lo} and {hi}, not {}",
+                size as f64 / f64::from(1 << 20)
+            )));
+        }
         for (i, t) in self.tokens.iter().enumerate() {
             if t.name.trim().is_empty() {
                 return Err(HubError::Config(format!("token #{} has no name", i + 1)));
@@ -287,6 +315,11 @@ pub fn default_config_text(token: &str) -> String {
 # 工程多久没人连接就从内存里卸载（秒，0 表示不卸载）。数据都在磁盘上，下次连接时重新加载。
 # idle_unload_secs = 600
 
+# 单条同步消息的上限（MiB，1–1024）。客户端固定用 256，两边要一致：
+# 改小后，超过它的工程层传不上来；改大也不会让客户端收得下更大的消息。
+# 不读数据的连接，积压超过"上限 + 16 MiB"就断开。
+# max_message_mib = 256
+
 # 团队令牌。客户端连接时带上其中一个。
 #   access = "write"：可以编辑，也可以新建工程
 #   access = "read"：只能看，客户端发来的修改会被丢弃
@@ -366,6 +399,56 @@ mod tests {
         assert!(FileConfig::parse("bogus = 1").is_err());
         c.tokens[0].token = "short".into();
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn max_message_mib() {
+        // Default: the same limits as the clients.
+        let c = HubConfig::new("/data");
+        assert_eq!(c.limits, HubLimits::default());
+        assert_eq!(c.limits.max_message_size, 256 << 20);
+        c.validate().unwrap();
+
+        let mut c = HubConfig::new("/data");
+        c.apply_file(FileConfig::parse("max_message_mib = 64").unwrap());
+        assert_eq!(c.limits.max_message_size, 64 << 20);
+        // The write buffer cap follows: one message plus the margin.
+        assert_eq!(c.limits.max_write_buffer_size, (64 + 16) << 20);
+        c.validate().unwrap();
+        // A file without the key keeps the earlier value.
+        c.apply_file(FileConfig::parse("idle_unload_secs = 5").unwrap());
+        assert_eq!(c.limits.max_message_size, 64 << 20);
+
+        for bad in [0, 1025, u64::MAX] {
+            let mut c = HubConfig::new("/data");
+            c.apply_file(FileConfig {
+                max_message_mib: Some(bad),
+                ..FileConfig::default()
+            });
+            let err = c.validate().unwrap_err().to_string();
+            assert!(err.contains("max_message_mib"), "{err}");
+        }
+        for ok in [1, 1024] {
+            let mut c = HubConfig::new("/data");
+            c.apply_file(FileConfig {
+                max_message_mib: Some(ok),
+                ..FileConfig::default()
+            });
+            c.validate().unwrap();
+        }
+        assert!(FileConfig::parse("max_message_mib = -1").is_err());
+        assert!(FileConfig::parse("max_message_mib = \"256\"").is_err());
+        assert!(FileConfig::parse("max_message_mib = 1.5").is_err());
+
+        // `load` refuses to start with an invalid value.
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(CONFIG_FILE), "max_message_mib = 0\n").unwrap();
+        let env = |k: &str| (k == ENV_TOKEN).then(|| "0123456789abcdef-write".to_owned());
+        let err = load(dir.path(), None, env).unwrap_err().to_string();
+        assert!(
+            err.contains("max_message_mib must be between 1 and 1024"),
+            "{err}"
+        );
     }
 
     #[test]

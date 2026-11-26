@@ -137,6 +137,7 @@ pub fn start(config: HubConfig) -> Result<RunningHub, HubError> {
         data = %config.data_dir.display(),
         tokens = config.tokens.len(),
         anonymous = ?config.anonymous,
+        max_message_mib = config.limits.max_message_size >> 20,
         "bae-hub {} listening",
         env!("CARGO_PKG_VERSION")
     );
