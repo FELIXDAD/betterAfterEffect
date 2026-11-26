@@ -178,32 +178,6 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
             Line(&[Button("Apply")]),
         ],
     ),
-    (
-        "tracker",
-        "Tracker",
-        &[
-            Line(&[Button("Track Camera"), Button("Warp Stabilizer")]),
-            Line(&[Button("Track Motion"), Button("Stabilize Motion")]),
-            Pair("Motion Source:", Dropdown("None")),
-            Pair("Current Track:", Dropdown("None")),
-            Pair("Track Type:", Dropdown("Transform")),
-            Line(&[
-                Check("Position", true),
-                Check("Rotation", false),
-                Check("Scale", false),
-            ]),
-            Note("Motion Target:"),
-            Line(&[Button("Edit Target..."), Button("Options...")]),
-            Line(&[
-                Text("Analyze:"),
-                Button("◀|"),
-                Button("◀"),
-                Button("▶"),
-                Button("|▶"),
-            ]),
-            Line(&[Button("Reset"), Button("Apply")]),
-        ],
-    ),
     ("progress", "Progress", &[Area("")]),
     (
         "layer",
@@ -466,6 +440,7 @@ mod tests {
                     | "audio"
                     | "character"
                     | "align"
+                    | "tracker"
                     | "paragraph"
                     | "properties"
                     | "effects"
