@@ -11,6 +11,8 @@
 //! Choose Folder…) from [`SettingsDialog::take_requests`]; every other button is
 //! drawn disabled.
 
+mod expression_preview;
+
 use bae_prefs::schema::{self, Item, Kind, PAGES, Pref, Style};
 use bae_prefs::{Preferences, parse_color, parse_timecode};
 use egui::{Color32, Key, RichText, Ui, vec2};
@@ -621,7 +623,7 @@ impl SettingsDialog {
                         ui.add_space(40.0);
                     });
             }
-            Item::Preview(_) => self.expression_preview(ui),
+            Item::Preview(_) => expression_preview::show(ui, &self.draft),
             Item::When(w, item) => {
                 let on = self.draft.holds(w);
                 ui.add_enabled_ui(on, |ui| self.item(ui, item));
@@ -821,37 +823,7 @@ impl SettingsDialog {
 
     /// Expression editor preview (Scripting & Expressions): a few lines of code
     /// in the editor's font size and colors.
-    fn expression_preview(&self, ui: &mut Ui) {
-        let p = &self.draft;
-        let c = |k: &str| {
-            let [r, g, b] = p.color(&format!("scripting_expressions.expr_color_{k}"));
-            Color32::from_rgb(r, g, b)
-        };
-        let size = p.int(bae_prefs::keys::EXPR_FONT_SIZE) as f32;
-        let font = egui::FontId::monospace(size);
-        let mut job = egui::text::LayoutJob::default();
-        let mut add = |text: &str, color: Color32| {
-            job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
-        };
-        add("// wiggle the position\n", c("comments"));
-        add("var ", c("keywords"));
-        add("amp", c("identifiers"));
-        add(" = ", c("operators"));
-        add("20", c("numbers"));
-        add(";\n", c("default"));
-        add("wiggle", c("identifiers"));
-        add("(", c("default"));
-        add("2", c("numbers"));
-        add(", amp); ", c("default"));
-        add("\"done\"", c("strings"));
-        egui::Frame::new()
-            .fill(c("background"))
-            .inner_margin(6)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 4.0);
-                ui.label(job);
-            });
-    }
+
 }
 
 fn visual_setting(key: &str) -> bool {
