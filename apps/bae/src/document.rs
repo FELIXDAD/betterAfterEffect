@@ -347,9 +347,24 @@ impl Document {
     /// in; if anything fails, the existing project is left as it was. Files
     /// embedded in a `.baez` the project came from are extracted with it.
     pub fn save_as_replacing(&mut self, target: &Path) -> anyhow::Result<()> {
+        self.save_copy(target)?;
+        let context = || target.display().to_string();
+        self.project.save_as(target).with_context(context)?;
+        self.saved = SavePoint::of(&self.project.stage);
+        self.assets = AssetLocator::for_project(&self.project).with_context(context)?;
+        Ok(())
+    }
+
+    /// Write an independent project copy, including packaged assets. Finish writing
+    /// the new directory before replacing a previous auto-save in the same slot.
+    pub fn save_copy(&self, target: &Path) -> anyhow::Result<()> {
         let context = || target.display().to_string();
         let tmp = sibling(target, "saving");
         let backup = sibling(target, "replaced");
+        if let Some(parent) = tmp.parent().filter(|p| !p.as_os_str().is_empty()) {
+            fs::create_dir_all(parent).with_context(context)?;
+        }
+        fs::create_dir(&tmp).with_context(context)?;
         let written = (|| -> anyhow::Result<()> {
             let mut copy = self.detached_copy()?;
             copy.save_as(&tmp)?;
@@ -364,30 +379,21 @@ impl Document {
             let _ = fs::remove_dir_all(&tmp);
             return Err(error.context(context()));
         }
-        if let Err(error) = fs::rename(target, &backup) {
+        let replacing = target.exists();
+        if replacing && let Err(error) = fs::rename(target, &backup) {
             let _ = fs::remove_dir_all(&tmp);
             return Err(anyhow::Error::new(error).context(context()));
         }
         if let Err(error) = fs::rename(&tmp, target) {
-            let _ = fs::rename(&backup, target);
+            if replacing {
+                fs::rename(&backup, target).with_context(context)?;
+            }
             let _ = fs::remove_dir_all(&tmp);
             return Err(anyhow::Error::new(error).context(context()));
         }
-        let _ = fs::remove_dir_all(&backup);
-        // The folder holds the project now; make it the location (rewrites the
-        // same project files in place, atomically per file).
-        self.project.save_as(target).with_context(context)?;
-        self.saved = SavePoint::of(&self.project.stage);
-        self.assets = AssetLocator::for_project(&self.project).with_context(context)?;
-        Ok(())
-    }
-
-    /// Writes a copy of the project to `target` (a `.bae` folder) without changing
-    /// its location or saved state (auto-save).
-    pub fn save_copy(&self, target: &Path) -> anyhow::Result<()> {
-        let mut copy = self.detached_copy()?;
-        copy.save_as(target)
-            .with_context(|| target.display().to_string())?;
+        if replacing {
+            fs::remove_dir_all(&backup).with_context(context)?;
+        }
         Ok(())
     }
 

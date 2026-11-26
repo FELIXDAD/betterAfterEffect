@@ -321,6 +321,7 @@ impl QueueItem {
 pub struct RenderQueue {
     items: Vec<QueueItem>,
     next_id: u64,
+    started_since_autosave: bool,
     running: bool,
     /// Items of the running render (queued when Render was pressed; later ones
     /// wait for the next Render, the snapshot does not have their edits).
@@ -342,6 +343,11 @@ impl RenderQueue {
     /// Whether the worker is rendering.
     pub fn is_running(&self) -> bool {
         self.running
+    }
+
+    /// A render started for this document since the last auto-save poll.
+    pub fn take_render_start(&mut self) -> bool {
+        std::mem::take(&mut self.started_since_autosave)
     }
 
     /// Queues `comp` over its work area, using H.264 on macOS and PNG elsewhere, in a folder
@@ -428,6 +434,7 @@ impl RenderQueue {
     /// the project). A running render is stopped; the worker finishes the
     /// frame it is on and finds nothing left.
     pub fn clear(&mut self) {
+        self.started_since_autosave = false;
         for item in &self.items {
             item.cancel.store(true, Ordering::Relaxed);
         }
@@ -784,12 +791,30 @@ pub fn start(
         return Ok(());
     }
     let snapshot = crate::preview_snapshot::PreviewSnapshot::take(stage);
-    let queue = queue.clone();
-    std::thread::Builder::new()
+    let worker_queue = queue.clone();
+    let worker = std::thread::Builder::new()
         .name("bae-render-queue".into())
-        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers, effects.as_deref()))
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .spawn(move || {
+            run_worker(
+                &worker_queue,
+                &snapshot,
+                gpu,
+                &providers,
+                effects.as_deref(),
+            )
+        });
+    let mut q = queue.lock();
+    match worker {
+        Ok(_) => {
+            q.started_since_autosave = true;
+            Ok(())
+        }
+        Err(error) => {
+            q.running = false;
+            q.batch.clear();
+            Err(error.to_string())
+        }
+    }
 }
 
 fn provider_list(registry: &Registry<dyn SourceProvider>) -> Vec<Arc<dyn SourceProvider>> {
