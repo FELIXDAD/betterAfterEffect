@@ -37,6 +37,7 @@ mod i18n_retest;
 #[cfg(target_os = "macos")]
 mod i18n_scan;
 mod import_preferences;
+mod layer_creation_preferences;
 #[cfg(target_os = "macos")]
 mod layers;
 #[cfg(target_os = "macos")]
