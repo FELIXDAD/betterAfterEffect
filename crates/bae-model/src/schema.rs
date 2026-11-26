@@ -775,6 +775,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             string("cue_point_name"),
             int("label", 0),
             boolean("protected_region", false),
+            // Layer markers: Segmentation Marker instead of Comment Marker (AE 26).
+            boolean("segment", false),
         ],
     },
     PrimSchema {
