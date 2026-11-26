@@ -35,6 +35,7 @@ fn formats() -> &'static MediaFormats {
 #[derive(Debug, Default)]
 pub struct Probed {
     pub files: Vec<ImportFile>,
+    pub photoshop: Vec<(PathBuf, Option<String>)>,
     pub failed: Vec<String>,
     notices: Vec<String>,
     sequences_to_verify: Vec<(PathBuf, String)>,
@@ -58,6 +59,12 @@ pub fn sequence_name(seq: &SequenceInfo) -> String {
         &seq.pattern[start + width..],
         w = width
     )
+}
+
+fn is_photoshop(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"))
 }
 
 fn file_name(path: &Path) -> String {
@@ -144,6 +151,13 @@ fn probe_file(
         });
         return;
     }
+    if is_photoshop(path) {
+        if seen.insert(path.to_owned()) {
+            out.photoshop
+                .push((path.to_owned(), folder.map(str::to_owned)));
+        }
+        return;
+    }
     let options = OpenOptions {
         sequence: if sequences {
             SequenceMode::Sequence
@@ -151,6 +165,7 @@ fn probe_file(
             SequenceMode::Single
         },
         sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
+        ..Default::default()
     };
     let info = match bae_media::audio::file_info(path) {
         Some(info) => Ok(info),
@@ -239,6 +254,11 @@ fn probe_dir(
                 }
                 probe_file(&p, Some(rel), false, defaults, seen, out);
             }
+            ScannedItem::Sequence(seq) if is_photoshop(&seq.path_for(seq.first())) => {
+                for &frame in &seq.frames {
+                    probe_file(&seq.path_for(frame), Some(rel), false, defaults, seen, out);
+                }
+            }
             ScannedItem::Sequence(seq) => probe_file(
                 &seq.path_for(seq.first()),
                 Some(rel),
@@ -322,7 +342,19 @@ fn import_into(
         return;
     }
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
-    let probed = probe(paths, &defaults);
+    let mut probed = probe(paths, &defaults);
+    for (path, folder) in probed.photoshop.drain(..) {
+        crate::dialogs::shared(cx.resources)
+            .lock()
+            .photoshop_queue
+            .push_back(crate::dialogs::photoshop::PhotoshopDialog::new(
+                path,
+                parent.clone(),
+                comp.clone(),
+                folder,
+                defaults.clone(),
+            ));
+    }
     if !probed.files.is_empty() {
         let mut params = json!({ "files": probed.files });
         if let Some(p) = parent {
@@ -428,6 +460,9 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         let Some(path) = footage_file(cx.stage, &item) else {
             continue;
         };
+        if queue_psd_replace(cx, &path, &item, &defaults, true) {
+            continue;
+        }
         let mut probed = probe(&[path], &defaults);
         if let Some(file) = probed.files.pop() {
             cx.invoke_with(
@@ -444,6 +479,14 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
 pub(crate) fn reveal_footage(cx: &PanelContext<'_>, session: &SharedSession) {
     if let Some(path) = replace_target(cx, session).and_then(|i| footage_file(cx.stage, &i)) {
         bae_platform::reveal(&path);
+    }
+}
+
+/// Edit > Edit Original (Cmd/Ctrl+E): the footage file in the application the
+/// system opens it with.
+pub(crate) fn edit_original(cx: &PanelContext<'_>, session: &SharedSession) {
+    if let Some(path) = replace_target(cx, session).and_then(|i| footage_file(cx.stage, &i)) {
+        bae_platform::open(&path);
     }
 }
 
@@ -465,11 +508,42 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
         return;
     };
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    if queue_psd_replace(cx, &path, &item, &defaults, false) {
+        return;
+    }
     let mut probed = probe(&[path], &defaults);
     if let Some(file) = probed.files.pop() {
         cx.invoke_with("item.replace_file", json!({ "item": item, "file": file }));
     }
     verify::report(cx, tr("Replace Footage File"), probed);
+}
+
+fn queue_psd_replace(
+    cx: &PanelContext<'_>,
+    path: &Path,
+    item: &PrimPath,
+    defaults: &ImportDefaults,
+    reload: bool,
+) -> bool {
+    if !is_photoshop(path) {
+        return false;
+    }
+    let Some(view) = cx.stage.prim(item) else {
+        return false;
+    };
+    let mut job = crate::dialogs::photoshop::PhotoshopDialog::new(
+        path.to_owned(),
+        None,
+        None,
+        None,
+        defaults.clone(),
+    );
+    job.replace(item.clone(), &view, reload);
+    crate::dialogs::shared(cx.resources)
+        .lock()
+        .photoshop_queue
+        .push_back(job);
+    true
 }
 
 /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I): the open panel comes back
