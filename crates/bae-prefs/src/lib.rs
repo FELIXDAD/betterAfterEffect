@@ -331,6 +331,7 @@ type Subscriber = Box<dyn Fn(&Preferences) + Send + Sync>;
 /// The app's current preferences (an app resource, `Arc<PrefsStore>`).
 pub struct PrefsStore {
     current: RwLock<Arc<Preferences>>,
+    display_preview: RwLock<Option<Arc<Preferences>>>,
     generation: AtomicU64,
     subscribers: Mutex<Vec<Subscriber>>,
     #[cfg(feature = "file")]
@@ -356,6 +357,7 @@ impl PrefsStore {
     pub fn new(prefs: Preferences) -> Self {
         Self {
             current: RwLock::new(Arc::new(prefs)),
+            display_preview: RwLock::default(),
             generation: AtomicU64::new(0),
             subscribers: Mutex::new(Vec::new()),
             #[cfg(feature = "file")]
@@ -369,6 +371,22 @@ impl PrefsStore {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// Visual settings for painting the next frame while the dialog is open.
+    pub fn display(&self) -> Arc<Preferences> {
+        self.display_preview
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| self.current())
+    }
+
+    pub fn preview_display(&self, preview: Option<&Preferences>) {
+        *self
+            .display_preview
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = preview.cloned().map(Arc::new);
     }
 
     /// Bumped on every change; poll it to refresh cached values.

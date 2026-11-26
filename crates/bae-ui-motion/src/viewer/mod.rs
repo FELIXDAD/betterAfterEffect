@@ -373,6 +373,7 @@ impl CompositionViewer {
         (
             View {
                 origin,
+                aspect: 1.0,
                 scale,
                 point,
                 camera: None,
@@ -582,7 +583,10 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
-fn checkerboard(p: &egui::Painter, r: Rect, s: f32, colors: [Color32; 2]) {
+pub(crate) fn checkerboard(p: &egui::Painter, r: Rect, resources: &bae_app::Resources) {
+    let prefs = prefs::ViewerPrefs::current(resources);
+    let s = prefs.checker_size;
+    let colors = prefs.checker_colors;
     p.rect_filled(r, 0.0, colors[1]);
     let mut y = r.top();
     let mut row = 0;
@@ -891,8 +895,7 @@ impl Panel for CompositionViewer {
             checkerboard(
                 &painter,
                 comp_rect.intersect(area),
-                self.prefs.checker_size,
-                self.prefs.checker_colors,
+                cx.resources,
             );
         } else {
             let c = info.bg_color;
