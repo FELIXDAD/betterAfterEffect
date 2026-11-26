@@ -2921,6 +2921,29 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// #460: the Window menu names what the viewers show (AE: "Composition: Comp 1").
+#[test]
+fn window_menu_titles_name_the_active_comp() {
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    h.session().lock().open_comp(&comp);
+    let items = crate::menus::items();
+    let label = |title: &str| {
+        let (_, spec) = items
+            .iter()
+            .find(|(_, s)| s.path.first().map(String::as_str) == Some("Window") && s.title == title)
+            .unwrap_or_else(|| panic!("Window ▸ {title}"));
+        spec.label(&bae_ui::menu::MenuContext::new(
+            &h.stage,
+            &h.resources,
+            "motion",
+        ))
+    };
+    let name = bae_motion::query::comp_info(&h.stage, &comp).unwrap().name;
+    assert_eq!(label("Composition"), Some(format!("Composition: {name}")));
+    assert_eq!(label("Footage"), Some("Footage: (none)".to_owned()));
+}
+
 /// #465: the Properties tab names the layer selected now, even before the
 /// panel draws again (a collapsed tab), and only "Properties" without one.
 #[test]
