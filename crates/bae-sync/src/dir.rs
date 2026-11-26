@@ -5,9 +5,10 @@
 //! everyone else's. Logs are sequences of checksummed records; the first record is
 //! a JSON header, the rest are encoded [`Message::Updates`] / [`Message::Snapshot`].
 //! A client compacts only its own log (rewrite as one snapshot, then rename), so
-//! concurrent compactions never interfere.
+//! concurrent compactions never interfere. Logs of clients that left long ago are
+//! deleted once another self-contained log holds all of them (§4.6).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
-use bae_model::loro::{LoroDoc, VersionVector};
+use bae_model::loro::{EncodedBlobMode, LoroDoc, VersionVector};
 use serde::{Deserialize, Serialize};
 
 use crate::client::ClientId;
@@ -44,6 +45,8 @@ const MAX_HEADER: usize = 64 * 1024;
 const MAX_DEPTH: usize = 16;
 /// `client` of the `Hello`s the folder sends.
 const FOLDER_CLIENT: &str = "shared-folder";
+/// The cleanup of departed clients' logs runs at most this often.
+const LOG_GC_EVERY: Duration = Duration::from_secs(3600);
 
 /// Settings of a [`DirTransport`].
 #[derive(Clone, Debug)]
@@ -61,6 +64,11 @@ pub struct DirConfig {
     pub full_check_every: u32,
     /// Watch the folder for changes (needs the `watch` feature; ignored without).
     pub watch: bool,
+    /// Delete another client's log once a self-contained log (one that starts
+    /// with a snapshot) holds all of it and neither the log nor its owner's
+    /// presence file changed for this long (`docs/spec/sync.md` §4.6). Checked at
+    /// most once an hour while polling. `None`: never delete other clients' logs.
+    pub log_gc_after: Option<Duration>,
 }
 
 impl Default for DirConfig {
@@ -71,6 +79,7 @@ impl Default for DirConfig {
             compact_ratio: 4,
             full_check_every: 30,
             watch: true,
+            log_gc_after: Some(Duration::from_secs(7 * 24 * 3600)),
         }
     }
 }
@@ -93,6 +102,9 @@ struct OwnLog {
     /// Size right after the last compaction.
     compacted_len: u64,
     snapshot_requested: bool,
+    /// The file vanished (another client's cleanup deleted it) and a snapshot to
+    /// write it again has been requested.
+    gone: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,6 +135,8 @@ pub struct DirStats {
     pub compactions: u64,
     /// Own logs that had to be rewritten because they were changed underneath us.
     pub repairs: u64,
+    /// Other clients' logs deleted because they were no longer needed (§4.6).
+    pub logs_removed: u64,
 }
 
 /// The shared-folder [`Transport`]. Its I/O is synchronous and may be slow on a
@@ -145,6 +159,8 @@ pub struct DirTransport {
     stats: DirStats,
     /// `(len, mtime)` of other clients' presence files when last read.
     presence_seen: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
+    /// When the cleanup of departed clients' logs last ran.
+    last_gc: Option<Instant>,
     #[cfg(feature = "watch")]
     _watcher: Option<notify::RecommendedWatcher>,
 }
@@ -206,6 +222,7 @@ impl DirTransport {
             last_error: None,
             stats: DirStats::default(),
             presence_seen: BTreeMap::new(),
+            last_gc: None,
             #[cfg(feature = "watch")]
             _watcher: None,
         };
@@ -243,6 +260,27 @@ impl DirTransport {
     /// poll interval.
     pub fn poll_soon(&self) {
         self.wake.store(true, Ordering::Relaxed);
+    }
+
+    /// Delete departed clients' logs now (`docs/spec/sync.md` §4.6) instead of
+    /// waiting for the hourly pass while polling. Returns how many logs were
+    /// deleted; problems are reported through [`DirTransport::last_error`]. Does
+    /// nothing when [`DirConfig::log_gc_after`] is `None`.
+    pub fn remove_departed_logs(&mut self) -> u64 {
+        let mut found = Vec::new();
+        walk(
+            &self.root.join(UPDATES),
+            String::new(),
+            0,
+            LOG_EXT,
+            &mut found,
+        );
+        let logs: Vec<(DocKey, String, PathBuf)> = found
+            .into_iter()
+            .filter_map(|(rel, stem, path)| Some((DocKey::parse(&rel).ok()?, stem, path)))
+            .collect();
+        self.last_gc = Some(Instant::now());
+        self.collect_logs(&logs)
     }
 
     fn doc_dir(&self, doc: &DocKey) -> PathBuf {
@@ -302,6 +340,8 @@ impl DirTransport {
             SNAPSHOT_EXT,
             &mut bases,
         );
+        // `(document, owner, path)` of every log, for the cleanup.
+        let mut logs = Vec::with_capacity(found.len());
         for (dir_rel, stem, path) in found {
             let Ok(doc) = DocKey::parse(&dir_rel) else {
                 continue;
@@ -311,18 +351,20 @@ impl DirTransport {
                     let r = self.adopt_own(&doc, &path);
                     self.note(r);
                 }
-                continue;
+            } else {
+                self.sources.entry(path.clone()).or_insert_with(|| Source {
+                    doc: doc.clone(),
+                    kind: SourceKind::Log,
+                    generation: None,
+                    offset: 0,
+                    seen: None,
+                });
+                let r = self.read_source(&path, full);
+                self.note(r);
             }
-            self.sources.entry(path.clone()).or_insert_with(|| Source {
-                doc,
-                kind: SourceKind::Log,
-                generation: None,
-                offset: 0,
-                seen: None,
-            });
-            let r = self.read_source(&path, full);
-            self.note(r);
+            logs.push((doc, stem, path));
         }
+        self.check_own(&logs);
         for (dir_rel, stem, path) in bases {
             let id = if dir_rel.is_empty() {
                 stem
@@ -360,6 +402,11 @@ impl DirTransport {
         if !self.scanned {
             self.scanned = true;
             self.inbox.push_back(self.hello());
+        } else if self.last_gc.is_none_or(|t| t.elapsed() >= LOG_GC_EVERY) {
+            // Not on the first poll: the session waits for its hello. This runs
+            // on the I/O thread of a `ThreadedTransport`, never on the stage's.
+            self.last_gc = Some(Instant::now());
+            self.collect_logs(&logs);
         }
     }
 
@@ -564,6 +611,7 @@ impl DirTransport {
                 len: good,
                 compacted_len: header_len + first_snapshot,
                 snapshot_requested: false,
+                gone: false,
             },
         );
         for msg in msgs {
@@ -592,7 +640,9 @@ impl DirTransport {
                 src.generation = None;
                 src.seen = None;
             }
-            if let Some(own) = self.own.get(doc) {
+            // A vanished log's ops are in the log that let it go (§4.6), which is
+            // re-read above.
+            if let Some(own) = self.own.get(doc).filter(|o| !o.gone) {
                 let path = own.path.clone();
                 let r = read_all_records(&path).map(|msgs| {
                     for m in msgs {
@@ -609,6 +659,169 @@ impl DirTransport {
         Ok(())
     }
 
+    // ---- cleanup of departed clients' logs (§4.6) ----
+
+    /// Notice that one of our own logs vanished although we did not touch it:
+    /// another client's cleanup deleted it while we looked inactive (or a person
+    /// did). Its ops are in another log, but we ask the session for a snapshot
+    /// anyway and write it as a new self-contained log, so the folder has all we
+    /// have again even if we never edit, and an append that raced with the
+    /// deletion is not lost. `logs` is this poll's listing.
+    fn check_own(&mut self, logs: &[(DocKey, String, PathBuf)]) {
+        let listed: BTreeSet<&DocKey> = logs
+            .iter()
+            .filter(|(_, owner, _)| owner == self.client.as_str())
+            .map(|(doc, _, _)| doc)
+            .collect();
+        let vanished: Vec<DocKey> = self
+            .own
+            .iter()
+            .filter(|(doc, own)| {
+                // The listing can be stale or fail: only a definite "not found"
+                // counts.
+                !own.gone
+                    && !listed.contains(doc)
+                    && fs::metadata(&own.path).is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
+            })
+            .map(|(doc, _)| doc.clone())
+            .collect();
+        for doc in vanished {
+            self.stats.repairs += 1;
+            if let Some(own) = self.own.get_mut(&doc) {
+                own.gone = true;
+            }
+            self.request_snapshot(&doc);
+        }
+    }
+
+    /// Delete other clients' logs that are no longer needed. `logs` lists every
+    /// log as `(document, owner, path)`. Returns how many were deleted; problems
+    /// are noted and skipped, so this never stops polling.
+    fn collect_logs(&mut self, logs: &[(DocKey, String, PathBuf)]) -> u64 {
+        let Some(after) = self.config.log_gc_after else {
+            return 0;
+        };
+        let now = SystemTime::now();
+        let mut by_doc: BTreeMap<&DocKey, Vec<(&str, &Path)>> = BTreeMap::new();
+        for (doc, owner, path) in logs {
+            by_doc
+                .entry(doc)
+                .or_default()
+                .push((owner.as_str(), path.as_path()));
+        }
+        let mut removed = 0;
+        for (doc, group) in by_doc {
+            removed += self.collect_doc_logs(doc, &group, now, after);
+        }
+        removed
+    }
+
+    /// The cleanup of one document. `group` holds all its logs as `(owner,
+    /// path)`, ours included: ours can hold other clients' ops too, but it is
+    /// never deleted.
+    fn collect_doc_logs(
+        &mut self,
+        doc: &DocKey,
+        group: &[(&str, &Path)],
+        now: SystemTime,
+        after: Duration,
+    ) -> u64 {
+        // Cheap test first: only logs whose owner looks gone can go. Most passes
+        // find none and read no file at all.
+        let candidates: Vec<usize> = (0..group.len())
+            .filter(|&i| {
+                let (owner, path) = group[i];
+                owner != self.client.as_str()
+                    && ClientId::new(owner).is_ok()
+                    && self.departed(owner, path, now, after)
+            })
+            .collect();
+        if candidates.is_empty() {
+            return 0;
+        }
+        let mut scans = Vec::with_capacity(group.len());
+        for &(owner, path) in group {
+            scans.push(match scan_log(path, doc, owner) {
+                Ok(scan) => scan,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    self.note(Err(SyncError::io(path)(e)));
+                    None
+                }
+            });
+        }
+        // A log deleted in this pass is never used as a cover afterwards, and a
+        // log used as a cover is not deleted in this pass: whatever we delete is
+        // in a log we leave in place. Other clients only delete a log for a
+        // strictly larger one (`LogScan::may_go_for`), so following "deleted
+        // because of" from any log never comes back to it (a strict order has no
+        // cycles) and ends at a log nobody deletes, which holds it all.
+        let mut removed = vec![false; group.len()];
+        let mut covering = vec![false; group.len()];
+        let mut count = 0;
+        for &i in &candidates {
+            let Some(scan) = &scans[i] else {
+                continue;
+            };
+            if covering[i] {
+                continue;
+            }
+            // Prefer a cover that stays anyway, so more candidates can go now.
+            let Some(cover) = (0..group.len())
+                .filter(|&j| j != i && !removed[j])
+                .filter(|&j| scans[j].as_ref().is_some_and(|c| scan.may_go_for(c)))
+                .min_by_key(|j| candidates.contains(j))
+            else {
+                continue;
+            };
+            let (owner, path) = group[i];
+            // Check again right before deleting: unchanged since we read it, and
+            // its owner is still away (it may have come back meanwhile).
+            let unchanged =
+                fs::metadata(path).is_ok_and(|m| (m.len(), m.modified().ok()) == scan.stamp);
+            if !unchanged || !self.departed(owner, path, now, after) {
+                continue;
+            }
+            match fs::remove_file(path) {
+                Ok(()) => {
+                    removed[i] = true;
+                    covering[cover] = true;
+                    count += 1;
+                    self.stats.logs_removed += 1;
+                    self.sources.remove(path);
+                }
+                // Someone else's cleanup was quicker.
+                Err(e) if e.kind() == io::ErrorKind::NotFound => removed[i] = true,
+                Err(e) => self.note(Err(SyncError::io(path)(e))),
+            }
+        }
+        count
+    }
+
+    /// Neither the log at `path` nor `owner`'s presence file changed for `after`
+    /// (no presence file counts as old). Both times come from the shared folder
+    /// and are compared with our clock; a time we cannot read, or one in the
+    /// future, counts as recent, so clock skew can only keep a log longer.
+    fn departed(&self, owner: &str, path: &Path, now: SystemTime, after: Duration) -> bool {
+        let old = |meta: fs::Metadata| {
+            meta.modified()
+                .ok()
+                .and_then(|m| now.duration_since(m).ok())
+                .is_some_and(|age| age >= after)
+        };
+        if !fs::metadata(path).is_ok_and(old) {
+            return false;
+        }
+        let presence = self
+            .root
+            .join(PRESENCE)
+            .join(format!("{owner}.{PRESENCE_EXT}"));
+        match fs::metadata(&presence) {
+            Ok(meta) => old(meta),
+            Err(e) => e.kind() == io::ErrorKind::NotFound,
+        }
+    }
+
     // ---- writing ----
 
     fn append(
@@ -623,11 +836,15 @@ impl DirTransport {
             None => false,
         };
         if !appended {
-            let repaired = self.own.contains_key(doc);
+            // `Some`: our log vanished or was replaced; `Some(true)`: a poll
+            // already noticed (and counted) that.
+            let noticed = self.own.get(doc).map(|o| o.gone);
             self.write_fresh(doc, &record)?;
-            if repaired {
-                // Our log vanished or was replaced: get the full state back in.
-                self.stats.repairs += 1;
+            if let Some(noticed) = noticed {
+                // Get the full state back in.
+                if !noticed {
+                    self.stats.repairs += 1;
+                }
                 self.request_snapshot(doc);
             }
         }
@@ -706,6 +923,7 @@ impl DirTransport {
                 len: bytes.len() as u64,
                 compacted_len: bytes.len() as u64,
                 snapshot_requested: false,
+                gone: false,
             },
         );
         Ok(())
@@ -756,11 +974,12 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
     if actual < own.len {
         return Ok(false);
     }
-    let mut f = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .open(&path)
-        .map_err(SyncError::io(&path))?;
+    let mut f = match OpenOptions::new().read(true).append(true).open(&path) {
+        Ok(f) => f,
+        // Deleted since the check above (another client's cleanup, §4.6).
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(SyncError::io(&path)(e)),
+    };
     if actual > own.len {
         let same = read_header(&mut f)
             .map_err(SyncError::io(&path))?
@@ -792,6 +1011,106 @@ fn read_all_records(path: &Path) -> Result<Vec<Message>, SyncError> {
         .into_iter()
         .filter_map(|p| Message::decode(p).ok())
         .collect())
+}
+
+/// What the cleanup (§4.6) knows about one log, from its intact records only.
+#[derive(Debug)]
+struct LogScan {
+    /// File stem, the same as `client` in the header.
+    owner: String,
+    /// `(len, mtime)` when it was read.
+    stamp: (u64, Option<SystemTime>),
+    /// Every op the log may hold: the `version` of each record and the end of
+    /// each Loro blob in it, merged. An upper bound. `None` unless every byte is
+    /// an intact record of the document that decodes: a torn or corrupt tail,
+    /// a record kind from a newer version or a change while reading mean we do
+    /// not know all it holds.
+    upper: Option<VersionVector>,
+    /// The ops the log certainly holds if it is self-contained: those in its
+    /// first record, a full snapshot (taken from the Loro blob itself, not the
+    /// `version` field). A lower bound. Later records are not counted: an
+    /// `Updates` record holds only what its writer thought the folder lacked.
+    held: Option<VersionVector>,
+}
+
+impl LogScan {
+    /// This log may be deleted because of `cover`: `cover` holds every op this
+    /// one may hold, and comes strictly after it in the order "version first,
+    /// then the smaller client ID" (equal versions: the larger ID goes).
+    ///
+    /// The order stops two clients from deleting each other's logs. X going
+    /// because of Y needs `held(Y) ⊇ upper(X)`, Y going because of X needs
+    /// `held(X) ⊇ upper(Y)`. With `held ⊆ upper` for every log, both together
+    /// mean all four are equal, and then only the larger ID may go. Candidates
+    /// are logs nobody touched for days, so every client reads the same bytes
+    /// and comes to the same answer.
+    fn may_go_for(&self, cover: &LogScan) -> bool {
+        let (Some(upper), Some(held)) = (&self.upper, &cover.held) else {
+            return false;
+        };
+        held.includes_vv(upper) && (upper != held || self.owner > cover.owner)
+    }
+}
+
+/// Read the whole log at `path` for the cleanup, with the parser polling uses.
+/// `None`: the header is not one of `doc` written by `owner`.
+fn scan_log(path: &Path, doc: &DocKey, owner: &str) -> io::Result<Option<LogScan>> {
+    let mut f = File::open(path)?;
+    let meta = f.metadata()?;
+    let stamp = (meta.len(), meta.modified().ok());
+    let Some((header, header_len)) = read_header(&mut f)? else {
+        return Ok(None);
+    };
+    if header.doc != doc.as_str() || header.client != owner {
+        return Ok(None);
+    }
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    let (payloads, consumed) = parse_records(&buf);
+    let mut complete = consumed == buf.len() && header_len + buf.len() as u64 == stamp.0;
+    let mut upper = VersionVector::default();
+    let mut held = None;
+    for (i, payload) in payloads.iter().enumerate() {
+        let Ok(msg) = Message::decode(payload) else {
+            complete = false;
+            continue;
+        };
+        let (Message::Updates {
+            doc: d,
+            version,
+            data,
+        }
+        | Message::Snapshot {
+            doc: d,
+            version,
+            data,
+        }) = &msg
+        else {
+            // No document data (readers skip these too).
+            continue;
+        };
+        let blob = match LoroDoc::decode_import_blob_meta(data, true) {
+            Ok(blob) if d == doc => blob,
+            _ => {
+                complete = false;
+                continue;
+            }
+        };
+        upper.merge(version);
+        upper.merge(&blob.partial_end_vv);
+        if i == 0
+            && matches!(msg, Message::Snapshot { .. })
+            && blob.mode == EncodedBlobMode::Snapshot
+        {
+            held = Some(blob.partial_end_vv);
+        }
+    }
+    Ok(Some(LogScan {
+        owner: owner.to_owned(),
+        stamp,
+        upper: complete.then_some(upper),
+        held,
+    }))
 }
 
 /// Files with extension `ext` under `dir`, as `(directory relative to the walk

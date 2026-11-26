@@ -44,6 +44,7 @@
 - [x] Hub 的 WebSocket 客户端传输（PR E，feature `hub`）：`HubTransport`，回环延迟中位数 2.9 ms；测试里有基于 `Relay` 的参考 Hub
 - [x] 同步协议与 Transport 抽象（PR A，#14 已合并）：`Message` 二进制编码、`SyncSession`、`DocSet`、`Relay`（Hub 端逻辑）、`MemoryTransport`；规格见 `docs/spec/sync.md`
 - [x] 共享目录模式（PR B）：`DirTransport`（每客户端追加日志、校验和、撕裂尾部修复、只压缩自己的日志、文件锁、基础快照也作为来源）、`ThreadedTransport`（I/O 放后台线程）、可选 `watch` feature（notify 文件监听 + 轮询兜底）、会话按文档批量导入；模拟 SMB 1–3 秒延迟下收敛；一小时编辑 `updates/` 只有 26 KB
+- [x] 清理离开的客户端的日志（`collab/hub-reliability`）：被别人的自包含日志包含、主人 7 天不活跃（日志和在线状态文件都没动）、严格更小（同版本删 ID 大的）才删；每小时最多一次，在轮询里做；还在运行的主人发现日志被删后马上写回完整快照
 - [x] 在线状态与建议性锁（PR D）：`PresenceState`（用户、颜色、选中、播放头、工作区、`editing` 建议性锁）、心跳 + 接收方时钟判断离线、Hub 转发/新人同步/断线通知、共享目录心跳文件
 - [x] 版本（PR C）：命名版本（`History`，同步的 Loro 文档 + `history.loro`）、任意版本的只读视图、按 Prim 的差异（新增/删除/修改/移动，含作者和时间）
 - [x] 回滚（PR F）：`History::revert_to` / `history::revert`，以新的撤销单元恢复整个工程、一个工程层或一个 Prim 子树，不改写历史；命令 `version.revert`（`bae_sync::register_commands`）供 Agent 调用
@@ -53,7 +54,7 @@
 ### 2026-11-20
 
 - PR A 已合并（#14）。给 02 的请求见 02 任务书"请求"一节：导入性能（增量镜像或批量导入）、记录提交时间、`TreeID` → 路径。02 在 PR E（#17，已合并）里实现了，`Stage` 的 `DocSet::import_batch` 已改用 `Stage::import_updates_batch`（同一轮同一层只重建一次镜像）。
-- PR B（共享目录，#22）、PR C（版本，#27）已合并。PR D（在线状态，#34）、PR E（Hub WebSocket 客户端，#37）、PR F（回滚）已提交。还没做：两台机器经 NAS 实测（需要第二台机器）；清理离开的客户端的日志（心跳文件已有，规则见 spec 4.7，待实现）。
+- PR B（共享目录，#22）、PR C（版本，#27）已合并。PR D（在线状态，#34）、PR E（Hub WebSocket 客户端，#37）、PR F（回滚）已提交。还没做：两台机器经 NAS 实测（需要第二台机器）；清理离开的客户端的日志（心跳文件已有，规则见 spec 4.7，待实现；2026-11-26 已完成，见 spec 4.6）。
 
 ### 2026-11-26
 
@@ -64,6 +65,12 @@
   - 写缓冲上限默认"消息上限 + 16 MiB"，至少能放下一条最大的消息；满了 `send` 报错，Relay 马上断开这个连接。
   - 测试：`tests/transport_errors.rs`（出错前收到的数据被导入，结果只报告一次；旧代码上第一条测试失败）、`tests/relay.rs`（`connect_with` 的节流只作用于那一个连接）、`tests/hub_limits.rs`（20 MiB 快照双向传输；超限被拒；不读的对端让 `send` 失败、被 Relay 断开。用 tungstenite 默认设置时这几条都失败）。
   - 还没解决：一次 `pump` 给慢的对端发的总量超过写缓冲上限（比如新客户端第一次同步好几个大工程层）时也会断开；一个文档超过 256 MiB 时一条消息放不下。见 spec 3.1。
+- 共享目录：清理离开的客户端的日志（spec 4.6，原来在"还没做"里）。
+  - 规则：别人的日志 L 只在三个条件都满足时删除。同一文档有另一个以完整快照开头的日志，快照包含 L 可能有的全部操作（L 取上界，快照取下界）；L 和主人的在线状态文件都超过 `DirConfig::log_gc_after`（默认 7 天，`None` 关闭）没动；按"版本、再按 ID"L 严格更小。L 必须能完整读出，末尾有半条记录就不删。
+  - 打开后第二次轮询做一次，之后每小时最多一次，在 `ThreadedTransport` 的后台线程上。删掉的个数记在 `DirStats::logs_removed`，出错记到 `last_error`。`remove_departed_logs()` 立即做一轮。
+  - 主人回来：还在运行的主人下一次轮询发现自己的日志不见了，向会话要快照，写回完整的自包含日志；追加时文件刚好被删（打开时找不到）也按"文件不见了"重写，不再当成传输错误。重新启动的主人从别人的快照读回自己的修改。
+  - 测试在 `tests/shared_dir.rs`（8 个，见 spec 4.7）。把每一条检查分别去掉，都有测试失败。
+  - 没做：删除时没有打日志（`bae-sync` 没有依赖 `tracing`，加依赖要改 `Cargo.lock`），只有 `DirStats::logs_removed` 计数。
 
 ## 请求（其他工作流在这里留言）
 
