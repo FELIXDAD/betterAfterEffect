@@ -376,6 +376,7 @@ impl CompositionViewer {
         (
             View {
                 origin,
+                aspect: 1.0,
                 scale,
                 point,
                 camera: None,
@@ -585,7 +586,7 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
-fn checkerboard(p: &egui::Painter, r: Rect) {
+pub(crate) fn checkerboard(p: &egui::Painter, r: Rect) {
     p.rect_filled(r, 0.0, Color32::from_gray(200));
     let s = 8.0;
     let mut y = r.top();
