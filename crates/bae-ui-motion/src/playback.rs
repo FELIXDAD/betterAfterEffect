@@ -593,7 +593,12 @@ fn sync_engine(engine: &mut RenderEngine, scene: &Scene) {
 
 /// Evaluates frame N+1 while the render thread encodes and submits frame N:
 /// playback runs at the slower of the two stages, not their sum.
-fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: Arc<Shared>, disk: Option<Arc<DiskFrames>>) {
+fn worker(
+    gpu: Arc<GpuContext>,
+    registry: Arc<ViewportTextureRegistry>,
+    shared: Arc<Shared>,
+    disk: Option<Arc<DiskFrames>>,
+) {
     let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(1);
     {
         let (gpu, shared) = (gpu.clone(), shared.clone());
@@ -672,34 +677,50 @@ fn idle(shared: &Shared) -> bool {
 
 /// File versions, evaluated content and project versions determine whether a
 /// stored image can be reused. Auxiliary EXR picking data needs a fresh render.
-fn disk_key(job:&Job, engine:&RenderEngine, binary_stamp:u64) -> Option<u64> {
-    use std::hash::{Hash, Hasher};
+fn disk_key(job: &Job, engine: &RenderEngine, binary_stamp: u64) -> Option<u64> {
     use bae_render::{LayerContent, RenderComp};
-    fn media_versions(comp:&RenderComp, state:&mut impl Hasher) -> Option<()> {
+    use std::hash::{Hash, Hasher};
+    fn media_versions(comp: &RenderComp, state: &mut impl Hasher) -> Option<()> {
         for l in &comp.layers {
-            if l.effects.iter().any(|e| matches!(e.effect.as_str(), "Cryptomatte"|"EXtractoR"|"IDentifier")) {
+            if l.effects.iter().any(|e| {
+                matches!(
+                    e.effect.as_str(),
+                    "Cryptomatte" | "EXtractoR" | "IDentifier"
+                )
+            }) {
                 return None;
             }
             match &l.content {
-                LayerContent::Comp(c) => media_versions(c,state)?,
+                LayerContent::Comp(c) => media_versions(c, state)?,
                 LayerContent::Footage(f) => {
-                    let mut path=f.file.clone()?;
-                    if let Some(rate)=f.sequence {
-                        if f.blend.is_some() { return None }
-                        let n=bae_media::sequence::parse_numbered_name(path.file_name()?.to_str()?)?;
-                        let index=n.number.checked_add(rate.time_to_frame(f.source_time).max(0))?;
-                        path.set_file_name(format!("{}{:0width$}{}",n.prefix,index,n.suffix,width=n.digits));
+                    let mut path = f.file.clone()?;
+                    if let Some(rate) = f.sequence {
+                        if f.blend.is_some() {
+                            return None;
+                        }
+                        let n =
+                            bae_media::sequence::parse_numbered_name(path.file_name()?.to_str()?)?;
+                        let index = n
+                            .number
+                            .checked_add(rate.time_to_frame(f.source_time).max(0))?;
+                        path.set_file_name(format!(
+                            "{}{:0width$}{}",
+                            n.prefix,
+                            index,
+                            n.suffix,
+                            width = n.digits
+                        ));
                     }
-                    let meta=std::fs::metadata(&path).ok()?;
+                    let meta = std::fs::metadata(&path).ok()?;
                     meta.len().hash(state);
                     meta.modified().ok()?.hash(state);
                 }
-                _=>{}
+                _ => {}
             }
         }
         Some(())
     }
-    let mut state=std::collections::hash_map::DefaultHasher::new();
+    let mut state = std::collections::hash_map::DefaultHasher::new();
     binary_stamp.hash(&mut state);
     job.disk_revision.hash(&mut state);
     job.scene.key.resolution.hash(&mut state);
@@ -707,7 +728,7 @@ fn disk_key(job:&Job, engine:&RenderEngine, binary_stamp:u64) -> Option<u64> {
     job.scene.key.effects.hash(&mut state);
     job.time.hash(&mut state);
     engine.renderer.content_hash(&job.rc).hash(&mut state);
-    media_versions(&job.rc,&mut state)?;
+    media_versions(&job.rc, &mut state)?;
     Some(state.finish())
 }
 
@@ -765,7 +786,10 @@ fn render_worker(
             sync_engine(&mut engine, &job.scene);
             synced = Some(generations);
         }
-        let disk_key = disk.as_ref().filter(|d| d.enabled()).and_then(|d| disk_key(&job, &engine,d.binary_stamp()));
+        let disk_key = disk
+            .as_ref()
+            .filter(|d| d.enabled())
+            .and_then(|d| disk_key(&job, &engine, d.binary_stamp()));
         let restored = disk_key.and_then(|k| disk.as_ref()?.read(k, &gpu));
         let hit = restored.is_some();
         let rendered = if let Some((target, rect)) = restored {
@@ -782,7 +806,8 @@ fn render_worker(
                 spare,
             )
         };
-        let result = rendered.map_err(|e| e.to_string())
+        let result = rendered
+            .map_err(|e| e.to_string())
             .and_then(|(target, rect, temporal)| {
                 let mut spares_now = spares.lock().unwrap();
                 spares_now.size = Some(target.size());
@@ -810,7 +835,9 @@ fn render_worker(
                     target: Some(target),
                     spares: spares.clone(),
                 });
-                if !hit && !temporal && slot.channels.is_none()
+                if !hit
+                    && !temporal
+                    && slot.channels.is_none()
                     && let (Some(disk), Some(key)) = (&disk, disk_key)
                 {
                     disk.save(key, slot.texture.clone(), rect, slot.clone());

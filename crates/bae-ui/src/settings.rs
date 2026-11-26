@@ -310,6 +310,7 @@ pub type Request = String;
 #[derive(Default)]
 pub struct SettingsDialog {
     installed_ram: Option<u64>,
+    cache_root: Option<std::path::PathBuf>,
     open: bool,
     confirm_reset: bool,
     display_changed: bool,
@@ -329,6 +330,11 @@ impl SettingsDialog {
     /// is drawn disabled.
     pub fn with_host_buttons(mut self, ids: &[&str]) -> Self {
         self.host_buttons = ids.iter().map(|s| (*s).to_owned()).collect();
+        self
+    }
+
+    pub fn with_cache_root(mut self, root: Option<std::path::PathBuf>) -> Self {
+        self.cache_root = root;
         self
     }
 
@@ -811,9 +817,17 @@ impl SettingsDialog {
                 }
             }
             Kind::Path => {
-                let path = draft.str(p.key);
-                let path = if path.is_empty() { "—" } else { path };
-                ui.label(RichText::new(path).color(color::TEXT_DIM))
+                let resolved;
+                let path = if p.key == "disk.disk_cache_folder"
+                    && let Some(root) = &self.cache_root
+                {
+                    resolved = draft.preview_cache_dir(root);
+                    resolved.to_string_lossy()
+                } else {
+                    let value = draft.str(p.key);
+                    std::borrow::Cow::Borrowed(if value.is_empty() { "—" } else { value })
+                };
+                ui.label(RichText::new(path.as_ref()).color(color::TEXT_DIM))
                     .on_hover_text(label);
             }
         }

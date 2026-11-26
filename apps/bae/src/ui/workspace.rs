@@ -212,6 +212,10 @@ impl Workspace {
             show_about: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
+                .with_cache_root(
+                    app.resource::<bae_platform::AppDirs>()
+                        .map(|dirs| dirs.cache.clone()),
+                )
                 .with_installed_ram(bae_platform::memory::total_bytes())
                 .with_host_buttons(&[
                     REVEAL_PREFERENCES,
@@ -227,6 +231,10 @@ impl Workspace {
     pub fn show_settings(&mut self, page: Option<&str>) {
         let current = self.prefs.current();
         self.settings.open(page, &current);
+    }
+
+    pub fn settings_draft(&self) -> &bae_prefs::Preferences {
+        self.settings.draft()
     }
 
     /// The Preferences window (acceptance tests, macOS run).

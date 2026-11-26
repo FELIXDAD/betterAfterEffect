@@ -239,6 +239,17 @@ impl Preferences {
         self.str(&format!("labels.label_name_{index}"))
     }
 
+    /// Directory owned by BAE below the selected or system cache root.
+    pub fn preview_cache_dir(&self, default_root: &std::path::Path) -> std::path::PathBuf {
+        let chosen = self.str("disk.disk_cache_folder");
+        let root = if chosen.is_empty() {
+            default_root
+        } else {
+            std::path::Path::new(chosen)
+        };
+        root.join("BAE Preview Frames")
+    }
+
     /// Auto-save interval in minutes, or `None` when auto-save is off.
     pub fn auto_save_minutes(&self) -> Option<u64> {
         self.bool(keys::AUTO_SAVE)

@@ -278,8 +278,11 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => bae_prefs::PrefsStore::default(),
     });
     app.insert_resource(prefs.clone());
-    if let Some(dirs)=dirs.as_ref().filter(|_| global.smoke_test.is_none()) {
-        app.insert_resource(bae_ui_motion::disk_frames::DiskFrames::new(dirs.cache.clone(), &prefs));
+    if let Some(dirs) = dirs.as_ref().filter(|_| global.smoke_test.is_none()) {
+        app.insert_resource(bae_ui_motion::disk_frames::DiskFrames::new(
+            dirs.cache.clone(),
+            &prefs,
+        ));
     }
     let project_file = bae_ui::files::ProjectFile::default();
     project_file.set(document.location().map(std::path::Path::to_owned));
@@ -480,7 +483,10 @@ impl Shell {
                 .get_registry::<dyn bae_gpu::WarmUp>()
                 .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
                 .unwrap_or_default();
-            if let Some(disk)=self.app.resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>() {
+            if let Some(disk) = self
+                .app
+                .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
+            {
                 tasks.push(disk.clone());
             }
             // Frames drawn without something still warming up are incomplete
@@ -737,14 +743,21 @@ impl Shell {
     fn run_settings_requests(&mut self) {
         for request in self.workspace.take_settings_requests() {
             if request == "disk.empty_disk_cache" {
-                if let Some(cache)=self.app.resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>() {
-                    let mut dialog=rfd::MessageDialog::new()
+                if let Some(cache) = self
+                    .app
+                    .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
+                {
+                    let mut dialog = rfd::MessageDialog::new()
                         .set_title(crate::i18n::tr("Empty Disk Cache"))
-                        .set_description(crate::i18n::tr("Delete cached preview frames from this folder?"))
+                        .set_description(crate::i18n::tr(
+                            "Delete cached preview frames from this folder?",
+                        ))
                         .set_buttons(rfd::MessageButtons::YesNo);
-                    if let Some(view)=&self.view {dialog=dialog.set_parent(&*view.window);}
-                    if dialog.show()==rfd::MessageDialogResult::Yes {
-                        cache.clear_folder(self.workspace.settings_dialog().draft());
+                    if let Some(view) = &self.view {
+                        dialog = dialog.set_parent(&*view.window);
+                    }
+                    if dialog.show() == rfd::MessageDialogResult::Yes {
+                        cache.clear_folder(self.workspace.settings_draft());
                     }
                 }
             } else if let Some((title, body)) =
