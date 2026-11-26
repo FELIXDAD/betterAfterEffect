@@ -38,6 +38,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    tracks: crate::tracker::overlay::Overlay,
     eval: EvalCache,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
@@ -210,7 +211,7 @@ impl LayerPanel {
     fn picture(
         &mut self,
         ui: &Ui,
-        cx: &PanelContext<'_>,
+        cx: &mut PanelContext<'_>,
         area: Rect,
         one: &EvaluatedComp,
         min: DVec2,
@@ -267,6 +268,7 @@ impl LayerPanel {
             Stroke::new(1.0, Color32::from_gray(90)),
             egui::StrokeKind::Outside,
         );
+        self.tracks.draw(ui, cx, area, &view, min, &layer.path);
         if self.show == Show::Masks {
             let to_panel = DMat4::from_translation((-min).extend(0.0));
             for m in &layer.masks {

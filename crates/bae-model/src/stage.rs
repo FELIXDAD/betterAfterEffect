@@ -109,6 +109,33 @@ impl Stage {
         Some(entries.iter().skip(from).map(|(_, event)| event))
     }
 
+    /// Pin this composed stage, including linked projects. Call the returned
+    /// reader on a worker to materialize it without serializing the project on the UI thread.
+    pub fn snapshot_reader(&self) -> Box<dyn FnOnce() -> Result<Self> + Send> {
+        let layers: Vec<_> = self
+            .stack
+            .iter()
+            .map(|id| self.sublayers[id].snapshot_reader())
+            .collect();
+        let linked: Vec<_> = self
+            .externals
+            .iter()
+            .map(|(k, v)| (k.clone(), v.snapshot_reader()))
+            .collect();
+        Box::new(move || {
+            let mut stage = Self::from_sublayers(
+                layers
+                    .into_iter()
+                    .map(|read| read())
+                    .collect::<Result<_>>()?,
+            )?;
+            for (name, read) in linked {
+                stage.externals.insert(name, read()?);
+            }
+            Ok(stage)
+        })
+    }
+
     /// A stage with one empty `root` sublayer as the edit target.
     pub fn new() -> Self {
         Self::from_sublayers(vec![Sublayer::new(SublayerId::root())]).expect("one sublayer")
