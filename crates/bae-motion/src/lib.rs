@@ -148,6 +148,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(ReplaceFile),
         r.register(CreateLayer),
         r.register(Precompose),
+        r.register(precompose::ReplaceWithPrecomp),
         r.register(SetSolidSettings),
         r.register(SetCameraSettings),
         r.register(SetLightSettings),

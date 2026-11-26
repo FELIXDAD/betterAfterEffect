@@ -512,3 +512,50 @@ fn panel_menus_match_chinese_and_selection() {
             .any(|(label, enabled, _)| label == "显示动画预设" && *enabled)
     );
 }
+
+#[test]
+fn effect_controls_flyout_uses_only_the_measured_panel_commands() {
+    let fx = Fx::new();
+    let mut panel = crate::panels::EffectControlsPanel::default();
+    let id = PanelId::new("effect_controls");
+    let mut requests = PanelRequests::default();
+    let mut cx = PanelContext::new(
+        &id,
+        "Effect Controls",
+        &fx.stage,
+        &fx.author,
+        &fx.resources,
+        &mut requests,
+    );
+    let mut app = AppBuilder::new();
+    app.add_module(crate::MotionUiModule);
+    let _app = app.build();
+    fx.ctx.enable_accesskit();
+    let out = fx
+        .ctx
+        .run_ui(Default::default(), |ui| panel.menu(ui, &mut cx));
+    let tree = out.platform_output.accesskit_update.unwrap();
+    let rows: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| {
+            let label = n.label()?;
+            Some((label, !n.is_disabled()))
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (bae_ui::tr("Show Animation Presets"), true),
+            (bae_ui::tr("Manage Effects..."), true)
+        ]
+    );
+    assert_eq!(
+        bae_ui::i18n::translation("Show Animation Presets"),
+        Some("显示动画预设")
+    );
+    assert_eq!(
+        bae_ui::i18n::translation("Manage Effects..."),
+        Some("管理效果...")
+    );
+}

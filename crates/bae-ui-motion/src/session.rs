@@ -249,6 +249,8 @@ pub struct Session {
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
+    /// Latest request to re-evaluate a generated source without editing project data.
+    pub(crate) solid_reload: Option<(u64, PrimPath)>,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
