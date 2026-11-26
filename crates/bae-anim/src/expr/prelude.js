@@ -277,6 +277,52 @@ function timeToTimecode(t, timecodeBase, isDuration) {
     __pad(s % 60, 2) + ":" + __pad(fr, String(timecodeBase - 1).length);
 }
 function timeToCurrentFormat(t, fps, isDuration) { return timeToTimecode(t, fps, isDuration); }
+// NTSC (29.97) timecode; drop frame skips frames 0 and 1 of every minute except
+// each tenth, with ";" separators.
+function timeToNTSCTimecode(t, ntscDropFrame, isDuration) {
+  if (t === undefined) t = __now + __h.compInfo(__env_c).displayStartTime;
+  var neg = t < 0, frames = Math.floor(Math.abs(t) * 30000 / 1001 + 1e-9);
+  if (ntscDropFrame) {
+    var d = Math.floor(frames / 17982), m = frames % 17982;
+    frames += 18 * d + (m > 1 ? 2 * Math.floor((m - 2) / 1798) : 0);
+  }
+  var sep = ntscDropFrame ? ";" : ":", s = Math.floor(frames / 30);
+  return (neg ? "-" : "") + __pad(Math.floor(s / 3600), 2) + sep + __pad(Math.floor(s / 60) % 60, 2) + sep +
+    __pad(s % 60, 2) + sep + __pad(frames % 30, 2);
+}
+// Film feet and frames: "FFFF+ff".
+function timeToFeetAndFrames(t, fps, framesPerFoot, isDuration) {
+  if (t === undefined) t = __now + __h.compInfo(__env_c).displayStartTime;
+  if (fps === undefined) fps = 1 / __h.compInfo(__env_c).frameDuration;
+  if (framesPerFoot === undefined) framesPerFoot = 16;
+  var neg = t < 0, frames = Math.floor(Math.abs(t) * fps + 1e-9);
+  return (neg ? "-" : "") + __pad(Math.floor(frames / framesPerFoot), 4) + "+" +
+    __pad(frames % framesPerFoot, String(framesPerFoot - 1).length);
+}
+
+// ---- project and footage (AE: thisProject, colorDepth, footage(name)) ----
+function __project() {
+  var p = __h.projectInfo();
+  return { fullPath: p.fullPath, bitsPerChannel: p.bitsPerChannel, linearBlending: p.linearBlending };
+}
+function Footage(f) {
+  this.name = f.name; this.width = f.width; this.height = f.height; this.duration = f.duration;
+  this.frameDuration = f.frameDuration; this.pixelAspect = f.pixelAspect; this.ntscDropFrame = f.ntscDropFrame;
+}
+Footage.prototype = {
+  // Data-driven footage (JSON / CSV) is not imported yet.
+  get sourceText() { throw new Error("Footage is not a text or data file"); },
+  get sourceData() { throw new Error("Footage is not a data file"); },
+  dataValue: function () { throw new Error("Footage is not a data file"); },
+  dataKeyCount: function () { throw new Error("Footage is not a data file"); },
+  dataKeyTimes: function () { throw new Error("Footage is not a data file"); },
+  dataKeyValues: function () { throw new Error("Footage is not a data file"); },
+};
+function footage(name) {
+  var f = __h.footage(String(name));
+  if (!f) throw new Error("Footage " + JSON.stringify(name) + " does not exist");
+  return new Footage(f);
+}
 
 // ---- evaluation entry (called from Rust) ----
 function __call(fn, c, l, prim, attr, t, seed) {
@@ -654,13 +700,17 @@ Layer.prototype = {
   },
   get enabled() { return this.__info.enabled; },
   get active() { return this.__info.enabled && __now >= Math.min(this.inPoint, this.outPoint) && __now < Math.max(this.inPoint, this.outPoint); },
-  get hasVideo() { return true; },
-  get hasAudio() { return false; },
+  get hasVideo() { return this.__info.hasVideo; },
+  get hasAudio() { return this.__info.hasAudio; },
+  get audioActive() { return this.hasAudio && this.active; },
   get width() { return this.__info.width; },
   get height() { return this.__info.height; },
+  // A precomp's comp, else the footage item (solids, footage).
   get source() {
-    if (this.__info.sourceComp < 0) throw new Error("Layer source is not a composition");
-    return new Comp(this.__info.sourceComp);
+    if (this.__info.sourceComp >= 0) return new Comp(this.__info.sourceComp);
+    var f = __h.layerFootage(this.__c, this.__l);
+    if (!f) throw new Error("Layer has no source");
+    return new Footage(f);
   },
   get transform() { return new __Transform(this); },
   get anchorPoint() { return this.transform.anchorPoint; },
@@ -691,6 +741,13 @@ Layer.prototype = {
   },
   get lightOption() { return __optionGroup(this, "Light Options", __LIGHT_OPTIONS); },
   get materialOption() { return __optionGroup(this, "Material Options", __MATERIAL_OPTIONS); },
+  get audioLevels() {
+    if (!this.hasAudio) {
+      throw new Error("property or method named 'audioLevels' in Class 'Layer' is missing or does not exist. " +
+        "It may have been renamed, moved, deleted, or the name may have been mistyped.");
+    }
+    return __prop(this.__c, this.__l, "", "audio:levels");
+  },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
@@ -737,6 +794,7 @@ Layer.prototype = {
   toCompVec: function (p, t) { return this.__xf(2, p, t); },
   fromCompVec: function (p, t) { return this.__xf(3, p, t); },
   toWorldVec: function (p, t) { return this.__xf(6, p, t); },
+  fromCompToSurface: function (p, t) { return this.__xf(8, p, t); },
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
@@ -846,6 +904,7 @@ Comp.prototype = {
   get frameDuration() { return this.__info.frameDuration; },
   get pixelAspect() { return this.__info.pixelAspect; },
   get numLayers() { return this.__info.numLayers; },
+  get ntscDropFrame() { return this.__info.ntscDropFrame; },
   get displayStartTime() { return this.__info.displayStartTime; },
   get bgColor() { return this.__info.bgColor; },
   get shutterAngle() { return this.__info.shutterAngle; },
