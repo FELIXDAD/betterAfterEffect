@@ -1112,3 +1112,53 @@ fn sample_image_through_the_sample_cache() {
     assert_eq!(ec.layers[1].text.as_ref().unwrap().text, "1,0.5,0.25,0.75");
     assert!(!samples.is_waiting());
 }
+
+/// A live drag's values (overrides) reach everything that depends on them —
+/// children through parenting, expressions reading them — without changing the
+/// stage; clearing them shows the committed values again.
+#[test]
+fn overrides_show_uncommitted_values_everywhere() {
+    use bae_anim::{AttrOverride, Evaluator};
+    use bae_model::AttrSpec;
+    let s = stage(|b| {
+        let parent = b.layer(MAIN, "P", "null");
+        let child = b.layer(MAIN, "C", "null");
+        b.set(&child, "parent", Value::PrimRef(p(&parent))).set(
+            &child,
+            "transform:position",
+            Value::Vec3([10.0, 0.0, 0.0]),
+        );
+        let reader = b.layer(MAIN, "R", "null");
+        b.expr(
+            &reader,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("P").transform.position[0]"#,
+        );
+    });
+    let parent = p(&format!("{MAIN}/layers/P"));
+    let mut ev = Evaluator::new();
+    let world_x = |ev: &mut Evaluator| {
+        let ec = ev.evaluate_comp(&s, &p(MAIN), Time::ZERO).unwrap();
+        (
+            ec.layers[1].world_matrix.w_axis.x,
+            ec.layers[2].transform.rotation.z,
+        )
+    };
+    assert_eq!(world_x(&mut ev), (10.0, 0.0));
+    ev.set_overrides(vec![AttrOverride {
+        prim: parent.clone(),
+        attr: "transform:position".into(),
+        spec: AttrSpec {
+            value: Some(Value::Vec3([100.0, 0.0, 0.0])),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(
+        world_x(&mut ev),
+        (110.0, 100.0),
+        "child and expression follow"
+    );
+    ev.set_overrides(Vec::new());
+    assert_eq!(world_x(&mut ev), (10.0, 0.0), "committed values again");
+}

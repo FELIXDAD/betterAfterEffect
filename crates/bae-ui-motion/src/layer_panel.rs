@@ -158,7 +158,7 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
-        let eval = self.eval.get(cx.resources);
+        let eval = crate::viewer::live_evaluator(&mut self.eval, cx, &session);
         if let Some(g) = &self.gpu
             && !eval
                 .image_samples()
