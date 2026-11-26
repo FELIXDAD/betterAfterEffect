@@ -335,6 +335,7 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) loading_lut: Option<crate::effects::lut::Load>,
     /// Automatically key animatable UI value edits.
     pub auto_key: bool,
     pub(crate) held_viewer_time: Option<(PrimPath, Time)>,

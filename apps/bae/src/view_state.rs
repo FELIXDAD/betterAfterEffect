@@ -111,13 +111,24 @@ fn first_comp(stage: &Stage) -> Option<PrimPath> {
 pub fn run_file_command(
     app: &mut App,
     doc: &mut Document,
+    workspace: &mut crate::ui::Workspace,
     dialogs: &mut dyn FileDialogs,
     inv: &Invocation,
 ) -> Option<FileOutcome> {
     remember(app, doc);
-    let outcome = files::run(doc, dialogs, inv);
+    workspace.remember_project_workspace(doc);
+    let prefs = app
+        .resource::<std::sync::Arc<bae_prefs::PrefsStore>>()
+        .map(|store| store.current());
+    let outcome = files::run(
+        doc,
+        dialogs,
+        inv,
+        prefs.as_deref().and_then(files::template_path),
+    );
     if outcome == Some(FileOutcome::Replaced) {
         restore(app, doc);
+        workspace.restore_project_workspace(doc);
         // The render queue belongs to the project (AE, #231).
         if let Some(queue) = app.resource::<bae_ui_motion::SharedRenderQueue>() {
             queue.lock().clear();
@@ -127,7 +138,13 @@ pub fn run_file_command(
 }
 
 /// The unsaved-changes question before quitting (a Save there keeps the view).
-pub fn confirm_quit(app: &App, doc: &mut Document, dialogs: &mut dyn FileDialogs) -> bool {
+pub fn confirm_quit(
+    app: &App,
+    doc: &mut Document,
+    workspace: &crate::ui::Workspace,
+    dialogs: &mut dyn FileDialogs,
+) -> bool {
+    workspace.remember_project_workspace(doc);
     remember(app, doc);
     files::confirm_discard(doc, dialogs)
 }
