@@ -44,8 +44,8 @@ pub enum ColorMode {
 impl ColorMode {
     const ALL: [(ColorMode, &'static str); 8] = [
         (ColorMode::Auto, "Auto Color Display"),
-        (ColorMode::Percent, "Percent (0-100)"),
-        (ColorMode::Web, "Web (00-FF)"),
+        (ColorMode::Percent, "Percent"),
+        (ColorMode::Web, "Web"),
         (ColorMode::Hsb, "HSB"),
         (ColorMode::Bpc8, "8-bpc (0-255)"),
         (ColorMode::Bpc10, "10-bpc (0-1023)"),
@@ -343,8 +343,8 @@ mod tests {
             entries,
             [
                 ("自动颜色显示", true),
-                ("百分比 (0-100)", false),
-                ("Web (00-FF)", false),
+                ("百分比", false),
+                ("Web", false),
                 ("HSB", false),
                 ("8-bpc (0-255)", false),
                 ("10-bpc (0-1023)", false),

@@ -35,8 +35,8 @@ pub(crate) fn panels() -> Vec<(&'static str, PanelKind)> {
 /// Chinese for these panels (AE's zh_CN dictionary).
 pub(crate) const ZH: &[(&str, &str)] = &[
     ("Auto Color Display", "自动颜色显示"),
-    ("Percent (0-100)", "百分比 (0-100)"),
-    ("Web (00-FF)", "Web (00-FF)"),
+    ("Percent", "百分比"),
+    ("Web", "Web"),
     ("HSB", "HSB"),
     ("8-bpc (0-255)", "8-bpc (0-255)"),
     ("10-bpc (0-1023)", "10-bpc (0-1023)"),
