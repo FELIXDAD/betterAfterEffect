@@ -1,7 +1,7 @@
 //! Preview shortcuts and contextual properties through the application's workbench.
 
 use super::*;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 #[test]
 fn preview_shortcuts_use_their_profiles_and_restore_the_workspace() {
@@ -57,4 +57,64 @@ fn shape_properties_offer_geometry_and_the_add_menu() {
             .and_then(|v| v.prim_type().cloned())
             == Some(bae_model::PrimType::ELLIPSE)
     }));
+}
+
+#[test]
+fn properties_font_size_previews_before_committing_the_drag() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.text"]);
+    let session = h.state().session();
+    let layer = session.lock().selected_layers[0].clone();
+    h.state_mut().dispatch(Invocation::with_params(
+        "text.set_text",
+        serde_json::json!({"layer":layer,"text":"Title","time":0}),
+    ));
+    to_front(&mut h, "properties");
+    h.state_mut().dispatch(Invocation::new(ids::MAXIMIZE_FRAME));
+    settle(&mut h);
+    let at = h
+        .query_by(|n| {
+            n.role() == egui::accesskit::Role::SpinButton
+                && n.label().as_deref() == Some("Font Size")
+        })
+        .unwrap()
+        .rect()
+        .center();
+    let stored = |h: &Ui| {
+        let view = h.state().stage().prim(&layer).unwrap();
+        let Some(bae_model::Value::TextDocument(doc)) =
+            bae_motion::query::static_value(&view, "text:source")
+        else {
+            panic!("missing text document");
+        };
+        doc.style_at(0).font_size
+    };
+    let before = stored(&h);
+    let button = |pos, pressed| Event::PointerButton {
+        pos,
+        pressed,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    };
+    let end = at + egui::vec2(28.0, 0.0);
+    send(&mut h, Event::PointerMoved(at));
+    send(&mut h, button(at, true));
+    send(&mut h, Event::PointerMoved(end));
+    settle(&mut h);
+    let live = {
+        let s = session.lock();
+        let Some(bae_model::Value::TextDocument(doc)) = s
+            .scrub
+            .as_ref()
+            .and_then(|v| v.value_for(&layer, "text:source"))
+        else {
+            panic!("the viewer did not receive the live edit");
+        };
+        doc.style_at(0).font_size
+    };
+    assert!(live > before);
+    assert_eq!(stored(&h), before);
+    send(&mut h, button(end, false));
+    settle(&mut h);
+    assert_eq!(stored(&h), live);
 }
