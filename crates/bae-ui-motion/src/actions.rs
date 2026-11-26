@@ -57,6 +57,8 @@ pub mod ids {
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
+    pub const AUTO_ORIENT: &str = "motion.layer.auto_orient";
     pub const GO_TO_TIME: &str = "motion.view.go_to_time";
     pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
@@ -210,6 +212,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
+    (ids::TIME_STRETCH, "Time Stretch..."),
+    (ids::AUTO_ORIENT, "Auto-Orient..."),
     (ids::GO_TO_TIME, "Go to Time..."),
     (ids::PROJECT_SETTINGS, "Project Settings..."),
     (ids::ADD_EXPRESSION, "Add Expression"),
@@ -933,6 +937,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_MULTIPLE => {
             crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::TIME_STRETCH => {
+            crate::dialogs::time_stretch(cx, session);
+            return true;
+        }
+        ids::AUTO_ORIENT => {
+            crate::dialogs::auto_orient(cx, session);
             return true;
         }
         ids::GO_TO_TIME => {
@@ -1782,6 +1794,8 @@ fn content_container(
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Time Stretch...", "时间伸缩..."),
+    ("Auto-Orient...", "自动定向..."),
     ("Go to Time...", "转到时间..."),
     ("Project Settings...", "项目设置..."),
     // Variants of motion actions and commands (`actions::variants`, #140): the
