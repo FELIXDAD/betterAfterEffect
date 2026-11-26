@@ -28,6 +28,21 @@ pub trait FilePicker: Send + Sync {
     fn open(&self, request: &OpenRequest) -> Vec<PathBuf>;
 }
 
+/// Where the open project is saved (`None`: not saved yet), as an app
+/// resource the shell keeps up to date (Reveal Project in Finder).
+#[derive(Clone, Debug, Default)]
+pub struct ProjectFile(Arc<std::sync::Mutex<Option<PathBuf>>>);
+
+impl ProjectFile {
+    pub fn get(&self) -> Option<PathBuf> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set(&self, path: Option<PathBuf>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = path;
+    }
+}
+
 /// The file picker as an app resource.
 #[derive(Clone)]
 pub struct SharedFilePicker(pub Arc<dyn FilePicker>);

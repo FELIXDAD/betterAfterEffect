@@ -165,9 +165,7 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
-        let Ok(comp) = self
-            .eval
-            .get(cx.resources)
+        let Ok(comp) = crate::viewer::live_evaluator(&mut self.eval, cx, &session)
             .evaluate_comp(cx.stage, &info.path, time)
         else {
             return;
