@@ -863,6 +863,10 @@ pub struct SetParentParams {
     /// Comp time (flicks) whose transforms are matched when keep_transform is on (default 0).
     #[serde(default)]
     pub time: Time,
+    /// Move the layers to the parent's location: their Position becomes the
+    /// parent's Anchor Point (AE: Shift while parenting). Keyframes shift with it.
+    #[serde(default)]
+    pub move_to_parent: bool,
 }
 
 fn parent_of(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
@@ -947,6 +951,9 @@ impl Command for SetParent {
                 let delta = new_world.inverse() * world(&old_parent);
                 compensate(tx, layer, &delta)?;
             }
+            if let (true, Some(parent)) = (p.move_to_parent, &p.parent) {
+                move_to(tx, layer, parent, p.time)?;
+            }
             match &p.parent {
                 Some(parent) => set(tx, layer, "parent", Value::PrimRef(parent.clone()))?,
                 None => {
@@ -966,6 +973,40 @@ impl Command for SetParent {
         }
         Ok(())
     }
+}
+
+/// Shift `layer`'s Position (value and keyframes) so that at comp time `time`
+/// it equals `parent`'s Anchor Point: once parented it sits on the parent.
+fn move_to(
+    tx: &mut Transaction<'_>,
+    layer: &PrimPath,
+    parent: &PrimPath,
+    time: Time,
+) -> Result<(), CommandError> {
+    const POSITION: &str = "transform:position";
+    let stage = tx.stage();
+    let xyz = |v: Option<Value>| match v {
+        Some(Value::Vec3(p)) => DVec3::from_array(p),
+        Some(Value::Vec2(p)) => DVec3::new(p[0], p[1], 0.0),
+        _ => DVec3::ZERO,
+    };
+    let anchor =
+        xyz(bae_anim::evaluate_attribute(stage, parent, "transform:anchor_point", time).ok());
+    let at = xyz(bae_anim::evaluate_attribute(stage, layer, POSITION, time).ok());
+    let d = anchor - at;
+    let view = stage
+        .prim(layer)
+        .ok_or_else(|| ModelError::NoSuchPrim(layer.clone()))?;
+    let mut position = view.attr(POSITION).cloned().unwrap_or_else(|| AttrSpec {
+        value: query::static_value(&view, POSITION),
+        ..Default::default()
+    });
+    map_values(&mut position, |v| match v {
+        Value::Vec3(p) => Some(Value::Vec3((DVec3::from_array(*p) + d).to_array())),
+        Value::Vec2(p) => Some(Value::Vec2([p[0] + d.x, p[1] + d.y])),
+        _ => None,
+    });
+    write_attr(tx, layer, POSITION, position)
 }
 
 /// Rewrite a layer's position, rotation and scale (static values and keyframes) by
@@ -1317,6 +1358,7 @@ pub(crate) fn delete_prims(
                     parent: None,
                     keep_transform: true,
                     time,
+                    move_to_parent: false,
                 },
             )
         })?;

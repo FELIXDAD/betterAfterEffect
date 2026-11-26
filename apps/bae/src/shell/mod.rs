@@ -741,7 +741,17 @@ impl Shell {
     /// Buttons of the Preferences window that need the system.
     fn run_settings_requests(&mut self) {
         for request in self.workspace.take_settings_requests() {
-            if request == crate::ui::REVEAL_PREFERENCES {
+            if let Some((title, body)) =
+                crate::ui::hardware_information(&request, self.app.resources())
+            {
+                let mut dialog = rfd::MessageDialog::new()
+                    .set_title(title)
+                    .set_description(body);
+                if let Some(view) = &self.view {
+                    dialog = dialog.set_parent(&*view.window);
+                }
+                dialog.show();
+            } else if request == crate::ui::REVEAL_PREFERENCES {
                 if let Some(dirs) = self.app.resource::<AppDirs>() {
                     reveal(&dirs.config_file(bae_prefs::FILE_NAME));
                 }
