@@ -74,6 +74,7 @@ impl CompositionViewer {
                 .clamp(0.01, 1.0 / ppp);
             let camera = views.camera_of(pane, size);
             let view = View {
+                aspect: 1.0,
                 origin: rect.center() - vec2(w, h) * scale / 2.0,
                 scale,
                 point: self.prefs.point_size,

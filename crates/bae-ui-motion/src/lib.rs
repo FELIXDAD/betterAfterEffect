@@ -55,6 +55,7 @@ mod render;
 pub mod render_queue;
 pub mod scripts;
 pub mod session;
+mod source_view_menu;
 mod timeline;
 pub mod tools;
 mod viewer;

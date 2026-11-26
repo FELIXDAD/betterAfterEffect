@@ -13,7 +13,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Quarter", "四分之一"),
     ("Title/Action Safe", "标题/动作安全"),
     ("Grid", "网格"),
-    ("Transparency Grid", "切换透明网格"),
+    ("Transparency Grid", "透明网格"),
+    ("Pixel Aspect Ratio Correction", "像素长宽比校正"),
     ("Preview (simplified)", "预览（简化）"),
     // The viewer's resolution menu.
     ("Auto", "自动"),

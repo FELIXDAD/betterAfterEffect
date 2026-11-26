@@ -38,6 +38,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    display: crate::source_view_menu::SourceView,
     eval: EvalCache,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
@@ -116,6 +117,10 @@ pub(crate) fn alone(
 }
 
 impl Panel for LayerPanel {
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        self.display.menu(ui);
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         let session = common::session(cx.resources);
         match shown_layer(&session) {
@@ -144,7 +149,8 @@ impl Panel for LayerPanel {
         );
         let bar = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
         ui.allocate_rect(full, Sense::hover());
-        ui.painter().rect_filled(area, 0.0, Color32::from_gray(35));
+        ui.painter()
+            .rect_filled(area, 0.0, self.display.background(ui));
         let info = common::active_comp(cx.stage, &session);
         let layer = shown_layer(&session).filter(|l| cx.stage.prim(l).is_some());
         let (Some(info), Some(layer)) = (info, layer) else {
@@ -189,13 +195,16 @@ impl Panel for LayerPanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({ "render": self.render }))
+        Some(serde_json::json!({ "render": self.render, "display": self.display }))
     }
 }
 
 impl LayerPanel {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
         LayerPanel {
+            display: state
+                .and_then(|v| serde_json::from_value(v["display"].clone()).ok())
+                .unwrap_or_default(),
             render: state
                 .and_then(|s| s.get("render"))
                 .and_then(|v| v.as_bool())
@@ -216,17 +225,26 @@ impl LayerPanel {
     ) -> View {
         let ppp = ui.ctx().pixels_per_point();
         let (w, h) = (one.width as f32, one.height as f32);
-        let scale = ((area.width() - 24.0) / w)
+        let source = cx
+            .stage
+            .prim(&layer.path)
+            .and_then(|l| l.value("source").and_then(|v| v.as_prim_ref()).cloned());
+        let aspect = self.display.aspect(cx.stage, source.as_ref());
+        let scale = ((area.width() - 24.0) / (w * aspect))
             .min((area.height() - 24.0) / h)
             .clamp(0.01, 1.0 / ppp);
         let view = View {
-            origin: area.center() - vec2(w, h) * scale / 2.0,
+            origin: area.center() - vec2(w * aspect, h) * scale / 2.0,
+            aspect,
             scale,
             point: 6.0,
             camera: None,
         };
         let frame = render::comp_rect(&view, one.width, one.height);
         let painter = ui.painter_at(area);
+        if self.display.grid {
+            crate::viewer::checkerboard(&painter, frame.intersect(area));
+        }
         if self.gpu.is_none() && !self.gpu_tried {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
