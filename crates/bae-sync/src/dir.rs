@@ -6,8 +6,11 @@
 //! a JSON header, the rest are encoded [`Message::Updates`] / [`Message::Snapshot`].
 //! A client compacts only its own log (rewrite as one snapshot, then rename), so
 //! concurrent compactions never interfere.
+//!
+//! Logs of clients that left are deleted once another log holds everything in
+//! them (§4.7, [`DirTransport`]'s cleanup section below).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -15,7 +18,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
-use bae_model::loro::{LoroDoc, VersionVector};
+use bae_model::loro::{EncodedBlobMode, LoroDoc, VersionVector};
 use serde::{Deserialize, Serialize};
 
 use crate::client::ClientId;
@@ -35,7 +38,15 @@ const PRESENCE_EXT: &str = "presence";
 const PRESENCE_GC: Duration = Duration::from_secs(24 * 3600);
 const SUBLAYERS: &str = "sublayers";
 const LOG_EXT: &str = "log";
+const LOCK_EXT: &str = "lock";
+/// Temporary files are named `<client>.tmp-<random>` (client IDs have no dots).
+const TMP_MARK: &str = ".tmp-";
 const SNAPSHOT_EXT: &str = "loro";
+/// A cleanup pass holds a departed client's lock for a moment while it deletes
+/// that client's files, so `open` retries a held lock this often before it
+/// reports [`SyncError::ClientIdInUse`].
+const LOCK_ATTEMPTS: u32 = 5;
+const LOCK_RETRY: Duration = Duration::from_millis(50);
 /// `len: u32` + 8 checksum bytes.
 const RECORD_HEADER: usize = 12;
 /// Larger lengths mean a corrupt record.
@@ -61,6 +72,20 @@ pub struct DirConfig {
     pub full_check_every: u32,
     /// Watch the folder for changes (needs the `watch` feature; ignored without).
     pub watch: bool,
+    /// Clients that showed no sign of life for this long (no write to any of their
+    /// logs, no presence heartbeat, lock not held) count as departed: their logs
+    /// are deleted once another log holds everything in them (§4.7). Temporary
+    /// files this old are leftovers of crashed writers and are deleted too.
+    /// `None`: never delete anything.
+    pub inactive_after: Option<Duration>,
+    /// How often to look for departed clients' files. The first pass runs this
+    /// long after the first scan.
+    pub cleanup_interval: Duration,
+    /// When a departed client's log is not held by any other log, ask our session
+    /// for a snapshot of that document (at most once per pass, and again only
+    /// after the folder changed) so our own log holds it and a later pass can
+    /// delete it.
+    pub absorb_departed: bool,
 }
 
 impl Default for DirConfig {
@@ -71,6 +96,9 @@ impl Default for DirConfig {
             compact_ratio: 4,
             full_check_every: 30,
             watch: true,
+            inactive_after: Some(Duration::from_secs(3 * 24 * 3600)),
+            cleanup_interval: Duration::from_secs(10 * 60),
+            absorb_departed: true,
         }
     }
 }
@@ -136,6 +164,46 @@ pub struct DirStats {
     pub compactions: u64,
     /// Own logs that had to be rewritten because they were changed underneath us.
     pub repairs: u64,
+    /// Cleanup passes run (§4.7).
+    pub cleanups: u64,
+    /// Departed clients' logs deleted because another log holds all of them.
+    pub logs_removed: u64,
+    /// Leftover temporary files of crashed writers and lock files of departed
+    /// clients deleted.
+    pub stale_files_removed: u64,
+    /// Snapshots asked of our session so our own log takes over a departed
+    /// client's log.
+    pub absorb_requests: u64,
+}
+
+/// What a log holds, as far as the cleanup is concerned (§4.7).
+#[derive(Clone, Debug)]
+struct LogSummary {
+    /// `(len, mtime)` of the bytes summarized.
+    stamp: (u64, Option<SystemTime>),
+    /// The log is self-contained up to this version: its first record is a full
+    /// (not shallow) snapshot holding exactly these ops. Later records are deltas
+    /// against what the folder had and may rely on ops in other logs, so they
+    /// add nothing here.
+    base: Option<VersionVector>,
+    /// Upper bound of the ops in the log: the union of its records' versions
+    /// (each is the writer's whole version at export time) and of the end
+    /// versions the Loro blobs themselves declare.
+    vmax: VersionVector,
+    /// Every byte belongs to a record we understand: a header for this document,
+    /// then `Updates` / `Snapshot` records of it whose Loro blobs decode; no torn
+    /// or corrupt tail. Only then is `vmax` known to bound everything in it.
+    complete: bool,
+}
+
+/// Whether a cleanup may run while holding a departed client's lock.
+enum OwnerLock {
+    /// We hold it: the owner cannot be running, nor start until we drop this.
+    Held(File),
+    /// Held by someone: the owner is running.
+    Busy,
+    /// No lock file, or no locking on this file system: decide by time alone.
+    Unknown,
 }
 
 /// The shared-folder [`Transport`]. Its I/O is synchronous and may be slow on a
@@ -162,6 +230,13 @@ pub struct DirTransport {
     stats: DirStats,
     /// `(len, mtime)` of other clients' presence files when last read.
     presence_seen: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
+    /// When the last cleanup pass ran (set at the first scan).
+    last_cleanup: Option<Instant>,
+    /// Cleanup summaries of logs, reused while a log's `(len, mtime)` is unchanged.
+    summaries: BTreeMap<PathBuf, LogSummary>,
+    /// Documents we asked our session to snapshot to take over a departed log,
+    /// with the folder's version at the time: asked again only once it changed.
+    absorbed: BTreeMap<DocKey, VersionVector>,
     #[cfg(feature = "watch")]
     _watcher: Option<notify::RecommendedWatcher>,
 }
@@ -195,17 +270,7 @@ impl DirTransport {
         fs::create_dir_all(&updates).map_err(SyncError::io(&updates))?;
         let presence = root.join(PRESENCE);
         fs::create_dir_all(&presence).map_err(SyncError::io(&presence))?;
-        let lock_path = updates.join(format!("{client}.lock"));
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-            .map_err(SyncError::io(&lock_path))?;
-        match lock.try_lock() {
-            Ok(()) | Err(fs::TryLockError::Error(_)) => {}
-            Err(fs::TryLockError::WouldBlock) => return Err(SyncError::ClientIdInUse(client)),
-        }
+        let lock = lock_client(&updates.join(format!("{client}.{LOCK_EXT}")), &client)?;
         #[allow(unused_mut)]
         let mut t = DirTransport {
             root,
@@ -224,6 +289,9 @@ impl DirTransport {
             last_error: None,
             stats: DirStats::default(),
             presence_seen: BTreeMap::new(),
+            last_cleanup: None,
+            summaries: BTreeMap::new(),
+            absorbed: BTreeMap::new(),
             #[cfg(feature = "watch")]
             _watcher: None,
         };
@@ -304,22 +372,8 @@ impl DirTransport {
                 .stats
                 .polls
                 .is_multiple_of(u64::from(self.config.full_check_every));
-        let mut found = Vec::new();
-        walk(
-            &self.root.join(UPDATES),
-            String::new(),
-            0,
-            LOG_EXT,
-            &mut found,
-        );
-        let mut bases = Vec::new();
-        walk(
-            &self.root.join(SUBLAYERS),
-            String::new(),
-            0,
-            SNAPSHOT_EXT,
-            &mut bases,
-        );
+        let found = walk(&self.root.join(UPDATES), LOG_EXT);
+        let bases = walk(&self.root.join(SUBLAYERS), SNAPSHOT_EXT);
         for (dir_rel, stem, path) in found {
             let Ok(doc) = DocKey::parse(&dir_rel) else {
                 continue;
@@ -377,7 +431,10 @@ impl DirTransport {
         }
         if !self.scanned {
             self.scanned = true;
+            self.last_cleanup = Some(Instant::now());
             self.inbox.push_back(self.hello());
+        } else {
+            self.maybe_cleanup();
         }
     }
 
@@ -612,12 +669,18 @@ impl DirTransport {
             }
             if let Some(own) = self.own.get(doc) {
                 let path = own.path.clone();
-                let r = read_all_records(&path).map(|msgs| {
-                    for m in msgs {
-                        self.deliver(m);
+                match read_all_records(&path) {
+                    Ok(msgs) => {
+                        for m in msgs {
+                            self.deliver(m);
+                        }
                     }
-                });
-                self.note(r);
+                    // Deleted underneath us (§4.7): the next append rewrites it
+                    // with a full snapshot.
+                    Err(SyncError::Io { source, .. })
+                        if source.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => self.note(Err(e)),
+                }
             }
         }
         if !missing.is_empty() {
@@ -779,6 +842,342 @@ impl DirTransport {
         );
         Ok(())
     }
+
+    // ---- cleanup of departed clients (§4.7) ----
+    //
+    // Every client ID that ever wrote (each app install, each agent process)
+    // leaves `updates/<doc>/<client>.log` behind, and every poll stats all of
+    // them. A pass every `cleanup_interval` deletes another client's log L (owner
+    // X) only if all of these hold:
+    //
+    // 1. X is gone: none of X's logs nor `presence/X.presence` was modified for
+    //    `inactive_after`, and X's lock `updates/X.lock` is free. We take that lock
+    //    (without waiting) for the moment of the deletion, so X cannot start a
+    //    session meanwhile; then L's length and time are checked once more.
+    // 2. L is `complete` (every record understood), so `vmax(L)` bounds every op
+    //    in it. A record we cannot decode might hold anything.
+    // 3. Another log M (owner Y != X, our own included), re-read from disk right
+    //    before the deletion, starts with a full snapshot whose version `base(M)`
+    //    includes `vmax(L)`: M holds everything L holds. It is re-read because
+    //    M's base can shrink when its owner rewrites a vanished or corrupt log.
+    //    Base snapshots (`sublayers/*.loro`, `history.loro`) are never used:
+    //    `Project::save` of a client that is behind can overwrite them.
+    // 4. If L could in turn replace M (base(L) includes vmax(M), so by (3) both
+    //    hold exactly the same), only the one with the smaller client ID goes:
+    //    X < Y.
+    //
+    // Why several cleaners cannot lose data between them: follow each deleted
+    // log to the container it was deleted for. Ops move up that chain, ops(L) ⊆
+    // vmax(L) ⊆ base(M) ⊆ ops(M) ⊆ vmax(M) ⊆ base(N) ..., and the chain cannot
+    // go round in a cycle, so it ends at a log that survives. A cycle L1 → L2 →
+    // ... → L1 would need vmax(L1) ⊆ base(L2) ⊆ vmax(L2) ⊆ ... ⊆ vmax(L1): all
+    // equal, every log a container of the one before it, so (4) would need
+    // X1 < X2 < ... < X1. So the order is only needed in that equal case: with
+    // different versions, (3) already lets only the smaller log go, and a log
+    // that is not self-contained can never be a container. (Only logs unchanged
+    // for days get deleted, so cleaners running at the same time see the same
+    // summaries of them; containers that are still written to only grow, by
+    // appends and by compaction into a snapshot of their owner's whole
+    // document. A log that is no longer there cannot be a container later.)
+
+    fn maybe_cleanup(&mut self) {
+        let Some(after) = self.config.inactive_after else {
+            return;
+        };
+        let now = Instant::now();
+        if self
+            .last_cleanup
+            .is_some_and(|t| now.saturating_duration_since(t) < self.config.cleanup_interval)
+        {
+            return;
+        }
+        self.last_cleanup = Some(now);
+        self.stats.cleanups += 1;
+        self.cleanup(after);
+    }
+
+    /// One cleanup pass. File-system errors only skip the file in question (and
+    /// end up in `last_error`); the transport keeps working.
+    fn cleanup(&mut self, after: Duration) {
+        let now = SystemTime::now();
+        // Logs by document, lock files, and how long each client has been idle
+        // (the youngest of its logs and presence file).
+        let mut logs: BTreeMap<DocKey, Vec<(String, PathBuf)>> = BTreeMap::new();
+        let mut locks: Vec<(String, PathBuf)> = Vec::new();
+        let mut idle: BTreeMap<String, Duration> = BTreeMap::new();
+        let mut files = Vec::new();
+        walk_files(&self.root.join(UPDATES), String::new(), 0, &mut files);
+        for (rel, name, path) in files {
+            if name.contains(TMP_MARK) {
+                self.remove_stale_file(&path, now, after);
+                continue;
+            }
+            let (Some(stem), Some(ext)) = (
+                path.file_stem().and_then(|s| s.to_str()).map(str::to_owned),
+                path.extension().and_then(|e| e.to_str()),
+            ) else {
+                continue;
+            };
+            if rel.is_empty() {
+                if ext == LOCK_EXT {
+                    locks.push((stem, path));
+                }
+            } else if ext == LOG_EXT
+                && let Ok(doc) = DocKey::parse(&rel)
+                && let Some(age) = file_age(&path, now)
+            {
+                note_idle(&mut idle, &stem, age);
+                logs.entry(doc).or_default().push((stem, path));
+            }
+        }
+        if let Ok(entries) = fs::read_dir(self.root.join(PRESENCE)) {
+            let suffix = format!(".{PRESENCE_EXT}");
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if name.contains(TMP_MARK) {
+                    self.remove_stale_file(&path, now, after);
+                } else if let Some(owner) = name.strip_suffix(&suffix)
+                    && let Some(age) = file_age(&path, now)
+                {
+                    note_idle(&mut idle, owner, age);
+                }
+            }
+        }
+        let us = self.client.as_str().to_owned();
+        let gone = |owner: &str| {
+            owner != us
+                && ClientId::new(owner).is_ok()
+                && idle.get(owner).is_none_or(|&age| age > after)
+        };
+        let all: BTreeSet<&PathBuf> = logs.values().flatten().map(|(_, p)| p).collect();
+        self.summaries.retain(|p, _| all.contains(p));
+        let mut left: BTreeMap<String, usize> = BTreeMap::new();
+        for (owner, _) in logs.values().flatten() {
+            *left.entry(owner.clone()).or_default() += 1;
+        }
+        for (doc, entries) in logs {
+            if !entries.iter().any(|(owner, _)| gone(owner)) {
+                continue;
+            }
+            for owner in self.cleanup_doc(&doc, entries, &gone, after) {
+                if let Some(n) = left.get_mut(&owner) {
+                    *n -= 1;
+                }
+            }
+        }
+        // Lock files of departed clients without logs: only while we hold the
+        // lock, so no session of theirs runs. One that opened the file just
+        // before we delete it finds it gone once it gets the lock, and takes a
+        // new one (`lock_client`).
+        for (owner, path) in locks {
+            if !gone(&owner)
+                || left.get(&owner).is_some_and(|&n| n > 0)
+                || file_age(&path, now).is_none_or(|age| age <= after)
+            {
+                continue;
+            }
+            if let OwnerLock::Held(guard) = self.lock_owner(&owner) {
+                match fs::remove_file(&path) {
+                    Ok(()) => self.stats.stale_files_removed += 1,
+                    Err(e) => self.note_cleanup_error(&path, e),
+                }
+                drop(guard);
+            }
+        }
+    }
+
+    /// The part of a cleanup pass for `doc`, whose logs are `entries` (owner,
+    /// path). Returns the owners whose log was deleted.
+    fn cleanup_doc(
+        &mut self,
+        doc: &DocKey,
+        entries: Vec<(String, PathBuf)>,
+        gone: &dyn Fn(&str) -> bool,
+        after: Duration,
+    ) -> Vec<String> {
+        let mut logs: Vec<(String, PathBuf, LogSummary)> = Vec::new();
+        for (owner, path) in entries {
+            if let Some(summary) = self.summary(doc, &path, false) {
+                logs.push((owner, path, summary));
+            }
+        }
+        let mut deleted = vec![false; logs.len()];
+        let mut removed = Vec::new();
+        for i in 0..logs.len() {
+            let (x, l_path, l) = logs[i].clone();
+            if !gone(&x) || !l.complete {
+                continue;
+            }
+            let container = (0..logs.len()).find(|&j| {
+                !deleted[j] && logs[j].0 != x && may_replace(&logs[j].2, &logs[j].0, &l, &x)
+            });
+            let Some(j) = container else {
+                let ours = logs
+                    .iter()
+                    .zip(&deleted)
+                    .find(|((owner, ..), del)| !**del && owner == self.client.as_str())
+                    .map(|((.., summary), _)| summary.clone());
+                self.maybe_absorb(doc, &l.vmax, ours.as_ref());
+                continue;
+            };
+            // Re-read the container now: what it held when summarized is not
+            // enough (see rule 3 above).
+            let Some(fresh) = self.summary(doc, &logs[j].1.clone(), true) else {
+                continue;
+            };
+            let still = may_replace(&fresh, &logs[j].0, &l, &x);
+            logs[j].2 = fresh;
+            if still && self.delete_departed_log(&x, &l_path, l.stamp, after) {
+                deleted[i] = true;
+                removed.push(x);
+            }
+        }
+        removed
+    }
+
+    /// Delete the departed client `owner`'s log at `path` (summarized at `stamp`)
+    /// if it is still unchanged and `owner` still looks gone.
+    fn delete_departed_log(
+        &mut self,
+        owner: &str,
+        path: &Path,
+        stamp: (u64, Option<SystemTime>),
+        after: Duration,
+    ) -> bool {
+        // Held until the log is gone: a running owner holds its lock all session,
+        // and a starting one waits for us (`lock_client`).
+        let guard = match self.lock_owner(owner) {
+            OwnerLock::Busy => return false,
+            OwnerLock::Held(f) => Some(f),
+            OwnerLock::Unknown => None,
+        };
+        let now = SystemTime::now();
+        let unchanged = fs::metadata(path).is_ok_and(|m| (m.len(), m.modified().ok()) == stamp);
+        let log_idle = stamp
+            .1
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|age| age > after);
+        let presence = self
+            .root
+            .join(PRESENCE)
+            .join(format!("{owner}.{PRESENCE_EXT}"));
+        let presence_idle = file_age(&presence, now).is_none_or(|age| age > after);
+        if !(unchanged && log_idle && presence_idle) {
+            return false;
+        }
+        let removed = fs::remove_file(path);
+        drop(guard);
+        match removed {
+            Ok(()) => self.stats.logs_removed += 1,
+            // Another cleaner was quicker.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => {
+                self.note_cleanup_error(path, e);
+                return false;
+            }
+        }
+        self.sources.remove(path);
+        self.summaries.remove(path);
+        true
+    }
+
+    /// Take over a departed client's log that no other log holds: ask our
+    /// session for a snapshot of `doc`, so our own log starts with one that holds
+    /// `vmax` (if our session has all of it) and a later pass can delete the
+    /// departed log. Asked again only once the folder has changed, so a request
+    /// that cannot help (our session lacks some of it, or does not have `doc`
+    /// at all and never answers) is not repeated every pass; nothing waits for
+    /// the answer.
+    fn maybe_absorb(&mut self, doc: &DocKey, vmax: &VersionVector, ours: Option<&LogSummary>) {
+        if !self.config.absorb_departed {
+            return;
+        }
+        // Our log already holds it and only rule 4 stands in the way (the departed
+        // log holds the same and has a larger ID): a new snapshot would be the
+        // same until someone edits, and then the edit itself unblocks it.
+        if ours
+            .and_then(|s| s.base.as_ref())
+            .is_some_and(|base| base.includes_vv(vmax))
+        {
+            return;
+        }
+        let folder = self.folder.get(doc).cloned().unwrap_or_default();
+        if self.absorbed.get(doc) == Some(&folder) {
+            return;
+        }
+        self.absorbed.insert(doc.clone(), folder);
+        self.stats.absorb_requests += 1;
+        self.inbox
+            .push_back(Message::SnapshotRequest { doc: doc.clone() });
+    }
+
+    /// Summary of the log of `doc` at `path`, from the cache while its length
+    /// and time are unchanged (unless `fresh`).
+    fn summary(&mut self, doc: &DocKey, path: &Path, fresh: bool) -> Option<LogSummary> {
+        if !fresh {
+            let stamp = match fs::metadata(path) {
+                Ok(m) => (m.len(), m.modified().ok()),
+                Err(e) => {
+                    self.note_cleanup_error(path, e);
+                    return None;
+                }
+            };
+            if let Some(cached) = self.summaries.get(path)
+                && stamp.1.is_some()
+                && cached.stamp == stamp
+            {
+                return Some(cached.clone());
+            }
+        }
+        match summarize_log(path, doc) {
+            Ok(Some(summary)) => {
+                self.summaries.insert(path.to_owned(), summary.clone());
+                Some(summary)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                self.note_cleanup_error(path, e);
+                None
+            }
+        }
+    }
+
+    /// Best-effort check whether `owner` runs a session: try to take its lock.
+    fn lock_owner(&self, owner: &str) -> OwnerLock {
+        let path = self.root.join(UPDATES).join(format!("{owner}.{LOCK_EXT}"));
+        let file = match File::open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return OwnerLock::Unknown,
+            // Cannot tell: assume it is running.
+            Err(_) => return OwnerLock::Busy,
+        };
+        match file.try_lock() {
+            Ok(()) => OwnerLock::Held(file),
+            Err(fs::TryLockError::WouldBlock) => OwnerLock::Busy,
+            Err(fs::TryLockError::Error(_)) => OwnerLock::Unknown,
+        }
+    }
+
+    /// Delete a leftover temporary file of a crashed writer.
+    fn remove_stale_file(&mut self, path: &Path, now: SystemTime, after: Duration) {
+        if file_age(path, now).is_some_and(|age| age > after) {
+            match fs::remove_file(path) {
+                Ok(()) => self.stats.stale_files_removed += 1,
+                Err(e) => self.note_cleanup_error(path, e),
+            }
+        }
+    }
+
+    /// Cleanup problems are reported like poll problems; a file that vanished
+    /// meanwhile (another cleaner, its owner compacting) is not a problem.
+    fn note_cleanup_error(&mut self, path: &Path, e: io::Error) {
+        if e.kind() != io::ErrorKind::NotFound {
+            self.last_error = Some(format!("cleanup {}: {e}", path.display()));
+        }
+    }
 }
 
 impl Transport for DirTransport {
@@ -855,11 +1254,12 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
     if actual < own.len {
         return Ok(false);
     }
-    let mut f = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .open(&path)
-        .map_err(SyncError::io(&path))?;
+    let mut f = match OpenOptions::new().read(true).append(true).open(&path) {
+        Ok(f) => f,
+        // Deleted since the check above (by a cleanup pass that took us for gone).
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(SyncError::io(&path)(e)),
+    };
     if actual > own.len {
         let same = read_header(&mut f)
             .map_err(SyncError::io(&path))?
@@ -874,8 +1274,57 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
     // still in the session's documents. Rewrites (compaction) are synced because
     // a rename must never expose a file whose data is not on disk.
     f.write_all(record).map_err(SyncError::io(&path))?;
-    own.len += record.len() as u64;
+    drop(f);
+    // Defence in depth against a cleanup pass elsewhere (§4.7) that took us for
+    // gone and deleted the log between the length check above and the write: on
+    // POSIX the record then went to an unlinked file nobody will ever read, while
+    // we would count it as written. So check that the path still has our bytes;
+    // if not, the caller rewrites the log and asks for a full snapshot, as for
+    // any repair. What remains is a cleaner that unlinks the log after this
+    // check, with our open, write, close and check all inside its own window
+    // between re-checking the log and unlinking it (one round trip). The cleaner
+    // only gets that far if for `inactive_after` (days) we wrote nothing and sent
+    // no heartbeat and it could take our lock, which we hold all session; and
+    // even then our next append finds the log missing and repairs it with a full
+    // snapshot, so only a last append before quitting without saving could be
+    // lost. That is acceptable. Unverifiable (another error): assume it is fine;
+    // the next append checks again.
+    let expected = own.len + record.len() as u64;
+    match fs::metadata(&path) {
+        Ok(m) if m.len() < expected => return Ok(false),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        _ => {}
+    }
+    own.len = expected;
     Ok(true)
+}
+
+/// Take the advisory lock at `path` for `client`'s session. File systems without
+/// locking are accepted as they are.
+fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
+    for attempt in 1..=LOCK_ATTEMPTS {
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+            .map_err(SyncError::io(path))?;
+        match lock.try_lock() {
+            Ok(()) => match fs::metadata(path) {
+                // A cleanup pass deleted the file we opened while it held the lock
+                // (§4.7): lock the file that is there now.
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                _ => return Ok(lock),
+            },
+            Err(fs::TryLockError::Error(_)) => return Ok(lock),
+            // Possibly a cleanup pass holding it for a moment.
+            Err(fs::TryLockError::WouldBlock) if attempt < LOCK_ATTEMPTS => {
+                std::thread::sleep(LOCK_RETRY);
+            }
+            Err(fs::TryLockError::WouldBlock) => {}
+        }
+    }
+    Err(SyncError::ClientIdInUse(client.clone()))
 }
 
 /// Every record of the log at `path`, decoded.
@@ -893,15 +1342,26 @@ fn read_all_records(path: &Path) -> Result<Vec<Message>, SyncError> {
         .collect())
 }
 
-/// Files with extension `ext` under `dir`, as `(directory relative to the walk
-/// root with '/' separators, file stem, path)`.
-fn walk(
-    dir: &Path,
-    rel: String,
-    depth: usize,
-    ext: &str,
-    out: &mut Vec<(String, String, PathBuf)>,
-) {
+/// Files with extension `ext` under `dir`, as `(directory relative to `dir` with
+/// '/' separators, file stem, path)`.
+fn walk(dir: &Path, ext: &str) -> Vec<(String, String, PathBuf)> {
+    let mut files = Vec::new();
+    walk_files(dir, String::new(), 0, &mut files);
+    files
+        .into_iter()
+        .filter_map(|(rel, _, path)| {
+            if path.extension().and_then(|e| e.to_str()) != Some(ext) {
+                return None;
+            }
+            let stem = path.file_stem()?.to_str()?.to_owned();
+            Some((rel, stem, path))
+        })
+        .collect()
+}
+
+/// Every file under `dir`, as `(directory relative to the walk root with '/'
+/// separators, file name, path)`.
+fn walk_files(dir: &Path, rel: String, depth: usize, out: &mut Vec<(String, String, PathBuf)>) {
     if depth > MAX_DEPTH {
         return;
     }
@@ -922,13 +1382,110 @@ fn walk(
             } else {
                 format!("{rel}/{name}")
             };
-            walk(&path, child, depth + 1, ext, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some(ext)
-            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-        {
-            out.push((rel.clone(), stem.to_owned(), path.clone()));
+            walk_files(&path, child, depth + 1, out);
+        } else {
+            out.push((rel.clone(), name, path));
         }
     }
+}
+
+/// How long ago `path` was modified; `None` if it does not exist. Unknown or
+/// future times count as "just now".
+fn file_age(path: &Path, now: SystemTime) -> Option<Duration> {
+    match fs::metadata(path) {
+        Ok(m) => Some(
+            m.modified()
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .unwrap_or_default(),
+        ),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(_) => Some(Duration::ZERO),
+    }
+}
+
+/// Record a sign of life of `owner` `age` ago (keeping the youngest).
+fn note_idle(idle: &mut BTreeMap<String, Duration>, owner: &str, age: Duration) {
+    idle.entry(owner.to_owned())
+        .and_modify(|a| *a = (*a).min(age))
+        .or_insert(age);
+}
+
+/// Whether the log `m` (owner `y`) holds everything in the log `l` (owner `x`), so
+/// that `l` may be deleted in its favour (§4.7, rules 3 and 4). `l` must be
+/// `complete` for its `vmax` to mean anything; the caller checks that.
+fn may_replace(m: &LogSummary, y: &str, l: &LogSummary, x: &str) -> bool {
+    let holds = |container: &LogSummary, vmax: &VersionVector| {
+        container
+            .base
+            .as_ref()
+            .is_some_and(|base| base.includes_vv(vmax))
+    };
+    // `m.vmax` only counts the records we understand, so `l` may look like a
+    // container of `m` when it is not: that only makes us stricter.
+    holds(m, &l.vmax) && (!holds(l, &m.vmax) || x < y)
+}
+
+/// Read the log of `doc` at `path` for the cleanup. `Ok(None)`: it changed while
+/// being read.
+fn summarize_log(path: &Path, doc: &DocKey) -> io::Result<Option<LogSummary>> {
+    let stamp = |m: fs::Metadata| (m.len(), m.modified().ok());
+    let before = stamp(fs::metadata(path)?);
+    let mut bytes = Vec::new();
+    File::open(path)?.read_to_end(&mut bytes)?;
+    let after = stamp(fs::metadata(path)?);
+    if before != after || after.0 != bytes.len() as u64 {
+        return Ok(None);
+    }
+    Ok(Some(summarize(&bytes, doc, after)))
+}
+
+fn summarize(bytes: &[u8], doc: &DocKey, stamp: (u64, Option<SystemTime>)) -> LogSummary {
+    let (records, used) = parse_records(bytes);
+    let mut summary = LogSummary {
+        stamp,
+        base: None,
+        vmax: VersionVector::new(),
+        complete: used == bytes.len(),
+    };
+    let mut records = records.into_iter();
+    let header = records
+        .next()
+        .filter(|p| p.len() <= MAX_HEADER)
+        .and_then(parse_header);
+    if !header.is_some_and(|h| h.doc == doc.as_str()) {
+        summary.complete = false;
+        return summary;
+    }
+    for (i, payload) in records.enumerate() {
+        let (snapshot, version, data) = match Message::decode(payload) {
+            Ok(Message::Updates {
+                doc: d,
+                version,
+                data,
+            }) if d == *doc => (false, version, data),
+            Ok(Message::Snapshot {
+                doc: d,
+                version,
+                data,
+            }) if d == *doc => (true, version, data),
+            _ => {
+                summary.complete = false;
+                continue;
+            }
+        };
+        summary.vmax.merge(&version);
+        match LoroDoc::decode_import_blob_meta(&data, true) {
+            Ok(meta) => {
+                summary.vmax.merge(&meta.partial_end_vv);
+                if i == 0 && snapshot && meta.mode == EncodedBlobMode::Snapshot {
+                    summary.base = Some(meta.partial_end_vv);
+                }
+            }
+            Err(_) => summary.complete = false,
+        }
+    }
+    summary
 }
 
 fn new_generation() -> String {
@@ -999,13 +1556,13 @@ fn read_header(f: &mut File) -> io::Result<Option<(LogHeader, u64)>> {
     if head[4..] != checksum(&payload) {
         return Ok(None);
     }
-    let Ok(header) = serde_json::from_slice::<LogHeader>(&payload) else {
-        return Ok(None);
-    };
-    if header.format != LOG_FORMAT || header.version > LOG_VERSION {
-        return Ok(None);
-    }
-    Ok(Some((header, (RECORD_HEADER + len) as u64)))
+    Ok(parse_header(&payload).map(|header| (header, (RECORD_HEADER + len) as u64)))
+}
+
+/// A header record's payload, if it is one this build can read.
+fn parse_header(payload: &[u8]) -> Option<LogHeader> {
+    let header = serde_json::from_slice::<LogHeader>(payload).ok()?;
+    (header.format == LOG_FORMAT && header.version <= LOG_VERSION).then_some(header)
 }
 
 #[cfg(test)]
@@ -1029,5 +1586,120 @@ mod tests {
         let mut bad = log.clone();
         bad[full + RECORD_HEADER] ^= 1;
         assert_eq!(parse_records(&bad).0.len(), 2);
+    }
+
+    fn header(doc: &str) -> Vec<u8> {
+        let header = LogHeader {
+            format: LOG_FORMAT.to_owned(),
+            version: LOG_VERSION,
+            doc: doc.to_owned(),
+            client: "x".to_owned(),
+            generation: new_generation(),
+        };
+        encode_record(&serde_json::to_vec(&header).unwrap())
+    }
+
+    fn record(msg: Message) -> Vec<u8> {
+        encode_record(&msg.encode())
+    }
+
+    /// A Loro document at two versions: its snapshot at the first, its update
+    /// from the first to the second.
+    fn two_versions() -> (VersionVector, Vec<u8>, VersionVector, Vec<u8>) {
+        use bae_model::loro::ExportMode;
+        let doc = LoroDoc::new();
+        doc.get_map("m").insert("a", 1).unwrap();
+        doc.commit();
+        let v1 = doc.oplog_vv();
+        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+        doc.get_map("m").insert("b", 2).unwrap();
+        doc.commit();
+        let v2 = doc.oplog_vv();
+        let update = doc.export(ExportMode::updates(&v1)).unwrap();
+        (v1, snapshot, v2, update)
+    }
+
+    #[test]
+    fn summaries_bound_what_a_log_holds() {
+        let root = DocKey::parse("root").unwrap();
+        let other = DocKey::parse("anim/a").unwrap();
+        let (v1, snapshot, v2, update) = two_versions();
+        let snap = |doc: &DocKey| {
+            record(Message::Snapshot {
+                doc: doc.clone(),
+                version: v1.clone(),
+                data: snapshot.clone(),
+            })
+        };
+        let upd = |doc: &DocKey, data: &[u8]| {
+            record(Message::Updates {
+                doc: doc.clone(),
+                version: v2.clone(),
+                data: data.to_vec(),
+            })
+        };
+        let summary = |parts: &[Vec<u8>]| summarize(&parts.concat(), &root, (0, None));
+
+        // Starts with a snapshot: self-contained up to exactly the snapshot; the
+        // later delta only raises the upper bound.
+        let s = summary(&[header("root"), snap(&root), upd(&root, &update)]);
+        assert!(s.complete);
+        assert_eq!(s.base, Some(v1.clone()));
+        assert_eq!(s.vmax, v2);
+        // Starts with a delta: not self-contained, even with a snapshot later.
+        let s = summary(&[header("root"), upd(&root, &update), snap(&root)]);
+        assert!(s.complete);
+        assert_eq!(s.base, None);
+        assert_eq!(s.vmax, v2);
+
+        // Anything we do not understand makes the log incomplete.
+        let full = [header("root"), snap(&root), upd(&root, &update)].concat();
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("unknown message type", encode_record(&[0x7f, 1, 2, 3])),
+            ("not a Loro blob", upd(&root, b"not loro")),
+            ("record of another document", upd(&other, &update)),
+            ("torn tail", upd(&root, &update)[..20].to_vec()),
+        ];
+        for (what, extra) in cases {
+            let s = summary(&[full.clone(), extra]);
+            assert!(!s.complete, "{what}");
+            assert_eq!(s.base, Some(v1.clone()), "{what}");
+        }
+        let s = summary(&[header("anim/a"), snap(&root)]);
+        assert!(!s.complete, "header of another document");
+        assert_eq!(s.base, None);
+        let mut corrupt = header("root");
+        corrupt[RECORD_HEADER] ^= 1;
+        assert!(!summary(&[corrupt, snap(&root)]).complete, "corrupt header");
+    }
+
+    #[test]
+    fn a_log_is_only_replaced_by_one_that_holds_it() {
+        let (v1, _, v2, _) = two_versions();
+        let log = |base: Option<&VersionVector>, vmax: &VersionVector| LogSummary {
+            stamp: (0, None),
+            base: base.cloned(),
+            vmax: vmax.clone(),
+            complete: true,
+        };
+        let small = log(Some(&v1), &v1);
+        let full = log(Some(&v2), &v2);
+        // Strictly smaller: only that one goes, whatever the IDs.
+        assert!(may_replace(&full, "a", &small, "z"));
+        assert!(!may_replace(&small, "z", &full, "a"));
+        // A snapshot followed by more: its base is what counts as held.
+        let more = log(Some(&v1), &v2);
+        assert!(!may_replace(&more, "a", &full, "z"));
+        assert!(may_replace(&full, "z", &more, "a"));
+        assert!(may_replace(&full, "a", &more, "z"));
+        // Not self-contained: never a container, so it may go even when its
+        // versions equal the container's and its ID is larger.
+        let deltas = log(None, &v2);
+        assert!(!may_replace(&deltas, "a", &small, "z"));
+        assert!(may_replace(&full, "a", &deltas, "z"));
+        // Holding exactly the same: only the smaller ID goes, so two cleaners can
+        // never delete both.
+        assert!(may_replace(&full, "b", &full.clone(), "a"));
+        assert!(!may_replace(&full, "a", &full.clone(), "b"));
     }
 }
