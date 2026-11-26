@@ -34,6 +34,8 @@
 //! | `key.move` | dragging keyframes |
 //! | `key.delete` | deleting keyframes |
 //! | `key.reverse` | Keyframe Assistant > Time-Reverse Keyframes |
+//! | `key.exponential_scale` | Keyframe Assistant > Exponential Scale |
+//! | `layer.sequence` | Keyframe Assistant > Sequence Layers |
 //! | `key.paste` | pasting keyframes |
 //! | `key.edit` | Graph Editor drags (key time / value, Bezier handles, transform box), keyframe dialogs |
 //! | `transform.separate_dimensions` | Animation > Separate Dimensions (Position → X / Y / Z Position) |
@@ -107,14 +109,15 @@ pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
 pub use keys::{
-    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
-    PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
-    apply_key_edits, set_default_spatial_linear,
+    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
+    KeysOutput, MoveKeys, PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany,
+    ValueEdit, apply_key_edits, set_default_spatial_linear,
 };
 pub use layer::{
     CopiedLayer, CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS,
-    LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SetLayerAttr, SetParent, ShapePreset,
-    ShiftLayers, SlipLayers, SplitLayers, TrimLayers, copy_layers,
+    LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SequenceLayers, SequenceTransition,
+    SetLayerAttr, SetParent, ShapePreset, ShiftLayers, SlipLayers, SplitLayers, TrimLayers,
+    copy_layers,
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 pub use matte::SetTrackMatte;
@@ -158,6 +161,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimLayers),
         r.register(ShiftLayers),
         r.register(SlipLayers),
+        r.register(SequenceLayers),
         r.register(SetTrackMatte),
         r.register(DeleteLayers),
         r.register(DeleteItems),
@@ -171,6 +175,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(MoveKeys),
         r.register(DeleteKeys),
         r.register(ReverseKeys),
+        r.register(ExponentialScale),
         r.register(PasteKeys),
         r.register(EditKeys),
         r.register(SeparateDimensions),
