@@ -1126,23 +1126,7 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
 
 /// Shows `path` in Finder / Explorer (Reveal Preferences).
 fn reveal(path: &std::path::Path) {
-    let result = if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(path)
-            .spawn()
-    } else if cfg!(windows) {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .spawn()
-    } else {
-        std::process::Command::new("xdg-open")
-            .arg(path.parent().unwrap_or(path))
-            .spawn()
-    };
-    if let Err(error) = result {
-        tracing::warn!("could not reveal {}: {error}", path.display());
-    }
+    bae_platform::reveal(path);
 }
 
 /// Draws `shapes` (this frame's UI, textures already uploaded) offscreen and

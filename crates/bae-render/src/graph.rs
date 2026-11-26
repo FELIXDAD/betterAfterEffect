@@ -167,7 +167,7 @@ pub enum NodeKind {
     /// Pixels from a [`LayerSource`] (footage, shapes, text, generators).
     Source(SourceNode),
     /// An effect applied to its input.
-    Effect(EffectNode),
+    Effect(Box<EffectNode>),
     /// A layer's masks combined into one coverage image (layer space).
     Mask(MaskNode),
     /// An adjustment layer's result mixed into its backdrop.
@@ -386,6 +386,8 @@ pub struct EffectFrame {
     pub time: Time,
     /// Comp time.
     pub comp_time: Time,
+    /// Composition time corresponding to zero on the layer clock.
+    pub layer_start_time: Time,
     /// Comp time when the layer first becomes active.
     pub layer_in: Time,
     /// Comp-time seconds per layer-time second.
@@ -411,8 +413,8 @@ pub struct EffectFrame {
 impl EffectFrame {
     /// Map a layer sample time to the corresponding composition time.
     pub fn comp_at(&self, local: Time) -> Time {
-        self.comp_time
-            + Time::from_seconds((local - self.time).as_seconds() * self.layer_time_scale)
+        self.layer_start_time
+            + Time::from_flicks((local.flicks() as f64 * self.layer_time_scale).round() as i64)
     }
 
     /// The parameters of `instance` in this frame.
@@ -884,6 +886,7 @@ impl Builder<'_, '_> {
         let frame = EffectFrame {
             time: layer.time,
             comp_time: comp.time,
+            layer_start_time: layer.start_time,
             layer_time_scale: layer.time_scale,
             layer_in: layer.in_point,
             scale: 1.0 / scale,
@@ -1539,6 +1542,7 @@ impl Builder<'_, '_> {
         let frame = EffectFrame {
             time: layer.time,
             comp_time: comp.time,
+            layer_start_time: layer.start_time,
             layer_time_scale: layer.time_scale,
             layer_in: layer.in_point,
             scale: 1.0 / scale,
@@ -1838,7 +1842,7 @@ impl Builder<'_, '_> {
             })
         });
         Ok(self.push(Node {
-            kind: NodeKind::Effect(EffectNode {
+            kind: NodeKind::Effect(Box::new(EffectNode {
                 scene,
                 layer: layer.path.clone(),
                 effect,
@@ -1848,7 +1852,7 @@ impl Builder<'_, '_> {
                 layers,
                 masks,
                 samples,
-            }),
+            })),
             rect,
             pixel_scale: scale,
             key: h.finish(),
@@ -1966,6 +1970,7 @@ impl Builder<'_, '_> {
             let frame = EffectFrame {
                 time: layer.time,
                 comp_time: comp.time,
+                layer_start_time: layer.start_time,
                 layer_time_scale: layer.time_scale,
                 layer_in: layer.in_point,
                 scale: 1.0 / scale,
