@@ -6,6 +6,11 @@ struct Params {
     flags: u32,
     opacity: f32,
     gradient: vec4f,
+    // The Clone Stamp (style 6): where a dab reads, relative to it.
+    offset: vec2f,
+    pad: vec2f,
+    // Restore (style 7): the image the dabs bring back.
+    restore: FxImage,
 }
 
 struct Mark {
@@ -19,6 +24,7 @@ struct Mark {
 @group(0) @binding(2) var dst: texture_storage_2d<WORKING_FORMAT, write>;
 @group(0) @binding(3) var<storage, read> marks: array<Mark>;
 @group(0) @binding(4) var<storage, read> bins: array<u32>;
+@group(0) @binding(5) var restore_src: texture_2d<f32>;
 
 fn segment_distance(rel: vec2f, delta: vec2f, inv_len_squared: f32) -> f32 {
     let t = clamp(dot(rel, delta) * inv_len_squared, 0.0, 1.0);
@@ -115,6 +121,16 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         case 4u: { result = base + paint * (1.0 - base.a); }
         // The Paint effect's Eraser.
         case 5u: { result = base * (1.0 - paint.a); }
+        // The Clone Stamp: the image at the offset, through the dabs.
+        case 6u: {
+            let source = fx_bilinear(src, u.input, point + u.offset, false);
+            result = source * paint.a + base * (1.0 - paint.a);
+        }
+        // Eraser, Paint Only / Last Stroke Only: back to an earlier image.
+        case 7u: {
+            let back = fx_sample(restore_src, u.restore, point, false);
+            result = back * paint.a + base * (1.0 - paint.a);
+        }
         default: { result = paint; }
     }
     if (u.flags & 0x80000000u) == 0u {
