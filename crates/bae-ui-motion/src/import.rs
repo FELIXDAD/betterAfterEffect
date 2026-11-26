@@ -339,7 +339,7 @@ fn import_into(
             ));
     }
     if !probed.files.is_empty() {
-        let mut params = json!({ "files": probed.files });
+        let mut params = json!({ "files": probed.files, "folder_label": crate::prefs::current(cx.resources).int("labels.label_default_folder") });
         if let Some(p) = parent {
             params["parent"] = json!(p);
         }
