@@ -775,7 +775,7 @@ impl SettingsDialog {
                                 if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0)
                                     .changed()
                                 {
-                                    draft.set(p.key, options[selected].value);
+                                    self.set(p.key, options[selected].value);
                                 }
                             });
                             return;
