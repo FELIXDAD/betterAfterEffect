@@ -11,6 +11,8 @@
 //! Choose Folder…) from [`SettingsDialog::take_requests`]; every other button is
 //! drawn disabled.
 
+mod expression_preview;
+
 use bae_prefs::schema::{self, Item, Kind, PAGES, Pref, Style};
 use bae_prefs::{Preferences, parse_color, parse_timecode};
 use egui::{Color32, Key, RichText, Ui, vec2};
@@ -66,6 +68,11 @@ pub fn register(app: &mut bae_app::AppBuilder) {
         .filter(|(en, _)| !crate::i18n::has_translation(en))
         .collect();
     crate::i18n::register(&new);
+    crate::i18n::register(&[
+        ("System Default", "系统默认值"),
+        ("Output device unavailable", "输出设备不可用"),
+        ("Current device buffer", "当前设备缓冲区"),
+    ]);
     let zh = |en: &'static str| bae_prefs::i18n::zh(en).unwrap_or(en);
     let owner = app.current_owner();
     let actions = app.registry::<crate::ActionInfo>();
@@ -124,6 +131,7 @@ pub fn apply(prefs: &Preferences) {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
+    crate::theme::set_accessible_contrast(prefs.bool("appearance.accessibility_color_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
     ));
@@ -316,6 +324,12 @@ pub struct SettingsDialog {
     page: usize,
     draft: Preferences,
     requests: Vec<Request>,
+    audio_device: String,
+    system_output: String,
+    audio_outputs: std::sync::Arc<[(String, String)]>,
+    audio_channels: u16,
+    audio_rate: u32,
+    audio_buffer_ms: Option<f64>,
     /// Buttons the host implements (others are drawn disabled); `choose` stands
     /// for every Choose… button.
     host_buttons: Vec<String>,
@@ -325,6 +339,27 @@ pub struct SettingsDialog {
 }
 
 impl SettingsDialog {
+    /// Update the Audio page from the already-open preview stream.
+    pub fn set_audio_output(
+        &mut self,
+        output: Option<(&str, u16, u32)>,
+        buffer_ms: Option<f64>,
+        system_output: &str,
+        outputs: std::sync::Arc<[(String, String)]>,
+    ) {
+        if self.system_output != system_output {
+            system_output.clone_into(&mut self.system_output);
+        }
+        self.audio_outputs = outputs;
+        let (name, channels, rate) = output.unwrap_or(("", 0, 0));
+        if self.audio_device != name {
+            name.clone_into(&mut self.audio_device);
+        }
+        self.audio_channels = channels;
+        self.audio_rate = rate;
+        self.audio_buffer_ms = buffer_ms;
+    }
+
     /// Buttons the host handles from [`Self::take_requests`]; every other button
     /// is drawn disabled.
     pub fn with_host_buttons(mut self, ids: &[&str]) -> Self {
@@ -543,7 +578,7 @@ impl SettingsDialog {
             }
             Item::Group(title, list) => {
                 ui.add_space(4.0);
-                ui.add_enabled_ui(*title != "Mercury Transmit", |ui| {
+                ui.add_enabled_ui(!Item::unsupported(list), |ui| {
                     ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
                     egui::Frame::new()
                         .stroke(egui::Stroke::new(1.0, color::DIVIDER))
@@ -573,12 +608,16 @@ impl SettingsDialog {
             Item::Info(label, value) => {
                 ui.horizontal(|ui| {
                     if !label.is_empty() {
-                        let label = if *value == "<InstalledRAM - ReservedRAM> GB" {
-                            "RAM Available for BAE:"
-                        } else {
-                            label
-                        };
                         ui.label(tr(label));
+                    }
+                    if *label == "Sample Rate:" && self.page() == "audio" {
+                        let rate = if self.audio_rate == 0 {
+                            "—".to_owned()
+                        } else {
+                            format!("{} Hz", self.audio_rate)
+                        };
+                        ui.label(RichText::new(rate).color(color::TEXT_DIM));
+                        return;
                     }
                     let bytes = match *value {
                         "<InstalledRAM> GB" => self.installed_ram,
@@ -621,7 +660,7 @@ impl SettingsDialog {
                         ui.add_space(40.0);
                     });
             }
-            Item::Preview(_) => self.expression_preview(ui),
+            Item::Preview(_) => expression_preview::show(ui, &self.draft),
             Item::When(w, item) => {
                 let on = self.draft.holds(w);
                 ui.add_enabled_ui(on, |ui| self.item(ui, item));
@@ -645,10 +684,7 @@ impl SettingsDialog {
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
-        let enabled = !matches!(
-            p.key,
-            "project.dynamic_link_highest_number" | "export.preview_output_during_render_queue"
-        ) && self.draft.enabled(p);
+        let enabled = !p.unsupported && self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 if p.indent {
@@ -666,8 +702,15 @@ impl SettingsDialog {
         let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = p.key != "video.enable_mercury_transmit" && draft.bool(p.key);
-                if widgets::checkbox(ui, &mut v, label).changed() {
+                // A setting BAE does not support shows AE's default (greyed;
+                // Mercury Transmit: off), whatever a preferences file saved for
+                // it; the saved value stays.
+                let mut v = if p.unsupported {
+                    matches!(p.default, bae_prefs::DefaultValue::Bool(true))
+                } else {
+                    draft.bool(p.key)
+                };
+                if widgets::checkbox(ui, &mut v, label).changed() && !p.unsupported {
                     self.set(p.key, v);
                 }
             }
@@ -719,14 +762,91 @@ impl SettingsDialog {
                 }
                 ui.label(RichText::new(tr(right)).color(color::TEXT_DIM));
             }
+            Kind::AudioOutput => {
+                field_label(ui, shown);
+                let device = if self.system_output.is_empty() {
+                    "—"
+                } else {
+                    &self.system_output
+                };
+                let system = format!("{} - {device}", tr("System Default"));
+                let mut choices = vec![("system_default", system.as_str())];
+                choices.extend(
+                    self.audio_outputs
+                        .iter()
+                        .map(|(id, name)| (id.as_str(), name.as_str())),
+                );
+                let available = choices.len();
+                let current = draft.str(p.key);
+                let mut selected = choices
+                    .iter()
+                    .position(|(id, _)| *id == current)
+                    .unwrap_or_else(|| {
+                        choices.push((current, tr("Output device unavailable")));
+                        choices.len() - 1
+                    });
+                let labels: Vec<_> = choices.iter().map(|(_, name)| *name).collect();
+                let source = |index| match index {
+                    0 => Some(crate::a11y::SYSTEM_OUTPUT),
+                    i if i < available => Some(crate::a11y::VERBATIM_VALUE),
+                    _ => None, // The unavailable-device fallback is UI text.
+                };
+                if widgets::dropdown_with_source(ui, p.key, &mut selected, &labels, 220.0, source)
+                    .changed()
+                {
+                    self.set(p.key, choices[selected].0.to_owned());
+                }
+            }
             Kind::Choice { options, style } => {
                 let current = draft.str(p.key).to_owned();
                 match style {
                     Style::Dropdown => {
                         field_label(ui, shown);
+                        if matches!(p.key, "audio.audio_map_left" | "audio.audio_map_right") {
+                            let device = if self.audio_device.is_empty() {
+                                "—"
+                            } else {
+                                &self.audio_device
+                            };
+                            let mut selected =
+                                options.iter().position(|o| o.value == current).unwrap_or(0);
+                            let names = if self.audio_channels == 0 {
+                                vec!["—".to_owned()]
+                            } else {
+                                (1..=self.audio_channels.clamp(1, 2))
+                                    .map(|n| format!("{device} {n}"))
+                                    .collect()
+                            };
+                            selected = selected.min(names.len() - 1);
+                            let labels: Vec<_> = names.iter().map(String::as_str).collect();
+                            ui.add_enabled_ui(self.audio_channels > 0, |ui| {
+                                if widgets::dropdown_with_source(
+                                    ui,
+                                    p.key,
+                                    &mut selected,
+                                    &labels,
+                                    220.0,
+                                    |_| Some(crate::a11y::VERBATIM_VALUE),
+                                )
+                                .changed()
+                                {
+                                    self.set(p.key, options[selected].value);
+                                }
+                            });
+                            return;
+                        }
                         let names: Vec<&str> = options.iter().map(|o| tr(o.label)).collect();
                         let mut i = options.iter().position(|o| o.value == current).unwrap_or(0);
-                        if widgets::dropdown(ui, p.key, &mut i, &names, 220.0).changed() {
+                        let response = widgets::dropdown(ui, p.key, &mut i, &names, 220.0);
+                        if p.key == "audio.audio_latency_ms"
+                            && let Some(ms) = self.audio_buffer_ms
+                        {
+                            response.clone().on_hover_text(format!(
+                                "{}: {ms:.1} ms",
+                                tr("Current device buffer")
+                            ));
+                        }
+                        if response.changed() {
                             self.set(p.key, options[i].value);
                         }
                     }
@@ -813,44 +933,12 @@ impl SettingsDialog {
             Kind::Path => {
                 let path = draft.str(p.key);
                 let path = if path.is_empty() { "—" } else { path };
-                ui.label(RichText::new(path).color(color::TEXT_DIM))
+                let response = ui
+                    .label(RichText::new(path).color(color::TEXT_DIM))
                     .on_hover_text(label);
+                crate::a11y::value_source(&response, crate::a11y::VERBATIM_VALUE);
             }
         }
-    }
-
-    /// Expression editor preview (Scripting & Expressions): a few lines of code
-    /// in the editor's font size and colors.
-    fn expression_preview(&self, ui: &mut Ui) {
-        let p = &self.draft;
-        let c = |k: &str| {
-            let [r, g, b] = p.color(&format!("scripting_expressions.expr_color_{k}"));
-            Color32::from_rgb(r, g, b)
-        };
-        let size = p.int(bae_prefs::keys::EXPR_FONT_SIZE) as f32;
-        let font = egui::FontId::monospace(size);
-        let mut job = egui::text::LayoutJob::default();
-        let mut add = |text: &str, color: Color32| {
-            job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
-        };
-        add("// wiggle the position\n", c("comments"));
-        add("var ", c("keywords"));
-        add("amp", c("identifiers"));
-        add(" = ", c("operators"));
-        add("20", c("numbers"));
-        add(";\n", c("default"));
-        add("wiggle", c("identifiers"));
-        add("(", c("default"));
-        add("2", c("numbers"));
-        add(", amp); ", c("default"));
-        add("\"done\"", c("strings"));
-        egui::Frame::new()
-            .fill(c("background"))
-            .inner_margin(6)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 4.0);
-                ui.label(job);
-            });
     }
 }
 
@@ -927,7 +1015,7 @@ fn label_index(key: &str) -> usize {
 }
 
 /// A label's name as shown: the user's name, or the translated default.
-fn label_name(p: &Preferences, i: usize) -> String {
+pub fn label_name(p: &Preferences, i: usize) -> String {
     let name = p.label_name(i);
     if i == 0 || name.is_empty() || name == schema::LABEL_NAMES[i] {
         tr(schema::LABEL_NAMES[i]).to_owned()

@@ -18,6 +18,18 @@ use crate::util::{ensure_unlocked, fail, write_attr};
 /// The attribute holding the path of a mask or shape Path prim.
 pub const PATH_ATTR: &str = "path";
 
+/// Center of a drawn Pen path, including cubic extrema. A point has no segments.
+pub fn drawing_center(path: &BezierPath) -> [f64; 2] {
+    use bae_vector::kurbo::Shape;
+    if let [vertex] = path.vertices.as_slice()
+        && !path.closed
+    {
+        return *vertex;
+    }
+    let c = bae_vector::path::to_bez_path(path).bounding_box().center();
+    [c.x, c.y]
+}
+
 type P = [f64; 2];
 
 fn add(a: P, b: P) -> P {
@@ -322,6 +334,50 @@ fn edit_all(
 
 pub struct SetVertices;
 
+/// A topology edit to repeat on the other keys of an animated mask.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskTopologyEdit {
+    RemoveVertices(Vec<usize>),
+    AddFeather(bae_model::FeatherPoint),
+    RemoveFeather(usize),
+}
+
+impl MaskTopologyEdit {
+    fn apply(&self, source: &BezierPath) -> Result<BezierPath, CommandError> {
+        let mut path = source.clone();
+        match self {
+            Self::RemoveVertices(indices) => {
+                let mut indices = indices.clone();
+                indices.sort_unstable();
+                indices.dedup();
+                for i in indices.into_iter().rev() {
+                    if i < path.vertices.len() && path.vertices.len() > 1 {
+                        path = remove(&path, i);
+                    }
+                }
+            }
+            Self::AddFeather(point) => {
+                let mut point = *point;
+                let count = segment_count(&path);
+                if count == 0 {
+                    return Err(fail(
+                        "cannot add a feather point to a path without segments",
+                    ));
+                }
+                point.segment = point.segment.min((count - 1) as u32);
+                path.feather.push(point);
+            }
+            Self::RemoveFeather(index) => {
+                if *index < path.feather.len() {
+                    path.feather.remove(*index);
+                }
+            }
+        }
+        Ok(path)
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SetVerticesParams {
     /// The mask or shape Path prim.
@@ -329,6 +385,7 @@ pub struct SetVerticesParams {
     /// Keyframe time in flicks (layer time) when the path is animated.
     #[serde(default)]
     pub time: Option<Time>,
+    pub topology: Option<MaskTopologyEdit>,
     /// The new path (layer space for masks, group space for shape paths).
     #[serde(flatten)]
     pub shape: BezierPath,
@@ -355,6 +412,13 @@ impl Command for SetVertices {
             .prim(&p.path)
             .and_then(|v| v.prim_type().cloned())
             == Some(PrimType::MASK);
+        if is_mask
+            && let Some(edit) = p.topology.as_ref()
+            && query::attr_spec(tx.stage(), &p.path, PATH_ATTR)
+                .is_some_and(|a| !a.keyframes.is_empty())
+        {
+            edit_all(tx, &p.path, |b| edit.apply(b))?;
+        }
         let was_open = matches!(
             tx.stage().prim(&p.path).and_then(|v| query::static_value(&v, PATH_ATTR)),
             Some(Value::Bezier(ref b)) if !b.closed

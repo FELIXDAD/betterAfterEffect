@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::session::SharedSession;
+pub(crate) mod builtins;
 
 /// Extension of BAE's preset files.
 pub const EXTENSION: &str = "baepreset";
@@ -206,7 +207,11 @@ pub(crate) fn preset_of(stage: &Stage, effects: &[PrimPath], t: Time) -> Preset 
                     Some((a.to_owned(), v))
                 })
                 .collect();
-            Some(PresetEffect { match_name, values })
+            Some(PresetEffect {
+                match_name,
+                values,
+                ..Default::default()
+            })
         })
         .collect();
     Preset {
@@ -315,7 +320,7 @@ pub(crate) fn apply_to_layers(
     }
     cx.invoke_with(
         "effect.apply_preset",
-        json!({"layers":layers,"effects":effects}),
+        json!({"layers":layers,"effects":effects,"time":crate::common::session(cx.resources).lock().active_time()}),
     );
     cx.invoke_with(
         bae_ui::action::ids::OPEN_PANEL,
@@ -342,6 +347,7 @@ pub(crate) fn apply(cx: &mut PanelContext<'_>, session: &SharedSession) {
 /// Registers the Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(builtins::ZH);
 }
 
 /// Chinese for presets (AE 26).
@@ -375,6 +381,7 @@ mod tests {
                 values: [("param:1".to_owned(), bae_model::Value::Float(25.0))]
                     .into_iter()
                     .collect(),
+                ..Default::default()
             }],
         };
         let dir = std::env::temp_dir().join(format!("bae-presets-{}", std::process::id()));

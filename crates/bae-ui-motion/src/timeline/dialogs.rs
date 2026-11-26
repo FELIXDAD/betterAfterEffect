@@ -626,7 +626,9 @@ pub(super) fn show(ctx: &egui::Context, cx: &mut PanelContext<'_>, session: &Sha
             match &mut dialog {
                 KeyDialog::Interpolation(d) => interpolation_body(ui, stage, d),
                 KeyDialog::Velocity(d) => velocity_body(ui, d),
-                KeyDialog::Marker(d) => super::markers::marker_body(ui, d),
+                KeyDialog::Marker(d) => {
+                    super::markers::marker_body(ui, d, &crate::prefs::current(cx.resources))
+                }
                 KeyDialog::Sequence(d) => sequence_body(ui, d),
             }
             ui.add_space(10.0);

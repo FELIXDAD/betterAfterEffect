@@ -17,7 +17,7 @@
 mod shortcuts;
 mod workspaces;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bae_app::{App, Registry, RegistrySnapshot, Resources};
@@ -65,6 +65,9 @@ pub struct WorkbenchState {
     /// as "Custom.txt"; the built-in preset when absent).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub shortcut_presets: BTreeMap<String, String>,
+    /// Panels whose first-use instruction the user dismissed.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub dismissed_coachmarks: BTreeSet<String>,
     /// Workspace bar order chosen in Edit Workspaces (ids; others follow).
     pub order: Vec<String>,
     /// Workspaces not shown in the bar (still in Window > Workspace).
@@ -139,6 +142,8 @@ pub struct Workbench {
     /// Workspaces sorted by order, rebuilt when the registry changes.
     workspaces: Vec<(String, Arc<WorkspacePreset>)>,
     presets_gen: u64,
+    #[cfg(target_os = "macos")]
+    standard_system_shortcuts: bool,
     keymaps_gen: u64,
     extensions_gen: u64,
     active: String,
@@ -186,6 +191,9 @@ impl Workbench {
     /// Menu items (`Registry<MenuItemSpec>`), for the Keyboard Shortcuts tree.
     pub fn with_menus(mut self, menus: Arc<Registry<crate::menu::MenuItemSpec>>) -> Self {
         self.menus = menus;
+        for (id, custom) in &self.state.custom {
+            self.register_workspace_menu(id, &custom.title);
+        }
         self
     }
 
@@ -223,6 +231,7 @@ impl Workbench {
     /// dialog. Hosts use it to disable the native menu bar, like AE.
     pub fn modal_open(&self, resources: &bae_app::Resources) -> bool {
         self.role_picker_open()
+            || self.dialogs.naming_workspace()
             || self.external_modal
             || self.editor.open
             || self
@@ -327,6 +336,8 @@ impl Workbench {
             dialogs: workspaces::Dialogs::default(),
             workspaces: Vec::new(),
             presets_gen: u64::MAX,
+            #[cfg(target_os = "macos")]
+            standard_system_shortcuts: true,
             keymaps_gen: u64::MAX,
             extensions_gen: u64::MAX,
             active: String::new(),
@@ -407,6 +418,12 @@ impl Workbench {
     pub fn state(&mut self) -> WorkbenchState {
         self.capture();
         self.state.clone()
+    }
+
+    /// Show previously dismissed panel instructions again.
+    pub fn reset_coachmarks(&mut self) {
+        self.state.dismissed_coachmarks.clear();
+        self.save_requested = true;
     }
 
     /// Model commands `(id, English title)` the shortcut editor lists in addition
@@ -575,6 +592,42 @@ impl Workbench {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn set_standard_system_shortcuts(&mut self, standard: bool) {
+        if self.standard_system_shortcuts != standard {
+            self.standard_system_shortcuts = standard;
+            self.rebuild_keymap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_system_shortcuts(&self, base: &mut Keymap) {
+        if !self.standard_system_shortcuts {
+            for b in &mut base.bindings {
+                let c = &mut b.chord;
+                if matches!(
+                    b.action.as_str(),
+                    crate::action::ids::MINIMIZE | "app.hide" | "app.hide_others"
+                ) {
+                    c.mac_ctrl = true;
+                    continue;
+                }
+                if c.mac_ctrl
+                    && c.command
+                    && !c.shift
+                    && matches!(
+                        (b.action.as_str(), c.key, c.alt),
+                        ("motion.file.replace_footage_file", egui::Key::H, false)
+                            | ("motion.toggle_hold", egui::Key::H, true)
+                            | ("motion.add_to_render_queue", egui::Key::M, false)
+                    )
+                {
+                    c.mac_ctrl = false;
+                }
+            }
+        }
+    }
+
     fn rebuild_keymap(&mut self) {
         let id = self.keymap_id();
         let base = self.extended_keymap_logged(&id);
@@ -594,6 +647,8 @@ impl Workbench {
         for (_, _, k) in self.keymap_extensions_for(id) {
             base.bindings.extend(k.bindings.iter().cloned());
         }
+        #[cfg(target_os = "macos")]
+        self.apply_system_shortcuts(&mut base);
         base
     }
 
@@ -642,6 +697,8 @@ impl Workbench {
         for (_, _, k) in &ext {
             base.bindings.extend(k.bindings.iter().cloned());
         }
+        #[cfg(target_os = "macos")]
+        self.apply_system_shortcuts(&mut base);
         base
     }
 
@@ -714,7 +771,14 @@ impl Workbench {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(dock_rect));
         let kinds = self.kinds.snapshot();
         let focused = self.dock.focused_panel().cloned();
+        let show_coachmarks = cx
+            .resources
+            .get::<Arc<bae_prefs::PrefsStore>>()
+            .is_some_and(|p| p.current().bool("appearance.show_coachmarks"))
+            && !self.modal_open(cx.resources);
         let mut host = Host {
+            dismissed_coachmarks: show_coachmarks.then_some(&mut self.state.dismissed_coachmarks),
+            save_requested: &mut self.save_requested,
             panels: &mut self.panels,
             kinds: &kinds,
             saved: &mut self.state.panels,
@@ -1085,7 +1149,24 @@ impl Workbench {
                 if let Some(title) = inv.params.get("title").and_then(|v| v.as_str()) {
                     self.save_as_new_workspace(title);
                 } else {
-                    self.dialogs.edit_open = true;
+                    self.dialogs.start_naming();
+                }
+                true
+            }
+            ids::ASSIGN_WORKSPACE_SHORTCUT => {
+                if let Some(key) = inv.params["slot"]
+                    .as_u64()
+                    .and_then(|slot| usize::try_from(slot).ok())
+                    .and_then(|slot| crate::presets::WORKSPACE_KEYS.get(slot))
+                {
+                    let id = self.keymap_id();
+                    let mut overrides = self.keymap_overrides(&id);
+                    overrides.bind(
+                        crate::keymap::Binding::new(key, ids::SWITCH_WORKSPACE)
+                            .params(serde_json::json!({"id":self.active})),
+                    );
+                    self.set_keymap_overrides(&id, overrides);
+                    self.save_requested = true;
                 }
                 true
             }
@@ -1258,6 +1339,8 @@ fn reserved_while_typing(chord: &Chord) -> bool {
 
 /// Adapts registered panels to the dock.
 struct Host<'a, 'c> {
+    dismissed_coachmarks: Option<&'a mut BTreeSet<String>>,
+    save_requested: &'a mut bool,
     panels: &'a mut HashMap<PanelId, Box<dyn Panel>>,
     kinds: &'a RegistrySnapshot<PanelKind>,
     saved: &'a mut BTreeMap<String, serde_json::Value>,
@@ -1318,7 +1401,34 @@ impl PanelHost for Host<'_, '_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, panel: &PanelId) {
+        let anchor = ui.max_rect().left_top() + vec2(8.0, 8.0);
         self.with_panel(panel, |p, cx| p.ui(ui, cx));
+        let Some(dismissed) = self.dismissed_coachmarks.as_deref_mut() else {
+            return;
+        };
+        if self.focused.as_ref() != Some(panel) || dismissed.contains(panel.kind()) {
+            return;
+        }
+        let tip = match panel.kind() {
+            "project" => "Drop files here to import footage.",
+            "composition" => "Hold Space and drag to pan the composition.",
+            "timeline" => "Drag the time indicator to preview a frame.",
+            _ => return,
+        };
+        egui::Area::new(egui::Id::new(("panel-coachmark", panel)))
+            .fixed_pos(anchor)
+            .movable(false)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(220.0);
+                    ui.label(tr(tip));
+                    if ui.button(tr("Got it")).clicked() {
+                        dismissed.insert(panel.kind().to_owned());
+                        *self.save_requested = true;
+                    }
+                });
+            });
     }
 
     fn menu(&mut self, ui: &mut Ui, panel: &PanelId) {

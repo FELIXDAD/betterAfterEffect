@@ -21,6 +21,10 @@ use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Audio analysis and optional mask geometry supplied only for the two Generate effects.
+pub const AUDIO_VISUAL_VALUES: u32 = u32::MAX;
+pub const AUDIO_VISUAL_PATH: u32 = u32::MAX - 1;
+
 /// A parameter lookup can borrow the evaluated values and shadow individual IDs.
 /// A shadow with no value hides that ID from the target effect.
 #[derive(Clone, Copy, Debug)]
@@ -73,6 +77,7 @@ struct ScalarKnot {
     value: f64,
     incoming: f64,
     area: f64,
+    signed_area: f64,
     peak: f64,
     fingerprint: u64,
 }
@@ -81,14 +86,16 @@ impl ScalarTrack {
     pub(crate) fn push(&mut self, time: Time, value: f64, incoming: f64) {
         use std::hash::{Hash, Hasher};
         let time = time.as_seconds();
-        let (value, incoming) = (value.max(0.), incoming.max(0.));
         let area = self.knots.last().map_or(0., |p| {
-            p.area + (time - p.time) * (p.value + incoming) * 0.5
+            p.area + (time - p.time) * (p.value.max(0.) + incoming.max(0.)) * 0.5
+        });
+        let signed_area = self.knots.last().map_or(0., |p| {
+            p.signed_area + (time - p.time) * (p.value + incoming) * 0.5
         });
         let peak = self
             .knots
             .last()
-            .map_or(value, |p| p.peak.max(value).max(incoming));
+            .map_or(value.max(0.), |p| p.peak.max(value).max(incoming));
         let mut h = rustc_hash::FxHasher::default();
         (
             self.fingerprint(),
@@ -102,6 +109,7 @@ impl ScalarTrack {
             value,
             incoming,
             area,
+            signed_area,
             peak,
             fingerprint: h.finish(),
         });
@@ -145,7 +153,7 @@ impl ScalarTrack {
     pub fn incoming(&self, t: f64) -> f64 {
         self.knots
             .binary_search_by(|k| k.time.total_cmp(&t))
-            .map_or_else(|_| self.at(t).0, |i| self.knots[i].incoming)
+            .map_or_else(|_| self.at(t).0, |i| self.knots[i].incoming.max(0.))
     }
 
     /// Value and cumulative integral at a nonnegative layer time.
@@ -155,10 +163,24 @@ impl ScalarTrack {
             return (0., 0.);
         };
         let dt = t - a.time;
+        let start = a.value.max(0.);
+        let end = self.knots.get(i).map_or(start, |b| {
+            start + (b.incoming.max(0.) - start) * dt / (b.time - a.time)
+        });
+        (end, a.area + dt * (start + end) * 0.5)
+    }
+
+    /// Integral of the signed rate from zero (negative speeds run backwards).
+    pub fn signed_integral(&self, t: f64) -> f64 {
+        let i = self.knots.partition_point(|k| k.time <= t);
+        let Some(a) = i.checked_sub(1).map(|i| self.knots[i]) else {
+            return self.knots.first().map_or(0., |k| t * k.value);
+        };
+        let dt = t - a.time;
         let end = self.knots.get(i).map_or(a.value, |b| {
             a.value + (b.incoming - a.value) * dt / (b.time - a.time)
         });
-        (end, a.area + dt * (a.value + end) * 0.5)
+        a.signed_area + dt * (a.value + end) * 0.5
     }
 }
 
@@ -346,7 +368,10 @@ impl LayerDependency {
         Self {
             layer,
             time,
-            stage: LayerStage::BeforeEffect(effect),
+            stage: LayerStage::BeforeEffect {
+                effect,
+                native_motion_blur: true,
+            },
         }
     }
 }
@@ -364,7 +389,12 @@ pub enum LayerStage {
     /// warns.
     EffectsAndMasks,
     /// The prefix of the layer’s effect stack, stopping at this effect prim.
-    BeforeEffect(PrimPath),
+    BeforeEffect {
+        /// Stop before this effect.
+        effect: PrimPath,
+        /// Include native motion blur when drawing nested compositions.
+        native_motion_blur: bool,
+    },
 }
 
 /// Selects masks of an effect's own layer (AE path parameters and All Masks).

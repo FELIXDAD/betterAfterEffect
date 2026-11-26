@@ -68,8 +68,10 @@ fn lumetri_input_and_creative_look_use_straight_color_in_order() {
     });
     let [first, look] = assets;
     let params = vec![
-        (125, Value::Bytes(first)),
-        (126, Value::Bytes(look)),
+        (127, Value::Int(2)),
+        (25, Value::Int(2)),
+        (125, Value::Bytes(first.clone())),
+        (126, Value::Bytes(look.clone())),
         (26, Value::Float(35.)),
     ];
     let got = run(
@@ -87,6 +89,101 @@ fn lumetri_input_and_creative_look_use_straight_color_in_order() {
         rect,
         0.0001,
         "Lumetri LUT order and intensity",
+    );
+    // A retained asset cannot silently substitute for a named vendor preset or None.
+    for choice in [1, 5, 69] {
+        let got = run(
+            &gpu,
+            Rgba32Float,
+            builtin("ADBE Lumetri"),
+            vec![
+                (128, Value::Int(choice)),
+                (126, Value::Bytes(look.clone())),
+                (5, Value::Int(1)),
+                (125, Value::Bytes(first.clone())),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&got, &input, rect, 0., "unavailable LUT bypass");
+    }
+}
+
+#[test]
+fn lumetri_hdr_white_separates_diffuse_and_specular_and_scales_rgb_curves() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(2, 1);
+    let input = Pixels::new(rect, |x, _| {
+        let energy: f32 = if x == 0 { 0.5 } else { 2. };
+        let level = energy.powf(1. / 2.4);
+        [level, level, level, 1.]
+    });
+    let render = |values| {
+        run_depth(
+            &gpu,
+            F32,
+            builtin("ADBE Lumetri"),
+            values,
+            &input,
+            rect,
+            1.,
+            true,
+        )
+    };
+    let hdr = (62, Value::Bool(true));
+    let boost = (64, Value::Float(100.));
+    let boosted = render(vec![hdr.clone(), boost.clone()]);
+    assert!((boosted.get(0, 0)[0] - input.get(0, 0)[0]).abs() < 0.0001);
+    assert!((boosted.get(1, 0)[0] - 3_f32.powf(1. / 2.4)).abs() < 0.0001);
+    let raised_white = render(vec![hdr.clone(), boost.clone(), (63, Value::Float(400.))]);
+    assert_close(
+        &raised_white,
+        &input,
+        rect,
+        0.0001,
+        "diffuse white above source",
+    );
+    assert_close(&render(vec![boost]), &input, rect, 0.0001, "HDR switch off");
+
+    let identity_red = (39, Value::FloatList(vec![1., 0., 0., 1., 1., 1.]));
+    let sdr_range = render(vec![hdr.clone(), identity_red.clone()]);
+    let hdr_range = render(vec![hdr.clone(), identity_red, (65, Value::Float(400.))]);
+    assert!((sdr_range.get(1, 0)[0] - 1.).abs() < 0.001);
+    assert_close(&hdr_range, &input, rect, 0.001, "HDR RGB curve domain");
+
+    let lift = (1013, Value::Float(60.));
+    let normal = render(vec![hdr.clone(), lift.clone()]);
+    let white4 = render(vec![hdr, lift, (66, Value::Float(400.))]);
+    let white = 4_f32.powf(1. / 2.4);
+    for x in 0..2 {
+        let c = input.get(x, 0)[0];
+        assert!((normal.get(x, 0)[0] - (c + 0.15 * (1. - c))).abs() < 0.0001);
+        assert!((white4.get(x, 0)[0] - (c + 0.15 * (white - c))).abs() < 0.0001);
+    }
+}
+
+#[test]
+fn lumetri_sampled_white_uses_editable_sliders_and_preserves_alpha() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(2, 2);
+    let sample = [0.6, 0.4, 0.2, 1.];
+    let input = Pixels::new(rect, |_, _| [0.3, 0.2, 0.1, 0.5]);
+    let [temp, tint] = bae_effects::lumetri_white_balance_settings(sample).unwrap();
+    let params = vec![(7, Value::Float(temp)), (8, Value::Float(tint))];
+    let render = |values| run(&gpu, F32, builtin("ADBE Lumetri"), values, &input, rect, 1.);
+    let output = render(params.clone());
+    let [r, g, b, a] = output.get(0, 0);
+    assert!((r - g).abs() < 0.0001 && (g - b).abs() < 0.0001);
+    assert_eq!(a, 0.5);
+    let mut imported = params;
+    imported.push((94, Value::Color(sample)));
+    assert_close(
+        &render(imported),
+        &output,
+        rect,
+        0.0001,
+        "one correction after import",
     );
 }
 
@@ -502,6 +599,32 @@ fn legacy_corrections_clip_straight_hdr_before_premultiplying() {
         1.,
     );
     assert_close(&actual, &white, rect, 1e-5, "broadcast white");
+}
+
+#[test]
+fn cineon_reuses_the_pass_with_the_current_white_point() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(1, 1);
+    let input = Pixels::new(rect, |_, _| [1.; 4]);
+    let cineon = builtin("ADBE Cineon Converter2");
+    for white in [500., 800., 500.] {
+        let out = run(
+            &gpu,
+            F32,
+            cineon,
+            vec![
+                (1, Value::Int(1)),
+                (4, Value::Float(white)),
+                (8, Value::Float(0.)),
+                (9, Value::Float(1.)),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        let expected = white as f32 / 1023.;
+        assert!((out.get(0, 0)[0] - expected).abs() < 0.0001);
+    }
 }
 
 #[test]

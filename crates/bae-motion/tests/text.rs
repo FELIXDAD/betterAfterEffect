@@ -197,6 +197,7 @@ fn new_text_takes_the_panel_settings_and_reset_character_keeps_paragraphs() {
     let comp = fx.comp();
     let mut defaults = TextDocument::new("", "Arial", 48.0);
     defaults.style.hindi_digits = true;
+    defaults.style.baseline_direction = bae_model::BaselineDirection::TateChuYoko;
     defaults.paragraph.every_line = true;
     defaults.paragraph.justification = "right".into();
     let layer = p(&fx.run(
@@ -206,6 +207,10 @@ fn new_text_takes_the_panel_settings_and_reset_character_keeps_paragraphs() {
     )["path"]);
     let doc = fx.doc(&layer);
     assert!(doc.style.hindi_digits && doc.paragraph.every_line);
+    assert_eq!(
+        doc.style.baseline_direction,
+        bae_model::BaselineDirection::TateChuYoko
+    );
     assert_eq!((doc.text.as_str(), doc.style.font_size), ("12", 48.));
     fx.run(
         "text.set_style",

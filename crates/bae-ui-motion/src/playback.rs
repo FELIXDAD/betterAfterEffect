@@ -29,6 +29,8 @@ struct SceneKey {
     revision: u64,
     path: PrimPath,
     resolution: u32,
+    nested_switches: bool,
+    scope_source: bool,
     sources: Option<u64>,
     effects: Option<u64>,
 }
@@ -38,13 +40,15 @@ impl SceneKey {
         FrameKey {
             comp: self.path.clone(),
             time,
-            request: u64::from(self.resolution),
+            request: u64::from(self.resolution) | (u64::from(self.nested_switches) << 32),
         }
     }
 
     fn same_view(&self, other: &Self) -> bool {
         self.path == other.path
             && self.resolution == other.resolution
+            && self.nested_switches == other.nested_switches
+            && self.scope_source == other.scope_source
             && self.sources == other.sources
             && self.effects == other.effects
     }
@@ -65,6 +69,7 @@ struct Slot {
     time: Time,
     errors: Vec<AttrError>,
     bytes: u64,
+    source: Option<bae_render::GpuImage>,
     /// The published texture (the Info panel and snapshots read it).
     texture: wgpu::Texture,
     /// Its target, handed to [`Spares`] when the frame is dropped.
@@ -278,6 +283,17 @@ impl PlaybackPreview {
         }
     }
 
+    pub(super) fn invalidate_source(&mut self, event: &bae_model::StageEvent) {
+        self.stop();
+        let mut state = self.shared.state.lock().unwrap();
+        if state.cache.dynamic {
+            state.cache.frames.clear();
+        } else {
+            state.cache.frames.invalidate(event);
+        }
+        state.cache.revision += 1;
+    }
+
     pub(super) fn stop(&mut self) {
         let mut state = self.shared.state.lock().unwrap();
         if state.demand.take().is_some() {
@@ -320,6 +336,9 @@ impl PlaybackPreview {
             revision: stage.revision(),
             path: path.clone(),
             resolution,
+            nested_switches: crate::prefs::current(resources)
+                .bool("composition.switches_affect_nested_comps"),
+            scope_source: crate::scopes::needs_working_frame(repaint),
             sources: sources.map(|s| s.0.generation()),
             effects: effects.map(|e| e.0.generation()),
         };
@@ -433,6 +452,10 @@ impl PlaybackPreview {
         Some((shown.image()?, shown.time, &shown.errors))
     }
 
+    pub(super) fn scope_source(&self) -> Option<bae_render::GpuImage> {
+        self.shown.as_ref()?.source.clone()
+    }
+
     /// The texture and rect of the frame [`Self::poll`] returned last.
     pub(super) fn shown_channels(&self) -> Option<Arc<crate::gpu_preview::ChannelFrame>> {
         self.shown.as_ref()?.channels.clone()
@@ -509,11 +532,13 @@ impl Evaluate {
         let samples = Arc::new(bae_anim::ImageSamples::new());
         let mut eval = Evaluator::new();
         eval.set_image_samples(Some(samples.clone()));
+        let mut anim = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+        anim.set_nested_switches(scene.key.nested_switches);
         Ok(Self {
             dynamic,
             stage: Arc::new(stage),
             eval,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            anim,
             gpu,
             samples,
             sampler: None,
@@ -572,6 +597,7 @@ impl Evaluate {
 
 /// Registers `scene`'s layer sources and effects with `engine`.
 fn sync_engine(engine: &mut RenderEngine, scene: &Scene) {
+    engine.anim.set_nested_switches(scene.key.nested_switches);
     if let Some(sources) = &scene.sources {
         for entry in sources.0.snapshot().iter() {
             engine
@@ -728,15 +754,17 @@ fn render_worker(
                 spare,
             )
             .map_err(|e| e.to_string())
-            .and_then(|(target, rect, temporal)| {
+            .and_then(|(target, source, temporal)| {
                 let mut spares_now = spares.lock().unwrap();
                 spares_now.size = Some(target.size());
                 // Not an interactive thread: it waits for the warm-up instead.
-                let Some(rect) = rect else {
+                let Some(source) = source else {
                     spares_now.give(target);
                     return Err("incomplete frame".to_owned());
                 };
                 drop(spares_now);
+                let rect = source.rect;
+                let source = job.scene.key.scope_source.then_some(source);
                 let texture = target.view().texture().clone();
                 let channels = engine.channels.clone();
                 let pick_bytes = channels
@@ -750,7 +778,9 @@ fn render_worker(
                     time: job.time,
                     errors: job.errors,
                     bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
-                        + pick_bytes,
+                        + pick_bytes
+                        + source.as_ref().map_or(0, bae_render::GpuImage::byte_size),
+                    source,
                     texture,
                     target: Some(target),
                     spares: spares.clone(),

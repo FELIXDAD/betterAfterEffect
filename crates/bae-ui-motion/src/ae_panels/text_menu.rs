@@ -132,6 +132,7 @@ impl Selection {
             value,
             peers: targets.collect(),
             time: self.time,
+            auto_key: false,
             committed,
         });
     }

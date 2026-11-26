@@ -187,24 +187,30 @@ impl ProjectPanel {
             return;
         };
         let stage = cx.stage;
-        let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
-        if self.thumbnail_grid {
-            crate::viewer::checkerboard(p, thumb);
+        let x = if crate::prefs::current(cx.resources)
+            .bool("appearance.disable_thumbnails_in_project_panel")
+        {
+            rect.left() + 8.0
         } else {
-            p.rect_filled(thumb, 1.0, color::FIELD);
-        }
-        let icon = match item_kind(stage, path) {
-            Some(ItemKind::Comp) => Icon::Composition,
-            Some(ItemKind::Folder) => Icon::Folder,
-            _ => Icon::Footage,
+            let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
+            if self.thumbnail_grid {
+                crate::viewer::checkerboard(p, thumb, cx.resources);
+            } else {
+                p.rect_filled(thumb, 1.0, color::FIELD);
+            }
+            let icon = match item_kind(stage, path) {
+                Some(ItemKind::Comp) => Icon::Composition,
+                Some(ItemKind::Folder) => Icon::Folder,
+                _ => Icon::Footage,
+            };
+            icons::paint(
+                p,
+                Rect::from_center_size(thumb.center(), vec2(20.0, 20.0)),
+                icon,
+                color::ICON_DIM,
+            );
+            thumb.right() + 10.0
         };
-        icons::paint(
-            p,
-            Rect::from_center_size(thumb.center(), vec2(20.0, 20.0)),
-            icon,
-            color::ICON_DIM,
-        );
-        let x = thumb.right() + 10.0;
         let mut y = rect.top() + 12.0;
         let mut line = |text: String, c| {
             p.text(pos2(x, y), Align2::LEFT_CENTER, text, theme::small(), c);
@@ -372,8 +378,13 @@ impl Panel for ProjectPanel {
             cx.invoke(crate::actions::ids::PROJECT_SETTINGS);
             ui.close();
         }
+        let thumbnails = !crate::prefs::current(cx.resources)
+            .bool("appearance.disable_thumbnails_in_project_panel");
         if ui
-            .checkbox(&mut self.thumbnail_grid, tr("Thumbnail Transparency Grid"))
+            .add_enabled(
+                thumbnails,
+                egui::Checkbox::new(&mut self.thumbnail_grid, tr("Thumbnail Transparency Grid")),
+            )
             .changed()
         {
             ui.close();
@@ -429,7 +440,7 @@ impl Panel for ProjectPanel {
         let mut delete: Vec<PrimPath> = Vec::new();
         // Folder rows, for files dropped from Finder / Explorer.
         let mut folder_rows: Vec<(Rect, PrimPath)> = Vec::new();
-        egui::ScrollArea::horizontal().id_salt("project_columns").auto_shrink([false, true]).show(ui, |ui| {
+        let scroll = egui::ScrollArea::horizontal().id_salt("project_columns").auto_shrink([false, true]).show(ui, |ui| {
         // The label chip precedes the name in the list, as in AE.
         let mut x = 2.0;
         let mut cells = Vec::new();
@@ -449,8 +460,13 @@ impl Panel for ProjectPanel {
             } else {
                 ui.painter().text(r.left_center()+vec2(4.0,0.0), Align2::LEFT_CENTER, tr(col.title), theme::small(), color::TEXT);
             }
-            let resp = ui.interact(r, ui.id().with(col.title), Sense::click());
-            common::context_menu(&resp, &mut |ui| self.columns.header_menu(ui, COLUMNS, col));
+            let visible = r.intersect(ui.clip_rect()).intersect(panel_rect);
+            if visible.is_positive() {
+                let name = bae_ui::a11y::context(&[tr("Project Columns"), tr(col.title)]);
+                let resp = ui.interact(visible, ui.id().with(col.title), Sense::click())
+                    .labeled(egui::WidgetType::Button, &name);
+                common::context_menu(&resp, &mut |ui| self.columns.header_menu(ui, COLUMNS, col));
+            }
         }
         let name_left = cells.iter().find(|(col,_)| col.title == "Name").unwrap().1;
         let name_right = name_left + COLUMNS[0].width;
@@ -459,7 +475,12 @@ impl Panel for ProjectPanel {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (i, row) in rows.iter().enumerate() {
-                    let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click_and_drag());
+                    let (id, rect) = ui.allocate_space(vec2(width, ROW_H));
+                    let visible = rect.intersect(ui.clip_rect()).intersect(panel_rect);
+                    if !visible.is_positive() {
+                        continue;
+                    }
+                    let resp = ui.interact(visible, id, Sense::click_and_drag());
                     if row.kind == ItemKind::Folder {
                         folder_rows.push((rect, row.path.clone()));
                     }
@@ -557,8 +578,10 @@ impl Panel for ProjectPanel {
                     if resp.double_clicked() {
                         match row.kind {
                             ItemKind::Comp => open_comp = Some(row.path.clone()),
-                            // AE: footage opens in the Footage panel.
-                            ItemKind::Footage => open_footage = Some(row.path.clone()),
+                            // AE: footage and solids open in the Footage panel.
+                            ItemKind::Footage | ItemKind::Solid => {
+                                open_footage = Some(row.path.clone())
+                            }
                             ItemKind::Folder if !self.collapsed.remove(&row.path) => {
                                 self.collapsed.insert(row.path.clone());
                             }
@@ -600,6 +623,11 @@ impl Panel for ProjectPanel {
             });
 
         });
+
+        // egui identifies its native scroll bars by axis (horizontal is zero).
+        if let Some(bar) = ui.ctx().read_response(scroll.id.with(0_usize)) {
+            bar.labeled(egui::WidgetType::ScrollBar, tr("Scroll Project Columns"));
+        }
 
         // Footer: item count and buttons (AE: interpret, new folder, new comp, delete).
         let (foot, _) = ui.allocate_exact_size(vec2(width, footer_h), Sense::hover());
@@ -664,11 +692,7 @@ impl Panel for ProjectPanel {
             cx.open_panel("composition");
         }
         if menu_new_folder {
-            let mut params = json!({"name": common::numbered(stage, &session, target_folder.as_ref().unwrap_or(&PrimPath::root()), "Untitled")});
-            if let Some(f) = &target_folder {
-                params["parent"] = json!(f);
-            }
-            cx.invoke_with("folder.create", params);
+            crate::actions::new_folder(cx, &session);
         }
         if !delete.is_empty() {
             cx.invoke_with("item.delete", json!({"paths": delete}));

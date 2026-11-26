@@ -103,6 +103,33 @@ pub(super) fn hit_layer(
     layers_at(stage, comp, view, pos).next()
 }
 
+/// The edges of the layers not in `moving`, extended across the comp: the
+/// left and right of their bounds as vertical lines, top and bottom as
+/// horizontal ones (comp space).
+fn extended_edges(comp: &EvaluatedComp, moving: &[PrimPath]) -> Vec<(bool, f64)> {
+    let mut out = Vec::new();
+    for l in comp.layers.iter().filter(|l| {
+        l.visible
+            && !moving.contains(&l.path)
+            && !matches!(
+                l.kind,
+                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+            )
+    }) {
+        let Some((a, b)) = render::layer_bounds(l) else {
+            continue;
+        };
+        let m = Affine::new(l.world_matrix);
+        let corners = [a, DVec2::new(b.x, a.y), b, DVec2::new(a.x, b.y)].map(|p| m.apply(p));
+        let (lo, hi) = corners.iter().fold(
+            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+            |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+        );
+        out.extend([(true, lo.x), (true, hi.x), (false, lo.y), (false, hi.y)]);
+    }
+    out
+}
+
 /// The unlocked layers under `pos`, topmost first.
 pub(super) fn layers_at<'a>(
     stage: &'a bae_model::Stage,
@@ -208,6 +235,7 @@ pub(super) fn frame(
     view: &View,
     tool: Tool,
     painter: &Painter,
+    eval: &mut crate::common::EvalCache,
 ) -> Option<CursorIcon> {
     if !matches!(tool, Tool::Selection | Tool::Rotation | Tool::PanBehind) {
         state.press = None;
@@ -226,11 +254,13 @@ pub(super) fn frame(
         )
     });
     let selected = session.lock().selected_layers.clone();
-    let mut paths: Vec<EditablePath> = if tool == Tool::Selection {
-        overlay::editable_paths(stage, comp, &selected, None)
-    } else {
-        Vec::new()
-    };
+    // The bar's Toggle Mask and Shape Path Visibility off: no paths to edit.
+    let mut paths: Vec<EditablePath> =
+        if tool == Tool::Selection && session.lock().view_options.paths {
+            overlay::editable_paths(stage, comp, &selected, None)
+        } else {
+            Vec::new()
+        };
     // A shape layer's path in Free Transform (double-clicked) stays editable.
     let prefs = super::prefs::ViewerPrefs::current(cx.resources);
     if state
@@ -265,10 +295,19 @@ pub(super) fn frame(
     }
     let request = std::mem::take(&mut tools.lock().free_transform_request);
     if request && tool == Tool::Selection {
+        // The path with selected vertices, else the one selected in the
+        // Timeline, else the first.
+        let in_timeline = session
+            .lock()
+            .selected_props
+            .iter()
+            .find(|(p, attr)| attr == "path" && paths.iter().any(|e| &e.prim == p))
+            .map(|(p, _)| p.clone());
         let prim = state
             .vertices
             .prim
             .clone()
+            .or(in_timeline)
             .or_else(|| paths.first().map(|p| p.prim.clone()));
         if let Some(p) = prim.and_then(|prim| paths.iter().find(|p| p.prim == prim)) {
             let sel = if state.vertices.prim.as_ref() == Some(&p.prim) {
@@ -334,10 +373,15 @@ pub(super) fn frame(
                 {
                     // A parametric shape (rectangle, ellipse, polystar): AE
                     // selects its group and shows the group's box.
-                    session.lock().selected_layers = vec![layer.clone()];
                     state.group = comp
                         .layer(layer)
                         .and_then(|l| group_edit::group_at(l, view, pos));
+                    let mut s = session.lock();
+                    s.selected_layers = vec![layer.clone()];
+                    // The Timeline selects its row too.
+                    if let Some(g) = &state.group {
+                        s.selected_groups = vec![format!("{layer}#{g}")];
+                    }
                 }
                 Some(bae_model::LayerKind::Shape) => {
                     let own = overlay::editable_paths(
@@ -358,13 +402,35 @@ pub(super) fn frame(
                         state.path_drag = None;
                     }
                 }
-                Some(_) => crate::layer_panel::open(cx, session, layer),
+                Some(_) => {
+                    crate::layer_panel::open_clicked(
+                        cx,
+                        session,
+                        layer,
+                        ui.input(|i| i.modifiers.alt),
+                        tool,
+                        eval,
+                    );
+                }
                 None => {}
             }
         }
     }
 
-    // The selected shape group: only while its layer stays selected.
+    // The shape group selected in the Timeline shows its box (AE: a shape
+    // tool's new group, a group row clicked); the viewer selects groups there.
+    state.group = session
+        .lock()
+        .selected_groups
+        .iter()
+        .rev()
+        .filter_map(|id| crate::session::group_prim(id))
+        .find(|g| {
+            stage
+                .prim(g)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::SHAPE_GROUP))
+        });
+    // Only while its layer stays selected.
     if state
         .group
         .as_ref()
@@ -466,8 +532,13 @@ pub(super) fn frame(
             _ if !shift => state.vertices.clear(),
             _ => {}
         }
-        if !matches!(t, Press::Group | Press::GroupHandle(_)) {
-            state.group = None;
+        if !matches!(t, Press::Group | Press::GroupHandle(_))
+            && let Some(g) = state.group.take()
+        {
+            session
+                .lock()
+                .selected_groups
+                .retain(|id| crate::session::group_prim(id).as_ref() != Some(&g));
         }
         state.press = Some((t, pos));
     }
@@ -609,7 +680,7 @@ pub(super) fn frame(
                         compensate: true,
                     },
                 );
-                state.drag = Some(drag.with_snapping(comp, &layer, anchor));
+                state.drag = Some(drag.with_snapping(comp, &layer, anchor, options.snap_features));
             }
             Press::Layer(layer) => {
                 let layers = {
@@ -665,15 +736,20 @@ pub(super) fn frame(
                         })
                     });
                 let drag = TransformDrag::new(stage, comp, &layers, kind).with_plane(plane);
-                let lines = super::guides::snap_lines(
+                let mut lines = super::guides::snap_lines(
                     stage,
                     info,
                     &session.lock().view_options,
                     &bae_ui::settings::GridGuides::current(cx.resources),
                 );
+                // Snap to edges extended beyond layer bounds: the other
+                // layers' edges as lines across the comp.
+                if options.snap_edges {
+                    lines.extend(extended_edges(comp, &layers));
+                }
                 let reach = f64::from(transform::SNAP_DISTANCE / view.scale.max(1e-6));
                 let drag = drag
-                    .with_snapping(comp, &layer, at)
+                    .with_snapping(comp, &layer, at, options.snap_features)
                     .with_lines(lines, reach);
                 state.drag = Some(primary_first(drag, &layer));
             }
