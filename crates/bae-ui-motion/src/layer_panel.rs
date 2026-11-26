@@ -93,7 +93,7 @@ pub(crate) fn open_clicked(
                         .and_then(|v| v.as_bool())
                         == Some(true);
                     let time = if remap {
-                        eval.get(cx.resources)
+                        eval.get(cx.stage)
                             .evaluate_attribute(cx.stage, layer, "time_remap", now)
                             .ok()
                             .and_then(|v| {
