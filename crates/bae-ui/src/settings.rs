@@ -831,6 +831,11 @@ impl SettingsDialog {
         let font = egui::FontId::monospace(size);
         let mut job = egui::text::LayoutJob::default();
         let mut add = |text: &str, color: Color32| {
+            let color = if p.bool("scripting_expressions.expr_syntax_highlighting") {
+                color
+            } else {
+                c("default")
+            };
             job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
         };
         add("// wiggle the position\n", c("comments"));

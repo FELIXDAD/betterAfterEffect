@@ -86,3 +86,80 @@ fn expression_gutter_and_guides_follow_preferences_in_the_timeline() {
         );
     }
 }
+
+#[test]
+fn expression_syntax_and_brace_colors_reach_the_timeline_text() {
+    let mut h = gui();
+    new_comp(&mut h);
+    new_solid(&mut h);
+    let layer = h.state().layers()[0].clone();
+    h.state_mut().workspace.focus_panel("timeline");
+    key(&mut h, Modifiers::NONE, Key::P);
+    let source = "var 字 = 'x'; // ]\nvalue + [2,2]";
+    h.state_mut().dispatch(Invocation::with_params(
+        "attr.set_expressions",
+        serde_json::json!({"items":[{"path":layer,"attr":"transform:position","source":source}]}),
+    ));
+    let mut prefs = (*h.state().prefs.current()).clone();
+    prefs.set("scripting_expressions.expr_color_correct_braces", "#010203");
+    h.state().prefs.set(prefs.clone()).unwrap();
+    settle(&mut h);
+    let field = find_text(&h, source).unwrap();
+    click_at(&mut h, field.center());
+    key(&mut h, Modifiers::CTRL, Key::End);
+    settle(&mut h);
+    let sections = |h: &Ui| {
+        h.output()
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == source => Some(
+                    t.galley
+                        .job
+                        .sections
+                        .iter()
+                        .map(|s| {
+                            (
+                                source[usize::from(s.byte_range.start)
+                                    ..usize::from(s.byte_range.end)]
+                                    .to_owned(),
+                                s.format.color,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .expect("timeline expression text")
+    };
+    let runs = sections(&h);
+    for (token, key) in [
+        ("var", "keywords"),
+        ("字", "identifiers"),
+        ("=", "operators"),
+        ("'x'", "strings"),
+        ("// ]", "comments"),
+        ("2", "numbers"),
+    ] {
+        let [r, g, b] = prefs.color(&format!("scripting_expressions.expr_color_{key}"));
+        assert!(
+            runs.contains(&(token.to_owned(), egui::Color32::from_rgb(r, g, b))),
+            "{token}: {runs:?}"
+        );
+    }
+    let matched = egui::Color32::from_rgb(1, 2, 3);
+    for token in ["[", "]"] {
+        assert!(runs.contains(&(token.into(), matched)), "{runs:?}");
+    }
+    prefs.set(
+        "scripting_expressions.expr_highlight_matching_braces",
+        false,
+    );
+    h.state().prefs.set(prefs.clone()).unwrap();
+    settle(&mut h);
+    assert!(sections(&h).iter().all(|(_, c)| *c != matched));
+    prefs.set("scripting_expressions.expr_syntax_highlighting", false);
+    h.state().prefs.set(prefs).unwrap();
+    settle(&mut h);
+    assert_eq!(sections(&h).len(), 1);
+}

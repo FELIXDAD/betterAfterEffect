@@ -20,7 +20,9 @@ impl ComputerMut<&str, Arc<Syntax>> for Scanner {
         let mut braces = Vec::new();
         let mut open = Vec::new();
         for (range, kind) in &tokens {
-            if *kind != ExpressionToken::Operator { continue }
+            if *kind != ExpressionToken::Operator {
+                continue;
+            }
             let key = &source[range.clone()];
             let at = range.start;
             match key {
@@ -48,45 +50,93 @@ impl ComputerMut<&str, Arc<Syntax>> for Scanner {
 
 impl Syntax {
     fn at_caret(&self, source: &str, caret: usize) -> Option<(usize, Option<usize>)> {
-        let byte = source.char_indices().nth(caret).map_or(source.len(), |(i, _)| i);
-        let find = |i| self.braces.binary_search_by_key(&i, |e| e.0).ok().map(|n| self.braces[n]);
+        let byte = source
+            .char_indices()
+            .nth(caret)
+            .map_or(source.len(), |(i, _)| i);
+        let find = |i| {
+            self.braces
+                .binary_search_by_key(&i, |e| e.0)
+                .ok()
+                .map(|n| self.braces[n])
+        };
         byte.checked_sub(1).and_then(find).or_else(|| find(byte))
     }
 }
 
-pub(super) fn colorize(ui: &Ui, job: &mut LayoutJob, prefs: &bae_prefs::Preferences, caret: Option<usize>) {
-    let syntax = ui.memory_mut(|m| m.caches.cache::<FrameCache<Arc<Syntax>, Scanner>>().get(job.text.as_str()).clone());
-    if syntax.tokens.is_empty() { return }
+pub(super) fn colorize(
+    ui: &Ui,
+    job: &mut LayoutJob,
+    prefs: &bae_prefs::Preferences,
+    caret: Option<usize>,
+) {
+    let syntax = ui.memory_mut(|m| {
+        m.caches
+            .cache::<FrameCache<Arc<Syntax>, Scanner>>()
+            .get(job.text.as_str())
+            .clone()
+    });
+    if syntax.tokens.is_empty() {
+        return;
+    }
     let rgb = |key| {
         let [r, g, b] = prefs.color(key);
-        Color32::from_rgb(r,g,b)
+        Color32::from_rgb(r, g, b)
     };
-    let colors = [
-        rgb("scripting_expressions.expr_color_keywords"),
-        rgb("scripting_expressions.expr_color_identifiers"),
-        rgb("scripting_expressions.expr_color_numbers"),
-        rgb("scripting_expressions.expr_color_strings"),
-        rgb("scripting_expressions.expr_color_operators"),
-        rgb("scripting_expressions.expr_color_comments"),
-    ];
+    let mut colors = [Color32::TRANSPARENT; 6];
+    for (kind, key) in [
+        (
+            ExpressionToken::Keyword,
+            "scripting_expressions.expr_color_keywords",
+        ),
+        (
+            ExpressionToken::Identifier,
+            "scripting_expressions.expr_color_identifiers",
+        ),
+        (
+            ExpressionToken::Number,
+            "scripting_expressions.expr_color_numbers",
+        ),
+        (
+            ExpressionToken::String,
+            "scripting_expressions.expr_color_strings",
+        ),
+        (
+            ExpressionToken::Operator,
+            "scripting_expressions.expr_color_operators",
+        ),
+        (
+            ExpressionToken::Comment,
+            "scripting_expressions.expr_color_comments",
+        ),
+    ] {
+        colors[kind as usize] = rgb(key);
+    }
     let highlight = caret.and_then(|c| syntax.at_caret(&job.text, c));
-    let brace_color = highlight.map(|(_, mate)| rgb(if mate.is_some() {
-        "scripting_expressions.expr_color_correct_braces"
-    } else {
-        "scripting_expressions.expr_color_incorrect_braces"
-    }));
+    let brace_color = highlight.map(|(_, mate)| {
+        rgb(if mate.is_some() {
+            "scripting_expressions.expr_color_correct_braces"
+        } else {
+            "scripting_expressions.expr_color_incorrect_braces"
+        })
+    });
     let plain = job.sections[0].format.clone();
     job.sections.clear();
     let mut append = |range: Range<usize>, color| {
         job.sections.push(LayoutSection {
             leading_space: 0.0,
-            byte_range: range,
-            format: egui::TextFormat { color, ..plain.clone() },
+            byte_range: range.start.into()..range.end.into(),
+            format: egui::TextFormat {
+                color,
+                ..plain.clone()
+            },
         });
     };
     let mut end = 0;
     for (span, kind) in &syntax.tokens {
-        if end < span.start { append(end..span.start, plain.color); }
+        if end < span.start {
+            append(end..span.start, plain.color);
+        }
         let color = match (highlight, brace_color) {
             (Some((at, mate)), Some(c)) if span.start == at || Some(span.start) == mate => c,
             _ => colors[*kind as usize],
@@ -94,5 +144,7 @@ pub(super) fn colorize(ui: &Ui, job: &mut LayoutJob, prefs: &bae_prefs::Preferen
         append(span.clone(), color);
         end = span.end;
     }
-    if end < job.text.len() { append(end..job.text.len(), plain.color); }
+    if end < job.text.len() {
+        append(end..job.text.len(), plain.color);
+    }
 }

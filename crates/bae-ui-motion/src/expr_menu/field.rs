@@ -7,6 +7,13 @@ use std::sync::Arc;
 
 mod syntax;
 
+fn display_preferences(resources: &Resources) -> Arc<bae_prefs::Preferences> {
+    resources
+        .get::<Arc<bae_prefs::PrefsStore>>()
+        .map(|s| s.display())
+        .unwrap_or_default()
+}
+
 fn gutter_width(ui: &Ui, source: &str, font: &FontId, width: f32, numbers: bool) -> f32 {
     if !numbers {
         return 0.0;
@@ -51,7 +58,7 @@ fn layout(
 }
 
 pub(crate) fn height(ui: &Ui, resources: &Resources, source: &str, width: f32) -> f32 {
-    let prefs = crate::prefs::current(resources);
+    let prefs = display_preferences(resources);
     let (font, text, _) = crate::common::expression_style(resources);
     let gutter = gutter_width(
         ui,
@@ -73,7 +80,7 @@ pub(super) fn show(
     buffer: &mut String,
     rows: Option<usize>,
 ) -> TextEditOutput {
-    let prefs = crate::prefs::current(resources);
+    let prefs = display_preferences(resources);
     let color = |key| {
         let [r, g, b] = prefs.color(key);
         Color32::from_rgb(r, g, b)
@@ -117,6 +124,7 @@ pub(super) fn show(
                     None
                 };
                 let mut layouter = |ui: &Ui, buffer: &dyn TextBuffer, width: f32| {
+                    let width = if rows.is_some() { width } else { f32::INFINITY };
                     layout(ui, buffer.as_str(), &font, text, &prefs, width, caret)
                 };
                 let widget = match rows {
