@@ -263,4 +263,19 @@ impl bae_ui::files::FilePicker for NativePicker {
     fn open(&self, _request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
         Vec::new()
     }
+
+    #[cfg(any(target_os = "macos", windows))]
+    fn save(&self, request: &bae_ui::files::SaveRequest) -> Option<PathBuf> {
+        let mut dialog = Native::new(self.parent.clone())
+            .files()
+            .set_title(&request.title)
+            .set_file_name(&request.file_name);
+        if let Some(dir) = &request.directory {
+            dialog = dialog.set_directory(dir);
+        }
+        for (label, extensions) in &request.filters {
+            dialog = dialog.add_filter(label, extensions);
+        }
+        dialog.save_file()
+    }
 }

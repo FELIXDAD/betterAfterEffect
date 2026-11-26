@@ -58,6 +58,8 @@ pub mod ids {
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
     pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
     pub const INTERPRET_FOOTAGE: &str = "motion.file.interpret_footage_main";
+    pub const SAVE_PRESET: &str = "motion.anim.save_animation_preset";
+    pub const APPLY_PRESET: &str = "motion.anim.apply_animation_preset";
     pub const TIME_STRETCH: &str = "motion.layer.time_stretch";
     pub const AUTO_ORIENT: &str = "motion.layer.auto_orient";
     pub const GO_TO_TIME: &str = "motion.view.go_to_time";
@@ -107,6 +109,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
     /// Numbered comp marker N at the current time (AE Shift+0–9 on the main
@@ -221,6 +224,8 @@ pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
 /// `(id, English title)` of every motion action, for the shortcut editor.
 pub const ACTIONS: &[(&str, &str)] = &[
     (ids::INTERPRET_FOOTAGE, "Interpret Footage: Main..."),
+    (ids::SAVE_PRESET, "Save Animation Preset..."),
+    (ids::APPLY_PRESET, "Apply Animation Preset..."),
     (ids::TIME_STRETCH, "Time Stretch..."),
     (ids::AUTO_ORIENT, "Auto-Orient..."),
     (ids::GO_TO_TIME, "Go to Time..."),
@@ -313,6 +318,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
+    (ids::TRACK_MOTION, "Track Motion"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
@@ -830,6 +836,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::TRACK_MOTION {
+        let layer = session.lock().selected_layers.first().cloned();
+        if let Some(layer) = layer
+            && !query::is_locked(stage, &layer)
+        {
+            crate::tracker::create(cx, &layer, false);
+        }
+        return true;
+    }
     if id == ids::CUT {
         // AE: Cut = Copy + Clear (one undo step: the Clear).
         if handle(&Invocation::new(ids::COPY), cx, session) {
@@ -944,6 +959,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 })
                 .collect();
             if !items.is_empty() {
+                if !remove && let Some((p, a)) = props.iter().find(|(p, a)| !has(p, a)) {
+                    session.lock().focus_expression =
+                        Some((p.clone(), a.clone(), std::time::Instant::now()));
+                }
                 cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
             return true;
@@ -954,6 +973,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::INTERPRET_FOOTAGE => {
             crate::dialogs::interpret_footage(cx, session);
+            return true;
+        }
+        ids::SAVE_PRESET => {
+            crate::presets::save(cx, session);
+            return true;
+        }
+        ids::APPLY_PRESET => {
+            crate::presets::apply(cx, session);
             return true;
         }
         ids::TIME_STRETCH => {
@@ -1847,6 +1874,8 @@ fn content_container(
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
     ("Interpret Footage: Main...", "解释素材：主要..."),
+    ("Save Animation Preset...", "保存动画预设..."),
+    ("Apply Animation Preset...", "应用动画预设..."),
     // Layer ▸ Time and switches (AE 26's Chinese).
     ("Enable Time Remapping", "启用时间重映射"),
     ("Time-Reverse Layer", "时间反向图层"),

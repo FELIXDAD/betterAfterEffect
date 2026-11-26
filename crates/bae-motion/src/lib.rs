@@ -124,7 +124,7 @@ pub use orient::AutoOrient;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
-pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
+pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
@@ -181,6 +181,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(MoveMarkers),
         r.register(DeleteMarkers),
         r.register(AddShape),
+        r.register(AddShapeItem),
         r.register(CreateMask),
         r.register(SetVertices),
         r.register(InsertVertex),
