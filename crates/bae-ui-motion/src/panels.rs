@@ -100,6 +100,39 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
         .filter(|l| stage.has_prim(l))
 }
 
+impl EffectControlsPanel {
+    /// AE's line under the tab: the lock, the layer's label color and
+    /// "<comp> • <layer>".
+    fn layer_header(&mut self, ui: &mut Ui, stage: &Stage, layer: &PrimPath) {
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            let locked = self.locked.is_some();
+            let lock = icons::button(ui, Icon::Lock, 14.0, locked).labeled_toggle(
+                egui::WidgetType::Checkbox,
+                tr("Lock"),
+                locked,
+            );
+            if lock.clicked() {
+                self.locked = if locked { None } else { Some(layer.clone()) };
+            }
+            let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            icons::swatch(
+                ui.painter(),
+                r.center(),
+                9.0,
+                theme::label_color(actions::label_of(stage, layer).max(0) as usize),
+            );
+            let comp = query::owning_comp(stage, layer)
+                .map(|c| query::display_name_of(stage, &c))
+                .unwrap_or_default();
+            ui.label(
+                egui::RichText::new(format!("{comp} • {}", self.title)).color(color::TEXT_DIM),
+            );
+        });
+        ui.separator();
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
@@ -273,10 +306,14 @@ pub struct EffectControlsPanel {
     eval: EvalCache,
     title: String,
     controls: crate::effects::controls::ControlsState,
+    /// The layer the panel is locked to (its lock button, AE): it stays on it
+    /// whatever is selected.
+    locked: Option<PrimPath>,
 }
 
 impl Panel for EffectControlsPanel {
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
+        // AE: "Effect Controls <layer>".
         if self.title.is_empty() {
             TabInfo::new(tr("Effect Controls"))
         } else {
@@ -293,20 +330,23 @@ impl Panel for EffectControlsPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
-        let Some(layer) = selected_layer(stage, &session) else {
+        if self.locked.as_ref().is_some_and(|l| !stage.has_prim(l)) {
+            self.locked = None;
+        }
+        // Nothing selected: AE's panel is empty ("Effect Controls (none)").
+        let Some(layer) = self
+            .locked
+            .clone()
+            .or_else(|| selected_layer(stage, &session))
+        else {
             self.title.clear();
-            common::empty_hint(
-                ui,
-                tr("No layer selected"),
-                tr("Select a layer to see its properties."),
-            );
             return;
         };
         self.title = query::display_name_of(stage, &layer);
+        self.layer_header(ui, stage, &layer);
         let now = session.lock().active_time();
         let effects = props::effect_nodes(stage, &layer);
         if effects.is_empty() {
-            common::empty_hint(ui, &self.title.clone(), tr("No effects applied"));
             return;
         }
         // Controls from the effect definitions (07's built-ins, plugins).
