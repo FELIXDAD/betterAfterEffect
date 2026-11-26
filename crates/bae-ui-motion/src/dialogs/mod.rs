@@ -165,12 +165,13 @@ pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: O
 
 /// Open Composition Settings for an existing comp.
 pub(crate) fn comp_settings(cx: &PanelContext<'_>, comp: &PrimPath) {
-    let Some(settings) = CompSettings::edit(cx.stage, comp) else {
-        return;
-    };
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
-    if d.open.is_none() {
+    if d.open.is_some() {
+        return;
+    }
+    remember(cx.resources, &mut d);
+    if let Some(settings) = CompSettings::edit(cx.stage, comp, &d.comp) {
         d.open = Some(Dialog::CompSettings(Box::new(settings)));
     }
 }
