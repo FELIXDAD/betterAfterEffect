@@ -115,6 +115,9 @@ pub(crate) mod flags {
     pub const LIT: u32 = 1024;
     /// Motion blur: a lighting record per sample.
     pub const LIT_SAMPLES: u32 = 2048;
+    /// 3D plane over 3D models: the matte slot holds the models' camera
+    /// depth, `occlusion` the plane's.
+    pub const OCCLUDE: u32 = 4096;
 }
 
 /// Which fragment entry point a composite pipeline uses: plain draws never pay
@@ -165,6 +168,9 @@ pub(crate) struct DrawData {
     pub clips: [[f32; 4]; MAX_CLIPS],
     /// Clip count, first motion sample, sample count, lighting record offset.
     pub extra: [u32; 4],
+    /// The plane's camera depth `a·x + b·y + c` at target texel (x, y); w: 1
+    /// perspective (it is `1 / depth`), 2 orthographic.
+    pub occlusion: [f32; 4],
 }
 
 /// One motion-blur sample of a draw: target texel → input texel homography,

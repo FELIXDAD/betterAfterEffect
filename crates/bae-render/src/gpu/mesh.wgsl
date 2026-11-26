@@ -28,7 +28,7 @@ struct Frame {
     normal: mat4x4<f32>,
     // Eye (comp space) and light count.
     eye: vec4<f32>,
-    // x: display-encode the shading (a non-linear working space).
+    // x: display-encode the shading (a non-linear working space), y: opacity.
     out: vec4<f32>,
     // Comp directions → environment picture directions.
     env_rot: mat4x4<f32>,
@@ -65,13 +65,24 @@ struct VsOut {
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
+    // Camera depth.
+    @location(3) depth: f32,
+}
+
+struct FsOut {
+    @location(0) color: vec4<f32>,
+    // Camera depth as two halves (hi + lo: a half-float texture keeps it
+    // to ~1e-3 px) and alpha; the planes drawn over the models read them.
+    @location(1) depth: vec4<f32>,
 }
 
 @vertex
 fn vs_mesh(v: VsIn) -> VsOut {
     let world = f.model * vec4<f32>(v.pos, 1.0);
     var o: VsOut;
-    o.clip = f.clip * (f.view * world);
+    let camera = f.view * world;
+    o.clip = f.clip * camera;
+    o.depth = camera.z;
     o.world = world.xyz;
     o.normal = (f.normal * vec4<f32>(v.normal, 0.0)).xyz;
     o.uv = v.uv;
@@ -111,7 +122,7 @@ fn env_brdf(f0: vec3<f32>, rough: f32, nv: f32) -> vec3<f32> {
 }
 
 @fragment
-fn fs_mesh(i: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+fn fs_mesh(i: VsOut, @builtin(front_facing) front: bool) -> FsOut {
     var base = m.base;
     if m.pbr.z > 0.5 {
         let t = textureSample(t_base, s_base, i.uv);
@@ -185,5 +196,10 @@ fn fs_mesh(i: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     if f.out.x > 0.5 {
         color = to_display(color);
     }
-    return vec4<f32>(color * base.a, base.a);
+    let a = base.a * f.out.y;
+    var o: FsOut;
+    o.color = vec4<f32>(color * a, a);
+    let hi = unpack2x16float(pack2x16float(vec2<f32>(i.depth, 0.0))).x;
+    o.depth = vec4<f32>(hi, i.depth - hi, a, 0.0);
+    return o;
 }

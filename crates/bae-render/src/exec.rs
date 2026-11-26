@@ -287,6 +287,7 @@ pub(crate) fn execute(
         passes: 0,
         mask_outs: Vec::new(),
         incomplete: false,
+        mesh_depths: Default::default(),
     };
     // Every mask of the frame at once, in shared atlases (they have no inputs).
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
@@ -470,14 +471,21 @@ pub(crate) fn execute(
                 target
             }
             (NodeKind::Mesh(mesh), None) => {
-                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
-                let environment = mesh.environment.as_ref().map(|e| {
-                    (
-                        e,
-                        graph.nodes[e.input.index()].key,
-                        outputs[e.input.index()].clone(),
-                    )
-                });
+                let px = node_pixels(node);
+                let target = pool.acquire(device, format, px, node.pixel_scale)?;
+                let depth_out = pool.acquire(device, mesh::DEPTH_OUT, px, node.pixel_scale)?;
+                let environments: Vec<_> = mesh
+                    .models
+                    .iter()
+                    .map(|m| {
+                        m.environment.as_ref().map(|e| {
+                            (
+                                graph.nodes[e.input.index()].key,
+                                outputs[e.input.index()].clone(),
+                            )
+                        })
+                    })
+                    .collect();
                 let pipelines = ctx.pipelines.mesh();
                 ctx.draw_calls += mesh::encode(
                     &mut pipelines.lock(),
@@ -486,11 +494,11 @@ pub(crate) fn execute(
                     &mut encoder,
                     format,
                     mesh,
-                    environment
-                        .as_ref()
-                        .map(|(e, key, image)| (*e, *key, image.as_ref())),
+                    &environments,
                     &target,
+                    &depth_out,
                 );
+                ctx.mesh_depths.insert(index, depth_out);
                 ctx.passes += 1;
                 target
             }
@@ -614,21 +622,29 @@ fn needed_nodes(
             continue;
         }
         let node = &graph.nodes[index];
-        let environment = match &node.kind {
-            NodeKind::Mesh(m) => m.environment.as_ref().map(|e| (e, m.linear)),
-            NodeKind::Sky(s) => Some((&s.environment, s.linear)),
-            _ => None,
+        let (environments, linear): (Vec<_>, bool) = match &node.kind {
+            NodeKind::Mesh(m) => (
+                m.models
+                    .iter()
+                    .filter_map(|m| m.environment.as_ref())
+                    .collect(),
+                m.linear,
+            ),
+            NodeKind::Sky(s) => (vec![&s.environment], s.linear),
+            _ => {
+                node.kind.for_each_input(|id| needed[id.index()] = true);
+                continue;
+            }
         };
-        if let Some((e, linear)) = environment {
+        for e in environments {
             let key = graph.nodes[e.input.index()].key;
-            if mesh
+            if !mesh
                 .as_mut()
                 .is_some_and(|p| p.has_env(key, e.width, linear))
             {
-                continue;
+                needed[e.input.index()] = true;
             }
         }
-        node.kind.for_each_input(|id| needed[id.index()] = true);
     }
     needed
 }
@@ -652,6 +668,9 @@ struct ExecCtx<'a> {
     mask_outs: Vec<Option<masks::MaskOut>>,
     /// A pipeline was still compiling for the UI thread (incomplete frame).
     incomplete: bool,
+    /// Camera depth of the 3D model passes (by node index), for the planes
+    /// drawn over the models.
+    mesh_depths: rustc_hash::FxHashMap<usize, GpuImage>,
 }
 
 /// A planned draw of one op.
@@ -758,9 +777,36 @@ impl ExecCtx<'_> {
                 OpInput::Image(id) => outputs[id.index()].as_ref().map(|i| &i.view),
                 OpInput::Solid { .. } => None,
             };
-            let matte_view = op
-                .matte
-                .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));
+            // A plane over 3D models reads their depth in the matte slot.
+            let occlusion = op
+                .occlusion
+                .filter(|_| op.matte.is_none())
+                .and_then(|o| Some((o, self.mesh_depths.get(&o.mesh.index())?)));
+            if let Some((o, depth)) = &occlusion {
+                let s = node.pixel_scale;
+                let (x0, y0) = (f64::from(node.rect.x0), f64::from(node.rect.y0));
+                let [a, b, c] = o.depth;
+                data.occlusion = [
+                    (a * s) as f32,
+                    (b * s) as f32,
+                    ((a * x0 + b * y0) * s + c) as f32,
+                    if o.orthographic { 2.0 } else { 1.0 },
+                ];
+                let [dw, dh] = depth.texel_size();
+                data.matte = [
+                    (f64::from(depth.rect.x0) / depth.pixel_scale - x0) as f32,
+                    (f64::from(depth.rect.y0) / depth.pixel_scale - y0) as f32,
+                    dw as f32,
+                    dh as f32,
+                ];
+                data.mode[1] |= flags::OCCLUDE;
+            }
+            let matte_view = match &occlusion {
+                Some((_, depth)) => Some(&depth.view),
+                None => op
+                    .matte
+                    .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view)),
+            };
             let mask_view = op
                 .mask
                 .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));

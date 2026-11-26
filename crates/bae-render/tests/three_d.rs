@@ -721,3 +721,81 @@ fn environment_light_pictures_light_models_and_show_behind() {
     assert_eq!(luma(&img, 100, 72), top, "the model draws over it");
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// A 3D plane through a model cuts it (true intersection): the plane,
+/// tilted through the cube's centre, covers the cube where it is nearer
+/// and goes under it where it is farther. Planes in front of or behind the
+/// whole cube cover it or not at all.
+#[test]
+fn planes_intersect_models() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-intersect-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cube.obj");
+    let mut obj = String::new();
+    for z in [-1.0, 1.0] {
+        for y in [-1.0, 1.0] {
+            for x in [-1.0, 1.0] {
+                obj += &format!("v {x} {y} {z}\n");
+            }
+        }
+    }
+    for f in [
+        "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+    ] {
+        obj += &format!("f {f}\n");
+    }
+    std::fs::write(&file, obj).unwrap();
+    let mut r = Renderer::new(gpu);
+    let mut model = RenderLayer::new(
+        p("/comps/main/layers/model"),
+        LayerContent::Model(bae_render::ModelRef {
+            asset: p("/assets/cube"),
+            file: Some(file.clone()),
+        }),
+    );
+    model.matrix_3d = Some(DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0)));
+    let mut scene = |plane: RenderLayer| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        comp.layers = vec![model.clone(), plane];
+        render(&mut r, &comp)
+    };
+    let red = |px: [u8; 4]| px[0] > 200 && px[1] < 40 && px[2] < 40;
+    // Tilted 60° about x through the cube's centre.
+    let tilted = scene(solid_3d(
+        "plane",
+        RED,
+        [300, 300],
+        DVec3::new(100.0, 100.0, 0.0),
+        DVec3::new(60.0, 0.0, 0.0),
+    ));
+    let (upper, lower) = (tilted.px(100, 50), tilted.px(100, 150));
+    assert!(
+        red(upper) != red(lower),
+        "the plane covers one end: {upper:?} {lower:?}"
+    );
+    // The cut is where the plane meets the front face (z = −50, ~37 px from
+    // the centre), not at the cube's centre.
+    for y in [85, 100, 115] {
+        assert!(!red(tilted.px(100, y)), "y {y}: {:?}", tilted.px(100, y));
+    }
+    // In front of the whole cube: covers it; behind it: under it.
+    let front = scene(solid_3d(
+        "plane",
+        RED,
+        [300, 300],
+        DVec3::new(100.0, 100.0, -80.0),
+        DVec3::ZERO,
+    ));
+    assert!(red(front.px(100, 100)), "{:?}", front.px(100, 100));
+    let behind = scene(solid_3d(
+        "plane",
+        RED,
+        [300, 300],
+        DVec3::new(100.0, 100.0, 80.0),
+        DVec3::ZERO,
+    ));
+    assert!(!red(behind.px(100, 100)), "{:?}", behind.px(100, 100));
+    assert!(red(behind.px(5, 5)), "around the cube");
+    std::fs::remove_dir_all(dir).ok();
+}
