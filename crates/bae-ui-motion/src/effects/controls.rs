@@ -100,7 +100,7 @@ fn header(
         .and_then(|v| query::static_value(&v, "enabled"))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let name = query::display_name_of(stage, effect);
+    let name = super::instance_name(stage, effect);
     let session = common::session(cx.resources);
     let selected = session.lock().selected_effects.contains(effect);
     ui.add_space(2.0);
@@ -157,7 +157,7 @@ fn header(
         }
         title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let about = ui.add(egui::Label::new(tr("About...")).sense(Sense::click()));
+            let about = widgets::link(ui, tr("About..."));
             egui::Popup::menu(&about).show(|ui| {
                 let shown = super::effect_name(match_name, def);
                 ui.label(egui::RichText::new(shown).strong());
@@ -168,11 +168,7 @@ fn header(
                 };
                 ui.label(source);
             });
-            if def.is_some()
-                && ui
-                    .add(egui::Label::new(tr("Reset")).sense(Sense::click()))
-                    .clicked()
-            {
+            if def.is_some() && widgets::link(ui, tr("Reset")).clicked() {
                 reset(cx, effect, now);
             }
         });
