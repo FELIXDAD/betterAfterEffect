@@ -6,19 +6,25 @@ use glam::{DMat4, DVec3};
 const LIGHTS_PARAM: u32 = u32::MAX - 1;
 const MAX_LIGHTS: usize = 24;
 
+pub(super) fn uses_scene(def: &EffectDef, instance: &RenderEffect) -> bool {
+    def.params
+        .iter()
+        .find(|p| p.name == "Using")
+        .is_some_and(|using| {
+            matches!(
+                instance.param(using.id),
+                Some(Value::Int(2) | Value::Float(2.0))
+            )
+        })
+}
+
 pub(crate) fn collect(
     def: &EffectDef,
     instance: &mut RenderEffect,
     comp: &RenderComp,
     layer: &RenderLayer,
 ) {
-    let Some(using) = def.params.iter().find(|p| p.name == "Using") else {
-        return;
-    };
-    if !matches!(
-        instance.param(using.id),
-        Some(Value::Int(2) | Value::Float(2.0))
-    ) {
+    if !uses_scene(def, instance) {
         return;
     }
     let m = layer.transform;
