@@ -192,6 +192,7 @@ pub struct Session {
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
@@ -268,6 +269,7 @@ impl SharedSession {
         s.opening_audio = false;
         match device {
             Ok(output) => {
+                output.set_gain(10.0_f32.powf(s.master_db / 20.0));
                 let previous = s.output.replace(output);
                 s.mix_revision = None;
                 s.retry_audio_after = None;
@@ -282,25 +284,23 @@ impl SharedSession {
         }
     }
 
-    /// A user can connect a device after starting the application.
-    pub(crate) fn retry_audio(&self) {
-        let mut s = self.lock();
-        let needed = s.retry_audio_after.map_or_else(
-            || {
-                s.output
+    /// Opens the output device on its own thread (OS negotiation may block). It
+    /// needs no GPU. Does nothing while a device is open or opening.
+    pub(crate) fn start_audio(&self) {
+        {
+            let mut s = self.lock();
+            if s.opening_audio
+                || s.output
                     .as_ref()
-                    .is_some_and(bae_media::playback::AudioOutput::device_lost)
-            },
-            |at| Instant::now() >= at,
-        );
-        if !needed || s.opening_audio {
-            return;
+                    .is_some_and(|output| !output.device_lost())
+            {
+                return;
+            }
+            s.opening_audio = true;
         }
-        s.opening_audio = true;
-        drop(s);
         let session = self.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("bae-audio-reopen".into())
+            .name("bae-audio-device".into())
             .spawn(move || {
                 if let Err(error) = session.open_audio() {
                     tracing::warn!(%error, "Audio output unavailable");
@@ -310,6 +310,42 @@ impl SharedSession {
             self.lock().opening_audio = false;
             tracing::warn!(%error, "Could not start the audio device worker");
         }
+    }
+
+    /// A user can connect a device after starting the application.
+    pub(crate) fn retry_audio(&self) {
+        let needed = {
+            let s = self.lock();
+            match s.retry_audio_after {
+                Some(at) => Instant::now() >= at,
+                // Never opened or lost: open it now rather than wait for a failure.
+                None => s
+                    .output
+                    .as_ref()
+                    .is_none_or(bae_media::playback::AudioOutput::device_lost),
+            }
+        };
+        if needed {
+            self.start_audio();
+        }
+    }
+}
+
+/// Module setup already started the device. As the first warm-up task this
+/// only reopens a failed or lost one, on its own thread, so it never holds up
+/// the GPU tasks.
+impl bae_gpu::WarmUp for SharedSession {
+    fn name(&self) -> &str {
+        "audio output"
+    }
+
+    fn priority(&self) -> u8 {
+        0
+    }
+
+    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        self.start_audio();
+        Ok(())
     }
 }
 
@@ -483,6 +519,15 @@ impl Session {
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
         self.selected_effects.retain(|e| stage.has_prim(e));
+    }
+
+    /// Keep the meters moving through the last audible scrub sample.
+    pub(crate) fn monitoring_audio(&self) -> bool {
+        (self.audio_clock || self.last_scrub.is_some())
+            && self
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.finished())
     }
 
     pub fn is_playing(&self) -> bool {

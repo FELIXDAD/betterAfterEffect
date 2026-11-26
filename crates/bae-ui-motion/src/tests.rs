@@ -201,6 +201,10 @@ fn module_registers_panels_shortcuts_and_commands() {
     b.add_module(bae_ui::UiModule)
         .add_module(crate::MotionUiModule);
     let mut app = b.build();
+    assert!(
+        app.registry::<dyn bae_gpu::WarmUp>()
+            .contains("bae.media/audio-output")
+    );
     let kinds = app.registry::<PanelKind>();
     for id in [
         "project",
@@ -209,6 +213,7 @@ fn module_registers_panels_shortcuts_and_commands() {
         "properties",
         "effect_controls",
         "preview",
+        "audio",
     ] {
         let entry = kinds.snapshot();
         let e = entry.entry(id).unwrap_or_else(|| panic!("{id}"));
