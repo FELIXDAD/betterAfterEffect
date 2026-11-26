@@ -203,6 +203,7 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        bae_ui_motion::tools::configure_camera_keys(app, &prefs);
         if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
             let apply = move |p: &bae_prefs::Preferences| {
                 session.configure_output(
