@@ -964,6 +964,9 @@ impl Panel for CompositionViewer {
             .filter(|pb| pb.comp == info.path);
         let mut completed = None;
         if let Some(gpu) = self.gpu.as_mut() {
+            if let Some((generation, item)) = &session.lock().solid_reload {
+                gpu.reload_solid(*generation, item);
+            }
             if editing {
                 gpu.playback.stop();
             } else {
