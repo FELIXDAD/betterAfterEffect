@@ -503,3 +503,132 @@ fn easy_ease_after_dragging_marquee_selected_keys() {
         assert_eq!(h.times(POS), times, "graph {graph}: the drag stays");
     }
 }
+
+/// Sequence Layers opens its dialog and OK sequences the selected layers in
+/// one command; a Shift-click on the ruler snaps the CTI to a keyframe (AE).
+#[test]
+fn sequence_layers_dialog_and_cti_snap() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let a = h.layer.clone();
+    let b = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    h.keys(ROT, &[(1.0, float(0.0)), (2.0, float(90.0))]);
+    let mut tl = h.bars();
+    h.session().lock().selected_layers = vec![a.clone(), b.clone()];
+    let r = h.action(
+        &mut tl,
+        Invocation::new(crate::actions::ids::SEQUENCE_LAYERS),
+    );
+    assert!(r.invocations.is_empty(), "the dialog opens first");
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        let Some(crate::timeline::KeyDialog::Sequence(d)) = &mut s.key_dialog else {
+            panic!("Sequence Layers is open");
+        };
+        d.overlap = true;
+        d.transition = 2;
+    }
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let r = h.frame(&mut tl, vec![press(egui::Key::Enter)], Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "OK is one command");
+    assert_eq!(r.invocations[0].id, "layer.sequence");
+    assert_eq!(r.invocations[0].params["transition"], "cross_dissolve");
+    h.apply(&r);
+    assert_eq!(query::layer_timing(&h.stage, &b).in_point, Time(9 * SEC));
+
+    h.session().lock().selected_layers = vec![a.clone()];
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let header_y = h
+        .painted_text
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|(s, _)| s == bae_ui::tr("Source Name"))
+        .map(|(_, r)| r.center().y)
+        .expect("column header");
+    let p = pos2(x_of(&tl, 1.0) + 5.0, header_y);
+    h.click(&mut tl, p, Modifiers::SHIFT);
+    assert_eq!(h.session().lock().time(&comp), Time(SEC), "snapped");
+    h.click(&mut tl, p, Modifiers::NONE);
+    assert_ne!(h.session().lock().time(&comp), Time(SEC));
+}
+
+/// AE's timeline keys: M / MM / F reveal masks under their groups, Alt+Shift+M
+/// keys the mask path, Shift+J / K step through the selected property's
+/// keyframes, Ctrl+Alt+A and Shift+F2 select and deselect what is shown.
+#[test]
+fn mask_reveals_mask_keys_and_keyframe_selection_shortcuts() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let solid = h.layer.clone();
+    let mask = path(
+        &h.run(
+            "mask.create",
+            json!({"layer": solid, "kind": "rect", "position": [10.0, 10.0], "size": [20.0, 20.0]}),
+        )["mask"],
+    );
+    h.keys(ROT, &[(1.0, float(0.0)), (2.0, float(90.0))]);
+    h.keys(POS, &[(3.0, vec3(0.0, 0.0))]);
+    let mut tl = h.bars();
+    let reveal = |what: &str, add: bool| {
+        Invocation::with_params(ids::REVEAL, json!({"what": what, "add": add}))
+    };
+    let shown = |h: &H, tl: &mut TimelinePanel| {
+        let s = h.session();
+        let s = s.lock();
+        tl.prop_rows(&h.stage, &h.comp, &s)
+    };
+    // M: the mask's path under Masks > Mask 1; MM: all four mask properties.
+    h.action(&mut tl, reveal("mask_path", false));
+    assert_eq!(shown(&h, &mut tl), vec![(mask.clone(), "path".to_owned())]);
+    {
+        let s = h.session();
+        let s = s.lock();
+        let groups = tl.group_rows(&h.stage, &h.comp, &s);
+        assert!(groups.iter().any(|g| g.ends_with("#masks")), "{groups:?}");
+        assert!(
+            groups.iter().any(|g| g.ends_with(mask.as_str())),
+            "{groups:?}"
+        );
+    }
+    h.action(&mut tl, reveal("mask_path", false));
+    assert_eq!(shown(&h, &mut tl).len(), 4, "MM");
+    // F: the feather.
+    h.action(&mut tl, reveal("mask_feather", false));
+    assert_eq!(
+        shown(&h, &mut tl),
+        vec![(mask.clone(), "feather".to_owned())]
+    );
+    // Alt+Shift+M: a Mask Path keyframe now.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::TOGGLE_KEY, json!({"attr": "mask_path"})),
+    );
+    h.apply(&r);
+    assert!(
+        query::attr_spec(&h.stage, &mask, "path").is_some_and(|s| s.is_animated()),
+        "mask path keyed"
+    );
+    // Shift+K on the selected Rotation: 1 s, 2 s, then stays (Position's 3 s key
+    // is not selected).
+    h.session().lock().selected_props = vec![(solid.clone(), ROT.to_owned())];
+    let now = |h: &H| h.session().lock().time(&h.comp);
+    for want in [1.0, 2.0, 2.0] {
+        h.action(&mut tl, Invocation::new(ids::NEXT_SELECTED_KEY));
+        assert_eq!(now(&h), Time::from_seconds(want));
+    }
+    h.action(&mut tl, Invocation::new(ids::PREV_SELECTED_KEY));
+    assert_eq!(now(&h), Time::from_seconds(1.0));
+    // U, then Ctrl+Alt+A: every shown keyframe; Shift+F2 deselects them.
+    h.session().lock().reveal.clear();
+    h.action(&mut tl, reveal("animated", false));
+    h.action(&mut tl, Invocation::new(ids::SELECT_VISIBLE_KEYS));
+    let selected = h.session().lock().selected_keys.len();
+    assert!(selected >= 3, "{selected}");
+    h.action(&mut tl, Invocation::new(ids::DESELECT_KEYS));
+    assert!(h.session().lock().selected_keys.is_empty());
+    assert!(h.session().lock().selected_props.is_empty());
+}

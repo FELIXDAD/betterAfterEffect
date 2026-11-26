@@ -9,8 +9,10 @@
 pub(crate) mod browser;
 pub(crate) mod controls;
 mod eq_response;
+mod exr;
 mod lumetri_curve;
 pub(crate) mod lut;
+pub mod manager;
 mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
@@ -124,6 +126,39 @@ pub(crate) fn effect_name(match_name: &str, def: Option<&EffectDef>) -> String {
     }
 }
 
+/// The name an applied effect shows: its own, or — while it still has the
+/// effect's English default name ("Gaussian Blur", "Gaussian Blur 2") — the
+/// effect's name in the UI language (AE names effects in the language they
+/// were applied in; BAE stores the English one).
+pub(crate) fn instance_name(stage: &bae_model::Stage, effect: &bae_model::PrimPath) -> String {
+    let name = bae_motion::query::display_name_of(stage, effect);
+    let match_name = stage
+        .prim(effect)
+        .and_then(|v| bae_motion::query::static_value(&v, "match_name"))
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let def = global().and_then(|r| r.def(&match_name));
+    let english = directory()
+        .iter()
+        .find(|e| e.match_name == match_name)
+        .map(|e| e.name.to_owned())
+        .or_else(|| def.as_ref().map(|d| d.name.clone()));
+    let Some(english) = english else {
+        return name;
+    };
+    let shown = effect_name(&match_name, def.as_deref());
+    if name == english {
+        return shown;
+    }
+    match name
+        .strip_prefix(english.as_str())
+        .and_then(|r| r.strip_prefix(' '))
+    {
+        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => format!("{shown} {n}"),
+        _ => name,
+    }
+}
+
 /// Localized label of `param` of effect `match_name`.
 pub(crate) fn param_label(match_name: &str, param: &EffectParamDef) -> String {
     if chinese()
@@ -202,6 +237,11 @@ pub(crate) fn apply(cx: &mut PanelContext<'_>, layers: &[PrimPath], match_name: 
     cx.invoke_with(
         "effect.apply",
         json!({"layers": layers, "match_name": match_name}),
+    );
+    // AE brings Effect Controls to the front with the new effect.
+    cx.invoke_with(
+        bae_ui::action::ids::OPEN_PANEL,
+        json!({"id": "effect_controls"}),
     );
     *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(match_name.to_owned());
 }
@@ -359,8 +399,8 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "effects",
-        bae_ui::PanelKind::new("Effects & Presets", |_| {
-            Box::new(browser::EffectsPanel::default())
+        bae_ui::PanelKind::new("Effects & Presets", |spawn| {
+            Box::new(browser::EffectsPanel::restore(spawn.state))
         }),
     );
 }

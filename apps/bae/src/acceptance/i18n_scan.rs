@@ -11,6 +11,8 @@ use super::*;
 
 /// Proper nouns and key legends that stay in Latin letters in a Chinese UI.
 pub(super) const ALLOWED: &[&str] = &[
+    // The Project panel's color depth button ("8 bpc", as in AE's Chinese UI).
+    "bpc",
     // Product, formats, color models, codecs.
     "BAE",
     "PNG",
@@ -29,6 +31,8 @@ pub(super) const ALLOWED: &[&str] = &[
     // Frame rate unit: AE zh_CN keeps it ("社交媒体纵向 HD • 1080x1920 • 30 fps",
     // docs/reference/ae/preferences.json); the timeline shows "(30.00 fps)".
     "fps",
+    // The H.264 output module uses this bitrate unit in both languages.
+    "Mbps",
     // AE (keyboard layout name, "Roto 笔刷工具") and BAE's Agent workspace
     // (docs/glossary.md).
     "After",

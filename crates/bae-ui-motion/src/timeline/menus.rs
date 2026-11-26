@@ -64,8 +64,34 @@ pub(crate) fn property_menu_entries(
     ]
 }
 
+/// The Parent & Link column's right-click menu (AE 26): the parent list itself,
+/// `items[0]` None and then the comp's layers, the current parent (`current`)
+/// checked and the layer itself (`own`) greyed. Returns the picked index.
+pub(crate) fn parent_menu(
+    ui: &mut Ui,
+    items: &[&str],
+    current: usize,
+    own: usize,
+) -> Option<usize> {
+    let mut picked = None;
+    for (i, item) in items.iter().enumerate() {
+        if i == 1 {
+            ui.separator();
+        }
+        let mut on = i == current;
+        let resp = ui
+            .add_enabled_ui(i != own, |ui| widgets::checkbox(ui, &mut on, item))
+            .inner;
+        if resp.clicked() {
+            picked = Some(i);
+            ui.close();
+        }
+    }
+    picked
+}
+
 /// A property name's right-click menu ([`property_menu_entries`]) for `attr` of
-/// `path` at comp time `now`.
+/// `path` at comp time `now`; a right-click on its value shows it too.
 pub(crate) fn property_menu(
     ui: &mut Ui,
     cx: &mut PanelContext<'_>,
@@ -254,7 +280,11 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
             ui.separator();
         }
         Node::Submenu(s) if s.platform.current() => {
-            if s.children.is_empty() {
+            if s.title == "Layer Styles" {
+                common::submenu(ui, tr(s.title), &mut |ui| {
+                    crate::layer_styles::context_menu(ui, cx)
+                });
+            } else if s.children.is_empty() {
                 ui.add_enabled(false, egui::Button::new(tr(s.title)));
             } else {
                 common::submenu(ui, tr(s.title), &mut |ui| catalog_nodes(ui, cx, s.children));

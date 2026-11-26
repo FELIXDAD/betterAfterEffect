@@ -92,6 +92,57 @@ fn expressions_add_pick_whip_switch_and_multiline_edit() {
 }
 
 #[test]
+fn typing_and_accepting_an_expression_completion_edits_the_draft() {
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.session().lock().selected_props = vec![(layer.clone(), POS.to_owned())];
+    let mut tl = h.bars();
+    let action = h.action(
+        &mut tl,
+        Invocation::new(crate::actions::ids::ADD_EXPRESSION),
+    );
+    h.apply(&action);
+    h.frame(&mut tl, vec![], Modifiers::NONE);
+    let eq = tl.last_expr.iter().find(|e| e.1 == POS).unwrap().2;
+    let field = pos2(tl.last_axis.unwrap().left + 50.0, eq.y);
+    h.click(&mut tl, field, Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![
+            Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: cmd(),
+            },
+            Event::Text("wig".into()),
+        ],
+        Modifiers::NONE,
+    );
+    assert_eq!(tl.expr_edit.as_ref().map(|e| e.2.as_str()), Some("wig"));
+    h.frame(&mut tl, vec![press(egui::Key::Tab)], Modifiers::NONE);
+    assert_eq!(
+        tl.expr_edit.as_ref().map(|e| e.2.as_str()),
+        Some("wiggle()")
+    );
+    h.frame(&mut tl, vec![Event::Text("2, 10".into())], Modifiers::NONE);
+    assert_eq!(
+        tl.expr_edit.as_ref().map(|e| e.2.as_str()),
+        Some("wiggle(2, 10)")
+    );
+    assert_ne!(
+        query::attr_spec(&h.stage, &layer, POS)
+            .unwrap()
+            .expression
+            .as_ref()
+            .unwrap()
+            .source,
+        "wiggle(2, 10)"
+    );
+}
+
+#[test]
 fn pick_whip_references_follow_ae() {
     let mut h = H::new();
     let comp = h.comp.clone();
@@ -108,6 +159,26 @@ fn pick_whip_references_follow_ae() {
     );
     assert_eq!(r(&a, &b, None), format!("thisComp.layer(\"{name}\")"));
     assert_eq!(r(&a, &a, None), "thisLayer");
+    // Onto an effect's row: the effect as a whole.
+    let folder = b.child("effects").unwrap();
+    h.run(
+        "prim.create",
+        json!({"path": folder, "prim_type": "Folder"}),
+    );
+    let blur = folder.child("Gaussian_Blur").unwrap();
+    h.run("prim.create", json!({"path": blur, "prim_type": "Effect"}));
+    h.run(
+        "attr.set",
+        json!({"path": blur, "attr": "name", "value": {"type": "string", "value": "Gaussian Blur"}}),
+    );
+    let r = |from: &PrimPath, to: &PrimPath, attr: Option<&str>| {
+        crate::expr::reference(&h.stage, from, to, attr).unwrap()
+    };
+    assert_eq!(
+        r(&a, &blur, None),
+        format!("thisComp.layer(\"{name}\").effect(\"Gaussian Blur\")")
+    );
+    assert_eq!(r(&b, &blur, None), "effect(\"Gaussian Blur\")");
     assert_eq!(
         crate::expr::default_expression(&h.stage, &a, "transform:opacity"),
         "transform.opacity"

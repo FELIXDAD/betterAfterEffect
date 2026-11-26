@@ -137,6 +137,54 @@ pub struct ShortcutRow {
 
 /// Preferences > Startup & Repair > Reveal Preferences in Explorer / Finder.
 pub const REVEAL_PREFERENCES: &str = "startup_repair.reveal_preferences_in_explorer";
+pub const MEMORY_DETAILS: &str = "memory_cpu.show_memory_usage_details";
+pub const GPU_INFORMATION: &str = "memory_cpu.gpu_information";
+
+pub(crate) fn hardware_information(
+    id: &str,
+    resources: &Resources,
+) -> Option<(&'static str, String)> {
+    match id {
+        MEMORY_DETAILS => {
+            let show = |n: Option<u64>| {
+                n.map(|n| format!("{:.1} MB", n as f64 / (1_u64 << 20) as f64))
+                    .unwrap_or_else(|| "—".to_owned())
+            };
+            let body = format!(
+                "{} {}\nBAE ({})   {} {}",
+                tr("Installed RAM:"),
+                show(bae_platform::memory::total_bytes()),
+                std::process::id(),
+                tr("Resident Memory:"),
+                show(bae_platform::memory::resident_bytes())
+            );
+            Some((tr("Memory Usage Details"), body))
+        }
+        GPU_INFORMATION => {
+            let body = resources
+                .get::<Arc<bae_gpu::GpuContext>>()
+                .map(|gpu| {
+                    let info = gpu.adapter_info();
+                    let mut lines = vec![gpu_summary(gpu)];
+                    if !info.driver.is_empty() {
+                        lines.push(format!("{} {}", tr("Driver:"), info.driver));
+                    }
+                    if !info.driver_info.is_empty() {
+                        lines.push(info.driver_info.clone());
+                    }
+                    lines.push(format!(
+                        "{} {} px",
+                        tr("Maximum Texture Dimension:"),
+                        gpu.limits().max_texture_dimension_2d
+                    ));
+                    lines.join("\n")
+                })
+                .unwrap_or_else(|| tr("No active GPU device.").to_owned());
+            Some((tr("GPU Information"), body))
+        }
+        _ => None,
+    }
+}
 
 /// The workbench plus shell-owned windows.
 pub struct Workspace {
@@ -164,7 +212,13 @@ impl Workspace {
             show_about: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
-                .with_host_buttons(&[REVEAL_PREFERENCES, "choose"]),
+                .with_installed_ram(bae_platform::memory::total_bytes())
+                .with_host_buttons(&[
+                    REVEAL_PREFERENCES,
+                    MEMORY_DETAILS,
+                    GPU_INFORMATION,
+                    "choose",
+                ]),
         }
     }
 
@@ -274,10 +328,24 @@ impl Workspace {
         };
         self.workbench.set_external_modal(self.settings.is_open());
         let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
-        if let bae_ui::settings::Outcome::Ok(prefs) = self.settings.show(ui.ctx())
-            && let Err(error) = self.prefs.set(prefs)
-        {
-            tracing::warn!("could not save preferences: {error}");
+        if self.settings.is_open() {
+            let outcome = self.settings.show(ui.ctx());
+            if outcome == bae_ui::settings::Outcome::None {
+                if let Some(draft) = self.settings.take_display_preview() {
+                    self.prefs.preview_display(Some(draft));
+                    bae_ui::settings::apply(draft);
+                    ui.ctx().request_repaint();
+                }
+            } else {
+                self.prefs.preview_display(None);
+                if let bae_ui::settings::Outcome::Ok(prefs) = outcome
+                    && let Err(error) = self.prefs.set(prefs)
+                {
+                    tracing::warn!("could not save preferences: {error}");
+                }
+                bae_ui::settings::apply(&self.prefs.current());
+                ui.ctx().request_repaint();
+            }
         }
         if self.show_about {
             let mut open = true;
@@ -312,7 +380,18 @@ impl Workspace {
             title: &title,
             dirty: false,
         };
-        (!self.workbench.handle(&inv, &cx)).then_some(inv)
+        if self.workbench.handle(&inv, &cx) {
+            return None;
+        }
+        let mut inv = inv;
+        if matches!(inv.id.as_str(), "attr.set_at" | "attr.set_many")
+            && resources
+                .get::<bae_ui_motion::SharedSession>()
+                .is_some_and(|s| s.lock().auto_key)
+        {
+            inv.params["auto_key"] = true.into();
+        }
+        Some(inv)
     }
 
     /// The menus modules contributed (`Registry<MenuItemSpec>`), for the active

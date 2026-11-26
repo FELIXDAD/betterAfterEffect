@@ -298,6 +298,28 @@ impl MediaLibrary {
         Ok(frame)
     }
 
+    /// Look up the already decoded channel metadata for exactly this source frame.
+    pub fn cached_channels(
+        &self,
+        path: &Path,
+        options: &OpenOptions,
+        request: &FrameRequest,
+        time: Time,
+    ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+        let key = SourceKey {
+            path: path.to_owned(),
+            options: *options,
+        };
+        let source = self.sources.lock().slots.get(&key)?.source.clone();
+        let source = source.lock();
+        let index = clamp_index(&source.info, source.source.frame_at(time));
+        let frame = self.cache.get(&FrameKey::new(
+            source.id,
+            &FrameRequest { index, ..*request },
+        ))?;
+        Some(frame.channels?.info.clone())
+    }
+
     /// Frame `request.index` decoded to the CPU (thumbnails, packaging, Agent
     /// previews without a GPU). Not cached.
     pub fn frame_cpu(

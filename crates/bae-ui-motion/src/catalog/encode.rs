@@ -17,6 +17,16 @@ pub fn source_effects() -> Vec<AeEffect> {
                 match_name: f[1],
                 name: f[2],
                 name_zh: f[3],
+                capabilities: f[4].split(',').fold(0, |bits, flag| {
+                    bits | match flag {
+                        "8" => 1,
+                        "16" => 2,
+                        "32" => 4,
+                        "GPU" => 8,
+                        "-" => 0,
+                        _ => panic!("unknown effect capability {flag}"),
+                    }
+                }),
             }
         })
         .collect()
@@ -118,10 +128,11 @@ pub fn encode(
             .expect("effect category is listed");
         let _ = writeln!(
             out,
-            "{category}\t{}\t{}\t{}",
+            "{category}\t{}\t{}\t{}\t{}",
             field(e.match_name),
             field(e.name),
-            field(e.name_zh)
+            field(e.name_zh),
+            e.capabilities
         );
     }
     out

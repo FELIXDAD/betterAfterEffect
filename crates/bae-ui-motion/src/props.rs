@@ -232,6 +232,16 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             children,
         });
     }
+    // Time Remap, once enabled: a property of its own above the trackers and
+    // masks (AE's property order).
+    if stage
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, "time_remap_enabled"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+    {
+        out.push(prop(stage, layer, "time_remap", three_d));
+    }
     if let Ok(masks) = layer.child("masks") {
         let children: Vec<Node> = stage
             .children(&masks)
@@ -310,6 +320,7 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             .map(|a| prop(stage, layer, a, three_d))
             .collect(),
     });
+    out.extend(crate::layer_styles::node(stage, layer));
     out
 }
 
@@ -408,7 +419,7 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
                 .unwrap_or_default();
             Some(Node::Group {
                 id: format!("{layer}#{e}"),
-                label: group_label(stage, &e),
+                label: crate::effects::instance_name(stage, &e),
                 children: params
                     .into_iter()
                     .map(|a| Node::Prop {
@@ -436,6 +447,33 @@ fn flatten_props(nodes: &[Node], out: &mut Vec<Node>) {
 }
 
 /// The properties a reveal filter shows directly under the layer.
+/// The masks of `layer`, in order.
+pub(crate) fn masks_of(stage: &Stage, layer: &PrimPath) -> Vec<PrimPath> {
+    layer.child("masks").map_or_else(
+        |_| Vec::new(),
+        |masks| {
+            stage
+                .children(&masks)
+                .into_iter()
+                .filter(|m| stage.prim(m).is_some_and(|v| v.is_a(&PrimType::MASK)))
+                .collect()
+        },
+    )
+}
+
+/// The mask attributes a reveal list asks for (M: Mask Path, F: Mask Feather,
+/// MM: all), as the masks' own attribute names (`*` = all).
+pub(crate) fn revealed_mask_attrs(list: &[String]) -> Vec<&'static str> {
+    list.iter()
+        .filter_map(|a| match a.as_str() {
+            "mask_path" => Some("path"),
+            "mask_feather" => Some("feather"),
+            "masks" => Some("*"),
+            _ => None,
+        })
+        .collect()
+}
+
 pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<Node> {
     let mut all = Vec::new();
     flatten_props(&layer_tree(stage, layer), &mut all);

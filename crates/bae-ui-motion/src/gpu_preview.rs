@@ -49,7 +49,39 @@ pub(crate) struct PreviewImage {
     pub rect: IRect,
 }
 
+/// Picker data belongs to the same composition and time as the displayed preview.
+#[derive(Debug)]
+pub(crate) struct ChannelFrame {
+    pub comp: bae_model::PrimPath,
+    pub time: Time,
+    pub layers: std::collections::HashMap<bae_model::PrimPath, Arc<bae_gpu::channels::ChannelInfo>>,
+}
+impl ChannelFrame {
+    fn from_comp(renderer: &Renderer, rc: &bae_render::RenderComp) -> Option<Arc<Self>> {
+        let mut layers = std::collections::HashMap::new();
+        for layer in &rc.layers {
+            if layer.effects.iter().any(|e| {
+                matches!(
+                    e.effect.as_str(),
+                    "Cryptomatte" | "EXtractoR" | "IDentifier"
+                )
+            }) && let bae_render::LayerContent::Footage(f) = &layer.content
+                && let Some(info) = renderer.footage_channels(f)
+            {
+                layers.insert(layer.path.clone(), info);
+            }
+        }
+        (!layers.is_empty()).then(|| {
+            Arc::new(Self {
+                comp: rc.path.clone(),
+                time: rc.time,
+                layers,
+            })
+        })
+    }
+}
 pub(super) struct RenderEngine {
+    pub(super) channels: Option<Arc<ChannelFrame>>,
     pub(super) renderer: Renderer,
     pub(super) anim: AnimEvaluator,
     /// The comp and per-layer render times of the last frame rendered (not
@@ -63,6 +95,7 @@ pub(super) struct RenderEngine {
 impl RenderEngine {
     pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
         Self {
+            channels: None,
             renderer: Renderer::with_config(
                 gpu,
                 RendererConfig {
@@ -151,6 +184,7 @@ impl RenderEngine {
             (frame, target)
         };
         self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
+        self.channels = ChannelFrame::from_comp(&self.renderer, rc);
         let rect = (!frame.incomplete).then_some(frame.image.rect);
         Ok((target, rect, frames.sampled))
     }
@@ -337,8 +371,10 @@ impl GpuPreview {
             .unwrap_or_default();
         let live = (!overrides.is_empty()).then(|| overrides.clone());
         self.engine.anim.set_overrides(overrides);
-        if self.changes.changed(resources) {
-            self.engine.anim.clear_compiled();
+        if self.changes.sync(stage, |event| match event {
+            Some(event) => bae_render::CompEvaluator::invalidate(&mut self.engine.anim, event),
+            None => self.engine.anim.clear_compiled(),
+        }) {
             self.last = None;
         }
         let mut rc = match self.engine.anim.convert(stage, comp, 0) {
@@ -357,16 +393,18 @@ impl GpuPreview {
             }
         }
         // sampleImage: the layers expressions sampled are drawn and read back
-        // without waiting. A frame evaluated before its samples arrived is not
-        // shown: the previous image stays up and the viewer evaluates again.
-        if self.samples.has_requests()
+        // without waiting (during a value drag on the live renderer's thread).
+        // A frame evaluated before its samples arrived is not shown: the
+        // previous image stays up and the viewer evaluates again.
+        if live.is_none()
+            && self.samples.has_requests()
             && let Err(e) = self.engine.read_samples(stage, &rc, &self.samples)
         {
             tracing_warn(&format!("preview: sampleImage: {e}"));
         }
         let arrived = self.engine.renderer.poll_samples(&self.samples);
         self.waiting = arrived || self.samples.is_waiting();
-        if self.waiting && self.rect.is_some() {
+        if self.waiting && live.is_none() && self.rect.is_some() {
             return Some(PreviewImage {
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
@@ -444,6 +482,9 @@ impl GpuPreview {
             {
                 tracing_warn(&format!("preview: {e}"));
                 return None;
+            }
+            if let Some(session) = resources.get::<crate::session::SharedSession>() {
+                session.lock().channel_frame = self.engine.channels.clone();
             }
             self.last = Some(key);
             self.rect = Some(rect);
@@ -531,6 +572,34 @@ impl GpuPreview {
 
     /// Show Snapshot: publish snapshot `slot` instead of the frame (the next
     /// [`GpuPreview::frame`] shows the frame again).
+    /// The project version live frames render with (kept for the drag).
+    fn live_scene(
+        &mut self,
+        resources: &Resources,
+        stage: &Stage,
+    ) -> Arc<crate::live_preview::LiveScene> {
+        let sources = resources.get::<PreviewSources>();
+        let effects = resources.get::<PreviewEffects>();
+        let scene_key = (
+            stage.revision(),
+            sources.map(|s| s.0.generation()),
+            effects.map(|e| e.0.generation()),
+        );
+        match &self.live_scene {
+            Some(scene) if scene.key == scene_key => scene.clone(),
+            _ => {
+                let scene = Arc::new(crate::live_preview::LiveScene {
+                    key: scene_key,
+                    snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
+                    sources: sources.cloned(),
+                    effects: effects.cloned(),
+                });
+                self.live_scene = Some(scene.clone());
+                scene
+            }
+        }
+    }
+
     /// [`GpuPreview::frame`] during a value drag: submits the newest value to
     /// the background renderer (replacing a request that has not started)
     /// and shows the newest finished frame, never waiting for one.
@@ -545,30 +614,34 @@ impl GpuPreview {
         measure_layer_times: bool,
         overrides: Vec<bae_anim::AttrOverride>,
     ) -> Option<PreviewImage> {
-        use crate::live_preview::{LiveJob, LiveScene};
+        use crate::live_preview::LiveJob;
         // The frame is rendered again here once the drag ends.
         self.last = None;
+        // Samples this value needs are read on the live thread first; the
+        // frame itself goes once they are all in (the viewer evaluates again).
+        let reading = self.samples.has_requests();
+        if reading || self.waiting {
+            if reading {
+                let scene = self.live_scene(resources, stage);
+                self.live.submit(LiveJob {
+                    scene,
+                    rc,
+                    overrides,
+                    resolution,
+                    display: self.display,
+                    roi: self.roi,
+                    measure: false,
+                    samples: Some(self.samples.clone()),
+                    render: false,
+                });
+            }
+            return Some(PreviewImage {
+                handle: self.registry.display_handle(self.id)?,
+                rect: self.rect?,
+            });
+        }
         if self.live_sent != Some(sent) {
-            let sources = resources.get::<PreviewSources>();
-            let effects = resources.get::<PreviewEffects>();
-            let scene_key = (
-                stage.revision(),
-                sources.map(|s| s.0.generation()),
-                effects.map(|e| e.0.generation()),
-            );
-            let scene = match &self.live_scene {
-                Some(scene) if scene.key == scene_key => scene.clone(),
-                _ => {
-                    let scene = Arc::new(LiveScene {
-                        key: scene_key,
-                        snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
-                        sources: sources.cloned(),
-                        effects: effects.cloned(),
-                    });
-                    self.live_scene = Some(scene.clone());
-                    scene
-                }
-            };
+            let scene = self.live_scene(resources, stage);
             self.live.submit(LiveJob {
                 scene,
                 rc,
@@ -577,6 +650,8 @@ impl GpuPreview {
                 display: self.display,
                 roi: self.roi,
                 measure: measure_layer_times,
+                samples: Some(self.samples.clone()),
+                render: true,
             });
             self.live_sent = Some(sent);
         }

@@ -200,6 +200,36 @@ impl std::fmt::Debug for MappedFrame {
 }
 
 impl MappedFrame {
+    #[cfg(feature = "media")]
+    fn write_to(self, encoder: &mut dyn bae_media::Encoder) -> Result<Duration, RenderError> {
+        #[cfg(target_os = "macos")]
+        {
+            let staging = self.staging.as_ref().expect("present until consumed");
+            let view = staging
+                .buffer
+                .get_mapped_range(..)
+                .map_err(|e| GpuError::Map(e.to_string()))?;
+            if encoder
+                .push_mapped_rows(
+                    self.format.into(),
+                    self.alpha.into(),
+                    [self.width, self.height],
+                    self.padded_bytes_per_row as usize,
+                    &view,
+                )
+                .map_err(media_error)?
+            {
+                // The encoder consumed shared Metal storage directly.
+                return Ok(Duration::ZERO);
+            }
+        }
+        let frame = self.into_frame()?;
+        let elapsed = frame.copy;
+        let frame = cpu_frame(frame, encoder.settings());
+        encoder.push_frame_owned(frame).map_err(media_error)?;
+        Ok(elapsed)
+    }
+
     /// Copies the pixels out (rows tightly packed) and returns the staging
     /// buffer for reuse.
     pub fn into_frame(mut self) -> Result<ReadFrame, RenderError> {
@@ -591,10 +621,8 @@ impl EncoderThread {
             .spawn(move || {
                 let mut copy = Duration::ZERO;
                 for (index, mapped) in receiver.iter().enumerate() {
-                    let pushed = mapped.into_frame().and_then(|frame| {
-                        copy += frame.copy;
-                        let frame = cpu_frame(frame, encoder.settings());
-                        encoder.push_frame_owned(frame).map_err(media_error)?;
+                    let pushed = mapped.write_to(&mut *encoder).and_then(|elapsed| {
+                        copy += elapsed;
                         if let Some(track) = &mut audio {
                             track.push(index, &mut *encoder)?;
                         }
@@ -683,6 +711,12 @@ pub enum ExportFormat {
     H264,
     /// HEVC movie.
     Hevc,
+    /// H.264 in a QuickTime container.
+    QuickTimeH264,
+    /// HEVC in a QuickTime container.
+    QuickTimeHevc,
+    /// Standard ProRes 422 movie.
+    ProRes422,
     /// ProRes 422 HQ movie (macOS).
     ProRes,
     /// ProRes 4444 movie with alpha (macOS).
@@ -691,12 +725,15 @@ pub enum ExportFormat {
 
 impl ExportFormat {
     /// Names accepted by [`Self::parse`] (`bae render --format`).
-    pub const NAMES: [&'static str; 8] = [
+    pub const NAMES: [&'static str; 11] = [
         "png",
         "tiff",
         "exr",
         "h264",
         "hevc",
+        "mov-h264",
+        "mov-hevc",
+        "prores422",
         "prores",
         "prores4444",
         "wav",
@@ -711,6 +748,9 @@ impl ExportFormat {
             "exr" => Self::Exr,
             "h264" | "mp4" => Self::H264,
             "hevc" => Self::Hevc,
+            "mov-h264" => Self::QuickTimeH264,
+            "mov-hevc" => Self::QuickTimeHevc,
+            "prores422" => Self::ProRes422,
             "prores" | "mov" => Self::ProRes,
             "prores4444" => Self::ProRes4444,
             _ => return None,
@@ -732,6 +772,9 @@ impl ExportFormat {
             Self::Exr => "exr",
             Self::H264 => "h264",
             Self::Hevc => "hevc",
+            Self::QuickTimeH264 => "mov-h264",
+            Self::QuickTimeHevc => "mov-hevc",
+            Self::ProRes422 => "prores422",
             Self::ProRes => "prores",
             Self::ProRes4444 => "prores4444",
         }
@@ -745,8 +788,17 @@ impl ExportFormat {
             Self::Tiff => "tif",
             Self::Exr => "exr",
             Self::H264 | Self::Hevc => "mp4",
-            Self::ProRes | Self::ProRes4444 => "mov",
+            Self::ProRes
+            | Self::ProRes422
+            | Self::ProRes4444
+            | Self::QuickTimeH264
+            | Self::QuickTimeHevc => "mov",
         }
+    }
+
+    /// The output module writes a QuickTime container.
+    pub fn is_quicktime(self) -> bool {
+        self.extension() == "mov"
     }
 
     /// One file per frame.
@@ -814,6 +866,8 @@ pub struct ExportSettings {
     /// Movies: average bit rate in bits per second (AE's H.264 "target
     /// bitrate"); `None`: the encoder's default. Ignored for image sequences.
     pub bit_rate: Option<u64>,
+    /// Write uncompressed 24-bit audio to QuickTime instead of AAC.
+    pub pcm_audio: bool,
 }
 
 impl ExportSettings {
@@ -827,6 +881,7 @@ impl ExportSettings {
             threads: None,
             alpha: ExportAlpha::default(),
             bit_rate: None,
+            pcm_audio: format.is_quicktime(),
         }
     }
 
@@ -921,7 +976,7 @@ pub fn has_frame_run(pattern: &Path) -> bool {
 /// `pattern` with an explicit `####` run when its file name has none, so
 /// bae-media numbers files exactly like [`frame_file`].
 #[cfg_attr(not(feature = "media"), allow(dead_code))]
-pub(crate) fn explicit_pattern(pattern: &Path) -> PathBuf {
+pub fn explicit_pattern(pattern: &Path) -> PathBuf {
     if has_frame_run(pattern) {
         return pattern.to_owned();
     }
@@ -988,8 +1043,9 @@ fn encode_settings(
             Some("piz") => ExrCompression::Piz,
             Some(_) => return Err(bad("exr (none | rle | zips | zip | piz)")),
         }),
-        ExportFormat::H264 => VideoCodec::H264,
-        ExportFormat::Hevc => VideoCodec::Hevc,
+        ExportFormat::H264 | ExportFormat::QuickTimeH264 => VideoCodec::H264,
+        ExportFormat::Hevc | ExportFormat::QuickTimeHevc => VideoCodec::Hevc,
+        ExportFormat::ProRes422 => VideoCodec::ProRes(ProResProfile::Standard),
         ExportFormat::ProRes => VideoCodec::ProRes(ProResProfile::Hq),
         ExportFormat::ProRes4444 => VideoCodec::ProRes(ProResProfile::P4444),
     };
@@ -1152,7 +1208,11 @@ impl Sink {
                 MovieAudio::new(job)
             };
             if audio.is_some() {
-                encode.audio = Some(bae_media::export::AudioEncodeSettings::aac_stereo());
+                let mut track = bae_media::export::AudioEncodeSettings::aac_stereo();
+                if settings.pcm_audio && settings.format.is_quicktime() {
+                    track.codec = "pcm_s24le".into();
+                }
+                encode.audio = Some(track);
             }
             let builtin;
             let encoders = match job.encoders {
@@ -1358,23 +1418,36 @@ impl Sink {
 
 /// A read-back frame as bae-media's frame type.
 #[cfg(feature = "media")]
+impl From<ReadbackFormat> for bae_media::PixelFormat {
+    fn from(value: ReadbackFormat) -> Self {
+        match value {
+            ReadbackFormat::Rgba8 => Self::Rgba8,
+            ReadbackFormat::Bgra8 => Self::Bgra8,
+            ReadbackFormat::Rgba16Float => Self::Rgba16Float,
+            ReadbackFormat::Rgba32Float => Self::Rgba32Float,
+        }
+    }
+}
+
+#[cfg(feature = "media")]
+impl From<OutputAlpha> for bae_media::AlphaMode {
+    fn from(value: OutputAlpha) -> Self {
+        match value {
+            OutputAlpha::Straight => Self::Straight,
+            OutputAlpha::Premultiplied => Self::Premultiplied,
+            OutputAlpha::Over(_) => Self::Opaque,
+        }
+    }
+}
+
+#[cfg(feature = "media")]
 fn cpu_frame(frame: ReadFrame, settings: &bae_media::EncodeSettings) -> bae_media::CpuFrame {
-    use bae_media::{AlphaMode, PixelFormat};
     bae_media::CpuFrame {
         width: frame.width,
         height: frame.height,
-        format: match frame.format {
-            ReadbackFormat::Rgba8 => PixelFormat::Rgba8,
-            ReadbackFormat::Bgra8 => PixelFormat::Bgra8,
-            ReadbackFormat::Rgba16Float => PixelFormat::Rgba16Float,
-            ReadbackFormat::Rgba32Float => PixelFormat::Rgba32Float,
-        },
+        format: frame.format.into(),
         data: frame.data,
-        alpha: match frame.alpha {
-            OutputAlpha::Straight => AlphaMode::Straight,
-            OutputAlpha::Premultiplied => AlphaMode::Premultiplied,
-            OutputAlpha::Over(_) => AlphaMode::Opaque,
-        },
+        alpha: frame.alpha.into(),
         color: settings.color.clone(),
         pixel_aspect: settings.pixel_aspect,
     }

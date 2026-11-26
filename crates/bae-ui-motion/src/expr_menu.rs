@@ -2,6 +2,11 @@
 //! in AE's order, the items inserted as written. AE shows this menu in English in
 //! every language.
 
+pub(crate) mod assist;
+mod field;
+mod typing;
+pub(crate) use field::height as field_height;
+
 use egui::Ui;
 
 use crate::common;
@@ -161,6 +166,7 @@ const MENU: &[(&str, Group)] = &[
                 "Sub-objects",
                 &[
                     "source",
+                    "sourceRectAtTime(t = time, includeExtents = false)",
                     "effect(name)",
                     "effect(index)",
                     "mask(name)",
@@ -338,6 +344,24 @@ const MENU: &[(&str, Group)] = &[
             "sourceText.style",
             "sourceText.getStyleAt(charIndex, t = time)",
             "sourceText.createStyle()",
+            "style.setFont(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setFontSize(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setFillColor(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setStrokeColor(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setStrokeWidth(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setTracking(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setLeading(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setBaselineShift(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setFauxBold(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setFauxItalic(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setAllCaps(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setSmallCaps(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setBaselineOption(value, startIndex = 0, numOfCharacters = text.sourceText.length - startIndex)",
+            "style.setText(value)",
+            "style.setJustification(value)",
+            "style.setApplyFill(value)",
+            "style.setApplyStroke(value)",
+            "style.setAutoLeading(value)",
         ]),
     ),
 ];

@@ -166,6 +166,28 @@ impl OutputTarget {
     pub fn size(&self) -> [u32; 2] {
         [self.0.texture().width(), self.0.texture().height()]
     }
+
+    /// A new display target of `size` (allocated ahead of the frames it will
+    /// hold, such as playback's spare targets).
+    pub fn new(device: &wgpu::Device, [w, h]: [u32; 2]) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bae-render.output"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        OutputTarget(texture.create_view(&Default::default()))
+    }
 }
 
 pub(crate) struct DisplayOutput {
@@ -192,26 +214,7 @@ impl DisplayOutput {
         let target = self
             .available
             .filter(|t| t.size() == [w.max(1), h.max(1)])
-            .unwrap_or_else(|| {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("bae-render.output"),
-                    size: wgpu::Extent3d {
-                        width: w.max(1),
-                        height: h.max(1),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
-                let view = texture.create_view(&Default::default());
-                OutputTarget(view)
-            });
+            .unwrap_or_else(|| OutputTarget::new(device, [w, h]));
         crate::exec::record_output_pass(
             device,
             pipelines,
@@ -232,6 +235,8 @@ pub struct Renderer {
     pool: TexturePool,
     draws: DrawBuffer,
     output_uniform: Option<([u8; OUTPUT_PARAMS_SIZE as usize], wgpu::Buffer)>,
+    /// Receiver-space shadow maps kept across frames.
+    shadow_maps: crate::exec::shadowmap::ShadowMapCache,
     readback_target: Option<OutputTarget>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
@@ -300,6 +305,7 @@ impl Renderer {
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
             output_uniform: None,
+            shadow_maps: Default::default(),
             readback_target: None,
             mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
@@ -393,6 +399,14 @@ impl Renderer {
     pub fn set_media_library(&mut self, library: Arc<bae_media::MediaLibrary>) {
         self.footage.set_library(library);
         self.frames.clear();
+    }
+
+    /// Original channel names and picker data for a frame already decoded by this renderer.
+    pub fn footage_channels(
+        &self,
+        footage: &FootageRef,
+    ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+        self.footage.channels(footage)
     }
 
     /// Closes every open footage file so the next frame reopens them (after
@@ -506,7 +520,9 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
-        let tiles = request.roi.map(|_| crate::exec::TileCache {
+        let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
+        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
+            feedback,
             frames: &mut self.frames,
             request: RenderRequest {
                 roi: None,
@@ -524,6 +540,7 @@ impl Renderer {
             &graph,
             format,
             tiles,
+            &mut self.shadow_maps,
             crate::exec::Timing {
                 cpu: self.layer_times,
                 gpu: self.gpu_timer.as_mut(),
@@ -538,6 +555,7 @@ impl Renderer {
         }
         let encode = encode_start.elapsed();
         self.pool.end_frame();
+        self.shadow_maps.end_frame();
 
         let output = executed.output;
         let image = executed.image;
@@ -725,6 +743,7 @@ impl Renderer {
                 &graph,
                 format,
                 None,
+                &mut self.shadow_maps,
                 crate::exec::Timing {
                     cpu: false,
                     gpu: None,

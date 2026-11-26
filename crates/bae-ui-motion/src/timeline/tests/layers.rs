@@ -431,6 +431,102 @@ fn property_name_menu_matches_ae() {
     }
 }
 
+/// #596: a right-click on a property's value shows the property name's menu;
+/// one on the Parent & Link column pops the parent list, the layer itself
+/// greyed (AE 26, #591 batches 14/15).
+#[test]
+fn value_and_parent_column_right_click_menus() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let first = h.layer.clone();
+    let second = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    let mut tl = TimelinePanel::default();
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.graph_editor = false;
+        s.reveal.insert(
+            first.clone(),
+            crate::session::Reveal::Attrs(vec![POS.into()]),
+        );
+    }
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let find = |h: &H, text: &str| {
+        h.painted_text
+            .as_ref()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(s, _)| s == text)
+            .map(|(_, r)| r.center())
+    };
+    let right_click = |h: &mut H, tl: &mut TimelinePanel, p: Pos2| {
+        let right = |down| Event::PointerButton {
+            pos: p,
+            button: PointerButton::Secondary,
+            pressed: down,
+            modifiers: Modifiers::NONE,
+        };
+        h.frame(
+            tl,
+            vec![Event::PointerMoved(p), right(true)],
+            Modifiers::NONE,
+        );
+        h.frame(tl, vec![right(false)], Modifiers::NONE);
+        h.frame(tl, Vec::new(), Modifiers::NONE);
+    };
+    // Position's value text (the solid sits at the comp centre).
+    let value = h
+        .painted_text
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|(s, _)| s.starts_with("320"))
+        .map(|(_, r)| r.center())
+        .expect("position value");
+    let edit_value = bae_ui::tr("Edit Value...");
+    assert!(find(&h, edit_value).is_none());
+    right_click(&mut h, &mut tl, value);
+    assert!(find(&h, edit_value).is_some(), "property menu on the value");
+    h.frame(&mut tl, vec![press(egui::Key::Escape)], Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+
+    // The solid (layer 2 after the null) under its own Parent & Link "None".
+    let none = bae_ui::tr("None");
+    let nones: Vec<Pos2> = h
+        .painted_text
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|(s, _)| s == none)
+        .map(|(_, r)| r.center())
+        .collect();
+    assert_eq!(nones.len(), 2, "one dropdown per layer");
+    let solid_row = *nones.iter().max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+    right_click(&mut h, &mut tl, solid_row);
+    let solid_name = query::display_name_of(&h.stage, &first);
+    let null_name = query::display_name_of(&h.stage, &second);
+    let own = find(&h, &format!("2. {solid_name}")).expect("own entry");
+    // Greyed: picking the layer itself does nothing.
+    h.click(&mut tl, own, Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let parent = |h: &H| {
+        h.stage
+            .prim(&first)
+            .and_then(|p| p.value("parent").and_then(|v| v.as_prim_ref().cloned()))
+    };
+    assert_eq!(parent(&h), None);
+    if find(&h, &format!("1. {null_name}")).is_none() {
+        right_click(&mut h, &mut tl, solid_row);
+    }
+    let other = find(&h, &format!("1. {null_name}")).expect("other layer entry");
+    let r = h.click(&mut tl, other, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(parent(&h), Some(second));
+}
+
 /// #596: the Graph Editor's empty-space menu matches AE 26 zh_CN.
 #[test]
 fn graph_area_menu_matches_ae() {
@@ -458,4 +554,71 @@ fn graph_area_menu_matches_ae() {
         .map(|t| t.map(zh_of))
         .collect();
     assert_eq!(ours, ae.map(|t| t.map(str::to_owned)));
+}
+
+/// The parent pick whip with AE's modifiers: Shift moves the layer onto its
+/// new parent; Cmd/Ctrl-click removes the parent.
+#[test]
+fn parent_pick_whip_shift_and_cmd_click() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let nul = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    h.run(
+        "attr.set",
+        json!({"path": nul, "attr": "transform:position", "value": {"type": "vec3", "value": [100.0, 50.0, 0.0]}}),
+    );
+    let mut tl = TimelinePanel::default();
+    h.session().lock().graph_editor = false;
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let nones = |h: &H| -> Vec<Rect> {
+        let mut v: Vec<Rect> = h
+            .painted_text
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|(s, _)| s == bae_ui::tr("None"))
+            .map(|(_, r)| *r)
+            .collect();
+        v.sort_by(|a, b| a.center().y.total_cmp(&b.center().y));
+        v
+    };
+    let rows = nones(&h);
+    assert_eq!(rows.len(), 2);
+    // The solid is layer 2; its pick whip sits left of its Parent dropdown.
+    let whip = |r: Rect| pos2(r.left() - 18.0, r.center().y);
+    let r = h.drag(&mut tl, whip(rows[1]), rows[0].center(), Modifiers::SHIFT);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    assert_eq!(r.invocations[0].params["move_to_parent"], true);
+    h.apply(&r);
+    let parent = |h: &H| {
+        h.stage
+            .prim(&solid)
+            .and_then(|p| p.value("parent").and_then(|v| v.as_prim_ref().cloned()))
+    };
+    assert_eq!(parent(&h), Some(nul.clone()));
+    let e = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    // The solid's anchor lands on the null's anchor.
+    let anchor_on_screen = |l: &PrimPath| {
+        let a = match query::attr_spec(&h.stage, l, "transform:anchor_point")
+            .and_then(|s| s.value.clone())
+            .or_else(|| {
+                h.stage
+                    .prim(l)
+                    .and_then(|v| query::static_value(&v, "transform:anchor_point"))
+            }) {
+            Some(Value::Vec3(a)) => bae_anim::glam::DVec3::from_array(a),
+            _ => bae_anim::glam::DVec3::ZERO,
+        };
+        e.layer(l).unwrap().world_matrix.transform_point3(a)
+    };
+    let (s_at, n_at) = (anchor_on_screen(&solid), anchor_on_screen(&nul));
+    assert!((s_at - n_at).length() < 1e-6, "{s_at} vs {n_at}");
+    // Cmd/Ctrl-click the pick whip: no parent.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let r = h.click(&mut tl, whip(rows[1]), cmd());
+    h.apply(&r);
+    assert_eq!(parent(&h), None);
 }

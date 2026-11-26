@@ -19,6 +19,7 @@ mod markers;
 mod menus;
 mod modes;
 pub(crate) mod navigation;
+mod panel_menu;
 mod rows;
 mod search;
 mod switches;
@@ -49,7 +50,7 @@ use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use columns::Column;
 use columns::{Cols, Columns};
-pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
+pub(crate) use dialogs::{InterpolationDialog, KeyDialog, SequenceDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
 pub(crate) use markers::MarkerDialog;
@@ -220,6 +221,7 @@ pub struct TimelinePanel {
     graph_mode: bool,
     /// Switches / Modes / Parent & Link columns shown (F4, Shift+F4).
     columns: Columns,
+    display: panel_menu::Display,
     /// Where a keyframe drag puts the keyframes this frame.
     key_plan: Option<keys::KeyPlan>,
     /// Modifiers held when the primary button last went down (AE decides drag
@@ -386,6 +388,42 @@ fn label_of(stage: &Stage, path: &PrimPath) -> usize {
 }
 
 impl TimelinePanel {
+    /// F4 (Switches / Modes columns) or Shift+F4 (Parent & Link column).
+    fn toggle_columns(&mut self, id: &str) {
+        match id {
+            actions::ids::TOGGLE_SWITCHES_MODES => self.columns.toggle_switches_modes(),
+            actions::ids::TOGGLE_PARENT_COLUMN => self.columns.toggle(Column::Parent),
+            _ => {}
+        }
+    }
+
+    /// Ctrl+Alt+A: every keyframe and property shown in the Timeline.
+    fn select_visible_keys(&mut self, stage: &Stage, session: &SharedSession) {
+        let Some(info) = common::active_comp(stage, session) else {
+            return;
+        };
+        let layers = self.layer_list(stage, &info.path);
+        let mut s = session.lock();
+        let mut keys = Vec::new();
+        let mut props = Vec::new();
+        for row in self.rows(stage, &layers, &s) {
+            if let RowKind::Prop { path, attr, .. } = &row.kind {
+                props.push((path.clone(), attr.clone()));
+                if let Some(spec) = query::attr_spec(stage, path, attr) {
+                    keys.extend(
+                        spec.keyframes
+                            .keys()
+                            .map(|t| KeyRef::new(path.clone(), attr.clone(), *t)),
+                    );
+                }
+            }
+        }
+        s.selected_keys = keys;
+        s.selected_props = props;
+    }
+}
+
+impl TimelinePanel {
     /// The field selection the language menu will replace (tests).
     #[cfg(test)]
     pub(crate) fn lang_insert(&self) -> Option<crate::expr::Selection> {
@@ -419,6 +457,24 @@ impl TimelinePanel {
             .into_iter()
             .filter_map(|r| match r.kind {
                 RowKind::Group { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The property rows shown (tests).
+    #[cfg(test)]
+    pub(crate) fn prop_rows(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        s: &Session,
+    ) -> Vec<(PrimPath, String)> {
+        let layers = self.layer_list(stage, comp);
+        self.rows(stage, &layers, s)
+            .into_iter()
+            .filter_map(|r| match r.kind {
+                RowKind::Prop { path, attr, .. } => Some((path, attr)),
                 _ => None,
             })
             .collect()
@@ -494,6 +550,55 @@ impl TimelinePanel {
                 continue;
             }
             if let Some(r) = s.reveal.get(layer) {
+                // M, F, MM: the Masks group and each mask, open, with the asked
+                // properties (above the effects and transform, AE's order).
+                if let Reveal::Attrs(v) = r
+                    && let wanted = props::revealed_mask_attrs(v)
+                    && !wanted.is_empty()
+                    && let Some(Node::Group {
+                        id,
+                        label,
+                        children,
+                    }) = props::layer_tree(stage, layer)
+                        .into_iter()
+                        .find(|n| matches!(n, Node::Group { id, .. } if id.ends_with("#masks")))
+                {
+                    out.push(Row {
+                        kind: RowKind::Group {
+                            id,
+                            label,
+                            open: true,
+                        },
+                        layer_index,
+                        depth: 1,
+                    });
+                    for mask in children {
+                        let Node::Group {
+                            id,
+                            label,
+                            children,
+                        } = mask
+                        else {
+                            continue;
+                        };
+                        out.push(Row {
+                            kind: RowKind::Group {
+                                id,
+                                label,
+                                open: true,
+                            },
+                            layer_index,
+                            depth: 2,
+                        });
+                        for p in children {
+                            if let Node::Prop { path, attr, label } = p
+                                && (wanted.contains(&"*") || wanted.contains(&attr.as_str()))
+                            {
+                                push_prop(&path, &attr, &label, layer_index, 3, stage, &mut out);
+                            }
+                        }
+                    }
+                }
                 // E: the Effects group, open, its effects as twirled (AE shows
                 // them above the revealed transform properties).
                 if let Reveal::Attrs(v) = r
@@ -542,12 +647,19 @@ impl TimelinePanel {
                 );
             }
         }
-        self.expression_lines(stage, out)
+        out
     }
 
     /// Multi-line expressions take one row per line (the text being edited, else
     /// the expression; at most [`MAX_EXPR_LINES`]).
-    fn expression_lines(&self, stage: &Stage, rows: Vec<Row>) -> Vec<Row> {
+    fn expression_lines(
+        &self,
+        stage: &Stage,
+        rows: Vec<Row>,
+        ui: &Ui,
+        resources: &bae_app::Resources,
+        width: f32,
+    ) -> Vec<Row> {
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             let RowKind::Expression { path, attr, .. } = &row.kind else {
@@ -555,15 +667,19 @@ impl TimelinePanel {
                 continue;
             };
             let stored = query::attr_spec(stage, path, attr).and_then(|s| s.expression.as_ref());
-            let lines = match &self.expr_edit {
+            let source = match &self.expr_edit {
                 Some((p, a, buf, base))
                     if p == path && a == attr && stored.is_some_and(|e| e.source == *base) =>
                 {
-                    buf.split('\n').count()
+                    buf.as_str()
                 }
-                _ => stored.map_or(1, |e| e.source.split('\n').count()),
-            }
-            .clamp(1, MAX_EXPR_LINES);
+                _ => stored.map_or("", |e| e.source.as_str()),
+            };
+            let height = crate::expr_menu::field_height(ui, resources, source, width);
+            let hard_lines = source.bytes().filter(|c| *c == b'\n').count() + 1;
+            let lines = ((height / ROW_H).ceil() as usize)
+                .max(hard_lines)
+                .min(MAX_EXPR_LINES);
             for line in 0..lines {
                 out.push(Row {
                     kind: RowKind::Expression {
@@ -629,6 +745,7 @@ impl TimelinePanel {
         let mut panel = Self::default();
         if let Some(state) = state {
             panel.columns = Columns::load(state);
+            panel.display = serde_json::from_value(state["display"].clone()).unwrap_or_default();
             panel.zoom = state["zoom"].as_f64().unwrap_or_default().clamp(0.0, 1.0) as f32;
         }
         panel
@@ -639,17 +756,74 @@ impl TimelinePanel {
     }
 }
 
+#[derive(Clone, Copy)]
+enum OtherTimelines {
+    All,
+    Left,
+    Right,
+}
+impl OtherTimelines {
+    fn matches(self, index: usize, active: usize) -> bool {
+        match self {
+            Self::All => index != active,
+            Self::Left => index < active,
+            Self::Right => index > active,
+        }
+    }
+}
+const OTHER_TIMELINES: [(OtherTimelines, &str); 3] = [
+    (OtherTimelines::All, "Close Other Timeline Panels"),
+    (OtherTimelines::Right, "Close Timeline Panels to the Right"),
+    (OtherTimelines::Left, "Close Timeline Panels to the Left"),
+];
+
 impl Panel for TimelinePanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        self.panel_menu(ui, cx);
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
         match common::active_comp(cx.stage, &common::session(cx.resources)) {
             Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
             None => TabInfo::new(tr("Timeline")),
         }
+        .close_submenu()
+    }
+
+    fn related_tabs_menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) -> bool {
+        let session = common::session(cx.resources);
+        let mut session = session.lock();
+        let active = session
+            .active_comp
+            .as_ref()
+            .and_then(|c| session.open_comps.iter().position(|p| p == c));
+        for (action, label) in OTHER_TIMELINES {
+            if matches!(action, OtherTimelines::Right) {
+                ui.separator();
+            }
+            let targets: Vec<_> = session
+                .open_comps
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| active.is_some_and(|at| action.matches(*i, at)))
+                .map(|(_, c)| c.clone())
+                .collect();
+            if ui
+                .add_enabled(!targets.is_empty(), egui::Button::new(tr(label)))
+                .clicked()
+            {
+                for target in targets {
+                    session.close_comp(&target);
+                }
+                ui.close();
+            }
+        }
+        true
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(json!({"zoom": self.zoom, "columns":self.columns}))
+        Some(json!({"zoom": self.zoom, "columns":self.columns, "display": self.display}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -667,12 +841,12 @@ impl Panel for TimelinePanel {
                 }
                 true
             }
-            "motion.timeline.toggle_switches_modes" => {
-                self.columns.toggle_switches_modes();
+            id @ (actions::ids::TOGGLE_SWITCHES_MODES | actions::ids::TOGGLE_PARENT_COLUMN) => {
+                self.toggle_columns(id);
                 true
             }
-            "motion.timeline.toggle_parent_column" => {
-                self.columns.toggle(Column::Parent);
+            actions::ids::SELECT_VISIBLE_KEYS => {
+                self.select_visible_keys(cx.stage, &session);
                 true
             }
             // Edit ▸ Find (Ctrl+F): the search field.
@@ -685,6 +859,15 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        // F4 / Shift+F4 pressed with another panel in front.
+        let toggles = std::mem::take(&mut common::session(cx.resources).lock().timeline_toggles);
+        for id in toggles {
+            if id == actions::ids::SELECT_VISIBLE_KEYS {
+                self.select_visible_keys(cx.stage, &common::session(cx.resources));
+            } else {
+                self.toggle_columns(id);
+            }
+        }
         let full = ui.available_rect_before_wrap();
         crate::import::drop_on_panel(ui, cx);
         let cols = self.columns.layout(ui, full);
@@ -694,8 +877,19 @@ impl Panel for TimelinePanel {
 impl TimelinePanel {
     fn contents(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, cols: &Cols) {
         let session = common::session(cx.resources);
+        self.expanded
+            .extend(session.lock().reveal_style_groups.drain(..));
         session.lock().sync(cx.stage);
         let stage = cx.stage;
+        if let Some(track) = session.lock().reveal_tracker.take()
+            && let Some(layer) = query::owning_layer(stage, &track)
+        {
+            self.expanded.extend([
+                layer.to_string(),
+                format!("{layer}#trackers"),
+                track.to_string(),
+            ]);
+        }
         let renaming_before = self.rename.is_some();
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, color::PANEL);
@@ -806,6 +1000,7 @@ impl TimelinePanel {
             }
             self.rows(stage, &layers, &s)
         };
+        let rows = self.expression_lines(stage, rows, ui, cx.resources, graph_body.width() - 8.0);
         if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
             self.press_mods = m;
         }
@@ -889,6 +1084,7 @@ impl TimelinePanel {
                 let mut clip = ui.clip_rect();
                 clip.max.x = clip.max.x.min(graph_left - 2.0);
                 outline.set_clip_rect(clip);
+                let visible_end = range.end;
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =
@@ -916,6 +1112,7 @@ impl TimelinePanel {
                         &axis,
                         row,
                         rect,
+                        i + 1 == visible_end,
                         switch_input,
                         &layers,
                         &parent_items,
@@ -927,6 +1124,22 @@ impl TimelinePanel {
                         }
                         RowKind::Prop { path, attr, .. } => {
                             prop_rows.push((rect, path.clone(), attr.clone()))
+                        }
+                        // An effect or a mask: the expression pick whip refers to
+                        // it as a whole (empty attribute).
+                        RowKind::Group { id, .. } => {
+                            if let Some(prim) = id
+                                .split_once('#')
+                                .and_then(|(_, p)| PrimPath::new(p).ok())
+                                .filter(|p| {
+                                    stage.prim(p).is_some_and(|v| {
+                                        v.is_a(&bae_model::PrimType::EFFECT)
+                                            || v.is_a(&bae_model::PrimType::MASK)
+                                    })
+                                })
+                            {
+                                prop_rows.push((rect, prim, String::new()));
+                            }
                         }
                         _ => {}
                     }
@@ -1010,6 +1223,7 @@ impl TimelinePanel {
                         &axis,
                         area,
                         color::TEXT_DIM.gamma_multiply(0.5),
+                        self.display.rectified,
                     );
                 },
             );
@@ -1205,4 +1419,25 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
             Box::new(TimelinePanel::from_state(spawn.state))
         }),
     );
+}
+
+#[cfg(test)]
+mod close_menu_tests {
+    use super::*;
+    #[test]
+    fn close_other_timeline_choices_keep_the_active_comp() {
+        let zh = [
+            "关闭其他时间轴面板",
+            "关闭右侧的时间轴面板",
+            "关闭左侧的时间轴面板",
+        ];
+        for ((which, name), label) in OTHER_TIMELINES.into_iter().zip(zh) {
+            assert!(ZH.contains(&(name, label)));
+            assert!(!which.matches(0, 0));
+        }
+        assert!(!OtherTimelines::Left.matches(1, 0));
+        assert!(!OtherTimelines::Right.matches(0, 1));
+        assert!(OtherTimelines::Left.matches(0, 1));
+        assert!(OtherTimelines::Right.matches(1, 0));
+    }
 }
