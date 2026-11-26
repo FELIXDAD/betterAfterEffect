@@ -92,7 +92,7 @@ pub(crate) fn build_app() -> App {
     );
     let _ = builder.register_arc::<dyn bae_render::SourceProvider>(
         bae_text::TEXT_PROVIDER,
-        Arc::new(bae_text::render::TextProvider::new()),
+        bae_text::render::TextProvider::shared(),
     );
     builder.build()
 }

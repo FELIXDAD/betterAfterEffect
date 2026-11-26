@@ -154,6 +154,7 @@ impl Differences {
             | ParamKind::Angle
             | ParamKind::Checkbox
             | ParamKind::Popup { .. } => "OneD",
+            ParamKind::Text => "TEXT_DOCUMENT",
             ParamKind::Color => "COLOR",
             ParamKind::Point => "TwoD_SPATIAL",
             ParamKind::Point3d => "ThreeD_SPATIAL",

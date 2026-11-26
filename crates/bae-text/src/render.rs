@@ -420,6 +420,18 @@ pub struct TextProvider {
 }
 
 impl TextProvider {
+    /// The process-wide system font provider used by layers and text effects.
+    pub fn shared() -> Arc<Self> {
+        static SYSTEM: std::sync::LazyLock<Arc<TextProvider>> =
+            std::sync::LazyLock::new(|| Arc::new(TextProvider::new()));
+        SYSTEM.clone()
+    }
+
+    pub fn layout_for_render(&self, doc: &TextDocument) -> Result<TextLayout, RenderError> {
+        let mut fonts = self.render_fonts()?;
+        Ok(layout_text(fonts.get_or_insert_with(FontSystem::new), doc))
+    }
+
     /// A provider with the system fonts (scanned on first use).
     pub fn new() -> Self {
         Self::default()
@@ -478,11 +490,7 @@ impl TextProvider {
             return Ok(Arc::new(layout.clone()));
         }
         if let Some(doc) = content.data.downcast_ref::<TextDocument>() {
-            let mut fonts = self.render_fonts()?;
-            return Ok(Arc::new(layout_text(
-                fonts.get_or_insert_with(FontSystem::new),
-                doc,
-            )));
+            return self.layout_for_render(doc).map(Arc::new);
         }
         if let Some(layer) = content.data.downcast_ref::<EvaluatedLayer>() {
             return Ok(Arc::new(match &layer.text {
@@ -569,8 +577,14 @@ impl bae_gpu::WarmUp for TextProvider {
         0
     }
 
-    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+    fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
         self.load_fonts();
-        Ok(())
+        VelloRenderer::warm(gpu).map_err(|e| e.to_string())?;
+        let doc = TextDocument::new("Text 文字 0123456789", "ArialMT", 48.);
+        let source = TextSource::new(Arc::new(self.layout(&doc)));
+        source
+            .render_on(gpu, source.bounds, 1.)
+            .map(drop)
+            .map_err(|e| e.to_string())
     }
 }

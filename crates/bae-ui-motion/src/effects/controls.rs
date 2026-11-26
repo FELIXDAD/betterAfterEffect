@@ -554,6 +554,20 @@ fn value_control(
             ui.add_enabled(false, egui::Button::new(caption));
             Edit::None
         }
+        ParamKind::Text => {
+            let mut text = match value {
+                Some(Value::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            if ui
+                .add(egui::TextEdit::multiline(&mut text).id(id).desired_rows(1))
+                .changed()
+            {
+                Edit::Commit(Value::String(text))
+            } else {
+                Edit::None
+            }
+        }
         ParamKind::ArbitraryData | ParamKind::CurvePoints => {
             ui.colored_label(color::TEXT_DISABLED, "—");
             Edit::None
