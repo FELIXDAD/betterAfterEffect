@@ -613,6 +613,10 @@ pub struct PasteLayersParams {
     /// Paste directly above this layer of `comp`; default the top of the comp.
     #[serde(default)]
     pub above: Option<PrimPath>,
+    /// Move the pasted layers in time so the earliest in point is here (comp
+    /// flicks; AE: Paste at Current Time, Ctrl+Alt+V).
+    #[serde(default)]
+    pub time: Option<Time>,
 }
 
 impl Command for PasteLayers {
@@ -677,6 +681,30 @@ impl Command for PasteLayers {
             })?;
             set(tx, new_path, "name", Value::String(new_name.clone()))?;
             paths.push(new_path.clone());
+        }
+        if let Some(at) = p.time
+            && let Some(first) = paths
+                .iter()
+                .map(|l| {
+                    let t = query::layer_timing(tx.stage(), l);
+                    t.in_point.min(t.out_point)
+                })
+                .min()
+            && at != first
+        {
+            let delta = at - first;
+            for l in &paths {
+                let t = query::layer_timing(tx.stage(), l);
+                let has_out = tx
+                    .stage()
+                    .prim(l)
+                    .is_some_and(|v| v.value("out_point").is_some());
+                set(tx, l, "start_time", Value::Time(t.start_time + delta))?;
+                set(tx, l, "in_point", Value::Time(t.in_point + delta))?;
+                if has_out {
+                    set(tx, l, "out_point", Value::Time(t.out_point + delta))?;
+                }
+            }
         }
         Ok(LayersOutput { paths })
     }

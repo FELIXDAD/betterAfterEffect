@@ -555,3 +555,55 @@ fn graph_area_menu_matches_ae() {
         .collect();
     assert_eq!(ours, ae.map(|t| t.map(str::to_owned)));
 }
+
+/// ; zooms to frames and back, Shift+; to the whole comp and back, Ctrl+`
+/// opens and closes every property of the selected layer, Ctrl+Alt+V pastes
+/// layers at the CTI (AE).
+#[test]
+fn zoom_twirl_and_paste_at_time_shortcuts() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let mut tl = TimelinePanel::default();
+    h.session().lock().selected_layers = vec![solid.clone()];
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let run = |h: &mut H, tl: &mut TimelinePanel, id: &str| {
+        let r = h.action(tl, Invocation::new(id));
+        h.apply(&r);
+    };
+    run(&mut h, &mut tl, ids::ZOOM_FRAMES);
+    assert_eq!(tl.zoom, 1.0);
+    run(&mut h, &mut tl, ids::ZOOM_FRAMES);
+    assert_eq!(tl.zoom, 0.0);
+    tl.zoom = 0.5;
+    run(&mut h, &mut tl, ids::ZOOM_TOGGLE);
+    assert_eq!(tl.zoom, 0.0);
+    run(&mut h, &mut tl, ids::ZOOM_TOGGLE);
+    assert_eq!(tl.zoom, 0.5);
+    // Ctrl+`: the layer and its Transform group open; again: closed.
+    run(&mut h, &mut tl, ids::TWIRL);
+    assert!(tl.expanded.contains(solid.as_str()));
+    assert!(
+        tl.expanded.iter().any(|id| id.ends_with("#transform")),
+        "{:?}",
+        tl.expanded
+    );
+    run(&mut h, &mut tl, ids::TWIRL);
+    assert!(tl.expanded.is_empty(), "{:?}", tl.expanded);
+    // Copy, then Ctrl+Alt+V at 2 s: the copy starts at 2 s.
+    run(&mut h, &mut tl, ids::COPY);
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    h.session().lock().set_time(&info, Time::from_seconds(2.0));
+    let before = query::comp_layers(&h.stage, &comp);
+    run(&mut h, &mut tl, ids::PASTE_AT_TIME);
+    let pasted: Vec<PrimPath> = query::comp_layers(&h.stage, &comp)
+        .into_iter()
+        .filter(|l| !before.contains(l))
+        .collect();
+    assert_eq!(pasted.len(), 1);
+    assert_eq!(
+        query::layer_timing(&h.stage, &pasted[0]).in_point,
+        Time::from_seconds(2.0)
+    );
+}
