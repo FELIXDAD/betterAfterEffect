@@ -117,9 +117,7 @@ fn drop_on_canvas(h: &mut Ui, files: &[PathBuf]) {
     for file in files {
         h.input_mut()
             .dropped_files
-            .push(std::sync::Arc::new(super::dialogs::DroppedFile(
-                file.clone(),
-            )));
+            .push(std::sync::Arc::new(DroppedFile(file.clone())));
     }
     settle(h);
 }
@@ -152,6 +150,7 @@ fn layered_drops_use_canvas_or_layer_size_from_preferences() {
             frame(&mut h);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        settle(&mut h);
         h.get_by_label("OK").click();
         settle(&mut h);
         let stage = h.state().stage();
@@ -161,8 +160,11 @@ fn layered_drops_use_canvas_or_layer_size_from_preferences() {
             .filter_map(|p| bae_model::psd::LayerImage::from_asset(&stage.prim(&p)?))
             .collect();
         assert!(
-            layers.iter().any(|l| l.canvas == canvas),
-            "{mode}: {layers:?}"
+            layers
+                .iter()
+                .any(|l| l.key == bae_model::psd::LayerKey::Id(2) && l.canvas == canvas),
+            "{mode}: {layers:?}, {:?}",
+            painted_texts(&h)
         );
     }
 }
