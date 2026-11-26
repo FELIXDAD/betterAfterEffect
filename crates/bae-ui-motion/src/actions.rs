@@ -106,6 +106,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const WARP_STABILIZER: &str = "motion.anim.warp_stabilizer_vfx";
     pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
@@ -301,6 +302,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
+    (ids::WARP_STABILIZER, "Warp Stabilizer VFX"),
     (ids::TRACK_MOTION, "Track Motion"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
@@ -818,6 +820,23 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let id = inv.id.as_str();
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
+    }
+    if id == ids::DELETE && crate::tracker::stabilizer::delete_point(cx) {
+        return true;
+    }
+    if id == ids::WARP_STABILIZER {
+        let layers: Vec<_> = session
+            .lock()
+            .selected_layers
+            .iter()
+            .filter(|l| !query::is_locked(stage, l))
+            .cloned()
+            .collect();
+        crate::effects::apply(cx, &layers, bae_model::effect::stabilizer::MATCH_NAME);
+        if !layers.is_empty() {
+            cx.open_panel("effect_controls");
+        }
+        return true;
     }
     if id == ids::TRACK_MOTION {
         let layer = session.lock().selected_layers.first().cloned();

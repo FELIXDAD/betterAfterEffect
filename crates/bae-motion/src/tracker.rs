@@ -1,5 +1,6 @@
 //! Layer-space motion tracking. Each editing gesture or analysis run is a transaction.
 mod apply;
+mod stabilize;
 use crate::query;
 use crate::util::{child, create, ensure_folder, ensure_unlocked, fail, set, write_attr};
 pub use apply::ApplyTrack;
@@ -9,6 +10,7 @@ use bae_model::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use stabilize::RecordStabilization;
 use std::collections::BTreeMap;
 
 pub const FOLDER: &str = "motion_trackers";

@@ -1061,6 +1061,8 @@ impl Panel for CompositionViewer {
             );
             clip.extend(shapes);
         }
+        crate::tracker::stabilizer::points(cx, ui, &clip, &comp, &view);
+        crate::tracker::stabilizer::banner(cx, &info.path, &painter, comp_rect.intersect(area));
         if preparing {
             painter.text(
                 area.right_bottom() + vec2(-8.0, -8.0),

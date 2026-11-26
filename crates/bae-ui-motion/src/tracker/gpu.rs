@@ -1,7 +1,4 @@
-use bae_gpu::{
-    GpuContext, WarmUp,
-    wgpu::{self, util::DeviceExt},
-};
+use bae_gpu::{GpuContext, WarmUp, wgpu};
 use bae_render::{Renderer, RendererConfig};
 use std::sync::{Arc, Mutex};
 
@@ -48,6 +45,31 @@ impl WarmUp for TrackingGpu {
 pub(super) struct Matcher {
     scores: wgpu::ComputePipeline,
     peak: wgpu::ComputePipeline,
+    windows: Mutex<Vec<Window>>,
+    staging: wgpu::Buffer,
+}
+struct Window {
+    params: wgpu::Buffer,
+    scores: wgpu::Buffer,
+    peak: wgpu::Buffer,
+}
+fn buffer(d: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    d.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage,
+        mapped_at_creation: false,
+    })
+}
+impl Window {
+    fn new(d: &wgpu::Device, bytes: u64) -> Self {
+        use wgpu::BufferUsages as U;
+        Self {
+            params: buffer(d, "tracking window", 64, U::UNIFORM | U::COPY_DST),
+            scores: buffer(d, "tracking scores", bytes, U::STORAGE),
+            peak: buffer(d, "tracking peak", 16, U::STORAGE | U::COPY_SRC),
+        }
+    }
 }
 pub(super) struct Region<'a> {
     pub reference: &'a wgpu::Texture,
@@ -85,6 +107,13 @@ impl Matcher {
         Self {
             scores: build("correlate"),
             peak: build("peak"),
+            windows: Mutex::new((0..8).map(|_| Window::new(device, 4 * 65 * 65)).collect()),
+            staging: buffer(
+                device,
+                "tracking samples",
+                16 * 8,
+                wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            ),
         }
     }
     /// Runs on the analysis thread. One readback and one submission for all active points.
@@ -99,19 +128,8 @@ impl Matcher {
             return Err("invalid track point count".into());
         }
         let d = gpu.device();
-        let buf = |label, size, usage| {
-            d.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size,
-                usage,
-                mapped_at_creation: false,
-            })
-        };
-        let staging = buf(
-            "tracking samples",
-            16 * regions.len() as u64,
-            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        );
+        let mut windows = self.windows.lock().map_err(|e| e.to_string())?;
+        let staging = &self.staging;
         let cur = current.create_view(&Default::default());
         let mut enc = d.create_command_encoder(&Default::default());
         for (n, r) in regions.iter().enumerate() {
@@ -149,17 +167,16 @@ impl Matcher {
                 0,
             ];
             let data: Vec<u8> = words.into_iter().flat_map(u32::to_le_bytes).collect();
-            let params = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tracking window"),
-                contents: &data,
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            let scores = buf("tracking scores", bytes, wgpu::BufferUsages::STORAGE);
-            let peak = buf(
-                "tracking peak",
-                16,
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            );
+            let window = &mut windows[n];
+            if window.scores.size() < bytes {
+                window.scores = buffer(d, "tracking scores", bytes, wgpu::BufferUsages::STORAGE);
+            }
+            let Window {
+                params,
+                scores,
+                peak,
+            } = window;
+            gpu.queue().write_buffer(params, 0, &data);
             let reference = r.reference.create_view(&Default::default());
             let entries = [
                 wgpu::BindGroupEntry {
@@ -202,7 +219,7 @@ impl Matcher {
                 pass.set_bind_group(0, &group, &[]);
                 pass.dispatch_workgroups(x, y, 1);
             }
-            enc.copy_buffer_to_buffer(&peak, 0, &staging, 16 * n as u64, 16);
+            enc.copy_buffer_to_buffer(peak, 0, staging, 16 * n as u64, 16);
         }
         let submission = gpu.queue().submit([enc.finish()]);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -218,7 +235,7 @@ impl Matcher {
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
         let data = staging.get_mapped_range(..).map_err(|e| e.to_string())?;
-        Ok(data
+        let hits = data
             .as_chunks::<16>()
             .0
             .iter()
@@ -227,6 +244,10 @@ impl Matcher {
                     f32::from_le_bytes(chunk[4 * i..4 * i + 4].try_into().expect("four bytes"))
                 })
             })
-            .collect())
+            .take(regions.len())
+            .collect();
+        drop(data);
+        staging.unmap();
+        Ok(hits)
     }
 }

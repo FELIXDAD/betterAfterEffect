@@ -2,6 +2,7 @@
 mod dialogs;
 mod gpu;
 pub(crate) mod overlay;
+pub(crate) mod stabilizer;
 #[cfg(test)]
 #[path = "tests/analysis.rs"]
 mod tests;
@@ -40,6 +41,13 @@ fn shared(resources: &Resources) -> Shared {
 
 struct TrackerPanel;
 pub(crate) fn register(app: &mut AppBuilder) {
+    app.insert_resource(stabilizer::Shared::default());
+    bae_ui::i18n::register(&[
+        ("Analyzing", "正在分析"),
+        ("Analyzing in background", "正在后台分析"),
+        ("Analysis cancelled", "分析已取消"),
+        ("Analyze", "分析"),
+    ]);
     app.insert_resource(Shared::default());
     let gpu = Arc::new(gpu::TrackingGpu::default());
     app.insert_resource(gpu.clone());
@@ -173,7 +181,21 @@ impl Panel for TrackerPanel {
         });
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled(false, egui::Button::new(tr("Track Camera")));
-            ui.add_enabled(false, egui::Button::new(tr("Warp Stabilizer")));
+            if ui
+                .add_enabled(
+                    src.as_ref().is_some_and(|l| !query::is_locked(cx.stage, l)),
+                    egui::Button::new(tr("Warp Stabilizer")),
+                )
+                .clicked()
+                && let Some(layer) = &src
+            {
+                crate::effects::apply(
+                    cx,
+                    std::slice::from_ref(layer),
+                    bae_model::effect::stabilizer::MATCH_NAME,
+                );
+                cx.open_panel("effect_controls");
+            }
         });
         let created = ui
             .horizontal_wrapped(|ui| {
@@ -361,6 +383,7 @@ impl bae_ui::DialogHost for Host {
         shared(r).lock().unwrap().dialog.is_some()
     }
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
+        stabilizer::tick(ctx, cx);
         let shared = shared(cx.resources);
         let mut s = shared.lock().unwrap();
         if let Some(job) = s.job.take() {

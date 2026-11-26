@@ -225,6 +225,9 @@ fn params(
     def: &EffectDef,
     now: Time,
 ) {
+    if def.match_name == bae_model::effect::stabilizer::MATCH_NAME {
+        crate::tracker::stabilizer::controls(ui, cx, effect);
+    }
     let mut depth = 1usize;
     // Depth at which a closed group hides its contents.
     let mut hidden_from: Option<usize> = None;

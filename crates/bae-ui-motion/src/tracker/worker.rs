@@ -1,3 +1,4 @@
+mod stabilize;
 use super::gpu::{Ready, Region, TrackingGpu};
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 use bae_anim::{Evaluator, glam::DVec2};
@@ -38,6 +39,31 @@ pub(super) fn start(
     start: Time,
     step: i32,
     single: bool,
+) -> Result<Job, String> {
+    launch(
+        cx,
+        ui,
+        tracker,
+        Mode::Point {
+            start,
+            step,
+            single,
+        },
+    )
+}
+pub(super) enum Mode {
+    Point {
+        start: Time,
+        step: i32,
+        single: bool,
+    },
+    Stabilize(i64),
+}
+pub(super) fn launch(
+    cx: &PanelContext<'_>,
+    ui: &egui::Context,
+    tracker: &PrimPath,
+    mode: Mode,
 ) -> Result<Job, String> {
     let gpu = cx
         .resources
@@ -126,6 +152,14 @@ pub(super) fn start(
                 let timing = query::layer_timing(&stage, &source);
                 let lo = timing.in_point.min(timing.out_point).max(Time::ZERO);
                 let hi = timing.in_point.max(timing.out_point).min(info.duration);
+                let (start, step, single) = match mode {
+                    Mode::Point {
+                        start,
+                        step,
+                        single,
+                    } => (start, step, single),
+                    Mode::Stabilize(_) => (lo, 1, false),
+                };
                 let stride = Time(duration * i64::from(step) / if fields { 2 } else { 1 });
                 let run = Analysis {
                     stage: &stage,
@@ -138,12 +172,16 @@ pub(super) fn start(
                     single,
                     stop: &stop,
                 };
-                run.track(&mut picture, |frame| {
+                let emit = |frame| {
                     tx.send(Update::Frame(frame))
                         .map_err(|_| "Tracker closed".to_owned())?;
                     ui.request_repaint();
                     Ok(())
-                })
+                };
+                match mode {
+                    Mode::Stabilize(quality) => run.stabilize(quality, &mut picture, emit),
+                    Mode::Point { .. } => run.track(&mut picture, emit),
+                }
             })();
             let _ = tx.send(Update::End(result));
             ui.request_repaint();

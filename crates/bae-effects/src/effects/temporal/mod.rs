@@ -17,7 +17,7 @@ use crate::{
 
 use super::{image_grid, layer_input};
 
-mod flow;
+pub(crate) mod flow;
 
 const LABEL: &str = "bae.effects.temporal";
 const SHADER: &str = include_str!("time.wgsl");
