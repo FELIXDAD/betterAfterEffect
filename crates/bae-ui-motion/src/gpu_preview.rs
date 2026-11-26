@@ -217,6 +217,7 @@ pub(crate) struct GpuPreview {
     changes: StageChanges,
     sources_gen: Option<u64>,
     footage_generation: u64,
+    solid_reload: u64,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
@@ -291,6 +292,7 @@ impl GpuPreview {
             changes: StageChanges::default(),
             sources_gen: None,
             footage_generation: 0,
+            solid_reload: 0,
             last: None,
             rect: None,
             target: None,
@@ -356,6 +358,23 @@ impl GpuPreview {
         {
             self.last = None;
         }
+    }
+
+    pub(super) fn reload_solid(&mut self, generation: u64, item: &bae_model::PrimPath) {
+        if self.solid_reload == generation {
+            return;
+        }
+        let event = bae_model::StageEvent {
+            origin: bae_model::EventOrigin::Local,
+            author: None,
+            sublayers: vec![],
+            changes: vec![bae_model::Change::Resynced { path: item.clone() }],
+        };
+        self.engine.renderer.invalidate(&event);
+        self.engine.anim.clear_compiled();
+        self.last = None;
+        self.playback.invalidate_source(&event);
+        self.solid_reload = generation;
     }
 
     /// Render `comp` (if it changed) and return the texture to draw. `None` until
