@@ -368,7 +368,7 @@ fn default_buffer_frames(
     format: SampleFormat,
 ) -> Option<u32> {
     let probe = device
-        .build_output_stream_raw(config.clone(), format, |_, _| {}, |_| {}, None)
+        .build_output_stream_raw(*config, format, |_, _| {}, |_| {}, None)
         .ok()?;
     probe.buffer_size().ok().filter(|n| *n > 0)
 }
