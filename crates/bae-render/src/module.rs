@@ -54,6 +54,18 @@ impl AppModule for RenderModule {
     fn build(&self, app: &mut AppBuilder) {
         // The GPU module provides the context descriptor (and the placeholder).
         app.add_module(bae_gpu::GpuModule);
+        // The compositor's pipelines, compiled in the app's warm-up.
+        for (id, task) in [
+            (
+                "bae.render.compositor.basic",
+                crate::CompositorWarmUp::Basic,
+            ),
+            ("bae.render.compositor", crate::CompositorWarmUp::Full),
+        ] {
+            if let Err(e) = app.register_arc::<dyn bae_gpu::WarmUp>(id, std::sync::Arc::new(task)) {
+                tracing::warn!("compositor warm-up not registered: {e}");
+            }
+        }
         let registry = app.registry::<CliSubcommand>();
         let render = CliSubcommand::new(
             "render",

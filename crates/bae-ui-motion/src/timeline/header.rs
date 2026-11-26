@@ -121,7 +121,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         now: Time,
     ) {
-        let p = ui.painter();
+        let p = ui.painter().clone();
         // Current time: big blue timecode, scrubbable.
         let tc = Rect::from_min_size(head.min + vec2(8.0, 2.0), vec2(120.0, head.height() - 4.0));
         p.text(
@@ -161,15 +161,31 @@ impl TimelinePanel {
             }
         }
 
+        // Search field, between the current time and the comp switches.
+        let left = tc.right() + 12.0;
+        let right = (left + 170.0).min(head.left() + cols.end - 140.0);
+        if right - left > 60.0 {
+            self.search_ui(
+                ui,
+                Rect::from_min_max(
+                    pos2(left, head.center().y - 10.0),
+                    pos2(right, head.center().y + 10.0),
+                ),
+            );
+        }
+
         // Graph Editor switch (AE's comp button; Shift+F3).
         let ge = Rect::from_center_size(
             pos2(head.left() + cols.viewport - 14.0, head.center().y),
             vec2(20.0, 20.0),
         );
-        let on = session.lock().graph_editor;
-        let gresp = ui
-            .interact(ge, ui.id().with("graph_editor_switch"), Sense::click())
-            .labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
+        let gresp = ui.interact(ge, ui.id().with("graph_editor_switch"), Sense::click());
+        if gresp.clicked() {
+            self.graph_mode = !self.graph_mode;
+            session.lock().graph_editor = self.graph_mode;
+        }
+        let on = self.graph_mode;
+        let gresp = gresp.labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
         if on {
             ui.painter().rect_filled(ge, 2.0, color::BUTTON_ON);
         }
@@ -185,9 +201,6 @@ impl TimelinePanel {
                 color::ICON_DIM
             },
         );
-        if gresp.clicked() {
-            session.lock().graph_editor = !on;
-        }
         gresp.on_hover_text(tr("Graph Editor"));
 
         let flow = ge.translate(vec2(-5.0 * 26.0, 0.0));
@@ -195,14 +208,13 @@ impl TimelinePanel {
         let button = ui
             .interact(flow, ui.id().with("mini_flow"), Sense::click())
             .labeled(egui::WidgetType::Button, title);
-        icons::paint(p, flow.shrink(3.0), Icon::MiniFlowchart, color::ICON);
+        icons::paint(&p, flow.shrink(3.0), Icon::MiniFlowchart, color::ICON);
         if button.on_hover_text(title).clicked() {
             cx.invoke(ids::MINI_FLOW);
         }
 
         // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
-        // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
-        // comp, as AE does.
+        // Frame Blending, Motion Blur.
         for (i, (attr, icon, name, tip, enabled)) in [
             (
                 "motion_blur",
@@ -216,7 +228,7 @@ impl TimelinePanel {
                 Icon::FrameBlend,
                 "Enable Frame Blending",
                 "Enables Frame Blending for all layers with the Frame Blend switch set",
-                false,
+                true,
             ),
             (
                 "hide_shy_layers",
@@ -230,7 +242,7 @@ impl TimelinePanel {
                 Icon::Cube,
                 "Draft 3D",
                 "Turn fast 3D previews on or off",
-                true,
+                false,
             ),
         ]
         .into_iter()
@@ -238,8 +250,16 @@ impl TimelinePanel {
         {
             let r = ge.translate(vec2(-26.0 * (i as f32 + 1.0), 0.0));
             let on = enabled && bool_attr(cx.stage, &info.path, attr);
-            let resp = ui
-                .interact(r, ui.id().with(("comp_switch", attr)), Sense::click())
+            let mut cell = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(r)
+                    .id_salt(("comp_switch", attr)),
+            );
+            if !enabled {
+                cell.disable();
+            }
+            let resp = cell
+                .interact(r, cell.id().with("button"), Sense::click())
                 .labeled_toggle(egui::WidgetType::Button, tr(name), on);
             if on {
                 ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
