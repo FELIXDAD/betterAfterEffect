@@ -374,8 +374,22 @@ fn noise_varies_across_the_plane_and_volume() {
 }
 
 #[test]
+fn noise_accepts_one_component_and_color_arrays() {
+    let src = "var x=.25; (noise([x])===noise(x) && noise([x,.2,.3,1])===noise([x,.2,.3])) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
 fn wiggle_uses_the_offset_independently_of_timeless() {
     let src = "seedRandom(2,true);var a=wiggle(2,4);seedRandom(2,false);var b=wiggle(2,4);seedRandom(3,true); (a===b && a!==wiggle(2,4)) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn wiggle_takes_properties_for_octaves_and_amplitude_multiplier() {
+    // wiggle(2, 10, effect("Oct")("Slider")): a property, not a number, reaches the host.
+    let src = "var o=transform.opacity, m=transform.opacity; \
+               (isFinite(wiggle(2,10,o,m/200)) && isFinite(temporalWiggle(2,0.1,o,m/200))) ? 1 : 0";
     assert_eq!(rotation_expression(src, 0.0), 1.0);
 }
 
@@ -469,7 +483,21 @@ fn time_conversions_follow_the_display_settings_and_rounding_mode() {
     assert!(comp.errors.is_empty(), "{:?}", comp.errors);
     assert_eq!(
         comp.layers[0].text.as_ref().unwrap().text,
-        "0|48|0.25|1|-00:00:00:01|0000+-3|00;01;00;02|3|true"
+        "0|48|0.25|1|-00:00:00:01|-0000+03|00;01;00;02|3|true"
+    );
+}
+
+#[test]
+fn project_timecode_and_signed_footage_display() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "Format", "text");
+        b.expr(&l,"text:source",doc(""),r#"[timeToCurrentFormat(60,24),timeToTimecode(60,24),timeToFeetAndFrames(-1,30)].join("|")"#);
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "0:01:00:00|00:01:00:00|-0001+14"
     );
 }
 

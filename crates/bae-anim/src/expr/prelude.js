@@ -260,9 +260,11 @@ function __noise1(seed, x) {
 function noise(v) {
   v = __val(v);
   if (!__isArr(v)) return __noise1(12345, v);
+  if (v.length === 1) return __noise1(12345, v[0]);
+  if (v.length === 4) v = v.slice(0, 3);
   // Interpolate the gradient at each lattice corner along each input axis.
   var dims = v.length, cell = v.map(Math.floor);
-  if (dims !== 2 && dims !== 3) throw new Error("noise expects a number or a 2D or 3D point");
+  if (dims !== 2 && dims !== 3) throw new Error("noise expects a number or an array of one to four components");
   var f = v.map(function (x, i) { return x - cell[i]; });
   var u = f.map(function (x) { return x * x * x * (x * (x * 6 - 15) + 10); });
   var sum = 0;
@@ -298,7 +300,7 @@ function framesToTime(frames, fps) {
   return __val(frames) / __val(fps);
 }
 function __pad(n, w) { var s = String(Math.floor(Math.abs(n))); while (s.length < w) s = "0" + s; return s; }
-function __timecode(frames, base, drop) {
+function __timecode(frames, base, drop, hourDigits) {
   var total = Math.abs(frames);
   // Skip two frame labels per minute at 29.97, four at 59.94, except each tenth minute.
   var skip = drop && (base === 30 || base === 60) ? base / 15 : 0;
@@ -307,12 +309,12 @@ function __timecode(frames, base, drop) {
     total += 9 * skip * Math.floor(total / ten) + skip * Math.max(0, Math.floor((total % ten - skip) / minute));
   }
   var sep = skip ? ";" : ":", seconds = Math.floor(total / base);
-  return (frames < 0 ? "-" : "") + __pad(Math.floor(seconds / 3600), 2) + sep + __pad(Math.floor(seconds / 60) % 60, 2) +
+  return (frames < 0 ? "-" : "") + __pad(Math.floor(seconds / 3600), hourDigits) + sep + __pad(Math.floor(seconds / 60) % 60, 2) +
     sep + __pad(seconds % 60, 2) + sep + __pad(total % base, Math.max(2, String(base - 1).length));
 }
 function timeToTimecode(t, timecodeBase, isDuration) {
   if (timecodeBase === undefined) timecodeBase = 30;
-  return __timecode(timeToFrames(t, timecodeBase, isDuration), timecodeBase, false);
+  return __timecode(timeToFrames(t, timecodeBase, isDuration), timecodeBase, false, 2);
 }
 function timeToCurrentFormat(t, fps, isDuration, ntscDropFrame) {
   if (fps === undefined || ntscDropFrame === undefined) {
@@ -323,18 +325,17 @@ function timeToCurrentFormat(t, fps, isDuration, ntscDropFrame) {
   var frames = timeToFrames(t, fps, isDuration);
   if (__h.projectInfo().displayFrames) return String(frames);
   var ntsc = Math.abs(fps - 29.97) < 0.01 || Math.abs(fps - 59.94) < 0.01;
-  return __timecode(frames, Math.round(fps), ntsc && ntscDropFrame);
+  return __timecode(frames, Math.round(fps), ntsc && ntscDropFrame, 1);
 }
 function timeToNTSCTimecode(t, ntscDropFrame, isDuration) {
-  return __timecode(timeToFrames(t, 30000 / 1001, isDuration), 30, ntscDropFrame);
+  return __timecode(timeToFrames(t, 30000 / 1001, isDuration), 30, ntscDropFrame, 2);
 }
 function timeToFeetAndFrames(t, fps, framesPerFoot, isDuration) {
   if (framesPerFoot === undefined) framesPerFoot = 16;
   var total = timeToFrames(t, fps, isDuration);
-  var feet = Math.trunc(total / framesPerFoot), frames = total % framesPerFoot;
-  var width = String(framesPerFoot - 1).length;
-  return (feet < 0 ? "-" : "") + __pad(feet, feet < 0 ? 3 : 4) + "+" +
-    (frames < 0 ? "-" : "") + __pad(frames, frames < 0 ? width - 1 : width);
+  var magnitude = Math.abs(total);
+  return (total < 0 ? "-" : "") + __pad(Math.floor(magnitude / framesPerFoot), 4) + "+" +
+    __pad(magnitude % framesPerFoot, String(framesPerFoot - 1).length);
 }
 
 // ---- project and footage (AE: thisProject, colorDepth, footage(name)) ----
@@ -428,15 +429,16 @@ Property.prototype = {
     if (ampMult === undefined) ampMult = 0.5;
     if (t === undefined) t = __now;
     var v = this.valueAtTime(t), seed = __h.seed(this.__c, this.__l, this.__p, this.__a);
-    function w(dim) { return __h.wiggleNoise(__offsetSeed(seed), dim, t * freq, octaves, ampMult) * amp; }
+    // Unary + turns a property (effect("Oct")("Slider")) into a number for the host.
+    function w(dim) { return __h.wiggleNoise(__offsetSeed(seed), dim, t * freq, +octaves, +ampMult) * amp; }
     if (__isArr(v)) return v.map(function (x, i) { return x + w(i); });
     return v + w(0);
   },
   temporalWiggle: function (freq, amp, octaves, ampMult, t) {
     if (t === undefined) t = __now;
     var seed = __offsetSeed(__h.seed(this.__c, this.__l, this.__p, this.__a));
-    var delta = __h.wiggleNoise(seed, 0, t * freq, octaves === undefined ? 1 : octaves,
-                                ampMult === undefined ? 0.5 : ampMult);
+    var delta = __h.wiggleNoise(seed, 0, t * freq, octaves === undefined ? 1 : +octaves,
+                                ampMult === undefined ? 0.5 : +ampMult);
     return this.valueAtTime(t + delta * amp);
   },
   smooth: function (width, samples, t) {
