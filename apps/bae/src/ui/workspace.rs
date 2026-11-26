@@ -153,6 +153,7 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        bae_ui_motion::tools::configure_camera_keys(app, &prefs);
         let mut workbench = Workbench::new(app, state);
         // Keyboard Shortcuts presets are files in the config folder (AE: aeks/).
         workbench.set_shortcut_presets_dir(
