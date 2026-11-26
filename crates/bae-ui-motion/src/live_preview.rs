@@ -19,6 +19,7 @@ use crate::preview_snapshot::PreviewSnapshot;
 pub(crate) struct LiveScene {
     /// Stage revision and the sources' and effects' registry generations.
     pub key: (u64, Option<u64>, Option<u64>),
+    pub nested_switches: bool,
     pub snapshot: PreviewSnapshot,
     pub sources: Option<PreviewSources>,
     pub effects: Option<PreviewEffects>,
@@ -146,6 +147,7 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
                 engine.renderer.sync_effects(&effects.0);
             }
             engine.anim.clear_compiled();
+            engine.anim.set_nested_switches(job.scene.nested_switches);
             scene = Some((job.scene.clone(), Arc::new(stage)));
         }
         let stage = scene.as_ref().unwrap().1.clone();

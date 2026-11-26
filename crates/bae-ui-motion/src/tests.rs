@@ -63,8 +63,21 @@ impl Harness {
 
     /// One frame of `panel`; returns its requests.
     fn frame(&self, kind: &str, panel: &mut dyn Panel, events: Vec<Event>) -> PanelRequests {
+        self.frame_mods(kind, panel, events, egui::Modifiers::NONE)
+    }
+
+    /// [`Harness::frame`] with `modifiers` held.
+    fn frame_mods(
+        &self,
+        kind: &str,
+        panel: &mut dyn Panel,
+        events: Vec<Event>,
+        modifiers: egui::Modifiers,
+    ) -> PanelRequests {
         let mut requests = PanelRequests::default();
         let id = PanelId::new(kind);
+        let mut events = events;
+        events.insert(0, Event::ModifiersChanged(modifiers));
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
             events,
@@ -1316,8 +1329,8 @@ fn render_button_activates_with_space_and_enter() {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
-            item.set_format(bae_render::ExportFormat::Png);
-            item.output = dir
+            item.outputs[0].set_format(bae_render::ExportFormat::Png);
+            item.outputs[0].output = dir
                 .path()
                 .join(format!("k{n}/f_####.png"))
                 .to_string_lossy()
@@ -3007,6 +3020,54 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// File ▸ New Comp from Selection…: the dialog opens for the selected items;
+/// one comp with them as layers, in sequence with a cross dissolve, or one comp
+/// per item.
+#[test]
+fn new_comp_from_selection() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let solid_item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    // The dialog asks first.
+    h.session().lock().selected_items = vec![solid_item.clone(), comp.clone()];
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::NEW_COMP_FROM_SELECTION),
+    );
+    assert!(h.dialogs().is_open());
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "comp.create_from_items");
+    let before = query::comps(&h.stage).len();
+    let out = h.run(
+        "comp.create_from_items",
+        json!({
+            "items": [solid_item, comp],
+            "sequence": true,
+            "overlap": Time::from_seconds(1.0),
+            "transition": "cross_dissolve",
+            "still_duration": Time::from_seconds(5.0),
+        }),
+    );
+    let new = PrimPath::new(out["comps"][0].as_str().unwrap()).unwrap();
+    let layers = query::comp_layers(&h.stage, &new);
+    assert_eq!(layers.len(), 2);
+    // The second starts where the first (5 s) ends minus the overlap.
+    let t = query::layer_timing(&h.stage, &layers[1]);
+    assert_eq!(t.in_point, Time::from_seconds(4.0));
+    let fades = |l: &PrimPath| {
+        query::attr_spec(&h.stage, l, "transform:opacity").map_or(0, |s| s.keyframes.len())
+    };
+    assert_eq!((fades(&layers[0]), fades(&layers[1])), (2, 2));
+    // Multiple Compositions: one per item.
+    h.run(
+        "comp.create_from_items",
+        json!({"items": [solid_item, comp], "multiple": true}),
+    );
+    assert_eq!(query::comps(&h.stage).len(), before + 3);
+}
+
 /// #460: the Window menu names what the viewers show (AE: "Composition: Comp 1").
 #[test]
 fn window_menu_titles_name_the_active_comp() {
@@ -3321,6 +3382,92 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
     assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
+/// Shift-drag continues the previous Brush stroke; Ctrl/Cmd-drag only sizes
+/// the brush (AE).
+#[test]
+fn shift_continues_the_last_stroke_and_command_sizes_the_brush() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::Brush);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = |x: f32, y: f32| pos2(320.0 + x, 195.0 + y);
+    let drag = |h: &mut Harness, panel: &mut crate::layer_panel::LayerPanel, from, to, m| {
+        let mut r = PanelRequests::default();
+        for (i, p) in [from, from, to, to].into_iter().enumerate() {
+            let mut evs = Vec::new();
+            pointer(
+                &mut evs,
+                p,
+                match i {
+                    1 => Some(true),
+                    3 => Some(false),
+                    _ => None,
+                },
+            );
+            r.invocations
+                .extend(h.frame_mods("layer", panel, evs, m).invocations);
+        }
+        let ids: Vec<String> = r.invocations.iter().map(|i| i.id.clone()).collect();
+        h.apply(r);
+        ids
+    };
+    let none = egui::Modifiers::NONE;
+    let r = drag(&mut h, &mut panel, at(10.0, 10.0), at(60.0, 10.0), none);
+    assert!(r.iter().any(|i| i == "paint.add_stroke"), "{r:?}");
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    let strokes = |h: &Harness| bae_motion::paint::strokes_of(&h.stage, &effects[0]);
+    let r = drag(
+        &mut h,
+        &mut panel,
+        at(60.0, 20.0),
+        at(100.0, 20.0),
+        egui::Modifiers::SHIFT,
+    );
+    assert!(r.iter().any(|i| i == "paint.extend_stroke"), "{r:?}");
+    assert_eq!(strokes(&h).len(), 1, "the same stroke, longer");
+    // Ctrl/Cmd-drag 30 points out: a 60 px brush, no stroke.
+    let r = drag(
+        &mut h,
+        &mut panel,
+        at(200.0, 100.0),
+        at(230.0, 100.0),
+        egui::Modifiers::COMMAND,
+    );
+    assert!(r.is_empty(), "{r:?}");
+    let d = tools.lock().options.paint.diameter;
+    assert!((d - 60.0).abs() < 1.0, "{d}");
+}
+
+/// The Paint panel's Clone presets recall their Clone Options.
+#[test]
+fn clone_presets_recall_their_options() {
+    let mut p = crate::tools::PaintOptions {
+        clone_offset: [10.0, 20.0],
+        ..Default::default()
+    };
+    p.choose_clone_preset(2);
+    assert_eq!(p.clone_offset, [0.0, 0.0], "preset 3 starts empty");
+    p.clone_offset = [5.0, 5.0];
+    p.choose_clone_preset(0);
+    assert_eq!(p.clone_offset, [10.0, 20.0]);
+    p.choose_clone_preset(2);
+    assert_eq!(p.clone_offset, [5.0, 5.0]);
+}
+
 /// #599: the Project panel starts renaming the item another panel asks for.
 #[test]
 fn project_panel_renames_the_item_another_panel_asks_for() {
@@ -3395,6 +3542,61 @@ fn new_folder_and_open_layer() {
     h.session().lock().selected_layers = vec![solid.clone()];
     h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
     assert_eq!(h.session().lock().layer_panel, Some(solid));
+}
+
+/// Camera Options, Light Options (by light type) and a 3D layer's Material
+/// Options sit after Transform, as in AE's timeline.
+#[test]
+fn camera_light_and_material_options_groups() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let layer = |h: &mut Harness, kind: &str| {
+        PrimPath::new(
+            h.run("layer.create", json!({"comp": comp, "kind": kind}))["path"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let camera = layer(&mut h, "camera");
+    let light = layer(&mut h, "light");
+    let groups = |h: &Harness, l: &PrimPath| {
+        crate::props::layer_tree(&h.stage, l)
+            .into_iter()
+            .filter_map(|n| match n {
+                crate::props::Node::Group {
+                    label, children, ..
+                } => Some((label, children.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cam = groups(&h, &camera);
+    assert_eq!(
+        cam.last(),
+        Some(&("Camera Options".to_owned(), 13)),
+        "{cam:?}"
+    );
+    let lit = groups(&h, &light);
+    assert_eq!(lit.last().map(|g| g.0.as_str()), Some("Light Options"));
+    assert_eq!(lit.last().map(|g| g.1), Some(10), "a spot light: {lit:?}");
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("ambient".into())}),
+    );
+    assert_eq!(groups(&h, &light).last().map(|g| g.1), Some(2), "ambient");
+    assert!(
+        groups(&h, &solid).iter().all(|g| g.0 != "Material Options"),
+        "2D layers have none"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "three_d", "value": Value::Bool(true)}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 9))
+    );
 }
 
 /// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label

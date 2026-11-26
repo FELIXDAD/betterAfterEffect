@@ -11,6 +11,8 @@
 //! Choose Folder…) from [`SettingsDialog::take_requests`]; every other button is
 //! drawn disabled.
 
+mod expression_preview;
+
 use bae_prefs::schema::{self, Item, Kind, PAGES, Pref, Style};
 use bae_prefs::{Preferences, parse_color, parse_timecode};
 use egui::{Color32, Key, RichText, Ui, vec2};
@@ -129,6 +131,7 @@ pub fn apply(prefs: &Preferences) {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
+    crate::theme::set_accessible_contrast(prefs.bool("appearance.accessibility_color_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
     ));
@@ -575,7 +578,7 @@ impl SettingsDialog {
             }
             Item::Group(title, list) => {
                 ui.add_space(4.0);
-                ui.add_enabled_ui(*title != "Mercury Transmit", |ui| {
+                ui.add_enabled_ui(!Item::unsupported(list), |ui| {
                     ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
                     egui::Frame::new()
                         .stroke(egui::Stroke::new(1.0, color::DIVIDER))
@@ -605,11 +608,6 @@ impl SettingsDialog {
             Item::Info(label, value) => {
                 ui.horizontal(|ui| {
                     if !label.is_empty() {
-                        let label = if *value == "<InstalledRAM - ReservedRAM> GB" {
-                            "RAM Available for BAE:"
-                        } else {
-                            label
-                        };
                         ui.label(tr(label));
                     }
                     if *label == "Sample Rate:" && self.page() == "audio" {
@@ -662,7 +660,7 @@ impl SettingsDialog {
                         ui.add_space(40.0);
                     });
             }
-            Item::Preview(_) => self.expression_preview(ui),
+            Item::Preview(_) => expression_preview::show(ui, &self.draft),
             Item::When(w, item) => {
                 let on = self.draft.holds(w);
                 ui.add_enabled_ui(on, |ui| self.item(ui, item));
@@ -686,10 +684,7 @@ impl SettingsDialog {
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
-        let enabled = !matches!(
-            p.key,
-            "project.dynamic_link_highest_number" | "export.preview_output_during_render_queue"
-        ) && self.draft.enabled(p);
+        let enabled = !p.unsupported && self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 if p.indent {
@@ -707,8 +702,15 @@ impl SettingsDialog {
         let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = p.key != "video.enable_mercury_transmit" && draft.bool(p.key);
-                if widgets::checkbox(ui, &mut v, label).changed() {
+                // A setting BAE does not support shows AE's default (greyed;
+                // Mercury Transmit: off), whatever a preferences file saved for
+                // it; the saved value stays.
+                let mut v = if p.unsupported {
+                    matches!(p.default, bae_prefs::DefaultValue::Bool(true))
+                } else {
+                    draft.bool(p.key)
+                };
+                if widgets::checkbox(ui, &mut v, label).changed() && !p.unsupported {
                     self.set(p.key, v);
                 }
             }
@@ -938,41 +940,6 @@ impl SettingsDialog {
             }
         }
     }
-
-    /// Expression editor preview (Scripting & Expressions): a few lines of code
-    /// in the editor's font size and colors.
-    fn expression_preview(&self, ui: &mut Ui) {
-        let p = &self.draft;
-        let c = |k: &str| {
-            let [r, g, b] = p.color(&format!("scripting_expressions.expr_color_{k}"));
-            Color32::from_rgb(r, g, b)
-        };
-        let size = p.int(bae_prefs::keys::EXPR_FONT_SIZE) as f32;
-        let font = egui::FontId::monospace(size);
-        let mut job = egui::text::LayoutJob::default();
-        let mut add = |text: &str, color: Color32| {
-            job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
-        };
-        add("// wiggle the position\n", c("comments"));
-        add("var ", c("keywords"));
-        add("amp", c("identifiers"));
-        add(" = ", c("operators"));
-        add("20", c("numbers"));
-        add(";\n", c("default"));
-        add("wiggle", c("identifiers"));
-        add("(", c("default"));
-        add("2", c("numbers"));
-        add(", amp); ", c("default"));
-        add("\"done\"", c("strings"));
-        egui::Frame::new()
-            .fill(c("background"))
-            .inner_margin(6)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 4.0);
-                let sample = ui.label(job);
-                crate::a11y::value_source(&sample, crate::a11y::VERBATIM_VALUE);
-            });
-    }
 }
 
 fn visual_setting(key: &str) -> bool {
@@ -1048,7 +1015,7 @@ fn label_index(key: &str) -> usize {
 }
 
 /// A label's name as shown: the user's name, or the translated default.
-fn label_name(p: &Preferences, i: usize) -> String {
+pub fn label_name(p: &Preferences, i: usize) -> String {
     let name = p.label_name(i);
     if i == 0 || name.is_empty() || name == schema::LABEL_NAMES[i] {
         tr(schema::LABEL_NAMES[i]).to_owned()
