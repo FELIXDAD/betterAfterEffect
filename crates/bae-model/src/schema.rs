@@ -252,6 +252,7 @@ const LAYER: &[AttrDef] = &[
     choice("kind", "solid", LAYER_KINDS).doc("Layer kind; required."),
     prim_ref("source").doc("Comp (pre-comp) or Asset (footage, solid) providing the pixels/audio."),
     int("label", 1),
+    string("comment"),
     time("start_time", 0).doc("Comp time of layer time 0."),
     time("in_point", 0).doc("Comp time."),
     time_none("out_point").doc("Comp time; none = end of the comp."),
@@ -410,6 +411,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             time("work_area_start", 0),
             time_none("work_area_duration").doc("None = to the end."),
             time("display_start_time", 0),
+            AttrDef::new("guides", ValueType::FloatList, DefaultValue::None, false)
+                .doc("Viewer guides: pairs of (0 horizontal / 1 vertical, comp pixels)."),
             boolean("motion_blur", false),
             boolean("frame_blending", false).doc("AE Enable Frame Blending (comp switch)."),
             AttrDef::new(
@@ -654,6 +657,48 @@ pub static SCHEMAS: &[PrimSchema] = &[
             string("plugin:version"),
             AttrDef::new("state", ValueType::Bytes, DefaultValue::None, false)
                 .doc("Opaque per-instance plugin state (AE sequence data)."),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::MOTION_TRACKER,
+        doc: "A motion tracker in a layer's trackers folder.",
+        attrs: &[
+            string("name"),
+            choice(
+                "track_type",
+                "transform",
+                &["transform", "stabilize", "parallel", "perspective"],
+            ),
+            boolean("position", true).fixed(),
+            boolean("rotation", false).fixed(),
+            boolean("scale", false).fixed(),
+            choice("channel", "luminance", &["rgb", "luminance", "saturation"]),
+            boolean("subpixel", true).fixed(),
+            boolean("adapt", false).fixed(),
+            choice("enhance", "none", &["none", "blur", "sharpen"]),
+            choice(
+                "low_confidence",
+                "continue",
+                &["continue", "stop", "extrapolate", "adapt"],
+            ),
+            float("threshold", 80.0).fixed(),
+            prim_ref("target"),
+            string("target_property"),
+            vec2("origin", [0.0; 2]).fixed(),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::TRACK_POINT,
+        doc: "A feature and its search window in source-layer pixels.",
+        attrs: &[
+            string("name"),
+            vec2("feature_center", [0.0; 2]),
+            vec2("feature_size", [16.0; 2]),
+            vec2("search_offset", [0.0; 2]),
+            vec2("search_size", [64.0; 2]),
+            float("confidence", 100.0),
+            vec2("attach_point", [0.0; 2]),
+            vec2("attach_offset", [0.0; 2]),
         ],
     },
     PrimSchema {
