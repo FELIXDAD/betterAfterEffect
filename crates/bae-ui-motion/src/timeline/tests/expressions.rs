@@ -57,6 +57,20 @@ fn expressions_add_pick_whip_switch_and_multiline_edit() {
     );
     h.resources
         .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
+    let edit_y = row(&tl).2.y;
+    let field = pos2(tl.last_axis.unwrap().left + 50.0, edit_y);
+    h.click(&mut tl, field, Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: cmd(),
+        }],
+        cmd(),
+    );
     let (_, _, _, whip) = row(&tl);
     let r = h.drag(&mut tl, whip, rot2, Modifiers::NONE);
     h.apply(&r);
