@@ -330,6 +330,7 @@ pub struct RenderQueue {
     /// wait for the next Render, the snapshot does not have their edits).
     batch: Vec<u64>,
     sequence_files_per_folder: Option<usize>,
+    audio_block: Option<[u32; 4]>,
     repaint: Option<egui::Context>,
 }
 
@@ -562,6 +563,7 @@ impl RenderQueue {
             bit_rate_mbps: item.bit_rate_mbps,
             pcm_audio: item.pcm_audio,
             sequence_files_per_folder: self.sequence_files_per_folder,
+            audio_block: self.audio_block,
             start: item.start,
             end: item.end,
             cancel: item.cancel.clone(),
@@ -647,6 +649,7 @@ pub(crate) struct Job {
     bit_rate_mbps: f64,
     pcm_audio: bool,
     sequence_files_per_folder: Option<usize>,
+    audio_block: Option<[u32; 4]>,
     start: i64,
     end: i64,
     cancel: Arc<AtomicBool>,
@@ -656,6 +659,11 @@ pub(crate) struct Job {
 /// The export settings of a job's output module.
 fn export_settings(job: &Job, output: PathBuf) -> ExportSettings {
     let mut settings = ExportSettings::new(job.format, output);
+    if let Some([h, m, s, frames]) = job.audio_block {
+        let seconds = f64::from(h) * 3600.0 + f64::from(m) * 60.0 + f64::from(s);
+        settings.audio_block =
+            Time::from_seconds(seconds + job.rate.frame_to_time(i64::from(frames)).as_seconds());
+    }
     settings.pcm_audio = job.pcm_audio && job.format.is_quicktime();
     settings.alpha = match job.channels {
         Channels::RgbAlpha if supports_alpha(job.format) => ExportAlpha::Straight,
@@ -853,6 +861,7 @@ pub fn start(
             return Ok(());
         }
         let prefs = crate::prefs::current(resources);
+        queue.audio_block = bae_prefs::parse_timecode(prefs.str("audio.audio_block_duration"));
         queue.sequence_files_per_folder = prefs
             .bool("export.segment_sequences_enabled")
             .then(|| prefs.int("export.segment_sequences_files").clamp(1, 99999) as usize);
@@ -2251,10 +2260,12 @@ mod tests {
             start: 0,
             end: 0,
             sequence_files_per_folder: None,
+            audio_block: Some([0, 0, 0, 12]),
             cancel: Arc::default(),
         };
         let s = |format, channels| export_settings(&job(format, channels), PathBuf::from("/r/x"));
         let png = s(ExportFormat::Png, Channels::RgbAlpha);
+        assert_eq!(png.audio_block, FrameRate::FPS_30.frame_to_time(12));
         assert_eq!((png.alpha, png.bit_rate), (ExportAlpha::Straight, None));
         assert_eq!(
             s(ExportFormat::Png, Channels::Rgb).alpha,

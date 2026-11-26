@@ -78,6 +78,29 @@ fn render(h: &mut Ui) {
 }
 
 #[test]
+fn wav_queue_respects_frame_ranges_with_short_and_long_audio_blocks() {
+    let Some(mut h) = gpu_gui() else { return };
+    new_comp(&mut h);
+    let dir = tempfile::tempdir().unwrap();
+    let mut outputs = Vec::new();
+    for (i, duration) in ["0:00:00:01", "0:00:01:00"].into_iter().enumerate() {
+        let mut prefs = (*h.state().prefs.current()).clone();
+        prefs.set("audio.audio_block_duration", duration);
+        h.state().prefs.set(prefs).unwrap();
+        let path = dir.path().join(format!("clip{i}.wav"));
+        let index = queue_one(&mut h, ExportFormat::Wav, &path, 2, 7);
+        render(&mut h);
+        wait_done(&mut h, Duration::from_secs(30));
+        assert!(matches!(items(&h)[index].status, ItemStatus::Done { .. }));
+        let wav = fs::read(path).unwrap();
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(wav.len(), 44 + 6 * 1600 * 6);
+        outputs.push(wav);
+    }
+    assert_eq!(outputs[0], outputs[1]);
+}
+
+#[test]
 fn png_tiff_exr_with_ranges_into_tricky_paths() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
