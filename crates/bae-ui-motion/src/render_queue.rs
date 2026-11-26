@@ -36,8 +36,8 @@ use item_menu::{ItemAction, LogMode, RenderLog};
 use templates::{Library, NameDialog, Span, Store, Template};
 
 /// Formats offered in the panel and by `bae render --format`.
+/// WAV comes last, as in AE's Format menu.
 pub const FORMATS: &[ExportFormat] = &[
-    ExportFormat::Wav,
     ExportFormat::Png,
     ExportFormat::Tiff,
     ExportFormat::Exr,
@@ -51,6 +51,7 @@ pub const FORMATS: &[ExportFormat] = &[
     ExportFormat::ProRes422,
     ExportFormat::ProRes,
     ExportFormat::ProRes4444,
+    ExportFormat::Wav,
 ];
 
 /// AE 26's Render Settings templates in its menu order; BAE renders at Best
@@ -1791,19 +1792,29 @@ fn item_ui(
                         ui.close();
                     }
                 }
-            });
+            })
+            .response
+            .labeled_value(egui::WidgetType::Button, &name("Log"), tr(label));
         });
     });
-    if let Some(path) = &item.log_file
-        && ui.link(path.display().to_string()).clicked()
-    {
-        reveal(path);
+    if let Some(path) = &item.log_file {
+        let link = ui.link(path.display().to_string());
+        bae_ui::a11y::value_source(&link, bae_ui::a11y::VERBATIM_VALUE);
+        if link.clicked() {
+            reveal(path);
+        }
     }
     let id = item.id;
     let multiple = item.outputs.len() > 1;
     let mut remove_output = None;
     for (index, module) in item.outputs.iter_mut().enumerate() {
         ui.push_id(("output_module", index), |ui| {
+            let module_name =
+                multiple.then(|| tr("Output Module {n}").replace("{n}", &(index + 1).to_string()));
+            let name = |what: &str| match &module_name {
+                Some(module) => bae_ui::a11y::context(&[&item_ctx, module, tr(what)]),
+                None => name(what),
+            };
             ui.add_enabled_ui(editable, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let mut om: Vec<_> = OM_TEMPLATES
@@ -2008,8 +2019,13 @@ fn item_ui(
                     ui.horizontal(|ui| {
                         ui.label(tr("Output To"));
                         if let Some(comp) = comp {
+                            let button =
+                                ui.add(egui::Button::new("▾").frame(false).small()).labeled(
+                                    egui::WidgetType::Button,
+                                    &name("File Name and Location Templates"),
+                                );
                             filenames::menu(
-                                ui,
+                                &button,
                                 id,
                                 index,
                                 module,
@@ -2039,7 +2055,7 @@ fn item_ui(
                         &module.output,
                     );
                     // The path is the user's, not UI text to translate.
-                    bae_ui::a11y::value_source(&file_link, bae_ui::a11y::VERBATIM_VALUE);
+                    bae_ui::a11y::value_source(&file_link, bae_ui::a11y::FILE_NAME_VALUE);
                     let follows = extension_follows_format(&module.output, module.format);
                     if let Some(extension) = follows {
                         file_link.clone().on_hover_text(
@@ -2055,6 +2071,7 @@ fn item_ui(
                     if multiple
                         && ui
                             .small_button("−")
+                            .labeled(egui::WidgetType::Button, &name("Remove Output Module"))
                             .on_hover_text(tr("Remove Output Module"))
                             .clicked()
                     {
@@ -2170,6 +2187,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Render Settings", "渲染设置"),
     ("Log", "日志"),
     ("Output Module", "输出模块"),
+    ("Output Module {n}", "输出模块 {n}"),
     ("Output Module:", "输出模块:"),
     ("Render Settings:", "渲染设置:"),
     ("Best Settings", "最佳设置"),

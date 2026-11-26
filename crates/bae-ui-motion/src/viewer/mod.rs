@@ -227,6 +227,8 @@ pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    /// CC Particle World producer paths (expressions evaluated once per time).
+    particle_paths: particle_guides::PathCache,
     preview_3d: Option<(PrimPath, u64, bool)>,
     /// The expression error banner.
     banner: errors::Banner,
@@ -1512,7 +1514,16 @@ impl Panel for CompositionViewer {
         if controls.masks && opts.paths {
             overlay::masks(&painter, cx.stage, &comp, &view, &selected);
         }
-        particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected, view_camera);
+        particle_guides::paint(
+            &clip,
+            cx.stage,
+            eval,
+            &comp,
+            &view,
+            &selected,
+            view_camera,
+            &mut self.particle_paths,
+        );
         // Cameras and lights in the 3D views (not the camera looked through).
         let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
             None | Some(view3d::View3d::Active) => comp.camera.map(|i| comp.layers[i].path.clone()),
