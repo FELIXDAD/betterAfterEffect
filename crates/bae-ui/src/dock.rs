@@ -100,6 +100,9 @@ pub struct Frame {
     pub stack_height: Option<f32>,
     #[serde(default)]
     pub small_tabs: bool,
+    /// Expanded panels when Solo Panels in Stack is off.
+    #[serde(default)]
+    pub expanded_panels: Option<Vec<PanelId>>,
 }
 
 impl Frame {
@@ -112,18 +115,82 @@ impl Frame {
             collapsed: false,
             stack_height: None,
             small_tabs: false,
+            expanded_panels: None,
         }
     }
 
     pub fn active(mut self, i: usize) -> Self {
-        self.active = i;
+        self.activate(i);
         self
     }
 
     pub fn stacked(mut self, expanded_height: Option<f32>) -> Self {
         self.stacked = true;
+        self.small_tabs = true;
         self.stack_height = expanded_height;
         self
+    }
+
+    fn expanded(&self, index: usize) -> bool {
+        self.expanded_panels
+            .as_ref()
+            .map_or(!self.collapsed && self.active == index, |open| {
+                self.tabs.get(index).is_some_and(|p| open.contains(p))
+            })
+    }
+
+    fn activate(&mut self, index: usize) {
+        self.active = index.min(self.tabs.len().saturating_sub(1));
+        self.collapsed = false;
+        if let (Some(open), Some(panel)) = (&mut self.expanded_panels, self.tabs.get(self.active))
+            && !open.contains(panel)
+        {
+            open.push(panel.clone());
+        }
+    }
+
+    fn toggle_solo(&mut self) {
+        if let Some(open) = self.expanded_panels.take() {
+            if !self.active_panel().is_some_and(|p| open.contains(p))
+                && let Some(i) = self.tabs.iter().position(|p| open.contains(p))
+            {
+                self.active = i;
+            }
+            self.collapsed = open.is_empty();
+        } else {
+            self.expanded_panels = Some(
+                self.active_panel()
+                    .filter(|_| !self.collapsed)
+                    .cloned()
+                    .into_iter()
+                    .collect(),
+            );
+        }
+    }
+
+    fn collapse(&mut self, index: usize) {
+        if let Some(open) = &mut self.expanded_panels {
+            open.retain(|p| self.tabs.get(index) != Some(p));
+            self.collapsed = open.is_empty();
+            if self.active == index
+                && let Some(i) = self.tabs.iter().position(|p| open.contains(p))
+            {
+                self.activate(i);
+            }
+        } else {
+            self.collapsed = true;
+        }
+    }
+
+    fn remove_tab(&mut self, i: usize) {
+        let removed = self.tabs.remove(i);
+        if let Some(open) = &mut self.expanded_panels {
+            open.retain(|p| p != &removed);
+            self.collapsed = open.is_empty();
+        }
+        if self.active > i || self.active >= self.tabs.len() {
+            self.active = self.active.saturating_sub(1);
+        }
     }
 
     pub fn active_panel(&self) -> Option<&PanelId> {
@@ -282,10 +349,7 @@ impl Node {
         match self {
             Node::Frame(f) => {
                 let i = f.tabs.iter().position(|t| t == panel)?;
-                f.tabs.remove(i);
-                if f.active > i || f.active >= f.tabs.len() {
-                    f.active = f.active.saturating_sub(1);
-                }
+                f.remove_tab(i);
                 Some(f.id)
             }
             Node::Split { children, .. } => children.iter_mut().find_map(|c| c.take_panel(panel)),
@@ -369,6 +433,8 @@ pub struct TabInfo {
     pub locked: Option<bool>,
     /// Viewers (Composition, Layer, Footage, Timeline) always show the close button.
     pub viewer: bool,
+    /// The hamburger offers a Close Other Panels submenu; tab context menus keep the group command.
+    pub close_submenu: bool,
     /// The smallest content area (below the tabs) that shows the panel
     /// completely; the dock gives the panel at least this much when it fits.
     pub min_size: Vec2,
@@ -384,6 +450,11 @@ impl TabInfo {
 
     pub fn label(mut self, c: Color32) -> Self {
         self.label = Some(c);
+        self
+    }
+
+    pub fn close_submenu(mut self) -> Self {
+        self.close_submenu = true;
         self
     }
 
@@ -415,6 +486,11 @@ pub trait PanelHost {
         let _ = (ui, panel);
     }
 
+    /// Allows a panel with internal document tabs to supply its own related-tab commands.
+    fn related_tabs_menu(&mut self, _ui: &mut Ui, _panel: &PanelId) -> bool {
+        false
+    }
+
     fn on_close(&mut self, panel: &PanelId) {
         let _ = panel;
     }
@@ -443,7 +519,8 @@ enum Action {
     ToggleMaximize(FrameId),
     ToggleStacked(FrameId),
     ToggleSmallTabs(FrameId),
-    ToggleCollapsed(FrameId),
+    ToggleSolo(FrameId),
+    Collapse(FrameId, usize),
     StackHeight(FrameId, f32),
     Move(PanelId, FrameId, DropZone, Option<usize>),
 }
@@ -613,7 +690,7 @@ impl Dock {
             if let Some(f) = self.frame_mut(fid)
                 && let Some(i) = f.tabs.iter().position(|t| t == panel)
             {
-                f.active = i;
+                f.activate(i);
             }
             self.focused = Some(fid);
         }
@@ -644,8 +721,7 @@ impl Dock {
             if let Some(f) = frame.and_then(|f| self.layout.root.find_mut(f)) {
                 let i = index.unwrap_or(f.tabs.len()).min(f.tabs.len());
                 f.tabs.insert(i, panel);
-                f.active = i;
-                f.collapsed = false;
+                f.activate(i);
                 self.focused = Some(f.id);
                 return;
             }
@@ -654,8 +730,7 @@ impl Dock {
             if let Some(f) = self.frame_mut(fid)
                 && let Some(i) = f.tabs.iter().position(|t| *t == panel)
             {
-                f.active = i;
-                f.collapsed = false;
+                f.activate(i);
             }
             self.focused = Some(fid);
             return;
@@ -667,7 +742,7 @@ impl Dock {
         match target.and_then(|t| self.layout.root.find_mut(t)) {
             Some(f) => {
                 f.tabs.push(panel);
-                f.active = f.tabs.len() - 1;
+                f.activate(f.tabs.len() - 1);
             }
             None => {
                 self.next_id += 1;
@@ -703,8 +778,7 @@ impl Dock {
         self.layout.root.take_panel(panel);
         for f in &mut self.layout.floating {
             if let Some(i) = f.frame.tabs.iter().position(|t| t == panel) {
-                f.frame.tabs.remove(i);
-                f.frame.active = f.frame.active.min(f.frame.tabs.len().saturating_sub(1));
+                f.frame.remove_tab(i);
             }
         }
         self.layout.floating.retain(|f| !f.frame.tabs.is_empty());
@@ -733,8 +807,7 @@ impl Dock {
         if self.layout.root.take_panel(panel).is_none() {
             for f in &mut self.layout.floating {
                 if let Some(i) = f.frame.tabs.iter().position(|t| t == panel) {
-                    f.frame.tabs.remove(i);
-                    f.frame.active = f.frame.active.min(f.frame.tabs.len().saturating_sub(1));
+                    f.frame.remove_tab(i);
                 }
             }
         }
@@ -743,8 +816,7 @@ impl Dock {
                 if let Some(f) = self.frame_mut(target) {
                     let i = index.unwrap_or(f.tabs.len()).min(f.tabs.len());
                     f.tabs.insert(i, panel.clone());
-                    f.active = i;
-                    f.collapsed = false;
+                    f.activate(i);
                 }
             }
             edge => {
@@ -778,7 +850,7 @@ impl Dock {
                 {
                     // Splitting inside a floating window: keep it simple and add as a tab.
                     fl.frame.tabs.push(panel.clone());
-                    fl.frame.active = fl.frame.tabs.len() - 1;
+                    fl.frame.activate(fl.frame.tabs.len() - 1);
                 }
             }
         }
@@ -928,7 +1000,8 @@ impl Dock {
 
     /// Draws the tab row; returns the content rect below it.
     fn tab_bar(&mut self, ui: &Ui, rect: Rect, frame: &Frame, host: &mut impl PanelHost) -> Rect {
-        let bar = Rect::from_min_size(rect.min, vec2(rect.width(), metrics::TAB_BAR_H));
+        let compact = if frame.small_tabs { 4.0 } else { 0.0 };
+        let bar = Rect::from_min_size(rect.min, vec2(rect.width(), metrics::TAB_BAR_H - compact));
         let font = theme::body();
         let multi = frame.tabs.len() > 1;
         let tabs_right = if multi {
@@ -937,7 +1010,7 @@ impl Dock {
             bar.right()
         };
         let mut x = bar.left() + geom::TAB_PAD;
-        let baseline = bar.top() + geom::BASELINE;
+        let baseline = bar.top() + geom::BASELINE - compact * 0.5;
         let mut tab_rects = Vec::new();
 
         let infos: Vec<TabInfo> = frame.tabs.iter().map(|p| host.tab(p)).collect();
@@ -1024,7 +1097,7 @@ impl Dock {
             self.panel_menu(&resp, frame, i, host, true);
 
             let painter = ui.painter_at(bar);
-            let mid_y = bar.top() + 12.5;
+            let mid_y = bar.top() + 12.5 - compact * 0.5;
             let mut cx = x;
             // Close button: always on viewers, on hover for the rest.
             let close_x = if close_slot {
@@ -1120,8 +1193,8 @@ impl Dock {
                 cx += geom::MENU_W;
                 if multi {
                     let ul = Rect::from_min_max(
-                        pos2(text_x - 1.0, bar.top() + geom::UNDERLINE_Y),
-                        pos2(cx + 1.0, bar.top() + geom::UNDERLINE_Y + 1.0),
+                        pos2(text_x - 1.0, bar.top() + geom::UNDERLINE_Y - compact),
+                        pos2(cx + 1.0, bar.top() + geom::UNDERLINE_Y - compact + 1.0),
                     );
                     painter.rect_filled(ul, 0.5, color::TAB_ACTIVE);
                 }
@@ -1214,11 +1287,37 @@ impl Dock {
             if ui.button(tr("Undock Panel")).clicked() {
                 actions.push(Action::Undock(panel.clone(), None));
             }
-            let others = ui.add_enabled(
-                frame.tabs.len() > 1,
-                egui::Button::new(tr("Close Other Panels in Group")),
-            );
-            if others.clicked() {
+            let group_button = |ui: &mut Ui| {
+                ui.add_enabled(
+                    frame.tabs.len() > 1,
+                    egui::Button::new(tr("Close Other Panels in Group")),
+                )
+                .clicked()
+            };
+            if !context && host.tab(&panel).close_submenu {
+                crate::widgets::menu_button(ui, tr("Close Other Panels"), |ui| {
+                    if group_button(ui) {
+                        actions.push(Action::CloseOthers(fid, index));
+                    }
+                    if !host.related_tabs_menu(ui, &panel) {
+                        let similar: Vec<_> = self
+                            .layout
+                            .panel_ids()
+                            .into_iter()
+                            .filter(|id| id != &panel && id.kind() == panel.kind())
+                            .collect();
+                        if ui
+                            .add_enabled(
+                                !similar.is_empty(),
+                                egui::Button::new(tr("Close Other Similar Panels")),
+                            )
+                            .clicked()
+                        {
+                            actions.extend(similar.into_iter().map(Action::Close));
+                        }
+                    }
+                });
+            } else if group_button(ui) {
                 actions.push(Action::CloseOthers(fid, index));
             }
             crate::widgets::menu_button(ui, tr("Panel Group Settings"), |ui| {
@@ -1241,6 +1340,19 @@ impl Dock {
                 if check_item(ui, frame.stacked, tr("Stacked Panel Group")).clicked() {
                     actions.push(Action::ToggleStacked(fid));
                 }
+                if ui
+                    .add_enabled_ui(frame.stacked, |ui| {
+                        check_item(
+                            ui,
+                            frame.expanded_panels.is_none(),
+                            tr("Solo Panels in Stack"),
+                        )
+                        .clicked()
+                    })
+                    .inner
+                {
+                    actions.push(Action::ToggleSolo(fid));
+                }
                 if check_item(ui, frame.small_tabs, tr("Small Tabs")).clicked() {
                     actions.push(Action::ToggleSmallTabs(fid));
                 }
@@ -1253,12 +1365,16 @@ impl Dock {
 
     fn stack_ui(&mut self, ui: &mut Ui, rect: Rect, frame: &Frame, host: &mut impl PanelHost) {
         let n = frame.tabs.len();
-        let expanded = (!frame.collapsed).then_some(frame.active);
+        let expanded = (0..n).filter(|i| frame.expanded(*i)).count();
+        let compact = if frame.small_tabs { 4.0 } else { 0.0 };
+        let closed_h = metrics::STACK_HEADER_H - compact;
+        let open_h = metrics::TAB_BAR_H - compact;
         let font = theme::body();
-        let headers_h = n as f32 * (metrics::STACK_HEADER_H + geom::STACK_SEP)
-            + (metrics::TAB_BAR_H - metrics::STACK_HEADER_H) * expanded.is_some() as u8 as f32;
+        let headers_h =
+            n as f32 * (closed_h + geom::STACK_SEP) + (open_h - closed_h) * expanded as f32;
         let free = (rect.height() - headers_h).max(0.0);
-        let content_h = frame.stack_height.map_or(free, |h| h.min(free));
+        let share = free / expanded.max(1) as f32;
+        let content_h = frame.stack_height.map_or(share, |h| h.min(share));
         let sep_stroke_rect = |y: f32| {
             Rect::from_min_max(
                 pos2(rect.left(), y),
@@ -1268,12 +1384,8 @@ impl Dock {
         let mut y = rect.top();
         for (i, panel) in frame.tabs.iter().enumerate() {
             let info = host.tab(panel);
-            let is_open = expanded == Some(i);
-            let h = if is_open {
-                metrics::TAB_BAR_H
-            } else {
-                metrics::STACK_HEADER_H
-            };
+            let is_open = frame.expanded(i);
+            let h = if is_open { open_h } else { closed_h };
             let header = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), h));
             let id = self.id.with(("tab", panel));
             let resp = ui
@@ -1281,7 +1393,7 @@ impl Dock {
                 .labeled_toggle(egui::WidgetType::CollapsingHeader, tr(&info.title), is_open);
             if resp.clicked() {
                 if is_open {
-                    self.actions.push(Action::ToggleCollapsed(frame.id));
+                    self.actions.push(Action::Collapse(frame.id, i));
                 } else {
                     self.actions.push(Action::Activate(frame.id, i));
                 }
@@ -1301,13 +1413,16 @@ impl Dock {
             } else {
                 color::TAB_INACTIVE
             };
-            let baseline_off = if is_open { geom::BASELINE } else { 15.0 };
+            let baseline_off = if is_open { geom::BASELINE } else { 15.0 } - compact * 0.5;
             let galley = painter.layout_no_wrap(tr(&info.title).to_owned(), font.clone(), tc);
             let top = y + baseline_off - theme::baseline_offset(&galley);
             painter.galley(pos2(header.left() + 13.0, top), galley, tc);
             if is_open {
                 let mr = Rect::from_center_size(
-                    pos2(rect.right() - geom::STACK_SEP_MARGIN - 9.0, y + 12.5),
+                    pos2(
+                        rect.right() - geom::STACK_SEP_MARGIN - 9.0,
+                        y + 12.5 - compact * 0.5,
+                    ),
                     Vec2::splat(16.0),
                 );
                 let menu_resp = ui.interact(mr, id.with("menu"), Sense::click()).labeled(
@@ -1340,7 +1455,7 @@ impl Dock {
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
                 }
                 if hr.dragged() {
-                    let h = (content_h + hr.drag_delta().y).clamp(20.0, free);
+                    let h = (content_h + hr.drag_delta().y).clamp(20.0_f32.min(share), share);
                     self.actions.push(Action::StackHeight(frame.id, h));
                 }
                 ui.painter()
@@ -1480,8 +1595,7 @@ impl Dock {
                 Action::Focus(f) => self.focused = Some(f),
                 Action::Activate(f, i) => {
                     if let Some(fr) = self.frame_mut(f) {
-                        fr.active = i.min(fr.tabs.len().saturating_sub(1));
-                        fr.collapsed = false;
+                        fr.activate(i);
                     }
                 }
                 Action::Close(p) => {
@@ -1535,9 +1649,14 @@ impl Dock {
                         fr.small_tabs = !fr.small_tabs;
                     }
                 }
-                Action::ToggleCollapsed(f) => {
+                Action::ToggleSolo(f) => {
                     if let Some(fr) = self.frame_mut(f) {
-                        fr.collapsed = !fr.collapsed;
+                        fr.toggle_solo();
+                    }
+                }
+                Action::Collapse(f, i) => {
+                    if let Some(fr) = self.frame_mut(f) {
+                        fr.collapse(i);
                     }
                 }
                 Action::StackHeight(f, h) => {
@@ -2305,5 +2424,25 @@ mod tests {
             dock.frame(project_frame).unwrap().tabs,
             vec![PanelId::from("project")]
         );
+    }
+}
+
+#[cfg(test)]
+mod stack_menu_tests {
+    use super::*;
+    #[test]
+    fn solo_and_multi_panel_modes_retain_the_visible_panels() {
+        let mut frame = Frame::new(&["info", "preview", "audio"]).stacked(None);
+        assert!(frame.small_tabs && frame.expanded(0));
+        frame.toggle_solo();
+        frame.activate(1);
+        assert!(frame.expanded(0) && frame.expanded(1));
+        frame.collapse(1);
+        assert!(frame.expanded(0) && !frame.expanded(1));
+        frame.activate(2);
+        frame.toggle_solo();
+        assert!(!frame.expanded(0) && frame.expanded(2));
+        frame.collapse(2);
+        assert!((0..3).all(|i| !frame.expanded(i)));
     }
 }

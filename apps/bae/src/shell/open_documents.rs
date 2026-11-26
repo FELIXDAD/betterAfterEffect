@@ -46,6 +46,42 @@ pub fn install(sink: impl Fn(Vec<PathBuf>) + Send + 'static) -> bool {
     }
 }
 
+/// Winit reports paths but no cursor motion while Finder owns a drag. Convert
+/// the current location from AppKit window coordinates to the flipped winit view.
+pub fn pointer_in_view(window: &winit::window::Window) -> Option<egui::Pos2> {
+    use objc2::{msg_send, runtime::AnyObject};
+    use objc2_foundation::NSPoint;
+    use winit::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+    let RawWindowHandle::AppKit(handle) = window.window_handle().ok()?.as_raw() else {
+        return None;
+    };
+    let view = handle.ns_view.as_ptr().cast::<AnyObject>();
+    // SAFETY: winit owns the NSView and NSWindow for the duration of this event.
+    unsafe {
+        let native: *mut AnyObject = msg_send![view, window];
+        if native.is_null() {
+            return None;
+        }
+        let pos: NSPoint = msg_send![native, mouseLocationOutsideOfEventStream];
+        let local: NSPoint =
+            msg_send![view, convertPoint: pos, fromView: std::ptr::null_mut::<AnyObject>()];
+        Some(egui::pos2(local.x as f32, local.y as f32))
+    }
+}
+
+/// Publish a successful open or save to the system recent-documents list (Dock).
+pub fn note_recent(path: &std::path::Path) {
+    use objc2::{class, msg_send};
+    if let Some(url) = NSURL::from_file_path(path) {
+        // SAFETY: the desktop shell calls this on the main thread with a live file URL.
+        unsafe {
+            let controller: *mut AnyObject =
+                msg_send![class!(NSDocumentController), sharedDocumentController];
+            let (): () = msg_send![controller, noteNewRecentDocumentURL: &*url];
+        }
+    }
+}
+
 fn set_sink(sink: Sink) {
     *SINK
         .lock()
