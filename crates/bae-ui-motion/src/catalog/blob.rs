@@ -179,6 +179,7 @@ fn decode(text: &'static str) -> Tables {
                     match_name: f[1],
                     name: f[2],
                     name_zh: f[3],
+                    capabilities: f[4].parse().expect("effect capability flags"),
                 });
             }
             Some(Section::MacKeys) => {

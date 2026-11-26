@@ -3149,7 +3149,7 @@ fn paint_and_brushes_panels_show_for_each_paint_tool() {
         h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
         h.frame(
             "brushes",
-            &mut crate::paint_panels::BrushesPanel,
+            &mut crate::paint_panels::BrushesPanel::default(),
             Vec::new(),
         );
     }

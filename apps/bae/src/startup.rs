@@ -74,9 +74,25 @@ pub fn run(mut app: App) -> ExitCode {
     if !is_subcommand && let Some(report) = crash::take_previous_crash(&dirs.crash_reports) {
         tracing::warn!("the previous session crashed; report: {}", report.display());
     }
+    if !is_subcommand {
+        bae_ui_motion::register_preset_index(&mut app, dirs.data.join("Presets"));
+    }
     app.insert_resource(dirs);
     // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
     bae_plugin::load_installed(&app);
+    let packages = app
+        .resource::<bae_plugin::PluginRuntime>()
+        .map(|runtime| {
+            runtime.with_host(|host| {
+                host.plugins()
+                    .filter_map(|plugin| {
+                        Some((plugin.id().to_owned(), plugin.package.root.clone()?))
+                    })
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+    bae_ui_motion::effects::manager::configure(&mut app, packages);
 
     // Messages of subcommands (e.g. why `bae export-json` cannot open a file)
     // follow the UI language too.
