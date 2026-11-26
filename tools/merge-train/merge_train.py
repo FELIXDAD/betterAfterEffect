@@ -376,7 +376,7 @@ PR_FIELDS = """
   author { login }
   labels(first: 30) { nodes { name } }
   timelineItems(itemTypes: [LABELED_EVENT], last: 50) {
-    nodes { ... on LabeledEvent { createdAt label { name } } }
+    nodes { ... on LabeledEvent { createdAt actor { login } label { name } } }
   }
 """
 
@@ -384,10 +384,29 @@ PR_FIELDS = """
 def _norm_pr(n):
     n["labels"] = [x["name"] for x in n["labels"]["nodes"]]
     q = CFG["labels"]["queue"]
-    times = [e["createdAt"] for e in n.pop("timelineItems")["nodes"]
-             if e and e.get("label", {}).get("name") == q]
-    n["queued_at"] = max(times) if times else None
+    events = sorted((e for e in n.pop("timelineItems")["nodes"]
+                     if e and e.get("label", {}).get("name") == q), key=lambda e: e["createdAt"])
+    n["queued_at"] = events[-1]["createdAt"] if events else None
+    n["queued_by"] = ((events[-1].get("actor") or {}).get("login") if events else None)
     return n
+
+
+def drop_unauthorized(prs):
+    """Only `label_actors` (the leader's account) may queue a PR: collaborators with write
+    access can add labels too, and the label is the only review gate."""
+    allowed = CFG.get("label_actors")
+    if not allowed:
+        return prs
+    keep = []
+    for p in prs:
+        if p.get("queued_by") in allowed or p.get("simulated"):
+            keep.append(p)
+            continue
+        log("#%d labelled %s by %s, not a leader: label removed" % (p["number"], CFG["labels"]["queue"], p.get("queued_by")))
+        remove_label(p["number"], CFG["labels"]["queue"])
+        comment(p["number"], "merge-train：`%s` 只能由领导打（审查通过后）。已去掉这个标签，"
+                "PR 本身不受影响，等领导审查。" % CFG["labels"]["queue"])
+    return keep
 
 
 def fetch_queue():
@@ -404,6 +423,7 @@ def fetch_queue():
                 p["queued_at"] = p["queued_at"] or now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
                 p["simulated"] = True
                 prs.append(p)
+    prs = drop_unauthorized(prs)
     prs.sort(key=lambda p: (p["queued_at"] or "9999", p["number"]))
     return prs
 
