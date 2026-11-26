@@ -161,6 +161,33 @@ impl FileDialogs for Native {
         }
     }
 
+    fn confirm_revert(&mut self) -> bool {
+        let question =
+            tr("Revert the project to the last saved version? All changes will be lost.");
+        let dialog = self.message(rfd::MessageLevel::Warning);
+        #[cfg(target_os = "macos")]
+        {
+            let revert = tr("Revert").to_owned();
+            let result = dialog
+                .set_title(question)
+                .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                    revert.clone(),
+                    tr("Cancel").to_owned(),
+                ))
+                .show();
+            matches!(result, rfd::MessageDialogResult::Custom(c) if c == revert)
+        }
+        #[cfg(windows)]
+        {
+            let result = dialog
+                .set_title(bae_platform::APP_NAME)
+                .set_description(question)
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show();
+            result == rfd::MessageDialogResult::Ok
+        }
+    }
+
     fn save_dialog_confirms_replace(&self) -> bool {
         // In BAE.app, `.bae` is a package (Info.plist), so the save panel treats
         // it as a file and asks before replacing; a bare binary does not.
