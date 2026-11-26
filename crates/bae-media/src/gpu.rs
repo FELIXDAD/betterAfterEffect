@@ -487,6 +487,7 @@ impl MediaGpu {
         let (op, alpha) = alpha_plan(source_alpha, request.alpha_output);
         let out = self.create_frame_texture(frame.width, frame.height)?;
         let gpu_frame = GpuFrame {
+            channels: None,
             texture: out,
             alpha,
             color: frame.color.clone(),
@@ -544,6 +545,7 @@ impl MediaGpu {
         self.record_convert(&mut encoder, source.view, source.format, &texture, op)?;
         self.ctx.queue().submit([encoder.finish()]);
         Ok(GpuFrame {
+            channels: None,
             texture,
             alpha,
             color: source.color.clone(),

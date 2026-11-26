@@ -29,6 +29,8 @@ pub(crate) enum Binding {
     Texture,
     /// An unfiltered 3D lookup texture.
     Texture3d,
+    /// Raw scalar planes from a multi-channel footage frame.
+    UintTextureArray,
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
     ReadBuffer,
@@ -313,6 +315,11 @@ impl Runtime {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: true,
                         min_binding_size: NonZeroU64::new(u64::from(size)),
+                    },
+                    Binding::UintTextureArray => wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
                     },
                     Binding::Texture | Binding::Texture3d => wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
