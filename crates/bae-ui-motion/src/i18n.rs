@@ -24,6 +24,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "合成中没有开启声音的图层。",
     ),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
+    ("Set Frame", "设置帧"),
     ("Apply Motion Tracker", "应用动态跟踪器"),
     ("Edit Motion Tracker", "编辑动态跟踪器"),
     ("Analyze Motion", "分析运动"),
