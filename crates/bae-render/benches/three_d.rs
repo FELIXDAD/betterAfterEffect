@@ -300,6 +300,11 @@ fn main() {
             &|f| shadows(lit(scene_3d(f, false))),
             &full,
         ),
+        fps(
+            "3d_shadows half",
+            &|f| shadows(lit(scene_3d(f, false))),
+            &half,
+        ),
     ];
     let report = serde_json::json!({
         "scenario": "three_d",

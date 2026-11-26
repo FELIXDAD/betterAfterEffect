@@ -383,6 +383,7 @@ fn shadow_worst(img: &Image, comp: &RenderComp) -> u8 {
         opacity: 1.0,
         transmission: caster.material.light_transmission,
         pixels: CasterPixels::Solid(color),
+        footprints: Arc::new([]),
     }];
     let cam = comp.view_camera();
     let size = DVec2::splat(200.0);
