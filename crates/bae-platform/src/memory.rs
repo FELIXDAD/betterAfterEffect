@@ -59,22 +59,23 @@ mod platform {
 
     /// Current resident working set of the BAE process.
     pub fn resident_bytes() -> Option<u64> {
-        let mut info = MaybeUninit::<libc::mach_task_basic_info>::uninit();
-        let mut count = libc::MACH_TASK_BASIC_INFO_COUNT;
-        // SAFETY: the current task owns the port; the buffer and count match the flavor.
+        let mut info = MaybeUninit::<libc::proc_taskinfo>::uninit();
+        let size = size_of::<libc::proc_taskinfo>() as libc::c_int;
+        // SAFETY: the flavor, buffer type and byte count agree.
         let result = unsafe {
-            libc::task_info(
-                libc::mach_task_self_,
-                libc::MACH_TASK_BASIC_INFO,
+            libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDTASKINFO,
+                0,
                 info.as_mut_ptr().cast(),
-                &mut count,
+                size,
             )
         };
-        if result != libc::KERN_SUCCESS || count != libc::MACH_TASK_BASIC_INFO_COUNT {
+        if result != size {
             return None;
         }
-        // SAFETY: task_info filled the whole structure.
-        Some(unsafe { info.assume_init() }.resident_size)
+        // SAFETY: proc_pidinfo returned the full byte count.
+        Some(unsafe { info.assume_init() }.pti_resident_size)
     }
 }
 
