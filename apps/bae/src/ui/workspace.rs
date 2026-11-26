@@ -442,11 +442,15 @@ impl Workspace {
 
     /// English title of the active workspace.
     pub fn active_workspace_title(&self) -> &str {
-        let active = self.workbench.active_workspace();
+        self.workspace_title(self.workbench.active_workspace())
+            .unwrap_or("")
+    }
+
+    pub fn workspace_title(&self, workspace: &str) -> Option<&str> {
         self.workbench
             .workspaces()
-            .find(|(id, _)| *id == active)
-            .map_or("", |(_, p)| p.title.as_str())
+            .find(|(id, _)| *id == workspace)
+            .map(|(_, p)| p.title.as_str())
     }
 
     /// Workspace ids and English titles in bar order (Window menu).

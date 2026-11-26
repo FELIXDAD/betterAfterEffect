@@ -1125,9 +1125,9 @@ const WINDOW: &[Node] = &[
     sub(
         "Assign Shortcut to Workspace",
         &[
-            it(12779521, "Shift+F10", "motion.window.assign_workspace_shortcut", r#"{"slot":0}"#, B, Todo),
-            it(12779522, "Shift+F11", "motion.window.assign_workspace_shortcut", r#"{"slot":1}"#, B, Todo),
-            it(12779523, "Shift+F12", "motion.window.assign_workspace_shortcut", r#"{"slot":2}"#, B, Todo),
+            it(12779521, "Shift+F10", "workspace.assign_shortcut", r#"{"slot":0}"#, B, Done),
+            it(12779522, "Shift+F11", "workspace.assign_shortcut", r#"{"slot":1}"#, B, Done),
+            it(12779523, "Shift+F12", "workspace.assign_shortcut", r#"{"slot":2}"#, B, Done),
         ],
     ),
     SEP,
@@ -1141,7 +1141,7 @@ const WINDOW: &[Node] = &[
     ),
     SEP,
     s(it(524296, "Lumetri Scopes", "window.panel", r#"{"id":"lumetri_scopes","toggle":true}"#, E, Later)),
-    s(it(524297, "Review with Frame.io", "window.panel", r#"{"id":"frame_io","toggle":true}"#, B, Adobe)),
+    s(it(524297, "Review with Frame.io", "window.panel", r#"{"id":"frame_io","toggle":true}"#, B, Done)),
     s(it(524298, "Info", "window.panel", r#"{"id":"info","toggle":true}"#, E, Todo)),
     s(it(524299, "Metadata", "window.panel", r#"{"id":"metadata","toggle":true}"#, E, Later)),
     s(it(524300, "Content-Aware Fill", "window.panel", r#"{"id":"content_aware_fill","toggle":true}"#, E, Later)),

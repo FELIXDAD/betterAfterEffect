@@ -591,13 +591,13 @@
 | Workspace ▸ Save Changes to this Workspace | 9961491 | `workspace.save` |  |  |  | B | ✅ |
 | Workspace ▸ Save as New Workspace... | 9961492 | `workspace.new` |  |  |  | B | ✅ |
 | Workspace ▸ Edit Workspaces... | 9961494 | `workspace.edit` |  |  |  | B | ✅ |
-| Assign Shortcut to Workspace ▸ Shift+F10 | 12779521 | `motion.window.assign_workspace_shortcut` | `{"slot":0}` |  |  | B | ☐ |
-| Assign Shortcut to Workspace ▸ Shift+F11 | 12779522 | `motion.window.assign_workspace_shortcut` | `{"slot":1}` |  |  | B | ☐ |
-| Assign Shortcut to Workspace ▸ Shift+F12 | 12779523 | `motion.window.assign_workspace_shortcut` | `{"slot":2}` |  |  | B | ☐ |
+| Assign Shortcut to Workspace ▸ Shift+F10 | 12779521 | `workspace.assign_shortcut` | `{"slot":0}` |  |  | B | ✅ |
+| Assign Shortcut to Workspace ▸ Shift+F11 | 12779522 | `workspace.assign_shortcut` | `{"slot":1}` |  |  | B | ✅ |
+| Assign Shortcut to Workspace ▸ Shift+F12 | 12779523 | `workspace.assign_shortcut` | `{"slot":2}` |  |  | B | ✅ |
 | Find Extensions on Exchange... | 524292 | `motion.window.find_extensions_on_exchange` |  |  |  | B | Ⓐ |
 | Extensions ▸ (extensions) |  | `motion.window.extension` |  |  |  | B | ⋯ |
 | Lumetri Scopes | 524296 | `window.panel` | `{"id":"lumetri_scopes","toggle":true}` |  |  | E | ⏸ |
-| Review with Frame.io | 524297 | `window.panel` | `{"id":"frame_io","toggle":true}` |  |  | B | Ⓐ |
+| Review with Frame.io | 524297 | `window.panel` | `{"id":"frame_io","toggle":true}` |  |  | B | ✅ |
 | Info | 524298 | `window.panel` | `{"id":"info","toggle":true}` | Ctrl+2 | Cmd+2 | E | ☐ |
 | Metadata | 524299 | `window.panel` | `{"id":"metadata","toggle":true}` |  |  | E | ⏸ |
 | Content-Aware Fill | 524300 | `window.panel` | `{"id":"content_aware_fill","toggle":true}` |  |  | E | ⏸ |
