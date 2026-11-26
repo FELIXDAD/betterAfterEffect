@@ -88,6 +88,7 @@ pub mod text;
 pub mod text_animators;
 pub mod text_path;
 pub mod time;
+pub mod tracker;
 mod util;
 
 use std::sync::Arc;
@@ -133,6 +134,10 @@ pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
         r.register(paint::AddStroke),
+        r.register(tracker::CreateTracker),
+        r.register(tracker::ConfigureTracker),
+        r.register(tracker::RecordTrack),
+        r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),

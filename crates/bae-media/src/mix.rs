@@ -10,7 +10,7 @@ use crate::audio::{layer_file, sample_to_time};
 use crate::{AudioSource, FileAudio, MediaError};
 
 struct Track {
-    file: PathBuf,
+    file: Option<PathBuf>,
     source: Option<FileAudio>,
     kernel: Option<Sinc>,
     timing: LayerTiming,
@@ -42,18 +42,21 @@ impl AudioMix {
                 .and_then(Value::as_bool)
                 .unwrap_or(default)
         };
-        let audio_solo = layers.iter().any(|l| {
-            flag(l, "solo", false)
-                && flag(l, "audio_enabled", true)
-                && layer_file(stage, l).is_some()
-        });
-        let tracks = layers
+        let mut tracks: Vec<_> = layers
             .iter()
             .filter_map(|l| {
-                if !flag(l, "audio_enabled", true) || (audio_solo && !flag(l, "solo", false)) {
+                if !flag(l, "audio_enabled", true) {
                     return None;
                 }
-                let file = layer_file(stage, l)?;
+                let effects = crate::audio_fx::Rack::read(stage, l);
+                let file = if effects.generates {
+                    None
+                } else {
+                    layer_file(stage, l).map(std::path::Path::to_owned)
+                };
+                if file.is_none() && !effects.generates {
+                    return None;
+                }
                 let view = stage.prim(l)?;
                 let levels = match view.value("audio:levels") {
                     Some(Value::Vec2(db)) => *db,
@@ -62,24 +65,35 @@ impl AudioMix {
                 let automation = view
                     .attr("audio:levels")
                     .and_then(|s| Curve::new(&s.keyframes, CurveKind::PerDimension));
-                Some(Track {
-                    file: file.to_owned(),
-                    source: None,
-                    kernel: None,
-                    timing: bae_anim::layer_timing(&view, duration),
-                    levels,
-                    automation,
-                    effects: crate::audio_fx::Rack::read(stage, l),
-                })
+                Some((
+                    flag(l, "solo", false),
+                    Track {
+                        file,
+                        source: None,
+                        kernel: None,
+                        timing: bae_anim::layer_timing(&view, duration),
+                        levels,
+                        automation,
+                        effects,
+                    },
+                ))
             })
             .collect();
-        Self { tracks }
+        if tracks.iter().any(|(solo, _)| *solo) {
+            tracks.retain(|(solo, _)| *solo);
+        }
+        Self {
+            tracks: tracks.into_iter().map(|(_, t)| t).collect(),
+        }
     }
 
     /// Probe enabled sources on the preview producer, before the first seek.
     pub(crate) fn prepare_sources(&mut self, rate: u32) {
         for track in &mut self.tracks {
-            if let Ok(mut decoder) = FileAudio::open(&track.file) {
+            track.effects.prepare(rate);
+            if let Some(path) = &track.file
+                && let Ok(mut decoder) = FileAudio::open(path)
+            {
                 let source_rate = f64::from(decoder.info().sample_rate);
                 let step = source_step(track.timing, source_rate, rate);
                 if (step.abs() - 1.0).abs() > 1e-9 {
@@ -128,16 +142,19 @@ impl Track {
         if a >= b {
             return Ok(());
         }
-        if self.source.is_none() {
-            self.source = Some(FileAudio::open(&self.file)?);
+        if self.source.is_none()
+            && let Some(path) = &self.file
+        {
+            self.source = Some(FileAudio::open(path)?);
         }
-        let source = self.source.as_mut().unwrap();
-        let src_rate = f64::from(source.info().sample_rate);
+        let source = self.source.as_mut();
+        let src_rate = source
+            .as_ref()
+            .map_or(f64::from(rate), |s| f64::from(s.info().sample_rate));
         let layer_time = |i| {
             self.timing
                 .layer_time(sample_to_time(start + i as i64, rate))
         };
-        self.effects.begin(start + a as i64, start + b as i64, rate);
         let step = source_step(self.timing, src_rate, rate);
         let (head, step) = if self.effects.reverse {
             let mirror = first_at(self.timing.in_point) + first_at(self.timing.out_point) - 1;
@@ -146,9 +163,15 @@ impl Track {
         } else {
             (layer_time(a).as_seconds() * src_rate, step)
         };
+        self.effects.begin(
+            start + a as i64,
+            start + b as i64,
+            rate,
+            (head / src_rate, step * f64::from(rate) / src_rate),
+        );
         let tail = head + (b - a - 1) as f64 * step;
         let aligned = (step.abs() - 1.0).abs() < 1e-9 && (head - head.round()).abs() < 1e-5;
-        let kernel = if aligned {
+        let kernel = if source.is_none() || aligned {
             None
         } else {
             let cutoff = (1.0 / step.abs()).min(1.0);
@@ -160,11 +183,16 @@ impl Track {
         let radius = kernel.map_or(0, |k| k.radius as u64);
         let base = (head.min(tail).max(0.0).floor() as u64).saturating_sub(radius);
         let last = head.max(tail).ceil() as u64 + radius + 1;
-        let channels = usize::from(source.info().channels);
-        let data = if head.max(tail) < 0.0 || source.info().frame_count.is_some_and(|n| base >= n) {
-            &[][..]
-        } else {
-            source.read_window(base, last - base)?
+        let channels = source
+            .as_ref()
+            .map_or(2, |s| usize::from(s.info().channels));
+        let data = match source {
+            Some(source)
+                if head.max(tail) >= 0. && source.info().frame_count.is_none_or(|n| base < n) =>
+            {
+                source.read_window(base, last - base)?
+            }
+            _ => &[][..],
         };
         let frames = data.len() / channels;
         let static_gain = self.levels.map(db_gain);
@@ -195,7 +223,9 @@ impl Track {
                     let frame = (pos.round() as usize).min(frames - 1) * channels;
                     [data[frame], data[frame + 1.min(channels - 1)]]
                 };
-                let sample = self.effects.process(sample, layer_time(offset + i), rate);
+                let sample = self
+                    .effects
+                    .process(sample, rate, || layer_time(offset + i));
                 let t = i as f32 / (end - offset) as f32;
                 for c in 0..2 {
                     dst[c] += sample[c] * (from[c] + (to[c] - from[c]) * t);
@@ -213,4 +243,58 @@ fn source_step(timing: LayerTiming, source_rate: f64, output_rate: u32) -> f64 {
 
 fn db_gain(db: f64) -> f32 {
     10.0_f32.powf(db as f32 / 20.0)
+}
+
+#[test]
+fn tone_on_a_silent_layer_plays_seeks_and_bypasses() {
+    use bae_model::{AuthorId, CommandRegistry, PrimPath, Stage, Time};
+    use serde_json::json;
+    let mut stage = Stage::new();
+    let reg = CommandRegistry::with_builtins();
+    let user = AuthorId::new("user:test").unwrap();
+    let run = |stage: &mut Stage, id: &str, params| {
+        reg.execute(stage, &user, id, params).unwrap();
+    };
+    let layer = "/comp/layers/solid";
+    let tone = "/comp/layers/solid/effects/tone";
+    for (path, ty) in [
+        ("/comp", "Comp"),
+        ("/comp/layers", "Folder"),
+        (layer, "Layer"),
+        ("/comp/layers/solid/effects", "Folder"),
+        (tone, "Effect"),
+    ] {
+        run(
+            &mut stage,
+            "prim.create",
+            json!({"path":path,"prim_type":ty}),
+        );
+    }
+    let set = |stage: &mut Stage, path: &str, key: &str, v: bae_model::Value| {
+        run(stage, "attr.set", json!({"path":path,"attr":key,"value":v}));
+    };
+    set(
+        &mut stage,
+        "/comp",
+        "duration",
+        bae_model::Value::Time(Time::from_seconds(1.)),
+    );
+    set(
+        &mut stage,
+        tone,
+        "match_name",
+        bae_model::Value::String("ADBE Aud Tone".into()),
+    );
+    let comp = PrimPath::new("/comp").unwrap();
+    let mut mix = AudioMix::from_stage(&stage, &comp);
+    let mut first = [[0.; 2]; 64];
+    mix.render(0, 48000, &mut first).unwrap();
+    assert!(first.iter().any(|s| s[0].abs() > 0.05));
+    let mut seeked = [[0.; 2]; 32];
+    mix.render(18, 48000, &mut seeked).unwrap();
+    for (sample, expected) in seeked.iter().zip(&first[18..50]) {
+        assert!((sample[0] - expected[0]).abs() < 0.00001);
+    }
+    set(&mut stage, tone, "enabled", bae_model::Value::Bool(false));
+    assert!(AudioMix::from_stage(&stage, &comp).is_empty());
 }
