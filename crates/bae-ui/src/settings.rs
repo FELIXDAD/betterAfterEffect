@@ -85,6 +85,8 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     let bindings = crate::KeymapBindings::new(
         crate::presets::AE_KEYMAP,
         vec![
+            #[cfg(target_os = "macos")]
+            crate::Binding::new("Cmd+,", ACTION),
             crate::Binding::new("Cmd+Alt+;", ACTION)
                 .params(serde_json::json!({"page": "startup_repair"})),
         ],

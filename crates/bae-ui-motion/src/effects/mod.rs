@@ -9,6 +9,7 @@
 pub(crate) mod browser;
 pub(crate) mod controls;
 mod eq_response;
+mod lumetri_curve;
 pub(crate) mod lut;
 mod warp_grid;
 
@@ -56,6 +57,10 @@ pub(crate) fn register_i18n() {
         .map(|e| (e.name, e.name_zh))
         .collect();
     i18n::register(&pairs);
+    i18n::register(&[(
+        "Click to add a point. Drag to adjust. Shift-drag vertically. Ctrl/Cmd-click to remove.",
+        "单击添加控制点，拖动调整。按住 Shift 垂直拖动，按住 Ctrl 或 Command 单击移除。",
+    )]);
 }
 
 /// The app's effect registries (definitions and catalog entries), as an app

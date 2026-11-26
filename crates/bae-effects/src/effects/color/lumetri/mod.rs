@@ -1,5 +1,8 @@
 mod definition;
 mod menus;
+mod secondary_curve;
+
+pub use secondary_curve::LumetriCurve;
 
 use crate::blur::{self, Edge};
 use crate::effects::{
@@ -329,13 +332,9 @@ fn curves(v: Params<'_>, u: &mut UniformWriter) -> u32 {
             }
             let table = first + ch;
             mask |= 1 << table;
-            if (4..=6).contains(&table) {
-                hue_samples(u, table, &mut points);
-                continue;
-            }
-            let samples = super::curves::samples(&mut points);
-            for k in 0..256 {
-                write_curve(u, table, k, samples[(k * 1023 + 127) / 255]);
+            let samples = curve_samples(&mut points, (4..=6).contains(&table));
+            for (k, value) in samples.into_iter().enumerate() {
+                write_curve(u, table, k, value);
             }
         }
     }
@@ -344,7 +343,14 @@ fn curves(v: Params<'_>, u: &mut UniformWriter) -> u32 {
 
 // The hue axis wraps at red. A local extremum has a horizontal tangent;
 // adjacent monotone intervals share their harmonic-mean secant slope.
-fn hue_samples(u: &mut UniformWriter, table: usize, points: &mut Vec<[f64; 2]>) {
+fn curve_samples(points: &mut Vec<[f64; 2]>, periodic: bool) -> [f64; 256] {
+    if points.is_empty() {
+        return [0.; 256];
+    }
+    if !periodic {
+        let samples = super::curves::samples(points);
+        return std::array::from_fn(|k| samples[(k * 1023 + 127) / 255]);
+    }
     points.iter_mut().for_each(|p| p[0] = p[0].rem_euclid(1.));
     points.sort_by(|a, b| a[0].total_cmp(&b[0]));
     points.dedup_by(|a, b| a[0] == b[0]);
@@ -359,18 +365,17 @@ fn hue_samples(u: &mut UniformWriter, table: usize, points: &mut Vec<[f64; 2]>) 
         let b = secant(i);
         if a * b > 0. { 2. * a * b / (a + b) } else { 0. }
     };
-    for k in 0..256 {
+    std::array::from_fn(|k| {
         let x = k as f64 / 255.;
         let i = (points.partition_point(|p| p[0] <= x) + n - 1) % n;
         let j = (i + 1) % n;
         let dx = points[j][0] - points[i][0] + f64::from(j == 0);
         let t = (x - points[i][0] + f64::from(x < points[i][0])) / dx;
         let h = t * t * (3. - 2. * t);
-        let y = (1. - h) * points[i][1]
+        (1. - h) * points[i][1]
             + h * points[j][1]
-            + dx * t * (1. - t) * ((1. - t) * slope(i) - t * slope(j));
-        write_curve(u, table, k, y);
-    }
+            + dx * t * (1. - t) * ((1. - t) * slope(i) - t * slope(j))
+    })
 }
 
 const BASIC_BYTES: usize = HEADER + 3 * KNOTS * 4;
