@@ -822,6 +822,11 @@ pub struct ToolOptions {
     pub creates_mask: bool,
     /// Snapping (Selection, Rotation, Pan Behind, shape and pen tools).
     pub snapping: bool,
+    /// Snap to edges extended beyond layer bounds (AE, off by default).
+    pub snap_edges: bool,
+    /// Snap to features inside collapsed compositions and text layers (AE,
+    /// on by default).
+    pub snap_features: bool,
     /// Type and paint tools: open the Character / Paragraph (Paint / Brushes) panels.
     pub auto_open_panels: bool,
     pub axis_mode: AxisMode,
@@ -853,6 +858,8 @@ impl Default for ToolOptions {
             roto_bezier: false,
             creates_mask: false,
             snapping: false,
+            snap_edges: false,
+            snap_features: true,
             auto_open_panels: true,
             axis_mode: AxisMode::Local,
             gizmo: GizmoMode::Position,
@@ -1263,6 +1270,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Bezier Path", "贝塞尔曲线路径"),
     ("RotoBezier", "RotoBezier"),
     ("Snapping", "对齐"),
+    (
+        "Snap to edges extended beyond layer bounds",
+        "沿扩展到图层边界以外的边缘对齐",
+    ),
+    (
+        "Snap to features inside collapsed compositions and text layers",
+        "对齐并显示折叠合成和文本图层内的特性",
+    ),
     ("Auto-Open Panels", "自动打开面板"),
     ("Local Axis Mode", "本地轴模式"),
     ("World Axis Mode", "世界轴模式"),
