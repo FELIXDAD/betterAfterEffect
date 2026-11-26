@@ -690,6 +690,18 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
         "items" => Ok(Json::Array(items(s.stage()))),
         "item" => item(s.stage(), &path(args, "path")?),
         "pathInfo" => path_info(s.stage(), &path(args, "path")?),
+        "copyLayersToComp" => {
+            let layers: Vec<PrimPath> = serde_json::from_value(arg(args, "layers")?.clone())
+                .map_err(|e| e.to_string())?;
+            let comp = path(args, "comp")?;
+            if !view(s.stage(), &comp)?.is_a(&PrimType::COMP)
+                || layers.iter().any(|p| !query::is_layer(s.stage(), p)) {
+                return Err("expected layers and a destination composition".into());
+            }
+            let copied = bae_motion::layer::copy_layers(s.stage(), &layers);
+            let out = s.invoke("layer.paste", json!({"layers": copied, "comp":comp}))?;
+            Ok(out["paths"].clone())
+        }
         "layer" => layer(s.stage(), &path(args, "path")?),
         "prop" => s.prop(&path(args, "path")?, &string(args, "attr")?),
         "sample" => {
