@@ -616,11 +616,12 @@ impl Panel for CompositionViewer {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // Read from the session every frame, so New / Open / Close Project
         // update the tab (and its accessible name) at once (issue #215).
-        let title = match common::active_comp(cx.stage, &common::session(cx.resources)) {
-            Some(info) => format!("{} {}", tr("Composition"), info.name),
-            None => tr("Composition").to_owned(),
-        };
-        TabInfo::new(title).viewer().locked(self.locked)
+        match common::active_comp(cx.stage, &common::session(cx.resources)) {
+            Some(info) => common::related_tab(cx, "Composition", &info.path, &info.name),
+            None => TabInfo::new(tr("Composition")),
+        }
+        .viewer()
+        .locked(self.locked)
     }
 
     fn set_locked(&mut self, locked: bool) {
@@ -952,6 +953,9 @@ impl Panel for CompositionViewer {
             .filter(|pb| pb.comp == info.path);
         let mut completed = None;
         if let Some(gpu) = self.gpu.as_mut() {
+            if let Some((generation, item)) = &session.lock().solid_reload {
+                gpu.reload_solid(*generation, item);
+            }
             if editing {
                 gpu.playback.stop();
             } else {
