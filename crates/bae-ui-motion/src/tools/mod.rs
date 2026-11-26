@@ -275,6 +275,7 @@ impl Tool {
             Group::Selection | Group::Hand | Group::Zoom | Group::Rotation | Group::PanBehind
         ) || self.is_shape()
             || self.is_pen()
+            || self.is_camera()
             // Vertical type needs a text direction in the model (not yet).
             || self == Tool::TypeHorizontal
     }
@@ -522,6 +523,8 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
+        .chain(GIZMOS.iter().map(|(id, title, ..)| (*id, *title)))
+        .chain(crate::viewer::look_at_actions())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -586,6 +589,7 @@ pub fn bindings() -> Vec<Binding> {
         // fields and open menus keep their Esc (the workbench); the viewer
         // passes it on to a drag or text it is editing.
         .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
+        .chain(GIZMOS.iter().map(|(id, _, chord, _)| Binding::new(chord, id)))
         .collect()
 }
 
@@ -727,6 +731,45 @@ impl Default for PaintOptions {
     }
 }
 
+/// What the Selection tool's 3D gizmo does (AE's 3D Gizmo modes).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GizmoMode {
+    #[default]
+    Position,
+    Scale,
+    Rotation,
+}
+
+/// AE's 3D Gizmo shortcuts: `(action id, English title, chord, mode)`; `None`
+/// goes to the next mode.
+const GIZMOS: &[(&str, &str, &str, Option<GizmoMode>)] = &[
+    (
+        "motion.tool.gizmo_position",
+        "3D Gizmo: Position",
+        "4",
+        Some(GizmoMode::Position),
+    ),
+    (
+        "motion.tool.gizmo_scale",
+        "3D Gizmo: Scale",
+        "5",
+        Some(GizmoMode::Scale),
+    ),
+    (
+        "motion.tool.gizmo_rotate",
+        "3D Gizmo: Rotation",
+        "6",
+        Some(GizmoMode::Rotation),
+    ),
+    (
+        "motion.tool.gizmo_toggle",
+        "Toggle 3D Gizmo Mode",
+        "Shift+V",
+        None,
+    ),
+];
+
 /// Options of the tools, shown right of the tool buttons. First-run values follow
 /// the spec's best understanding of AE's (AE-SHP-057, 待核).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -747,6 +790,7 @@ pub struct ToolOptions {
     /// Type and paint tools: open the Character / Paragraph (Paint / Brushes) panels.
     pub auto_open_panels: bool,
     pub axis_mode: AxisMode,
+    pub gizmo: GizmoMode,
     /// Rotation tool on 3D layers: set Orientation (true) or Rotation.
     pub rotation_sets_orientation: bool,
     /// Rounded Rectangle tool: last roundness in pixels.
@@ -776,6 +820,7 @@ impl Default for ToolOptions {
             snapping: false,
             auto_open_panels: true,
             axis_mode: AxisMode::Local,
+            gizmo: GizmoMode::Position,
             rotation_sets_orientation: true,
             roundness: 10.0,
             points: 5.0,
@@ -1051,6 +1096,21 @@ impl ActionHandler for ToolActions {
         if crate::viewer::view3d::handle(inv, cx) || crate::viewer::guides::handle(inv, cx) {
             return true;
         }
+        if let Some((.., mode)) = GIZMOS.iter().find(|(id, ..)| *id == inv.id) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            let o = &mut t.options;
+            o.gizmo = mode.unwrap_or(match o.gizmo {
+                GizmoMode::Position => GizmoMode::Scale,
+                GizmoMode::Scale => GizmoMode::Rotation,
+                GizmoMode::Rotation => GizmoMode::Position,
+            });
+            t.set(Tool::Selection);
+            return true;
+        }
+        if crate::viewer::look_at(inv, cx) {
+            return true;
+        }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
             let mut t = tools.lock();
@@ -1065,6 +1125,10 @@ impl ActionHandler for ToolActions {
 /// Chinese names of the tools and tool options (`docs/glossary.md`; names marked
 /// 待核 in the PR are best effort until R1 checks AE 26's Chinese UI).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("3D Gizmo: Position", "3D 位置 Gizmo"),
+    ("3D Gizmo: Scale", "三维缩放 Gizmo"),
+    ("3D Gizmo: Rotation", "三维旋转 Gizmo"),
+    ("Toggle 3D Gizmo Mode", "向前循环 3D Gizmo 模式"),
     ("Orbit Around Scene Tool", "绕场景旋转工具"),
     ("Orbit Around Camera POI Tool", "绕摄像机目标点旋转工具"),
     ("Pan Camera POI Tool", "平移摄像机目标点工具"),
