@@ -403,7 +403,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "AddItemToCompReplaceLayer", "Ctrl+Alt+/", "motion.file.replace_layer_with_footage", "", E, Todo, 0),
     k("CSwitchboard", "AddItemsToNewComp", "Alt+Backslash", "motion.file.new_comp_from_selection", "", E, Todo, 0),
     k("CSwitchboard", "AddToAdobeMediaEncoderRenderQueue", "Ctrl+Alt+M", "motion.comp.add_to_adobe_media_encoder_queue", "", B, Adobe, 0),
-    k("CSwitchboard", "AutoOrient", "Ctrl+Alt+O", "motion.layer.auto_orient", "", E, Todo, 0),
+    k("CSwitchboard", "AutoOrient", "Ctrl+Alt+O", "motion.layer.auto_orient", "", E, Done, 0),
     k("CSwitchboard", "BestQuality", "Ctrl+U", "motion.layer.quality", r#"{"quality":"best"}"#, B, Done, 0),
     k("CSwitchboard", "BestQualityRecurse", "Ctrl+macControl+U", "motion.layer.quality", r#"{"quality":"best","nested":true}"#, B, Later, 0),
     k("CSwitchboard", "BringCloser", "Ctrl+]|Ctrl+Alt+UpArrow", "motion.order", r#"{"to":"forward"}"#, B, Done, 0),

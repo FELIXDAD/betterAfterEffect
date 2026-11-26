@@ -108,7 +108,7 @@ impl RenderEngine {
         display: bae_render::Display,
         roi: Option<IRect>,
         reuse: Option<OutputTarget>,
-    ) -> Result<(OutputTarget, Option<IRect>), bae_render::RenderError> {
+    ) -> Result<(OutputTarget, Option<IRect>, bool), bae_render::RenderError> {
         let request = RenderRequest {
             resolution: match resolution {
                 0 | 1 => Resolution::Full,
@@ -121,9 +121,12 @@ impl RenderEngine {
             roi,
             ..RenderRequest::full()
         };
-        let mut frames = bae_render::eval::EvaluatorFrames {
-            stage,
-            evaluator: &mut self.anim,
+        let mut frames = SampledFrames {
+            sampled: false,
+            inner: bae_render::eval::EvaluatorFrames {
+                stage,
+                evaluator: &mut self.anim,
+            },
         };
         let (frame, target) = if display == bae_render::Display::default() {
             // The frame and its 8-bit conversion in one GPU submission.
@@ -148,7 +151,26 @@ impl RenderEngine {
             (frame, target)
         };
         self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
-        Ok((target, (!frame.incomplete).then_some(frame.image.rect)))
+        let rect = (!frame.incomplete).then_some(frame.image.rect);
+        Ok((target, rect, frames.sampled))
+    }
+}
+
+/// Other frames the render sampled (time effects): such frames depend on
+/// more than their own time.
+struct SampledFrames<'a> {
+    inner: bae_render::eval::EvaluatorFrames<'a>,
+    sampled: bool,
+}
+
+impl bae_render::graph::CompFrames for SampledFrames<'_> {
+    fn comp_at(
+        &mut self,
+        path: &bae_model::PrimPath,
+        t: Time,
+    ) -> Result<Option<bae_render::RenderComp>, bae_render::RenderError> {
+        self.sampled = true;
+        self.inner.comp_at(path, t)
     }
 }
 
@@ -167,8 +189,6 @@ pub(crate) struct GpuPreview {
     /// pixel read: (texel, value).
     target: Option<OutputTarget>,
     sampled: Option<((u32, u32, u64), [u8; 4])>,
-    /// Text layers have a source provider (otherwise the viewer draws them).
-    pub has_text: bool,
     /// How the viewer shows the frame (Show Channel, Exposure).
     pub display: bae_render::Display,
     /// Region of interest (comp pixels): only it is rendered.
@@ -179,6 +199,9 @@ pub(crate) struct GpuPreview {
     snapshots: [Option<(wgpu::Texture, IRect)>; 4],
     /// The registry shows `target`'s view (not a snapshot).
     target_shown: bool,
+    /// A frame of the background renderer or its cache the viewer shows
+    /// instead (the Info panel and snapshots read it).
+    cached: Option<(wgpu::Texture, IRect)>,
     /// The newest frame was incomplete (something still warming up): the
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
@@ -217,12 +240,12 @@ impl GpuPreview {
             rect: None,
             target: None,
             sampled: None,
-            has_text: false,
             display: bae_render::Display::default(),
             roi: None,
             last_view: None,
             snapshots: Default::default(),
             target_shown: false,
+            cached: None,
             preparing: false,
             samples,
             waiting: false,
@@ -263,7 +286,6 @@ impl GpuPreview {
         for entry in registry.snapshot().iter() {
             providers.register(entry.item().clone());
         }
-        self.has_text = providers.get(bae_render::anim::TEXT_PROVIDER).is_some();
         self.last = None;
     }
 
@@ -287,6 +309,9 @@ impl GpuPreview {
         camera: Option<bae_render::Camera>,
         measure_layer_times: bool,
     ) -> Option<PreviewImage> {
+        if self.cached.take().is_some() {
+            self.sampled = None;
+        }
         self.sync_sources(resources);
         self.sync_effects(resources);
         if self.changes.changed(resources) {
@@ -356,7 +381,7 @@ impl GpuPreview {
             // renderer still warming up) is never shown: the last complete
             // frame stays, and the frame is rendered again on the redraw the
             // warm-up requests when it is ready.
-            let (target, rect) = rendered;
+            let (target, rect, _) = rendered;
             self.preparing = rect.is_none();
             let Some(rect) = rect else {
                 // The published target (if any) still shows the last complete
@@ -412,9 +437,27 @@ impl GpuPreview {
         })
     }
 
+    /// The viewer shows `texture` (a frame of the background renderer or
+    /// its cache): the Info panel and snapshots read it until the next
+    /// [`Self::frame`].
+    pub fn show_cached(&mut self, texture: wgpu::Texture, rect: IRect) {
+        if self.cached.as_ref().map(|c| &c.0) != Some(&texture) {
+            self.cached = Some((texture, rect));
+            self.sampled = None;
+        }
+    }
+
     /// Take Snapshot: keep the frame shown now in `slot` (0–3).
     pub fn take_snapshot(&mut self, slot: usize) -> bool {
-        let (Some(r), Some(s)) = (self.rect, self.snapshots.get_mut(slot)) else {
+        let Some(s) = self.snapshots.get_mut(slot) else {
+            return false;
+        };
+        // A cached frame's texture is never rendered into again.
+        if let Some(cached) = &self.cached {
+            *s = Some(cached.clone());
+            return true;
+        }
+        let Some(r) = self.rect else {
             return false;
         };
         // The snapshot keeps the frame's texture: the next frame renders into
@@ -452,7 +495,10 @@ impl GpuPreview {
     /// one texel back from the GPU (blocking, only when the pointer moved to
     /// another texel or the frame changed).
     pub fn pixel(&mut self, p: [f64; 2]) -> Option<[u8; 4]> {
-        let (texture, rect) = (self.target.as_ref()?.view().texture(), self.rect?);
+        let (texture, rect) = match &self.cached {
+            Some((texture, rect)) => (texture, *rect),
+            None => (self.target.as_ref()?.view().texture(), self.rect?),
+        };
         let (w, h) = (texture.width(), texture.height());
         let (rw, rh) = (f64::from(rect.x1 - rect.x0), f64::from(rect.y1 - rect.y0));
         if rw <= 0.0 || rh <= 0.0 {
