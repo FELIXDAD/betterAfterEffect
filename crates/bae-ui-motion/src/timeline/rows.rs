@@ -536,8 +536,15 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
-                self.waveforms
-                    .draw(ui, stage, layer, axis, graph, color::TEXT);
+                self.waveforms.draw(
+                    ui,
+                    stage,
+                    layer,
+                    axis,
+                    graph,
+                    color::TEXT,
+                    self.display.rectified,
+                );
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
