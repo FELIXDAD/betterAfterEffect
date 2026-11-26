@@ -328,7 +328,13 @@ impl EncodeSettings {
             return bad(format!("{} bit {:?}", self.bit_depth, self.codec));
         }
         if let Some(audio) = &self.audio
-            && (audio.codec != "aac"
+            && (!(audio.codec == "aac"
+                || (audio.codec == "pcm_s24le"
+                    && cfg!(target_os = "macos")
+                    && self
+                        .path
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("mov"))))
                 || !matches!(audio.sample_rate, 44_100 | 48_000)
                 || !(1..=2).contains(&audio.channels)
                 || !matches!(
@@ -336,7 +342,9 @@ impl EncodeSettings {
                     VideoCodec::H264 | VideoCodec::Hevc | VideoCodec::ProRes(_)
                 ))
         {
-            return bad("AAC movie audio requires one or two channels at 44.1 or 48 kHz".into());
+            return bad(
+                "Unsupported movie audio codec, container, sample rate or channel count".into(),
+            );
         }
         // 4:2:0 / 4:2:2 chroma subsampling needs even sizes.
         if matches!(
@@ -402,6 +410,19 @@ pub trait Encoder: Send {
     /// queue frames (image sequences) do not copy them.
     fn push_frame_owned(&mut self, frame: CpuFrame) -> Result<(), MediaError> {
         self.push_frame(&frame)
+    }
+
+    /// Consume borrowed GPU readback rows before the staging buffer is unmapped.
+    /// Return false without consuming a frame if conversion or ownership is needed.
+    fn push_mapped_rows(
+        &mut self,
+        _format: PixelFormat,
+        _alpha: AlphaMode,
+        _size: [u32; 2],
+        _stride: usize,
+        _bytes: &[u8],
+    ) -> Result<bool, MediaError> {
+        Ok(false)
     }
 
     /// Appends interleaved PCM to a configured audio track.
