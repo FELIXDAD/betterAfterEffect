@@ -437,6 +437,15 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
         assert!(frame(&fx, &mut panel, vec![]).invocations.is_empty());
     }
     let mut last = frame(&fx, &mut panel, vec![button(40.0, false)]);
+    // Shown as committed from the release on: the viewers keep the stroke
+    // while the mesh is read back (no flash of the old mesh).
+    assert!(
+        session
+            .lock()
+            .scrub
+            .as_ref()
+            .is_some_and(|s| s.committed.is_some())
+    );
     let start = std::time::Instant::now();
     while !last.invocations.iter().any(|v| v.id == "attr.set_at") && start.elapsed().as_secs() < 10
     {
@@ -448,6 +457,15 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
         .find(|i| i.id == "attr.set_at")
         .expect("the mesh is set");
     assert_eq!(set.params["attr"], "param:0014");
+    // Until the command runs, the read-back mesh is what the viewers show.
+    assert!(
+        session
+            .lock()
+            .scrub
+            .as_ref()
+            .is_some_and(|s| s.committed.is_some()
+                && matches!(s.value, Value::FloatList(ref v) if !v.is_empty()))
+    );
     fx.exec_all(last);
     let effect = bae_motion::effect::effects_of(&fx.stage, &layer)[0].clone();
     let spec = bae_motion::query::attr_spec(&fx.stage, &effect, "param:0014").unwrap();

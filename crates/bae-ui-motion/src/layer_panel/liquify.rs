@@ -55,21 +55,31 @@ impl Editor {
         };
         let attr = bae_model::effect::param_attr(lq::MESH);
         let live = gpu.preview_value();
+        // Once the pointer is up the stroke shows as committed, so the
+        // viewers keep it while the GPU mesh is read back and the command
+        // runs (as `common::apply_edit` does): no flash of the old mesh.
+        let committed = g
+            .released
+            .then(|| (cx.stage.revision(), std::time::Instant::now()));
         if let Some(value) = live.as_ref() {
             let mut s = session.lock();
-            if s.scrub
-                .as_ref()
-                .is_none_or(|old| old.path != g.effect || old.value != *value)
-            {
-                s.scrub = Some(crate::session::Scrub {
-                    auto_key: g.auto_key,
-                    path: g.effect.clone(),
-                    time: g.time,
-                    value: value.clone(),
-                    attr: attr.clone(),
-                    peers: Vec::new(),
-                    committed: None,
-                });
+            match s.scrub.as_mut() {
+                Some(old) if old.path == g.effect && old.value == *value => {
+                    if old.committed.is_none() {
+                        old.committed = committed;
+                    }
+                }
+                _ => {
+                    s.scrub = Some(crate::session::Scrub {
+                        auto_key: g.auto_key,
+                        path: g.effect.clone(),
+                        time: g.time,
+                        value: value.clone(),
+                        attr: attr.clone(),
+                        peers: Vec::new(),
+                        committed,
+                    });
+                }
             }
         }
         if !g.released {
@@ -92,7 +102,17 @@ impl Editor {
                 ui.ctx().request_repaint();
             }
             Ok(Some(value)) => {
-                clear();
+                // The read-back mesh replaces the GPU ticket (the stroke is
+                // dropped below) and shows until the command has run.
+                session.lock().scrub = Some(crate::session::Scrub {
+                    auto_key: g.auto_key,
+                    path: g.effect.clone(),
+                    time: g.time,
+                    value: value.clone(),
+                    attr: attr.clone(),
+                    peers: Vec::new(),
+                    committed,
+                });
                 let time = query::to_key_time(cx.stage, &g.effect, g.time);
                 cx.invoke_with(
                     "attr.set_at",
