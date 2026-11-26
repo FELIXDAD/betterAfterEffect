@@ -1790,9 +1790,11 @@ impl GraphEditor {
         // Right-click on a keyframe: the keyframe menu; elsewhere the Keyframe
         // Assistant and Toggle Hold items for the selection.
         let menu_key = self.menu_key.clone();
+        let settings = &mut self.settings;
         crate::common::context_menu(&resp, &mut |ui| match &menu_key {
             Some(k) => crate::timeline::key_menu(ui, cx, session, k),
-            None => crate::timeline::keyframe_menu(ui, cx, session),
+            // Empty graph space: AE's view options.
+            None => area_menu(ui, settings),
         });
 
         // Drag start.
@@ -2491,6 +2493,68 @@ fn bar_button(
         c,
     );
     resp.on_hover_text(label)
+}
+
+/// Right-click on the graph's empty space (AE 26, 14 entries; `None` is a
+/// separator).
+pub(crate) const AREA_MENU: [Option<&str>; 17] = [
+    Some("Auto-Zoom Graph Height"),
+    Some("Show Selected Properties"),
+    None,
+    Some("Show Animated Properties"),
+    Some("Show Graph Editor Set"),
+    Some("Auto-Select Graph Type"),
+    Some("Edit Value Graph"),
+    None,
+    Some("Edit Speed Graph"),
+    Some("Show Reference Graph"),
+    Some("Snap"),
+    Some("Show Audio Waveforms"),
+    Some("Show Layer In/Out Points"),
+    None,
+    Some("Show Layer Markers"),
+    Some("Show Graph Tool Tips"),
+    Some("Show Expression Editor"),
+];
+
+fn area_menu(ui: &mut Ui, s: &mut GraphSettings) {
+    ui.set_min_width(240.0);
+    for entry in AREA_MENU {
+        let Some(title) = entry else {
+            ui.separator();
+            continue;
+        };
+        let label = tr(title);
+        let graph_type = match title {
+            "Auto-Select Graph Type" => Some(GraphType::Auto),
+            "Edit Value Graph" => Some(GraphType::Value),
+            "Edit Speed Graph" => Some(GraphType::Speed),
+            _ => None,
+        };
+        if let Some(t) = graph_type {
+            if ui.radio(s.graph_type == t, label).clicked() {
+                s.graph_type = t;
+                ui.close();
+            }
+            continue;
+        }
+        let on = match title {
+            "Auto-Zoom Graph Height" => &mut s.auto_zoom,
+            "Show Selected Properties" => &mut s.show_selected,
+            "Show Animated Properties" => &mut s.show_animated,
+            "Show Graph Editor Set" => &mut s.show_set,
+            "Show Reference Graph" => &mut s.show_reference,
+            "Snap" => &mut s.snap,
+            "Show Audio Waveforms" => &mut s.show_waveforms,
+            "Show Layer In/Out Points" => &mut s.show_in_out,
+            "Show Layer Markers" => &mut s.show_markers,
+            "Show Graph Tool Tips" => &mut s.show_tooltips,
+            _ => &mut s.show_expression_editor,
+        };
+        if menu_check(ui, on, label) {
+            ui.close();
+        }
+    }
 }
 
 fn menu_check(ui: &mut Ui, on: &mut bool, label: &str) -> bool {
