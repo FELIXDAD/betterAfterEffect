@@ -414,7 +414,7 @@ fn param_row(
         && let Some(curve) = bae_effects::LumetriCurve::from_param(param.id)
     {
         let curve_attr = param_attr(curve.id());
-        let old = common::current_value(eval.get(cx.resources), stage, effect, &curve_attr, now);
+        let old = common::current_value(eval.get(stage), stage, effect, &curve_attr, now);
         let time = query::to_key_time(stage, effect, now);
         let points = curve.pick([*r, *g, *b], old.as_ref());
         cx.invoke_with(
