@@ -80,6 +80,7 @@ pub mod names;
 pub mod paint;
 pub mod path;
 pub mod precompose;
+pub mod project_settings;
 pub mod query;
 pub mod shape;
 pub mod solid;
@@ -118,6 +119,7 @@ pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutp
 pub use matte::SetTrackMatte;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
+pub use project_settings::SetProjectSettings;
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
@@ -180,6 +182,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(SetProjectSettings),
         r.register(SetText),
         r.register(SetExpressions),
         r.register(DuplicateContent),
