@@ -1,3 +1,136 @@
+[effect.vr-chromatic-aberration]
+name = "VR 色差"
+keywords = ["沉浸式视频", "VR 色差"]
+
+[effect.vr-chromatic-aberration.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+point_of_interest = "目标点"
+aberration_red = "色差 (红色)"
+aberration_green = "色差 (绿色)"
+aberration_blue = "色差 (蓝色)"
+falloff_distance = "衰减距离"
+invert_falloff = "衰减反转"
+
+[effect.vr-chromatic-aberration.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-color-gradients]
+name = "VR 颜色渐变"
+keywords = ["沉浸式视频", "VR 颜色渐变"]
+
+[effect.vr-color-gradients.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+number_of_points = "点数"
+gradient_power = "渐变功率"
+gradient_blending = "渐变混合"
+points = "点"
+point_1 = "点 1"
+color_1 = "颜色 1"
+point_2 = "点 2"
+color_2 = "颜色 2"
+point_3 = "点 3"
+color_3 = "颜色 3"
+point_4 = "点 4"
+color_4 = "颜色 4"
+point_5 = "点 5"
+color_5 = "颜色 5"
+point_6 = "点 6"
+color_6 = "颜色 6"
+point_7 = "点 7"
+color_7 = "颜色 7"
+point_8 = "点 8"
+color_8 = "颜色 8"
+opacity = "不透明度"
+blending_mode = "混合模式"
+
+[effect.vr-color-gradients.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+blending_mode = ["无", "正常", "(-", "相加", "相乘", "滤色", "叠加", "柔光", "强光", "(-", "颜色减淡", "颜色加深", "(-", "变暗", "变亮", "差值", "排除", "(-", "色相", "饱和度", "颜色", "发光度"]
+
+[effect.vr-digital-glitch]
+name = "VR 数字故障"
+keywords = ["沉浸式视频", "VR 数字故障"]
+
+[effect.vr-digital-glitch.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+point_of_interest = "目标点"
+poi_scale = "POI 缩放"
+poi_aspect_ratio = "POI 长宽比"
+master_amplitude = "主振幅"
+distortion = "扭曲"
+color_distortion = "颜色扭曲"
+geometry_distortion_x = "几何扭曲 X 轴"
+geometry_distortion_y = "几何扭曲 Y 轴"
+geometry_distortion_z = "几何扭曲 Z 轴"
+distortion_complexity = "扭曲复杂度"
+distortion_rate = "扭曲率"
+distortion_evolution = "扭曲演化"
+color_evolution = "颜色演化"
+transform = "变换"
+scale_x = "缩放 X 轴"
+scale_y = "缩放 Y 轴"
+scale_z = "缩放 Z 轴"
+translate_x = "转换 X 轴"
+translate_y = "转换 Y 轴"
+translate_z = "转换 Z 轴"
+sub_settings = "子设置"
+sub_influence = "子影响"
+sub_scaling = "子缩放"
+noise = "杂色"
+noise_strength = "杂色强度"
+noise_amount = "杂色数量"
+noise_scale = "杂色比例"
+noise_evolution = "杂色演化"
+color_noise = "杂色"
+random_seed = "随机植入"
+
+[effect.vr-digital-glitch.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-fractal-noise]
+name = "VR 分形杂色"
+keywords = ["沉浸式视频", "VR 分形杂色"]
+
+[effect.vr-fractal-noise.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+fractal_type = "分形类型"
+contrast = "对比度"
+brightness = "亮度"
+invert = "反转"
+complexity = "复杂度"
+evolution = "演化"
+transform = "变换"
+scale = "缩放"
+tilt_x_axis = "倾斜 (X 轴)"
+pan_y_axis = "平移 (Y 轴)"
+roll_z_axis = "滚动 (Z 轴)"
+sub_settings = "子设置"
+sub_influence = "子影响"
+sub_scaling = "子缩放"
+sub_tilt_x_axis = "子倾斜 (X 轴)"
+sub_pan_y_axis = "子平移 (Y 轴)"
+sub_roll_z_axis = "子滚动 (Z 轴)"
+random_seed = "随机植入"
+opacity = "不透明度"
+blending_mode = "混合模式"
+
+[effect.vr-fractal-noise.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+fractal_type = ["基本", "湍流锐化", "最大", "字符串"]
+blending_mode = ["无", "正常", "(-", "相加", "相乘", "滤色", "叠加", "柔光", "强光", "(-", "颜色减淡", "颜色加深", "(-", "变暗", "变亮", "差值", "排除", "(-", "色相", "饱和度", "颜色", "发光度"]
+
 [effect.vr-converter]
 name = "VR 转换器"
 keywords = ["沉浸式视频", "VR 转换器"]
