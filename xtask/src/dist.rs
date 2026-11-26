@@ -407,6 +407,8 @@ pub fn info_plist(version: &str) -> String {
                             "public.png",
                             "public.jpeg",
                             "public.tiff",
+                            "com.adobe.photoshop-image",
+                            "com.adobe.photoshop-large-image",
                             "org.webmproject.webp",
                             "com.ilm.openexr-image",
                             "com.apple.quicktime-movie",

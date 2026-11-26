@@ -17,6 +17,7 @@ unsafe extern "C" {
         sequences: &mut bool,
         alphabetical: &mut bool,
         create_comp: &mut bool,
+        kind: &mut isize,
     ) -> *mut NSArray<NSURL>;
     fn bae_dock_progress(percent: i32);
     fn bae_prepare_notifications();
@@ -67,8 +68,11 @@ pub fn import(window: Option<&Window>, title: &str) -> ImportSelection {
         tr("Force alphabetical order"),
         tr("Import As:"),
         tr("Footage"),
+        tr("Composition"),
+        tr("Composition - Retain Layer Sizes"),
     ]);
     let (mut sequences, mut alphabetical, mut create_comp) = (true, false, false);
+    let mut kind = 0;
     // SAFETY: synchronous main-thread panel, nil on cancel or a retained array of file URLs.
     let urls = unsafe {
         Retained::from_raw(bae_import_panel(
@@ -77,6 +81,7 @@ pub fn import(window: Option<&Window>, title: &str) -> ImportSelection {
             &mut sequences,
             &mut alphabetical,
             &mut create_comp,
+            &mut kind,
         ))
     };
     let paths = urls
@@ -88,6 +93,11 @@ pub fn import(window: Option<&Window>, title: &str) -> ImportSelection {
         sequences,
         alphabetical,
         create_comp,
+        photoshop_kind: match kind {
+            1 => bae_model::psd::ImportKind::Composition,
+            2 => bae_model::psd::ImportKind::RetainSize,
+            _ => bae_model::psd::ImportKind::Footage,
+        },
     }
 }
 

@@ -31,8 +31,11 @@ mod imp {
         pub fn get(
             &self,
             path: &Path,
+            _asset: &bae_model::PrimPath,
+            _revision: i64,
             _sequence: Option<bae_model::FrameRate>,
             _alphabetical: bool,
+            _psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
             Err(format!(
                 "footage {}: bae-render was built without the `media` feature",
@@ -99,13 +102,9 @@ mod imp {
             gpu: Arc<MediaGpu>,
             path: &Path,
             sequence: Option<FrameRate>,
+            psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Self, RenderError> {
-            Self::open_with_options(
-                library,
-                gpu,
-                path,
-                sequence.map(OpenOptions::sequence).unwrap_or_default(),
-            )
+            Self::open_with_options(library, gpu, path, open_options(sequence, false, psd_layer))
         }
 
         fn open_with_options(
@@ -182,8 +181,13 @@ mod imp {
         }
     }
 
-    fn open_options(sequence: Option<FrameRate>, alphabetical: bool) -> OpenOptions {
+    fn open_options(
+        sequence: Option<FrameRate>,
+        alphabetical: bool,
+        psd_layer: Option<bae_model::psd::LayerImage>,
+    ) -> OpenOptions {
         let mut options = sequence.map(OpenOptions::sequence).unwrap_or_default();
+        options.psd_layer = psd_layer;
         if alphabetical && sequence.is_some() {
             options.sequence = SequenceMode::Alphabetical;
         }
@@ -194,6 +198,7 @@ mod imp {
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
+        revisions: FxHashMap<bae_model::PrimPath, i64>,
         sources: FxHashMap<(PathBuf, OpenOptions), Result<Arc<FootageSource>, String>>,
     }
 
@@ -206,6 +211,7 @@ mod imp {
             Self {
                 library: Arc::new(library),
                 gpu: Arc::new(MediaGpu::new(gpu)),
+                revisions: FxHashMap::default(),
                 sources: FxHashMap::default(),
             }
         }
@@ -221,10 +227,17 @@ mod imp {
         pub fn get(
             &mut self,
             path: &Path,
+            asset: &bae_model::PrimPath,
+            revision: i64,
             sequence: Option<FrameRate>,
             alphabetical: bool,
+            psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
-            let options = open_options(sequence, alphabetical);
+            if self.revisions.insert(asset.clone(), revision).unwrap_or(0) != revision {
+                self.sources.retain(|(file, _), _| file != path);
+                self.library.invalidate(path);
+            }
+            let options = open_options(sequence, alphabetical, psd_layer);
             let key = (path.to_path_buf(), options);
             if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
@@ -250,7 +263,7 @@ mod imp {
                 .sources
                 .get(&(
                     path.clone(),
-                    open_options(footage.sequence, footage.alphabetical),
+                    open_options(footage.sequence, footage.alphabetical, footage.psd_layer),
                 ))?
                 .as_ref()
                 .ok()?;

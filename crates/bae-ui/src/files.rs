@@ -41,6 +41,7 @@ pub struct ImportSelection {
     pub sequences: bool,
     pub alphabetical: bool,
     pub create_comp: bool,
+    pub photoshop_kind: bae_model::psd::ImportKind,
 }
 
 /// A native open panel.
@@ -54,6 +55,7 @@ pub trait FilePicker: Send + Sync {
             sequences: true,
             alphabetical: false,
             create_comp: false,
+            photoshop_kind: Default::default(),
         }
     }
 

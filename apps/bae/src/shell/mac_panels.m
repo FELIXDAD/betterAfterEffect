@@ -5,6 +5,8 @@
 @interface BAEImportOptions : NSObject <NSOpenSavePanelDelegate>
 @property(strong) NSButton *sequence;
 @property(strong) NSButton *order;
+@property(strong) NSButton *create;
+@property(strong) NSPopUpButton *kind;
 @end
 
 @implementation BAEImportOptions
@@ -15,6 +17,20 @@
 - (void)panelSelectionDidChange:(NSOpenPanel *)panel {
     NSArray *images = @[@"png", @"jpg", @"jpeg", @"jpe", @"jfif", @"tif", @"tiff", @"exr", @"webp"];
     NSString *extension = panel.URL.pathExtension.lowercaseString;
+    BOOL layered = NO;
+    BOOL ordinary = NO;
+    for (NSURL *url in panel.URLs) {
+        NSString *ext = url.pathExtension.lowercaseString;
+        if ([ext isEqualToString:@"psd"] || [ext isEqualToString:@"psb"]) {
+            layered = YES;
+        } else {
+            ordinary = YES;
+        }
+    }
+    self.create.enabled = !layered || ordinary;
+    if (!self.create.enabled) self.create.state = NSControlStateValueOff;
+    self.kind.enabled = layered;
+    if (!layered) [self.kind selectItemAtIndex:0];
     self.sequence.enabled = [images containsObject:extension ?: @""];
     NSString *stem = panel.URL.lastPathComponent.stringByDeletingPathExtension;
     BOOL numbered = stem && [stem rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet].location != NSNotFound;
@@ -24,9 +40,9 @@
 @end
 
 NSArray<NSURL *> *bae_import_panel(NSView *owner, NSArray<NSString *> *labels,
-                                   bool *sequences, bool *alphabetical, bool *createComp) NS_RETURNS_RETAINED;
+                                   bool *sequences, bool *alphabetical, bool *createComp, NSInteger *importKind) NS_RETURNS_RETAINED;
 NSArray<NSURL *> *bae_import_panel(NSView *owner, NSArray<NSString *> *labels,
-                                   bool *sequences, bool *alphabetical, bool *createComp) {
+                                   bool *sequences, bool *alphabetical, bool *createComp, NSInteger *importKind) {
     NSOpenPanel *panel = NSOpenPanel.openPanel;
     panel.title = labels[0];
     panel.canChooseDirectories = YES;
@@ -39,13 +55,14 @@ NSArray<NSURL *> *bae_import_panel(NSView *owner, NSArray<NSString *> *labels,
     __attribute__((objc_precise_lifetime)) BAEImportOptions *delegate = [BAEImportOptions new];
     delegate.sequence = sequence;
     delegate.order = order;
+    delegate.create = create;
     sequence.target = delegate;
     sequence.action = @selector(updateOrder);
     panel.delegate = delegate;
-    [delegate panelSelectionDidChange:panel];
     NSPopUpButton *kind = [NSPopUpButton new];
-    [kind addItemWithTitle:labels[5]];
-    kind.enabled = NO; // The footage importer decodes flattened sources.
+    [kind addItemsWithTitles:@[labels[5], labels[6], labels[7]]];
+    delegate.kind = kind;
+    [delegate panelSelectionDidChange:panel];
     NSStackView *kindRow = [NSStackView stackViewWithViews:@[[NSTextField labelWithString:labels[4]], kind]];
     NSStackView *options = [NSStackView stackViewWithViews:@[kindRow, sequence, order, create]];
     options.orientation = NSUserInterfaceLayoutOrientationVertical;
@@ -63,6 +80,7 @@ NSArray<NSURL *> *bae_import_panel(NSView *owner, NSArray<NSString *> *labels,
     *sequences = sequence.state == NSControlStateValueOn;
     *alphabetical = *sequences && order.state == NSControlStateValueOn;
     *createComp = create.state == NSControlStateValueOn;
+    *importKind = kind.indexOfSelectedItem;
     return panel.URLs;
 }
 

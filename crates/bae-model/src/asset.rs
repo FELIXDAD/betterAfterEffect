@@ -30,6 +30,15 @@ pub mod attrs {
     pub const HASH: &str = "file:hash";
 }
 
+/// Incremented by Replace Footage, including a reload of the same path.
+pub const FILE_REVISION: &str = "file:revision";
+pub fn file_revision(prim: &crate::PrimView<'_>) -> i64 {
+    match prim.value(FILE_REVISION) {
+        Some(crate::Value::Int(n)) => *n,
+        _ => 0,
+    }
+}
+
 /// Where an asset's file is, and how to recognize it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AssetFile {

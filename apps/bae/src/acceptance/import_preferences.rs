@@ -1,11 +1,12 @@
 use super::*;
 use bae_ui::files::{FilePicker, ImportSelection, OpenRequest, SharedFilePicker};
 
-struct SequencePicker {
+struct ImportPicker {
     first: PathBuf,
     alphabetical: bool,
+    photoshop_kind: bae_model::psd::ImportKind,
 }
-impl FilePicker for SequencePicker {
+impl FilePicker for ImportPicker {
     fn open(&self, _: &OpenRequest) -> Vec<PathBuf> {
         vec![self.first.clone()]
     }
@@ -15,6 +16,7 @@ impl FilePicker for SequencePicker {
             sequences: true,
             alphabetical: self.alphabetical,
             create_comp: false,
+            photoshop_kind: self.photoshop_kind,
         }
     }
 }
@@ -40,9 +42,10 @@ fn sequence_import_reports_missing_and_unreadable_frames_separately() {
         let mut h = gui();
         h.state_mut()
             .app
-            .insert_resource(SharedFilePicker::new(SequencePicker {
+            .insert_resource(SharedFilePicker::new(ImportPicker {
                 first: first.clone(),
                 alphabetical,
+                photoshop_kind: Default::default(),
             }));
         let mut prefs = (*h.state().prefs.current()).clone();
         prefs.set("import.report_missing_frames", report);
@@ -77,4 +80,34 @@ fn sequence_import_reports_missing_and_unreadable_frames_separately() {
             assert!(!dialog_open(&h));
         }
     }
+}
+
+#[test]
+fn native_import_kind_reaches_the_layered_photoshop_import() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/bae-interop-psd/tests/fixtures/art.psd");
+    let mut h = gui();
+    h.state_mut()
+        .app
+        .insert_resource(SharedFilePicker::new(ImportPicker {
+            first: path,
+            alphabetical: false,
+            photoshop_kind: bae_model::psd::ImportKind::RetainSize,
+        }));
+    h.state_mut().workspace.focus_panel("project");
+    h.state_mut()
+        .dispatch(Invocation::new("motion.file.import_file"));
+    let selected_kind = bae_ui::tr("Composition - Retain Layer Sizes");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while find_text(&h, selected_kind).is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "selected import kind absent"
+        );
+        frame(&mut h);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    settle(&mut h);
+    assert!(!bae_motion::query::comps(h.state().stage()).is_empty());
 }
