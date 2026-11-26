@@ -220,6 +220,8 @@ pub struct PanelContext<'a> {
     pub kind_title: &'a str,
     /// Whether this panel is the active panel of the focused frame (AE's blue box).
     pub focused: bool,
+    /// The focused dock panel while drawing the workbench.
+    pub focused_panel: Option<&'a PanelId>,
     /// The open project's composed stage (read-only; change it with [`Self::invoke`]).
     pub stage: &'a Stage,
     /// The local user; undo/redo and new commands are attributed to it.
@@ -243,6 +245,7 @@ impl<'a> PanelContext<'a> {
             panel,
             kind_title,
             focused: false,
+            focused_panel: None,
             stage,
             author,
             resources,
@@ -278,6 +281,7 @@ impl<'a> PanelContext<'a> {
             panel: self.panel,
             kind_title: self.kind_title,
             focused: self.focused,
+            focused_panel: self.focused_panel,
             stage: self.stage,
             author: self.author,
             resources: self.resources,

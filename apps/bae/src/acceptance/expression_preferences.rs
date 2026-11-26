@@ -113,3 +113,40 @@ fn settings_sample_folds_and_restores_its_expression() {
     settle(&mut h);
     assert_eq!(sample(&h), Some(full));
 }
+
+#[test]
+fn expression_themes_save_and_delete_through_preferences() {
+    use egui_kittest::kittest::Queryable as _;
+
+    let mut h = gui();
+    let open = |h: &mut Ui| {
+        h.state_mut()
+            .workspace
+            .show_settings(Some("scripting_expressions"));
+        settle(h);
+    };
+    open(&mut h);
+    h.get_by_label("Save Theme").click_accesskit();
+    settle(&mut h);
+    h.get_by_label("Theme name").click();
+    type_text(&mut h, "Studio");
+    h.get_by_label("Save").click();
+    settle(&mut h);
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    assert_eq!(
+        h.state().prefs.current().selected_expression_theme(),
+        Some("Studio")
+    );
+    for commit in [false, true] {
+        open(&mut h);
+        h.get_by_label("Delete Theme").click_accesskit();
+        settle(&mut h);
+        h.get_by_label(if commit { "OK" } else { "Cancel" }).click();
+        settle(&mut h);
+        assert_eq!(
+            h.state().prefs.current().saved_expression_themes().count(),
+            usize::from(!commit)
+        );
+    }
+}
