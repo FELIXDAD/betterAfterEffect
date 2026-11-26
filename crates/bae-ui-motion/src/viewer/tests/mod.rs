@@ -467,6 +467,7 @@ mod display;
 mod effect_points;
 mod free_transform;
 mod guides;
+mod masks;
 mod motion_sketch;
 mod navigation;
 mod pen;

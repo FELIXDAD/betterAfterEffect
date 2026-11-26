@@ -134,6 +134,22 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Alpha / Luma Matte", "Alpha/亮度遮罩"),
     ("Invert Matte", "反转遮罩"),
     ("Toggle Switches / Modes", "切换开关/模式"),
+    (
+        "Expand or Collapse the Layer Switches pane",
+        "展开或折叠“图层切换”窗格",
+    ),
+    (
+        "Expand or Collapse the Transfer Controls pane",
+        "展开或折叠“转换控制”窗格",
+    ),
+    (
+        "Expand or Collapse the In/Out/Duration/Stretch panes",
+        "展开或折叠“入点”/“出点”/“持续时间”/“伸缩”窗格",
+    ),
+    (
+        "Expand or Collapse the Render Time pane",
+        "展开或折叠渲染时间窗格",
+    ),
     ("Toggle Switches / Modes Columns", "切换开关/模式列"),
     ("Show / Hide Parent Column", "显示/隐藏父级列"),
     ("Set Track Matte", "设置轨道遮罩"),
@@ -260,4 +276,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Composition Mini-Flowchart", "合成微型流程图"),
     ("Select", "选择"),
+    ("Frame Mix", "帧混合"),
+    ("Pixel Motion", "像素运动"),
 ];

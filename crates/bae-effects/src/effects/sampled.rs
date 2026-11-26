@@ -1,5 +1,7 @@
 //! A layer-space compute pass for effects with auxiliary images. Each parameter
 //! occupies its AE disk-ID slot. This keeps the CPU and WGSL layouts identical.
+#[path = "sampled_lights.rs"]
+pub(crate) mod lights;
 use super::{image_grid, layer_input};
 use crate::{
     EffectTarget, TargetEffect,
@@ -122,6 +124,7 @@ impl Shader {
                 _ => {}
             }
         }
+        lights::write(v.p.effect, &mut u, HEADER);
         extra(&mut u, HEADER);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(

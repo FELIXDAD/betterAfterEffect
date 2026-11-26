@@ -474,6 +474,11 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             let view = spec_param(item.params, "view").unwrap_or_default();
             spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
         }
+        actions::ids::TIME_REMAP => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let first = session.lock().selected_layers.first().cloned();
+            first.is_some_and(|l| actions::switch_on(cx.stage, &l, "time_remap_enabled"))
+        }),
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
             spec.checked_when(move |cx| cx.panel_open(&panel))
