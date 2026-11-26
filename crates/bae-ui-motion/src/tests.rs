@@ -2599,6 +2599,118 @@ fn layer_copy_cut_and_paste() {
     );
 }
 
+/// The viewer's GPU path with an effect (the user's case): a red solid with
+/// Gaussian Blur 25 shows the same image at every preview resolution — with
+/// Repeat Edge Pixels a sharp rectangle filling its layer box, without it a
+/// blur spreading past the box (not a smaller copy in the box's corner).
+#[test]
+fn gpu_preview_keeps_blurred_solids_in_their_box() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let mut app = bae_app::AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    let mut app = app.build();
+    let defs = app.registry::<bae_model::EffectDef>();
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    h.resources.insert(crate::gpu_preview::PreviewEffects(
+        app.registry::<dyn bae_render::Effect>(),
+    ));
+    let comp = h.run("comp.create", json!({"width": 640, "height": 360}))["path"].clone();
+    let solid = h.run(
+        "layer.create",
+        json!({"comp": comp, "kind": "solid", "color": [1.0, 0.0, 0.0, 1.0], "size": [100, 250]}),
+    )["path"]
+        .clone();
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "transform:position", "value": {"type": "vec3", "value": [400.0, 180.0, 0.0]}}),
+    );
+    let fx = h.run(
+        "effect.apply",
+        json!({"layers": [solid], "match_name": "ADBE Gaussian Blur 2"}),
+    )["effects"][0]
+        .clone();
+    let set = |h: &mut Harness, id: u32, value: serde_json::Value| {
+        h.run(
+            "attr.set",
+            json!({"path": fx, "attr": format!("param:{id:04}"), "value": value}),
+        );
+    };
+    set(&mut h, 1, json!({"type": "float", "value": 25.0}));
+    let comp = PrimPath::new(comp.as_str().unwrap()).unwrap();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    // What the viewer draws: the published texture stretched over `rect`;
+    // returns the comp-pixel box of texels more than half opaque.
+    let mut shown = |h: &Harness, resolution: u32| {
+        let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+        preview.frame(&h.resources, &h.stage, &evaluated, resolution, None, false);
+        let img = preview
+            .frame(&h.resources, &h.stage, &evaluated, resolution, None, false)
+            .expect("image");
+        let rc = bae_render::AnimEvaluator::new(None)
+            .with_purpose(bae_render::RenderPurpose::Preview)
+            .convert(&h.stage, &evaluated, 0)
+            .unwrap();
+        let request = bae_render::RenderRequest {
+            resolution: match resolution {
+                1 => bae_render::Resolution::Full,
+                2 => bae_render::Resolution::Half,
+                _ => bae_render::Resolution::Quarter,
+            },
+            purpose: bae_render::RenderPurpose::Preview,
+            ..bae_render::RenderRequest::full()
+        };
+        let frame = preview.renderer().render_frame(&rc, &request).unwrap();
+        assert!(frame.from_cache, "the frame the preview published");
+        let data = preview
+            .renderer()
+            .read_rgba8(&frame, bae_render::OutputAlpha::Straight)
+            .unwrap();
+        let size = registry.get(preview.viewport()).unwrap().size;
+        assert_eq!(size, [data.width, data.height]);
+        let r = img.rect;
+        let s = r.width() as i32 / data.width as i32;
+        let mut bbox = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
+        for j in 0..data.height as i32 {
+            for i in 0..data.width as i32 {
+                if data.pixel(i as u32, j as u32)[3] > 128 {
+                    let (x, y) = (r.x0 + i * s, r.y0 + j * s);
+                    bbox = [
+                        bbox[0].min(x),
+                        bbox[1].min(y),
+                        bbox[2].max(x + s),
+                        bbox[3].max(y + s),
+                    ];
+                }
+            }
+        }
+        bbox
+    };
+    let close = |a: [i32; 4], b: [i32; 4], tol: i32| (0..4).all(|k| (a[k] - b[k]).abs() <= tol);
+    for repeat in [true, false] {
+        set(&mut h, 3, json!({"type": "bool", "value": repeat}));
+        // Half-opaque at the layer's edges either way (the blur used to come
+        // out shifted, cut or as stale pixels for larger layers).
+        let full = shown(&h, 1);
+        assert!(
+            close(full, [350, 55, 450, 305], 1),
+            "repeat {repeat}: {full:?}"
+        );
+        for (resolution, tol) in [(2, 4), (4, 8)] {
+            let got = shown(&h, resolution);
+            assert!(
+                close(got, full, tol),
+                "repeat {repeat}, 1/{resolution}: {got:?} vs {full:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn expression_errors_reach_the_session_banner_and_timeline() {
     let mut h = Harness::new();
