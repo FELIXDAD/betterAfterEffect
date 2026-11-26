@@ -296,6 +296,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// The mask or shape path whose vertices the Composition viewer has
+    /// selected (Ctrl+T then runs Free Transform Points, AE).
+    pub(crate) vertex_path: Option<PrimPath>,
     /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
     /// mask, effect or text animator; [`group_prim`] gives the prim).
     pub selected_groups: Vec<String>,
