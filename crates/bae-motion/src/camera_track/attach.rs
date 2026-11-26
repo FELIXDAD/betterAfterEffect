@@ -13,8 +13,8 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeSet;
 
-const GROUND: &str = "tracker:ground";
-const CAMERA: &str = "tracker:camera";
+pub(super) const GROUND: &str = "tracker:ground";
+pub(super) const CAMERA: &str = "tracker:camera";
 pub fn solution(stage: &Stage, fx: &PrimPath) -> Result<Solution, CommandError> {
     let Some(Value::Bytes(data)) =
         query::attr_spec(stage, fx, SOLUTION).and_then(|s| s.value.as_ref())
@@ -132,7 +132,8 @@ impl Command for Attach {
             if across {
                 solve.points.retain(|id, _| !p.points.contains(id));
             }
-            super::store_solution(tx, &p.effect, &solve)?;
+            let record = super::Recording::prepare(tx.stage(), &p.effect, &solve)?;
+            super::Record.run(tx, record)?;
             set(tx, &p.effect, "tracker:needs_solve", Value::Bool(true))?;
             return Ok(LayersOutput { paths: vec![] });
         }

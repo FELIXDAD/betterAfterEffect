@@ -1,6 +1,7 @@
 use super::{Tool, View};
 use crate::session::SharedSession;
 use bae_anim::{EvaluatedComp, glam::DVec3};
+use bae_model::effect::camera_tracks::{DISPLAY_POINTS, TrackPoint};
 use bae_model::{PrimPath, Time, Value};
 use bae_motion::camera_track::MATCH_NAME;
 use bae_ui::{PanelContext, tr};
@@ -45,7 +46,7 @@ impl Selection {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn frame(
         &mut self,
-        ui: &mut Ui,
+        ui: &Ui,
         resp: &Response,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
@@ -72,22 +73,24 @@ impl Selection {
                 ..Default::default()
             };
         }
-        let Some(Value::FloatList(rows)) = effect.param(9001) else {
+        let Some(Value::Bytes(rows)) = effect.param(DISPLAY_POINTS) else {
             return false;
         };
         let value = |id, default| effect.param(id).and_then(Value::as_f64).unwrap_or(default);
         let source = value(405, 2.) == 1.;
         let radius = (value(407, 100.) as f32 * 0.035).max(0.);
         let mut marks = Vec::new();
-        for &[id, x, y, sx, sy, error] in rows.as_chunks::<6>().0 {
-            if error < 0. && !source {
+        for point in TrackPoint::read(rows) {
+            let Some([x, y]) = point.position(source) else {
                 continue;
-            }
-            let (x, y) = if source { (x, y) } else { (sx, sy) };
-            let q = layer.world_matrix.transform_point3(DVec3::new(x, y, 0.));
+            };
+            let q = layer
+                .world_matrix
+                .transform_point3(DVec3::new(x as f64, y as f64, 0.));
             let pos = view.to_screen(q.truncate());
-            let id = id as u32;
-            let e = (error / 4.).clamp(0., 1.) as f32;
+            let id = point.id;
+            let error = point.error;
+            let e = (error / 4.).clamp(0., 1.);
             let r = radius * (1. + 0.5 * e);
             let selected = self.ids.contains(&id);
             let tint = if selected {
@@ -177,7 +180,10 @@ impl Selection {
             .collect();
         if !solved.is_empty() {
             let center = Pos2::ZERO
-                + solved.iter().fold(egui::Vec2::ZERO,|v,m|v+m.pos.to_vec2()) / solved.len() as f32;
+                + solved
+                    .iter()
+                    .fold(egui::Vec2::ZERO, |v, m| v + m.pos.to_vec2())
+                    / solved.len() as f32;
             let target = value(409, 100.) as f32 * 0.21;
             for r in [target, target * 0.6, target * 0.18] {
                 painter.circle_stroke(center, r, Stroke::new(1.6, Color32::LIGHT_RED));

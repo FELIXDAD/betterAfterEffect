@@ -4,6 +4,7 @@ use crate::{
     gpu::{self, Resource, UniformWriter},
 };
 use bae_gpu::wgpu;
+use bae_model::effect::camera_tracks::{DISPLAY_POINTS, TrackPoint};
 use bae_model::{EffectDef, Value};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
 use std::sync::Arc;
@@ -49,7 +50,7 @@ impl TargetEffect for TrackPoints {
         if p.value(406) != Some(&Value::Bool(true)) || roi.is_empty() {
             return Ok(input.clone());
         }
-        let Some(Value::FloatList(rows)) = p.value(9001) else {
+        let Some(Value::Bytes(rows)) = p.value(DISPLAY_POINTS) else {
             return Ok(input.clone());
         };
         let grid = image_grid::grid_scale(p, input);
@@ -60,23 +61,21 @@ impl TargetEffect for TrackPoints {
         let source = p.value(405).and_then(Value::as_f64) == Some(1.);
         let mut u = UniformWriter::with_size(BYTES);
         image_grid::image_coords(&mut u, 0, input, grid);
-        let rect = image_grid::pixel_rect(roi, 1. / grid);
-        u.i32s(32, &[rect.x0, rect.y0]);
+        u.i32s(32, &[roi.x0, roi.y0]);
         let mut n = 0;
-        for &[_, x, y, sx, sy, error] in rows.as_chunks::<6>().0 {
-            if !source && error < 0. {
+        for point in TrackPoint::read(rows) {
+            let Some([x, y]) = point.position(source) else {
                 continue;
-            }
+            };
             if n >= CAPACITY {
                 break;
             }
-            let (x, y) = if source { (x, y) } else { (sx, sy) };
-            let e = (error / 4.).clamp(0., 1.) as f32;
+            let e = (point.error / 4.).clamp(0., 1.);
             u.f32s(
                 48 + n * 16,
                 &[
-                    (x / grid) as f32,
-                    (y / grid) as f32,
+                    x / grid as f32,
+                    y / grid as f32,
                     e,
                     radius as f32 * (1. + 0.5 * e),
                 ],
@@ -89,7 +88,7 @@ impl TargetEffect for TrackPoints {
         u.u32(40, n as u32);
         let rt = gpu::runtime(t.gpu());
         let pipeline = kernel(&rt, t.format())?;
-        let out = t.allocate(roi, grid)?;
+        let out = t.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let group = rt.bind_group(
             &pipeline,
             &[
