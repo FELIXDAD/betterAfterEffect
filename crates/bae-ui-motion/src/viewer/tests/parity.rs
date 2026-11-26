@@ -74,3 +74,104 @@ fn dragging_while_previewing_stops_and_moves() {
     let p = h.v3(&a, "transform:position");
     assert!(close3(p, [360.0, 200.0, 0.0]), "{p:?}");
 }
+
+/// Snap to edges extended beyond layer bounds (off by default): another
+/// layer's edge becomes a line across the comp.
+#[test]
+fn snapping_to_extended_edges_is_an_option() {
+    let mut h = H::new();
+    // B's right edge: x = 150, from y 130 to 230.
+    let _b = h.solid([100.0, 100.0], [100.0, 180.0]);
+    // A far below B: its left midpoint (220, 400).
+    let a = h.solid([200.0, 100.0], [320.0, 400.0]);
+    h.tools().lock().set(Tool::Selection);
+    h.tools().lock().options.snapping = true;
+    let drag = |h: &mut H| {
+        let r = h.drag((228.0, 400.0), (161.0, 400.0), Modifiers::NONE);
+        h.apply(&r);
+        let p = h.v3(&a, "transform:position");
+        h.stage.undo(&h.author).unwrap();
+        p
+    };
+    // Off: 3 px from the extended edge, nothing to snap to.
+    assert!(close3(drag(&mut h), [253.0, 400.0, 0.0]));
+    h.tools().lock().options.snap_edges = true;
+    let p = drag(&mut h);
+    assert!(close3(p, [250.0, 400.0, 0.0]), "{p:?}");
+}
+
+/// Snap to features inside collapsed compositions (on by default): a
+/// collapsed pre-comp's inner layers are targets.
+#[test]
+fn snapping_reaches_inside_collapsed_precomps() {
+    let mut h = H::new();
+    let inner = path(&h.run("comp.create", json!({"width": 640, "height": 360}))["path"]);
+    // The inner solid's left midpoint: (390, 100).
+    h.run(
+        "layer.create",
+        json!({"comp": inner, "kind": "solid", "size": [20, 20], "position": [400.0, 100.0]}),
+    );
+    let pc = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": h.comp, "kind": "pre_comp", "source": inner}),
+        )["path"],
+    );
+    h.run(
+        "layer.set_attr",
+        json!({"layers": [pc], "attr": "collapse_transformation",
+               "value": {"type": "bool", "value": true}}),
+    );
+    // A's right midpoint (200, 300) dropped 3 px from it.
+    let a = h.solid([200.0, 100.0], [100.0, 300.0]);
+    h.tools().lock().set(Tool::Selection);
+    h.tools().lock().options.snapping = true;
+    let drag = |h: &mut H| {
+        let r = h.drag((192.0, 300.0), (379.0, 103.0), Modifiers::NONE);
+        h.apply(&r);
+        let p = h.v3(&a, "transform:position");
+        h.stage.undo(&h.author).unwrap();
+        p
+    };
+    let p = drag(&mut h);
+    assert!(close3(p, [290.0, 100.0, 0.0]), "{p:?}");
+    h.tools().lock().options.snap_features = false;
+    let p = drag(&mut h);
+    assert!(close3(p, [287.0, 103.0, 0.0]), "{p:?}");
+}
+
+/// Right-clicking a keyframe square on a motion path opens AE's keyframe
+/// menu (and selects the keyframe), not the layer menu.
+#[test]
+fn right_clicking_a_motion_path_keyframe_opens_the_keyframe_menu() {
+    let mut h = H::new();
+    let l = h.solid([20.0, 20.0], [100.0, 100.0]);
+    h.run(
+        "attr.set_animated",
+        json!({"path": l, "attr": "transform:position", "animated": true, "time": 0}),
+    );
+    let sec = bae_model::Time::FLICKS_PER_SECOND;
+    for (t, x) in [(0, 100.0), (sec, 300.0)] {
+        h.run(
+            "attr.set_at",
+            json!({"path": l, "attr": "transform:position", "time": t,
+                   "value": {"type": "vec3", "value": [x, 100.0, 0.0]}}),
+        );
+    }
+    h.select(&[&l]);
+    // The current time away from the keyframe at 1 s.
+    let info = query::comp_info(&h.stage, &h.comp).unwrap();
+    h.session()
+        .lock()
+        .set_time(&info, bae_model::Time::from_seconds(0.25));
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.right_click(300.0, 100.0);
+    assert!(
+        h.labeled("Toggle Hold Keyframe").is_some(),
+        "the keyframe menu"
+    );
+    assert!(h.labeled("Mask").is_none(), "not the layer menu");
+    let keys = h.session().lock().selected_keys.clone();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].time, bae_model::Time(sec));
+}

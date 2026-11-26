@@ -85,6 +85,7 @@ pub mod names;
 pub mod orient;
 pub mod paint;
 pub mod path;
+pub mod photoshop;
 pub mod precompose;
 pub mod project_settings;
 pub mod query;
@@ -153,9 +154,11 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(photoshop::ImportPhotoshop),
         r.register(ReplaceFile),
         r.register(CreateLayer),
         r.register(Precompose),
+        r.register(precompose::ReplaceWithPrecomp),
         r.register(SetSolidSettings),
         r.register(SetCameraSettings),
         r.register(SetLightSettings),
