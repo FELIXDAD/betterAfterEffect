@@ -43,6 +43,12 @@ fn with_fonts<R>(f: impl FnOnce(&mut bae_text::FontSystem) -> R) -> Option<R> {
     Some(f(&mut fonts))
 }
 
+/// Use the warmed font collection for a pointer hit without waiting for a font scan.
+pub(crate) fn hit_layout(doc: &TextDocument) -> Option<bae_text::TextLayout> {
+    let mut fonts = FONTS.get()?.try_lock().ok()?;
+    Some(bae_text::layout_text(&mut fonts, doc))
+}
+
 /// AE's size and leading presets (px).
 const SIZES: [f64; 14] = [
     6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 18.0, 24.0, 30.0, 36.0, 48.0, 60.0, 72.0,

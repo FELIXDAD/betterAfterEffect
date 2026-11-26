@@ -38,7 +38,9 @@ pub(crate) struct Editing {
     edits: Vec<TextReplacement>,
     selection: Option<std::ops::Range<usize>>,
     drag_end: Option<Pos2>,
+    source_cursors: Option<(usize, usize)>,
     font_size: f64,
+    align: egui::Align,
     color: Color32,
     /// Focus was requested / the field had it (losing it commits).
     focused_once: bool,
@@ -56,6 +58,7 @@ pub(crate) struct TypeState {
     /// it): a click edits that layer or starts point text, a drag makes a
     /// paragraph box. Editing starts on release so the field keeps its focus.
     press: Option<(Pos2, Option<PrimPath>)>,
+    hit_layout: Option<bae_text::TextLayout>,
 }
 
 impl TypeState {
@@ -72,6 +75,14 @@ fn text_id() -> Id {
 fn color32(c: [f64; 4]) -> Color32 {
     let u = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     Color32::from_rgb(u(c[0]), u(c[1]), u(c[2]))
+}
+
+fn text_align(doc: &bae_model::TextDocument) -> egui::Align {
+    match doc.paragraph.justification.as_str() {
+        "center" | "justify_last_center" => egui::Align::Center,
+        "right" | "justify_last_right" => egui::Align::Max,
+        _ => egui::Align::Min,
+    }
 }
 
 /// Start editing an existing text layer.
@@ -96,7 +107,9 @@ fn edit_layer(
         edits: vec![],
         selection: None,
         drag_end: None,
+        source_cursors: None,
         font_size: doc.style.font_size,
+        align: text_align(doc),
         color: color32(doc.style.fill_color),
         focused_once: false,
         caret_at,
@@ -129,7 +142,9 @@ fn new_text(
         edits: vec![],
         selection: None,
         drag_end: None,
+        source_cursors: None,
         font_size,
+        align: defaults.map_or(egui::Align::Min, text_align),
         color,
         focused_once: false,
         caret_at: None,
@@ -166,9 +181,17 @@ impl Editing {
                 let o = self.screen(view, [0.0, 0.0]);
                 let lines = self.buffer.lines().count().max(1) as f32 + 1.0;
                 let top = o.y - size * 0.8;
+                let (left, right) = match self.align {
+                    egui::Align::Min => (o.x, area.right().max(o.x + 40.)),
+                    egui::Align::Max => (area.left().min(o.x - 40.), o.x),
+                    egui::Align::Center => {
+                        let half = (o.x - area.left()).max(area.right() - o.x).max(40.);
+                        (o.x - half, o.x + half)
+                    }
+                };
                 Rect::from_min_max(
-                    egui::pos2(o.x, top),
-                    egui::pos2(area.right().max(o.x + 40.0), top + size * 1.25 * lines),
+                    egui::pos2(left, top),
+                    egui::pos2(right, top + size * 1.25 * lines),
                 )
             }
         }
@@ -247,9 +270,35 @@ fn hit_text(
     comp: &EvaluatedComp,
     view: &View,
     pos: Pos2,
+    hit_layout: &mut Option<bae_text::TextLayout>,
 ) -> Option<PrimPath> {
-    let hit = super::select_tool::hit_layer(stage, comp, view, pos)?;
-    (comp.layer(&hit)?.kind == bae_model::LayerKind::Text).then_some(hit)
+    let top = super::select_tool::hit_layer(stage, comp, view, pos);
+    let comp_point = view.to_comp(pos).extend(0.);
+    for l in comp.layers.iter() {
+        if let Some(doc) = l.text.as_deref()
+            && l.visible
+            && !l.switches.guide
+            && !query::is_locked(stage, &l.path)
+            && (!doc.runs.is_empty() || doc.box_size.is_some() || doc.text.contains(['\r', '\n']))
+            && let Some(layout) = crate::ae_panels::character::hit_layout(doc)
+        {
+            let p = l.world_matrix.inverse().transform_point3(comp_point);
+            let inside = layout.lines.iter().any(|line| {
+                p.x >= line.x
+                    && p.x <= line.x + line.width
+                    && p.y >= line.baseline - line.ascent
+                    && p.y <= line.baseline + line.descent
+            });
+            if inside || top.as_ref() == Some(&l.path) {
+                *hit_layout = Some(layout);
+                return Some(l.path.clone());
+            }
+        }
+        if top.as_ref() == Some(&l.path) {
+            return l.text.is_some().then(|| l.path.clone());
+        }
+    }
+    None
 }
 
 /// The editor reports exact replacements, including repeated identical letters.
@@ -364,7 +413,10 @@ pub(super) fn frame(
             Some(_) => {}
             None => {
                 session.lock().text_selection = None;
-                state.press = Some((pos, hit_text(cx.stage, comp, view, pos)));
+                state.press = Some((
+                    pos,
+                    hit_text(cx.stage, comp, view, pos, &mut state.hit_layout),
+                ));
             }
         }
     }
@@ -386,12 +438,21 @@ pub(super) fn frame(
         }
         if !down || resp.clicked_by(PointerButton::Primary) || resp.drag_stopped() {
             state.press = None;
+            let hit_layout = state.hit_layout.take();
             let a = view.to_comp(origin);
             state.editing = match hit {
                 Some(layer) => {
                     session.lock().selected_layers = vec![layer.clone()];
                     edit_layer(comp, info, &layer, Some(origin)).map(|mut e| {
                         e.drag_end = pointer.filter(|p| p.distance(origin) > 3.);
+                        if let Some(layout) = hit_layout {
+                            let inverse = e.to_comp.inverse();
+                            let at = |pos| {
+                                let p = inverse.transform_point3(view.to_comp(pos).extend(0.));
+                                layout.cursor_at(p.x, p.y)
+                            };
+                            e.source_cursors = at(origin).zip(at(e.drag_end.unwrap_or(origin)));
+                        }
                         e
                     })
                 }
@@ -474,6 +535,7 @@ pub(super) fn frame(
     let edit = egui::TextEdit::multiline(&mut buffer)
         .id(text_id())
         .frame(egui::Frame::NONE)
+        .horizontal_align(e.align)
         .layouter(&mut layouter)
         .font(FontId::proportional(size))
         .text_color(e.color)
@@ -497,6 +559,13 @@ pub(super) fn frame(
         });
         egui::text::CCursorRange::two(anchor, end)
     });
+    let initial = e
+        .source_cursors
+        .take()
+        .map(|(a, b)| {
+            egui::text::CCursorRange::two(egui::text::CCursor::new(a), egui::text::CCursor::new(b))
+        })
+        .or(initial);
     let cursor = initial.or(shown.cursor_range);
     if initial.is_some() || (cursor.is_none() && out.has_focus()) {
         let mut state = shown.state;

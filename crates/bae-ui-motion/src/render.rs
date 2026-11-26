@@ -355,7 +355,21 @@ pub(crate) fn layer_bounds(layer: &EvaluatedLayer) -> Option<(DVec2, DVec2)> {
             (min.x <= max.x).then_some((min, max))
         }
         LayerKind::Text => layer.text.as_ref().map(|t| {
-            let w = t.style.font_size * 0.55 * t.text.chars().count().max(1) as f64;
+            if let Some(rect) = bae_text::layout::box_rect(t) {
+                return (DVec2::new(rect.x0, rect.y0), DVec2::new(rect.x1, rect.y1));
+            }
+            let w = if t.runs.is_empty() {
+                t.style.font_size * 0.55 * t.text.chars().count().max(1) as f64
+            } else {
+                t.text
+                    .chars()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        let style = t.style_at(i);
+                        style.font_size * (0.55 + style.tracking / 1000.)
+                    })
+                    .sum()
+            };
             let x0 = match t.paragraph.justification.as_str() {
                 "center" => -w / 2.0,
                 "right" => -w,
