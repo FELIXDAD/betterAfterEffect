@@ -447,6 +447,7 @@ mod context_menu;
 mod effect_points;
 mod free_transform;
 mod guides;
+mod motion_sketch;
 mod navigation;
 mod pen;
 mod resolution;

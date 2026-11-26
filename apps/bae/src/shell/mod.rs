@@ -24,6 +24,8 @@ mod open_documents;
 #[cfg(any(windows, test))]
 mod save_guard;
 mod script_bindings;
+#[cfg(any(windows, test))]
+mod win_keys;
 #[cfg(windows)]
 mod win_save;
 mod window_state;
@@ -169,7 +171,13 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => None,
     };
 
-    let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows as _;
+        builder.with_msg_hook(win_keys::hook);
+    }
+    let event_loop = match builder.build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             tracing::error!("cannot create the event loop: {error}");
@@ -1276,7 +1284,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             && let Some(pad) = numpad::key(code, &key.logical_key)
         {
             // egui-winit sends no event for numpad `*`: the modifiers held now.
-            let modifiers = view.egui_ctx.input(|i| i.modifiers);
+            let modifiers = numpad::current_modifiers(
+                &view.egui_state.egui_input().events,
+                view.egui_ctx.input(|i| i.modifiers),
+            );
             numpad::rewrite(
                 &mut view.egui_state.egui_input_mut().events,
                 before,

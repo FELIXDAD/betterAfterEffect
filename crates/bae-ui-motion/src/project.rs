@@ -5,7 +5,8 @@
 
 use std::collections::HashSet;
 
-use bae_model::{PrimPath, PrimType, Stage, Value};
+use bae_anim::glam::DVec2;
+use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
 use bae_motion::query;
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
@@ -16,15 +17,72 @@ use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::common;
+use crate::session::SharedSession;
 
 /// Drag payload: a project item dragged into a comp.
 #[derive(Clone, Debug)]
 pub(crate) struct ItemDrag(pub PrimPath);
 
+pub(crate) enum DropPlacement {
+    Viewer(Option<DVec2>),
+    Timeline { index: usize, start: Option<Time> },
+}
+
+impl ItemDrag {
+    /// Add a project item to the active comp (drag and drop).
+    pub(crate) fn add_as_layer(
+        &self,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        placement: DropPlacement,
+    ) {
+        let item = &self.0;
+        let stage = cx.stage;
+        let Some(active) = session.lock().active_comp.clone() else {
+            return;
+        };
+        let kind = if query::comp_info(stage, item).is_some() {
+            if query::would_nest_recursively(stage, &active, item) {
+                return;
+            }
+            LayerKind::PreComp
+        } else {
+            match stage
+                .prim(item)
+                .and_then(|v| query::static_value(&v, "kind"))
+            {
+                Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+                _ if stage.prim(item).is_some_and(|v| {
+                    v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                        && v.value("has_video").and_then(Value::as_bool) == Some(false)
+                }) =>
+                {
+                    LayerKind::Audio
+                }
+                _ => LayerKind::Footage,
+            }
+        };
+        let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
+        match placement {
+            DropPlacement::Viewer(Some(p)) => extra["position"] = json!([p.x, p.y]),
+            DropPlacement::Viewer(None) => {}
+            DropPlacement::Timeline { index, start } => {
+                extra["index"] = json!(index);
+                if let Some(start) = start {
+                    extra["start"] = json!(start);
+                }
+            }
+        }
+        common::new_layer(cx, session, kind, extra);
+    }
+}
+
 #[derive(Default)]
 pub struct ProjectPanel {
     collapsed: HashSet<PrimPath>,
     search: String,
+    /// Edit ▸ Find: focus the search field next frame.
+    focus_search: bool,
     rename: Option<(PrimPath, String)>,
 }
 
@@ -195,11 +253,14 @@ impl Panel for ProjectPanel {
 
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            widgets::search_field(
+            let field = widgets::search_field(
                 ui,
                 &mut self.search,
                 (ui.available_width() - 12.0).max(60.0),
             );
+            if std::mem::take(&mut self.focus_search) {
+                field.request_focus();
+            }
         });
         ui.add_space(4.0);
 
@@ -503,6 +564,11 @@ impl Panel for ProjectPanel {
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
+        // Edit ▸ Find (Ctrl+F): the search field.
+        if action.id == "motion.file.find" {
+            self.focus_search = true;
+            return true;
+        }
         if action.id == crate::actions::ids::DELETE {
             let items = session.lock().selected_items.clone();
             if !items.is_empty() {
