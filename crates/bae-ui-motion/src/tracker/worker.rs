@@ -114,11 +114,11 @@ pub(super) fn start(
                             f64::from(frame.image.rect.x0),
                             f64::from(frame.image.rect.y0),
                         );
-                    let texture = renderer
-                        .output_texture(&frame, OutputAlpha::Straight)
+                    let output = renderer
+                        .output_texture(&frame, OutputAlpha::Straight, None)
                         .map_err(|e| e.to_string())?;
                     Ok(Image {
-                        texture,
+                        texture: output.view().texture().clone(),
                         origin,
                         field,
                     })
