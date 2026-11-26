@@ -74,3 +74,68 @@ fn dragging_while_previewing_stops_and_moves() {
     let p = h.v3(&a, "transform:position");
     assert!(close3(p, [360.0, 200.0, 0.0]), "{p:?}");
 }
+
+/// Snap to edges extended beyond layer bounds (off by default): another
+/// layer's edge becomes a line across the comp.
+#[test]
+fn snapping_to_extended_edges_is_an_option() {
+    let mut h = H::new();
+    // B's right edge: x = 150, from y 130 to 230.
+    let _b = h.solid([100.0, 100.0], [100.0, 180.0]);
+    // A far below B: its left midpoint (220, 400).
+    let a = h.solid([200.0, 100.0], [320.0, 400.0]);
+    h.tools().lock().set(Tool::Selection);
+    h.tools().lock().options.snapping = true;
+    let drag = |h: &mut H| {
+        let r = h.drag((228.0, 400.0), (161.0, 400.0), Modifiers::NONE);
+        h.apply(&r);
+        let p = h.v3(&a, "transform:position");
+        h.stage.undo(&h.author).unwrap();
+        p
+    };
+    // Off: 3 px from the extended edge, nothing to snap to.
+    assert!(close3(drag(&mut h), [253.0, 400.0, 0.0]));
+    h.tools().lock().options.snap_edges = true;
+    let p = drag(&mut h);
+    assert!(close3(p, [250.0, 400.0, 0.0]), "{p:?}");
+}
+
+/// Snap to features inside collapsed compositions (on by default): a
+/// collapsed pre-comp's inner layers are targets.
+#[test]
+fn snapping_reaches_inside_collapsed_precomps() {
+    let mut h = H::new();
+    let inner = path(&h.run("comp.create", json!({"width": 640, "height": 360}))["path"]);
+    // The inner solid's left midpoint: (390, 100).
+    h.run(
+        "layer.create",
+        json!({"comp": inner, "kind": "solid", "size": [20, 20], "position": [400.0, 100.0]}),
+    );
+    let pc = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": h.comp, "kind": "pre_comp", "source": inner}),
+        )["path"],
+    );
+    h.run(
+        "layer.set_attr",
+        json!({"layers": [pc], "attr": "collapse_transformation",
+               "value": {"type": "bool", "value": true}}),
+    );
+    // A's right midpoint (200, 300) dropped 3 px from it.
+    let a = h.solid([200.0, 100.0], [100.0, 300.0]);
+    h.tools().lock().set(Tool::Selection);
+    h.tools().lock().options.snapping = true;
+    let drag = |h: &mut H| {
+        let r = h.drag((192.0, 300.0), (379.0, 103.0), Modifiers::NONE);
+        h.apply(&r);
+        let p = h.v3(&a, "transform:position");
+        h.stage.undo(&h.author).unwrap();
+        p
+    };
+    let p = drag(&mut h);
+    assert!(close3(p, [290.0, 100.0, 0.0]), "{p:?}");
+    h.tools().lock().options.snap_features = false;
+    let p = drag(&mut h);
+    assert!(close3(p, [287.0, 103.0, 0.0]), "{p:?}");
+}
