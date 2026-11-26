@@ -39,6 +39,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::i18n::tr;
 use anyhow::Context as _;
 use bae_app::{App, AppBuilder, AppModule};
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
@@ -244,11 +245,13 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     // `bae <project>`: open it now. One project at a time, like AE.
     let mut startup_error = None;
     let settings = prefs.current();
-    let startup = global
-        .open
-        .first()
-        .map(|p| p.as_path())
-        .or_else(|| files::template_path(&settings));
+    let startup = global.open.first().map(|p| p.as_path()).or_else(|| {
+        if global.safe_mode {
+            None
+        } else {
+            files::template_path(&settings)
+        }
+    });
     if let Some(path) = startup {
         if global.open.len() > 1 {
             tracing::warn!("only the first project is opened: {}", path.display());
@@ -304,8 +307,8 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.restore_project_workspace(&document);
     workspace.set_extra_commands(document.command_titles());
-    if first_run {
-        workspace.show_role_picker();
+    if startup.is_none() && global.smoke_test.is_none() && !global.safe_mode {
+        workspace.start_without_project(first_run);
     }
 
     let mut shell = Shell {
@@ -332,6 +335,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         ui_passes: 0,
         accesskit_active: false,
         exit_code: ExitCode::SUCCESS,
+        restart_safe: false,
         prefs_generation: prefs.generation(),
         prefs,
         menu_lang: bae_ui::i18n::lang(),
@@ -343,7 +347,26 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         return ExitCode::FAILURE;
     }
     muda::MenuEvent::set_event_handler(None::<fn(muda::MenuEvent)>);
-    shell.exit_code
+    let exit_code = shell.exit_code;
+    if shell.restart_safe {
+        let project = shell.document.location().map(std::path::Path::to_owned);
+        drop(shell);
+        drop(_instance);
+        let launched = std::env::current_exe().and_then(|exe| {
+            std::process::Command::new(exe)
+                .arg("--safe-mode")
+                .args(project)
+                .spawn()
+        });
+        if let Err(error) = launched {
+            rfd::MessageDialog::new()
+                .set_title(tr("Start in Safe Mode..."))
+                .set_description(error.to_string())
+                .show();
+            return ExitCode::FAILURE;
+        }
+    }
+    exit_code
 }
 
 struct SmokeTest {
@@ -407,6 +430,7 @@ struct Shell {
     /// A screen reader / automation client is reading the accesskit tree.
     accesskit_active: bool,
     exit_code: ExitCode,
+    restart_safe: bool,
 }
 
 /// Everything tied to the window and the current GPU device.
@@ -764,7 +788,7 @@ impl Shell {
     }
 
     /// Buttons of the Preferences window that need the system.
-    fn run_settings_requests(&mut self) {
+    fn run_settings_requests(&mut self, event_loop: &ActiveEventLoop) {
         for request in self.workspace.take_settings_requests() {
             if let Some((title, body)) =
                 crate::ui::hardware_information(&request, self.app.resources())
@@ -776,6 +800,20 @@ impl Shell {
                     dialog = dialog.set_parent(&*view.window);
                 }
                 dialog.show();
+            } else if request == "startup_repair.start_in_safe_mode" {
+                let mut dialog = rfd::MessageDialog::new()
+                    .set_title(tr("Start in Safe Mode..."))
+                    .set_description(tr(
+                        "Restart BAE with installed plugins disabled for this session?",
+                    ))
+                    .set_buttons(rfd::MessageButtons::OkCancel);
+                if let Some(view) = &self.view {
+                    dialog = dialog.set_parent(&*view.window);
+                }
+                if dialog.show() == rfd::MessageDialogResult::Ok {
+                    self.quit(event_loop);
+                    self.restart_safe = event_loop.exiting();
+                }
             } else if request == crate::ui::REVEAL_PREFERENCES {
                 if let Some(dirs) = self.app.resource::<AppDirs>() {
                     reveal(&dirs.config_file(bae_prefs::FILE_NAME));
@@ -1382,7 +1420,17 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .init_accesskit(event_loop, &view.window, self.proxy.clone());
                 view.window.set_visible(true);
                 view.window.request_redraw();
+                let software = view.gpu.capabilities().software;
                 self.view = Some(view);
+                if software
+                    && self.smoke.is_none()
+                    && self
+                        .prefs
+                        .current()
+                        .bool("startup_repair.show_system_compatibility_issues")
+                {
+                    self.set_notice(tr("BAE is using software rendering. Check that a hardware GPU driver is available.").to_owned());
+                }
                 if self.menu.is_none() {
                     self.menu_lang = bae_ui::i18n::lang();
                     self.build_menu();
@@ -1597,7 +1645,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.run_pending(event_loop);
         self.sync_prefs();
         self.sync_language();
-        self.run_settings_requests();
+        self.run_settings_requests(event_loop);
         // OK in Keyboard Shortcuts: save the shortcuts now, not only at exit.
         if self.workspace.take_save_request() {
             self.save_window_state();

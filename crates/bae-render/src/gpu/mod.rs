@@ -115,6 +115,8 @@ pub(crate) mod flags {
     pub const LIT: u32 = 1024;
     /// Motion blur: a lighting record per sample.
     pub const LIT_SAMPLES: u32 = 2048;
+    pub const DRAFT: u32 = 4096;
+    pub const WIREFRAME: u32 = 8192;
 }
 
 /// Which fragment entry point a composite pipeline uses: plain draws never pay

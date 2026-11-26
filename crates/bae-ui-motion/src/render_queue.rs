@@ -1033,12 +1033,13 @@ pub fn start(
         .map(|s| provider_list(&s.0))
         .unwrap_or_default();
     let effects = resources.get::<PreviewEffects>().map(|e| e.0.clone());
+    let prefs = crate::prefs::current(resources);
+    let nested_switches = prefs.bool("composition.switches_affect_nested_comps");
     {
         let mut queue = queue.lock();
         if !queue.begin() {
             return Ok(());
         }
-        let prefs = crate::prefs::current(resources);
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         queue.render_threads = Some(render_threads(&prefs, cores));
         queue.sequence_files_per_folder = prefs
@@ -1049,7 +1050,16 @@ pub fn start(
     let queue = queue.clone();
     std::thread::Builder::new()
         .name("bae-render-queue".into())
-        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers, effects.as_deref()))
+        .spawn(move || {
+            run_worker(
+                &queue,
+                &snapshot,
+                gpu,
+                &providers,
+                effects.as_deref(),
+                nested_switches,
+            )
+        })
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
@@ -1069,6 +1079,7 @@ pub(crate) fn run_worker(
     gpu: Arc<GpuContext>,
     providers: &[Arc<dyn SourceProvider>],
     effects: Option<&Registry<dyn bae_render::Effect>>,
+    nested_switches: bool,
 ) {
     let stage = snapshot.restore();
     let mut renderer = Renderer::with_config(
@@ -1085,6 +1096,7 @@ pub(crate) fn run_worker(
         renderer.sync_effects(effects);
     }
     let mut evaluator = AnimEvaluator::new(None);
+    evaluator.set_nested_switches(nested_switches);
     let comp_frames = |comp: &PrimPath| {
         let stage = stage.as_ref().ok()?;
         bae_motion::query::comp_info(stage, comp).map(|c| c.frame_count())
@@ -3158,7 +3170,7 @@ mod tests {
             .store(true, Ordering::Relaxed);
 
         let snapshot = crate::preview_snapshot::PreviewSnapshot::take(&stage);
-        run_worker(&queue, &snapshot, gpu, &[], None);
+        run_worker(&queue, &snapshot, gpu, &[], None, true);
 
         let q = queue.lock();
         assert!(!q.is_running());

@@ -805,6 +805,11 @@ impl ExecCtx<'_> {
             if backdrop {
                 fl |= flags::DST;
             }
+            fl |= match op.quality {
+                bae_anim::LayerQuality::Best => 0,
+                bae_anim::LayerQuality::Draft => flags::DRAFT,
+                bae_anim::LayerQuality::Wireframe => flags::WIREFRAME,
+            };
             if op.preserve_transparency {
                 fl |= flags::PRESERVE;
             }
