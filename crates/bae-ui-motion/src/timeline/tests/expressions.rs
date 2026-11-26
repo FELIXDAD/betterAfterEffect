@@ -159,6 +159,26 @@ fn pick_whip_references_follow_ae() {
     );
     assert_eq!(r(&a, &b, None), format!("thisComp.layer(\"{name}\")"));
     assert_eq!(r(&a, &a, None), "thisLayer");
+    // Onto an effect's row: the effect as a whole.
+    let folder = b.child("effects").unwrap();
+    h.run(
+        "prim.create",
+        json!({"path": folder, "prim_type": "Folder"}),
+    );
+    let blur = folder.child("Gaussian_Blur").unwrap();
+    h.run("prim.create", json!({"path": blur, "prim_type": "Effect"}));
+    h.run(
+        "attr.set",
+        json!({"path": blur, "attr": "name", "value": {"type": "string", "value": "Gaussian Blur"}}),
+    );
+    let r = |from: &PrimPath, to: &PrimPath, attr: Option<&str>| {
+        crate::expr::reference(&h.stage, from, to, attr).unwrap()
+    };
+    assert_eq!(
+        r(&a, &blur, None),
+        format!("thisComp.layer(\"{name}\").effect(\"Gaussian Blur\")")
+    );
+    assert_eq!(r(&b, &blur, None), "effect(\"Gaussian Blur\")");
     assert_eq!(
         crate::expr::default_expression(&h.stage, &a, "transform:opacity"),
         "transform.opacity"

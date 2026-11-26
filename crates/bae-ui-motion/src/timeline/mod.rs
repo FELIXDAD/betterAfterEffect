@@ -1102,6 +1102,22 @@ impl TimelinePanel {
                         RowKind::Prop { path, attr, .. } => {
                             prop_rows.push((rect, path.clone(), attr.clone()))
                         }
+                        // An effect or a mask: the expression pick whip refers to
+                        // it as a whole (empty attribute).
+                        RowKind::Group { id, .. } => {
+                            if let Some(prim) = id
+                                .split_once('#')
+                                .and_then(|(_, p)| PrimPath::new(p).ok())
+                                .filter(|p| {
+                                    stage.prim(p).is_some_and(|v| {
+                                        v.is_a(&bae_model::PrimType::EFFECT)
+                                            || v.is_a(&bae_model::PrimType::MASK)
+                                    })
+                                })
+                            {
+                                prop_rows.push((rect, prim, String::new()));
+                            }
+                        }
                         _ => {}
                     }
                 }
