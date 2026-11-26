@@ -24,6 +24,8 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 mod camera_tool;
+mod camera_tracks;
+pub(crate) use camera_tracks::ZH as TRACKER_ZH;
 pub(crate) mod display;
 mod effect_points;
 pub(crate) mod errors;
@@ -295,6 +297,7 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    camera_tracks: camera_tracks::Selection,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
     /// menu): Esc goes to it instead of switching to the last 3D view.
     esc_taken: bool,
@@ -1469,6 +1472,9 @@ impl Panel for CompositionViewer {
             &painter,
         );
         // Effect point controls: a press on a crosshair is theirs.
+        let tracks = self.camera_tracks.frame(
+            ui, &resp, cx, &session, &comp, &view, time, &painter, effective,
+        );
         let points = effect_points::frame(
             &mut self.effect_points,
             ui,
@@ -1517,9 +1523,11 @@ impl Panel for CompositionViewer {
             area,
             rulers,
             &opts,
-            effective == Tool::Selection && !path.owns && !points.owns,
+            effective == Tool::Selection && !path.owns && !points.owns && !tracks,
         );
-        let select_cursor = if points.owns {
+        let select_cursor = if tracks {
+            Some(egui::CursorIcon::Crosshair)
+        } else if points.owns {
             points.cursor
         } else if path.owns || sketching || guide_busy {
             path.cursor
@@ -1579,16 +1587,17 @@ impl Panel for CompositionViewer {
                 }
             }
         }
-        menu::frame(
-            &mut self.menu_layers,
-            self.menu_key.as_ref(),
-            &resp,
-            cx,
-            &session,
-            &comp,
-            &view,
-        );
-
+        if !tracks {
+            menu::frame(
+                &mut self.menu_layers,
+                self.menu_key.as_ref(),
+                &resp,
+                cx,
+                &session,
+                &comp,
+                &view,
+            );
+        }
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
             item.add_as_layer(

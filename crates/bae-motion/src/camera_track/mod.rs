@@ -1,4 +1,5 @@
 //! Sparse reconstruction in AE coordinates (+X right, +Y down, +Z forward).
+pub mod attach;
 mod geometry;
 mod math;
 use crate::{
@@ -337,8 +338,36 @@ impl Command for Record {
         {
             return Err(fail("Camera tracker changed"));
         }
-        let data = serde_json::to_vec(&p.solution).map_err(|e| fail(e.to_string()))?;
-        set(tx, &p.effect, ERROR, Value::Float(p.solution.error))?;
-        set(tx, &p.effect, SOLUTION, Value::Bytes(data))
+        store_solution(tx, &p.effect, &p.solution)?;
+        set(tx, &p.effect, "tracker:needs_solve", Value::Bool(false))
     }
+}
+fn store_solution(
+    tx: &mut Transaction<'_>,
+    effect: &PrimPath,
+    solution: &Solution,
+) -> Result<(), CommandError> {
+    use bae_model::{AttrSpec, Keyframe};
+    let half = DVec2::new(solution.size[0] as f64, solution.size[1] as f64) * 0.5;
+    let mut samples = AttrSpec::default();
+    for f in &solution.frames {
+        let mut rows = Vec::with_capacity(f.samples.len() * 6);
+        for s in &f.samples {
+            let xy = s.xy() + half;
+            let solved = solution
+                .points
+                .get(&s.id)
+                .and_then(|p| Some((f.camera.pixel(DVec3::from_array(p.world))? + half, p.error)));
+            let (projected, error) = solved.unwrap_or((xy, -1.));
+            rows.extend([s.id as f64, xy.x, xy.y, projected.x, projected.y, error]);
+        }
+        let t = query::to_key_time(tx.stage(), effect, f.time);
+        samples
+            .keyframes
+            .insert(t, Keyframe::hold(Value::FloatList(rows)));
+    }
+    crate::util::write_attr(tx, effect, &bae_model::effect::param_attr(9001), samples)?;
+    let data = serde_json::to_vec(solution).map_err(|e| fail(e.to_string()))?;
+    set(tx, effect, ERROR, Value::Float(solution.error))?;
+    set(tx, effect, SOLUTION, Value::Bytes(data))
 }

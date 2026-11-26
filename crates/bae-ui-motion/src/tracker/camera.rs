@@ -44,6 +44,7 @@ impl Drop for Job {
 }
 pub(super) fn register(app: &mut AppBuilder) {
     app.insert_resource(Shared::default());
+    bae_ui::i18n::register(crate::viewer::TRACKER_ZH);
     let _ = app.register_arc::<dyn bae_ui::DialogHost>("camera-tracker", Arc::new(Host));
     bae_ui::i18n::register(&[
         (
@@ -84,6 +85,7 @@ fn start(
     };
     let comp = query::owning_comp(cx.stage, effect).ok_or("Missing composition")?;
     let source = query::owning_layer(cx.stage, effect).ok_or("Missing motion source")?;
+    let effect_path = effect.clone();
     let read = cx.stage.snapshot_reader();
     let sources = cx.resources.get::<PreviewSources>().cloned();
     let effects = cx.resources.get::<PreviewEffects>().cloned();
@@ -126,6 +128,25 @@ fn start(
             bae_gpu::warm_up::lower_priority();
             let run = || {
                 let stage = read().map_err(|e| e.to_string())?;
+                if let Ok(prior) = camera_track::attach::solution(&stage, &effect_path)
+                    && prior.settings.detailed == settings.detailed
+                    && (prior.settings != settings
+                        || stage
+                            .prim(&effect_path)
+                            .and_then(|p| query::static_value(&p, "tracker:needs_solve"))
+                            == Some(Value::Bool(true)))
+                {
+                    step.store(2, Ordering::Relaxed);
+                    ui.request_repaint();
+                    let frames = prior
+                        .frames
+                        .into_iter()
+                        .map(|f| (f.time, f.samples))
+                        .collect();
+                    return camera_track::solve(prior.size, frames, settings, || {
+                        stop.load(Ordering::Relaxed)
+                    });
+                }
                 let info = query::comp_info(&stage, &comp).ok_or("Missing composition")?;
                 let duration = info.frame_duration().0.max(1);
                 let timing = query::layer_timing(&stage, &source);
@@ -221,7 +242,14 @@ pub(crate) fn controls(ui: &mut egui::Ui, cx: &PanelContext<'_>, effect: &PrimPa
     let stored = query::attr_spec(cx.stage, effect, camera_track::SOLUTION).is_some();
     let completed = state.finished.get(effect);
     let restart = completed.is_some_and(|(s, _)| *s != settings);
-    let mut analyze = restart || (!stored && completed.is_none());
+    let dirty = cx
+        .stage
+        .prim(effect)
+        .and_then(|v| query::static_value(&v, "tracker:needs_solve"))
+        == Some(Value::Bool(true));
+    let mut analyze = restart
+        || (!stored && completed.is_none())
+        || (dirty && completed.is_none_or(|(_, msg)| msg == "Camera solved"));
     if !analyze {
         ui.horizontal(|ui| {
             let status = completed.map_or("Camera solved", |(_, s)| s.as_str());

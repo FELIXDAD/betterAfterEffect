@@ -147,6 +147,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(paint::AddStroke),
         r.register(tracker::CreateTracker),
         r.register(camera_track::Record),
+        r.register(camera_track::attach::Attach),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
