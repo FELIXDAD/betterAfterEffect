@@ -153,9 +153,9 @@ pub(crate) struct Executed {
     pub incomplete: bool,
     /// CPU time encoding each node (by node index), when timed.
     pub node_times: Vec<std::time::Duration>,
-    /// The frame converted into a new RGBA8 texture (when asked for),
+    /// The frame converted into the requested RGBA8 target (when asked for),
     /// recorded in the frame's own submission.
-    pub output: Option<wgpu::Texture>,
+    pub output: Option<crate::OutputTarget>,
 }
 
 struct PoolAllocator<'a> {
@@ -191,7 +191,7 @@ pub(crate) struct Timing<'a> {
 }
 
 /// Executes `graph` and submits it once. Returns the output node's image,
-/// with `output` its conversion into a new RGBA8 texture recorded before the
+/// with `output` its conversion into the requested RGBA8 target recorded before the
 /// same submission (the viewer path: one submit per frame), and, when
 /// `timed`, the CPU time of every node.
 #[allow(clippy::too_many_arguments)]
@@ -205,7 +205,7 @@ pub(crate) fn execute(
     format: wgpu::TextureFormat,
     mut tiles: Option<TileCache<'_>>,
     timing: Timing<'_>,
-    output: Option<crate::OutputAlpha>,
+    output: Option<crate::renderer::DisplayOutput>,
 ) -> Result<Executed, RenderError> {
     let timed = timing.cpu;
     let mut gpu_timer = timing.gpu;
@@ -281,6 +281,7 @@ pub(crate) fn execute(
         draw_calls: 0,
         passes: 0,
         mask_outs: Vec::new(),
+        incomplete: false,
     };
     // Every mask of the frame at once, in shared atlases (they have no inputs).
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
@@ -419,8 +420,9 @@ pub(crate) fn execute(
                 };
                 let images = [input(mix.base)?, input(mix.over)?, input(mix.coverage)?];
                 let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let mix = ctx.pipelines.mix();
                 adjust::encode(
-                    &mut ctx.pipelines.adjust,
+                    &mut mix.lock(),
                     device,
                     gpu.queue(),
                     &mut encoder,
@@ -454,6 +456,7 @@ pub(crate) fn execute(
     }
     let draw_calls = ctx.draw_calls;
     let passes = ctx.passes;
+    let incomplete = incomplete || ctx.incomplete;
     if gpu_timed && let Some(t) = gpu_timer.as_deref_mut() {
         t.write(&mut encoder, graph.nodes.len());
         t.finish(&mut encoder, graph.nodes.len() + 1, &graph.owners);
@@ -461,43 +464,9 @@ pub(crate) fn execute(
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;
-    let output = output.map(|alpha| {
-        let [w, h] = image.texel_size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bae-render.output"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.output"),
-            size: crate::renderer::OUTPUT_PARAMS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        gpu.queue()
-            .write_buffer(&uniform, 0, &crate::renderer::output_params(alpha, false));
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        record_output_pass(
-            device,
-            ctx.pipelines,
-            &mut encoder,
-            &image,
-            &view,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &uniform,
-        );
-        target
+    let output = output.map(|out| {
+        let incomplete = graph.incomplete || incomplete;
+        out.record(device, ctx.pipelines, &mut encoder, &image, incomplete)
     });
     gpu.queue().submit([encoder.finish()]);
     ctx.pipelines.end_frame();
@@ -542,6 +511,8 @@ struct ExecCtx<'a> {
     passes: usize,
     /// Where each mask node's output lives (by node index).
     mask_outs: Vec<Option<masks::MaskOut>>,
+    /// A pipeline was still compiling for the UI thread (incomplete frame).
+    incomplete: bool,
 }
 
 /// A planned draw of one op.
@@ -799,7 +770,16 @@ impl ExecCtx<'_> {
                     break;
                 }
                 if current != Some((p.kind, p.variant)) {
-                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind, p.variant));
+                    let Some(pipeline) =
+                        self.pipelines.composite(device, format, p.kind, p.variant)
+                    else {
+                        // Still compiling for the UI thread: incomplete frame.
+                        self.incomplete = true;
+                        current = None;
+                        i += 1;
+                        continue;
+                    };
+                    pass.set_pipeline(pipeline);
                     current = Some((p.kind, p.variant));
                 }
                 // Batch a run of plain solids with the same pipeline.
@@ -882,10 +862,14 @@ impl ExecCtx<'_> {
         } else {
             BlendKind::Replace
         };
-        pass.set_pipeline(
-            self.pipelines
-                .composite(device, self.format, kind, Variant::Plain),
-        );
+        let Some(pipeline) = self
+            .pipelines
+            .composite(device, self.format, kind, Variant::Plain)
+        else {
+            self.incomplete = true;
+            return Ok(());
+        };
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, self.draws_group, &[]);
         pass.set_bind_group(1, &self.pipelines.empty_textures, &[]);
         pass.draw(0..6, first..first + 1);

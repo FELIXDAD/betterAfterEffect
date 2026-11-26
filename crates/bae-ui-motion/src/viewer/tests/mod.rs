@@ -24,6 +24,7 @@ struct H {
     time: f64,
     /// Modifiers egui last heard of.
     mods: Modifiers,
+    shapes: Vec<egui::epaint::ClippedShape>,
     /// The accessibility tree of the last frame (menus are found by label).
     access: Option<egui::accesskit::TreeUpdate>,
 }
@@ -51,6 +52,7 @@ impl H {
             time: 0.0,
             mods: Modifiers::NONE,
             access: None,
+            shapes: Vec::new(),
         };
         h.ctx.enable_accesskit();
         h.comp = path(&h.run("comp.create", json!({"width": 640, "height": 360}))["path"]);
@@ -108,6 +110,7 @@ impl H {
         });
         out.textures_delta.clear();
         self.access = out.platform_output.accesskit_update.take();
+        self.shapes = out.shapes;
         requests
     }
 
@@ -464,6 +467,7 @@ mod display;
 mod effect_points;
 mod free_transform;
 mod guides;
+mod masks;
 mod motion_sketch;
 mod navigation;
 mod pen;

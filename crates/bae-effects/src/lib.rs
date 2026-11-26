@@ -53,6 +53,7 @@ use bae_render::{Effect, EffectLibrary, EffectParams, GpuImage, IRect, RenderErr
 
 pub use catalog::{EffectInfo, Form, category_zh};
 pub use categories::color::ocio::embed_color_file;
+pub use categories::simulation::{particle_scene_projection, particle_world_projection};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
@@ -234,6 +235,7 @@ fn registry() -> &'static Registry {
         categories::controls::register(&mut r);
         categories::distort::register(&mut r);
         categories::generate::register(&mut r);
+        categories::immersive::register(&mut r);
         categories::keying::register(&mut r);
         categories::matte::register(&mut r);
         categories::noise_grain::register(&mut r);
@@ -276,6 +278,7 @@ pub fn register(defs: &mut EffectRegistry, library: &mut EffectLibrary) -> usize
         defs.register(b.def().clone());
         library.register(b.effect());
     }
+    library.set_frame_interpolator(effects::temporal::interpolator());
     builtins().len()
 }
 
