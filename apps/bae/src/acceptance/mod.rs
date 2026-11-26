@@ -42,6 +42,7 @@ mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
 mod preference_controls;
+mod preview_switches;
 #[cfg(target_os = "macos")]
 mod release_001;
 #[cfg(target_os = "macos")]

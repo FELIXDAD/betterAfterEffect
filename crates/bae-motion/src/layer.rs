@@ -1407,6 +1407,10 @@ pub struct SetLayerAttrParams {
     /// (AE's 38 modes, `multiply` …).
     pub attr: String,
     pub value: Value,
+    /// Also enable the owning composition's master switch when turning on layer
+    /// motion blur or a frame blending mode (the Previews preference).
+    #[serde(default)]
+    pub enable_comp_switch: bool,
 }
 
 impl Command for SetLayerAttr {
@@ -1423,9 +1427,18 @@ impl Command for SetLayerAttr {
                 p.attr
             )));
         }
+        let enable_master = p.enable_comp_switch
+            && match p.attr.as_str() {
+                "motion_blur" => p.value.as_bool() == Some(true),
+                "frame_blending" => matches!(p.value.as_str(), Some("frame_mix" | "pixel_motion")),
+                _ => false,
+            };
         for l in &p.layers {
             tx.stage().require_prim(l)?;
             set(tx, l, &p.attr, p.value.clone())?;
+            if enable_master && let Some(comp) = query::owning_comp(tx.stage(), l) {
+                set(tx, &comp, &p.attr, Value::Bool(true))?;
+            }
         }
         Ok(())
     }

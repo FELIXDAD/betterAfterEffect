@@ -38,6 +38,7 @@ struct Monitor {
     ended_at: AtomicU64,
     clock: clock::Clock,
     gain: AtomicU32,
+    muted: AtomicBool,
     peaks: AtomicU64,
 }
 
@@ -57,7 +58,11 @@ impl Sink {
             self.offset = 0;
             self.consumed = 0;
         }
-        let gain = f32::from_bits(self.monitor.gain.load(Ordering::Relaxed));
+        let gain = if self.monitor.muted.load(Ordering::Relaxed) {
+            0.0
+        } else {
+            f32::from_bits(self.monitor.gain.load(Ordering::Relaxed))
+        };
         let mut peaks = [0.0_f32; 2];
         let first = self.consumed;
         let mut output = data.chunks_exact_mut(channels);
@@ -225,6 +230,11 @@ impl AudioOutput {
     pub fn set_loop(&self, repeat: bool) {
         self.monitor.repeat.store(repeat, Ordering::Relaxed);
     }
+    /// Mute monitoring while the device clock and producer continue advancing.
+    pub fn set_muted(&self, muted: bool) {
+        self.monitor.muted.store(muted, Ordering::Relaxed);
+    }
+
     /// Change the monitor gain in linear amplitude.
     pub fn set_gain(&self, gain: f32) {
         self.monitor.gain.store(gain.to_bits(), Ordering::Relaxed);
@@ -324,5 +334,35 @@ mod tests {
         let bits = monitor.peaks.load(Ordering::Relaxed);
         assert_eq!(f32::from_bits(bits as u32), 1.5);
         assert_eq!(f32::from_bits((bits >> 32) as u32), 0.5);
+    }
+
+    #[test]
+    fn muted_monitor_keeps_consuming_pcm_and_recovers_its_gain() {
+        let (mut writer, ring) = RingBuffer::new(1);
+        let monitor = Arc::new(Monitor {
+            gain: AtomicU32::new(0.5_f32.to_bits()),
+            ..Monitor::default()
+        });
+        let mut sink = Sink {
+            ring,
+            monitor: monitor.clone(),
+            epoch: 0,
+            offset: 0,
+            consumed: 0,
+        };
+        let mut chunk = writer.write_chunk(1).unwrap();
+        let block = &mut chunk.as_mut_slices().0[0];
+        block.len = 4;
+        block.samples[..4].fill([0.5, -0.5]);
+        chunk.commit_all();
+        let mut stereo = [1.; 4];
+        monitor.muted.store(true, Ordering::Relaxed);
+        sink.pull(&mut stereo, 2, 0);
+        assert_eq!(stereo, [0.; 4]);
+        assert_eq!(sink.consumed, 2);
+        monitor.muted.store(false, Ordering::Relaxed);
+        sink.pull(&mut stereo, 2, 1000);
+        assert_eq!(stereo, [0.25, -0.25, 0.25, -0.25]);
+        assert_eq!(sink.consumed, 4);
     }
 }

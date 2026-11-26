@@ -200,6 +200,17 @@ impl ViewportTextureRegistry {
         Ok(())
     }
 
+    /// Change sampling on a published image without rendering or copying it again.
+    pub fn set_filter(&self, id: ViewportTextureId, filter: wgpu::FilterMode) {
+        let mut state = self.state.lock();
+        if let Some(texture) = state.slots.get_mut(&id).and_then(|s| s.texture.as_mut())
+            && texture.filter != filter
+        {
+            texture.filter = filter;
+            texture.generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        }
+    }
+
     /// Removes a slot. The shell frees its UI registration on the next sync.
     pub fn remove(&self, id: ViewportTextureId) -> bool {
         let removed = self.state.lock().slots.remove(&id).is_some();

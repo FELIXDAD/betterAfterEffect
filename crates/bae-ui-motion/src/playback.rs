@@ -84,6 +84,7 @@ impl Drop for Slot {
 impl Slot {
     fn image(&self) -> Option<PreviewImage> {
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect,
         })

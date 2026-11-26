@@ -45,6 +45,7 @@ impl std::fmt::Debug for PreviewEffects {
 /// What the viewer draws: an egui user texture covering `rect` (comp pixels).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PreviewImage {
+    pub viewport: ViewportTextureId,
     pub handle: u64,
     pub rect: IRect,
 }
@@ -406,6 +407,7 @@ impl GpuPreview {
         self.waiting = arrived || self.samples.is_waiting();
         if self.waiting && live.is_none() && self.rect.is_some() {
             return Some(PreviewImage {
+                viewport: self.id,
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
             });
@@ -464,6 +466,7 @@ impl GpuPreview {
                     self.target = Some(target);
                 }
                 return Some(PreviewImage {
+                    viewport: self.id,
                     handle: self.registry.display_handle(self.id)?,
                     rect: self.rect?,
                 });
@@ -511,6 +514,7 @@ impl GpuPreview {
             self.live_texture = None;
         }
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,
         })
@@ -636,6 +640,7 @@ impl GpuPreview {
                 });
             }
             return Some(PreviewImage {
+                viewport: self.id,
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
             });
@@ -685,6 +690,7 @@ impl GpuPreview {
             }
         }
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,
         })
@@ -698,6 +704,7 @@ impl GpuPreview {
         self.target_shown = false;
         self.live_texture = None;
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect,
         })
