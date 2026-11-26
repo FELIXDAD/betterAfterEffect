@@ -139,16 +139,12 @@ impl AppModule for MotionUiModule {
         app.insert_resource::<std::sync::Arc<dyn bae_script::ScriptView>>(std::sync::Arc::new(
             session.clone(),
         ));
-        if let Err(error) = std::thread::Builder::new()
-            .name("bae-audio-device".into())
-            .spawn(move || {
-                if let Err(error) = session.open_audio() {
-                    tracing::warn!(%error, "Audio output unavailable");
-                }
-            })
-        {
-            tracing::warn!(%error, "Could not start the audio device worker");
-        }
+        // Space should play sound as soon as the window is up, GPU or not.
+        session.start_audio();
+        let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
+            "bae.media/audio-output",
+            std::sync::Arc::new(session),
+        );
         if app.resource::<SharedTools>().is_none() {
             app.insert_resource(SharedTools::default());
         }
