@@ -402,6 +402,12 @@ fn a_slow_reader_gets_a_large_batch() {
 
 /// The peer sent its last message and went away (a reset) while we were still
 /// sending to it: the failed write is reported only after that message.
+///
+/// Linux only: Windows (and possibly other stacks) throw away received but
+/// unread data when a reset arrives, so the message is gone before we could
+/// read it. Clients therefore end with `Transport::close`, which waits for the
+/// close handshake (`closing_a_hub_client_delivers_its_last_message`).
+#[cfg(target_os = "linux")]
 #[test]
 fn a_message_that_arrived_before_a_reset_is_still_read() {
     use bae_sync::{DocKey, HubLimits, Message, Transport};
