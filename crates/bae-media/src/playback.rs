@@ -38,7 +38,9 @@ struct Monitor {
     ended_at: AtomicU64,
     clock: clock::Clock,
     gain: AtomicU32,
-    peaks: AtomicU64,
+    /// Stereo peaks (f32 bits; non-negative, so they order like integers) since
+    /// the meter last read them: every block raises them, the meter takes them.
+    peaks: [AtomicU32; 2],
     // Bit 0 routes L to output 2, bit 1 routes R to output 1. Zero is stereo.
     routing: AtomicU32,
 }
@@ -108,11 +110,9 @@ impl Sink {
                 self.offset = 0;
             }
         }
-        let bits = peaks.map(f32::to_bits);
-        self.monitor.peaks.store(
-            u64::from(bits[0]) | (u64::from(bits[1]) << 32),
-            Ordering::Relaxed,
-        );
+        for (held, peak) in self.monitor.peaks.iter().zip(peaks) {
+            held.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        }
         if self.consumed != first {
             self.monitor
                 .clock
@@ -345,13 +345,13 @@ impl AudioOutput {
         self.monitor.gain.store(gain.to_bits(), Ordering::Relaxed);
     }
 
-    /// Stereo peaks after monitor gain and before device clipping.
+    /// Stereo peaks after monitor gain and before device clipping, since the
+    /// last call (the meter reads once per frame and sees every block's peak).
     pub fn peaks(&self) -> [f32; 2] {
-        let bits = self.monitor.peaks.load(Ordering::Relaxed);
-        [
-            f32::from_bits(bits as u32),
-            f32::from_bits((bits >> 32) as u32),
-        ]
+        self.monitor
+            .peaks
+            .each_ref()
+            .map(|p| f32::from_bits(p.swap(0, Ordering::Relaxed)))
     }
 
     /// Silence queued audio while retaining the device and the prepared sources.
@@ -437,6 +437,9 @@ mod tests {
         assert_eq!(monitor.clock.heard(2, 4_000_000, 1000), 1);
         assert_eq!(monitor.clock.heard(2, 8_000_000, 1000), 3);
 
+        // The meter keeps the loudest block until it reads it.
+        let peak = |i: usize| f32::from_bits(monitor.peaks[i].swap(0, Ordering::Relaxed));
+        assert_eq!([peak(0), peak(1)], [0.75, 0.75]);
         // The master fader changes the actual samples. Meters see each peak before clipping.
         monitor.gain.store(2.0_f32.to_bits(), Ordering::Relaxed);
         let mut chunk = writer.write_chunk(1).unwrap();
@@ -448,9 +451,7 @@ mod tests {
         let mut stereo = [0.0; 2];
         sink.pull(&mut stereo, 2, 9_000_000);
         assert_eq!(stereo, [-1.0, 0.5]);
-        let bits = monitor.peaks.load(Ordering::Relaxed);
-        assert_eq!(f32::from_bits(bits as u32), 1.5);
-        assert_eq!(f32::from_bits((bits >> 32) as u32), 0.5);
+        assert_eq!([peak(0), peak(1)], [1.5, 0.5]);
 
         // Routing changes on the existing stream. The two sources may share an output.
         for (routing, expected) in [(3, [0.5, -1.0]), (1, [0.0, -1.0]), (2, [-1.0, 0.0])] {

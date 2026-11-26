@@ -86,7 +86,7 @@ fn collect_texts(
     texts: &mut Vec<String>,
     values: &mut Vec<DisplayValue>,
 ) {
-    use bae_ui::a11y::{GPU_STATUS, SYSTEM_OUTPUT, VERBATIM_VALUE};
+    use bae_ui::a11y::{FILE_NAME_VALUE, GPU_STATUS, SYSTEM_OUTPUT, VERBATIM_VALUE};
 
     let label = n.label();
     let value = n.value();
@@ -96,7 +96,7 @@ fn collect_texts(
     );
     let shown = value.as_deref().or(label.as_deref()).unwrap_or_default();
     let chrome = match n.class_name() {
-        Some(VERBATIM_VALUE) => Some(""),
+        Some(VERBATIM_VALUE | FILE_NAME_VALUE) => Some(""),
         // AE keeps "System Default" in Chinese on this control. Other captions
         // remain subject to the scan, even if concatenated with a device name.
         Some(SYSTEM_OUTPUT) => shown.split_once(" - ").map(|(caption, _)| {
@@ -115,12 +115,20 @@ fn collect_texts(
         }
         texts.push(chrome.to_owned());
         if let Some(r) = n.bounding_box() {
+            let painted = if n.class_name() == Some(FILE_NAME_VALUE) {
+                std::path::Path::new(shown)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+            } else {
+                shown
+            };
             values.push(DisplayValue {
                 bounds: Rect::from_min_max(
                     egui::pos2(r.x0 as f32 / ppp, r.y0 as f32 / ppp),
                     egui::pos2(r.x1 as f32 / ppp, r.y1 as f32 / ppp),
                 ),
-                shown: shown.to_owned(),
+                shown: painted.to_owned(),
                 chrome: chrome.to_owned(),
             });
         }
@@ -136,7 +144,7 @@ fn collect_texts(
     }
 }
 
-fn a11y_texts(h: &Ui) -> Vec<String> {
+pub(super) fn a11y_texts(h: &Ui) -> Vec<String> {
     let mut texts = Vec::new();
     collect_texts(
         h.root().accesskit_node(),
@@ -546,6 +554,18 @@ fn chinese_ui_names_new_items_in_chinese() {
 
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     settle(&mut h);
+    let file = "Client Footage.mov";
+    {
+        let queue = h.state().render_queue();
+        let mut queue = queue.lock();
+        let id = queue.items()[0].id;
+        queue.item_mut(id).unwrap().outputs[0].output = std::env::temp_dir()
+            .join(file)
+            .to_string_lossy()
+            .into_owned();
+    }
+    settle(&mut h);
+    assert!(find_text(&h, file).is_some());
     check(&h, "render queue", &mut problems);
 
     let scopes = shortcut_scopes(&mut h);

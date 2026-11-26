@@ -41,6 +41,7 @@ impl PhotoshopDialog {
         comp: Option<PrimPath>,
         folder: Option<String>,
         defaults: ImportDefaults,
+        kind: ImportKind,
     ) -> Self {
         Self {
             path,
@@ -50,18 +51,13 @@ impl PhotoshopDialog {
             defaults,
             replace: None,
             loaded: None,
-            kind: ImportKind::Footage,
+            kind,
             single: false,
             key: None,
             editable: true,
             ignore: false,
         }
     }
-    pub(crate) fn with_kind(mut self, kind: ImportKind) -> Self {
-        self.kind = kind;
-        self
-    }
-
     pub(crate) fn replace(&mut self, item: PrimPath, view: &bae_model::PrimView<'_>, reload: bool) {
         self.ignore = view
             .value("psd:ignore_styles")
@@ -242,11 +238,13 @@ impl PhotoshopDialog {
         replace: Option<&PrimPath>,
         reload: bool,
     ) {
-        let folder_label = crate::prefs::current(cx.resources).int("labels.label_default_folder");
+        let prefs = crate::prefs::current(cx.resources);
+        let keep = reload || prefs.str("import.footage_interpretation_on_replace") == "remember";
+        let folder_label = prefs.int("labels.label_default_folder");
         cx.invoke_with("item.import_photoshop", serde_json::json!({
             "folder_label": folder_label,
             "file": self.path, "document": doc, "kind": self.kind, "selection": selection,
-            "parent": self.parent, "comp": self.comp, "folder": self.folder, "replace": replace, "keep_name": reload,
+            "parent": self.parent, "comp": self.comp, "folder": self.folder, "replace": replace, "keep_name": reload, "keep_interpretation": keep,
             "editable": self.editable, "ignore_styles": self.kind == ImportKind::Footage && self.ignore,
             "fps": self.defaults.sequence_fps, "duration": self.defaults.still_duration,
             "label": self.defaults.labels.map(|labels| labels[0])

@@ -518,6 +518,20 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// Whether a mask or shape path is selected: vertices in the Composition
+/// viewer, or its path property in the Timeline.
+fn path_selected(cx: &PanelContext<'_>) -> bool {
+    let session = crate::common::session(cx.resources);
+    let s = session.lock();
+    s.vertex_path.is_some()
+        || s.selected_props.iter().any(|(p, attr)| {
+            attr == "path"
+                && cx.stage.prim(p).is_some_and(|v| {
+                    v.is_a(&bae_model::PrimType::MASK) || v.is_a(&bae_model::PrimType::PATH)
+                })
+        })
+}
+
 /// `(id, English title)` of the tool actions, for the shortcut editor.
 pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
     SHORTCUTS
@@ -534,6 +548,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
         .chain([
             (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::FAST_PREVIEWS, "Fast Previews"),
             (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
             (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
             (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
@@ -577,6 +592,12 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
             let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
             (crate::viewer::display::SHOW_CHANNEL, params, *title)
         });
+    let fast = crate::viewer::display::FAST_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::FAST_PREVIEWS, params, *title)
+        });
     let views = crate::viewer::view3d::SHORTCUT_NAMES
         .iter()
         .map(|(slot, title)| {
@@ -601,6 +622,7 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         .chain(views)
         .chain(custom)
         .chain(channels)
+        .chain(fast)
         .map(|(id, params, title)| (id, params, title.to_owned()))
         .chain(crate::viewer::display::snapshot_names())
         .map(|(id, params, title)| {
@@ -769,6 +791,8 @@ pub struct PaintOptions {
     pub clone_offset: [f64; 2],
     /// Clone Stamp: source time shift in seconds.
     pub clone_time_shift: f64,
+    /// Clone Stamp, Lock Source Time: the source time in seconds.
+    pub clone_source_time: f64,
     /// Brush tip (Brushes panel): pixels, degrees, percents.
     pub diameter: f64,
     pub angle: f64,
@@ -850,6 +874,7 @@ impl Default for PaintOptions {
             lock_source_time: false,
             clone_offset: [0.0, 0.0],
             clone_time_shift: 0.0,
+            clone_source_time: 0.0,
             diameter: 21.0,
             angle: 0.0,
             roundness: 100.0,
@@ -1268,6 +1293,15 @@ impl ActionHandler for ToolActions {
             return true;
         }
         if crate::viewer::view_options::handle(inv, cx) {
+            return true;
+        }
+        // Ctrl+T with a mask or shape path selected: Free Transform Points,
+        // else the Type tools (AE).
+        if inv.id == ids::TYPE && path_selected(cx) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            t.set(Tool::Selection);
+            t.free_transform_request = true;
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
