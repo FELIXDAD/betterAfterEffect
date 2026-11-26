@@ -342,3 +342,108 @@ fn mask_params_pick_a_mask_of_the_layer() {
     fx.run("prim.delete", json!({"path": m1}));
     assert!(none(&drawn_texts(&fx, &mut panel)));
 }
+
+/// With Liquify shown in the Layer panel, a drag warps its Distortion Mesh:
+/// previewed live, one `attr.set_at` on release.
+#[test]
+fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    fx.run(
+        "effect.apply",
+        json!({"layers": [layer], "match_name": "ADBE Liquify"}),
+    );
+    let session = fx.resources.get::<SharedSession>().unwrap().clone();
+    session.lock().layer_panel = Some(layer.clone());
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    panel.show = crate::layer_panel::Show::Effect(0);
+    let frame = |fx: &Fx, panel: &mut crate::layer_panel::LayerPanel, events: Vec<egui::Event>| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("layer");
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = fx.ctx.run_ui(raw, |ui| {
+            let mut cx = PanelContext::new(
+                &id,
+                "layer",
+                &fx.stage,
+                &fx.author,
+                &fx.resources,
+                &mut requests,
+            );
+            panel.ui(ui, &mut cx);
+        });
+        out.textures_delta.clear();
+        requests
+    };
+    frame(&fx, &mut panel, Vec::new());
+    // The 64 × 32 solid at 100 % in the middle of the 900 × 650 picture.
+    let at = |x: f32| egui::pos2(418.0 + x, 325.0);
+    let button = |x: f32, pressed: bool| egui::Event::PointerButton {
+        pos: at(x),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let mut last = PanelRequests::default();
+    for events in [
+        vec![egui::Event::PointerMoved(at(20.0))],
+        vec![button(20.0, true)],
+        vec![egui::Event::PointerMoved(at(30.0))],
+        vec![egui::Event::PointerMoved(at(40.0))],
+        vec![button(40.0, false)],
+    ] {
+        last = frame(&fx, &mut panel, events);
+    }
+    let set = last
+        .invocations
+        .iter()
+        .find(|i| i.id == "attr.set_at")
+        .expect("the mesh is set");
+    assert_eq!(set.params["attr"], "param:0010");
+    fx.exec_all(last);
+    let effect = bae_motion::effect::effects_of(&fx.stage, &layer)[0].clone();
+    let v =
+        bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0010").unwrap();
+    let mesh = bae_effects::effects::liquify::Mesh::from_value(&v).expect("a mesh");
+    assert!(mesh.reach() > 1.0, "warped");
+}
+
+#[test]
+fn animation_presets_save_and_apply_effects_with_their_values() {
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    let out = fx.run(
+        "effect.apply",
+        json!({"layers": [layer], "match_name": "ADBE Gaussian Blur 2"}),
+    );
+    let blur = PrimPath::new(out["effects"][0].as_str().unwrap()).unwrap();
+    fx.run(
+        "attr.set",
+        json!({"path": blur, "attr": "param:1", "value": {"type": "float", "value": 25.0}}),
+    );
+    // Save: the layer's effects and their values.
+    let preset = crate::presets::preset_of(&fx.stage, &[blur], bae_model::Time::ZERO);
+    assert_eq!(preset.effects[0].match_name, "ADBE Gaussian Blur 2");
+    assert_eq!(
+        preset.effects[0].values.get("param:1"),
+        Some(&Value::Float(25.0))
+    );
+    // Apply to another layer: the effect with the stored value, one step.
+    let comp = bae_motion::query::owning_comp(&fx.stage, &layer).unwrap();
+    let other = fx.run("layer.create", json!({"comp": comp, "kind": "solid"}));
+    let other = PrimPath::new(other["path"].as_str().unwrap()).unwrap();
+    let out = fx.run(
+        "effect.apply_preset",
+        json!({"layers": [other], "effects": preset.effects}),
+    );
+    let applied = PrimPath::new(out["effects"][0].as_str().unwrap()).unwrap();
+    let v = fx.stage.prim(&applied).unwrap();
+    assert_eq!(
+        bae_motion::query::static_value(&v, "param:1"),
+        Some(Value::Float(25.0))
+    );
+}

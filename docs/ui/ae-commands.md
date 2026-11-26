@@ -43,7 +43,7 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | New ▸ New Project | 16187393 | `file.new_project` |  | Ctrl+Alt+N | Cmd+Opt+N | B | ✅ |
-| New ▸ New Folder | 16187394 | `motion.file.new_folder` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | B | ☐ |
+| New ▸ New Folder | 16187394 | `motion.file.new_folder` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | B | ✅ |
 | New ▸ Adobe Photoshop File... | 16187395 | `motion.file.adobe_photoshop_file` |  |  |  | B | Ⓐ |
 | New ▸ Maxon Cinema 4D File... | 16187396 | `motion.file.maxon_cinema_4d_file` |  |  |  | B | Ⓐ |
 | Open Project... | 131074 | `file.open_project` |  | Ctrl+O | Cmd+O | B | ✅ |
@@ -57,8 +57,8 @@
 | Save As ▸ Save a Copy As XML... | 21889027 | `motion.file.save_a_copy_as_xml` |  |  |  | B | Ⓐ |
 | Save As ▸ Save a Copy As 25.x... | 21889028 | `motion.file.save_a_copy_as_25_x` |  |  |  | B | Ⓐ |
 | Save As ▸ Save a Copy As 24.x... | 21889029 | `motion.file.save_a_copy_as_24_x` |  |  |  | B | Ⓐ |
-| Increment and Save | 131082 | `motion.file.increment_and_save` |  | Ctrl+Alt+Shift+S | Cmd+Opt+Shift+S | B | ☐ |
-| Revert | 131083 | `motion.file.revert` |  |  |  | B | ☐ |
+| Increment and Save | 131082 | `file.increment_and_save` |  | Ctrl+Alt+Shift+S | Cmd+Opt+Shift+S | B | ✅ |
+| Revert | 131083 | `file.revert` |  |  |  | B | ✅ |
 | Import ▸ File... | 9764865 | `motion.file.import_file` |  | Ctrl+I | Cmd+I | E | ✅ |
 | Import ▸ Multiple Files... | 9764866 | `motion.file.import_multiple_files` |  | Ctrl+Alt+I | Cmd+Opt+I | E | ✅ |
 | Import ▸ From Libraries... | 9764867 | `motion.file.from_libraries` |  |  |  | B | Ⓐ |
@@ -70,7 +70,7 @@
 | Export ▸ Maxon Cinema 4D Exporter... | 11665409 | `motion.file.maxon_cinema_4d_exporter` |  |  |  | B | Ⓐ |
 | Export ▸ Export Adobe Premiere Project... | 11665410 | `motion.file.export_adobe_premiere_project` |  |  |  | B | Ⓐ |
 | Export ▸ Add to Adobe Media Encoder Queue... | 11665411 | `motion.comp.add_to_adobe_media_encoder_queue` |  | Ctrl+Alt+M | Cmd+Opt+M | B | Ⓐ |
-| Export ▸ Add to Render Queue | 11665412 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Cmd+M / Cmd+Shift+/ | B | ✅ |
+| Export ▸ Add to Render Queue | 11665412 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Fonts from Adobe... | 131089 | `motion.file.add_fonts_from_adobe` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ New Premiere Sequence... | 12845057 | `motion.file.new_premiere_sequence` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
@@ -109,7 +109,7 @@
 | Interpret Footage ▸ Proxy... | 10420226 | `motion.file.interpret_footage_proxy` |  |  |  | E | ⏸ |
 | Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ☐ |
 | Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ☐ |
-| Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Cmd+H | E | ✅ |
+| Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
 | Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
 | Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ⏸ |
@@ -207,7 +207,7 @@
 | Crop Comp to Region of Interest | 327686 | `motion.comp.crop_comp_to_region_of_interest` |  |  |  | B | ⏸ |
 | Crop Comp to Selected Layer(s) Bounds | 327687 | `motion.comp.crop_comp_to_selected_layer_bounds` |  |  |  | B | ⏸ |
 | Add to Adobe Media Encoder Queue... | 327689 | `motion.comp.add_to_adobe_media_encoder_queue` |  | Ctrl+Alt+M | Cmd+Opt+M | B | Ⓐ |
-| Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Cmd+M / Cmd+Shift+/ | B | ✅ |
+| Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
 | Preview ▸ Play Current Preview | 10682369 | `motion.play` |  | Space | Space | B | ✅ |
 | Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ⏸ |
@@ -247,33 +247,33 @@
 | New ▸ Cone | 11862032 | `motion.layer.new_3d_shape` | `{"shape":"cone"}` |  |  | B | ⏸ |
 | New ▸ Cylinder | 11862033 | `motion.layer.new_3d_shape` | `{"shape":"cylinder"}` |  |  | B | ⏸ |
 | Layer Settings... | 393218 | `motion.layer.layer_settings` |  | Ctrl+Shift+Y | Cmd+Shift+Y | E | ✅ |
-| Open Layer | 393220 | `motion.layer.open_layer` |  |  |  | E | ⏸ |
-| Open Layer Source | 393221 | `motion.layer.open_layer_source` |  | Alt+PadEnter | Opt+PadEnter | B | ☐ |
+| Open Layer | 393220 | `motion.layer.open_layer` |  |  |  | E | ✅ |
+| Open Layer Source | 393221 | `motion.layer.open_layer_source` |  | Alt+PadEnter | Opt+PadEnter | B | ✅ |
 | Reveal in Explorer | 393222 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
-| Mask ▸ New Mask | 8519681 | `motion.layer.new_mask` |  | Ctrl+Shift+N | Cmd+Shift+N | A | ☐ |
-| Mask ▸ Mask Shape... | 8519683 | `motion.layer.mask_shape` |  | Ctrl+Shift+M | Cmd+Shift+M | E | ☐ |
-| Mask ▸ Mask Feather... | 8519684 | `motion.layer.mask_feather` |  | Ctrl+Shift+F | Cmd+Shift+F | E | ☐ |
-| Mask ▸ Mask Opacity... | 8519685 | `motion.layer.mask_opacity` |  |  |  | E | ☐ |
-| Mask ▸ Mask Expansion... | 8519686 | `motion.layer.mask_expansion` |  |  |  | E | ☐ |
-| Mask ▸ Reset Mask | 8519688 | `motion.layer.reset_mask` |  |  |  | B | ☐ |
-| Mask ▸ Remove Mask | 8519689 | `motion.layer.remove_mask` |  |  |  | B | ☐ |
-| Mask ▸ Remove All Masks | 8519690 | `motion.layer.remove_all_masks` |  |  |  | B | ☐ |
-| Mask ▸ Mode ▸ None | 11468801 | `motion.layer.mask_mode` | `{"mode":"none"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Add | 11468803 | `motion.layer.mask_mode` | `{"mode":"add"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Subtract | 11468804 | `motion.layer.mask_mode` | `{"mode":"subtract"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Intersect | 11468805 | `motion.layer.mask_mode` | `{"mode":"intersect"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Lighten | 11468806 | `motion.layer.mask_mode` | `{"mode":"lighten"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Darken | 11468807 | `motion.layer.mask_mode` | `{"mode":"darken"}` |  |  | B | ☐ |
-| Mask ▸ Mode ▸ Difference | 11468808 | `motion.layer.mask_mode` | `{"mode":"difference"}` |  |  | B | ☐ |
-| Mask ▸ Inverted | 8519693 | `motion.layer.mask_inverted` |  | Ctrl+Shift+I | Cmd+Shift+I | B | ☐ |
-| Mask ▸ Locked | 8519694 | `motion.layer.mask_locked` |  |  |  | B | ☐ |
+| Mask ▸ New Mask | 8519681 | `motion.layer.new_mask` |  | Ctrl+Shift+N | Cmd+Shift+N | A | ✅ |
+| Mask ▸ Mask Shape... | 8519683 | `motion.layer.mask_shape` |  | Ctrl+Shift+M | Cmd+Shift+M | E | ✅ |
+| Mask ▸ Mask Feather... | 8519684 | `motion.layer.mask_feather` |  | Ctrl+Shift+F | Cmd+Shift+F | E | ✅ |
+| Mask ▸ Mask Opacity... | 8519685 | `motion.layer.mask_opacity` |  |  |  | E | ✅ |
+| Mask ▸ Mask Expansion... | 8519686 | `motion.layer.mask_expansion` |  |  |  | E | ✅ |
+| Mask ▸ Reset Mask | 8519688 | `motion.layer.reset_mask` |  |  |  | B | ✅ |
+| Mask ▸ Remove Mask | 8519689 | `motion.layer.remove_mask` |  |  |  | B | ✅ |
+| Mask ▸ Remove All Masks | 8519690 | `motion.layer.remove_all_masks` |  |  |  | B | ✅ |
+| Mask ▸ Mode ▸ None | 11468801 | `motion.layer.mask_mode` | `{"mode":"none"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Add | 11468803 | `motion.layer.mask_mode` | `{"mode":"add"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Subtract | 11468804 | `motion.layer.mask_mode` | `{"mode":"subtract"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Intersect | 11468805 | `motion.layer.mask_mode` | `{"mode":"intersect"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Lighten | 11468806 | `motion.layer.mask_mode` | `{"mode":"lighten"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Darken | 11468807 | `motion.layer.mask_mode` | `{"mode":"darken"}` |  |  | B | ✅ |
+| Mask ▸ Mode ▸ Difference | 11468808 | `motion.layer.mask_mode` | `{"mode":"difference"}` |  |  | B | ✅ |
+| Mask ▸ Inverted | 8519693 | `motion.layer.mask_inverted` |  | Ctrl+Shift+I | Cmd+Shift+I | B | ✅ |
+| Mask ▸ Locked | 8519694 | `motion.layer.mask_locked` |  |  |  | B | ✅ |
 | Mask ▸ Motion Blur ▸ Same As Layer | 14352385 | `motion.layer.mask_motion_blur` | `{"mode":"same_as_layer"}` |  |  | B | ⏸ |
 | Mask ▸ Motion Blur ▸ On | 14352386 | `motion.layer.mask_motion_blur` | `{"mode":"on"}` |  |  | B | ⏸ |
 | Mask ▸ Motion Blur ▸ Off | 14352387 | `motion.layer.mask_motion_blur` | `{"mode":"off"}` |  |  | B | ⏸ |
 | Mask ▸ Feather Falloff ▸ Smooth | 22544385 | `motion.layer.mask_feather_falloff` | `{"falloff":"smooth"}` |  |  | B | ⏸ |
 | Mask ▸ Feather Falloff ▸ Linear | 22544386 | `motion.layer.mask_feather_falloff` | `{"falloff":"linear"}` |  |  | B | ⏸ |
-| Mask ▸ Unlock All Masks | 8519698 | `motion.layer.unlock_all_masks` |  |  |  | B | ☐ |
-| Mask ▸ Lock Other Masks | 8519699 | `motion.layer.lock_other_masks` |  |  |  | B | ☐ |
+| Mask ▸ Unlock All Masks | 8519698 | `motion.layer.unlock_all_masks` |  |  |  | B | ✅ |
+| Mask ▸ Lock Other Masks | 8519699 | `motion.layer.lock_other_masks` |  |  |  | B | ✅ |
 | Mask ▸ Hide Locked Masks | 8519700 | `motion.layer.hide_locked_masks` |  |  |  | B | ⏸ |
 | Mask and Shape Path ▸ RotoBezier | 11010049 | `motion.layer.rotobezier` |  |  |  | A | ☐ |
 | Mask and Shape Path ▸ Closed | 11010050 | `motion.layer.path_closed` |  |  |  | A | ☐ |
@@ -316,23 +316,23 @@
 | Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ✅ |
 | Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ✅ |
 | Transform ▸ Auto-Orient... | 8912915 | `motion.layer.auto_orient` |  | Ctrl+Alt+O | Cmd+Opt+O | E | ✅ |
-| Time ▸ Enable Time Remapping | 1966081 | `motion.layer.enable_time_remapping` |  | Ctrl+Alt+T | Cmd+Opt+T | B | ☐ |
-| Time ▸ Time-Reverse Layer | 1966082 | `motion.layer.time_reverse_layer` |  | Ctrl+Alt+R | Cmd+Opt+R | B | ☐ |
+| Time ▸ Enable Time Remapping | 1966081 | `motion.layer.enable_time_remapping` |  | Ctrl+Alt+T | Cmd+Opt+T | B | ✅ |
+| Time ▸ Time-Reverse Layer | 1966082 | `motion.layer.time_reverse_layer` |  | Ctrl+Alt+R | Cmd+Opt+R | B | ✅ |
 | Time ▸ Time Stretch... | 1966083 | `motion.layer.time_stretch` |  |  |  | E | ✅ |
-| Time ▸ Freeze Frame | 1966084 | `motion.layer.freeze_frame` |  |  |  | B | ☐ |
-| Time ▸ Freeze On Last Frame | 1966085 | `motion.layer.freeze_on_last_frame` |  |  |  | B | ☐ |
+| Time ▸ Freeze Frame | 1966084 | `motion.layer.freeze_frame` |  |  |  | B | ✅ |
+| Time ▸ Freeze On Last Frame | 1966085 | `motion.layer.freeze_on_last_frame` |  |  |  | B | ✅ |
 | Time ▸ Align Video to Data | 1966086 | `motion.layer.align_video_to_data` |  |  |  | B | ⏸ |
 | Frame Blending ▸ Off | 10616833 | `motion.layer.frame_blending` | `{"mode":"off"}` |  |  | B | ⏸ |
 | Frame Blending ▸ Frame Mix | 10616834 | `motion.layer.frame_blending` | `{"mode":"frame_mix"}` |  |  | B | ⏸ |
 | Frame Blending ▸ Pixel Motion | 10616835 | `motion.layer.frame_blending` | `{"mode":"pixel_motion"}` |  |  | B | ⏸ |
 | 3D Layer | 393231 | `motion.layer.switch` | `{"switch":"three_d"}` |  |  | B | ✅ |
-| Guide Layer | 393232 | `motion.layer.switch` | `{"switch":"guide"}` |  |  | B | ☐ |
+| Guide Layer | 393232 | `motion.layer.switch` | `{"switch":"guide"}` |  |  | B | ✅ |
 | Environment Layer | 393233 | `motion.layer.switch` | `{"switch":"environment"}` |  |  | B | ⏸ |
 | Markers ▸ Add Marker | 23265281 | `motion.layer.add_marker` |  | PadMultiply | PadMultiply / Control+8 | C | ✅ |
 | Markers ▸ Update Markers From Source | 23265282 | `motion.layer.update_markers_from_source` |  |  |  | C | ⏸ |
 | Markers ▸ Lock Markers | 23265283 | `motion.layer.lock_markers` |  |  |  | C | ☐ |
 | Markers ▸ Delete All Markers | 23265284 | `motion.layer.delete_all_markers` |  |  |  | C | ✅ |
-| Preserve Transparency | 393236 | `motion.layer.switch` | `{"switch":"preserve_transparency"}` |  |  | B | ☐ |
+| Preserve Transparency | 393236 | `motion.layer.switch` | `{"switch":"preserve_transparency"}` |  |  | B | ✅ |
 | Blending Mode ▸ Normal | 16318465 | `motion.layer.blending_mode` | `{"mode":"normal"}` |  |  | B | ✅ |
 | Blending Mode ▸ Dissolve | 16318466 | `motion.layer.blending_mode` | `{"mode":"dissolve"}` |  |  | B | ✅ |
 | Blending Mode ▸ Dancing Dissolve | 16318467 | `motion.layer.blending_mode` | `{"mode":"dancing_dissolve"}` |  |  | B | ✅ |
@@ -436,12 +436,12 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | Track in Boris FX Mocha | 851969 | `motion.anim.track_in_boris_fx_mocha` |  |  |  | B | Ⓐ |
-| Save Animation Preset... | 851970 | `motion.anim.save_animation_preset` |  |  |  | E | ⏸ |
-| Apply Animation Preset... | 851971 | `motion.anim.apply_animation_preset` |  |  |  | E | ⏸ |
+| Save Animation Preset... | 851970 | `motion.anim.save_animation_preset` |  |  |  | E | ✅ |
+| Apply Animation Preset... | 851971 | `motion.anim.apply_animation_preset` |  |  |  | E | ✅ |
 | Recent Animation Presets ▸ (recent presets) | 11599873 | `motion.anim.recent_animation_preset` |  | Ctrl+Alt+Shift+F | Cmd+Opt+Shift+F | E | ⋯ |
 | Browse Presets... | 851973 | `motion.anim.browse_presets` |  |  |  | E | ⏸ |
 | Set Keyframe | 851975 | `motion.anim.set_keyframe` |  |  |  | B | ☐ |
-| Toggle Hold Keyframe | 851976 | `motion.toggle_hold` |  | Ctrl+Alt+H | Cmd+Opt+H | B | ✅ |
+| Toggle Hold Keyframe | 851976 | `motion.toggle_hold` |  | Ctrl+Alt+H | Control+Cmd+Opt+H | B | ✅ |
 | Keyframe Interpolation... | 851977 | `motion.anim.keyframe_interpolation` |  | Ctrl+Alt+K | Cmd+Opt+K | C | ✅ |
 | Keyframe Velocity... | 851978 | `motion.anim.keyframe_velocity` |  | Ctrl+Shift+K | Cmd+Shift+K | C | ✅ |
 | Keyframe Assistant ▸ RPF Camera Import | 11075585 | `motion.anim.rpf_camera_import` |  |  |  | B | Ⓐ |
@@ -492,7 +492,7 @@
 | Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ☐ |
 | Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
 | Warp Stabilizer VFX | 851989 | `motion.anim.warp_stabilizer_vfx` |  |  |  | B | ⏸ |
-| Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ⏸ |
+| Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ✅ |
 | Track Mask | 851991 | `motion.anim.track_mask` |  |  |  | B | ⏸ |
 | Track this Property | 851992 | `motion.anim.track_this_property` |  |  |  | B | ⏸ |
 | Reveal Properties with Keyframes | 851994 | `motion.reveal` | `{"what":"animated","add":false}` | U | U | B | ✅ |
@@ -629,8 +629,8 @@
 | Render Queue | 524327 | `window.panel` | `{"id":"render_queue","toggle":true}` | Ctrl+Alt+0 | Cmd+Opt+0 | B | ✅ |
 | Footage | 524328 | `window.panel` | `{"id":"footage","toggle":true}` |  |  | E | ⏸ |
 | Project | 524329 | `window.panel` | `{"id":"project","toggle":true}` | Ctrl+0 | Cmd+0 | B | ✅ |
-| (script panel) | 524331 | `motion.window.script_panel` |  |  |  | B | ⋯ |
-| (script panel) | 524338 | `motion.window.script_panel` |  |  |  | B | ⋯ |
+| Create Nulls From Paths.jsx（仅 Windows） | 524331 | `motion.window.script_panel` | `{"script":"Create Nulls From Paths.jsx"}` |  |  | B | ⏸ |
+| VR Comp Editor.jsx（仅 Windows） | 524338 | `motion.window.script_panel` | `{"script":"VR Comp Editor.jsx"}` |  |  | B | ⏸ |
 
 ### Help
 
@@ -673,8 +673,8 @@
 | Settings ▸ 3D... |  | `app.settings` | `{"page":"3d"}` |  |  | D | ☐ |
 | Settings ▸ Scripting & Expressions... |  | `app.settings` | `{"page":"scripting_expressions"}` |  |  | D | ☐ |
 | Services |  | `app.services` |  |  |  | B | ✅ |
-| Hide BAE |  | `app.hide` |  |  | Control+Cmd+H / Cmd+H | B | ✅ |
-| Hide Others |  | `app.hide_others` |  |  | Control+Cmd+Opt+H / Cmd+Opt+H | B | ✅ |
+| Hide BAE |  | `app.hide` |  |  | Cmd+H | B | ✅ |
+| Hide Others |  | `app.hide_others` |  |  | Cmd+Opt+H | B | ✅ |
 | Show All |  | `app.show_all` |  |  |  | B | ✅ |
 | Quit BAE |  | `app.quit` |  | Ctrl+Q | Cmd+Q | B | ✅ |
 
@@ -821,7 +821,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ☐ |
 | `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ☐ |
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ✅ |
-| `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ☐ |
+| `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ✅ |
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  |  | C | ⏸ |
 | `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Control+\` |  | C | ☐ |
 | `TwirlPreserveSolo` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":true}` | Shift+\` | Shift+\` |  | C | ☐ |
@@ -1141,7 +1141,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `SwitchTo3DViewC` | `motion.view.switch_3d_view_shortcut` | `{"slot":"c"}` | F12 | F12 |  | A | ⏸ |
 | `SwitchTo3DViewFirst`（同一快捷键 AE 先给了别的命令） | `motion.view.switch_3d_view_shortcut` | `{"slot":"first"}` | F10 | F10 |  | A | ⏸ |
 | `ToggleCastsShadows` | `motion.layer.casts_shadows` |  | Alt+Shift+C | Opt+Shift+C |  | B | ⏸ |
-| `ToggleSwitchesModes` | `motion.timeline.toggle_switches_modes` |  | F4 | F4 |  | C | ☐ |
+| `ToggleSwitchesModes` | `motion.timeline.toggle_switches_modes` |  | F4 | F4 |  | C | ✅ |
 | `WireframeQualityRecurse` | `motion.layer.quality` | `{"quality":"wireframe","nested":true}` |  | Control+Cmd+Opt+Shift+U |  | B | ⏸ |
 
 ### `CSwitchboardModal`
@@ -1172,7 +1172,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `MacSysMenuMinimize` | `window.minimize` |  |  | Control+Cmd+M |  | B | ☐ |
+| `MacSysMenuMinimize` | `window.minimize` |  |  |  |  | B | ☐ |
 
 ### `MacSysShortcutsStd`
 

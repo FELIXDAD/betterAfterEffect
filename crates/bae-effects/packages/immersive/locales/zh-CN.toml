@@ -208,3 +208,66 @@ invert_rotation = "反旋转"
 [effect.vr-sphere-to-plane.choices]
 input_format = ["立方图", "球形图", "球面投影"]
 output_frame_aspect_ratio = ["1:1", "4:3", "16:9", "16:10", "不变"]
+
+[effect.vr-blur]
+name = "VR 模糊"
+keywords = ["沉浸式视频", "VR 模糊"]
+
+[effect.vr-blur.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+blurriness = "模糊度"
+
+[effect.vr-blur.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-de-noise]
+name = "VR 降噪"
+keywords = ["沉浸式视频", "VR 降噪"]
+
+[effect.vr-de-noise.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+noise_type = "杂色类型"
+noise_level = "杂色级别"
+
+[effect.vr-de-noise.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+noise_type = ["随机赋值", "盐和胡椒"]
+
+[effect.vr-glow]
+name = "VR 发光"
+keywords = ["沉浸式视频", "VR 发光"]
+
+[effect.vr-glow.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+luma_threshold = "亮度阈值"
+glow_radius = "发光半径"
+glow_brightness = "发光亮度"
+glow_saturation = "发光饱和度"
+use_tint_color = "使用色调颜色"
+tint_color = "色调颜色"
+
+[effect.vr-glow.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]
+
+[effect.vr-sharpen]
+name = "VR 锐化"
+keywords = ["沉浸式视频", "VR 锐化"]
+
+[effect.vr-sharpen.params]
+auto_vr_properties = "自动 VR 属性"
+frame_layout = "帧布局"
+horizontal_field_of_view = "水平视角"
+vertical_field_of_view = "垂直视角"
+sharpen_amount = "锐化量"
+
+[effect.vr-sharpen.choices]
+frame_layout = ["单像", "立体 - 上/下", "立体 - 并排"]

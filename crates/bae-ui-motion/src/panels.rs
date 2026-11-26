@@ -11,7 +11,7 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
-mod audio;
+pub(crate) mod audio;
 
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
@@ -105,15 +105,19 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
 #[derive(Default)]
 pub struct PropertiesPanel {
     eval: EvalCache,
-    title: String,
 }
 
 impl Panel for PropertiesPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        if self.title.is_empty() {
-            TabInfo::new(tr("Properties"))
-        } else {
-            TabInfo::new(format!("{}: {}", tr("Properties"), self.title))
+    /// "Properties: <layer>" for the layer selected now, even while the panel
+    /// is not drawn (a collapsed or background tab, #465).
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        match selected_layer(cx.stage, &common::session(cx.resources)) {
+            Some(layer) => TabInfo::new(format!(
+                "{}: {}",
+                tr("Properties"),
+                query::display_name_of(cx.stage, &layer)
+            )),
+            None => TabInfo::new(tr("Properties")),
         }
     }
 
@@ -127,7 +131,6 @@ impl Panel for PropertiesPanel {
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let Some(layer) = selected_layer(stage, &session) else {
-            self.title.clear();
             common::empty_hint(
                 ui,
                 tr("No layer selected"),
@@ -135,7 +138,6 @@ impl Panel for PropertiesPanel {
             );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
         let now = session.lock().active_time();
         let dims = if common::is_3d(stage, &layer) { 3 } else { 2 };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -172,26 +174,44 @@ impl Panel for PropertiesPanel {
                     if r.lost_focus() {
                         ui.data_mut(|d| d.remove::<String>(key));
                         if text != doc.text {
-                            d2.text = text;
+                            d2.set_text(&text);
                             commit = true;
                         }
                     }
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
-                        let mut size = d2.font_size;
+                        let mut size = d2.style.font_size;
                         let px = format!(" {}", tr("px")); // 像素 in Chinese (#197)
                         let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(&px).range(1.0..=2000.0).label(tr("Font Size")));
                         if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                            d2.font_size = size;
+                            d2.style.font_size = size;
                             commit = true;
                         }
                     });
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Fill Color")).color(color::TEXT));
-                        let mut c = d2.fill_color.map(|v| v as f32);
+                        let mut c = d2.style.fill_color.map(|v| v as f32);
                         if ui.color_edit_button_rgba_unmultiplied(&mut c).changed() {
-                            d2.fill_color = c.map(f64::from);
+                            d2.style.fill_color = c.map(f64::from);
                             commit = true;
+                        }
+                    });
+                    // Paragraph alignment.
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(tr("Paragraph")).color(color::TEXT));
+                        for (icon, value, name) in [
+                            (Icon::TextAlignLeft, "left", "Left Align Text"),
+                            (Icon::TextAlignCenter, "center", "Center Text"),
+                            (Icon::TextAlignRight, "right", "Right Align Text"),
+                        ] {
+                            let on = d2.paragraph.justification == value;
+                            let r = icons::button(ui, icon, 20.0, on)
+                                .labeled_toggle(egui::WidgetType::Button, tr(name), on)
+                                .on_hover_text(tr(name));
+                            if r.clicked() && !on {
+                                d2.paragraph.justification = value.to_owned();
+                                commit = true;
+                            }
                         }
                     });
                     if commit {
@@ -212,6 +232,22 @@ impl Panel for PropertiesPanel {
                 for (path, attr, label) in flat.into_iter().filter(|(_, a, _)| a == "color" || a == "size" || a == "width") {
                     let owner = query::display_name_of(stage, &path);
                     prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &format!("{owner} · {label}"), now, 2);
+                }
+            }
+            // Effects: each effect's controls, in stacking order (AE).
+            let effects = props::effect_nodes(stage, &layer);
+            if !effects.is_empty() {
+                section(ui, tr("Effects"));
+                for effect in &effects {
+                    let Node::Group { label, children, .. } = effect else {
+                        continue;
+                    };
+                    ui.label(egui::RichText::new(label).color(color::TEXT_STRONG));
+                    let mut flat = Vec::new();
+                    collect_props(children, &mut flat);
+                    for (path, attr, label) in flat {
+                        prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &label, now, dims);
+                    }
                 }
             }
         });
@@ -339,6 +375,19 @@ const PREVIEW_MIN_H: f32 = 56.0;
 const PREVIEW_OPTIONS_H: f32 = 240.0;
 
 impl Panel for PreviewPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let session = common::session(cx.resources);
+        if ui
+            .checkbox(
+                &mut session.lock().preview.favor_active_camera,
+                tr("Previews Favor Active Camera"),
+            )
+            .clicked()
+        {
+            ui.close();
+        }
+    }
+
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         // The transport row and the timecode line below it, never cut off.
         TabInfo::new(tr("Preview")).min_size(egui::vec2(PREVIEW_MIN_W, PREVIEW_MIN_H))
@@ -353,10 +402,9 @@ impl Panel for PreviewPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let info = common::active_comp(cx.stage, &session);
-        if let Some(info) = &info
-            && session.lock().update_preview(cx, info)
-        {
-            ui.ctx().request_repaint();
+        // The shell ticks the clock; this keeps the audio mix current.
+        if let Some(info) = &info {
+            session.lock().update_preview(cx, info);
         }
         let playing = session.lock().is_playing();
         ui.add_space(4.0);
@@ -529,6 +577,11 @@ fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::Co
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Previews Favor Active Camera", "预览支持活动摄像机"),
+    ("Audio Options", "音频选项"),
+    ("Decibels (dB)", "分贝 (dB)"),
+    ("Slider Minimum", "滑块最小值"),
+    ("Percentage", "百分比"),
     // Preview panel (AE 26's Time_Palette strings).
     ("Spacebar", "空格键"),
     ("Include:", "包含:"),
@@ -593,6 +646,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Expression", "表达式"),
     ("Font Size", "字体大小"),
     ("Fill Color", "填充颜色"),
+    ("Left Align Text", "左对齐文本"),
+    ("Center Text", "居中对齐文本"),
+    ("Right Align Text", "右对齐文本"),
     ("Zoom", "缩放"),
     ("Intensity", "强度"),
     ("No layer selected", "未选择图层"),
@@ -625,7 +681,9 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "audio",
-        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+        bae_ui::PanelKind::new("Audio", |spawn| {
+            Box::new(audio::AudioPanel::from_state(spawn.state))
+        }),
     );
     crate::register_panel(
         app,

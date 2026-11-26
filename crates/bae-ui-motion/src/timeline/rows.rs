@@ -267,8 +267,10 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) && !locked {
-                        self.rename = Some((layer.clone(), name.clone()));
+                    // AE: a double-click opens a pre-comp's comp, any other layer
+                    // in the Layer panel; Enter renames.
+                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) {
+                        crate::layer_panel::open(cx, session, layer);
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {
@@ -394,7 +396,7 @@ impl TimelinePanel {
                             .id_salt(rid("parent")),
                     );
                     let current = parent_items[sel];
-                    widgets::dropdown(
+                    let dresp = widgets::dropdown(
                         &mut child,
                         rid("parent_dd"),
                         &mut sel,
@@ -406,6 +408,15 @@ impl TimelinePanel {
                         &bae_ui::a11y::context(&[&layer_ctx, tr("Parent & Link")]),
                         current,
                     );
+                    // AE: a right-click pops the same list.
+                    if !locked {
+                        let mut picked = None;
+                        crate::common::context_menu(&dresp, &mut |ui| {
+                            picked =
+                                menus::parent_menu(ui, parent_items, before, row.layer_index + 1);
+                        });
+                        sel = picked.unwrap_or(sel);
+                    }
                     if sel != before {
                         let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
                         if parent.as_ref() != Some(layer) {
@@ -501,7 +512,8 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
-                self.waveforms.draw(ui, stage, layer, axis, graph);
+                self.waveforms
+                    .draw(ui, stage, layer, axis, graph, color::TEXT);
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
@@ -749,6 +761,10 @@ impl TimelinePanel {
                 } else {
                     Some(crate::expr::default_expression(stage, path, attr))
                 };
+                if source.is_some() {
+                    session.lock().focus_expression =
+                        Some((path.clone(), attr.to_owned(), std::time::Instant::now()));
+                }
                 cx.invoke_with(
                     "attr.set_expression",
                     json!({"path": path, "attr": attr, "source": source}),
@@ -847,6 +863,13 @@ impl TimelinePanel {
                 s.selected_layers = vec![layer.clone()];
             }
         }
+        // Right-click: AE's property menu (Edit Value…, keyframes, Reset,
+        // expressions …).
+        if query::locked_layer_of(stage, path).is_none() {
+            crate::common::context_menu(&nresp, &mut |ui| {
+                menus::property_menu(ui, cx, session, path, attr, now);
+            });
+        }
         // Value.
         let value = session
             .lock()
@@ -913,6 +936,35 @@ impl TimelinePanel {
                 } else {
                     common::Edit::None
                 }
+            } else if let bae_model::Value::Time(t) = value {
+                // Time Remap: the source time as hot timecode, a frame per point.
+                let rate = info.frame_rate;
+                let mut frames = rate.time_to_frame(t) as f64;
+                let display = |f: f64| widgets::timecode(f.round() as i64, rate.as_f64());
+                let parse = |s: &str| super::markers::parse_timecode(info, s).map(|f| f as f64);
+                let resp = child
+                    .push_id(id.with("ed"), |ui| {
+                        ui.add(
+                            widgets::HotNumber::new(&mut frames)
+                                .tint(if expression {
+                                    common::EXPRESSION_VALUE
+                                } else {
+                                    color::ACCENT
+                                })
+                                .speed(1.0)
+                                .text(&display, &parse)
+                                .label(&prop_name),
+                        )
+                    })
+                    .inner;
+                let to = bae_model::Value::Time(rate.frame_to_time(frames.round() as i64));
+                if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                    common::Edit::Commit(to)
+                } else if resp.dragged() && resp.changed() {
+                    common::Edit::Live(to)
+                } else {
+                    common::Edit::None
+                }
             } else {
                 common::value_editor(
                     &mut child,
@@ -925,6 +977,22 @@ impl TimelinePanel {
                 )
             };
             common::apply_edit(cx, session, path, attr, now, edit);
+            // AE: a right-click on the value shows the property name's menu. The
+            // value widgets take the click, so read it from the pointer.
+            let used = child.min_rect();
+            let right_click = ui.input(|i| {
+                i.pointer.secondary_clicked()
+                    && i.pointer.interact_pos().is_some_and(|p| used.contains(p))
+            });
+            if query::locked_layer_of(stage, path).is_none() {
+                let mut vresp = ui.interact(used, id.with("val_menu"), Sense::hover());
+                if right_click {
+                    vresp.flags |= egui::response::Flags::CLICKED;
+                }
+                crate::common::context_menu(&vresp, &mut |ui| {
+                    menus::property_menu(ui, cx, session, path, attr, now);
+                });
+            }
         }
         // Keyframes (layer bar mode; the Graph Editor draws its own).
         if !self.graph_mode {
@@ -1088,27 +1156,45 @@ impl TimelinePanel {
             pos2(rect.right() - 4.0, rect.bottom() - 1.0),
         );
         let mut buf = match &self.expr_edit {
-            Some((p, a, b)) if p == path && a == attr => b.clone(),
+            Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
             _ => expr.source.clone(),
         };
+        // Just added: the field takes the focus with the whole text selected.
+        let focus = {
+            let mut s = session.lock();
+            match &s.focus_expression {
+                Some((p, a, _)) if p == path && a == attr => s.focus_expression.take().is_some(),
+                Some((.., at)) if at.elapsed() > std::time::Duration::from_secs(1) => {
+                    s.focus_expression = None;
+                    false
+                }
+                _ => false,
+            }
+        };
+        if focus {
+            let mut state =
+                egui::text_edit::TextEditState::load(ui.ctx(), field_id).unwrap_or_default();
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(buf.chars().count()),
+                )));
+            state.store(ui.ctx(), field_id);
+            ui.memory_mut(|m| m.request_focus(field_id));
+        }
         // Keypad Enter ends editing (Return adds a line).
         let keypad = ui.memory(|m| m.has_focus(field_id))
             && bae_ui::keypad_enter()
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        let (font, text, bg) = crate::common::expression_style(cx.resources);
-        let shown = ui
-            .scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
-                egui::TextEdit::multiline(&mut buf)
-                    .id(field_id)
-                    .font(font)
-                    .text_color(text)
-                    .background_color(bg)
-                    .desired_width(field.width())
-                    .desired_rows(lines)
-                    .min_size(field.size())
-                    .show(ui)
-            })
-            .inner;
+        let shown = crate::expr_menu::assist::show(
+            ui,
+            cx.resources,
+            field,
+            field_id,
+            &mut buf,
+            Some(lines),
+        );
         let r = shown.response.response.labeled(
             egui::WidgetType::TextEdit,
             &bae_ui::a11y::context(&[&name, tr("Expression")]),
@@ -1123,7 +1209,12 @@ impl TimelinePanel {
                     a.min(b)..a.max(b),
                 ));
             }
-            self.expr_edit = Some((path.clone(), attr.to_owned(), buf.clone()));
+            self.expr_edit = Some((
+                path.clone(),
+                attr.to_owned(),
+                buf.clone(),
+                expr.source.clone(),
+            ));
         }
         if keypad {
             r.surrender_focus();

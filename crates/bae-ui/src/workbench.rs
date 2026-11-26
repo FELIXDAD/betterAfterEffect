@@ -1325,6 +1325,10 @@ impl PanelHost for Host<'_, '_> {
         self.with_panel(panel, |p, cx| p.menu(ui, cx));
     }
 
+    fn related_tabs_menu(&mut self, ui: &mut Ui, panel: &PanelId) -> bool {
+        self.with_panel(panel, |p, cx| p.related_tabs_menu(ui, cx))
+    }
+
     fn on_close(&mut self, panel: &PanelId) {
         if let Some(mut p) = self.panels.remove(panel) {
             if let Some(state) = p.save_state() {

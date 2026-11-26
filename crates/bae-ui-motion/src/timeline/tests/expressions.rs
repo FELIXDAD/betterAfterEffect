@@ -92,6 +92,57 @@ fn expressions_add_pick_whip_switch_and_multiline_edit() {
 }
 
 #[test]
+fn typing_and_accepting_an_expression_completion_edits_the_draft() {
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.session().lock().selected_props = vec![(layer.clone(), POS.to_owned())];
+    let mut tl = h.bars();
+    let action = h.action(
+        &mut tl,
+        Invocation::new(crate::actions::ids::ADD_EXPRESSION),
+    );
+    h.apply(&action);
+    h.frame(&mut tl, vec![], Modifiers::NONE);
+    let eq = tl.last_expr.iter().find(|e| e.1 == POS).unwrap().2;
+    let field = pos2(tl.last_axis.unwrap().left + 50.0, eq.y);
+    h.click(&mut tl, field, Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![
+            Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: cmd(),
+            },
+            Event::Text("wig".into()),
+        ],
+        Modifiers::NONE,
+    );
+    assert_eq!(tl.expr_edit.as_ref().map(|e| e.2.as_str()), Some("wig"));
+    h.frame(&mut tl, vec![press(egui::Key::Tab)], Modifiers::NONE);
+    assert_eq!(
+        tl.expr_edit.as_ref().map(|e| e.2.as_str()),
+        Some("wiggle()")
+    );
+    h.frame(&mut tl, vec![Event::Text("2, 10".into())], Modifiers::NONE);
+    assert_eq!(
+        tl.expr_edit.as_ref().map(|e| e.2.as_str()),
+        Some("wiggle(2, 10)")
+    );
+    assert_ne!(
+        query::attr_spec(&h.stage, &layer, POS)
+            .unwrap()
+            .expression
+            .as_ref()
+            .unwrap()
+            .source,
+        "wiggle(2, 10)"
+    );
+}
+
+#[test]
 fn pick_whip_references_follow_ae() {
     let mut h = H::new();
     let comp = h.comp.clone();
@@ -222,4 +273,31 @@ fn layer_expression_commands_disable_convert_and_reveal_errors() {
         h.session().lock().reveal.get(&layer),
         Some(crate::session::Reveal::Props(p)) if p == &[(layer.clone(), "transform:opacity".to_owned())]
     ));
+}
+
+/// #592: an expression just added takes the focus with its text selected, so
+/// typing replaces the default (AE).
+#[test]
+fn added_expression_is_focused_with_its_text_selected() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.session().lock().selected_props = vec![(layer.clone(), POS.to_owned())];
+    let mut tl = h.bars();
+    let r = h.action(&mut tl, Invocation::new(ids::ADD_EXPRESSION));
+    h.apply(&r);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![Event::Text("wiggle(2, 50)".into())],
+        Modifiers::NONE,
+    );
+    bae_ui::set_keypad_enter(true);
+    let r = h.frame(&mut tl, vec![press(egui::Key::Enter)], Modifiers::NONE);
+    bae_ui::set_keypad_enter(false);
+    h.apply(&r);
+    let source = query::attr_spec(&h.stage, &layer, POS)
+        .and_then(|s| s.expression.clone())
+        .map(|e| e.source);
+    assert_eq!(source.as_deref(), Some("wiggle(2, 50)"));
 }

@@ -216,23 +216,38 @@ impl Command for SetAt {
         ensure_unlocked(tx.stage(), [&p.path])?;
         tx.stage().require_prim(&p.path)?;
         check_value(tx, &p.path, &p.attr, &p.value)?;
-        let mut spec = query::attr_spec(tx.stage(), &p.path, &p.attr)
-            .cloned()
-            .unwrap_or_default();
-        if spec.is_animated() {
-            match spec.keyframes.get_mut(&p.time) {
-                Some(k) => k.value = p.value,
-                None => {
-                    let k = new_key(&p.attr, &spec, p.value);
-                    spec.keyframes.insert(p.time, k);
-                }
-            }
-        } else {
-            spec.value = Some(p.value);
-        }
-        refresh_auto(&p.attr, &mut spec);
+        let spec = spec_with_value_at(tx.stage(), &p.path, &p.attr, p.time, p.value);
         write_attr(tx, &p.path, &p.attr, spec)
     }
+}
+
+/// `attr` of `path` as [`SetAt`] leaves it: a keyframe at `time` (keyframe
+/// time) holding `value` when animated (an existing one keeps its
+/// interpolation), else the new static value. Panels preview a value drag
+/// with it before committing (`bae_anim::Evaluator::set_overrides`).
+pub fn spec_with_value_at(
+    stage: &bae_model::Stage,
+    path: &PrimPath,
+    attr: &str,
+    time: Time,
+    value: Value,
+) -> AttrSpec {
+    let mut spec = query::attr_spec(stage, path, attr)
+        .cloned()
+        .unwrap_or_default();
+    if spec.is_animated() {
+        match spec.keyframes.get_mut(&time) {
+            Some(k) => k.value = value,
+            None => {
+                let k = new_key(attr, &spec, value);
+                spec.keyframes.insert(time, k);
+            }
+        }
+    } else {
+        spec.value = Some(value);
+    }
+    refresh_auto(attr, &mut spec);
+    spec
 }
 
 // ---------------------------------------------------------------------------

@@ -157,6 +157,7 @@ pub(crate) struct ProjectInfo {
     pub(crate) path: Option<PrimPath>,
     pub(crate) bit_depth: u32,
     pub(crate) linear_blending: bool,
+    pub(crate) display_frames: bool,
     /// Display name, path, facts.
     pub(crate) assets: Vec<(String, PrimPath, crate::AssetInfo)>,
 }
@@ -165,6 +166,8 @@ pub(crate) struct ProjectInfo {
 pub(crate) struct Scope {
     comps: Vec<Arc<CompiledComp>>,
     project: Arc<ProjectInfo>,
+    /// Layer pixels for `sampleImage` (none: transparent black).
+    samples: Option<Arc<crate::ImageSamples>>,
     by_path: HashMap<PrimPath, usize>,
     by_name: HashMap<String, usize>,
     memo: Memo,
@@ -200,6 +203,7 @@ impl Scope {
         Scope {
             comps,
             project: Arc::default(),
+            samples: None,
             by_path,
             by_name,
             memo: MEMO_POOL.with(|p| std::mem::take(&mut *p.borrow_mut())),
@@ -219,6 +223,11 @@ impl Scope {
 
     pub(crate) fn with_project(mut self, project: Arc<ProjectInfo>) -> Scope {
         self.project = project;
+        self
+    }
+
+    pub(crate) fn with_samples(mut self, samples: Option<Arc<crate::ImageSamples>>) -> Scope {
+        self.samples = samples;
         self
     }
 
@@ -278,6 +287,10 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
 /// Comp id of `path` in the active scope.
 pub(crate) fn scope_comp_id(path: &PrimPath) -> Option<usize> {
     SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.comp_id(path)))
+}
+
+fn scope_samples() -> Option<Arc<crate::ImageSamples>> {
+    SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.samples.clone()))
 }
 
 fn scope_project() -> Arc<ProjectInfo> {
@@ -513,7 +526,7 @@ fn eval_fast(f: &fast::Fast, cx: &Cx<'_, '_>, e: &ExprProp, pre: &Value) -> Opti
         flat: !layer.switches.three_d
             && e.prim == layer.path
             && matches!(&*e.attr, tr::POSITION | tr::ANCHOR_POINT | tr::SCALE),
-        seed: seed_of(e, cx.comp, cx.layer),
+        seed: e.seed,
     };
     let comps = f.eval(&env)?;
     // Errors (non-finite results) are reported by the JS path.
@@ -734,6 +747,7 @@ const LOCALS: &[(&str, &str)] = &[
     ("pointOfInterest", "thisLayer.pointOfInterest"),
     ("timeRemap", "thisLayer.timeRemap"),
     ("audioLevels", "thisLayer.audioLevels"),
+    ("sampleImage", "thisLayer.sampleImage.bind(thisLayer)"),
     ("effect", "thisLayer.effect.bind(thisLayer)"),
     ("mask", "thisLayer.mask.bind(thisLayer)"),
     ("toComp", "thisLayer.toComp.bind(thisLayer)"),
@@ -786,7 +800,7 @@ pub(crate) fn wrapper_source(source: &str) -> Result<String, String> {
     }
     if r.idents.contains("posterizeTime") && !r.declared.contains("posterizeTime") {
         prologue.push_str(
-            "function posterizeTime(f){if(f>0){time=Math.floor(time*f+1e-9)/f;__now=time;__reseed();",
+            "function posterizeTime(f){if(f>=0){time=f===0?0:Math.floor(time*f+1e-9)/f;__now=time;__reseed();",
         );
         if r.idents.contains("value") && !r.declared.contains("value") {
             prologue.push_str("value=thisProperty.__pre(time);");
@@ -833,7 +847,7 @@ fn call<'js>(
     e: &ExprProp,
 ) -> Result<rquickjs::Value<'js>, String> {
     let call: Function<'js> = ctx.globals().get("__call").map_err(|e| e.to_string())?;
-    let seed = seed_of(e, cx.comp, cx.layer);
+    let seed = e.seed;
     call.call((
         func.clone(),
         cx.comp as i32,
@@ -885,7 +899,7 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         return match template {
             Value::TextDocument(doc) => {
                 let mut doc = doc.clone();
-                doc.text = s;
+                doc.set_text(&s);
                 Ok(Value::TextDocument(doc))
             }
             Value::String(_) => Ok(Value::String(s)),
@@ -905,12 +919,27 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         if let Some(o) = js.as_object()
             && o.get::<_, bool>("__style").unwrap_or(false)
         {
-            let changes: Object<'_> = o.get("changes").map_err(|e| e.to_string())?;
-            apply_style(&mut doc, &changes);
+            let changes: Array<'_> = o.get("changes").map_err(|e| e.to_string())?;
+            for change in changes.iter::<Object<'_>>() {
+                let change = change.map_err(|e| e.to_string())?;
+                if let Ok(Some(text)) = change.get::<_, Option<String>>("text") {
+                    doc.set_text(&text);
+                    continue;
+                }
+                let start = change.get::<_, f64>("start").unwrap_or(0.) as usize;
+                let count = change.get::<_, Option<f64>>("count").ok().flatten();
+                let from = char_index(&doc.text, start);
+                let to = count.map_or(usize::MAX, |n| {
+                    char_index(&doc.text, start.saturating_add(n as usize))
+                });
+                if count != Some(0.) {
+                    doc.edit_styles(from..to, |style| apply_style(style, &change));
+                }
+            }
             return Ok(Value::TextDocument(doc));
         }
         // Numbers on Source Text show as text, as in AE.
-        doc.text = js_display(&js);
+        doc.set_text(&js_display(&js));
         return Ok(Value::TextDocument(doc));
     }
     let comps: Vec<f64> = if let Some(n) = js.as_number() {
@@ -1167,7 +1196,7 @@ fn path_from_js(
 }
 
 /// The changes a text style carries (its `set…` calls) applied to `doc`.
-fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
+fn apply_style(doc: &mut bae_model::TextStyle, c: &Object<'_>) {
     let num = |k: &str| c.get::<_, Option<f64>>(k).ok().flatten();
     let flag = |k: &str| c.get::<_, Option<bool>>(k).ok().flatten();
     let rgb = |k: &str| {
@@ -1176,8 +1205,12 @@ fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
             .flatten()
             .filter(|v| v.len() >= 3)
     };
-    if let Ok(Some(text)) = c.get::<_, Option<String>>("text") {
-        doc.text = text;
+    if let Ok(mode) = c.get::<_, String>("baselineOption") {
+        doc.baseline_option = match mode.as_str() {
+            "superScript" => bae_model::BaselineOption::Superscript,
+            "subScript" => bae_model::BaselineOption::Subscript,
+            _ => bae_model::BaselineOption::Normal,
+        };
     }
     if let Ok(Some(font)) = c.get::<_, Option<String>>("font") {
         doc.font = font;
@@ -1225,10 +1258,28 @@ fn apply_style(doc: &mut bae_model::TextDocument, c: &Object<'_>) {
     }
 }
 
+/// JavaScript string offsets count UTF-16 code units.
+fn char_index(text: &str, utf16: usize) -> usize {
+    let mut offset = 0;
+    text.chars()
+        .take_while(|c| {
+            offset += c.len_utf16();
+            offset <= utf16
+        })
+        .count()
+}
+
 /// A text document's style as the expression `TextStyle` reads it.
-fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextDocument) -> rquickjs::Result<Object<'js>> {
+fn text_style<'js>(ctx: &Ctx<'js>, doc: &bae_model::TextStyle) -> rquickjs::Result<Object<'js>> {
     let o = Object::new(ctx.clone())?;
-    o.set("text", doc.text.as_str())?;
+    o.set(
+        "baselineOption",
+        match doc.baseline_option {
+            bae_model::BaselineOption::Normal => "default",
+            bae_model::BaselineOption::Superscript => "superScript",
+            bae_model::BaselineOption::Subscript => "subScript",
+        },
+    )?;
     o.set("font", doc.font.as_str())?;
     o.set("fontSize", doc.font_size)?;
     o.set("fillColor", doc.fill_color[..3].to_vec())?;
@@ -1287,9 +1338,7 @@ fn components(v: &Value) -> Vec<f64> {
     }
 }
 
-// The property's random seed: FNV-1a over its identity (prim, 0, attr, comp
-// id, layer index), stable across runs and machines. The prim and attr part is
-// hashed once when the comp compiles ([`seed_prefix`]).
+// A property's absolute prim path and attribute identify it independently of layer order.
 
 fn fnv(mut h: u32, bytes: impl IntoIterator<Item = u8>) -> u32 {
     for b in bytes {
@@ -1299,23 +1348,9 @@ fn fnv(mut h: u32, bytes: impl IntoIterator<Item = u8>) -> u32 {
     h
 }
 
-/// The FNV-1a state after the property's prim and attr.
+/// Seed shared by the compiled expression and reads of the same property.
 pub(crate) fn seed_prefix(prim: &str, attr: &str) -> u32 {
     fnv(0x811c_9dc5, prim.bytes().chain([0]).chain(attr.bytes()))
-}
-
-fn seed_of(e: &ExprProp, comp: usize, layer: usize) -> u32 {
-    seed_with(e.seed, comp, layer)
-}
-
-fn seed_with(prefix: u32, comp: usize, layer: usize) -> u32 {
-    fnv(
-        prefix,
-        (comp as u32)
-            .to_le_bytes()
-            .into_iter()
-            .chain((layer as u32).to_le_bytes()),
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1561,7 +1596,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         "textStyle",
         Function::new(
             ctx.clone(),
-            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, t: f64| {
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, t: f64, index: f64| {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
@@ -1579,7 +1614,9 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     js: Some(&ctx),
                 };
                 match prop.sample(&cx) {
-                    Value::TextDocument(doc) => text_style(&ctx, &doc),
+                    Value::TextDocument(doc) => {
+                        text_style(&ctx, doc.style_at(char_index(&doc.text, index as usize)))
+                    }
                     _ => throw(&ctx, "style is only available on Source Text"),
                 }
             },
@@ -1854,13 +1891,8 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             )?;
             o.set("pixelAspect", comp.pixel_aspect)?;
             o.set("numLayers", comp.layers.len() as i32)?;
-            // No drop-frame setting yet: AE's default for 29.97 and 59.94 fps.
-            let fps = comp.frame_rate.as_f64();
-            o.set(
-                "ntscDropFrame",
-                (fps - 29.97).abs() < 0.01 || (fps - 59.94).abs() < 0.01,
-            )?;
-            o.set("displayStartTime", 0.0)?;
+            o.set("ntscDropFrame", comp.drop_frame)?;
+            o.set("displayStartTime", comp.display_start.as_seconds())?;
             o.set("bgColor", comp.bg_color.to_vec())?;
             o.set("shutterAngle", comp.motion_blur.shutter_angle)?;
             o.set("shutterPhase", comp.motion_blur.shutter_phase)?;
@@ -2020,6 +2052,33 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         )?,
     )?;
 
+    // sampleImage: args are [x, y, radius x, radius y, post effect (0/1), t]. A
+    // sample that is not read back yet is transparent black (see `samples`).
+    h.set(
+        "sampleImage",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32, l: i32, a: Vec<f64>| {
+            let comp = comp_or_throw(&ctx, c)?;
+            let li = layer_or_throw(&ctx, &comp, l)?;
+            note_dependency(c as usize, li);
+            let arg = |i: usize, d: f64| a.get(i).copied().filter(|v| v.is_finite()).unwrap_or(d);
+            let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
+            let t = Time::from_seconds((arg(5, 0.0) / tick).round() * tick);
+            let key = crate::SampleKey::new(
+                comp.path.clone(),
+                comp.layers[li].path.clone(),
+                t,
+                [arg(0, 0.0), arg(1, 0.0)],
+                [arg(2, 0.5), arg(3, 0.5)],
+                arg(4, 1.0) != 0.0,
+            );
+            note_read(|| ExprRead::prim(key.layer.clone(), ReadKind::Subtree, Some(key.time)));
+            let rgba = scope_samples()
+                .and_then(|s| s.get(&key))
+                .unwrap_or_default();
+            Ok::<_, rquickjs::Error>(rgba.map(f64::from).to_vec())
+        })?,
+    )?;
+
     h.set(
         "xform",
         Function::new(
@@ -2092,6 +2151,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 if p.bit_depth == 0 { 8 } else { p.bit_depth },
             )?;
             o.set("linearBlending", p.linear_blending)?;
+            o.set("displayFrames", p.display_frames)?;
             // The project file is not part of the document (AE: "" until saved).
             o.set("fullPath", "")?;
             Ok::<_, rquickjs::Error>(o)
@@ -2142,15 +2202,15 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
-                Ok::<_, rquickjs::Error>(seed_with(
-                    seed_prefix(own(&prim, &comp.layers[li]), &attr),
-                    c as usize,
-                    li,
-                ))
+                Ok::<_, rquickjs::Error>(seed_prefix(own(&prim, &comp.layers[li]), &attr))
             },
         )?,
     )?;
 
+    h.set(
+        "wiggleNoise",
+        Function::new(ctx.clone(), fast::wiggle_noise)?,
+    )?;
     ctx.globals().set("__h", h)?;
     Ok(())
 }

@@ -223,9 +223,11 @@ fn text_documents_animate_and_round_trip() {
     )
     .unwrap();
     let mut doc = TextDocument::new("你好 BAE", "PingFangSC-Regular", 96.0);
-    doc.justification = "center".into();
+    doc.paragraph.justification = "center".into();
+    doc.edit_styles(1..3, |s| s.tracking = 75.0);
     let mut later = doc.clone();
-    later.text = "Hello".into();
+    later.set_text("Hello");
+    later.edit_styles(2..4, |s| s.faux_bold = true);
     for (t, d) in [(0i64, &doc), (705_600_000, &later)] {
         exec(
             &reg,

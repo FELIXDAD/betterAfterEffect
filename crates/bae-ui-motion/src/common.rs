@@ -126,6 +126,7 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
         "audio:levels" => "Audio Levels",
+        "time_remap" => "Time Remap",
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
         "transform:position_x" => "X Position",
@@ -473,7 +474,7 @@ pub(crate) fn value_editor(
                 ui.data_mut(|d| d.remove::<String>(key));
                 if text != doc.text {
                     let mut d = (**doc).clone();
-                    d.text = text;
+                    d.set_text(&text);
                     out = Edit::Commit(Value::TextDocument(Box::new(d)));
                 }
             }
@@ -506,6 +507,8 @@ pub(crate) fn apply_edit(
                 attr: attr.to_owned(),
                 value,
                 peers,
+                time: t,
+                committed: None,
             });
         }
         Edit::Commit(value) => {
@@ -513,10 +516,19 @@ pub(crate) fn apply_edit(
             let dragged = session
                 .lock()
                 .scrub
-                .take()
-                .is_some_and(|s| s.path == *path && s.attr == attr);
+                .as_ref()
+                .is_some_and(|s| s.path == *path && s.attr == attr && s.committed.is_none());
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
+            // Shown as committed until the command has run.
+            session.lock().scrub = Some(Scrub {
+                path: path.clone(),
+                attr: attr.to_owned(),
+                value: value.clone(),
+                peers: peers.clone(),
+                time: t,
+                committed: Some((cx.stage.revision(), std::time::Instant::now())),
+            });
             let edits: Vec<serde_json::Value> = std::iter::once((path.clone(), value))
                 .chain(peers)
                 .map(|(p, v)| {
