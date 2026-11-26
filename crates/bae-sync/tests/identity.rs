@@ -12,9 +12,11 @@
 mod common;
 
 use bae_model::loro::TreeID;
-use bae_model::{AuthorId, Op, PrimPath, PrimSpec, PrimType, Specifier, Stage, SublayerId, Value};
+use bae_model::{
+    AuthorId, ModelError, Op, PrimPath, PrimSpec, PrimType, Specifier, Stage, SublayerId, Value,
+};
 use bae_sync::history::{diff, revert, view_at};
-use bae_sync::{PrimChange, PrimDiff, ProjectVersion, RevertScope};
+use bae_sync::{PrimChange, PrimDiff, ProjectVersion, RevertScope, SyncError};
 use common::*;
 
 fn root() -> SublayerId {
@@ -73,8 +75,39 @@ fn rename(stage: &mut Stage, who: &AuthorId, from: PrimPath, to: PrimPath) {
     );
 }
 
+fn delete(stage: &mut Stage, who: &AuthorId, path: PrimPath) {
+    apply(stage, who, Op::DeletePrim { path });
+}
+
 fn root_layer(stage: &Stage) -> &bae_model::Sublayer {
     stage.sublayer(&root()).unwrap()
+}
+
+/// Names of the children of `path` in the root sublayer, as this client's mirror
+/// shows them.
+fn names_in(stage: &Stage, path: &PrimPath) -> Vec<String> {
+    root_layer(stage)
+        .children(path)
+        .iter()
+        .map(|c| c.name().to_owned())
+        .collect()
+}
+
+/// `name` with the collision suffix of tree node `n`.
+fn suffixed(name: &str, n: TreeID) -> String {
+    format!("{name}_{}_{}", n.peer, n.counter)
+}
+
+/// Roll back and report whether that changed any document.
+fn revert_changes(
+    stage: &mut Stage,
+    who: &AuthorId,
+    to: &ProjectVersion,
+    scope: RevertScope,
+) -> bool {
+    let before = ProjectVersion::current(stage);
+    revert(stage, who, "revert", to, &scope).unwrap_or_else(|e| panic!("{e}"));
+    ProjectVersion::current(stage) != before
 }
 
 fn node(stage: &Stage, path: &PrimPath) -> TreeID {
@@ -306,19 +339,20 @@ fn revert_restores_the_deleted_prim_and_leaves_its_namesake_alone() {
         let spec = root_layer(stage).spec(&layer(&added[0])).unwrap();
         assert_eq!(opacity_of(spec), opacity_of(&x_then), "{reverter}");
         assert_eq!(spec, &x_then, "{reverter}");
-        // Under a name no remaining sibling has (y's raw name is `shared`).
-        assert_eq!(added[0], "shared_2", "{reverter}");
-        // Nothing else differs from v1.
-        let d = diff(stage, &c.v1, &ProjectVersion::current(stage)).unwrap();
-        let summary: Vec<_> = d.iter().map(|x| (x.path.name(), &x.change)).collect();
-        assert_eq!(
-            summary,
-            [
-                ("shared", &PrimChange::Removed),
-                ("shared_2", &PrimChange::Added)
-            ],
+        // y keeps the raw name `shared`, so x gets its collision suffix, the
+        // name a mirror rebuild gives it.
+        assert_eq!(added[0], suffixed("shared", c.x), "{reverter}");
+        // That name ties the new node to x: nothing differs from v1, and
+        // rolling back again changes nothing.
+        let now = ProjectVersion::current(stage);
+        assert_eq!(diff(stage, &c.v1, &now).unwrap(), [], "{reverter}");
+        assert_eq!(diff(stage, &now, &c.v1).unwrap(), [], "{reverter}");
+        let x_again = node(stage, &layer(&added[0]));
+        assert!(
+            !revert_changes(stage, who, &c.v1, RevertScope::Project),
             "{reverter}"
         );
+        assert_eq!(node(stage, &layer(&added[0])), x_again, "{reverter}");
     }
 }
 
@@ -358,7 +392,9 @@ fn revert_gives_the_same_result_on_every_client() {
     }
     assert_eq!(results[0].1.2, y_then, "y is left alone");
     // x is back next to it.
-    let x_now = root_layer(&a2).spec(&layer("shared_2")).cloned();
+    let x_now = root_layer(&a2)
+        .spec(&layer(&suffixed("shared", c.x)))
+        .cloned();
     assert_eq!(x_now, x_then);
 }
 
@@ -488,19 +524,362 @@ fn real_moves_and_renames_are_still_reported() {
     );
 }
 
+/// The differences between `from` and `to` are empty both ways on every stage.
+fn assert_no_diff(stages: &[(&str, &Stage)], from: &ProjectVersion, to: &ProjectVersion) {
+    for (who, stage) in stages {
+        assert_eq!(diff(stage, from, to).unwrap(), [], "on {who}");
+        assert_eq!(diff(stage, to, from).unwrap(), [], "backwards on {who}");
+    }
+}
+
+#[test]
+fn undoing_the_delete_of_a_suffixed_prim_changes_nothing() {
+    // `a` shows y as `shared_<peer>_<counter>`. Undoing its delete re-creates it
+    // (a new tree node) under that literal name: bae-model restores mirror names.
+    let mut c = collision();
+    let shown = names(&c.a);
+    let y_path = layer(&shown[2]);
+    assert_eq!(node(&c.a, &y_path), c.y);
+    delete(&mut c.a, &c.wa, y_path.clone());
+    c.a.undo(&c.wa).unwrap();
+    assert_ne!(node(&c.a, &y_path), c.y);
+    assert_eq!(names(&c.a), shown);
+    let now = ProjectVersion::current(&c.a);
+    sync(&mut [&mut c.a, &mut c.b]);
+    let fresh = clone_stage(&c.a);
+    assert_no_diff(&[("a", &c.a), ("b", &c.b), ("fresh", &fresh)], &c.v1, &now);
+    assert!(!revert_changes(
+        &mut c.a,
+        &c.wa,
+        &c.v1,
+        RevertScope::Project
+    ));
+    assert_eq!(names(&c.a), shown);
+}
+
+#[test]
+fn undoing_the_delete_of_a_folder_with_a_collided_pair_changes_nothing() {
+    let base = base_snapshots();
+    let (wa, wb) = (author("user:a"), author("user:b"));
+    let (mut a, mut b) = (client_stage(&base), client_stage(&base));
+    create_typed(&mut a, &wa, layer("grp"), "Folder");
+    sync(&mut [&mut a, &mut b]);
+    create(&mut a, &wa, "grp/x");
+    create(&mut b, &wb, "grp/x");
+    sync(&mut [&mut a, &mut b]);
+    let shown = names_in(&a, &layer("grp"));
+    assert_eq!(shown.len(), 2, "{shown:?}");
+    let v1 = ProjectVersion::current(&a);
+
+    delete(&mut a, &wa, layer("grp"));
+    a.undo(&wa).unwrap();
+    assert_eq!(names_in(&a, &layer("grp")), shown);
+    let now = ProjectVersion::current(&a);
+    sync(&mut [&mut a, &mut b]);
+    let fresh = clone_stage(&a);
+    assert_no_diff(&[("a", &a), ("b", &b), ("fresh", &fresh)], &v1, &now);
+    assert!(!revert_changes(&mut a, &wa, &v1, RevertScope::Project));
+}
+
+/// `foo` (opacity 10) at v1, renamed `bar` and changed since.
+fn renamed_since_v1() -> (Stage, AuthorId, ProjectVersion) {
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create(&mut stage, &w, "foo");
+    set_opacity(&mut stage, &w, layer("foo"), 10.0);
+    let v1 = ProjectVersion::current(&stage);
+    rename(&mut stage, &w, layer("foo"), layer("bar"));
+    set_opacity(&mut stage, &w, layer("bar"), 50.0);
+    (stage, w, v1)
+}
+
+#[test]
+fn reverting_one_prim_follows_it_across_a_rename() {
+    // By the path it has now or the one it had: it goes back to its old name
+    // and value, once.
+    for path in ["bar", "foo"] {
+        let (mut stage, w, v1) = renamed_since_v1();
+        revert(
+            &mut stage,
+            &w,
+            "revert",
+            &v1,
+            &RevertScope::Prim(layer(path)),
+        )
+        .unwrap();
+        assert_eq!(names(&stage), ["title", "foo"], "scope {path}");
+        let spec = root_layer(&stage).spec(&layer("foo")).unwrap();
+        assert_eq!(opacity_of(spec), Some(&Value::Float(10.0)), "scope {path}");
+        let now = ProjectVersion::current(&stage);
+        assert_eq!(diff(&stage, &v1, &now).unwrap(), [], "scope {path}");
+    }
+}
+
+#[test]
+fn reverting_one_prim_under_a_renamed_ancestor() {
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create_typed(&mut stage, &w, layer("grp"), "Folder");
+    create(&mut stage, &w, "grp/r");
+    create(&mut stage, &w, "grp/r/c");
+    set_opacity(&mut stage, &w, layer("grp/r/c"), 10.0);
+    let v1 = ProjectVersion::current(&stage);
+    rename(&mut stage, &w, layer("grp"), layer("grp2"));
+    delete(&mut stage, &w, layer("grp2/r/c"));
+
+    revert(
+        &mut stage,
+        &w,
+        "revert",
+        &v1,
+        &RevertScope::Prim(layer("grp2/r")),
+    )
+    .unwrap();
+    // c is back; the folder, outside the scope, keeps its new name.
+    assert_eq!(names_in(&stage, &layer("grp2/r")), ["c"]);
+    let spec = root_layer(&stage).spec(&layer("grp2/r/c")).unwrap();
+    assert_eq!(opacity_of(spec), Some(&Value::Float(10.0)));
+    assert_eq!(names(&stage), ["title", "grp2"]);
+}
+
+#[test]
+fn reverting_one_prim_means_the_prim_this_client_shows_there() {
+    // `b` shows y at `…/shared`: rolling back that prim leaves x deleted.
+    let mut c = diverged();
+    assert!(!revert_changes(
+        &mut c.b,
+        &c.wb,
+        &c.v1,
+        RevertScope::Prim(layer("shared"))
+    ));
+    assert_eq!(names(&c.b), ["title", "shared"]);
+}
+
+#[test]
+fn reverting_one_prim_puts_back_what_it_had_to_delete() {
+    // c leaves the folder, z moves into c and z's child e out of z. Putting
+    // the folder back moves c back in; z, which was not in the folder but has
+    // to go with c, goes back to its place with e, which therefore leaves its
+    // new place: nothing is lost or doubled.
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create_typed(&mut stage, &w, layer("grp"), "Folder");
+    create(&mut stage, &w, "grp/c");
+    create(&mut stage, &w, "z");
+    set_opacity(&mut stage, &w, layer("z"), 10.0);
+    create(&mut stage, &w, "z/e");
+    let v1 = ProjectVersion::current(&stage);
+    rename(&mut stage, &w, layer("grp/c"), layer("c"));
+    rename(&mut stage, &w, layer("z"), layer("c/z"));
+    rename(&mut stage, &w, layer("c/z/e"), layer("e"));
+
+    revert(
+        &mut stage,
+        &w,
+        "revert",
+        &v1,
+        &RevertScope::Prim(layer("grp")),
+    )
+    .unwrap();
+    assert_eq!(
+        fingerprint(&stage),
+        fingerprint(view_at(&stage, &v1, None).unwrap().stage())
+    );
+}
+
+#[test]
+fn reverting_one_prim_whose_parent_was_replaced() {
+    // The folder was deleted and a comp of the same name made in its place:
+    // the prim goes back under the comp, the prim at its old parent's path.
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create_typed(&mut stage, &w, layer("grp"), "Folder");
+    create(&mut stage, &w, "grp/x");
+    set_opacity(&mut stage, &w, layer("grp/x"), 10.0);
+    let v1 = ProjectVersion::current(&stage);
+    delete(&mut stage, &w, layer("grp"));
+    create_typed(&mut stage, &w, layer("grp"), "Comp");
+    create(&mut stage, &w, "grp/x");
+    set_opacity(&mut stage, &w, layer("grp/x"), 99.0);
+
+    revert(
+        &mut stage,
+        &w,
+        "revert",
+        &v1,
+        &RevertScope::Prim(layer("grp/x")),
+    )
+    .unwrap();
+    let l = root_layer(&stage);
+    assert_eq!(
+        l.spec(&layer("grp")).unwrap().prim_type,
+        Some(PrimType::new("Comp"))
+    );
+    assert_eq!(names_in(&stage, &layer("grp")), ["x"]);
+    let spec = l.spec(&layer("grp/x")).unwrap();
+    assert_eq!(opacity_of(spec), Some(&Value::Float(10.0)));
+}
+
+#[test]
+fn reverting_a_deleted_folder_with_a_collided_pair() {
+    let base = base_snapshots();
+    let (wa, wb) = (author("user:a"), author("user:b"));
+    let (mut a, mut b) = (client_stage(&base), client_stage(&base));
+    create_typed(&mut a, &wa, layer("grp"), "Folder");
+    sync(&mut [&mut a, &mut b]);
+    create(&mut a, &wa, "grp/shared");
+    set_opacity(&mut a, &wa, layer("grp/shared"), 10.0);
+    create(&mut b, &wb, "grp/shared");
+    set_opacity(&mut b, &wb, layer("grp/shared"), 20.0);
+    sync(&mut [&mut a, &mut b]);
+    let shown = names_in(&a, &layer("grp"));
+    let y = node(&a, &layer(&format!("grp/{}", shown[1])));
+    let v1 = ProjectVersion::current(&a);
+    delete(&mut a, &wa, layer("grp"));
+    sync(&mut [&mut a, &mut b]);
+
+    // One prim: its folder is gone and outside the scope.
+    let err = revert(
+        &mut a,
+        &wa,
+        "revert",
+        &v1,
+        &RevertScope::Prim(layer("grp/shared")),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&err, SyncError::Model(ModelError::PrimNotFound { path, .. }) if *path == layer("grp")),
+        "{err:?}"
+    );
+
+    // The whole project: the folder comes back with both children, under the
+    // names a mirror rebuild gives them, the same on every client.
+    revert(&mut a, &wa, "revert", &v1, &RevertScope::Project).unwrap();
+    assert_eq!(
+        names_in(&a, &layer("grp")),
+        ["shared".to_owned(), suffixed("shared", y)]
+    );
+    let now = ProjectVersion::current(&a);
+    sync(&mut [&mut a, &mut b]);
+    assert_eq!(content(&a), content(&b));
+    assert_eq!(fingerprint(&b), content(&b));
+    assert_no_diff(&[("a", &a), ("b", &b)], &v1, &now);
+    assert!(!revert_changes(&mut b, &wb, &v1, RevertScope::Project));
+}
+
+#[test]
+fn restored_siblings_keep_their_order() {
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    for n in ["d", "b", "a", "c"] {
+        create(&mut stage, &w, n);
+    }
+    let v1 = ProjectVersion::current(&stage);
+    for n in ["d", "b", "a", "c"] {
+        delete(&mut stage, &w, layer(n));
+    }
+    revert(&mut stage, &w, "revert", &v1, &RevertScope::Project).unwrap();
+    assert_eq!(names(&stage), ["title", "d", "b", "a", "c"]);
+}
+
+#[test]
+fn ambiguous_or_retyped_re_creations_are_new_prims() {
+    // Both same-named prims deleted and two made again: which is which is
+    // unknown, so all four are listed.
+    let mut c = collision();
+    for n in names(&c.a).split_off(1) {
+        delete(&mut c.a, &c.wa, layer(&n));
+    }
+    sync(&mut [&mut c.a, &mut c.b]);
+    create(&mut c.a, &c.wa, "shared");
+    create(&mut c.b, &c.wb, "shared");
+    sync(&mut [&mut c.a, &mut c.b]);
+    let d = diff(&c.a, &c.v1, &ProjectVersion::current(&c.a)).unwrap();
+    let count = |k: PrimChange| d.iter().filter(|x| x.change == k).count();
+    assert_eq!(
+        (
+            count(PrimChange::Added),
+            count(PrimChange::Removed),
+            d.len()
+        ),
+        (2, 2, 4),
+        "{d:#?}"
+    );
+
+    // A layer replaced by a folder of the same name.
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create(&mut stage, &w, "foo");
+    let v1 = ProjectVersion::current(&stage);
+    delete(&mut stage, &w, layer("foo"));
+    create_typed(&mut stage, &w, layer("foo"), "Folder");
+    let d = diff(&stage, &v1, &ProjectVersion::current(&stage)).unwrap();
+    let summary: Vec<_> = d.iter().map(|x| (x.path.name(), &x.change)).collect();
+    assert_eq!(
+        summary,
+        [("foo", &PrimChange::Added), ("foo", &PrimChange::Removed)]
+    );
+}
+
+#[test]
+fn a_name_that_only_looks_like_a_collision_suffix_is_kept() {
+    // Not this node's own `_<peer>_<counter>`: part of the name.
+    let mut stage = client_stage(&base_snapshots());
+    let w = author("user:a");
+    create(&mut stage, &w, "foo_1_2");
+    set_opacity(&mut stage, &w, layer("foo_1_2"), 10.0);
+    let v1 = ProjectVersion::current(&stage);
+    delete(&mut stage, &w, layer("foo_1_2"));
+    let now = ProjectVersion::current(&stage);
+    assert_eq!(
+        timeless(diff(&stage, &v1, &now).unwrap()),
+        [entry(
+            layer("foo_1_2"),
+            PrimChange::Removed,
+            &["opacity"],
+            &[&w]
+        )]
+    );
+    revert(&mut stage, &w, "revert", &v1, &RevertScope::Project).unwrap();
+    assert_eq!(names(&stage), ["title", "foo_1_2"]);
+    assert_eq!(
+        diff(&stage, &v1, &ProjectVersion::current(&stage)).unwrap(),
+        []
+    );
+}
+
 // ---- property test: random edits with colliding names ----
 
 /// One random edit under `…/layers` of the root sublayer. Names come from a small
-/// pool so concurrent creates and renames collide. Edits that no longer apply
-/// are ignored.
+/// pool so concurrent creates and renames collide, at the top and inside `grp`
+/// (prims are created, moved and deleted with their subtrees). Edits that no
+/// longer apply are ignored.
 fn random_edit(stage: &mut Stage, who: &AuthorId, rng: &mut Rng, n: &mut u32) {
-    const POOL: [&str; 4] = ["shared", "shared", "shared", "other"];
+    const POOL: [&str; 7] = [
+        "shared",
+        "shared",
+        "shared",
+        "other",
+        "grp",
+        "grp/shared",
+        "grp/shared",
+    ];
     stage.set_edit_target(&root()).unwrap();
-    let children = root_layer(stage).children(&p(LAYERS));
-    let pick = |rng: &mut Rng| children[rng.below(children.len())].clone();
+    // Every prim under `…/layers`, in a fixed order.
+    let prims: Vec<PrimPath> = {
+        let l = root_layer(stage);
+        let mut v: Vec<PrimPath> = l
+            .paths()
+            .filter(|q| p(LAYERS).is_ancestor_of(q))
+            .cloned()
+            .collect();
+        v.sort();
+        v
+    };
+    let pick = |rng: &mut Rng| prims[rng.below(prims.len())].clone();
     *n += 1;
     let roll = rng.below(100);
-    let op = if roll < 45 || children.is_empty() {
+    let op = if roll < 45 || prims.is_empty() {
         Op::CreatePrim {
             path: layer(POOL[rng.below(POOL.len())]),
             specifier: Specifier::Def,
@@ -714,6 +1093,17 @@ fn revert_is_the_same_on_every_client_with_colliding_names() {
         let then = view_at(&s[0], &to, None).unwrap();
         let count = |st: &Stage| root_layer(st).len();
         assert_eq!(count(&s[0]), count(then.stage()), "seed {seed}");
+        // The restored prims are the ones of that version again: nothing
+        // differs from it, and rolling back once more changes nothing.
+        for (i, stage) in s.iter_mut().enumerate() {
+            let now = ProjectVersion::current(stage);
+            let d = diff(stage, &to, &now).unwrap();
+            assert_eq!(d, [], "seed {seed}, client {i}");
+            assert!(
+                !revert_changes(stage, &who[i], &to, RevertScope::Project),
+                "seed {seed}, client {i}"
+            );
+        }
     }
     eprintln!("{stale} of {seeds} runs rolled back with different mirrors on the two clients");
 }

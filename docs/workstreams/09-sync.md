@@ -47,7 +47,7 @@
 - [x] 在线状态与建议性锁（PR D）：`PresenceState`（用户、颜色、选中、播放头、工作区、`editing` 建议性锁）、心跳 + 接收方时钟判断离线、Hub 转发/新人同步/断线通知、共享目录心跳文件
 - [x] 版本（PR C）：命名版本（`History`，同步的 Loro 文档 + `history.loro`）、任意版本的只读视图、按 Prim 的差异（新增/删除/修改/移动，含作者和时间）
 - [x] 回滚（PR F）：`History::revert_to` / `history::revert`，以新的撤销单元恢复整个工程、一个工程层或一个 Prim 子树，不改写历史；命令 `version.revert`（`bae_sync::register_commands`）供 Agent 调用
-- [x] 差异和回滚按节点身份（G0，分支与合并的前置）：`identity.rs` 的 `NodeIndex`（TreeID → 父节点、原始名、兄弟序号、spec）和 `Matching`（同一 TreeID，加"重建别名"）；`diff` 和 `revert` / `version.revert` 不再按路径匹配 Prim，镜像因并发同名新建而在客户端之间不一致时，两边算出的差异和回滚结果相同；恢复时与留下的同名兄弟冲突用 `<名字>_2`。镜像不一致本身是 bae-model 的问题，已报给 02
+- [x] 差异和回滚按节点身份（G0，分支与合并的前置）：`identity.rs` 的 `NodeIndex`（TreeID → 父节点、原始名、兄弟序号、spec）和 `Matching`（同一 TreeID，加"重建别名"）；`diff` 和 `revert` / `version.revert` 不再按路径匹配 Prim，镜像因并发同名新建而在客户端之间不一致时，两边算出的差异和回滚结果相同；恢复时与留下的同名兄弟冲突用旧节点自己的后缀 `<名字>_<peer>_<counter>`（按重建别名仍对上旧节点，回滚可重复执行）；`Prim` 范围也按节点判断。镜像不一致本身是 bae-model 的问题，已报给 02
 - [ ] 分支与合并
 - [x] 多客户端模拟测试：4 个客户端经 Hub、20% 丢包 + 10% 重复 + 乱序延迟，编辑 150 轮后全部收敛；两端直连；Hub 重启后补齐 + 新客户端加入；协作者新建的工程层
 

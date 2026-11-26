@@ -25,7 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::docs::{DocSet, Imported};
 use crate::error::SyncError;
-use crate::identity::{Matching, NodeIndex};
+use crate::identity::{Matching, NodeIndex, suffixed};
 use crate::protocol::DocKey;
 
 /// File name of the history document inside a `.bae` directory.
@@ -718,18 +718,10 @@ pub enum RevertScope {
     Project,
     /// One sublayer.
     Sublayer(SublayerId),
-    /// One prim and its descendants, in every sublayer.
+    /// One prim and its descendants, in every sublayer: the prim at this path
+    /// now (in this client's mirror), wherever it was then; if there is none,
+    /// or it did not exist then, what was at this path then.
     Prim(PrimPath),
-}
-
-impl RevertScope {
-    fn covers(&self, layer: &SublayerId, path: &PrimPath) -> bool {
-        match self {
-            RevertScope::Project => true,
-            RevertScope::Sublayer(id) => id == layer,
-            RevertScope::Prim(root) => root.is_prefix_of(path),
-        }
-    }
 }
 
 /// Put (part of) the project back the way it was at `to`, as one new undoable
@@ -740,9 +732,14 @@ impl RevertScope {
 /// did not exist then are deleted, prims that existed are restored with their
 /// whole subtree, and differing types, specifiers, references and attribute
 /// opinions are set back. A prim that was moved or renamed since is deleted and
-/// restored where it was. Not restored: sibling order of prims that exist in both
-/// versions, and sublayers no longer in the stack. A sublayer that did not exist
-/// at `to` is emptied.
+/// restored where it was. If a remaining sibling already has a restored prim's
+/// name, the restored prim gets its collision suffix, `<name>_<peer>_<counter>`
+/// (the name a mirror rebuild shows it under), which keeps it the same prim for
+/// later differences and rollbacks. `RevertScope::Prim` names the prim at that
+/// path now, followed to wherever it was at `to`; if there is none, or it did
+/// not exist then, whatever was at that path then. Not restored: sibling order
+/// of prims that exist in both versions, and sublayers no longer in the stack.
+/// A sublayer that did not exist at `to` is emptied.
 pub fn revert(
     stage: &mut Stage,
     author: &AuthorId,
@@ -772,7 +769,7 @@ pub(crate) fn revert_edits(
         }
         let live = stage.sublayer(id).expect("in stack");
         let past = layer_at(live, &to.get(id))?;
-        for step in revert_steps(id, live, past.get(), scope) {
+        for step in revert_steps(live, past.get(), scope) {
             steps.push((id.clone(), step));
         }
     }
@@ -803,10 +800,9 @@ impl RevertPlan {
 
 enum Step {
     Delete(TreeID),
-    /// Re-create a prim of the old version under `parent` (a live node).
+    /// Re-create a prim of the old version (named `tree.name`) under `parent`.
     Restore {
         parent: Parent,
-        name: String,
         tree: PrimTree,
         index: Option<usize>,
     },
@@ -816,7 +812,8 @@ enum Step {
 enum Parent {
     Top,
     Node(TreeID),
-    /// The old parent is gone and is not restored (outside the scope).
+    /// The old parent is gone, is not restored (outside the scope) and no prim
+    /// has its old path.
     Gone(PrimPath),
 }
 
@@ -835,7 +832,6 @@ impl Step {
             Step::Set(n, field) => path(n).map(|path| field.op(path)),
             Step::Restore {
                 parent,
-                name,
                 tree,
                 index,
             } => {
@@ -851,7 +847,8 @@ impl Step {
                 // The name was chosen free of every remaining sibling's raw
                 // name; a mirror name can still take it only by an unlikely
                 // literal match with a collision suffix.
-                let mut path = at.child(&name)?;
+                let name = &tree.name;
+                let mut path = at.child(name)?;
                 let mut n = 2;
                 while live.has_spec(&path) {
                     path = at.child(&format!("{name}_{n}"))?;
@@ -875,136 +872,179 @@ impl Field {
 }
 
 /// Edits that turn `live` into `past` within `scope`.
-fn revert_steps(
-    id: &SublayerId,
-    live: &Sublayer,
-    past: &Sublayer,
-    scope: &RevertScope,
-) -> Vec<Step> {
+///
+/// The scope is decided by node too. A prim is in it if its node at either
+/// version is: now, the subtree at the scope's path; then, the subtree of the
+/// counterpart of the prim now at that path, or, if that prim has none, the
+/// subtree at that path in the past version. So a prim moved into or out of the
+/// scope is both deleted and restored, never only one of the two. A prim that
+/// existed then and has to be deleted with an ancestor is restored where it was,
+/// and a live prim whose past node is restored with an ancestor is deleted, so
+/// nothing is lost or doubled.
+fn revert_steps(live: &Sublayer, past: &Sublayer, scope: &RevertScope) -> Vec<Step> {
     let (now, then) = (NodeIndex::new(live), NodeIndex::new(past));
     let m = Matching::new(&then, &now);
-    let in_scope = |p: &PrimPath| scope.covers(id, p);
-    let mut steps = Vec::new();
+    let root = match scope {
+        RevertScope::Prim(path) => Some(path),
+        // Other sublayers are skipped by the caller.
+        RevertScope::Project | RevertScope::Sublayer(_) => None,
+    };
+    let anchor = root.and_then(|r| live.node_id(r)).and_then(|l| m.old_of(l));
+    let now_in = |l: TreeID| root.is_none_or(|r| r.is_prefix_of(now.get(l).expect("listed").path));
+    let then_in = |q: TreeID| match (root, anchor) {
+        (None, _) => true,
+        (Some(_), Some(a)) => then.is_within(q, a),
+        (Some(r), None) => r.is_prefix_of(then.get(q).expect("listed").path),
+    };
+    let live_in_scope = |l: TreeID| now_in(l) || m.old_of(l).is_some_and(then_in);
+    let past_in_scope = |q: TreeID| then_in(q) || m.new_of(q).is_some_and(now_in);
+    let (live_order, past_order) = (now.pre_order(), then.pre_order());
 
-    // Delete what did not exist then, or was elsewhere (top-most only: the
-    // subtree goes with it). `gone`: deleted, explicitly or with an ancestor.
-    let live_paths = now.by_path();
-    let mut gone: FxHashSet<TreeID> = FxHashSet::default();
-    for &(path, node) in &live_paths {
-        let n = now.get(node).expect("listed");
-        if n.parent.is_some_and(|p| gone.contains(&p)) {
-            gone.insert(node);
-        } else if in_scope(path) && (m.old_of(node).is_none() || m.moved(&then, &now, node)) {
-            steps.push(Step::Delete(node));
-            gone.insert(node);
+    // Live prims to delete because their past node is restored with an
+    // ancestor (they were moved out of it since); found below, then planned
+    // again.
+    let mut forced: FxHashSet<TreeID> = FxHashSet::default();
+    loop {
+        let mut steps = Vec::new();
+
+        // Delete what did not exist then, or was elsewhere (top-most only: the
+        // subtree goes with it). `gone`: deleted, explicitly or with an ancestor.
+        let mut gone: FxHashSet<TreeID> = FxHashSet::default();
+        for &node in &live_order {
+            let n = now.get(node).expect("listed");
+            if n.parent.is_some_and(|p| gone.contains(&p)) {
+                gone.insert(node);
+            } else if forced.contains(&node)
+                || (live_in_scope(node) && (m.old_of(node).is_none() || m.moved(&then, &now, node)))
+            {
+                steps.push(Step::Delete(node));
+                gone.insert(node);
+            }
         }
-    }
 
-    // Restore what existed then and is gone or elsewhere now (top-most only,
-    // with its whole subtree), under the parent's node at its current path, at
-    // its old position. A name that a remaining sibling has is not reused.
-    let mut restored: FxHashSet<TreeID> = FxHashSet::default();
-    let mut taken: FxHashMap<Option<TreeID>, FxHashSet<String>> = FxHashMap::default();
-    for (path, node) in then.by_path() {
-        let n = then.get(node).expect("listed");
-        if n.parent.is_some_and(|p| restored.contains(&p)) {
+        // Restore what existed then and is gone or elsewhere now (top-most
+        // only, with its whole subtree), parents first and siblings in order,
+        // under the parent's node at its current path, at its old position.
+        let mut restored: FxHashSet<TreeID> = FxHashSet::default();
+        let mut taken: FxHashMap<Option<TreeID>, FxHashSet<String>> = FxHashMap::default();
+        let mut replan = false;
+        for &node in &past_order {
+            let n = then.get(node).expect("listed");
+            let remains = m.new_of(node).filter(|l| !gone.contains(l));
+            if n.parent.is_some_and(|p| restored.contains(&p)) {
+                restored.insert(node);
+                if let Some(l) = remains {
+                    replan |= forced.insert(l);
+                }
+                continue;
+            }
+            let stays = remains.is_some_and(|l| !m.moved(&then, &now, l));
+            let deleted = m.new_of(node).is_some_and(|l| gone.contains(&l));
+            if stays || !(deleted || past_in_scope(node)) {
+                continue;
+            }
+            // The parent's live node (`Some(None)`: top level), if it remains;
+            // else, the parent being gone and outside the scope, the prim now
+            // at the parent's old path.
+            let old_parent = n.path.parent().unwrap_or_else(PrimPath::root);
+            let live_parent = match n.parent {
+                None => Some(None),
+                Some(p) => m.new_of(p).filter(|l| !gone.contains(l)).map(Some),
+            }
+            .or_else(|| {
+                let l = live.node_id(&old_parent)?;
+                (now.contains(l) && !gone.contains(&l)).then_some(Some(l))
+            });
+            let (parent, name) = match live_parent {
+                Some(key) => {
+                    let names = taken.entry(key).or_insert_with(|| {
+                        now.children(key)
+                            .iter()
+                            .filter(|c| !gone.contains(*c))
+                            .filter_map(|c| now.get(*c))
+                            .map(|c| c.name.to_owned())
+                            .collect()
+                    });
+                    let name = restore_name(n.name, node, names);
+                    (key.map_or(Parent::Top, Parent::Node), name)
+                }
+                None => (Parent::Gone(old_parent), n.name.to_owned()),
+            };
+            steps.push(Step::Restore {
+                parent,
+                tree: restore_tree(&then, node, name),
+                index: Some(n.index),
+            });
             restored.insert(node);
+        }
+        if replan {
             continue;
         }
-        let stays = m
-            .new_of(node)
-            .is_some_and(|l| !gone.contains(&l) && !m.moved(&then, &now, l));
-        if stays || !in_scope(path) {
-            continue;
-        }
-        // The parent's live node (`Some(None)`: top level), if it remains.
-        let live_parent = match n.parent {
-            None => Some(None),
-            Some(p) => m.new_of(p).filter(|l| !gone.contains(l)).map(Some),
-        };
-        let (parent, name) = match live_parent {
-            Some(key) => {
-                let names = taken.entry(key).or_insert_with(|| {
-                    now.children(key)
-                        .iter()
-                        .filter(|c| !gone.contains(*c))
-                        .filter_map(|c| now.get(*c))
-                        .map(|c| c.name.to_owned())
-                        .collect()
-                });
-                let name = unique_name(n.name, names);
-                (key.map_or(Parent::Top, Parent::Node), name)
-            }
-            None => {
-                let old_parent = path.parent().unwrap_or_else(PrimPath::root);
-                (Parent::Gone(old_parent), n.name.to_owned())
-            }
-        };
-        steps.push(Step::Restore {
-            parent,
-            name,
-            tree: restore_tree(&then, node),
-            index: Some(n.index),
-        });
-        restored.insert(node);
-    }
 
-    // Set back what differs on prims that stay.
-    for &(path, node) in &live_paths {
-        if gone.contains(&node) || !in_scope(path) {
-            continue;
-        }
-        let Some(was) = m.old_of(node).and_then(|o| then.get(o)) else {
-            continue;
-        };
-        let (now, then) = (now.get(node).expect("listed").spec, was.spec);
-        if now.specifier != then.specifier {
-            steps.push(Step::Set(node, Field::Specifier(then.specifier)));
-        }
-        if now.prim_type != then.prim_type {
-            steps.push(Step::Set(node, Field::Type(then.prim_type.clone())));
-        }
-        if now.references != then.references {
-            steps.push(Step::Set(node, Field::References(then.references.clone())));
-        }
-        let names: BTreeSet<&String> = now.attrs.keys().chain(then.attrs.keys()).collect();
-        for name in names {
-            let old = then.attrs.get(name);
-            if now.attrs.get(name) != old {
-                steps.push(Step::Set(node, Field::Attr(name.clone(), old.cloned())));
+        // Set back what differs on prims that stay.
+        for &node in &live_order {
+            if gone.contains(&node) || !live_in_scope(node) {
+                continue;
+            }
+            let Some(was) = m.old_of(node).and_then(|o| then.get(o)) else {
+                continue;
+            };
+            let (now, then) = (now.get(node).expect("listed").spec, was.spec);
+            if now.specifier != then.specifier {
+                steps.push(Step::Set(node, Field::Specifier(then.specifier)));
+            }
+            if now.prim_type != then.prim_type {
+                steps.push(Step::Set(node, Field::Type(then.prim_type.clone())));
+            }
+            if now.references != then.references {
+                steps.push(Step::Set(node, Field::References(then.references.clone())));
+            }
+            let names: BTreeSet<&String> = now.attrs.keys().chain(then.attrs.keys()).collect();
+            for name in names {
+                let old = then.attrs.get(name);
+                if now.attrs.get(name) != old {
+                    steps.push(Step::Set(node, Field::Attr(name.clone(), old.cloned())));
+                }
             }
         }
+        return steps;
     }
-    steps
 }
 
-/// `name`, or `name_2`, `name_3`, … if it is in `taken`; the result is added.
-fn unique_name(name: &str, taken: &mut FxHashSet<String>) -> String {
+/// The name a restored prim (old node `id`, raw name `name`) gets among
+/// siblings named `taken`: its raw name, or, if a sibling has that, the name
+/// with its own collision suffix. That is the name a mirror rebuild shows it
+/// under, and it ties the new node to the old one (`crate::identity`, rule (a)).
+/// The result is added to `taken`.
+fn restore_name(name: &str, id: TreeID, taken: &mut FxHashSet<String>) -> String {
     let mut out = name.to_owned();
-    let mut n = 2;
-    while taken.contains(&out) {
-        out = format!("{name}_{n}");
-        n += 1;
+    if taken.contains(&out) {
+        // Only a literal name can already be the suffixed one.
+        let base = suffixed(name, id);
+        out = base.clone();
+        let mut n = 2;
+        while taken.contains(&out) {
+            out = format!("{base}_{n}");
+            n += 1;
+        }
     }
     taken.insert(out.clone());
     out
 }
 
-/// The subtree of `node` with raw names (unique among siblings), as it is
-/// re-created.
-fn restore_tree(index: &NodeIndex<'_>, node: TreeID) -> PrimTree {
-    let n = index.get(node).expect("listed");
+/// The subtree of `node`, named `name`, as it is re-created: children keep
+/// their raw names ([`restore_name`] among themselves).
+fn restore_tree(index: &NodeIndex<'_>, node: TreeID, name: String) -> PrimTree {
     let mut names = FxHashSet::default();
     PrimTree {
-        name: n.name.to_owned(),
-        spec: n.spec.clone(),
+        name,
+        spec: index.get(node).expect("listed").spec.clone(),
         children: index
             .children(Some(node))
             .iter()
             .map(|c| {
-                let mut t = restore_tree(index, *c);
-                t.name = unique_name(&t.name, &mut names);
-                t
+                let name = restore_name(index.get(*c).expect("listed").name, *c, &mut names);
+                restore_tree(index, *c, name)
             })
             .collect(),
     }

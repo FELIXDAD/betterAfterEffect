@@ -24,7 +24,10 @@ pub struct RevertParams {
     /// Only put back this sublayer.
     #[serde(default)]
     pub sublayer: Option<SublayerId>,
-    /// Only put back this prim and its descendants (in every sublayer).
+    /// Only put back this prim and its descendants (in every sublayer): the prim
+    /// at this path now, followed across renames and moves since that version;
+    /// if there is none, or it did not exist then, whatever was at this path
+    /// then.
     #[serde(default)]
     pub prim: Option<PrimPath>,
 }
@@ -47,8 +50,10 @@ impl Command for Revert {
         way it was at an earlier version, as one new undoable step. History is not rewritten; \
         collaborators receive the change like any other edit. Prims that did not exist are \
         deleted, prims that existed are restored with their subtree, and types, references and \
-        attribute opinions are set back. Give either `sublayer` or `prim`, or neither for the \
-        whole project.";
+        attribute opinions are set back. If a remaining sibling already has a restored prim's \
+        name, the restored prim is named `<name>_<peer>_<counter>` (its own collision suffix, \
+        as shown after concurrent creation of the same name); read the new paths back before \
+        editing them. Give either `sublayer` or `prim`, or neither for the whole project.";
 
     fn run(
         &self,
