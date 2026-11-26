@@ -796,23 +796,29 @@ fn render_worker(
         }
         let disk_key = disk
             .as_ref()
-            .filter(|d| d.enabled())
+            .filter(|d| d.enabled() && !job.scene.key.scope_source)
             .and_then(|d| disk_key(&job, &engine, d.binary_stamp()));
         let restored = disk_key.and_then(|k| disk.as_ref()?.read(k, &gpu));
         let hit = restored.is_some();
         let rendered = if let Some((target, rect)) = restored {
             engine.channels = None;
-            Ok((target, Some(rect), true))
+            Ok((target, Some((rect, None)), true))
         } else {
             let spare = spares.lock().unwrap().take();
-            engine.render(
-                &job.stage,
-                &job.rc,
-                job.scene.key.resolution,
-                bae_render::Display::default(),
-                None,
-                spare,
-            )
+            engine
+                .render(
+                    &job.stage,
+                    &job.rc,
+                    job.scene.key.resolution,
+                    bae_render::Display::default(),
+                    None,
+                    spare,
+                )
+                .map(|(target, source, temporal)| {
+                    let info = source
+                        .map(|image| (image.rect, job.scene.key.scope_source.then_some(image)));
+                    (target, info, temporal)
+                })
         };
         let result = rendered
             .map_err(|e| e.to_string())
@@ -820,13 +826,11 @@ fn render_worker(
                 let mut spares_now = spares.lock().unwrap();
                 spares_now.size = Some(target.size());
                 // Not an interactive thread: it waits for the warm-up instead.
-                let Some(source) = source else {
+                let Some((rect, source)) = source else {
                     spares_now.give(target);
                     return Err("incomplete frame".to_owned());
                 };
                 drop(spares_now);
-                let rect = source.rect;
-                let source = job.scene.key.scope_source.then_some(source);
                 let texture = target.view().texture().clone();
                 let channels = engine.channels.clone();
                 let pick_bytes = channels
