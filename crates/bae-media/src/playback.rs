@@ -126,7 +126,58 @@ impl Sink {
     }
 }
 
-/// Default device with a reusable decoding/mixing thread.
+/// Devices visible on the native audio host when the output was negotiated.
+#[derive(Debug, Default)]
+pub struct OutputDevices {
+    pub default_name: String,
+    /// Stable backend ID and user-visible name.
+    pub outputs: Arc<[(String, String)]>,
+}
+
+impl OutputDevices {
+    /// Enumerate on the device worker. Some drivers block while enumerating.
+    pub fn enumerate() -> Self {
+        let host = cpal::default_host();
+        let default_name = host
+            .default_output_device()
+            .and_then(|device| device.description().ok())
+            .map(|description| description.name().to_owned())
+            .unwrap_or_default();
+        let outputs = host
+            .output_devices()
+            .into_iter()
+            .flatten()
+            .filter_map(|device| {
+                Some((
+                    device.id().ok()?.to_string(),
+                    device.description().ok()?.name().to_owned(),
+                ))
+            })
+            .collect();
+        Self {
+            default_name,
+            outputs,
+        }
+    }
+}
+
+/// Native output selection and requested device buffer duration.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct OutputConfig {
+    pub device_id: String,
+    pub latency_ms: u32,
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            device_id: "system_default".into(),
+            latency_ms: 200,
+        }
+    }
+}
+
+/// Device with a reusable decoding/mixing thread.
 pub struct AudioOutput {
     stream: cpal::Stream,
     commands: Sender<producer::Command>,
@@ -134,6 +185,7 @@ pub struct AudioOutput {
     rate: u32,
     device_name: String,
     channels: u16,
+    buffer_frames: Option<u32>,
 }
 impl std::fmt::Debug for AudioOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -146,9 +198,22 @@ impl std::fmt::Debug for AudioOutput {
 impl AudioOutput {
     /// Negotiate the device's native sample format and start the producer.
     pub fn open() -> Result<Self, String> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or("No audio output device")?;
+        Self::open_with(&OutputConfig::default())
+    }
+
+    /// Open the selected endpoint with a buffer supported by the device.
+    pub fn open_with(request: &OutputConfig) -> Result<Self, String> {
+        let host = cpal::default_host();
+        let device = if request.device_id == "system_default" {
+            host.default_output_device()
+        } else {
+            request
+                .device_id
+                .parse()
+                .ok()
+                .and_then(|id| host.device_by_id(&id))
+        }
+        .ok_or("Audio output device unavailable")?;
         let config = device.default_output_config().map_err(|e| e.to_string())?;
         let rate = config.sample_rate();
         let channels = config.channels();
@@ -156,7 +221,20 @@ impl AudioOutput {
             .description()
             .map(|d| d.name().to_owned())
             .unwrap_or_default();
-        let (writer, reader) = RingBuffer::new(8);
+        let requested_frames =
+            (u64::from(rate) * u64::from(request.latency_ms.clamp(1, 500))).div_ceil(1000) as u32;
+        let mut stream_config = config.config();
+        let mut frames = requested_frames;
+        if let cpal::SupportedBufferSize::Range { min, max } = *config.buffer_size() {
+            frames = requested_frames.clamp(min, max);
+            stream_config.buffer_size = cpal::BufferSize::Fixed(frames);
+        }
+        let (writer, reader) = RingBuffer::new(
+            (frames.max(requested_frames) as usize)
+                .div_ceil(BLOCK_FRAMES)
+                .saturating_mul(2)
+                .max(4),
+        );
         let monitor = Arc::new(Monitor {
             gain: AtomicU32::new(1.0_f32.to_bits()),
             ..Monitor::default()
@@ -170,7 +248,7 @@ impl AudioOutput {
         };
         macro_rules! build {
             ($t:ty) => {
-                stream::<$t>(&device, config.into(), sink)
+                stream::<$t>(&device, stream_config, sink)
             };
         }
         let stream = match config.sample_format() {
@@ -183,6 +261,7 @@ impl AudioOutput {
             format => return Err(format!("Unsupported output format: {format}")),
         }
         .map_err(|e| e.to_string())?;
+        let buffer_frames = stream.buffer_size().ok().filter(|size| *size > 0);
         stream.play().map_err(|e| e.to_string())?;
         let (commands, messages) = mpsc::channel();
         let worker_monitor = monitor.clone();
@@ -197,6 +276,7 @@ impl AudioOutput {
             rate,
             device_name,
             channels,
+            buffer_frames,
         })
     }
 
@@ -233,6 +313,10 @@ impl AudioOutput {
     /// Name and channel count of the stream negotiated during device warm-up.
     pub fn device_info(&self) -> (&str, u16) {
         (&self.device_name, self.channels)
+    }
+    /// Buffer length actually negotiated by the driver, when provided.
+    pub fn buffer_frames(&self) -> Option<u32> {
+        self.buffer_frames
     }
 
     /// Route the left and right program channels on the running output stream.
