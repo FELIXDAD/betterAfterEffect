@@ -441,6 +441,7 @@ mod tests {
                     | "character"
                     | "align"
                     | "tracker"
+                    | "create_nulls_from_paths"
                     | "paragraph"
                     | "properties"
                     | "effects"
