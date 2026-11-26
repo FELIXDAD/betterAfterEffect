@@ -245,11 +245,13 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     // `bae <project>`: open it now. One project at a time, like AE.
     let mut startup_error = None;
     let settings = prefs.current();
-    let startup = global
-        .open
-        .first()
-        .map(|p| p.as_path())
-        .or_else(|| files::template_path(&settings));
+    let startup = global.open.first().map(|p| p.as_path()).or_else(|| {
+        if global.safe_mode {
+            None
+        } else {
+            files::template_path(&settings)
+        }
+    });
     if let Some(path) = startup {
         if global.open.len() > 1 {
             tracing::warn!("only the first project is opened: {}", path.display());
@@ -297,7 +299,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.restore_project_workspace(&document);
     workspace.set_extra_commands(document.command_titles());
-    if global.open.is_empty() && global.smoke_test.is_none() && !global.safe_mode {
+    if startup.is_none() && global.smoke_test.is_none() && !global.safe_mode {
         workspace.start_without_project(first_run);
     }
 
