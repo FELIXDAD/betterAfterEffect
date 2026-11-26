@@ -1021,7 +1021,7 @@ fn label_index(key: &str) -> usize {
 }
 
 /// A label's name as shown: the user's name, or the translated default.
-fn label_name(p: &Preferences, i: usize) -> String {
+pub fn label_name(p: &Preferences, i: usize) -> String {
     let name = p.label_name(i);
     if i == 0 || name.is_empty() || name == schema::LABEL_NAMES[i] {
         tr(schema::LABEL_NAMES[i]).to_owned()
