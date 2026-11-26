@@ -186,6 +186,7 @@ impl Builder<'_, '_> {
             opacity: 1.,
             blend: BlendMode::Normal,
             dissolve_seed: 0,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             matte: None,
             mask: None,

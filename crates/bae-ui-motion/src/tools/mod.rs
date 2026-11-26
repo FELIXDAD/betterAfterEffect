@@ -518,6 +518,20 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// Whether a mask or shape path is selected: vertices in the Composition
+/// viewer, or its path property in the Timeline.
+fn path_selected(cx: &PanelContext<'_>) -> bool {
+    let session = crate::common::session(cx.resources);
+    let s = session.lock();
+    s.vertex_path.is_some()
+        || s.selected_props.iter().any(|(p, attr)| {
+            attr == "path"
+                && cx.stage.prim(p).is_some_and(|v| {
+                    v.is_a(&bae_model::PrimType::MASK) || v.is_a(&bae_model::PrimType::PATH)
+                })
+        })
+}
+
 /// `(id, English title)` of the tool actions, for the shortcut editor.
 pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
     SHORTCUTS
@@ -534,6 +548,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
         .chain([
             (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::FAST_PREVIEWS, "Fast Previews"),
             (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
             (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
             (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
@@ -577,6 +592,12 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
             let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
             (crate::viewer::display::SHOW_CHANNEL, params, *title)
         });
+    let fast = crate::viewer::display::FAST_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::FAST_PREVIEWS, params, *title)
+        });
     let views = crate::viewer::view3d::SHORTCUT_NAMES
         .iter()
         .map(|(slot, title)| {
@@ -601,6 +622,7 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         .chain(views)
         .chain(custom)
         .chain(channels)
+        .chain(fast)
         .map(|(id, params, title)| (id, params, title.to_owned()))
         .chain(crate::viewer::display::snapshot_names())
         .map(|(id, params, title)| {
@@ -769,6 +791,8 @@ pub struct PaintOptions {
     pub clone_offset: [f64; 2],
     /// Clone Stamp: source time shift in seconds.
     pub clone_time_shift: f64,
+    /// Clone Stamp, Lock Source Time: the source time in seconds.
+    pub clone_source_time: f64,
     /// Brush tip (Brushes panel): pixels, degrees, percents.
     pub diameter: f64,
     pub angle: f64,
@@ -779,6 +803,58 @@ pub struct PaintOptions {
     /// Pressure, 2 Pen Tilt, 3 Stylus Wheel.
     pub dynamics: [u8; 5],
     pub minimum_size: f64,
+    /// Clone Source Overlay (the source shown over the layer while cloning)
+    /// and its opacity in percent.
+    pub clone_overlay: bool,
+    pub overlay_opacity: f64,
+    /// The Paint panel's five Clone presets and the one in use.
+    pub clone_presets: [ClonePreset; 5],
+    pub clone_preset: usize,
+}
+
+/// One of the Paint panel's Clone presets: the Clone Options it recalls.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClonePreset {
+    pub source: Option<bae_model::PrimPath>,
+    pub aligned: bool,
+    pub lock_source_time: bool,
+    pub offset: [f64; 2],
+    pub time_shift: f64,
+}
+
+impl Default for ClonePreset {
+    fn default() -> Self {
+        ClonePreset {
+            source: None,
+            aligned: true,
+            lock_source_time: false,
+            offset: [0.0, 0.0],
+            time_shift: 0.0,
+        }
+    }
+}
+
+impl PaintOptions {
+    /// Recalls Clone preset `i`, keeping the current options in the one in
+    /// use first (AE: changes go to the selected preset).
+    pub fn choose_clone_preset(&mut self, i: usize) {
+        let i = i.min(4);
+        self.clone_presets[self.clone_preset.min(4)] = ClonePreset {
+            source: self.clone_source.clone(),
+            aligned: self.aligned,
+            lock_source_time: self.lock_source_time,
+            offset: self.clone_offset,
+            time_shift: self.clone_time_shift,
+        };
+        let p = self.clone_presets[i].clone();
+        self.clone_source = p.source;
+        self.aligned = p.aligned;
+        self.lock_source_time = p.lock_source_time;
+        self.clone_offset = p.offset;
+        self.clone_time_shift = p.time_shift;
+        self.clone_preset = i;
+    }
 }
 
 impl Default for PaintOptions {
@@ -798,6 +874,7 @@ impl Default for PaintOptions {
             lock_source_time: false,
             clone_offset: [0.0, 0.0],
             clone_time_shift: 0.0,
+            clone_source_time: 0.0,
             diameter: 21.0,
             angle: 0.0,
             roundness: 100.0,
@@ -805,6 +882,10 @@ impl Default for PaintOptions {
             spacing: 25.0,
             dynamics: [1, 0, 0, 0, 0],
             minimum_size: 1.0,
+            clone_overlay: false,
+            overlay_opacity: 50.0,
+            clone_presets: Default::default(),
+            clone_preset: 0,
         }
     }
 }
@@ -1212,6 +1293,15 @@ impl ActionHandler for ToolActions {
             return true;
         }
         if crate::viewer::view_options::handle(inv, cx) {
+            return true;
+        }
+        // Ctrl+T with a mask or shape path selected: Free Transform Points,
+        // else the Type tools (AE).
+        if inv.id == ids::TYPE && path_selected(cx) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            t.set(Tool::Selection);
+            t.free_transform_request = true;
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
