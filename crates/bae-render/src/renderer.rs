@@ -517,7 +517,9 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
-        let tiles = request.roi.map(|_| crate::exec::TileCache {
+        let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
+        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
+            feedback,
             frames: &mut self.frames,
             request: RenderRequest {
                 roi: None,

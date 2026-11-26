@@ -3,8 +3,8 @@
 
 use bae_anim::glam::{DMat4, DVec3};
 use bae_model::{
-    AttrSpec, Command, CommandError, LayerKind, ModelError, Op, PrimPath, PrimType, Stage,
-    TextDocument, Time, Transaction, Value,
+    AttrSpec, Command, CommandError, Keyframe, LayerKind, ModelError, Op, PrimPath, PrimType,
+    Stage, TextDocument, Time, Transaction, Value,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1049,6 +1049,122 @@ impl Command for ShiftLayers {
         }
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+
+/// How Sequence Layers blends overlapping layers (AE's Transition menu).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceTransition {
+    /// 关
+    #[default]
+    Off,
+    /// 溶解前景图层: the upper layer of each overlapping pair fades.
+    DissolveFront,
+    /// 交叉溶解前景与背景图层: the ending layer fades out, the next fades in.
+    CrossDissolve,
+}
+
+pub struct SequenceLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SequenceLayersParams {
+    /// Layers of one comp in playing order (AE: the selection order); the
+    /// first stays where it is.
+    pub layers: Vec<PrimPath>,
+    /// How long each layer overlaps the one before (flicks; 0 butts them).
+    #[serde(default)]
+    pub overlap: Time,
+    /// Opacity keyframes over each overlap.
+    #[serde(default)]
+    pub transition: SequenceTransition,
+}
+
+impl Command for SequenceLayers {
+    type Params = SequenceLayersParams;
+    type Output = ();
+    const ID: &'static str = "layer.sequence";
+    const TITLE: &'static str = "Sequence Layers";
+    const DESCRIPTION: &'static str = "Keyframe assistant: move layers in time so each starts where the previous ends, optionally overlapping by a duration with opacity dissolves (AE: Animation > Keyframe Assistant > Sequence Layers). Keyframes move with the layers. One undo step.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
+        same_comp(tx.stage(), &p.layers)?;
+        let overlap = p.overlap.max(Time::ZERO);
+        let stack = p
+            .layers
+            .first()
+            .and_then(|l| query::owning_comp(tx.stage(), l))
+            .map(|c| query::comp_layers(tx.stage(), &c))
+            .unwrap_or_default();
+        let depth = |l: &PrimPath| stack.iter().position(|x| x == l).unwrap_or(usize::MAX);
+        let span = |tx: &Transaction<'_>, l: &PrimPath| {
+            let t = query::layer_timing(tx.stage(), l);
+            (t.in_point.min(t.out_point), t.in_point.max(t.out_point))
+        };
+        for pair in p.layers.windows(2) {
+            let (prev, next) = (&pair[0], &pair[1]);
+            let (_, end) = span(tx, prev);
+            let (start, _) = span(tx, next);
+            let delta = end - overlap - start;
+            if delta != Time::ZERO {
+                let t = query::layer_timing(tx.stage(), next);
+                let has_out = tx
+                    .stage()
+                    .prim(next)
+                    .is_some_and(|v| v.value("out_point").is_some());
+                set(tx, next, "start_time", Value::Time(t.start_time + delta))?;
+                set(tx, next, "in_point", Value::Time(t.in_point + delta))?;
+                if has_out {
+                    set(tx, next, "out_point", Value::Time(t.out_point + delta))?;
+                }
+            }
+            if overlap == Time::ZERO || p.transition == SequenceTransition::Off {
+                continue;
+            }
+            let (s, e) = (end - overlap, end);
+            let front_is_prev = depth(prev) < depth(next);
+            let fades: Vec<(&PrimPath, bool)> = match p.transition {
+                SequenceTransition::DissolveFront => {
+                    vec![(if front_is_prev { prev } else { next }, front_is_prev)]
+                }
+                _ => vec![(prev, true), (next, false)],
+            };
+            for (layer, out) in fades {
+                fade(tx, layer, s, e, out)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Opacity keys on `layer` from comp time `s` to `e`: from its opacity to 0
+/// (`out`) or from 0 up to it.
+fn fade(
+    tx: &mut Transaction<'_>,
+    layer: &PrimPath,
+    s: Time,
+    e: Time,
+    out: bool,
+) -> Result<(), CommandError> {
+    const OPACITY: &str = "transform:opacity";
+    let timing = query::key_timing(tx.stage(), layer);
+    let full = tx
+        .stage()
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, OPACITY))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0);
+    let (a, b) = if out { (full, 0.0) } else { (0.0, full) };
+    let mut spec = query::attr_spec(tx.stage(), layer, OPACITY)
+        .cloned()
+        .unwrap_or_default();
+    for (t, v) in [(s, a), (e, b)] {
+        spec.keyframes
+            .insert(timing.layer_time(t), Keyframe::linear(Value::Float(v)));
+    }
+    write_attr(tx, layer, OPACITY, spec)
 }
 
 // ---------------------------------------------------------------------------
