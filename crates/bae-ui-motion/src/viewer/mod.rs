@@ -575,16 +575,15 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
-fn checkerboard(p: &egui::Painter, r: Rect) {
-    p.rect_filled(r, 0.0, Color32::from_gray(200));
-    let s = 8.0;
+fn checkerboard(p: &egui::Painter, r: Rect, s: f32, colors: [Color32; 2]) {
+    p.rect_filled(r, 0.0, colors[1]);
     let mut y = r.top();
     let mut row = 0;
     while y < r.bottom() {
         let mut x = r.left() + if row % 2 == 0 { 0.0 } else { s };
         while x < r.right() {
             let cell = Rect::from_min_size(pos2(x, y), vec2(s, s)).intersect(r);
-            p.rect_filled(cell, 0.0, Color32::from_gray(150));
+            p.rect_filled(cell, 0.0, colors[0]);
             x += 2.0 * s;
         }
         y += s;
@@ -882,7 +881,12 @@ impl Panel for CompositionViewer {
             None => comp_rect,
         };
         if self.checker {
-            checkerboard(&painter, comp_rect.intersect(area));
+            checkerboard(
+                &painter,
+                comp_rect.intersect(area),
+                self.prefs.checker_size,
+                self.prefs.checker_colors,
+            );
         } else {
             let c = info.bg_color;
             painter.rect_filled(

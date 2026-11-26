@@ -40,7 +40,6 @@ mod menus;
 mod release_001;
 #[cfg(target_os = "macos")]
 mod render_queue;
-#[cfg(target_os = "macos")]
 mod settings;
 mod shortcut_sweep;
 #[cfg(target_os = "macos")]
