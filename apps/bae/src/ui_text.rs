@@ -119,6 +119,8 @@ pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     "视图 A",
     "视图 B",
     "视图 C",
+    // AE: 3D 位置 Gizmo, 三维旋转 Gizmo …
+    "Gizmo",
 ];
 
 #[test]

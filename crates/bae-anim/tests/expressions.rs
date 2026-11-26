@@ -990,6 +990,95 @@ fn audio_levels_and_has_audio() {
     );
 }
 
+/// evaluate_attribute_traced reports what the value was read from: the
+/// attribute itself, same-layer and other-layer properties at the times read,
+/// and what nested expressions read; edits to anything else leave it valid.
+#[test]
+fn traced_attribute_reports_its_reads() {
+    use bae_anim::{ExprRead, ReadKind};
+    use bae_model::{Change, TimeRange};
+    let a = format!("{MAIN}/layers/A");
+    let fx = format!("{a}/effects/rate");
+    let s = stage(|b| {
+        b.layer(MAIN, "A", "null");
+        let l = b.layer(MAIN, "B", "null");
+        b.expr(
+            &l,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("C").transform.scale[0]"#,
+        );
+        b.layer(MAIN, "C", "null");
+        b.prim(&format!("{a}/effects"), PrimType::FOLDER)
+            .prim(&fx, PrimType::EFFECT)
+            .set(&fx, "match_name", "ADBE Slider Control")
+            .set(&fx, "name", "Rate")
+            .expr(
+                &fx,
+                "param:0001",
+                0.0,
+                r#"var b = thisComp.layer("B");
+                   transform.opacity + b.transform.position.valueAtTime(time - 1)[0] + b.transform.rotation
+                   + thisComp.layer("C").marker.numKeys"#,
+            );
+    });
+    let mut ev = bae_anim::Evaluator::new();
+    let (v, reads) = ev
+        .evaluate_attribute_traced(&s, &p(&fx), "param:0001", secs(2.0))
+        .unwrap();
+    assert_eq!(v, Value::Float(100.0 + 0.0 + 100.0));
+    let attr = |prim: &str, attr: &str, t: f64| ExprRead {
+        prim: p(prim),
+        kind: ReadKind::Attr(attr.into()),
+        time: Some(secs(t)),
+    };
+    let (b, c) = (format!("{MAIN}/layers/B"), format!("{MAIN}/layers/C"));
+    for want in [
+        attr(&fx, "param:0001", 2.0),
+        attr(&a, "transform:opacity", 2.0),
+        attr(&b, "transform:position", 1.0),
+        attr(&b, "transform:rotation", 2.0),
+        attr(&c, "transform:scale", 2.0),
+        ExprRead {
+            prim: p(&format!("{c}/markers")),
+            kind: ReadKind::Subtree,
+            time: None,
+        },
+    ] {
+        assert!(reads.contains(&want), "missing {want:?} in {reads:#?}");
+    }
+    let set = |path: &str, attr: &str| Change::AttrChanged {
+        path: p(path),
+        attr: attr.into(),
+        range: TimeRange::ALL,
+    };
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:scale")]
+    ));
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:opacity")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:position")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:rotation")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&b, "transform:opacity")]
+    ));
+    // Without an expression: the attribute itself.
+    let (_, plain) = ev
+        .evaluate_attribute_traced(&s, &p(&c), "transform:scale", secs(2.0))
+        .unwrap();
+    assert_eq!(plain, vec![attr(&c, "transform:scale", 2.0)]);
+}
+
 /// sampleImage reads layer pixels through the shared sample cache: a miss is
 /// transparent black and asks for the sample; once the renderer fills it in,
 /// the next evaluation reads it.

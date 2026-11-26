@@ -903,6 +903,7 @@ fn project_info(stage: &Stage) -> expr::ProjectInfo {
     for p in stage.traverse() {
         let Some(v) = stage.prim(&p) else { continue };
         if v.is_a(&PrimType::PROJECT) {
+            info.path = Some(p.clone());
             let pt = &PrimType::PROJECT;
             info.bit_depth = setting_str(&v, pt, "bit_depth")
                 .and_then(|d| d.parse().ok())
@@ -1685,6 +1686,36 @@ impl Evaluator {
         attr: &str,
         time: Time,
     ) -> Result<Value, EvalError> {
+        self.attribute(stage, prim, attr, time, false)
+            .map(|(v, _)| v)
+    }
+
+    /// [`Evaluator::evaluate_attribute`] and what the value was read from: the
+    /// attribute itself at `time` and, for an expression, every value it read
+    /// (properties of this and other layers at the comp times read, layer
+    /// transforms, settings), through nested expressions too; sorted, without
+    /// duplicates. A value derived from it stays valid across an edit when no
+    /// read is [`crate::ExprRead::touched_by`] the edit's changes
+    /// ([`crate::reads_touched`]).
+    pub fn evaluate_attribute_traced(
+        &mut self,
+        stage: &Stage,
+        prim: &PrimPath,
+        attr: &str,
+        time: Time,
+    ) -> Result<(Value, Vec<crate::ExprRead>), EvalError> {
+        self.attribute(stage, prim, attr, time, true)
+    }
+
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        prim: &PrimPath,
+        attr: &str,
+        time: Time,
+        trace: bool,
+    ) -> Result<(Value, Vec<crate::ExprRead>), EvalError> {
+        let own = || crate::ExprRead::attr(prim.clone(), attr, Some(time));
         let view = stage
             .prim(prim)
             .ok_or_else(|| EvalError::NoSuchPrim(prim.clone()))?;
@@ -1709,9 +1740,16 @@ impl Evaluator {
             attr: attr.to_owned(),
         })?;
         if let (Prop::Expr(_), Some((layer, comp))) = (&prop, enclosing_layer(stage, prim)) {
-            return Ok(
-                self.evaluate_expression_attribute(stage, &comp, &layer, prim, attr, time, &prop)
+            let (v, mut reads) = self.evaluate_expression_attribute(
+                stage, &comp, &layer, prim, attr, time, &prop, trace,
             );
+            if trace {
+                let own = own();
+                if let Err(i) = reads.binary_search(&own) {
+                    reads.insert(i, own);
+                }
+            }
+            return Ok((v, reads));
         }
         let cx = Cx {
             comp: 0,
@@ -1720,7 +1758,8 @@ impl Evaluator {
             lt: local,
             js: None,
         };
-        Ok(prop.sample(&cx))
+        let reads = if trace { vec![own()] } else { Vec::new() };
+        Ok((prop.sample(&cx), reads))
     }
 
     /// `evaluate_attribute` for an attribute with an expression: runs it in the scope of
@@ -1735,19 +1774,22 @@ impl Evaluator {
         attr: &str,
         time: Time,
         fallback: &Prop,
-    ) -> Value {
+        trace: bool,
+    ) -> (Value, Vec<crate::ExprRead>) {
         let Ok(compiled) = self.compiled(stage, comp) else {
-            return fallback.sample(&Cx {
+            let v = fallback.sample(&Cx {
                 comp: 0,
                 layer: 0,
                 ct: time,
                 lt: time,
                 js: None,
             });
+            return (v, Vec::new());
         };
         let index = compiled.layers.iter().position(|l| &l.path == layer);
         let (scope, id) = self.expression_scope(stage, &compiled);
-        let (v, _) = expr::with_scope(scope, || {
+        let scope = if trace { scope.traced() } else { scope };
+        let (v, result) = expr::with_scope(scope, || {
             expr::with_js(|ctx| {
                 let (li, lt) = match index {
                     Some(i) => (i, compiled.layers[i].timing.layer_time(time)),
@@ -1765,7 +1807,7 @@ impl Evaluator {
                 })
             })
         });
-        v
+        (v, result.map(|r| r.reads).unwrap_or_default())
     }
 
     /// Drop compiled comps that `event` may have changed.
@@ -2095,6 +2137,13 @@ impl CompiledComp {
         match cam {
             Some(i) => {
                 let layer = &self.layers[i];
+                crate::expr::note_read(|| {
+                    crate::reads::ExprRead::prim(
+                        layer.path.clone(),
+                        crate::reads::ReadKind::Prim,
+                        Some(ct),
+                    )
+                });
                 let cx = Cx {
                     comp: comp_id,
                     layer: i,
@@ -2139,6 +2188,9 @@ impl CompiledComp {
     ) -> DMat4 {
         visiting.push(i);
         let layer = &self.layers[i];
+        crate::expr::note_read(|| {
+            crate::reads::ExprRead::prim(layer.path.clone(), crate::reads::ReadKind::Prim, Some(ct))
+        });
         let cx = Cx {
             comp: comp_id,
             layer: i,
