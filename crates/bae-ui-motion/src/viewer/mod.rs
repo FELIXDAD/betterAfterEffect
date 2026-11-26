@@ -995,6 +995,12 @@ impl Panel for CompositionViewer {
             _ => image,
         };
         self.on_gpu = image.is_some();
+        if let Some(frame) = self.gpu.as_ref().and_then(|g| g.output()) {
+            let mut s = session.lock();
+            if s.scope_frame.as_ref().map(|f| f.1) != Some(frame.1) {
+                s.scope_frame = Some(frame);
+            }
+        }
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
         if let Some(h) = resp.hover_pos() {

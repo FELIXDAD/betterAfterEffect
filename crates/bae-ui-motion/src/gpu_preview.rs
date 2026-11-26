@@ -386,6 +386,21 @@ impl GpuPreview {
         })
     }
 
+    /// The frame the viewer shows and a key that changes with it (Lumetri
+    /// Scopes): a cached frame of the background renderer, else the rendered
+    /// one.
+    pub fn output(&self) -> Option<(wgpu::Texture, u64)> {
+        use std::hash::{Hash, Hasher};
+        if let Some((t, _)) = &self.cached {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            t.hash(&mut h);
+            return Some((t.clone(), h.finish()));
+        }
+        let (hash, time, resolution) = self.last?;
+        let key = hash ^ (time.flicks() as u64).rotate_left(17) ^ u64::from(resolution);
+        Some((self.target.as_ref()?.view().texture().clone(), key))
+    }
+
     /// The viewer shows `texture` (a frame of the background renderer or
     /// its cache): the Info panel and snapshots read it until the next
     /// [`Self::frame`].

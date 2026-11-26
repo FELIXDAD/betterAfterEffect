@@ -53,6 +53,7 @@ mod project;
 mod props;
 mod render;
 pub mod render_queue;
+pub mod scopes;
 pub mod scripts;
 pub mod session;
 mod timeline;
@@ -87,6 +88,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     render_queue::register,
     layer_panel::register,
     ae_panels::register,
+    scopes::register,
     media_browser::register,
     flowchart::register,
     footage_panel::register,
