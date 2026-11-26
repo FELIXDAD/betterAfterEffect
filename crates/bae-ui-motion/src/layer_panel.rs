@@ -1013,6 +1013,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 
 /// Chinese (AE's zh_CN dictionary).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Refine Edge Canvas", "调整边缘画布"),
     ("Roto Brush Canvas", "Roto 笔刷画布"),
     ("Freeze", "冻结"),
     ("Unfreeze", "解除冻结"),

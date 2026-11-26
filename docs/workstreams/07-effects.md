@@ -147,3 +147,4 @@ Particle World 和 Particle Systems II 共用 GPU 粒子引擎。出生率的时
 第二组增加 ID 遮罩、Cryptomatte、EXtractoR 和 IDentifier。查看器按显示帧点选物体后，把物体 ID 写入效果参数。通道选择来自已解码的素材帧。
 
 - Roto 笔刷在图层面板记录前景和背景笔触，效果通过源帧光流传播。冻结会生成逐帧遮罩素材。
+- 调整边缘笔触指定半透明区域，在 GPU 上从边缘两侧估计前景和背景色。

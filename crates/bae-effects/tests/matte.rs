@@ -37,3 +37,44 @@ fn roto_foreground_and_background_propagate_on_both_sides_of_a_seed() {
         );
     }
 }
+
+#[test]
+fn refine_edge_brush_recovers_partial_coverage_on_a_colour_ramp() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let scene = |edge: bool| {
+        let mut comp = RenderComp::new(path("/comps/main"), 64, 8);
+        let mut layer = solid(CLIP, 64, [1.; 4]);
+        layer.effects.push(effect(
+            "ramp",
+            "ADBE Ramp",
+            vec![
+                (1, Value::Vec2([0., 4.])),
+                (2, Value::Color([0., 0., 0., 1.])),
+                (3, Value::Vec2([63., 4.])),
+                (4, Value::Color([1.; 4])),
+            ],
+        ));
+        let mut params = vec![(
+            0,
+            Value::FloatList(vec![0., 3., 48., 3., 48., 6., 0., -3., 16., 3., 16., 6.]),
+        )];
+        if edge {
+            params.push((
+                bae_vision::EDGE_STROKES,
+                Value::FloatList(vec![0., 8., 32., 1., 32., 7.]),
+            ));
+        }
+        layer.effects.push(effect("roto", bae_vision::ROTO, params));
+        comp.layers.push(layer);
+        comp
+    };
+    let raw = pixels(&mut renderer, |_| scene(false), 0.);
+    let refined = pixels(&mut renderer, |_| scene(true), 0.);
+    assert!((26usize..38).any(|x| {
+        let i = (4 * 64 + x) * 4 + 3;
+        refined[i] > 10 && refined[i] < 245 && refined[i].abs_diff(raw[i]) > 10
+    }));
+    assert_eq!(&raw[..16], &refined[..16]);
+}

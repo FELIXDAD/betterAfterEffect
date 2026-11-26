@@ -4,9 +4,10 @@ use bae_model::{Time, Value};
 pub const ROTO: &str = "ADBE Samurai";
 /// Internal effect parameters outside AE's public controls.
 pub const STROKES: u32 = 0;
+pub const EDGE_STROKES: u32 = 50_005;
 pub const SPAN: u32 = 50_001;
 pub const FROZEN: u32 = 50_002;
-/// Bake outputs the raw segmentation as alpha for the frozen footage sequence.
+/// Bake stores confidence, refine coverage and temporal confidence in RGB.
 pub const BAKE: u32 = 50_003;
 /// Comp start, layer start (flicks) and stretch (%) at bake time.
 pub const FROZEN_TIMING: u32 = 50_004;
