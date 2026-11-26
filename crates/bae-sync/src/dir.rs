@@ -7,7 +7,7 @@
 //! A client compacts only its own log (rewrite as one snapshot, then rename), so
 //! concurrent compactions never interfere.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -84,6 +84,19 @@ struct LogHeader {
     generation: String,
 }
 
+/// Snapshot requests for a document whose own log fell behind: the first goes
+/// out at once, later ones (the request was lost, or the rewrite failed too)
+/// back off, because the session exports a whole snapshot for each on the thread
+/// that owns the stage, and a folder that is down may stay down for a while.
+#[derive(Debug)]
+struct Behind {
+    next_request: Instant,
+    delay: Duration,
+}
+
+/// Longest wait between two snapshot requests for a log that fell behind.
+const BEHIND_MAX_DELAY: Duration = Duration::from_secs(60);
+
 #[derive(Debug)]
 struct OwnLog {
     path: PathBuf,
@@ -139,7 +152,7 @@ pub struct DirTransport {
     /// Documents whose own log lacks ops the session counts as written, because
     /// a write failed. Nothing is appended to them until the session's snapshot
     /// rewrites the log (see [`DirTransport::fell_behind`]).
-    behind: BTreeSet<DocKey>,
+    behind: BTreeMap<DocKey, Behind>,
     inbox: VecDeque<Message>,
     scanned: bool,
     poll_now: bool,
@@ -202,7 +215,7 @@ impl DirTransport {
             own: BTreeMap::new(),
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
-            behind: BTreeSet::new(),
+            behind: BTreeMap::new(),
             inbox: VecDeque::new(),
             scanned: false,
             poll_now: true,
@@ -366,6 +379,7 @@ impl DirTransport {
             self.scanned = true;
             self.inbox.push_back(self.hello());
         }
+        self.rerequest_behind();
     }
 
     fn note(&mut self, r: Result<(), SyncError>) {
@@ -659,9 +673,41 @@ impl DirTransport {
     /// If the session goes away before answering, the log still claims only what
     /// it holds, and the next session on the folder writes what is missing.
     fn fell_behind(&mut self, doc: &DocKey) {
-        self.behind.insert(doc.clone());
-        self.inbox
-            .push_back(Message::SnapshotRequest { doc: doc.clone() });
+        let now = Instant::now();
+        let first = self.config.poll_interval.max(Duration::from_millis(100));
+        match self.behind.get_mut(doc) {
+            Some(b) => {
+                // Failed again (the rewrite, or a write while we waited): ask
+                // again later, not on every failure.
+                b.delay = (b.delay * 2).min(BEHIND_MAX_DELAY);
+                b.next_request = b.next_request.max(now + b.delay);
+            }
+            None => {
+                self.behind.insert(
+                    doc.clone(),
+                    Behind {
+                        next_request: now + first,
+                        delay: first,
+                    },
+                );
+                self.inbox
+                    .push_back(Message::SnapshotRequest { doc: doc.clone() });
+            }
+        }
+    }
+
+    /// Ask again for the snapshots of logs that are still behind (the answer may
+    /// have been lost with a session that went away), with backoff.
+    fn rerequest_behind(&mut self) {
+        let now = Instant::now();
+        for (doc, b) in &mut self.behind {
+            if now >= b.next_request {
+                b.next_request = now + b.delay;
+                b.delay = (b.delay * 2).min(BEHIND_MAX_DELAY);
+                self.inbox
+                    .push_back(Message::SnapshotRequest { doc: doc.clone() });
+            }
+        }
     }
 
     fn request_snapshot(&mut self, doc: &DocKey) {
@@ -738,7 +784,7 @@ impl Transport for DirTransport {
             Message::Hello { versions, .. } => self.on_hello(versions.clone()),
             Message::Updates { doc, version, .. } => {
                 let doc = doc.clone();
-                if self.behind.contains(&doc) {
+                if self.behind.contains_key(&doc) {
                     // The snapshot we asked for covers this too.
                     return Ok(());
                 }

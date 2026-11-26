@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use bae_model::project::Project;
 use bae_model::{AuthorId, Op, Stage, SublayerId, Value};
 use bae_sync::{
-    ClientId, DirConfig, DirTransport, DocKey, MemoryTransport, SessionConfig, SyncError,
+    ClientId, DirConfig, DirTransport, DocKey, DocSet, MemoryTransport, SessionConfig, SyncError,
     SyncSession, ThreadedTransport, Transport,
 };
 use common::*;
@@ -280,7 +280,13 @@ fn a_failed_append_is_repaired_with_a_snapshot() {
     assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
     unstall(&log, &aside);
     set_opacity(&mut a, 4.0);
-    a.pump();
+    // The snapshot is asked for again (with backoff), then the log is rewritten.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while a.dir.stats().compactions == 0 {
+        assert!(Instant::now() < deadline, "the log was never rewritten");
+        std::thread::sleep(Duration::from_millis(10));
+        a.pump();
+    }
     assert_eq!(a.dir.stats().compactions, 1);
     let mut b = Client::open(&dir, "bob", fast(), 2);
     b.pump();
@@ -718,4 +724,49 @@ fn file_events_wake_the_poll() {
         assert!(Instant::now() < deadline, "no wake-up from file events");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// While the folder keeps failing, the session is not asked for a snapshot on
+/// every pump: it exports a whole snapshot for each request, on the thread that
+/// owns the stage.
+#[test]
+fn a_stalled_log_is_not_snapshotted_on_every_pump() {
+    let (_tmp, dir) = project_dir();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    set_opacity(&mut a, 1.0);
+    a.pump();
+    let log = a.dir.log_path(&DocKey::sublayer(&SublayerId::root()));
+    let aside = stall(&log);
+    set_opacity(&mut a, 2.0);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    // No edits from here on: everything the session tries to send is a snapshot
+    // answer (failed sends are not counted as messages, but their bytes are).
+    let root = DocKey::sublayer(&SublayerId::root());
+    let snapshot_len = DocSet::export_snapshot(&a.stage, &root).unwrap().len() as u64;
+    let before = a.session.stats().bytes_sent;
+    let mut pumps = 0;
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(500) {
+        let _ = a.session.pump(&mut a.stage, &mut a.dir);
+        pumps += 1;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let snapshots = (a.session.stats().bytes_sent - before) / snapshot_len;
+    assert!(pumps > 50, "only {pumps} pumps");
+    assert!(
+        (1..=5).contains(&snapshots),
+        "{snapshots} snapshots in {pumps} pumps over 0.5 s"
+    );
+    unstall(&log, &aside);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while a.dir.stats().compactions == 0 {
+        assert!(Instant::now() < deadline, "the log was never rewritten");
+        std::thread::sleep(Duration::from_millis(10));
+        let _ = a.session.pump(&mut a.stage, &mut a.dir);
+    }
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
 }
