@@ -81,6 +81,23 @@ impl RenderComp {
         }
     }
 
+    /// In Photoshop a hidden clipping base hides its clipped layers as well.
+    pub(crate) fn photoshop_clipping_visibility(&mut self, stage: &bae_model::Stage) {
+        for index in 0..self.layers.len() {
+            let layer = &self.layers[index];
+            let Some(matte) = layer.track_matte.and_then(|m| self.layers.get(m.layer)) else {
+                continue;
+            };
+            if !matte.visible
+                && stage.prim(&layer.path).is_some_and(|p| {
+                    p.value("psd:clip_base").and_then(Value::as_prim_ref) == Some(&matte.path)
+                })
+            {
+                self.layers[index].visible = false;
+            }
+        }
+    }
+
     /// The camera 3D layers are seen through: the active camera or AE's default
     /// camera for this comp size.
     pub fn view_camera(&self) -> Camera {
@@ -302,6 +319,122 @@ pub struct RenderLayer {
 }
 
 impl RenderLayer {
+    pub(crate) fn resolve_photoshop_group(
+        &mut self,
+        stage: &bae_model::Stage,
+        assets: &crate::assets::AssetFiles,
+    ) {
+        let LayerContent::Comp(nested) = &mut self.content else {
+            return;
+        };
+        let Some(index) = self.masks.iter().position(|m| {
+            stage
+                .prim(&m.path)
+                .is_some_and(|p| p.value("psd:channel_mask") == Some(&Value::Bool(true)))
+        }) else {
+            return;
+        };
+        let mask = self.masks.remove(index);
+        if mask.mode == MaskMode::None {
+            return;
+        }
+        let Some(view) = stage.prim(&mask.path) else {
+            return;
+        };
+        let Some(mut selection) = bae_model::psd::LayerImage::from_asset(&view) else {
+            return;
+        };
+        let Some(Value::Vec2(origin)) = view.value("psd:origin") else {
+            return;
+        };
+        let size = [nested.width, nested.height];
+        selection.mask = bae_model::psd::PixelMask::Group {
+            origin: origin.map(|v| v as i32),
+            size,
+            inverted: mask.inverted ^ (mask.mode == MaskMode::Subtract),
+            density: (mask.opacity.clamp(0., 1.) * 65535.).round() as u16,
+        };
+        let footage = FootageRef {
+            asset: mask.path.clone(),
+            file: assets.file(&view).ok().flatten(),
+            size: Some(size),
+            source_time: Time::ZERO,
+            sequence: None,
+            file_revision: bae_model::asset::file_revision(&view),
+            psd_layer: Some(selection),
+            blend: None,
+        };
+        let mut stencil = Self::new(mask.path, LayerContent::Footage(footage));
+        stencil.blend_mode = BlendMode::StencilAlpha;
+        let nested = Arc::make_mut(nested);
+        for layer in &mut nested.layers {
+            if let Some(matte) = &mut layer.track_matte {
+                matte.layer += 1;
+            }
+        }
+        nested.layers.insert(0, stencil);
+    }
+    /// A Photoshop pixel mask samples the source channel. Timeline mask controls
+    /// edit that channel without tracing soft edges into a polygon.
+    pub fn resolve_photoshop_mask(&mut self, stage: &bae_model::Stage) {
+        let LayerContent::Footage(f) = &mut self.content else {
+            return;
+        };
+        let Some(sel) = &mut f.psd_layer else { return };
+        if !stage
+            .prim(&self.path)
+            .is_some_and(|p| p.value("psd:separate_vectors") == Some(&Value::Bool(true)))
+            && let Ok(folder) = f.asset.child("masks")
+        {
+            for path in stage.children(&folder) {
+                let Some(mask) = stage.prim(&path) else {
+                    continue;
+                };
+                let Some(Value::Bezier(shape)) = mask.value("path") else {
+                    continue;
+                };
+                self.masks.push(RenderMask {
+                    path: path.clone(),
+                    shape: shape.clone(),
+                    mode: mask
+                        .value("mode")
+                        .and_then(Value::as_str)
+                        .and_then(MaskMode::from_token)
+                        .unwrap_or_default(),
+                    inverted: mask
+                        .value("inverted")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    opacity: 1.,
+                    feather: [0.; 2],
+                    expansion: 0.,
+                });
+            }
+        }
+        if !stage
+            .prim(&self.path)
+            .is_some_and(|p| p.value("psd:separate_mask") == Some(&Value::Bool(true)))
+        {
+            return;
+        }
+        use bae_model::psd::PixelMask;
+        sel.mask = PixelMask::Disabled;
+        self.masks.retain(|m| {
+            if !stage
+                .prim(&m.path)
+                .is_some_and(|p| p.value("psd:channel_mask") == Some(&Value::Bool(true)))
+            {
+                return true;
+            }
+            if m.mode != MaskMode::None {
+                sel.mask = PixelMask::Channel {
+                    inverted: m.inverted ^ (m.mode == MaskMode::Subtract),
+                    density: (m.opacity.clamp(0., 1.) * 65535.).round() as u16,
+                };
+            }
+            false
+        });
+    }
     /// A visible, active, Normal layer with identity transform and full opacity.
     pub fn new(path: PrimPath, content: LayerContent) -> Self {
         Self {
@@ -519,6 +652,8 @@ impl LayerContent {
                 f.file.hash(h);
                 f.source_time.hash(h);
                 f.sequence.hash(h);
+                f.psd_layer.hash(h);
+                f.file_revision.hash(h);
                 f.blend.hash(h);
             }
             LayerContent::Comp(c) => c.hash_content(h, effects),
@@ -546,6 +681,8 @@ pub struct FootageRef {
     /// Image sequences: the frame rate of the sequence (its numbered files are
     /// frames from `file` on); `None` opens `file` alone (a still or a movie).
     pub sequence: Option<FrameRate>,
+    pub file_revision: i64,
+    pub psd_layer: Option<bae_model::psd::LayerImage>,
     /// Frame blending, when the comp and layer switches are on.
     pub blend: Option<FrameBlend>,
 }
@@ -764,6 +901,8 @@ mod tests {
                 size: None,
                 source_time: Time::ZERO,
                 sequence: None,
+                psd_layer: None,
+                file_revision: 0,
                 blend: None,
             }),
         ));
