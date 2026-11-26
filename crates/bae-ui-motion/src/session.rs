@@ -246,6 +246,7 @@ pub struct Session {
     /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
     /// mask, effect or text animator; [`group_prim`] gives the prim).
     pub selected_groups: Vec<String>,
+    pub(crate) reveal_tracker: Option<PrimPath>,
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
