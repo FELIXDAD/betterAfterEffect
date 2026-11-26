@@ -380,6 +380,9 @@ impl GpuPreview {
             .and_then(|s| s.lock().scrub.as_ref().map(|s| s.overrides(stage)))
             .unwrap_or_default();
         let live = (!overrides.is_empty()).then(|| overrides.clone());
+        self.engine.anim.set_nested_switches(
+            crate::prefs::current(resources).bool("composition.switches_affect_nested_comps"),
+        );
         self.engine.anim.set_overrides(overrides);
         if self.changes.sync(stage, |event| match event {
             Some(event) => bae_render::CompEvaluator::invalidate(&mut self.engine.anim, event),
@@ -620,11 +623,16 @@ impl GpuPreview {
             sources.map(|s| s.0.generation()),
             effects.map(|e| e.0.generation()),
         );
+        let nested_switches =
+            crate::prefs::current(resources).bool("composition.switches_affect_nested_comps");
         match &self.live_scene {
-            Some(scene) if scene.key == scene_key => scene.clone(),
+            Some(scene) if scene.key == scene_key && scene.nested_switches == nested_switches => {
+                scene.clone()
+            }
             _ => {
                 let scene = Arc::new(crate::live_preview::LiveScene {
                     key: scene_key,
+                    nested_switches,
                     snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
                     sources: sources.cloned(),
                     effects: effects.cloned(),
