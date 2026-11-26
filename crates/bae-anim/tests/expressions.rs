@@ -351,6 +351,14 @@ fn wiggle_uses_the_offset_independently_of_timeless() {
 }
 
 #[test]
+fn wiggle_takes_properties_for_octaves_and_amplitude_multiplier() {
+    // wiggle(2, 10, effect("Oct")("Slider")): a property, not a number, reaches the host.
+    let src = "var o=transform.opacity, m=transform.opacity; \
+               (isFinite(wiggle(2,10,o,m/200)) && isFinite(temporalWiggle(2,0.1,o,m/200))) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
 fn temporal_wiggle_samples_an_animated_property_with_multiple_octaves() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "animated", "null");

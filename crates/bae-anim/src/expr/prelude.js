@@ -425,15 +425,16 @@ Property.prototype = {
     if (ampMult === undefined) ampMult = 0.5;
     if (t === undefined) t = __now;
     var v = this.valueAtTime(t), seed = __h.seed(this.__c, this.__l, this.__p, this.__a);
-    function w(dim) { return __h.wiggleNoise(__offsetSeed(seed), dim, t * freq, octaves, ampMult) * amp; }
+    // Unary + turns a property (effect("Oct")("Slider")) into a number for the host.
+    function w(dim) { return __h.wiggleNoise(__offsetSeed(seed), dim, t * freq, +octaves, +ampMult) * amp; }
     if (__isArr(v)) return v.map(function (x, i) { return x + w(i); });
     return v + w(0);
   },
   temporalWiggle: function (freq, amp, octaves, ampMult, t) {
     if (t === undefined) t = __now;
     var seed = __offsetSeed(__h.seed(this.__c, this.__l, this.__p, this.__a));
-    var delta = __h.wiggleNoise(seed, 0, t * freq, octaves === undefined ? 1 : octaves,
-                                ampMult === undefined ? 0.5 : ampMult);
+    var delta = __h.wiggleNoise(seed, 0, t * freq, octaves === undefined ? 1 : +octaves,
+                                ampMult === undefined ? 0.5 : +ampMult);
     return this.valueAtTime(t + delta * amp);
   },
   smooth: function (width, samples, t) {
