@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；传输出错时的处理（2.4）和按连接设置会话（第 3 节）在 `collab/hub-reliability`。分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；传输出错时的处理（2.4）、按连接设置会话（第 3 节）、WebSocket 的大小上限和写缓冲上限（3.1）在 `collab/hub-reliability`。分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -99,10 +99,26 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 - `HubTransport::connect(url, token, timeout)`：`url` 形如 `ws://nas.local:7341/projects/<工程>`，路径和查询参数怎么选工程由 Hub（10）决定；`token` 作为 `Authorization: Bearer <token>` 发送，Hub 拒绝时返回 `SyncError::Hub("... 401 ...")`。暂时只支持 `ws://`（局域网），`wss://` 报错。
 - 一条协议消息就是一个 WebSocket **二进制帧**；文本帧、ping/pong 忽略（pong 自动回复）；解码失败或未知类型的帧跳过；收到 close 帧或连接断开返回 `SyncError::Closed`。
-- 握手后套接字是非阻塞的，`send` 写不完的部分留在缓冲区，在之后的 `recv` 里继续发。应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。
+- 握手后套接字是非阻塞的，`send` 写不完的部分留在缓冲区，在之后的 `recv` 里继续发（缓冲区有上限，见下面"写缓冲上限"）。应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。
 - 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去）。
 - `HubTransport::accept(tcp_stream, token)` 是服务端一侧，给测试和简单工具用：`tests/hub.rs` 里用 `Relay` + `accept` 写了一个几十行的阻塞式参考 Hub。
+- **消息大小上限**（`HubLimits`）：
+  - `connect_with(url, token, timeout, limits)`、`accept_with(stream, token, limits)` 传入上限；`connect` / `accept` 用 `HubLimits::default()`。
+  - `max_message_size`：一条消息（编码后的 `Message`）最多多少字节，默认 256 MiB。WebSocket 的单帧上限设成一样大：tungstenite 发送时不分片，一条消息就是一帧。（tungstenite 默认单帧 16 MiB，超过 16 MiB 的快照会被对方拒绝。）
+  - **两端必须一致。** 对方收不下的消息会让连接断开，重连后又发同一条，永远卡住。客户端和 Hub（`hub.toml` 的 `max_message_mib`）默认都是 256 MiB。
+  - 发送前先查自己的上限：超过就不发，`send` 返回 `SyncError::Hub("message of … bytes is over the limit …")`。收到超过上限的消息时（看帧头就拒绝，不读内容），`recv` 返回 `SyncError::Hub("received a message of … over the limit …")`。两种情况都要断开重连。
+  - 还没做：一个文档的全部数据超过上限时（比如新客户端第一次同步一个超过 256 MiB 的工程层），一条消息放不下。要等协议支持分块发送。
+- **写缓冲上限**（`HubLimits::max_write_buffer_size`）：
+  - 对方不读时，`send` 写不完的部分留在 tungstenite 的写缓冲里（不算操作系统的套接字缓冲）。这里限制它最多多大。
+  - 满了以后 `send` 返回 `SyncError::Hub("write buffer full: the peer is not reading")`，这条消息不入队。会话的 `pump` 随即出错，Relay 马上断开这个连接（`RelayOutcome::disconnected`），不用等 Hub 的超时，内存也不会一直涨。
+  - 默认是 `max_message_size` + 16 MiB（`HubLimits::WRITE_BUFFER_MARGIN`）。多出的 16 MiB 留给大消息发送期间排在后面的小消息（`Hello`、在线状态、修改，每条几 KB）。
+  - 下限：tungstenite 自己的写缓冲（128 KiB）加一条最大的消息（含 14 字节帧头），否则最大的消息永远发不出去。设得更小时自动提到下限（`min_write_buffer_size()`；实际生效的值是 `write_buffer_cap()`）。
+  - 注意：没写出去的都算。一次 `pump` 给一个慢的对端发出的总量超过上限时（比如新客户端第一次同步好几个大工程层），它也会被断开，重连后还是一样。要彻底解决，需要会话层的背压（传输有积压时先不发）。
 - 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。
+- 上限的验证（`tests/hub_limits.rs`）：
+  - 20 MiB 的快照两个方向都能完整传过去。用 tungstenite 的默认设置时失败（对方报 16 MiB 帧上限）。
+  - 超过上限的消息：发送方不发；上限不一致时，接收方报错。
+  - 对方不读：写缓冲满时 `send` 失败（测试里约 4 MiB 后，主要是系统的套接字缓冲）；Relay 马上断开它，另一个连接不受影响。用默认设置时，发了 256 MiB 还不失败。
 
 ## 4. 共享目录模式（PR B）
 
@@ -268,5 +284,5 @@ sum     := BLAKE3(payload) 的前 8 字节
 ## 7. 给其他工作流
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
-- **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。
+- **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。握手用 `HubTransport::accept_with`，大小上限要和客户端一致（默认 256 MiB，见 3.1）。
 - **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`pump` 出错时这一轮已导入的事件用 `take_interrupted()` 取（或等下一次 `pump` 报告，见 2.4）；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。

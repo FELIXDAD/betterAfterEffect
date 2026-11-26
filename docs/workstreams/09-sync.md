@@ -57,10 +57,13 @@
 
 ### 2026-11-26
 
-- 10 的请求 1、4 已完成（分支 `collab/hub-reliability`）：
+- 10 的请求 1、2、3、4 已完成（分支 `collab/hub-reliability`）：
   - `pump` 遇到传输错误时先导入本轮已收到的数据，再返回错误；这一轮的事件和计数留到下一次 `pump`，或用 `take_interrupted()` 取。Relay 把出错连接最后发来的数据在同一次 `pump` 里转发出去。
   - `Relay::connect_with(transport, config)` 按连接设置会话；Hub 存盘用的对端节流 250 ms。
-  - 测试：`tests/transport_errors.rs`（出错前收到的数据被导入，结果只报告一次；旧代码上第一条测试失败）、`tests/relay.rs`（`connect_with` 的节流只作用于那一个连接）。
+  - `HubLimits`：单条消息和单帧上限都是 256 MiB（两端默认一致），`connect_with` / `accept_with` 可以改。超过上限的消息发送前就拒绝。
+  - 写缓冲上限默认"消息上限 + 16 MiB"，至少能放下一条最大的消息；满了 `send` 报错，Relay 马上断开这个连接。
+  - 测试：`tests/transport_errors.rs`（出错前收到的数据被导入，结果只报告一次；旧代码上第一条测试失败）、`tests/relay.rs`（`connect_with` 的节流只作用于那一个连接）、`tests/hub_limits.rs`（20 MiB 快照双向传输；超限被拒；不读的对端让 `send` 失败、被 Relay 断开。用 tungstenite 默认设置时这几条都失败）。
+  - 还没解决：一次 `pump` 给慢的对端发的总量超过写缓冲上限（比如新客户端第一次同步好几个大工程层）时也会断开；一个文档超过 256 MiB 时一条消息放不下。见 spec 3.1。
 
 ## 请求（其他工作流在这里留言）
 
@@ -83,7 +86,9 @@ bae-hub 已经直接建立在 `Relay` + `HubTransport::accept` 上（PR #47）�
    - 现象：`transport.recv()?` 直接返回错误，本轮已经放进 `incoming` 的 `Updates` 没有导入。客户端发完最后几条修改马上断开时，Hub 收到了修改和关闭帧，但修改没有导入；而客户端的会话已经认为 Hub 有了这些修改。只有这个客户端以后重连，才会补发。
    - 复现：`services/bae-hub/tests/hub.rs` 的 `idle_projects_are_unloaded_and_reloaded`，去掉 `src/link.rs` 里的绕行就会超时。
    - 建议：遇到传输错误时先 `import` 已经收到的，再返回错误。Hub 现在在 `PeerLink` 里绕开了：出错时先返回 `Ok(None)`，下一次再报错。客户端一侧同样受影响，只是影响较小（重连后会补齐）。
-2. **WebSocket 消息大小上限。** `HubTransport` 用的是 tungstenite 的默认 `WebSocketConfig`：单帧最大 16 MiB，单条消息最大 64 MiB。tungstenite 发送时不会自动分片，所以一个工程层的快照或首次上传超过 16 MiB 时会被对方拒绝，连接断开，重连后又是同一条消息，会一直卡住。建议 `accept` / `connect` 把 `max_frame_size` 设成和 `max_message_size` 一样大（比如 256 MiB），或者让调用方传入配置。
-3. **写缓冲上限**（不急）。`send` 遇到 `WouldBlock` 时把数据留在 tungstenite 的写缓冲里，默认没有上限。一个只发不收的客户端会让 Hub 的内存一直涨，Hub 只能等 60 秒超时。如果能设 `max_write_buffer_size`，满了返回错误，Relay 就会马上断开它。
+2. **WebSocket 消息大小上限。**（已完成，collab/hub-reliability）`HubTransport` 用的是 tungstenite 的默认 `WebSocketConfig`：单帧最大 16 MiB，单条消息最大 64 MiB。tungstenite 发送时不会自动分片，所以一个工程层的快照或首次上传超过 16 MiB 时会被对方拒绝，连接断开，重连后又是同一条消息，会一直卡住。建议 `accept` / `connect` 把 `max_frame_size` 设成和 `max_message_size` 一样大（比如 256 MiB），或者让调用方传入配置。
+   - 做法：`HubLimits`，单帧上限 = 单条消息上限，默认 256 MiB，客户端和 Hub 一致；`HubTransport::connect_with` / `accept_with` 传入，Hub 用 `hub.toml` 的 `max_message_mib` 配置。超过上限的消息发送前就拒绝，报错写明原因。见 spec 3.1。
+3. **写缓冲上限**（已完成，collab/hub-reliability）（不急）。`send` 遇到 `WouldBlock` 时把数据留在 tungstenite 的写缓冲里，默认没有上限。一个只发不收的客户端会让 Hub 的内存一直涨，Hub 只能等 60 秒超时。如果能设 `max_write_buffer_size`，满了返回错误，Relay 就会马上断开它。
+   - 做法：`HubLimits::max_write_buffer_size`，默认消息上限 + 16 MiB，至少是 tungstenite 的写缓冲 + 一条最大的消息。满了 `send` 返回 `SyncError::Hub("write buffer full: the peer is not reading")`，Relay 马上断开这个连接。见 spec 3.1。
 4. **按连接设置 `SessionConfig`**（已完成，collab/hub-reliability）（不急，优化）。比如 `Relay::connect_with(transport, config)`：Hub 想给存盘用的对端（`DirTransport`）单独设 `min_send_interval` 为几百毫秒，拖动时少写几次盘。不影响正确性。
    - 做法：`Relay::session_config()`、`connect_with(transport, config)`、`peer_config_mut(handle)`，见 spec 第 3 节。Hub 存盘用的对端节流 250 ms，关闭工程前去掉节流。
