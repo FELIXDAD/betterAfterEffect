@@ -213,5 +213,7 @@ fn weather(id: u32, t: f32, s: State) -> Sprite {
     if rain && f(18) == 1. {
         color = mix(color, src.rgb, .5 * src.a);
     }
-    return sprite(pos, half, angle, style, vec4f(color, select(f(19), f(9), rain) * .01 * z));
+    let source_depth = f(144);
+    let visibility = select(1., 1.-source_at(pos).a, q.z > source_depth);
+    return sprite(pos, half, angle, style, vec4f(color, select(f(19), f(9), rain) * .01 * z * visibility));
 }
