@@ -30,6 +30,7 @@ use rustc_hash::FxHashMap;
 
 pub(crate) mod adjust;
 pub(crate) mod dof;
+pub(crate) mod env;
 mod masks;
 pub(crate) mod mesh;
 mod shadow;
@@ -266,6 +267,7 @@ pub(crate) fn execute(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("bae-render.frame"),
     });
+    let needed = needed_nodes(graph, &pipelines.mesh());
     let mut uses = graph.use_counts();
     let mut outputs: Vec<Option<GpuImage>> = vec![None; graph.nodes.len()];
     let mut ctx = ExecCtx {
@@ -295,6 +297,12 @@ pub(crate) fn execute(
         let started = timed.then(std::time::Instant::now);
         if gpu_timed && let Some(t) = gpu_timer.as_deref() {
             t.write(&mut encoder, index);
+        }
+        if !needed[index] {
+            if let Some(started) = started {
+                node_times.push(started.elapsed());
+            }
+            continue;
         }
         let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
             NodeKind::Effect(fx)
@@ -463,6 +471,13 @@ pub(crate) fn execute(
             }
             (NodeKind::Mesh(mesh), None) => {
                 let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let environment = mesh.environment.as_ref().map(|e| {
+                    (
+                        e,
+                        graph.nodes[e.input.index()].key,
+                        outputs[e.input.index()].clone(),
+                    )
+                });
                 let pipelines = ctx.pipelines.mesh();
                 ctx.draw_calls += mesh::encode(
                     &mut pipelines.lock(),
@@ -471,6 +486,27 @@ pub(crate) fn execute(
                     &mut encoder,
                     format,
                     mesh,
+                    environment
+                        .as_ref()
+                        .map(|(e, key, image)| (*e, *key, image.as_ref())),
+                    &target,
+                );
+                ctx.passes += 1;
+                target
+            }
+            (NodeKind::Sky(sky), None) => {
+                let e = &sky.environment;
+                let input = outputs[e.input.index()].clone();
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let pipelines = ctx.pipelines.mesh();
+                mesh::encode_sky(
+                    &mut pipelines.lock(),
+                    device,
+                    &mut encoder,
+                    format,
+                    sky,
+                    graph.nodes[e.input.index()].key,
+                    input.as_ref(),
                     &target,
                 );
                 ctx.passes += 1;
@@ -559,6 +595,42 @@ pub(crate) fn execute(
         node_times,
         output,
     })
+}
+
+/// The nodes the output needs. An environment light's picture whose maps
+/// are already built is not drawn again (nor what only it reads).
+fn needed_nodes(
+    graph: &RenderGraph,
+    mesh: &parking_lot::Mutex<Option<mesh::MeshPipelines>>,
+) -> Vec<bool> {
+    let mut needed = vec![false; graph.nodes.len()];
+    needed[graph.output.index()] = true;
+    let mut mesh = mesh.lock();
+    if let Some(p) = mesh.as_mut() {
+        p.begin_frame();
+    }
+    for index in (0..graph.nodes.len()).rev() {
+        if !needed[index] {
+            continue;
+        }
+        let node = &graph.nodes[index];
+        let environment = match &node.kind {
+            NodeKind::Mesh(m) => m.environment.as_ref().map(|e| (e, m.linear)),
+            NodeKind::Sky(s) => Some((&s.environment, s.linear)),
+            _ => None,
+        };
+        if let Some((e, linear)) = environment {
+            let key = graph.nodes[e.input.index()].key;
+            if mesh
+                .as_mut()
+                .is_some_and(|p| p.has_env(key, e.width, linear))
+            {
+                continue;
+            }
+        }
+        node.kind.for_each_input(|id| needed[id.index()] = true);
+    }
+    needed
 }
 
 struct ExecCtx<'a> {

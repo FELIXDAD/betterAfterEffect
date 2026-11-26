@@ -390,6 +390,15 @@ pub struct LightState {
     pub point_of_interest: DVec3,
     /// Light space → comp space; spot/parallel lights shine along local +z.
     pub world_matrix: DMat4,
+    /// Environment lights: the layer (index in the comp) whose image lights
+    /// the scene (AE's Source).
+    pub source: Option<usize>,
+    /// Environment lights: the image shows behind the layers.
+    pub background_visible: bool,
+    /// Percent.
+    pub background_opacity: f64,
+    /// Percent.
+    pub background_blur: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]

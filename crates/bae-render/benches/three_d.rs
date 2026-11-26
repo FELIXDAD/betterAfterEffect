@@ -218,6 +218,7 @@ fn main() {
             shadow_darkness: 100.0,
             shadow_diffusion: 0.0,
             scope_below: None,
+            environment: None,
         };
         let centre = DVec3::new(960.0, 540.0, 600.0);
         c.lights = vec![

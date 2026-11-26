@@ -99,6 +99,22 @@ pub struct Light {
     /// `None` lights every 3D layer of the comp. A layer no light reaches is
     /// unlit (not dark; measured in AE 26.2.1).
     pub scope_below: Option<usize>,
+    /// Environment lights with an image (AE's Advanced 3D): the source layer
+    /// lights 3D models from every direction ([`EnvironmentSource`]).
+    pub environment: Option<EnvironmentSource>,
+}
+
+/// The image of an environment light: an equirectangular (latitude /
+/// longitude) picture of everything around the scene, turned by the light's
+/// rotation. It lights 3D models (diffuse and reflections) and can show
+/// behind the layers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnvironmentSource {
+    /// The source layer: its index in [`crate::RenderComp::layers`].
+    pub layer: usize,
+    /// Background Visible: the image's opacity and blur behind the layers
+    /// (both 0–1).
+    pub background: Option<[f32; 2]>,
 }
 
 impl Light {
@@ -549,6 +565,7 @@ mod tests {
             shadow_darkness: 100.0,
             shadow_diffusion: 0.0,
             scope_below: None,
+            environment: None,
         }
     }
 

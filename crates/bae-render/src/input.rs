@@ -143,6 +143,11 @@ impl RenderComp {
                     }));
             any_blur |= !layer.motion_samples.is_empty();
         }
+        // An environment light's image can show behind every layer.
+        scene_used |= self
+            .lights
+            .iter()
+            .any(|l| l.environment.is_some_and(|e| e.background.is_some()));
         if scene_used {
             hash_camera(&self.camera, h);
             self.lights.len().hash(h);
@@ -403,6 +408,10 @@ fn hash_mat4(m: &DMat4, h: &mut impl Hasher) {
 
 pub(crate) fn hash_light(l: &Light, h: &mut impl Hasher) {
     (l.kind, l.falloff, l.casts_shadows, l.scope_below).hash(h);
+    if let Some(e) = &l.environment {
+        e.layer.hash(h);
+        e.background.map(|b| b.map(f32::to_bits)).hash(h);
+    }
     hash_mat4(&l.world, h);
     l.point_of_interest.to_array().map(f64::to_bits).hash(h);
     l.color.map(f32::to_bits).hash(h);
