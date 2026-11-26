@@ -2,7 +2,7 @@
 
 一个以 GPU 运算为基础、轻量、跨平台、支持多人协同和 Agent 操作的动画制作应用。目标是让分镜、动效、剪辑在同一个平台、同一个工程里工作，并且能和 After Effects / Illustrator 工程互相转换。
 
-当前开发版本为 0.1.0。[0.1.0 发布说明](docs/release/0.1.0.md) · [更新记录](CHANGELOG.md)
+当前开发版本为 0.1.0。[0.1.0 发布说明](docs/releases/0.1.0.md) · [更新记录](CHANGELOG.md)
 
 ## 下载后首次打开
 
@@ -11,7 +11,7 @@
 - **Windows x64**。将 ZIP 完整解压到一个文件夹，双击 `bae.exe`。
 - **Apple Silicon Mac**。打开 0.1.0 的 DMG，将 `BAE.app` 拖到“应用程序”，推出磁盘映像后打开应用。0.0.1 提供 ZIP，解压后同样安装。
 
-系统要求和首次打开提示见各版本说明。[0.1.0](docs/release/0.1.0.md) · [0.0.1](docs/releases/0.0.1.md)
+系统要求和首次打开提示见各版本说明。[0.1.0](docs/releases/0.1.0.md) · [0.0.1](docs/releases/0.0.1.md)
 
 ## 文档
 

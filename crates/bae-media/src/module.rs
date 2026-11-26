@@ -40,6 +40,11 @@ impl AppModule for MediaModule {
     }
 
     fn build(&self, app: &mut AppBuilder) {
+        if let Err(error) = app
+            .register_arc::<dyn bae_gpu::WarmUp>("bae.media.psd", Arc::new(crate::psd::Photoshop))
+        {
+            tracing::warn!("PSD decoder warm-up not registered: {error}");
+        }
         for format in crate::builtin_formats() {
             let id = format!("bae.media.{}", format.id());
             if let Err(error) = app.register_arc::<dyn MediaFormat>(id, format) {
