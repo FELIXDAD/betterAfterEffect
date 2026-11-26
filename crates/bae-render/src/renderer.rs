@@ -73,11 +73,19 @@ pub struct RenderedFrame {
     pub stats: FrameStats,
     /// Things that were not rendered faithfully.
     pub warnings: Vec<String>,
+    /// Something was still warming up and is missing (a vector or text layer,
+    /// an effect): the frame is not cached and should be drawn again when the
+    /// warm-up reports progress (`bae_gpu::warm_up::request_redraw`).
+    pub incomplete: bool,
     /// CPU time spent on each top-level layer of the comp, in drawing order,
     /// when [`Renderer::set_layer_times`] is on (AE's Render Time column);
     /// empty otherwise and for cached frames. Drawing the layer into the comp
     /// itself is not included (it is one batched pass for all layers).
     pub layer_times: Vec<(PrimPath, Duration)>,
+    /// GPU time per top-level layer, the newest measurement read back (from
+    /// a frame or two earlier), when the device has timestamp queries inside
+    /// encoders; empty otherwise.
+    pub layer_gpu_times: Vec<(PrimPath, Duration)>,
 }
 
 /// How [`Renderer::read_rgba8`] treats alpha.
@@ -92,12 +100,33 @@ pub enum OutputAlpha {
     Over([f32; 3]),
 }
 
+/// How a viewer shows a frame (AE's Show Channel and Exposure); display only,
+/// never in exports.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Display {
+    /// 0 RGB, 1 Red, 2 Green, 3 Blue, 4 Alpha, 5 RGB Straight.
+    pub channel: u32,
+    /// Show a colour channel in its colour, not grey.
+    pub colorize: bool,
+    /// Exposure in stops.
+    pub exposure: f32,
+}
+
 /// Size of the output pass's uniform block.
 pub(crate) const OUTPUT_PARAMS_SIZE: u64 = 32;
 
 /// The output pass's uniform block (`output.wgsl` `Params`). `float`: the
 /// target is a float format, so colour outside `[0, alpha]` is kept.
 pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARAMS_SIZE as usize] {
+    output_params_display(alpha, float, Display::default())
+}
+
+/// [`output_params`] with a viewer's [`Display`].
+fn output_params_display(
+    alpha: OutputAlpha,
+    float: bool,
+    display: Display,
+) -> [u8; OUTPUT_PARAMS_SIZE as usize] {
     let (mode, bg) = match alpha {
         OutputAlpha::Premultiplied => (0u32, [0.0f32; 3]),
         OutputAlpha::Straight => (1, [0.0; 3]),
@@ -107,7 +136,83 @@ pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARA
     params[..12].copy_from_slice(bytemuck::cast_slice(&bg));
     params[16..20].copy_from_slice(&mode.to_ne_bytes());
     params[20..24].copy_from_slice(&u32::from(float).to_ne_bytes());
+    params[12..16].copy_from_slice(&display.exposure.to_ne_bytes());
+    params[24..28].copy_from_slice(&display.channel.to_ne_bytes());
+    params[28..32].copy_from_slice(&u32::from(display.colorize).to_ne_bytes());
     params
+}
+
+/// Exact-sized display output. Keep the view with the texture so repeated
+/// presentations never sample the padding of a working texture.
+pub struct OutputTarget(wgpu::TextureView);
+
+impl OutputTarget {
+    /// The persistent sampled view used by the viewer registration.
+    pub fn view(&self) -> &wgpu::TextureView {
+        &self.0
+    }
+
+    /// Exact pixel dimensions of this RGBA8 display target.
+    pub fn size(&self) -> [u32; 2] {
+        [self.0.texture().width(), self.0.texture().height()]
+    }
+}
+
+pub(crate) struct DisplayOutput {
+    available: Option<OutputTarget>,
+    uniform: wgpu::Buffer,
+}
+
+impl DisplayOutput {
+    /// Records the conversion of `image`. An `incomplete` frame (something
+    /// still warming up) is never shown, so an available target comes back
+    /// untouched: it may still be on screen with the last complete frame.
+    pub(crate) fn record(
+        self,
+        device: &wgpu::Device,
+        pipelines: &mut Pipelines,
+        encoder: &mut wgpu::CommandEncoder,
+        image: &GpuImage,
+        incomplete: bool,
+    ) -> OutputTarget {
+        if incomplete && let Some(target) = self.available {
+            return target;
+        }
+        let [w, h] = image.texel_size();
+        let target = self
+            .available
+            .filter(|t| t.size() == [w.max(1), h.max(1)])
+            .unwrap_or_else(|| {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("bae-render.output"),
+                    size: wgpu::Extent3d {
+                        width: w.max(1),
+                        height: h.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                OutputTarget(view)
+            });
+        crate::exec::record_output_pass(
+            device,
+            pipelines,
+            encoder,
+            image,
+            target.view(),
+            wgpu::TextureFormat::Rgba8Unorm,
+            &self.uniform,
+        );
+        target
+    }
 }
 
 /// The GPU compositor.
@@ -116,6 +221,8 @@ pub struct Renderer {
     pipelines: Pipelines,
     pool: TexturePool,
     draws: DrawBuffer,
+    output_uniform: Option<([u8; OUTPUT_PARAMS_SIZE as usize], wgpu::Buffer)>,
+    readback_target: Option<OutputTarget>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
     footage: FootageCache,
@@ -123,6 +230,10 @@ pub struct Renderer {
     effects: EffectLibrary,
     /// Measure per-layer render times ([`RenderedFrame::layer_times`]).
     layer_times: bool,
+    /// Timestamp queries for per-layer GPU times (created when needed).
+    gpu_timer: Option<crate::gpu_timer::GpuTimer>,
+    /// The newest per-layer GPU times read back.
+    gpu_times: Vec<(PrimPath, Duration)>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -171,17 +282,21 @@ impl Renderer {
 
     /// A renderer with explicit settings.
     pub fn with_config(gpu: Arc<GpuContext>, config: RendererConfig) -> Self {
-        let pipelines = Pipelines::new(gpu.device());
+        let pipelines = Pipelines::new(&gpu);
         Self {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
+            output_uniform: None,
+            readback_target: None,
             mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
             footage: FootageCache::new(gpu.clone()),
             providers: SourceProviders::new(),
             effects: EffectLibrary::new(),
             layer_times: false,
+            gpu_timer: None,
+            gpu_times: Vec::new(),
             gpu,
         }
     }
@@ -191,11 +306,26 @@ impl Renderer {
     /// every graph node.
     pub fn set_layer_times(&mut self, on: bool) {
         self.layer_times = on;
+        if on && self.gpu_timer.is_none() {
+            self.gpu_timer = crate::gpu_timer::GpuTimer::new(self.gpu.device());
+        }
+        if !on {
+            self.gpu_timer = None;
+            self.gpu_times.clear();
+        }
     }
 
     /// The shared GPU context.
     pub fn gpu(&self) -> &Arc<GpuContext> {
         &self.gpu
+    }
+
+    /// Hash the pixels with camera/light dependencies from the installed effects.
+    pub fn content_hash(&self, comp: &RenderComp) -> u64 {
+        use std::hash::Hasher;
+        let mut h = rustc_hash::FxHasher::default();
+        comp.hash_content(&mut h, Some(&self.effects));
+        h.finish()
     }
 
     /// Effect implementations (register built-in and plugin effects here).
@@ -289,24 +419,62 @@ impl Renderer {
         request: &RenderRequest,
         frames: Option<&mut dyn crate::graph::CompFrames>,
     ) -> Result<RenderedFrame, RenderError> {
-        let key = FrameKey {
-            comp: comp.path.clone(),
-            time: comp.time,
-            request: request.fingerprint(),
-        };
-        let hash = comp.content_hash();
-        if self.frames.content_hash(&key) == Some(hash)
-            && let Some(image) = self.frames.get(&key)
+        Ok(self.render(comp, request, frames, None)?.0)
+    }
+
+    /// [`Renderer::render_frame_with`] followed by [`Renderer::output_texture`]
+    /// in one GPU submission (the viewer path). When the frame is incomplete,
+    /// `available` comes back untouched (still holding the frame shown).
+    pub fn render_frame_output(
+        &mut self,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        frames: Option<&mut dyn crate::graph::CompFrames>,
+        alpha: OutputAlpha,
+        available: Option<OutputTarget>,
+    ) -> Result<(RenderedFrame, OutputTarget), RenderError> {
+        let output = self.display_output(alpha, Display::default(), available);
+        let (frame, target) = self.render(comp, request, frames, Some(output))?;
+        Ok((frame, target.expect("display output requested")))
+    }
+
+    fn render(
+        &mut self,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        frames: Option<&mut dyn crate::graph::CompFrames>,
+        output: Option<DisplayOutput>,
+    ) -> Result<(RenderedFrame, Option<OutputTarget>), RenderError> {
+        let lookup = (self.frames.stats().budget > 0).then(|| {
+            (
+                FrameKey {
+                    comp: comp.path.clone(),
+                    time: comp.time,
+                    request: request.fingerprint(),
+                },
+                self.content_hash(comp),
+            )
+        });
+        if let Some((key, hash)) = &lookup
+            && self.frames.content_hash(key) == Some(*hash)
+            && let Some(image) = self.frames.get(key)
         {
-            return Ok(RenderedFrame {
-                image: image.clone(),
-                comp: comp.path.clone(),
-                time: comp.time,
-                from_cache: true,
-                stats: FrameStats::default(),
-                warnings: Vec::new(),
-                layer_times: Vec::new(),
-            });
+            let image = image.clone();
+            let output = output.map(|out| self.submit_output(&image, out, false));
+            return Ok((
+                RenderedFrame {
+                    image,
+                    comp: comp.path.clone(),
+                    time: comp.time,
+                    from_cache: true,
+                    stats: FrameStats::default(),
+                    warnings: Vec::new(),
+                    incomplete: false,
+                    layer_times: Vec::new(),
+                    layer_gpu_times: Vec::new(),
+                },
+                output,
+            ));
         }
 
         let started = Instant::now();
@@ -325,6 +493,15 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
+        let tiles = request.roi.map(|_| crate::exec::TileCache {
+            frames: &mut self.frames,
+            request: RenderRequest {
+                roi: None,
+                ..*request
+            }
+            .fingerprint(),
+            comp,
+        });
         let executed = execute(
             &self.gpu,
             &mut self.pipelines,
@@ -333,13 +510,30 @@ impl Renderer {
             &mut self.mask_buffers,
             &graph,
             format,
-            self.layer_times,
+            tiles,
+            crate::exec::Timing {
+                cpu: self.layer_times,
+                gpu: self.gpu_timer.as_mut(),
+            },
+            output,
         )?;
+        if let Some(timer) = &mut self.gpu_timer {
+            let period = self.gpu.queue().get_timestamp_period();
+            if let Some(times) = timer.collect(self.gpu.device(), period) {
+                self.gpu_times = times;
+            }
+        }
         let encode = encode_start.elapsed();
         self.pool.end_frame();
 
+        let output = executed.output;
         let image = executed.image;
-        if !graph.time_dependent {
+        let incomplete = graph.incomplete || executed.incomplete;
+        if !graph.time_dependent
+            && !incomplete
+            && image.byte_size() <= self.frames.stats().budget
+            && let Some((key, hash)) = lookup
+        {
             self.frames.insert(
                 key,
                 image.clone(),
@@ -351,22 +545,27 @@ impl Renderer {
         for w in &warnings {
             tracing::debug!(comp = %comp.path, "{w}");
         }
-        Ok(RenderedFrame {
-            image,
-            comp: comp.path.clone(),
-            time: comp.time,
-            from_cache: false,
-            stats: FrameStats {
-                nodes: graph.nodes.len(),
-                draws: graph.draw_count(),
-                draw_calls: executed.draw_calls,
-                passes: executed.passes,
-                build,
-                encode,
+        Ok((
+            RenderedFrame {
+                image,
+                comp: comp.path.clone(),
+                time: comp.time,
+                from_cache: false,
+                stats: FrameStats {
+                    nodes: graph.nodes.len(),
+                    draws: graph.draw_count(),
+                    draw_calls: executed.draw_calls,
+                    passes: executed.passes,
+                    build,
+                    encode,
+                },
+                warnings,
+                incomplete,
+                layer_times: layer_times(&graph, &executed.node_times),
+                layer_gpu_times: self.gpu_times.clone(),
             },
-            warnings,
-            layer_times: layer_times(&graph, &executed.node_times),
-        })
+            output,
+        ))
     }
 
     /// Blocks until the GPU has finished all submitted work.
@@ -380,59 +579,78 @@ impl Renderer {
         frame: &RenderedFrame,
         alpha: OutputAlpha,
     ) -> Result<ImageData, RenderError> {
-        let target = self.output_texture(frame, alpha)?;
-        Ok(bae_gpu::transfer::read_texture(&self.gpu, &target)?)
+        let available = self.readback_target.take();
+        let target = self.output_texture(frame, alpha, available)?;
+        let pixels = bae_gpu::transfer::read_texture(&self.gpu, target.view().texture());
+        self.readback_target = Some(target);
+        Ok(pixels?)
     }
 
-    /// Converts a frame to an 8-bit RGBA texture on the GPU, without reading it
-    /// back (what [`Renderer::read_rgba8`] reads): `Rgba8Unorm`, usable as a copy
-    /// source and as a sampled texture, e.g. published to the viewport registry for
-    /// a viewer. The work is submitted; the texture is ready for later commands.
+    /// Converts to RGBA8. Return the display target here only after its consumers have released it.
     pub fn output_texture(
         &mut self,
         frame: &RenderedFrame,
         alpha: OutputAlpha,
-    ) -> Result<wgpu::Texture, RenderError> {
+        available: Option<OutputTarget>,
+    ) -> Result<OutputTarget, RenderError> {
+        self.output_texture_display(frame, alpha, Display::default(), available)
+    }
+
+    /// [`Renderer::output_texture`] as a viewer shows it ([`Display`]). When
+    /// the frame is incomplete, `available` comes back untouched.
+    pub fn output_texture_display(
+        &mut self,
+        frame: &RenderedFrame,
+        alpha: OutputAlpha,
+        display: Display,
+        available: Option<OutputTarget>,
+    ) -> Result<OutputTarget, RenderError> {
+        let out = self.display_output(alpha, display, available);
+        Ok(self.submit_output(&frame.image, out, frame.incomplete))
+    }
+
+    fn submit_output(
+        &mut self,
+        image: &GpuImage,
+        output: DisplayOutput,
+        incomplete: bool,
+    ) -> OutputTarget {
         let device = self.gpu.device();
-        let [w, h] = frame.image.texel_size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bae-render.output"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.output"),
-            size: OUTPUT_PARAMS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.gpu
-            .queue()
-            .write_buffer(&uniform, 0, &output_params(alpha, false));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("bae-render.output"),
         });
-        self.record_output(
-            &mut encoder,
-            frame,
-            &view,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &uniform,
-        );
+        let target = output.record(device, &mut self.pipelines, &mut encoder, image, incomplete);
         self.gpu.queue().submit([encoder.finish()]);
-        Ok(target)
+        target
+    }
+
+    fn display_output(
+        &mut self,
+        alpha: OutputAlpha,
+        display: Display,
+        available: Option<OutputTarget>,
+    ) -> DisplayOutput {
+        let params = output_params_display(alpha, false, display);
+        let device = self.gpu.device();
+        let (previous, uniform) = self.output_uniform.get_or_insert_with(|| {
+            use wgpu::util::DeviceExt;
+            (
+                params,
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bae-render.output"),
+                    contents: &params,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                }),
+            )
+        });
+        if *previous != params {
+            self.gpu.queue().write_buffer(uniform, 0, &params);
+            *previous = params;
+        }
+        DisplayOutput {
+            available,
+            uniform: uniform.clone(),
+        }
     }
 
     /// Records the output conversion of `frame` into `target` (a `format`
@@ -446,42 +664,15 @@ impl Renderer {
         format: wgpu::TextureFormat,
         uniform: &wgpu::Buffer,
     ) {
-        let device = self.gpu.device();
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bae-render.output"),
-            layout: &self.pipelines.output_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&frame.image.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: uniform.as_entire_binding(),
-                },
-            ],
-        });
-        let [w, h] = frame.image.texel_size();
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("bae-render.output"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_pipeline(self.pipelines.output_for(device, format));
-        pass.set_bind_group(0, &group, &[]);
-        pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
-        pass.draw(0..3, 0..1);
+        crate::exec::record_output_pass(
+            self.gpu.device(),
+            &mut self.pipelines,
+            encoder,
+            &frame.image,
+            target,
+            format,
+            uniform,
+        );
     }
 
     /// Writes a frame as an 8-bit RGBA PNG (straight alpha unless `alpha` says

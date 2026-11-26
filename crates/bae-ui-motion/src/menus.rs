@@ -186,6 +186,7 @@ pub fn need(path: &[&str], item: &Item) -> Need {
         "Layer" if path.get(1) == Some(&"New") => Comp,
         "Layer" | "Effect" => Layers,
         "Animation" => match item.action {
+            "motion.anim.convert_audio_to_keyframes" => Comp,
             a if a.starts_with("motion.anim.recent_animation_preset")
                 || a == "motion.anim.browse_presets"
                 || a == "motion.anim.apply_animation_preset" =>
@@ -384,7 +385,8 @@ impl Builder {
 fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpec {
     let mut spec = MenuItemSpec::new(path, catalog::shown_title(item.title), item.action)
         .workspace(WORKSPACE)
-        .at(levels);
+        .at(levels)
+        .mnemonic(catalog::item_mnemonic(item.ae));
     if !item.params.is_empty() {
         spec = spec.params(serde_json::from_str(item.params).expect("catalog params are JSON"));
     }
@@ -434,6 +436,27 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .position(|x| *x == q)
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
+        }
+        id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
+            && id != "motion.view.clear_guides" =>
+        {
+            spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
+        }
+
+        crate::viewer::view3d::ids::LAYOUT => {
+            let n = item
+                .params
+                .trim_start_matches("{\"views\":")
+                .trim_end_matches('}');
+            let n: usize = n.parse().unwrap_or(1);
+            spec.checked_when(move |cx| crate::viewer::view3d::layout(cx.resources) == n)
+        }
+
+        "motion.view.look_at_selected_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, false))
+        }
+        "motion.view.look_at_all_layers" => {
+            spec.enabled_when(|cx| crate::viewer::look_at_enabled(cx.resources, true))
         }
         crate::viewer::view3d::ids::SWITCH => {
             let view = spec_param(item.params, "view").unwrap_or_default();
@@ -494,4 +517,27 @@ impl ActionHandler for MotionActions {
         let session = common::session(cx.resources);
         actions::handle(inv, cx, &session)
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // New layer menu
+    ("New", "新建"),
+    ("Text", "文本"),
+    ("Shape Layer", "形状图层"),
+    ("Null Object", "空对象"),
+    ("Null", "空"),
+    ("Camera", "摄像机"),
+    ("Light", "灯光"),
+    ("Adjustment Layer", "调整图层"),
+    ("Rectangle", "矩形"),
+    ("Ellipse", "椭圆"),
+    ("Star", "星形"),
+    ("Pre-comp", "预合成"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
 }

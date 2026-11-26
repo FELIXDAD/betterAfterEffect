@@ -1019,6 +1019,37 @@ def auto_resume_if_green(st, sha, latest):
     return True
 
 
+def notify_recent_dev_failure(st):
+    """dev gets merges every few minutes, so the full run for the newest dev commit is
+    usually cancelled by the next push and check_dev_red never sees a result. Look at
+    the newest dev full run that actually finished; if it failed, tell the leader once
+    per run (no pause: a red dev must be fixed forward, not block the queue)."""
+    rc, out, _ = sh(["gh", "run", "list", "--repo", CFG["repo"], "--branch", CFG["base"],
+                     "--workflow", CFG.get("full_workflow", "CI"), "--status", "completed",
+                     "--limit", "15", "--json", "databaseId,headSha,conclusion,url"], check=False)
+    if rc != 0:
+        return False
+    try:
+        runs = [r for r in json.loads(out) if r.get("conclusion") != "cancelled"]
+    except ValueError:
+        return False
+    if not runs or runs[0].get("conclusion") not in ("failure", "timed_out", "startup_failure"):
+        return False
+    run = runs[0]
+    seen = st.setdefault("dev_red_runs", [])
+    if run["databaseId"] in seen:
+        return False
+    seen.append(run["databaseId"])
+    st["dev_red_runs"] = seen[-20:]
+    line = "dev %s 的全量 CI 失败（最近一次跑完的）：%s" % (run["headSha"][:7], run["url"])
+    log("RED: " + line)
+    if mutate("notify %s about red dev run %d" % (LEADERS.get("pause_notify"), run["databaseId"])):
+        for leader in LEADERS.get("pause_notify", []):
+            send(leader, "dev 全量 CI 红了：" + run["headSha"][:7], line + "\n队列不暂停，请尽快在 dev 上修。",
+                 msg_type="escalation", priority="high")
+    return True
+
+
 def check_dev_red(st):
     """Pause the queue when the newest dev commit's required full checks failed; lift
     that pause by itself once the newest dev commit is green again."""
@@ -1092,6 +1123,7 @@ def one_pass(st):
                     "queued_at": p["queued_at"]} for p in q]
     st["last_pass"] = now_utc().isoformat()
     check_dev_red(st)
+    notify_recent_dev_failure(st)
     reason = paused_reason(st)
     st["paused"] = reason
     if reason:
@@ -1136,6 +1168,8 @@ def head_conflict(head_files, files):
     shared = sorted(f for f in head_files & files if keep(f))
     if shared:
         return ", ".join(shared[:5])
+    if not CFG["merge"].get("relate_crates", True):
+        return ""
     rel = crate_relation(head_files, files)
     return ("crate " + rel) if rel else ""
 

@@ -644,7 +644,10 @@ fn data_range(pieces: &[Piece], extra: impl Iterator<Item = f64>) -> Option<(f64
 /// A range with room around the data (and never empty).
 fn padded((lo, hi): (f64, f64)) -> (f64, f64) {
     let span = hi - lo;
-    if span.abs() < 1e-9 {
+    // Flat when the spread is rounding noise next to the values (a linear
+    // segment's speed samples differ by ~1e-9): fitting it would blow the noise
+    // up to the full height (#552).
+    if span.abs() <= 1e-9 * lo.abs().max(hi.abs()).max(1.0) {
         let m = lo.abs().max(1.0) * 0.1;
         (lo - m, hi + m)
     } else {
@@ -1898,6 +1901,12 @@ impl GraphEditor {
                     k.time = *t;
                 }
             }
+            // Panels drawn before the edit runs keep the moved keys selected.
+            let landing: Vec<KeyRef> = moved
+                .iter()
+                .map(|(k, t)| KeyRef::new(k.path.clone(), k.attr.clone(), *t))
+                .collect();
+            s.expect(crate::session::Pending::Keys(landing));
             self.sel_dims = self
                 .sel_dims
                 .drain()
@@ -2864,6 +2873,72 @@ impl GraphEditor {
     }
 }
 
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Graph Editor (AE-UI-077 … 083): AE's Simplified Chinese wording.
+    ("Graph Editor", "图表编辑器"),
+    ("Graph Editor Set", "图表编辑器集"),
+    (
+        "Choose which properties are shown in the graph editor",
+        "选择图表编辑器中显示的属性",
+    ),
+    ("Show Selected Properties", "显示选择的属性"),
+    ("Show Animated Properties", "显示动画属性"),
+    ("Show Graph Editor Set", "显示图表编辑器集"),
+    ("Choose graph type and options", "选择图表类型和选项"),
+    ("Auto-Select Graph Type", "自动选择图表类型"),
+    ("Edit Value Graph", "编辑值图表"),
+    ("Edit Speed Graph", "编辑速度图表"),
+    ("Show Reference Graph", "显示参考图表"),
+    ("Show Audio Waveforms", "显示音频波形"),
+    ("Show Layer In/Out Points", "显示图层的入点/出点"),
+    ("Show Layer Markers", "显示图层标记"),
+    ("Show Graph Tool Tips", "显示图表工具技巧"),
+    ("Show Expression Editor", "显示表达式编辑器"),
+    ("Allow Keyframes Between Frames", "允许帧之间的关键帧"),
+    (
+        "Show Transform Box when multiple keys are selected",
+        "选择多个关键帧时，显示变换框",
+    ),
+    ("Snap", "对齐"),
+    ("Auto-zoom graph height", "自动缩放图表高度"),
+    ("Fit selection to view", "使选择适于查看"),
+    ("Fit all graphs to view", "使所有图表适于查看"),
+    ("Separate Dimensions", "单独尺寸"),
+    ("Edit selected keyframes", "编辑选定的关键帧"),
+    (
+        "Convert selected keyframes to Hold",
+        "将选定的关键帧转换为定格",
+    ),
+    (
+        "Convert selected keyframes to Linear",
+        "将选定的关键帧转换为线性",
+    ),
+    (
+        "Convert selected keyframes to Auto Bezier",
+        "将选定的关键帧转换为自动贝塞尔曲线",
+    ),
+    ("sec", "秒"),
+    ("X Position", "X 位置"),
+    ("Y Position", "Y 位置"),
+    ("Z Position", "Z 位置"),
+    (
+        "Select a property to show its graph",
+        "选择属性以显示其图表",
+    ),
+    (
+        "No expression on the focused property",
+        "当前属性没有表达式",
+    ),
+    ("Edit Keyframes", "编辑关键帧"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3004,6 +3079,42 @@ mod tests {
         for (_, v) in &pieces[0].pts {
             assert!((v - 500.0).abs() < 1e-3, "{v}");
         }
+    }
+
+    /// #552: a linear segment's constant speed draws as a level line, not as its
+    /// rounding noise fitted to the full height.
+    #[test]
+    fn constant_speed_draws_level() {
+        let lin = prop(
+            "transform:position",
+            vec![
+                (62.0 / 30.0, Keyframe::linear([960.0, 540.0, 0.0])),
+                (242.0 / 30.0, Keyframe::linear([1500.0, 540.0, 0.0])),
+            ],
+            true,
+            true,
+        );
+        let axis = TimeAxis {
+            left: 0.0,
+            width: 1500.0,
+            start: Time::ZERO,
+            span: Time::from_seconds(10.0),
+        };
+        let c = lin.curve().unwrap();
+        let data = Sampled::new(
+            sample(&lin, &c, &axis, 0.0, 1500.0, true),
+            key_values(&lin, &c, true),
+        );
+        let va = VAxis::new(
+            padded(data.range.unwrap()),
+            Rect::from_min_size(Pos2::ZERO, vec2(1500.0, 300.0)),
+        );
+        let ys: Vec<f32> = data.pieces[0].pts.iter().map(|(_, v)| va.y(*v)).collect();
+        let (lo, hi) = ys
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(*y), b.max(*y)));
+        assert!(hi - lo < 0.5, "a level line, not spikes: {lo}..{hi}");
+        assert!((va.v(lo) - 90.0).abs() < 1e-6);
     }
 
     #[test]

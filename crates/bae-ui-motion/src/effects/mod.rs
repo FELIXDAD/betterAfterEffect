@@ -8,6 +8,7 @@
 
 pub(crate) mod browser;
 pub(crate) mod controls;
+mod eq_response;
 mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
@@ -332,4 +333,19 @@ mod directory_tests {
         }
         assert!(list.iter().all(|e| !e.name_zh.is_empty()));
     }
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "effects",
+        bae_ui::PanelKind::new("Effects & Presets", |_| {
+            Box::new(browser::EffectsPanel::default())
+        }),
+    );
 }

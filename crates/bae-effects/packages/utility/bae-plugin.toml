@@ -1,0 +1,33 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "cc-overbrights"
+name = "CC Overbrights"
+category = "Utility"
+implementation = "wgsl"
+ae_match_names = ["CC Overbrights"]
+shader = "shaders/cc_overbrights.wgsl"
+
+[[effect.param]]
+id = 1
+key = "channel"
+type = "popup"
+name = "Channel"
+default = 5
+choices = ["RGB Solid", "Lightness Solid", "Luminance Solid", "(-", "RGB Clip", "Lightness Clip", "Luminance Clip"]
+
+[[effect.param]]
+id = 2
+key = "clip_color"
+type = "color"
+name = "Clip Color"
+default = [1, 0, 0, 1]

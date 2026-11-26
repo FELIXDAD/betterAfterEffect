@@ -27,6 +27,36 @@ use crate::catalog::EffectInfo;
 #[derive(Debug, Default)]
 pub struct EffectsModule;
 
+/// Compiles the built-in effects' pipelines during the app's warm-up, before
+/// the first effect is applied: RGBA16F (the default working format), then
+/// RGBA32F where the GPU supports 32 bpc. Anything the UI needs earlier is
+/// compiled on demand in the background (`gpu::Runtime::kernel`).
+struct WarmUp;
+
+impl bae_gpu::WarmUp for WarmUp {
+    fn name(&self) -> &str {
+        "effects"
+    }
+
+    fn priority(&self) -> u8 {
+        20
+    }
+
+    fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        crate::prewarm(gpu, bae_render::WorkFormat::Rgba16Float.texture_format())
+            .map_err(|e| e.to_string())?;
+        // 32 bpc projects work in RGBA32F when the GPU can filter and blend
+        // it (`Renderer::work_format` falls back to RGBA16F otherwise).
+        let float32 = bae_gpu::wgpu::Features::FLOAT32_FILTERABLE
+            | bae_gpu::wgpu::Features::FLOAT32_BLENDABLE;
+        if gpu.device().features().contains(float32) {
+            crate::prewarm(gpu, bae_render::WorkFormat::Rgba32Float.texture_format())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
 impl AppModule for EffectsModule {
     fn name(&self) -> &str {
         "bae-effects"
@@ -64,6 +94,9 @@ impl AppModule for EffectsModule {
                 }
             }
         });
+        if let Err(e) = app.register_arc::<dyn bae_gpu::WarmUp>("bae.effects", Arc::new(WarmUp)) {
+            tracing::warn!("effects warm-up not registered: {e}");
+        }
         infos.batch(|tx| {
             for b in crate::builtins() {
                 let info: Arc<EffectInfo> = Arc::new(b.info.clone());
