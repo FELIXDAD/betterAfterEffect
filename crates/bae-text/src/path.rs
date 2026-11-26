@@ -119,14 +119,15 @@ pub fn place_on_path(
         return;
     }
     if layout.styles.len() != layout.chars.len() {
-        layout.styles = vec![
-            CharacterStyle {
+        layout.styles = layout
+            .chars
+            .iter()
+            .map(|c| CharacterStyle {
                 transform: Affine::IDENTITY,
-                paint: layout.paint,
+                paint: c.paint,
                 opacity: 1.0,
-            };
-            layout.chars.len()
-        ];
+            })
+            .collect();
     }
     let len = path.length();
     let first = options.first_margin;
