@@ -18,6 +18,18 @@ use crate::util::{ensure_unlocked, fail, write_attr};
 /// The attribute holding the path of a mask or shape Path prim.
 pub const PATH_ATTR: &str = "path";
 
+/// Center of a drawn Pen path, including cubic extrema. A point has no segments.
+pub fn drawing_center(path: &BezierPath) -> [f64; 2] {
+    use bae_vector::kurbo::Shape;
+    if let [vertex] = path.vertices.as_slice()
+        && !path.closed
+    {
+        return *vertex;
+    }
+    let c = bae_vector::path::to_bez_path(path).bounding_box().center();
+    [c.x, c.y]
+}
+
 type P = [f64; 2];
 
 fn add(a: P, b: P) -> P {

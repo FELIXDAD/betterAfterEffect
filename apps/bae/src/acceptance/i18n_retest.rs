@@ -97,11 +97,23 @@ fn a11y_texts(h: &Ui) -> Vec<String> {
 
 /// Painted and accessible texts of the last frame that break the language:
 /// Latin words in Chinese, Chinese characters in English.
-pub(super) fn wrong_language(h: &Ui, zh: bool, extra_ok: &[String]) -> Vec<String> {
+pub(super) fn wrong_language(
+    h: &Ui,
+    zh: bool,
+    extra_ok: &[String],
+    expected_zh_label: Option<&str>,
+) -> Vec<String> {
     let mut texts = painted_texts(h);
     texts.extend(a11y_texts(h));
     texts.sort();
     texts.dedup();
+    if zh && let Some(label) = expected_zh_label {
+        let index = texts
+            .iter()
+            .position(|text| text == label)
+            .unwrap_or_else(|| panic!("missing expected Chinese UI label {label:?}"));
+        texts.remove(index);
+    }
     texts
         .into_iter()
         // File paths (the render queue's output) are the file system's.
@@ -299,7 +311,7 @@ fn chinese_ui_names_new_items_in_chinese() {
     let (mut h, extra_ok) = gui_with_status();
     let mut problems = Vec::new();
     let check = |h: &Ui, step: &str, problems: &mut Vec<String>| {
-        for p in wrong_language(h, true, &extra_ok) {
+        for p in wrong_language(h, true, &extra_ok, None) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -462,7 +474,7 @@ fn english_ui_names_new_items_in_english() {
     let (mut h, extra_ok) = gui_with_status();
     let mut problems = Vec::new();
     let check = |h: &Ui, step: &str, problems: &mut Vec<String>| {
-        for p in wrong_language(h, false, &extra_ok) {
+        for p in wrong_language(h, false, &extra_ok, None) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -720,7 +732,7 @@ fn pixel_units(zh: bool) {
         painted_texts(&h)
     );
     problems.extend(
-        wrong_language(&h, zh, &extra_ok)
+        wrong_language(&h, zh, &extra_ok, None)
             .into_iter()
             .map(|p| format!("speed graph: {p}")),
     );
@@ -743,7 +755,7 @@ fn pixel_units(zh: bool) {
         "still the speed graph"
     );
     problems.extend(
-        wrong_language(&h, zh, &extra_ok)
+        wrong_language(&h, zh, &extra_ok, None)
             .into_iter()
             .map(|p| format!("value graph: {p}")),
     );
@@ -769,7 +781,7 @@ fn pixel_units(zh: bool) {
         painted_texts(&h)
     );
     problems.extend(
-        wrong_language(&h, zh, &extra_ok)
+        wrong_language(&h, zh, &extra_ok, None)
             .into_iter()
             .map(|p| format!("character: {p}")),
     );
