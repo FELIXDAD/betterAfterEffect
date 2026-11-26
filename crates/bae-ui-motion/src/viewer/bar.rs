@@ -151,9 +151,14 @@ pub(super) fn bottom_bar(
     // Resolution: the comp's (as in Composition Settings), or Auto.
     let factor = super::comp_resolution(cx.stage, &info.path);
     let auto = session.lock().auto_resolution;
+    // AE lists Custom… last; a custom resolution shows as Custom.
+    let steps = super::comp_steps(cx.stage, &info.path);
+    let custom = steps[0] != steps[1] || factor > 4;
     let names = ["Full", "Half", "Third", "Quarter"];
     let shown = if auto {
         tr("Auto")
+    } else if custom {
+        tr("Custom")
     } else {
         names
             .get(factor as usize - 1)
@@ -163,14 +168,23 @@ pub(super) fn bottom_bar(
     common::popup_menu(&resp, &mut |ui| {
         for (i, name) in names.iter().enumerate() {
             let step = i as u32 + 1;
-            if ui.radio(!auto && factor == step, tr(name)).clicked() {
-                super::set_resolution(cx, session, step, false);
+            if ui
+                .radio(!auto && !custom && factor == step, tr(name))
+                .clicked()
+            {
+                super::set_resolution(cx, session, [step; 2], false);
                 ui.close();
             }
         }
         ui.separator();
-        if ui.radio(!auto && factor > 4, tr("Custom...")).clicked() {
-            crate::dialogs::custom_resolution(cx, session);
+        if ui.radio(!auto && custom, tr("Custom...")).clicked() {
+            crate::dialogs::open(
+                cx.resources,
+                crate::dialogs::Dialog::CustomResolution {
+                    steps,
+                    nested: false,
+                },
+            );
             ui.close();
         }
         if ui.radio(auto, tr("Auto")).clicked() {

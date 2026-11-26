@@ -254,6 +254,39 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             });
         }
     }
+    let trackers = bae_motion::tracker::trackers(stage, layer);
+    if !trackers.is_empty() {
+        let children = trackers
+            .into_iter()
+            .map(|tracker| {
+                let children = bae_motion::tracker::points(stage, &tracker)
+                    .into_iter()
+                    .map(|point| Node::Group {
+                        id: point.to_string(),
+                        label: group_label(stage, &point),
+                        children: bae_motion::tracker::PROPERTIES
+                            .iter()
+                            .map(|(key, name)| Node::Prop {
+                                path: point.clone(),
+                                attr: (*key).into(),
+                                label: tr(name).into(),
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                Node::Group {
+                    id: tracker.to_string(),
+                    label: group_label(stage, &tracker),
+                    children,
+                }
+            })
+            .collect();
+        out.push(Node::Group {
+            id: format!("{layer}#trackers"),
+            label: tr("Motion Trackers").into(),
+            children,
+        });
+    }
     let effects = effect_nodes(stage, layer);
     if !effects.is_empty() {
         out.push(Node::Group {
@@ -373,24 +406,116 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             let match_name = query::static_value(&v, "match_name")
                 .and_then(|m| m.as_str().map(str::to_owned))
                 .unwrap_or_default();
+            let mut children: Vec<Node> = params
+                .into_iter()
+                .map(|a| Node::Prop {
+                    path: e.clone(),
+                    attr: a.to_owned(),
+                    label: bae_model::effect::param_id(a)
+                        .and_then(|id| crate::effects::param_label_of(&match_name, id))
+                        .unwrap_or_else(|| {
+                            format!("{} {}", tr("Param"), a.trim_start_matches("param:"))
+                        }),
+                })
+                .collect();
+            if match_name == bae_motion::puppet::PUPPET {
+                children.extend(puppet_mesh(stage, layer, &e));
+            }
             Some(Node::Group {
                 id: format!("{layer}#{e}"),
                 label: group_label(stage, &e),
-                children: params
-                    .into_iter()
-                    .map(|a| Node::Prop {
-                        path: e.clone(),
-                        attr: a.to_owned(),
-                        label: bae_model::effect::param_id(a)
-                            .and_then(|id| crate::effects::param_label_of(&match_name, id))
-                            .unwrap_or_else(|| {
-                                format!("{} {}", tr("Param"), a.trim_start_matches("param:"))
-                            }),
-                    })
-                    .collect(),
+                children,
             })
         })
         .collect()
+}
+
+/// A pin's name as AE shows it in the UI language ("Puppet Pin 1" → "操控点 1").
+fn pin_label(stage: &Stage, pin: &PrimPath) -> String {
+    let name = query::display_name_of(stage, pin);
+    ["Puppet Pin", "Overlap", "Starch"]
+        .into_iter()
+        .find_map(|base| {
+            let n = name.strip_prefix(base)?.strip_prefix(' ')?;
+            n.parse::<u32>().ok().map(|n| format!("{} {n}", tr(base)))
+        })
+        .unwrap_or(name)
+}
+
+/// The Puppet effect's Mesh 1 group (AE): Deform with the Position, Bend and
+/// Advanced pins, then Overlap and Starch with theirs.
+fn puppet_mesh(stage: &Stage, layer: &PrimPath, effect: &PrimPath) -> Option<Node> {
+    let pins = bae_motion::puppet::pins_of(stage, effect);
+    if pins.is_empty() {
+        return None;
+    }
+    let kind = |p: &PrimPath| {
+        stage
+            .prim(p)
+            .and_then(|v| query::static_value(&v, "pin_type"))
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "position".to_owned())
+    };
+    let pin_node = |p: &PrimPath, attrs: &[(&str, &str)]| Node::Group {
+        id: format!("{layer}#{p}"),
+        label: pin_label(stage, p),
+        children: attrs
+            .iter()
+            .map(|(attr, label)| Node::Prop {
+                path: p.clone(),
+                attr: (*attr).to_owned(),
+                label: tr(label).to_owned(),
+            })
+            .collect(),
+    };
+    let group = |id: &str, label: &str, kinds: &[&str], attrs: &[(&str, &str)]| {
+        let children: Vec<Node> = pins
+            .iter()
+            .filter(|p| kinds.contains(&kind(p).as_str()))
+            .map(|p| pin_node(p, attrs))
+            .collect();
+        (!children.is_empty()).then(|| Node::Group {
+            id: format!("{layer}#{effect}#{id}"),
+            label: tr(label).to_owned(),
+            children,
+        })
+    };
+    let children: Vec<Node> = [
+        group(
+            "deform",
+            "Deform",
+            &["position", "bend", "advanced"],
+            &[("position", "Position")],
+        ),
+        group(
+            "overlap",
+            "Overlap",
+            &["overlap"],
+            &[
+                ("position", "Position"),
+                ("in_front", "In Front"),
+                ("extent", "Extent"),
+            ],
+        ),
+        group(
+            "starch",
+            "Starch",
+            &["starch"],
+            &[
+                ("position", "Position"),
+                ("amount", "Amount"),
+                ("extent", "Extent"),
+            ],
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Some(Node::Group {
+        id: format!("{layer}#{effect}#mesh"),
+        label: format!("{} 1", tr("Mesh")),
+        children,
+    })
 }
 
 fn flatten_props(nodes: &[Node], out: &mut Vec<Node>) {

@@ -42,4 +42,20 @@ fn puppet_pins_are_added_on_a_click_and_dragged_in_one_step() {
         close(vec2v(h.value(&pin, "rest")), [100.0, 50.0]),
         "rest stays"
     );
+    // The Timeline shows Puppet ▸ Mesh 1 ▸ Deform ▸ Puppet Pin 1 ▸ Position.
+    let labels = |n: &crate::props::Node| match n {
+        crate::props::Node::Group {
+            label, children, ..
+        } => (label.clone(), children.clone()),
+        crate::props::Node::Prop { label, .. } => (label.clone(), Vec::new()),
+    };
+    let fx = crate::props::effect_nodes(&h.stage, &solid);
+    let (_, fx_children) = labels(&fx[0]);
+    let (mesh, mesh_children) = labels(fx_children.last().unwrap());
+    assert_eq!(mesh, "Mesh 1");
+    let (deform, pin_rows) = labels(&mesh_children[0]);
+    assert_eq!(deform, "Deform");
+    let (first, props) = labels(&pin_rows[0]);
+    assert_eq!(first, "Puppet Pin 1");
+    assert_eq!(labels(&props[0]).0, "Position");
 }

@@ -134,6 +134,22 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Alpha / Luma Matte", "Alpha/亮度遮罩"),
     ("Invert Matte", "反转遮罩"),
     ("Toggle Switches / Modes", "切换开关/模式"),
+    (
+        "Expand or Collapse the Layer Switches pane",
+        "展开或折叠“图层切换”窗格",
+    ),
+    (
+        "Expand or Collapse the Transfer Controls pane",
+        "展开或折叠“转换控制”窗格",
+    ),
+    (
+        "Expand or Collapse the In/Out/Duration/Stretch panes",
+        "展开或折叠“入点”/“出点”/“持续时间”/“伸缩”窗格",
+    ),
+    (
+        "Expand or Collapse the Render Time pane",
+        "展开或折叠渲染时间窗格",
+    ),
     ("Toggle Switches / Modes Columns", "切换开关/模式列"),
     ("Show / Hide Parent Column", "显示/隐藏父级列"),
     ("Set Track Matte", "设置轨道遮罩"),
@@ -167,6 +183,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Animator", "动画制作工具"),
     ("Based On", "依据"),
     ("Amount", "数量"),
+    // The Puppet effect's Mesh 1 group (`props::puppet_mesh`, AE 26's words).
+    ("Mesh", "网格"),
+    ("Deform", "变形"),
+    ("Puppet Pin", "操控点"),
+    ("Overlap", "重叠"),
+    ("Starch", "扑粉"),
+    ("In Front", "前面"),
+    ("Extent", "程度"),
     ("Smoothness", "平滑度"),
     ("Ease High", "缓和高"),
     ("Ease Low", "缓和低"),

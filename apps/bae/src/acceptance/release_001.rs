@@ -1254,7 +1254,7 @@ fn close_project_leaves_no_old_comp_name_in_the_panels() {
 fn render_queue_output_defaults_to_movies_on_macos() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = h.state().render_queue();
     let output = queue.lock().items().last().unwrap().output.clone();
     let movies = bae_platform::dirs::home_dir().unwrap().join("Movies");

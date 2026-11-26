@@ -61,6 +61,7 @@ pub mod pool;
 pub mod puppet;
 mod renderer;
 pub mod request;
+mod sample;
 pub mod source;
 pub mod testing;
 pub mod three_d;

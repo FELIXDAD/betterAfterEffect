@@ -6,10 +6,17 @@ pub(super) struct Main {
     index: usize,
 }
 impl Processor for Main {
+    /// Five seconds of history, allocated once per rate (not on a seek).
+    fn prepare(&mut self, rate: u32, _: &[f64], _: u32) {
+        self.ring = vec![[0.0; 2]; rate as usize * 5 + 2];
+        self.index = 0;
+    }
+    fn clear_history(&mut self) -> bool {
+        self.ring.fill([0.0; 2]);
+        self.index = 0;
+        true
+    }
     fn apply(&mut self, frame: [f32; 2], p: &[f64], rate: u32) -> [f32; 2] {
-        if self.ring.is_empty() {
-            self.ring.resize(rate as usize * 5 + 2, [0.0; 2]);
-        }
         let delay = (p[0].clamp(0.0, 5000.0) * f64::from(rate) * 0.001).round() as usize;
         let echo = if delay == 0 {
             frame
@@ -29,6 +36,7 @@ impl Processor for Main {
 fn impulse_and_feedback_arrive_at_the_requested_samples() {
     let mut delay = Main::default();
     let p = [10.0, 100.0, 50.0, 0.0, 100.0];
+    delay.prepare(1000, &p, 0);
     for n in 0..22 {
         let out = delay.apply(if n == 0 { [1.0, 0.0] } else { [0.0; 2] }, &p, 1000);
         assert_eq!(
