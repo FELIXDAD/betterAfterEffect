@@ -11,6 +11,8 @@
 //! Choose Folder…) from [`SettingsDialog::take_requests`]; every other button is
 //! drawn disabled.
 
+mod expression_preview;
+
 use bae_prefs::schema::{self, Item, Kind, PAGES, Pref, Style};
 use bae_prefs::{Preferences, parse_color, parse_timecode};
 use egui::{Color32, Key, RichText, Ui, vec2};
@@ -576,7 +578,7 @@ impl SettingsDialog {
             }
             Item::Group(title, list) => {
                 ui.add_space(4.0);
-                ui.add_enabled_ui(*title != "Mercury Transmit", |ui| {
+                ui.add_enabled_ui(!Item::unsupported(list), |ui| {
                     ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
                     egui::Frame::new()
                         .stroke(egui::Stroke::new(1.0, color::DIVIDER))
@@ -606,11 +608,6 @@ impl SettingsDialog {
             Item::Info(label, value) => {
                 ui.horizontal(|ui| {
                     if !label.is_empty() {
-                        let label = if *value == "<InstalledRAM - ReservedRAM> GB" {
-                            "RAM Available for BAE:"
-                        } else {
-                            label
-                        };
                         ui.label(tr(label));
                     }
                     if *label == "Sample Rate:" && self.page() == "audio" {
@@ -663,7 +660,7 @@ impl SettingsDialog {
                         ui.add_space(40.0);
                     });
             }
-            Item::Preview(_) => self.expression_preview(ui),
+            Item::Preview(_) => expression_preview::show(ui, &self.draft),
             Item::When(w, item) => {
                 let on = self.draft.holds(w);
                 ui.add_enabled_ui(on, |ui| self.item(ui, item));
@@ -687,10 +684,7 @@ impl SettingsDialog {
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
-        let enabled = !matches!(
-            p.key,
-            "project.dynamic_link_highest_number" | "export.preview_output_during_render_queue"
-        ) && self.draft.enabled(p);
+        let enabled = !p.unsupported && self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 if p.indent {
@@ -708,7 +702,7 @@ impl SettingsDialog {
         let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = p.key != "video.enable_mercury_transmit" && draft.bool(p.key);
+                let mut v = draft.bool(p.key);
                 if widgets::checkbox(ui, &mut v, label).changed() {
                     self.set(p.key, v);
                 }
@@ -775,6 +769,7 @@ impl SettingsDialog {
                         .iter()
                         .map(|(id, name)| (id.as_str(), name.as_str())),
                 );
+                let available = choices.len();
                 let current = draft.str(p.key);
                 let mut selected = choices
                     .iter()
@@ -784,7 +779,14 @@ impl SettingsDialog {
                         choices.len() - 1
                     });
                 let labels: Vec<_> = choices.iter().map(|(_, name)| *name).collect();
-                if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0).changed() {
+                let source = |index| match index {
+                    0 => Some(crate::a11y::SYSTEM_OUTPUT),
+                    i if i < available => Some(crate::a11y::VERBATIM_VALUE),
+                    _ => None, // The unavailable-device fallback is UI text.
+                };
+                if widgets::dropdown_with_source(ui, p.key, &mut selected, &labels, 220.0, source)
+                    .changed()
+                {
                     self.set(p.key, choices[selected].0.to_owned());
                 }
             }
@@ -811,8 +813,15 @@ impl SettingsDialog {
                             selected = selected.min(names.len() - 1);
                             let labels: Vec<_> = names.iter().map(String::as_str).collect();
                             ui.add_enabled_ui(self.audio_channels > 0, |ui| {
-                                if widgets::dropdown(ui, p.key, &mut selected, &labels, 220.0)
-                                    .changed()
+                                if widgets::dropdown_with_source(
+                                    ui,
+                                    p.key,
+                                    &mut selected,
+                                    &labels,
+                                    220.0,
+                                    |_| Some(crate::a11y::VERBATIM_VALUE),
+                                )
+                                .changed()
                                 {
                                     self.set(p.key, options[selected].value);
                                 }
@@ -917,44 +926,12 @@ impl SettingsDialog {
             Kind::Path => {
                 let path = draft.str(p.key);
                 let path = if path.is_empty() { "—" } else { path };
-                ui.label(RichText::new(path).color(color::TEXT_DIM))
+                let response = ui
+                    .label(RichText::new(path).color(color::TEXT_DIM))
                     .on_hover_text(label);
+                crate::a11y::value_source(&response, crate::a11y::VERBATIM_VALUE);
             }
         }
-    }
-
-    /// Expression editor preview (Scripting & Expressions): a few lines of code
-    /// in the editor's font size and colors.
-    fn expression_preview(&self, ui: &mut Ui) {
-        let p = &self.draft;
-        let c = |k: &str| {
-            let [r, g, b] = p.color(&format!("scripting_expressions.expr_color_{k}"));
-            Color32::from_rgb(r, g, b)
-        };
-        let size = p.int(bae_prefs::keys::EXPR_FONT_SIZE) as f32;
-        let font = egui::FontId::monospace(size);
-        let mut job = egui::text::LayoutJob::default();
-        let mut add = |text: &str, color: Color32| {
-            job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
-        };
-        add("// wiggle the position\n", c("comments"));
-        add("var ", c("keywords"));
-        add("amp", c("identifiers"));
-        add(" = ", c("operators"));
-        add("20", c("numbers"));
-        add(";\n", c("default"));
-        add("wiggle", c("identifiers"));
-        add("(", c("default"));
-        add("2", c("numbers"));
-        add(", amp); ", c("default"));
-        add("\"done\"", c("strings"));
-        egui::Frame::new()
-            .fill(c("background"))
-            .inner_margin(6)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 4.0);
-                ui.label(job);
-            });
     }
 }
 
