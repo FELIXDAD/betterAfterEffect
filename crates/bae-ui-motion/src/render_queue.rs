@@ -174,6 +174,20 @@ pub fn format_available(format: ExportFormat) -> bool {
     format == ExportFormat::Wav || format.is_image() || cfg!(target_os = "macos")
 }
 
+#[cfg(windows)]
+static MOVIE_ENCODERS: std::sync::OnceLock<[bool; 2]> = std::sync::OnceLock::new();
+
+/// The menu never waits for Media Foundation enumeration on the UI thread.
+pub(crate) fn ui_format_available(format: ExportFormat) -> bool {
+    #[cfg(windows)]
+    if matches!(format, ExportFormat::H264 | ExportFormat::Hevc) {
+        return MOVIE_ENCODERS
+            .get()
+            .is_some_and(|m| m[usize::from(format == ExportFormat::Hevc)]);
+    }
+    format_available(format)
+}
+
 /// The output's channels (AE output module "Channels").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Channels {
@@ -1459,13 +1473,13 @@ fn item_ui(
                 ui.horizontal_wrapped(|ui| {
                     let mut om: Vec<_> = OM_TEMPLATES
                         .iter()
-                        .map(|(n, t)| (tr(n), t.is_some_and(|(f, ..)| format_available(f))))
+                        .map(|(n, t)| (tr(n), t.is_some_and(|(f, ..)| ui_format_available(f))))
                         .collect();
                     if let Some(lib) = library {
                         om.extend(lib.outputs.iter().map(|(name, p)| {
                             (
                                 name.as_str(),
-                                p.settings().is_some_and(|(f, ..)| format_available(f)),
+                                p.settings().is_some_and(|(f, ..)| ui_format_available(f)),
                             )
                         }));
                     }
@@ -1547,7 +1561,7 @@ fn item_ui(
                         .selected_text(tr(format_label(format)))
                         .show_ui(ui, |ui| {
                             for f in FORMATS {
-                                let available = format_available(f);
+                                let available = ui_format_available(f);
                                 let r = ui.add_enabled(
                                     available,
                                     egui::Button::selectable(format == f, tr(format_label(f))),

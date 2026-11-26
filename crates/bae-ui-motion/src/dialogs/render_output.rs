@@ -252,7 +252,7 @@ impl OutputModule {
         dialog::row(ui, LW, tr("Format:"), |ui| {
             let available: Vec<ExportFormat> = FORMATS
                 .into_iter()
-                .filter(|f| render_queue::format_available(*f))
+                .filter(|f| render_queue::ui_format_available(*f))
                 .collect();
             let names: Vec<&str> = available
                 .iter()

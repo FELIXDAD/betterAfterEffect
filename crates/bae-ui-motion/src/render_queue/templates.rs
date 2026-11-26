@@ -144,9 +144,9 @@ impl bae_gpu::WarmUp for Store {
                 .unwrap_or_else(|e| e.into_inner())
                 .get_or_insert_with(|| Arc::new(saved));
         }
-        for format in FORMATS {
-            format_available(format);
-        }
+        #[cfg(windows)]
+        MOVIE_ENCODERS
+            .get_or_init(|| [ExportFormat::H264, ExportFormat::Hevc].map(format_available));
         Ok(())
     }
 }
