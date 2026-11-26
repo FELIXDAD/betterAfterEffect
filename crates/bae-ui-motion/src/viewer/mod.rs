@@ -373,6 +373,7 @@ impl CompositionViewer {
         (
             View {
                 origin,
+                aspect: 1.0,
                 scale,
                 point,
                 camera: None,

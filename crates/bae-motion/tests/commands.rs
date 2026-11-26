@@ -2196,6 +2196,46 @@ fn auto_key_starts_a_track_and_preserves_existing_keys() {
 }
 
 #[test]
+fn interpret_footage_sets_alpha_rate_aspect_and_loop() {
+    let dir = std::env::temp_dir().join(format!("bae-interpret-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run(
+        "item.import",
+        json!({"files": [{"path": clip, "attrs": {
+            "frame_rate": {"type": "frame_rate", "value": [24, 1]}}}]}),
+    );
+    let item = p(out["items"][0].as_str().unwrap());
+    fx.run(
+        "footage.interpret",
+        json!({"items": [item], "alpha_mode": "premultiplied", "frame_rate": 30.0,
+               "pixel_aspect": 2.0, "loop_count": 3}),
+    );
+    assert_eq!(
+        fx.value(&item, "alpha_mode"),
+        Some(Value::Enum("premultiplied".into()))
+    );
+    assert_eq!(
+        fx.value(&item, "frame_rate"),
+        Some(Value::FrameRate(FrameRate::FPS_30))
+    );
+    assert_eq!(fx.value(&item, "pixel_aspect"), Some(Value::Float(2.0)));
+    assert_eq!(fx.value(&item, "loop"), Some(Value::Int(3)));
+    // Back to the file's rate.
+    fx.run(
+        "footage.interpret",
+        json!({"items": [item], "use_file_frame_rate": true}),
+    );
+    assert_eq!(
+        fx.value(&item, "frame_rate"),
+        Some(Value::FrameRate(FrameRate::FPS_24))
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn exponential_scale_and_sequence_layers() {
     let mut fx = Fx::new();
     let comp = fx.comp();

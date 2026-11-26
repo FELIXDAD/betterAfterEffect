@@ -176,6 +176,7 @@ pub fn layout(fonts: &mut FontsImpl, pixels_per_point: f32, job: Arc<LayoutJob>)
 
 /// Shared context for emitting shaped glyphs into a [`Paragraph`].
 struct ShapingContext {
+    tab_stop_spaces: Option<std::num::NonZeroU8>,
     pixels_per_point: f32,
     font_size: f32,
     line_height: f32,
@@ -266,7 +267,17 @@ fn layout_shaped_run(
             let tab_size = tweak.map_or(4.0, |t| t.tab_size);
             let (_, space_info) = font.glyph_info(' ', face_metrics);
             let space_width_px = space_info.advance_width_unscaled.0 * px_scale;
-            advance_width_px = tab_size * space_width_px;
+            advance_width_px = if let Some(spaces) = ctx.tab_stop_spaces {
+                let stop = f32::from(spaces.get()) * space_width_px;
+                if stop > 0.0 {
+                    let column = paragraph.cursor_x_px / stop;
+                    ((column + 0.0001).floor() + 1.0) * stop - paragraph.cursor_x_px
+                } else {
+                    0.0
+                }
+            } else {
+                tab_size * space_width_px
+            };
         }
 
         // Thin space (U+2009) and narrow no-break space (U+202F):
@@ -337,8 +348,11 @@ fn layout_shaped_run(
                 })
                 .unwrap_or_default();
             let (_, glyph_info) = font.glyph_info(chr, &fallback_metrics);
-            let advance_width_px =
-                glyph_info.advance_width_unscaled.0 * fallback_metrics.px_scale_factor;
+            let advance_width_px = if chr == '\t' && ctx.tab_stop_spaces.is_some() {
+                advance_width_px
+            } else {
+                glyph_info.advance_width_unscaled.0 * fallback_metrics.px_scale_factor
+            };
             let (glyph_alloc, physical_x) =
                 if let Some(ff) = font.fonts_by_id.get_mut(&fallback_key) {
                     ff.allocate_glyph(
@@ -488,6 +502,7 @@ fn layout_section(
 
     let section_text = &job.text[byte_range.as_usize()];
     let mut ctx = ShapingContext {
+        tab_stop_spaces: job.tab_stop_spaces,
         pixels_per_point,
         font_size,
         line_height,
