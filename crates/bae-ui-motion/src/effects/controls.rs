@@ -469,7 +469,23 @@ fn param_row(
             }
         });
     }
-    common::apply_edit(cx, session, effect, &attr, now, edit);
+    if def.match_name == "ADBE Lumetri"
+        && (70..=72).contains(&param.id)
+        && let Edit::Commit(Value::Color(sample)) = &edit
+    {
+        let edits = bae_effects::lumetri_key_edits(param.id, *sample, |id| {
+            common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
+        });
+        let time = query::to_key_time(stage, effect, now);
+        let edits: Vec<_> = edits.into_iter().map(|(id, value)|
+            json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
+        session.lock().scrub = None;
+        if !edits.is_empty() {
+            cx.invoke_with("attr.set_many", json!({"edits": edits}));
+        }
+    } else {
+        common::apply_edit(cx, session, effect, &attr, now, edit);
+    }
 }
 
 /// The value column of one parameter (red when an expression drives it).

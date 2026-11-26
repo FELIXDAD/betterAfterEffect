@@ -1,5 +1,5 @@
 use crate::{
-    Builtin, EffectTarget, TargetEffect, blur,
+    Builtin, EffectTarget, TargetEffect,
     catalog::DefBuilder,
     common,
     effects::{layer_input, sampled::Shader, temporal},
@@ -230,26 +230,6 @@ impl Effect for Cleanup {
     }
 }
 
-// Run the shared blur in texture coordinates, then restore the layer placement.
-fn blurred(
-    target: &mut dyn EffectTarget,
-    image: &GpuImage,
-    radius: f64,
-) -> Result<GpuImage, RenderError> {
-    let sigma = radius * 0.5 / image.pixel_scale;
-    if blur::radius(sigma) == 0 {
-        return Ok(image.clone());
-    }
-    let mut local = common::premultiplied(target, image)?;
-    let [w, h] = local.texel_size();
-    local.rect = IRect::from_size(w, h);
-    local.pixel_scale = 1.;
-    let mut result = blur::plan_gaussian(local.rect, [sigma; 2], blur::Edge::Repeat, local.rect)
-        .encode(target, &local)?;
-    result.rect = image.rect;
-    result.pixel_scale = image.pixel_scale;
-    Ok(result)
-}
 impl TargetEffect for Cleanup {
     fn encode(
         &self,
@@ -275,8 +255,8 @@ impl TargetEffect for Cleanup {
                 let Some(map) = map else {
                     return Ok(input.clone());
                 };
-                let plate = blurred(target, map, v.f(6))?;
-                let source = blurred(target, input, v.f(6))?;
+                let plate = common::blurred(target, map, v.f(6))?;
+                let source = common::blurred(target, input, v.f(6))?;
                 KEY.dispatch(target, v, roi, input, [Some(&plate), Some(&source)], [0, 0])
             }
             Method::Wire => WIRE.dispatch(target, v, roi, input, [map.as_ref()], [0, 0]),
