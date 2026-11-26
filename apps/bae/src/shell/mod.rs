@@ -241,6 +241,12 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         }
         match document.open(path) {
             Ok(()) => {
+                #[cfg(target_os = "macos")]
+                if global.smoke_test.is_none()
+                    && let Some(path) = document.location()
+                {
+                    open_documents::note_recent(path);
+                }
                 tracing::info!("opened {}", path.display());
                 crate::view_state::restore(&mut app, &document);
             }
@@ -270,6 +276,9 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => bae_prefs::PrefsStore::default(),
     });
     app.insert_resource(prefs.clone());
+    let project_file = bae_ui::files::ProjectFile::default();
+    project_file.set(document.location().map(std::path::Path::to_owned));
+    app.insert_resource(project_file);
     crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());
@@ -295,6 +304,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         viewer: None,
         view: None,
         repaint_at: None,
+        last_present: None,
         last_resize: None,
         recoveries: 0,
         gate: CommitGate::default(),
@@ -361,6 +371,8 @@ struct Shell {
     viewer: Option<ViewportTextureId>,
     view: Option<WindowView>,
     repaint_at: Option<Instant>,
+    /// When the last frame reached the surface (paces idle repaints).
+    last_present: Option<Instant>,
     /// Time of the last `Resized` event while live-resize mode is on.
     last_resize: Option<Instant>,
     recoveries: u32,
@@ -434,7 +446,7 @@ impl Shell {
             present_mode: if self.smoke.is_some() {
                 PresentModePreference::NoVsync
             } else {
-                PresentModePreference::Vsync
+                PresentModePreference::LowLatency
             },
             ..SurfaceOptions::default()
         };
@@ -574,6 +586,7 @@ impl Shell {
 
     fn schedule_repaint(&mut self, delay: Duration) {
         tracing::trace!(?delay, "egui repaint request");
+        let delay = delay.max(self.idle_frame_wait());
         let Some(view) = &self.view else { return };
         if delay.is_zero() {
             view.window.request_redraw();
@@ -601,20 +614,45 @@ impl Shell {
                 return;
             }
             ids::ABOUT => self.workspace.show_about(),
+            ids::REVEAL_PROJECT => {
+                if let Some(path) = self.document.location() {
+                    bae_platform::reveal(path);
+                }
+            }
             bae_ui::settings::ACTION => self
                 .workspace
                 .show_settings(inv.params.get("page").and_then(|p| p.as_str())),
             id if files::is_file_command(id) => {
                 // Saves record the open comps; another project restores its own.
                 let mut dialogs = self.dialogs();
-                crate::view_state::run_file_command(
+                let outcome = crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.document,
                     &mut *dialogs,
                     &inv,
                 );
+                if cfg!(target_os = "macos")
+                    && self.smoke.is_none()
+                    && inv.id != ids::SAVE_A_COPY
+                    && matches!(
+                        outcome,
+                        Some(files::FileOutcome::Saved | files::FileOutcome::Replaced)
+                    )
+                    && let Some(_path) = self.document.location()
+                {
+                    #[cfg(target_os = "macos")]
+                    open_documents::note_recent(_path);
+                }
                 // A save or another project restarts the auto-save interval.
                 self.autosave.reset();
+                if let Some(file) = self.app.resource::<bae_ui::files::ProjectFile>() {
+                    file.set(self.document.location().map(std::path::Path::to_owned));
+                }
+            }
+            ids::MINIMIZE => {
+                if let Some(view) = &self.view {
+                    view.window.set_minimized(true);
+                }
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
@@ -744,6 +782,30 @@ impl Shell {
         if let Some(view) = &mut self.view {
             view.status.notice = text;
         }
+    }
+
+    /// Mailbox presentation does not wait for vblank, so continuous egui
+    /// repaints outside playback (which paces itself by frame deadlines) wait
+    /// for the display's next refresh after the last presented frame.
+    fn idle_frame_wait(&self) -> Duration {
+        let (Some(view), Some(last)) = (&self.view, self.last_present) else {
+            return Duration::ZERO;
+        };
+        let playing = self
+            .app
+            .resource::<bae_ui_motion::SharedSession>()
+            .is_some_and(|s| s.lock().is_playing());
+        if playing || self.smoke.is_some() {
+            return Duration::ZERO;
+        }
+        let millihertz = view
+            .window
+            .current_monitor()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .unwrap_or(60_000)
+            .max(1);
+        let interval = Duration::from_secs_f64(1000.0 / f64::from(millihertz));
+        (last + interval).saturating_duration_since(Instant::now())
     }
 
     fn request_redraw(&self) {
@@ -964,6 +1026,7 @@ impl Shell {
             textures_delta: output.textures_delta,
             pixels_per_point: output.pixels_per_point,
         };
+        let session = self.app.resource::<bae_ui_motion::SharedSession>();
         let (width, height) = view.surface.size();
         let background = view.egui_ctx.global_style().visuals.panel_fill;
 
@@ -982,6 +1045,9 @@ impl Shell {
                 view.window.pre_present_notify();
                 let suboptimal = frame.is_suboptimal();
                 frame.present();
+                if let Some(session) = session {
+                    session.lock().frame_presented(Instant::now());
+                }
                 if suboptimal {
                     view.surface.handle_suboptimal();
                 }
@@ -1042,6 +1108,7 @@ impl Shell {
         }
 
         if presented {
+            self.last_present = Some(Instant::now());
             let ms = frame_start.elapsed().as_secs_f32() * 1000.0;
             let status = &mut view.status;
             status.frame_ms = if status.frames == 0 {
@@ -1260,6 +1327,18 @@ impl ApplicationHandler<UserEvent> for Shell {
         {
             bae_ui::set_keypad_enter(code == winit::keyboard::KeyCode::NumpadEnter);
         }
+        #[cfg(target_os = "macos")]
+        if matches!(
+            event,
+            WindowEvent::DroppedFile(_) | WindowEvent::DoubleTapGesture { .. }
+        ) && let Some(pos) = open_documents::pointer_in_view(&view.window)
+        {
+            let pos = pos / view.egui_ctx.zoom_factor();
+            view.egui_state
+                .egui_input_mut()
+                .events
+                .push(egui::Event::PointerMoved(pos));
+        }
         let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
         // Numpad keys are their own keys in AE's shortcuts (#261).
@@ -1290,6 +1369,11 @@ impl ApplicationHandler<UserEvent> for Shell {
             view.window.request_redraw();
         }
         match event {
+            #[cfg(target_os = "macos")]
+            WindowEvent::DoubleTapGesture { .. } => {
+                bae_ui_motion::request_smart_zoom(&view.egui_ctx);
+                view.window.request_redraw();
+            }
             WindowEvent::CloseRequested => {
                 // Through the dispatch: unsaved changes are asked about first.
                 self.pending.push(Invocation::new(ids::QUIT));
@@ -1450,6 +1534,17 @@ impl ApplicationHandler<UserEvent> for Shell {
         }
         if let Some(at) = autosave_at {
             deadline = Some(deadline.map_or(at, |d| d.min(at)));
+        }
+        if let Some(at) = self
+            .app
+            .resource::<bae_ui_motion::SharedSession>()
+            .and_then(|s| s.lock().playback_deadline())
+        {
+            if at <= now {
+                self.request_redraw();
+            } else {
+                deadline = Some(deadline.map_or(at, |d| d.min(at)));
+            }
         }
         if let Some(at) = self.repaint_at {
             if at <= now {

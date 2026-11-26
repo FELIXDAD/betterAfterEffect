@@ -309,6 +309,93 @@ fn wiggle_is_deterministic_and_bounded() {
     assert!(seen.iter().any(|x| (x - seen[0]).abs() > 1.0));
 }
 
+fn rotation_expression(source: &str, t: f64) -> f64 {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "sample", "null");
+        b.expr(&l, "transform:rotation", 0.0, source);
+    });
+    let comp = eval(&s, t);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    comp.layers[0].transform.rotation.z
+}
+
+#[test]
+fn seed_random_restarts_the_property_stream() {
+    let src = "seedRandom(7, true); var x=random(); seedRandom(9); random(); seedRandom(7,true); random()-x";
+    assert_eq!(rotation_expression(src, 1.25), 0.0);
+    for timeless in [false, true] {
+        let src = format!("seedRandom(7,{timeless});random()");
+        assert_eq!(
+            rotation_expression(&src, 0.0) == rotation_expression(&src, 1.0),
+            timeless
+        );
+    }
+    let s = stage(|b| {
+        for name in ["a", "b"] {
+            let layer = b.layer(MAIN, name, "null");
+            b.expr(
+                &layer,
+                "transform:rotation",
+                0.0,
+                "seedRandom(7,true);random()",
+            );
+        }
+    });
+    let result = eval(&s, 1.0);
+    assert!(result.errors.is_empty());
+    assert_ne!(
+        result.layers[0].transform.rotation.z,
+        result.layers[1].transform.rotation.z
+    );
+}
+
+#[test]
+fn random_pads_vector_ranges_and_consumes_one_draw_per_component() {
+    let src = "seedRandom(0,true);var v=random([1],[1,8]);seedRandom(0,true);random();var y=random(8); (v[0]===1 && v[1]===y) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn uniform_draws_follow_the_measured_ae26_recurrence() {
+    let src = "var a=Math.round(random()*4294967295);var expected=(Math.imul(a,1664525)+1013904223)>>>0; random()===expected/4294967295 ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn gauss_random_has_the_documented_tails() {
+    let src = "var tails=0; for(var i=0;i<2048;i++){var v=gaussRandom([4],[4,1]); if(v[0]!==4) throw Error('range'); if(v[1]<0 || v[1]>1) tails++;} tails/2048";
+    assert!((0.07..0.14).contains(&rotation_expression(src, 0.0)));
+}
+
+#[test]
+fn noise_varies_across_the_plane_and_volume() {
+    let src = "var p=noise([0.32,0.27]);var q=noise([0.32,0.27,0.15]); (p!==noise([0.32+31.7,0.27-1]) && q!==p && Math.abs(p-noise([0.32001,0.27]))<0.001 && Math.abs(q)<=1) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn wiggle_uses_the_offset_independently_of_timeless() {
+    let src = "seedRandom(2,true);var a=wiggle(2,4);seedRandom(2,false);var b=wiggle(2,4);seedRandom(3,true); (a===b && a!==wiggle(2,4)) ? 1 : 0";
+    assert_eq!(rotation_expression(src, 0.0), 1.0);
+}
+
+#[test]
+fn temporal_wiggle_samples_an_animated_property_with_multiple_octaves() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "animated", "null");
+        let mut spec = AttrSpec::default();
+        spec.keyframes.insert(secs(0.0), Keyframe::linear(0.0));
+        spec.keyframes.insert(secs(3.0), Keyframe::linear(300.0));
+        spec.expression = Some(Expression::new(
+            "temporalWiggle(2,0.25,3,0.5)-temporalWiggle(2,0.25,1)",
+        ));
+        b.spec(&l, "transform:rotation", spec);
+    });
+    let comp = eval(&s, 1.25);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert!(comp.layers[0].transform.rotation.z.abs() > 0.01);
+}
+
 #[test]
 fn to_comp_uses_the_parent_chain() {
     let s = stage(|b| {
@@ -359,6 +446,30 @@ fn comp_by_name_and_source() {
     assert_eq!(
         nested.as_ref().unwrap().layers[0].transform.rotation.z,
         30.0
+    );
+}
+
+#[test]
+fn time_conversions_follow_the_display_settings_and_rounding_mode() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT).set(
+            "/project",
+            "time_display",
+            Value::Enum("frames".into()),
+        );
+        b.set(MAIN, "display_start_time", Value::Time(secs(2.0)))
+            .set(MAIN, "drop_frame", true);
+        let l = b.layer(MAIN, "Clock", "text");
+        b.expr(&l, "text:source", doc(""), r#"posterizeTime(0);
+            [time, timeToFrames(undefined,24), framesToTime(6,24), timeToFrames(0.01,24,true),
+             timeToTimecode(-0.01,24), timeToFeetAndFrames(-0.11,24,16,true), timeToNTSCTimecode(60.06,true),
+             timeToCurrentFormat(0.11,24,true),thisComp.ntscDropFrame].join("|")"#);
+    });
+    let comp = eval(&s, 0.5);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "0|48|0.25|1|-00:00:00:01|0000+-3|00;01;00;02|3|true"
     );
 }
 
@@ -1112,6 +1223,40 @@ fn traced_attribute_reports_its_reads() {
         .evaluate_attribute_traced(&s, &p(&c), "transform:scale", secs(2.0))
         .unwrap();
     assert_eq!(plain, vec![attr(&c, "transform:scale", 2.0)]);
+}
+
+/// sampleImage reads layer pixels through the shared sample cache: a miss is
+/// transparent black and asks for the sample; once the renderer fills it in,
+/// the next evaluation reads it.
+#[test]
+fn sample_image_through_the_sample_cache() {
+    let s = stage(|b| {
+        b.layer(MAIN, "Plate", "solid");
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var c = thisComp.layer("Plate").sampleImage([10, 20], [2, 1], false, 1);
+               c.map(function (v) { return Math.round(v * 100) / 100; }).join(",")"#,
+        );
+    });
+    let samples = std::sync::Arc::new(bae_anim::ImageSamples::new());
+    let mut ev = bae_anim::Evaluator::new();
+    ev.set_image_samples(Some(samples.clone()));
+    let ec = ev.evaluate_comp(&s, &p(MAIN), secs(0.0)).unwrap();
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[1].text.as_ref().unwrap().text, "0,0,0,0");
+    let taken = samples.take_requests();
+    assert_eq!(taken.keys.len(), 1);
+    let key = &taken.keys[0];
+    assert_eq!(key.layer, p(&format!("{MAIN}/layers/Plate")));
+    assert_eq!((key.time, key.post_effect), (secs(1.0), false));
+    assert_eq!(key.area(), [8.0, 19.0, 12.0, 21.0]);
+    samples.fulfil(taken.generation, key.clone(), [1.0, 0.5, 0.25, 0.75]);
+    let ec = ev.evaluate_comp(&s, &p(MAIN), secs(0.0)).unwrap();
+    assert_eq!(ec.layers[1].text.as_ref().unwrap().text, "1,0.5,0.25,0.75");
+    assert!(!samples.is_waiting());
 }
 
 /// A live drag's values (overrides) reach everything that depends on them —

@@ -33,7 +33,7 @@ python3 server.py
 
 ## Agent 汇报
 
-在“里程碑”或“效果矩阵”搜索名称或 ID，复制名称下的完整 ID。效果 ID 以 `fx:` 开头，含空格时加引号。Agent 页面列出该 agent 当前负责的所有进行中项和最后汇报时间。
+在“里程碑”或“效果矩阵”搜索名称或 ID，复制名称下的完整 ID（已完成项默认折叠在各组的“已完成 N 项”里，选“完成”筛选或搜索时全部展开）。效果 ID 以 `fx:` 开头，含空格时加引号。“实时动态”页顶部列出每个 agent 当前负责的进行中项和最后汇报时间。页面地址后加 `#ms`、`#fx`、`#feed`、`#parity` 可直接打开对应标签页。
 
 将管理员分发的 env 放在本机 `~/.config/bae-board/env`（Windows 为 `$HOME\.config\bae-board\env`），使用 UTF-8，每行一个 `键=值`，无需引号。跨机器使用部署地址。仅向有写入权限的 agent 分发 token。默认 agent 为机器名/当前分支，可设置环境变量或在 env 文件指定 `BAE_BOARD_AGENT`。
 
