@@ -82,6 +82,7 @@ pub(crate) enum V {
 pub(crate) trait Env {
     /// `time` (comp seconds).
     fn now(&self) -> f64;
+    fn bounds(&self) -> (f64, f64);
     /// The pre-expression value at comp time `t` (seconds), as JS sees it.
     fn pre(&self, t: f64) -> Vec<f64>;
     /// Keyframes: comp time (seconds) and value, in order.
@@ -520,6 +521,9 @@ fn looped(env: &dyn Env, out: bool, by_duration: bool, args: &[V]) -> Option<V> 
         Some(V::N(n)) => *n,
         Some(_) => return None,
     };
+    if !matches!(kind.as_str(), "cycle" | "continue" | "offset" | "pingpong") {
+        return None;
+    }
     let (num_keys, duration) = if by_duration {
         (0.0, Some(n))
     } else {
@@ -537,6 +541,7 @@ fn looped(env: &dyn Env, out: bool, by_duration: bool, args: &[V]) -> Option<V> 
     if out {
         last = ks[ks.len() - 1].0;
         first = match duration {
+            Some(0.0) => env.bounds().0,
             Some(d) if d > 0.0 => last - d,
             _ => ks[pick(num_keys).map_or(0, |k| ks.len() - 1 - k)].0,
         };
@@ -546,6 +551,7 @@ fn looped(env: &dyn Env, out: bool, by_duration: bool, args: &[V]) -> Option<V> 
     } else {
         first = ks[0].0;
         last = match duration {
+            Some(0.0) => env.bounds().1,
             Some(d) if d > 0.0 => first + d,
             _ => ks[pick(num_keys).unwrap_or(ks.len() - 1)].0,
         };

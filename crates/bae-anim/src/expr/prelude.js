@@ -3,8 +3,7 @@
 // Host functions (implemented in Rust, see expr/mod.rs) live on `__h`:
 //   __h.prop(c, l, prim, attr, t, pre) -> number[]   property value at comp time t
 //   __h.vel(c, l, prim, attr, t, pre) -> number[]    AE velocity (see velocityAtTime)
-//   __h.keys(c, l, prim, attr) -> number[]           [t0, v0..., t1, v1..., ...] (comp time)
-//   __h.dims(c, l, prim, attr) -> number             value dimensions
+//   __h.keys(c, l, prim, attr) -> {time, value}[]   in composition-time order
 //   __h.layerIndex(c, nameOrIndex) -> number         0-based layer index or -1
 //   __h.layerInfo(c, l) -> object                    name, inPoint, outPoint, ...
 //   __h.compInfo(c) -> object                        name, width, height, ...
@@ -361,16 +360,11 @@ Property.prototype = {
   get speed() { return this.speedAtTime(__now); },
   get numKeys() { return this.__keys().length; },
   __keys: function () {
-    var raw = __h.keys(this.__c, this.__l, this.__p, this.__a), d = __h.dims(this.__c, this.__l, this.__p, this.__a);
-    var out = [];
-    for (var i = 0; i + d < raw.length; i += d + 1) {
-      out.push({ time: raw[i], value: d === 1 ? raw[i + 1] : raw.slice(i + 1, i + 1 + d) });
-    }
-    return out;
+    return __h.keys(this.__c, this.__l, this.__p, this.__a);
   },
   key: function (i) {
     var ks = this.__keys();
-    if (i < 1 || i > ks.length) throw new Error("Key index " + i + " out of range");
+    if (!Number.isInteger(i) || i < 1 || i > ks.length) throw new Error("Key index " + i + " out of range");
     var k = ks[i - 1];
     k.index = i;
     return k;
@@ -426,14 +420,16 @@ Property.prototype = {
     var ks = this.__keys(), t = __now;
     if (ks.length < 2) return this.__pre(t);
     var first, last;
+    var bounds = duration === 0 ? __h.layerInfo(this.__c, this.__l) : null;
+    if (["cycle", "pingpong", "offset", "continue"].indexOf(type) < 0) throw new Error("Unknown loop type " + type);
     if (out) {
       last = ks[ks.length - 1].time;
-      first = duration !== undefined && duration > 0 ? last - duration
+      first = bounds ? Math.min(bounds.inPoint, bounds.outPoint) : duration > 0 ? last - duration
         : ks[numKeyframes > 0 && numKeyframes < ks.length ? ks.length - 1 - numKeyframes : 0].time;
       if (t <= last) return this.__pre(t);
     } else {
       first = ks[0].time;
-      last = duration !== undefined && duration > 0 ? first + duration
+      last = bounds ? Math.max(bounds.inPoint, bounds.outPoint) : duration > 0 ? first + duration
         : ks[numKeyframes > 0 && numKeyframes < ks.length ? numKeyframes : ks.length - 1].time;
       if (t >= first) return this.__pre(t);
     }
@@ -468,7 +464,7 @@ Property.prototype = {
   loopIn: function (type, numKeyframes) { return this.__loop(false, type, numKeyframes || 0); },
   loopOutDuration: function (type, duration) { return this.__loop(true, type, 0, duration || 0); },
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
-  get propertyIndex() { return 1; },
+  get propertyIndex() { return this.__chain().index; },
 };
 // ---- property names and groups (AE: thisProperty.name, propertyGroup(n)) ----
 Property.prototype.__chain = function () {
@@ -480,20 +476,21 @@ Object.defineProperty(Property.prototype, "active", { get: function () { return 
 Object.defineProperty(Property.prototype, "enabled", { get: function () { return true; } });
 Property.prototype.propertyGroup = function (countUp) {
   var n = countUp === undefined ? 1 : countUp;
+  if (n === 0) return this;
   var g = this.__chain().groups[n - 1];
   if (!g) throw new Error("Property group " + n + " is out of range");
   var c = this.__c, l = this.__l, layer = new Layer(c, l);
   switch (g.kind) {
     case "layer": return layer;
     case "transform": var t = layer.transform; t.name = g.name; return t;
-    case "mask": var m = layer.mask(g.name); m.name = g.name; return m;
-    case "effect": var e = layer.effect(g.name); if (!e.name) e.name = g.name; return e;
+    case "mask": var m = layer.mask(g.index); m.name = g.name; m.propertyIndex = g.index; return m;
+    case "effect": return layer.effect(g.index);
     case "cameraOption": return layer.cameraOption;
     case "lightOption": return layer.lightOption;
     case "materialOption": return layer.materialOption;
     case "shape":
       if (typeof __ShapeItem === "function") {
-        return new __ShapeItem(c, l, { path: g.path, type: g.type, op: g.op, name: g.name });
+        return new __ShapeItem(c, l, { path: g.path, type: g.type, op: g.op, name: g.name, index: g.index });
       }
       return { name: g.name };
     default: return { name: g.name };
@@ -510,7 +507,7 @@ function __content(c, l, parent, which) {
 }
 function __ShapeItem(c, l, info) {
   this.__c = c; this.__l = l; this.__p = info.path; this.__t = info.type; this.__o = info.op;
-  this.name = info.name;
+  this.name = info.name; this.propertyIndex = info.index;
 }
 __ShapeItem.prototype = {
   content: function (which) { return __content(this.__c, this.__l, this.__p, which); },
@@ -766,6 +763,8 @@ Layer.prototype = {
       return __prop(c, l, p, a);
     };
     fx.param = fx;
+    Object.defineProperty(fx, "name", { value: effect.name });
+    fx.propertyIndex = effect.index;
     fx.active = effect.active;
     return fx;
   },

@@ -227,6 +227,74 @@ fn cycles_terminate() {
 }
 
 #[test]
+fn keys_groups_and_loop_segments_use_composition_time() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "Source", "null");
+        b.set(&l, "out_point", Value::Time(secs(5.0)));
+        let mut pos = AttrSpec::default();
+        for (t, x) in [(1.0, 0.0), (3.0, 100.0)] {
+            pos.keyframes
+                .insert(secs(t), Keyframe::linear(Value::Vec3([x, 10.0, 0.0])));
+        }
+        b.spec(&l, "transform:position", pos);
+        let text = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &text,
+            "text:source",
+            doc(""),
+            r#"var p=thisComp.layer("Source").position;
+            [p.key(1).value.length,p.nearestKey(2.9).index,p.propertyIndex,
+             propertyGroup(1).name,p.valueAtTime(2)[0],Math.round(p.velocityAtTime(2)[0]),
+             Math.round(p.speedAtTime(2)),Math.round(p.smooth(1,3,2)[0]),
+             p.loopInDuration()[0],p.loopOutDuration()[0]].join("|")"#,
+        );
+    });
+    for (t, suffix) in [(0.5, "100|0"), (3.5, "100|0")] {
+        let comp = eval(&s, t);
+        assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+        assert_eq!(
+            comp.layers[1].text.as_ref().unwrap().text,
+            format!("2|2|2|Text|50|50|50|50|{suffix}")
+        );
+    }
+}
+
+#[test]
+fn loops_cover_each_mode_in_both_directions() {
+    let modes = [
+        ("cycle", 75.0, 25.0),
+        ("pingpong", 25.0, 75.0),
+        ("offset", -25.0, 125.0),
+        ("continue", -25.0, 125.0),
+    ];
+    for (mode, before, after) in modes {
+        for (method, arg, time, expected) in [
+            ("loopIn", 1, 0.5, before),
+            ("loopInDuration", 2, 0.5, before),
+            ("loopOut", 1, 3.5, after),
+            ("loopOutDuration", 2, 3.5, after),
+        ] {
+            let s = stage(|b| {
+                let l = b.layer(MAIN, "Animated", "null");
+                let mut rotation = AttrSpec::default();
+                rotation.keyframes.insert(secs(1.0), Keyframe::linear(0.0));
+                rotation
+                    .keyframes
+                    .insert(secs(3.0), Keyframe::linear(100.0));
+                rotation.expression = Some(Expression::new(format!("{method}('{mode}',{arg})")));
+                b.spec(&l, "transform:rotation", rotation);
+            });
+            let comp = eval(&s, time);
+            assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+            assert!(
+                (comp.layers[0].transform.rotation.z - expected).abs() < 0.01,
+                "{method} {mode}"
+            );
+        }
+    }
+}
+
+#[test]
 fn value_at_time_and_loop_out() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");
