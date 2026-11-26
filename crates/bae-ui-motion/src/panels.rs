@@ -11,6 +11,8 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
+mod audio;
+
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::props::{self, Node};
@@ -599,6 +601,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Select a layer to see its properties.",
         "选择一个图层以查看其属性。",
     ),
+    ("Master Volume", "主音量"),
+    ("Left output level", "左输出电平"),
+    ("Right output level", "右输出电平"),
     // Preview panel
     ("First Frame", "第一帧"),
     ("Previous Frame", "上一帧"),
@@ -617,6 +622,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers this module's Chinese strings and panels (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "audio",
+        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+    );
     crate::register_panel(
         app,
         "properties",

@@ -619,7 +619,7 @@
 | Mask Interpolation | 524316 | `window.panel` | `{"id":"mask_interpolation","toggle":true}` |  |  | E | ⏸ |
 | Tracker | 524317 | `window.panel` | `{"id":"tracker","toggle":true}` |  |  | E | ⏸ |
 | Progress | 524318 | `window.panel` | `{"id":"progress","toggle":true}` |  |  | E | ⏸ |
-| Audio | 524319 | `window.panel` | `{"id":"audio","toggle":true}` | Ctrl+4 | Cmd+4 | E | ☐ |
+| Audio | 524319 | `window.panel` | `{"id":"audio","toggle":true}` | Ctrl+4 | Cmd+4 | E | ✅ |
 | Preview | 524320 | `window.panel` | `{"id":"preview","toggle":true}` | Ctrl+3 | Cmd+3 | B | ✅ |
 | Composition | 524322 | `window.panel` | `{"id":"composition","toggle":true}` |  |  | B | ✅ |
 | Layer | 524323 | `window.panel` | `{"id":"layer","toggle":true}` |  |  | E | ⏸ |

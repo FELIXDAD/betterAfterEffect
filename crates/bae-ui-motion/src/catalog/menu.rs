@@ -1163,7 +1163,7 @@ const WINDOW: &[Node] = &[
     s(it(524316, "Mask Interpolation", "window.panel", r#"{"id":"mask_interpolation","toggle":true}"#, E, Later)),
     s(it(524317, "Tracker", "window.panel", r#"{"id":"tracker","toggle":true}"#, E, Later)),
     s(it(524318, "Progress", "window.panel", r#"{"id":"progress","toggle":true}"#, E, Later)),
-    s(it(524319, "Audio", "window.panel", r#"{"id":"audio","toggle":true}"#, E, Todo)),
+    s(it(524319, "Audio", "window.panel", r#"{"id":"audio","toggle":true}"#, E, Done)),
     s(it(524320, "Preview", "window.panel", r#"{"id":"preview","toggle":true}"#, B, Done)),
     SEP,
     s(it(524322, "Composition", "window.panel", r#"{"id":"composition","toggle":true}"#, B, Done)),

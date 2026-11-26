@@ -192,6 +192,7 @@ pub struct Session {
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
@@ -268,6 +269,7 @@ impl SharedSession {
         s.opening_audio = false;
         match device {
             Ok(output) => {
+                output.set_gain(10.0_f32.powf(s.master_db / 20.0));
                 let previous = s.output.replace(output);
                 s.mix_revision = None;
                 s.retry_audio_after = None;
@@ -517,6 +519,15 @@ impl Session {
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
         self.selected_effects.retain(|e| stage.has_prim(e));
+    }
+
+    /// Keep the meters moving through the last audible scrub sample.
+    pub(crate) fn monitoring_audio(&self) -> bool {
+        (self.audio_clock || self.last_scrub.is_some())
+            && self
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.finished())
     }
 
     pub fn is_playing(&self) -> bool {
