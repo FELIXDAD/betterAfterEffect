@@ -427,6 +427,9 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        actions::ids::CACHE_WHEN_IDLE => spec.checked_when(|cx| {
+            crate::prefs::current(cx.resources).bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
+        }),
         crate::effects::LAST_EFFECT => spec.enabled_when(crate::effects::last_effect_enabled),
         crate::effects::REMOVE_ALL => spec.enabled_when(crate::effects::remove_all_enabled),
         actions::ids::LAYER_SWITCH => {

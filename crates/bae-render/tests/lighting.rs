@@ -578,3 +578,38 @@ fn still_shadows_come_from_a_cached_map() {
         .unwrap();
     assert!(worst <= 24, "map vs per pixel: {worst}");
 }
+
+/// The render queue renders at Best Settings: a Draft layer is drawn at Best
+/// in final renders; previews honour the switch.
+#[test]
+fn final_renders_ignore_the_quality_switch() {
+    let mut b = SceneBuilder::new();
+    let comp = b
+        .comp(
+            "main",
+            100,
+            100,
+            bae_model::FrameRate::FPS_30,
+            Time::ONE_SECOND,
+        )
+        .unwrap();
+    let layer = b
+        .solid_layer(&comp, "a", [1.0, 1.0, 1.0, 1.0], [50, 50], [0.0, 0.0])
+        .unwrap();
+    b.set(&layer, "quality", Value::Enum("draft".into()))
+        .unwrap();
+    let stage = b.into_stage();
+    let quality = |purpose| {
+        let mut eval = AnimEvaluator::new(None).with_purpose(purpose);
+        let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
+        rc.layers[0].quality
+    };
+    assert_eq!(
+        quality(bae_render::RenderPurpose::Final),
+        bae_anim::LayerQuality::Best
+    );
+    assert_eq!(
+        quality(bae_render::RenderPurpose::Preview),
+        bae_anim::LayerQuality::Draft
+    );
+}

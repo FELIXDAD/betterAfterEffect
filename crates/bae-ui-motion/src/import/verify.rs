@@ -1,6 +1,7 @@
 //! Import diagnostics. Decode requested sequence frames sequentially off the UI thread.
 use super::{Probed, formats};
 use crate::dialogs::{Dialog, SharedDialogs};
+use bae_media::SequenceMode;
 use bae_ui::{PanelContext, tr};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -37,7 +38,7 @@ pub(super) fn ranges(numbers: &[i64]) -> String {
 
 #[derive(Default, Debug)]
 pub(crate) struct FrameChecks {
-    pending: VecDeque<(String, PathBuf, String)>,
+    pending: VecDeque<(String, PathBuf, String, SequenceMode)>,
     notices: VecDeque<(String, String)>,
     running: bool,
 }
@@ -47,12 +48,6 @@ impl FrameChecks {
         self.notices
             .pop_front()
             .map(|(title, message)| Dialog::Alert { title, message })
-    }
-
-    pub(crate) fn repaint_while_running(&self, ctx: &egui::Context) {
-        if self.running {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        }
     }
 }
 
@@ -84,7 +79,7 @@ pub(super) fn report(cx: &PanelContext<'_>, title: &str, mut result: Probed) {
         result
             .sequences_to_verify
             .into_iter()
-            .map(|(path, name)| (title.to_owned(), path, name)),
+            .map(|(path, name, mode)| (title.to_owned(), path, name, mode)),
     );
     if d.frame_checks.running || d.frame_checks.pending.is_empty() {
         return;
@@ -106,29 +101,47 @@ pub(super) fn report(cx: &PanelContext<'_>, title: &str, mut result: Probed) {
     }
 }
 
+/// Clears `running` however the worker ends (a decoder panic on a damaged
+/// frame included), so later imports are checked again.
+struct Running<'a>(&'a SharedDialogs);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.lock().frame_checks.running = false;
+    }
+}
+
 fn run(dialogs: &SharedDialogs) {
     bae_gpu::warm_up::lower_priority();
+    let _running = Running(dialogs);
     loop {
-        let (title, path, name) = {
+        let (title, path, name, mode) = {
             let mut d = dialogs.lock();
             let Some(job) = d.frame_checks.pending.pop_front() else {
-                d.frame_checks.running = false;
                 return;
             };
             job
         };
-        if let Some(message) = verify(&path, &name) {
+        if let Some(message) = verify(&path, &name, mode) {
             dialogs
                 .lock()
                 .frame_checks
                 .notices
                 .push_back((title, message));
+            // The dialog host shows it on the next frame: wake the UI then,
+            // not on a timer while the check runs.
+            bae_gpu::warm_up::request_redraw();
         }
     }
 }
 
-fn verify(path: &Path, name: &str) -> Option<String> {
-    let Ok(Some(seq)) = bae_media::sequence::detect_sequence(path) else {
+fn verify(path: &Path, name: &str, mode: SequenceMode) -> Option<String> {
+    let sequence = if mode == SequenceMode::Alphabetical {
+        bae_media::sequence::alphabetical_sequence(path).map(Some)
+    } else {
+        bae_media::sequence::detect_sequence(path)
+    };
+    let Ok(Some(seq)) = sequence else {
         return Some(format!(
             "{} — {}",
             path.display(),

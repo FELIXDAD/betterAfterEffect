@@ -34,6 +34,7 @@ mod imp {
             _asset: &bae_model::PrimPath,
             _revision: i64,
             _sequence: Option<bae_model::FrameRate>,
+            _alphabetical: bool,
             _psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
             Err(format!(
@@ -103,15 +104,15 @@ mod imp {
             sequence: Option<FrameRate>,
             psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Self, RenderError> {
-            let mut open = match sequence {
-                Some(rate) => OpenOptions {
-                    sequence: SequenceMode::Sequence,
-                    sequence_frame_rate: rate,
-                    ..Default::default()
-                },
-                None => OpenOptions::default(),
-            };
-            open.psd_layer = psd_layer;
+            Self::open_with_options(library, gpu, path, open_options(sequence, false, psd_layer))
+        }
+
+        fn open_with_options(
+            library: Arc<MediaLibrary>,
+            gpu: Arc<MediaGpu>,
+            path: &Path,
+            open: OpenOptions,
+        ) -> Result<Self, RenderError> {
             let info = library
                 .info(path, &open)
                 .map_err(|e| RenderError::Footage {
@@ -180,18 +181,25 @@ mod imp {
         }
     }
 
-    type SourceKey = (
-        PathBuf,
-        Option<FrameRate>,
-        Option<bae_model::psd::LayerImage>,
-    );
+    fn open_options(
+        sequence: Option<FrameRate>,
+        alphabetical: bool,
+        psd_layer: Option<bae_model::psd::LayerImage>,
+    ) -> OpenOptions {
+        let mut options = sequence.map(OpenOptions::sequence).unwrap_or_default();
+        options.psd_layer = psd_layer;
+        if alphabetical && sequence.is_some() {
+            options.sequence = SequenceMode::Alphabetical;
+        }
+        options
+    }
 
     /// Footage sources by path, over one [`MediaLibrary`].
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
         revisions: FxHashMap<bae_model::PrimPath, i64>,
-        sources: FxHashMap<SourceKey, Result<Arc<FootageSource>, String>>,
+        sources: FxHashMap<(PathBuf, OpenOptions), Result<Arc<FootageSource>, String>>,
     }
 
     impl FootageCache {
@@ -222,22 +230,23 @@ mod imp {
             asset: &bae_model::PrimPath,
             revision: i64,
             sequence: Option<FrameRate>,
+            alphabetical: bool,
             psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
             if self.revisions.insert(asset.clone(), revision).unwrap_or(0) != revision {
-                self.sources.retain(|(file, _, _), _| file != path);
+                self.sources.retain(|(file, _), _| file != path);
                 self.library.invalidate(path);
             }
-            let key = (path.to_path_buf(), sequence, psd_layer);
+            let options = open_options(sequence, alphabetical, psd_layer);
+            let key = (path.to_path_buf(), options);
             if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
             }
-            let entry = FootageSource::open(
+            let entry = FootageSource::open_with_options(
                 self.library.clone(),
                 self.gpu.clone(),
                 path,
-                sequence,
-                psd_layer,
+                options,
             )
             .map(Arc::new)
             .map_err(|e| e.to_string());
@@ -252,7 +261,10 @@ mod imp {
             let path = footage.file.as_ref()?;
             let source = self
                 .sources
-                .get(&(path.clone(), footage.sequence, footage.psd_layer))?
+                .get(&(
+                    path.clone(),
+                    open_options(footage.sequence, footage.alphabetical, footage.psd_layer),
+                ))?
                 .as_ref()
                 .ok()?;
             source
@@ -262,7 +274,7 @@ mod imp {
 
         /// Forgets open files (they changed on disk or were relinked).
         pub fn clear(&mut self) {
-            for (path, _, _) in self.sources.keys() {
+            for (path, _) in self.sources.keys() {
                 self.library.invalidate(path);
             }
             self.sources.clear();

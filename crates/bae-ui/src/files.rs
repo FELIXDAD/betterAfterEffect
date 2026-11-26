@@ -35,10 +35,29 @@ pub struct SaveRequest {
     pub file_name: String,
 }
 
+/// Files and footage options confirmed together in the import panel.
+pub struct ImportSelection {
+    pub paths: Vec<PathBuf>,
+    pub sequences: bool,
+    pub alphabetical: bool,
+    pub create_comp: bool,
+    pub photoshop_kind: bae_model::psd::ImportKind,
+}
+
 /// A native open panel.
 pub trait FilePicker: Send + Sync {
     /// The chosen files (and folders, when allowed); empty when cancelled.
     fn open(&self, request: &OpenRequest) -> Vec<PathBuf>;
+
+    fn import(&self, request: &OpenRequest) -> ImportSelection {
+        ImportSelection {
+            paths: self.open(request),
+            sequences: true,
+            alphabetical: false,
+            create_comp: false,
+            photoshop_kind: Default::default(),
+        }
+    }
 
     /// A native save panel: the chosen path, `None` when cancelled (or when
     /// the picker has none).
