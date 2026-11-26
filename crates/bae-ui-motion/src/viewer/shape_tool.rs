@@ -398,6 +398,13 @@ pub(crate) fn run(
             let center = super::prefs::ViewerPrefs::current(cx.resources).center_shape_anchor;
             obj.insert("center_anchor".into(), json!(center));
             add_paint(obj, bezier, options);
+            crate::prefs::apply_layer_defaults(
+                cx.resources,
+                session,
+                info,
+                bae_model::LayerKind::Shape,
+                &mut params,
+            );
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
             s.expect(Pending::Layer(path.clone()));
