@@ -13,6 +13,7 @@ struct Params {
     wave_mode: u32,
     parade: u32, // RGB, RGB white, YUV, YUV white.
     space: u32,
+    signal: u32, // mode in bits 0..1, clamp at bit 2, input space from bit 3.
 }
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -36,7 +37,19 @@ fn weights() -> vec2f {
 }
 
 fn level(v: f32) -> u32 {
-    return u32(round(saturate(v) * 255.0));
+    let mode = p.signal & 3u;
+    let clamped = (p.signal & 4u) != 0u;
+    var s = select(v, saturate(v), clamped);
+    if mode == 2u {
+        // Convert the selected signal's transfer curve to the ST 2084 nits scale.
+        if p.space != 5u {
+            s = scope_color(scope_to_709(vec3f(s), p.space), 5u).r;
+        }
+    } else {
+        if mode == 0u { s = round(s * 255.0) / 255.0; }
+        if !clamped { s = (s + 0.2) / 1.4; }
+    }
+    return u32(round(saturate(s) * 255.0));
 }
 
 @compute @workgroup_size(16, 16)
@@ -45,7 +58,12 @@ fn accumulate(@builtin(global_invocation_id) id: vec3u) {
     if pos.x >= p.size.x || pos.y >= p.size.y {
         return;
     }
-    let c = scope_color(textureLoad(src, vec2i(pos), 0).rgb, p.space);
+    let source_space = p.signal >> 3u;
+    var c = textureLoad(src, vec2i(pos), 0).rgb;
+    if source_space != p.space {
+        c = scope_color(scope_to_709(c, source_space), p.space);
+    }
+    if (p.signal & 4u) != 0u { c = saturate(c); }
     let col = pos.x * 256u / p.size.x;
     let rb = weights();
     let y = dot(c, vec3f(rb.x, 1.0 - rb.x - rb.y, rb.y));

@@ -158,6 +158,11 @@ impl Columns {
         );
         let handle = ui
             .interact(divider, ui.id().with("outline_split"), Sense::drag())
+            .labeled_value(
+                egui::WidgetType::Slider,
+                tr("Timeline Layer Pane Width"),
+                &format!("{width:.0}"),
+            )
             .on_hover_cursor(CursorIcon::ResizeHorizontal);
         if handle.dragged() {
             width = (width + handle.drag_delta().x).clamp(min, bounds);
@@ -197,11 +202,17 @@ impl Columns {
         let max_offset = cols.content - cols.viewport;
         let x = track.left() + travel * self.offset / max_offset;
         let thumb = Rect::from_min_size(pos2(x, track.top()), vec2(thumb_width, track.height()));
-        let drag = ui.interact(
-            thumb.expand2(vec2(0.0, 1.0)),
-            ui.id().with("outline_scrollbar"),
-            Sense::drag(),
-        );
+        let drag = ui
+            .interact(
+                thumb.expand2(vec2(0.0, 1.0)),
+                ui.id().with("outline_scrollbar"),
+                Sense::drag(),
+            )
+            .labeled_value(
+                egui::WidgetType::ScrollBar,
+                tr("Scroll Timeline Columns"),
+                &format!("{:.0}", self.offset),
+            );
         if drag.dragged() {
             self.offset =
                 (self.offset + drag.drag_delta().x * max_offset / travel).clamp(0.0, max_offset);
@@ -228,7 +239,9 @@ impl Columns {
 
     pub(super) fn header_controls(&mut self, ui: &Ui, row: Rect, cols: &Cols) {
         let outline = Rect::from_min_max(row.min, pos2(row.left() + cols.end, row.bottom()));
-        let header = ui.interact(outline, ui.id().with("timeline_columns"), Sense::click());
+        let header = ui
+            .interact(outline, ui.id().with("timeline_columns"), Sense::click())
+            .labeled(egui::WidgetType::Button, tr("Timeline Columns"));
         let on = header
             .ctx
             .input(|i| i.pointer.interact_pos())
@@ -281,6 +294,11 @@ impl Columns {
                     handle,
                     ui.id().with(("column_width", c as usize)),
                     Sense::drag(),
+                )
+                .labeled_value(
+                    egui::WidgetType::Slider,
+                    &bae_ui::a11y::context(&[tr("Column Width"), tr(c.spec().0)]),
+                    &format!("{:.0}", cols.width(c)),
                 )
                 .on_hover_cursor(CursorIcon::ResizeHorizontal);
             if resp.dragged() {
