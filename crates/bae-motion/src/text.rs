@@ -391,6 +391,7 @@ impl Command for SetTextStyle {
             SetAt.run(
                 tx,
                 SetAtParams {
+                    auto_key: false,
                     path: layer,
                     attr: SOURCE.into(),
                     time,
