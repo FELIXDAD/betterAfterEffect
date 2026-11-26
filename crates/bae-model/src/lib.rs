@@ -50,7 +50,10 @@ pub use project::{
 };
 pub use stage::{DEFAULT_UNDO_LIMIT, Stage, SubscriptionId, Transaction, editable_on_locked_layer};
 pub use sublayer::Sublayer;
-pub use text::{BaselineOption, ParagraphStyle, StyleRun, TextDocument, TextStyle};
+pub use text::{
+    BaselineDirection, BaselineOption, LineOrientation, ParagraphStyle, StyleRun, TextDocument,
+    TextStyle,
+};
 pub use time::{FrameRate, Time, TimeRange};
 pub use value::{BezierPath, FeatherPoint, Value, ValueType};
 
