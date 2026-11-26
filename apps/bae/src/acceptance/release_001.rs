@@ -847,7 +847,8 @@ fn new_layer_properties_survive_save_as_bae_and_baez() {
             continue;
         }
         settle(&mut h);
-        if dialog_open(&h) {
+        // A dialog, or Preferences (Edit ▸ Label ▸ Edit Label Colors…).
+        if dialog_open(&h) || h.state().workspace.modal_open(h.state().app.resources()) {
             key(&mut h, Modifiers::NONE, Key::Escape);
         }
         ran.push(format!("{} ▸ {}", item.path.join(" ▸ "), item.title));
