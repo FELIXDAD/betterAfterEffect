@@ -808,6 +808,8 @@ impl Workbench {
         self.collect_shortcuts(ui.ctx());
         let kinds = self.kinds.snapshot();
         let mut host = Host {
+            dismissed_coachmarks: None,
+            save_requested: &mut self.save_requested,
             panels: &mut self.panels,
             kinds: &kinds,
             saved: &mut self.state.panels,
