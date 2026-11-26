@@ -201,6 +201,16 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
+            let apply = move |p: &bae_prefs::Preferences| {
+                session.lock().set_audio_mapping(
+                    p.str("audio.audio_map_left") == "channel_2",
+                    p.str("audio.audio_map_right") == "channel_1",
+                );
+            };
+            apply(&prefs.current());
+            prefs.subscribe(apply);
+        }
         let mut workbench = Workbench::new(app, state);
         // Keyboard Shortcuts presets are files in the config folder (AE: aeks/).
         workbench.set_shortcut_presets_dir(
@@ -335,6 +345,9 @@ impl Workspace {
             let mut s = session.lock();
             s.sync_playback(doc.stage());
             s.tick(std::time::Instant::now());
+            if self.settings.is_open() && self.settings.page() == "audio" {
+                self.settings.set_audio_output(s.audio_output_info());
+            }
         }
         let title = doc.title();
         let cx = WorkbenchContext {
