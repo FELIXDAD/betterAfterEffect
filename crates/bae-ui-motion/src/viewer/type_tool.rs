@@ -98,7 +98,18 @@ fn edit_layer(
     })
 }
 
-fn new_text(info: &CompInfo, origin: DVec2, text_box: Option<[f64; 2]>) -> Editing {
+fn new_text(
+    info: &CompInfo,
+    origin: DVec2,
+    text_box: Option<[f64; 2]>,
+    defaults: Option<&bae_model::TextDocument>,
+) -> Editing {
+    // The Character panel's settings for new text (AE), else the defaults.
+    let (font_size, color) = defaults.map_or((DEFAULT_SIZE, Color32::WHITE), |d| {
+        let c = |v: f64| (v.clamp(0.0, 1.0) * 255.0) as u8;
+        let f = d.fill_color;
+        (d.font_size, Color32::from_rgb(c(f[0]), c(f[1]), c(f[2])))
+    });
     Editing {
         comp: info.path.clone(),
         layer: None,
@@ -106,8 +117,8 @@ fn new_text(info: &CompInfo, origin: DVec2, text_box: Option<[f64; 2]>) -> Editi
         text_box: text_box.map(|s| ([0.0, 0.0], s)),
         buffer: String::new(),
         original: String::new(),
-        font_size: DEFAULT_SIZE,
-        color: Color32::WHITE,
+        font_size,
+        color,
         focused_once: false,
         caret_at: None,
         refocus: false,
@@ -196,6 +207,12 @@ impl Editing {
                 });
                 if let Some((_, b)) = self.text_box {
                     params["box_size"] = json!(b);
+                }
+                if let Some(d) = session.lock().text_defaults.clone() {
+                    params["font"] = json!(d.font);
+                    params["font_size"] = json!(d.font_size);
+                    params["fill_color"] = json!(d.fill_color);
+                    params["justification"] = json!(d.justification);
                 }
                 cx.invoke_with("text.create", params);
                 if let Ok(path) = folder.child(&query::unique_child_name(stage, &folder, &name)) {
@@ -305,14 +322,22 @@ pub(super) fn frame(
                     session.lock().selected_layers = vec![layer.clone()];
                     edit_layer(comp, info, &layer, Some(origin))
                 }
-                None => Some(match pointer.filter(|_| dragged) {
-                    Some(p) => {
-                        let b = view.to_comp(p);
-                        let (lo, hi) = (a.min(b), a.max(b));
-                        new_text(info, lo, Some([hi.x - lo.x, hi.y - lo.y]))
-                    }
-                    None => new_text(info, a, None),
-                }),
+                None => {
+                    let defaults = session.lock().text_defaults.clone();
+                    Some(match pointer.filter(|_| dragged) {
+                        Some(p) => {
+                            let b = view.to_comp(p);
+                            let (lo, hi) = (a.min(b), a.max(b));
+                            new_text(
+                                info,
+                                lo,
+                                Some([hi.x - lo.x, hi.y - lo.y]),
+                                defaults.as_ref(),
+                            )
+                        }
+                        None => new_text(info, a, None, defaults.as_ref()),
+                    })
+                }
             };
         }
     }
