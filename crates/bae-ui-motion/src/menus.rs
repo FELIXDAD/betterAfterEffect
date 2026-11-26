@@ -437,6 +437,18 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
         }
+        crate::viewer::view_options::ids::PANEL_BACKGROUND => {
+            let key = spec_param(item.params, "color")
+                .unwrap_or_default()
+                .to_owned();
+            spec.checked_when(move |cx| {
+                crate::viewer::view_options::background_checked(cx.resources, &key)
+            })
+        }
+        crate::viewer::view3d::ids::CREATE_CAMERA => {
+            spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
+        }
+
         id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
             && id != "motion.view.clear_guides" =>
         {
