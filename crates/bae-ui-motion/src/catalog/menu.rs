@@ -668,11 +668,11 @@ const LAYER: &[Node] = &[
     sub(
         "Time",
         &[
-            it(1966081, "Enable Time Remapping", "motion.layer.enable_time_remapping", "", B, Todo),
-            it(1966082, "Time-Reverse Layer", "motion.layer.time_reverse_layer", "", B, Todo),
+            it(1966081, "Enable Time Remapping", "motion.layer.enable_time_remapping", "", B, Done),
+            it(1966082, "Time-Reverse Layer", "motion.layer.time_reverse_layer", "", B, Done),
             it(1966083, "Time Stretch...", "motion.layer.time_stretch", "", E, Done),
-            it(1966084, "Freeze Frame", "motion.layer.freeze_frame", "", B, Todo),
-            it(1966085, "Freeze On Last Frame", "motion.layer.freeze_on_last_frame", "", B, Todo),
+            it(1966084, "Freeze Frame", "motion.layer.freeze_frame", "", B, Done),
+            it(1966085, "Freeze On Last Frame", "motion.layer.freeze_on_last_frame", "", B, Done),
             it(1966086, "Align Video to Data", "motion.layer.align_video_to_data", "", B, Later),
         ],
     ),
@@ -685,7 +685,7 @@ const LAYER: &[Node] = &[
         ],
     ),
     it(393231, "3D Layer", "motion.layer.switch", r#"{"switch":"three_d"}"#, B, Done),
-    it(393232, "Guide Layer", "motion.layer.switch", r#"{"switch":"guide"}"#, B, Todo),
+    it(393232, "Guide Layer", "motion.layer.switch", r#"{"switch":"guide"}"#, B, Done),
     it(393233, "Environment Layer", "motion.layer.switch", r#"{"switch":"environment"}"#, B, Later),
     sub(
         "Markers",
@@ -697,7 +697,7 @@ const LAYER: &[Node] = &[
         ],
     ),
     SEP,
-    it(393236, "Preserve Transparency", "motion.layer.switch", r#"{"switch":"preserve_transparency"}"#, B, Todo),
+    it(393236, "Preserve Transparency", "motion.layer.switch", r#"{"switch":"preserve_transparency"}"#, B, Done),
     sub(
         "Blending Mode",
         &[
