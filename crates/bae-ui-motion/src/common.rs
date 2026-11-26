@@ -473,7 +473,7 @@ pub(crate) fn value_editor(
                 ui.data_mut(|d| d.remove::<String>(key));
                 if text != doc.text {
                     let mut d = (**doc).clone();
-                    d.text = text;
+                    d.set_text(&text);
                     out = Edit::Commit(Value::TextDocument(Box::new(d)));
                 }
             }

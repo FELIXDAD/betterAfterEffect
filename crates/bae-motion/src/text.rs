@@ -98,10 +98,10 @@ impl Command for CreateText {
         let mut doc =
             TextDocument::new(p.text, p.font.unwrap_or_else(|| DEFAULT_FONT.into()), size);
         if let Some(c) = p.fill_color {
-            doc.fill_color = c;
+            doc.style.fill_color = c;
         }
         if let Some(j) = p.justification {
-            doc.justification = j;
+            doc.paragraph.justification = j;
         }
         // Paragraph text (AE 26, R1): the layer sits at the box's center and the
         // box is offset by half its size.
@@ -185,7 +185,7 @@ impl Command for SetText {
         if doc.text == p.text {
             return Ok(SetTextOutput { changed: false });
         }
-        doc.text = p.text;
+        doc.set_text(&p.text);
         SetAt.run(
             tx,
             SetAtParams {

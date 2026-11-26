@@ -688,11 +688,33 @@ fn source_text_strings_and_styles() {
     assert_eq!(text(2).text, "Hi there");
     let styled = text(3);
     assert_eq!(styled.text, "New");
-    assert_eq!(styled.font_size, 80.0);
-    assert_eq!(styled.fill_color[..3], [1.0, 0.0, 0.0]);
-    assert!(styled.faux_bold);
+    assert_eq!(styled.style.font_size, 80.0);
+    assert_eq!(styled.style.fill_color[..3], [1.0, 0.0, 0.0]);
+    assert!(styled.style.faux_bold);
     // 11 characters, 2 words, 50 pt.
     assert_eq!(ec.layers[4].transform.rotation.z, 1100.0 + 20.0 + 5.0);
+}
+
+#[test]
+fn source_text_ranges_read_utf16_offsets_and_preserve_ordered_changes() {
+    let s = stage(|b| {
+        let a = b.layer(MAIN, "A", "text");
+        let mut text = TextDocument::new("A🙂bc", "Arial", 12.);
+        text.edit_styles(2..3, |s| s.font_size = 30.);
+        b.set(&a, "text:source", Value::TextDocument(Box::new(text)));
+        let target = b.layer(MAIN, "B", "text");
+        b.expr(&target,"text:source",doc("X🙂yz"),
+            r#"var a=thisComp.layer("A").text.sourceText; text.sourceText.style.setFontSize(a.getStyleAt(3).fontSize,1,3).setFontSize(18,3,1)"#);
+    });
+    let ec = eval(&s, 0.);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let text = ec.layers[1].text.as_ref().unwrap();
+    assert_eq!(
+        (0..4)
+            .map(|i| text.style_at(i).font_size)
+            .collect::<Vec<_>>(),
+        [50., 30., 18., 50.]
+    );
 }
 
 /// `sourceRectAtTime`: the measured text through the registered measurer, a
