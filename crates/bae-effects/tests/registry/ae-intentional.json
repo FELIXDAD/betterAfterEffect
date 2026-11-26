@@ -1,0 +1,45 @@
+[
+  {
+    "effect": "ADBE Lumetri",
+    "parameters": [
+      5,
+      127,
+      25,
+      128
+    ],
+    "behavior": "外部 LUT",
+    "reason": "保留原厂菜单名称与序号。Adobe 预设不可随程序分发，用户可浏览加载自己的 .cube。"
+  },
+  {
+    "effect": "ADBE Lumetri",
+    "parameters": [
+      102
+    ],
+    "behavior": "仅导入",
+    "reason": "人脸检测属于 AI 后续批次；保留原始开关值。"
+  },
+  {
+    "effect": "ADBE Lumetri",
+    "parameters": [
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      97
+    ],
+    "behavior": "仅导入",
+    "reason": "旧版 SpeedGrade 与旧版色调和饱和度用于工程数据往返，已退出渲染流程。"
+  },
+  {
+    "effect": "ADBE Lumetri",
+    "parameters": [
+      98,
+      99,
+      100
+    ],
+    "behavior": "仅导入",
+    "reason": "旧版媒体嵌入数据按原参数保留，当前调色使用用户加载的 LUT。"
+  }
+]
