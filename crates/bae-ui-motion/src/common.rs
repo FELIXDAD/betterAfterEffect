@@ -964,3 +964,34 @@ pub(crate) fn popup_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
 pub(crate) fn submenu(ui: &mut Ui, title: &str, add: &mut dyn FnMut(&mut Ui)) {
     widgets::menu_button(ui, title, |ui| add(ui));
 }
+
+/// Values displayed by the three text panels over the viewer selection.
+pub(crate) struct SelectedStyles<'a> {
+    pub doc: &'a bae_model::TextDocument,
+    pub range: std::ops::Range<usize>,
+}
+
+impl SelectedStyles<'_> {
+    pub fn character<T: PartialEq>(&self, get: impl Fn(&bae_model::TextStyle) -> T) -> Option<T> {
+        let first = get(self.doc.style_at(self.range.start));
+        self.doc
+            .runs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
+
+    pub fn paragraph<T: PartialEq>(
+        &self,
+        get: impl Fn(&bae_model::ParagraphStyle) -> T,
+    ) -> Option<T> {
+        let first = get(self.doc.paragraph_at(self.range.start));
+        self.doc
+            .paragraphs
+            .iter()
+            .filter(|r| r.start > self.range.start && r.start < self.range.end)
+            .all(|r| get(&r.style) == first)
+            .then_some(first)
+    }
+}
