@@ -7,7 +7,9 @@
 //! but the entry. Parent and child talk in lines: the parent writes commands to
 //! the child's stdin, the child answers on stdout with lines marked by
 //! [`PREFIX`] (libtest's own output around them is skipped). A child exits when
-//! its stdin closes, so a parent that dies does not leave clients behind.
+//! its stdin closes, so a parent that dies does not leave clients behind; the
+//! hub tests run the `bae-hub` binary under such a child too, which kills it
+//! then.
 //!
 //! Processes are killed with [`Child::kill`]: `TerminateProcess` on Windows,
 //! `SIGKILL` on Unix; neither runs any cleanup in the child.
@@ -25,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use bae_model::SublayerId;
 use bae_model::loro::VersionVector;
-use bae_sync::DocSet;
+use bae_sync::{DocSet, Message};
 
 /// Set in children: which client to run.
 pub const ROLE_VAR: &str = "BAE_MP_ROLE";
@@ -136,6 +138,32 @@ impl Proc {
         self.wait_for(kind, timeout)
     }
 
+    /// Take the answers of `kind` that arrived so far (in order), without
+    /// waiting.
+    pub fn take(&mut self, kind: &str) -> Vec<String> {
+        self.pending.extend(self.lines.try_iter());
+        let (taken, kept) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .partition::<VecDeque<_>, _>(|l| is_kind(l, kind));
+        self.pending = kept;
+        taken.iter().map(|l| rest_of(l, kind)).collect()
+    }
+
+    /// Close its stdin, which tells a child to exit (see the module docs), and
+    /// wait up to `timeout` for that; kill it if it is still running then.
+    /// Never panics (it runs in `Drop`).
+    pub fn end(&mut self, timeout: Duration) {
+        self.stdin = None;
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                Ok(Some(_)) | Err(_) => return,
+            }
+        }
+        self.kill_and_wait();
+    }
+
     /// Kill the process (no cleanup runs in it) without waiting for it to be
     /// gone: what a crash looks like to everyone else.
     pub fn kill(&mut self) {
@@ -226,6 +254,107 @@ pub fn input() -> (Sender<Input>, Receiver<Input>) {
         })
         .expect("spawn stdin thread");
     (tx, rx)
+}
+
+/// Wait up to `wait` for input, then take everything queued: the parent's
+/// commands in order, and whether its stdin closed. Wake-ups are merged:
+/// however many the transport sent (one per batch it received, every tick)
+/// while the loop was busy, one pass of the loop handles them all. Taking one
+/// message per pass let them pile up in front of the parent's commands once a
+/// child fell behind (a busy machine), until a command waited longer than the
+/// parent does.
+pub fn commands(input: &Receiver<Input>, wait: Duration) -> (Vec<String>, bool) {
+    let first = match input.recv_timeout(wait) {
+        Ok(first) => first,
+        Err(RecvTimeoutError::Timeout) => return (Vec::new(), false),
+        Err(RecvTimeoutError::Disconnected) => return (Vec::new(), true),
+    };
+    let (mut lines, mut eof) = (Vec::new(), false);
+    for msg in std::iter::once(first).chain(input.try_iter()) {
+        match msg {
+            Input::Line(line) => lines.push(line),
+            Input::Wake => {}
+            Input::Eof => eof = true,
+        }
+    }
+    (lines, eof)
+}
+
+/// When the edits of an `edit <count> <ms between>` command are due.
+///
+/// A wait lasts a whole timer tick (about 16 ms on Windows), longer than the
+/// time between edits, so the edits that are due are made at once, up to
+/// [`Schedule::BURST`] per pass of the loop. A child that fell further behind
+/// (a busy machine) does not try to catch up: it would edit flat out, and the
+/// parent's commands would wait behind the edits.
+#[derive(Debug)]
+pub struct Schedule {
+    left: u32,
+    every: Duration,
+    next: Instant,
+}
+
+impl Default for Schedule {
+    fn default() -> Self {
+        Schedule {
+            left: 0,
+            every: Duration::ZERO,
+            next: Instant::now(),
+        }
+    }
+}
+
+impl Schedule {
+    const BURST: u32 = 16;
+    /// Further behind than this, the schedule starts again from now.
+    const MAX_LAG: Duration = Duration::from_millis(100);
+    /// The longest a child's loop waits for input.
+    const POLL: Duration = Duration::from_millis(5);
+
+    /// `count` edits, `every` apart, the first one now.
+    pub fn start(&mut self, count: u32, every: Duration) {
+        *self = Schedule {
+            left: count,
+            every,
+            next: Instant::now(),
+        };
+    }
+
+    pub fn stop(&mut self) {
+        self.left = 0;
+    }
+
+    /// Edits still to make.
+    pub fn left(&self) -> u32 {
+        self.left
+    }
+
+    /// How many edits to make now; counts them as made.
+    pub fn due(&mut self, now: Instant) -> u32 {
+        if self.left == 0 {
+            return 0;
+        }
+        if now.saturating_duration_since(self.next) > Self::MAX_LAG {
+            self.next = now;
+        }
+        let mut n = 0;
+        while self.left > 0 && now >= self.next && n < Self::BURST {
+            self.left -= 1;
+            self.next += self.every;
+            n += 1;
+        }
+        n
+    }
+
+    /// How long the loop may wait for input before the next edit is due.
+    pub fn wait(&self) -> Duration {
+        if self.left == 0 {
+            return Self::POLL;
+        }
+        self.next
+            .saturating_duration_since(Instant::now())
+            .min(Self::POLL)
+    }
 }
 
 /// Answer the parent.
@@ -332,6 +461,77 @@ pub fn read_snapshots(path: &Path) -> Vec<(SublayerId, Vec<u8>)> {
         layers.push((SublayerId::new(&id).expect("sublayer id"), data));
     }
     layers
+}
+
+// ---- shared-folder logs on disk (spec 4.2) ----
+
+pub const RECORD_HEADER: usize = 12;
+
+/// `(offset, payload length)` of the complete records of a log, its header
+/// included, and where they end.
+pub fn log_records(bytes: &[u8]) -> (Vec<(usize, usize)>, usize) {
+    let (mut at, mut out) = (0, Vec::new());
+    while at + RECORD_HEADER <= bytes.len() {
+        let len = u32::from_le_bytes(bytes[at..at + 4].try_into().expect("4 bytes")) as usize;
+        if at + RECORD_HEADER + len > bytes.len() {
+            break;
+        }
+        let sum = blake3::hash(&bytes[at + RECORD_HEADER..at + RECORD_HEADER + len]);
+        if sum.as_bytes()[..8] != bytes[at + 4..at + RECORD_HEADER] {
+            break;
+        }
+        out.push((at, len));
+        at += RECORD_HEADER + len;
+    }
+    (out, at)
+}
+
+/// Every file under `dir` (none if it does not exist).
+pub fn files_under(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let path = e.path();
+        if path.is_dir() {
+            files_under(&path, out);
+        } else {
+            out.push(path);
+        }
+    }
+}
+
+/// What the logs under `<project>/updates/` hold, document by document: the
+/// union of the versions of their complete records (each covers everything
+/// before it in its log), as a folder claims it. Logs may be read while they
+/// are written.
+pub fn logged_versions(project: &Path) -> BTreeMap<String, VersionVector> {
+    let mut files = Vec::new();
+    files_under(&project.join("updates"), &mut files);
+    let mut have: BTreeMap<String, VersionVector> = BTreeMap::new();
+    for path in files {
+        let Some(bytes) = path
+            .extension()
+            .is_some_and(|e| e == "log")
+            .then(|| std::fs::read(&path).ok())
+            .flatten()
+        else {
+            continue;
+        };
+        for (at, len) in log_records(&bytes).0 {
+            let payload = &bytes[at + RECORD_HEADER..at + RECORD_HEADER + len];
+            let (doc, version) = match Message::decode(payload) {
+                Ok(
+                    Message::Updates { doc, version, .. } | Message::Snapshot { doc, version, .. },
+                ) => (doc, version),
+                _ => continue,
+            };
+            have.entry(doc.as_str().to_owned())
+                .or_default()
+                .merge(&version);
+        }
+    }
+    have
 }
 
 /// Poll `f` until it holds; panics with `what` after `timeout`.

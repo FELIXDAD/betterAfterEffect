@@ -69,8 +69,9 @@
 
 - 同一台机器上的多进程回环测试（epic #737 子任务 7 第一部分，`collab/sync-multiprocess-tests`）：客户端是测试程序自己再启动一次，不另外发布程序。
   - Hub 模式（`services/bae-hub/tests/multiprocess.rs`）：真实的 `bae-hub` 进程，杀掉后在同一个数据目录和端口重启；客户端进程被杀后用同一个 `ClientId` 从保存的状态或从头重启；一个会断线、会延迟的代理。
-  - 共享目录（`crates/bae-sync/tests/multiprocess_dir.rs`）：4 个进程，写到一半时被杀（半条记录、没释放的锁），同一个 `ClientId` 重启后继续；目录大小不超过压缩阈值。
+  - 共享目录（`crates/bae-sync/tests/multiprocess_dir.rs`）：4 个进程，编辑中途被杀（测试补上写到一半留下的半条记录和压缩临时文件；新进程先等着锁，再杀旧进程），同一个 `ClientId` 重启后继续；目录大小不超过压缩阈值。
   - 默认测试各约 3 秒，长时间测试在 `--ignored` 里。说明见 spec 3.1、4.6。
+  - 评审后：子进程每轮合并排队的唤醒、落后时不追赶编辑（原来一轮只取一条消息，机器忙时唤醒堆在父进程的命令前面，命令 30 秒等不到回答，共享目录的长时间测试每次都这样失败）；测试客户端不定期发 `Hello`，`SyncSession::reset` 失效时测试会失败；Hub 被杀后单独靠磁盘恢复、离线保存后重启、截掉半条记录、等锁这几处原来不管实现对不对都能通过，现在分别检查；`bae-hub` 由一个随测试进程退出的子进程启动，测试进程死掉时不再留下 Hub。
   - 测出的问题：进程在压缩（或写在线状态心跳）时写完临时文件、改名之前被杀，临时文件永远留在目录里，每次在这个时候崩溃就多一个（macOS 上压缩的 `F_FULLFSYNC` 慢，这个窗口不小）。现在 `DirTransport::open` 拿到锁之后删除自己的 `<client-id>.tmp-*`（spec 4.3，回归测试 `temporary_files_of_a_dead_session_are_removed`）。Hub 的工程目录用的是同一份代码。
 
 ## 请求（其他工作流在这里留言）

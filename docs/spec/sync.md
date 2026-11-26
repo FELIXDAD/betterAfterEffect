@@ -105,10 +105,11 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去）。
 - `HubTransport::accept(tcp_stream, token)` 是服务端一侧，给测试和简单工具用：`tests/hub.rs` 里用 `Relay` + `accept` 写了一个几十行的阻塞式参考 Hub。
 - 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。对方读得慢（每 25 ms 读一条）时，一次发出的 10 条 3 MiB 消息全部送到，积压远超 `max_backlog` 也不断开；完全不读的对方在 `stall_timeout` 后被断开；对方发完最后一条就重置连接时（我们还在给它发 40 MiB），那一条照样读到；`ThreadedTransport(HubTransport)` 的 `close` 返回时，最后一条 20 MiB 的消息已经送到（`tests/hub.rs`）。
-- **多进程验证**（`services/bae-hub/tests/multiprocess.rs`）：真实的 `bae-hub` 程序和每个客户端各占一个进程，经本机回环的真实套接字同步。客户端用应用自己的代码（`HubTransport` + `ThreadedTransport` + `SyncSession`），是测试程序自己再启动一次（只运行 `mp_child` 这个入口，靠环境变量 `BAE_MP_ROLE` 区分；不另外发布程序），父进程经标准输入输出发命令、收结果（`crates/bae-sync/tests/common/procs.rs`）。进程用 `Child::kill` 杀掉：Windows 上是 `TerminateProcess`，Unix 上是 `SIGKILL`，进程里什么清理都不做。
+- **多进程验证**（`services/bae-hub/tests/multiprocess.rs`）：真实的 `bae-hub` 程序和每个客户端各占一个进程，经本机回环的真实套接字同步。客户端用应用自己的代码（`HubTransport` + `ThreadedTransport` + `SyncSession`），是测试程序自己再启动一次（只运行 `mp_child` 这个入口，靠环境变量 `BAE_MP_ROLE` 区分；不另外发布程序），父进程经标准输入输出发命令、收结果（`crates/bae-sync/tests/common/procs.rs`）。进程用 `Child::kill` 杀掉：Windows 上是 `TerminateProcess`，Unix 上是 `SIGKILL`，进程里什么清理都不做。子进程在标准输入关闭时退出；`bae-hub` 也由这样一个子进程启动和杀掉，它退出前先杀掉 Hub，所以测试进程自己死掉（CI 超时、abort）时不留下占着端口和数据目录的进程。子进程的主循环每一轮把排队的唤醒合并成一次处理，落后时也不追赶编辑进度，所以机器很忙时父进程的命令照样很快得到回答。
+  - 测试客户端不定期发 `Hello`（应用会发）：重连后只有 `SyncSession::reset` 让双方交换版本，`reset` 不起作用时测试就失败，而不是被下一次定期 `Hello` 掩盖。
   - 3 个客户端进程随机编辑后收敛，和最后加入的新客户端一致。
-  - 编辑中途杀掉 Hub 进程：客户端发现断线，离线继续编辑；在同一个数据目录和端口重新启动 Hub 后重连（新连接 + `SyncSession::reset`）并收敛。Hub 没来得及写盘的部分由客户端重新上传，任何客户端的修改都不丢。
-  - 编辑中途杀掉客户端进程，用同一个 `ClientId` 重新启动：一个从它之前保存的状态开始，一个从基础工程开始。两个都追上进度并继续编辑；已经经过 Hub 的修改、保存过的修改都在（保存之后还没发出去的修改随进程一起丢失）。
+  - 编辑中途杀掉 Hub 进程：客户端发现断线，离线继续编辑；在同一个数据目录和端口重新启动 Hub 后重连（新连接 + `SyncSession::reset`）并收敛。Hub 没来得及写盘的部分由客户端重新上传，任何客户端的修改都不丢。之后客户端全部退出，Hub 的磁盘成了唯一的副本：等日志里的版本包含全部修改后再杀掉 Hub、重新启动，新客户端单独从它拿到完整工程；数据目录里没有残留的临时文件或改名留着排查的日志。
+  - 编辑中途杀掉客户端进程，用同一个 `ClientId` 重新启动：一个从它之前保存的状态开始，一个从基础工程开始。从保存的状态开始的那个之前一直离线编辑（它的 Hub 地址不应答），所以保存的修改别处都没有，只能靠重启后上传。两个都追上进度并继续编辑；已经经过 Hub 的修改、保存过的修改都在（保存之后还没发出去的修改随进程一起丢失）。
   - 客户端和 Hub 之间放一个故障代理（测试进程里的线程）：每个连接活 50–500 ms 后被切断，有时切在一帧中间；每段数据在两个方向上随机延迟 0–15 ms。每个客户端都要重连好几次，故障停止后收敛，不丢修改。TCP 连接内部不会丢失、重复、乱序，所以这一层能出现的故障就是断线和延迟；单条消息的丢失、重复、乱序已经在 `crates/bae-sync/tests/convergence.rs`（`SimNet`）里在进程内验证。
   - 默认的 4 个测试并行共约 2.5 秒（本机 debug；只用 1 个 CPU 时约 7 秒），等待都用轮询加期限，期限按慢的 CI 机器放宽。`--ignored` 的长时间测试 `soak_hub_and_client_kills_with_a_faulty_network`（`BAE_MP_SOAK_SECS`，默认 60 秒）随机杀 Hub、杀客户端、开关故障。
 
@@ -185,10 +186,10 @@ sum     := BLAKE3(payload) 的前 8 字节
 - `watch` feature：轮询间隔设成 1 小时，文件事件仍能在 0.4 秒内唤醒读取。
 - 启动时删除自己死掉的上一个会话留下的临时文件，不碰别人的；拿不到锁时什么都不删（`temporary_files_of_a_dead_session_are_removed`）。
 - **多进程**（`tests/multiprocess_dir.rs`，做法同 3.1 的多进程验证）：4 个客户端进程用 `DirTransport`（放在 `ThreadedTransport` 里）同时编辑一个目录。压缩阈值调小到 16 KiB，所以每个进程都压缩好几次。
-  - 编辑中途杀掉两个进程，用同一个 `ClientId` 重新启动。一个等进程没了以后，在它的日志末尾留下半条记录，旁边留一个写了一半的压缩临时文件，模拟写到一半时崩溃。另一个杀掉后立即启动，新进程等操作系统释放死进程的锁（Windows 上进程没了以后过一会儿才释放）再打开目录。
+  - 编辑中途杀掉两个进程，用同一个 `ClientId` 重新启动。一个等进程没了以后，在它的日志末尾留下半条记录，旁边留一个写了一半的压缩临时文件，模拟写到一半时崩溃（杀进程正好杀在写的中间只能碰运气）；新进程开始编辑之前就截掉了这半条记录（在压缩重写日志之前检查，否则不截也看不出来）。另一个先启动新进程，它发现锁被占着、开始等待之后，再杀掉旧进程；新进程等操作系统释放死进程的锁（Windows 上进程没了以后过一会儿才释放）再打开目录。
   - 另一个进程拿正在使用的 `ClientId` 打开目录，被拒绝（`ClientIdInUse`）。
   - 最后所有进程和一个新加入的进程一致；被杀之前已经被别的进程读到的修改都在。所有日志完整（半条记录被主人截掉），没有残留的临时文件；每个日志都不超过它的压缩阈值，重启后的进程照样压缩；`updates/` 总大小不超过"客户端数 × 快照大小"的量级。
-  - 约 3 秒（本机 debug）；`--ignored` 的 `soak_random_kills_and_restarts`（`BAE_MP_SOAK_SECS`，默认 60 秒）每 0.2–1.5 秒随机杀一个进程再重启。
+  - 约 3 秒（本机 debug）；`--ignored` 的 `soak_random_kills_and_restarts`（`BAE_MP_SOAK_SECS`，默认 60 秒）每 0.2–1.5 秒随机杀一个进程再重启（两种方式随机），每个进程每 10 ms 编辑一次（debug 构建在文档越来越大时也跟得上）。每个进程活不了几秒，文档大了以后压缩阈值也跟着变大，所以只要求整个过程中有重启后的进程压缩过。
 
 ### 4.7 还没做
 

@@ -1,7 +1,9 @@
 //! Shared-folder mode with every client in its own OS process (spec 4.6):
 //! real file handles and locks held by different processes, processes killed
-//! while they write (torn tails, locks released only by the OS) and restarted
-//! with the same `ClientId`.
+//! while they edit and write (their locks released only by the OS) and
+//! restarted with the same `ClientId`. A kill lands in the middle of a write
+//! only by chance, so what that leaves (a torn append, a half-written
+//! compaction) is put in place by the test after a kill.
 //!
 //! The clients are this test binary started again (`common/procs.rs`): the
 //! `mp_child` entry runs a client when `BAE_MP_ROLE` is set and does nothing
@@ -117,7 +119,8 @@ fn edit(stage: &mut Stage, who: &AuthorId, rng: &mut Rng, tag: &str, n: &mut u32
 /// long to wait for the client ID's lock, e.g. while the OS has not yet released
 /// the lock of a killed process with that ID).
 ///
-/// Answers `ready lock_retries=N` (or `refused <error>`), then takes commands:
+/// Answers `waiting` when it first finds the lock held and will wait for it,
+/// then `ready lock_retries=N` (or `refused <error>`), then takes commands:
 /// `edit <count> <ms between>` (answers `edited vv=…` when done), `stop`
 /// (`stopped vv=…`), `state` (`fp= vv= unsynced= compactions= sent= errors=`:
 /// snapshots and bytes written, failed pumps), `size` (`snapshot=`: bytes
@@ -138,6 +141,9 @@ fn dir_client() {
         match DirTransport::open(&dir, id.clone(), dir_config()) {
             Ok(t) => break t,
             Err(SyncError::ClientIdInUse(_)) if started.elapsed() < lock_wait => {
+                if lock_retries == 0 {
+                    reply("waiting", "");
+                }
                 lock_retries += 1;
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -167,21 +173,14 @@ fn dir_client() {
     let mut session = SyncSession::new(config);
     reply("ready", &format!("lock_retries={lock_retries}"));
 
-    let (mut left, mut every, mut next_edit, mut n) = (0u32, Duration::ZERO, Instant::now(), 0);
-    let mut errors = 0u64;
+    let (mut schedule, mut n, mut errors) = (Schedule::default(), 0, 0u64);
     loop {
-        let now = Instant::now();
-        // Keep to the schedule where a wait lasts a whole timer tick (about
-        // 16 ms on Windows): make the edits that are due at once.
-        let mut burst = 0;
-        while left > 0 && now >= next_edit && burst < 16 {
+        let due = schedule.due(Instant::now());
+        for _ in 0..due {
             edit(&mut stage, &who, &mut rng, &tag, &mut n);
-            left -= 1;
-            burst += 1;
-            next_edit += every;
-            if left == 0 {
-                reply("edited", &format!("vv={}", versions(&stage)));
-            }
+        }
+        if due > 0 && schedule.left() == 0 {
+            reply("edited", &format!("vv={}", versions(&stage)));
         }
         // A write that failed (e.g. a file another process had open at the
         // wrong moment) is repaired by the transport (spec 4.3); keep going.
@@ -190,67 +189,60 @@ fn dir_client() {
             errors += 1;
             eprintln!("{tag}: shared folder: {e}");
         }
-        let wait = if left > 0 {
-            next_edit.saturating_duration_since(Instant::now())
-        } else {
-            Duration::from_millis(5)
-        };
-        let Ok(msg) = input.recv_timeout(wait.min(Duration::from_millis(5))) else {
-            continue;
-        };
-        let line = match msg {
-            Input::Line(line) => line,
-            Input::Wake => continue,
-            Input::Eof => return,
-        };
-        let words: Vec<&str> = line.split_whitespace().collect();
-        match words.as_slice() {
-            ["edit", count, ms] => {
-                left = count.parse().unwrap();
-                every = Duration::from_millis(ms.parse().unwrap());
-                next_edit = Instant::now();
-            }
-            ["stop"] => {
-                left = 0;
-                reply("stopped", &format!("vv={}", versions(&stage)));
-            }
-            ["state"] => reply(
-                "state",
-                &format!(
-                    "fp={} vv={} unsynced={} compactions={} sent={} errors={errors}",
-                    digest(&fingerprint(&stage)),
-                    versions(&stage),
-                    session.unsynced(&stage).len(),
-                    compactions.load(Ordering::Relaxed),
-                    session.stats().bytes_sent,
+        let (lines, eof) = commands(&input, schedule.wait());
+        for line in lines {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            match words.as_slice() {
+                ["edit", count, ms] => schedule.start(
+                    count.parse().unwrap(),
+                    Duration::from_millis(ms.parse().unwrap()),
                 ),
-            ),
-            ["size"] => reply(
-                "size",
-                &format!(
-                    "snapshot={}",
-                    stage
-                        .sublayers()
-                        .map(|s| s.export_snapshot().unwrap().len())
-                        .sum::<usize>()
-                ),
-            ),
-            ["quit"] => {
-                let pumped = session.pump(&mut stage, &mut link);
-                let flushed = session.flush(&stage, &mut link);
-                let closed = link.close();
-                let result = pumped.and(flushed).and(closed);
-                reply(
-                    "bye",
+                ["stop"] => {
+                    schedule.stop();
+                    reply("stopped", &format!("vv={}", versions(&stage)));
+                }
+                ["state"] => reply(
+                    "state",
                     &format!(
-                        "vv={} close={}",
+                        "fp={} vv={} unsynced={} compactions={} sent={} errors={errors}",
+                        digest(&fingerprint(&stage)),
                         versions(&stage),
-                        result.map_or_else(|e| e.to_string().replace(' ', "_"), |_| "ok".into())
+                        session.unsynced(&stage).len(),
+                        compactions.load(Ordering::Relaxed),
+                        session.stats().bytes_sent,
                     ),
-                );
-                return;
+                ),
+                ["size"] => reply(
+                    "size",
+                    &format!(
+                        "snapshot={}",
+                        stage
+                            .sublayers()
+                            .map(|s| s.export_snapshot().unwrap().len())
+                            .sum::<usize>()
+                    ),
+                ),
+                ["quit"] => {
+                    let pumped = session.pump(&mut stage, &mut link);
+                    let flushed = session.flush(&stage, &mut link);
+                    let closed = link.close();
+                    let result = pumped.and(flushed).and(closed);
+                    reply(
+                        "bye",
+                        &format!(
+                            "vv={} close={}",
+                            versions(&stage),
+                            result
+                                .map_or_else(|e| e.to_string().replace(' ', "_"), |_| "ok".into())
+                        ),
+                    );
+                    return;
+                }
+                other => panic!("unknown command {other:?}"),
             }
-            other => panic!("unknown command {other:?}"),
+        }
+        if eof {
+            return;
         }
     }
 }
@@ -297,7 +289,11 @@ impl Client {
     /// Start client `id` (layers it creates are named after `tag`); waits for
     /// the client ID's lock up to `lock_wait`.
     fn start(dir: &Path, id: &str, tag: &str, seed: u64, lock_wait: Duration) -> Client {
-        let mut proc = spawn(dir, id, tag, seed, lock_wait);
+        Client::ready(spawn(dir, id, tag, seed, lock_wait), id, tag)
+    }
+
+    /// Wait until `proc` (started by [`spawn`]) is ready.
+    fn ready(mut proc: Proc, id: &str, tag: &str) -> Client {
         let ready = proc.wait_for("ready", START);
         Client {
             id: id.to_owned(),
@@ -380,11 +376,12 @@ fn wait_read(reader: &mut Client, state: &State) {
 
 /// Kill client `i` while it edits and start a new process with the same
 /// client ID, which goes on with `edits`. First another client reads what it
-/// wrote so far: that must survive (the returned state). `at_once`: start the
-/// new process right after the kill, so it waits for the lock until the OS
-/// releases it with the dead process. Otherwise wait until the old one is
-/// gone and leave what a crash in the middle of a write leaves: a torn append
-/// and a half-written compaction.
+/// wrote so far: that must survive (the returned state). `at_once`: the new
+/// process is started first and waits for the client ID's lock, the old one
+/// is killed, and the new one gets the lock once the OS released it with the
+/// dead process. Otherwise the new process starts after the old one is gone,
+/// which left what a crash in the middle of a write leaves: a torn append
+/// and a half-written compaction; the new process cuts the torn tail.
 fn kill_and_restart(
     dir: &Path,
     clients: &mut [Client],
@@ -396,15 +393,30 @@ fn kill_and_restart(
     let before = clients[i].state();
     wait_read(&mut clients[(i + 1) % clients.len()], &before);
     let id = clients[i].id.clone();
-    if at_once {
+    let tag = format!("{id}r{seed}");
+    let mut new = if at_once {
+        let mut proc = spawn(dir, &id, &tag, seed, LOCK_WAIT);
+        proc.wait_for("waiting", START);
         clients[i].proc.kill();
+        let new = Client::ready(proc, &id, &tag);
+        assert!(new.lock_retries > 0, "{tag} did not wait for the lock");
+        new
     } else {
         clients[i].proc.kill_and_wait();
-        tear(&dir.join(format!("updates/root/{id}.log")));
+        let log = dir.join(format!("updates/root/{id}.log"));
+        let torn = tear(&log);
         let tmp = dir.join(format!("updates/root/{id}.tmp-{seed:016x}"));
         fs::write(tmp, b"half a compaction").unwrap();
-    }
-    let mut new = Client::start(dir, &id, &format!("{id}r{seed}"), seed, LOCK_WAIT);
+        let new = Client::start(dir, &id, &tag, seed, LOCK_WAIT);
+        if torn {
+            // Checked before it edits: a compaction would rewrite the log
+            // whether or not the tail was cut.
+            wait_until("the restarted process to cut the torn tail", SETTLE, || {
+                fs::read(&log).is_ok_and(|b| log_records(&b).1 == b.len())
+            });
+        }
+        new
+    };
     new.restarted = true;
     new.proc.send(edits);
     let mut old = std::mem::replace(&mut clients[i], new);
@@ -412,37 +424,19 @@ fn kill_and_restart(
     before
 }
 
-const RECORD_HEADER: usize = 12;
-
-/// `(offset, payload length)` of the complete records of a log, header
-/// included, and where they end.
-fn records(bytes: &[u8]) -> (Vec<(usize, usize)>, usize) {
-    let (mut at, mut out) = (0, Vec::new());
-    while at + RECORD_HEADER <= bytes.len() {
-        let len = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
-        if at + RECORD_HEADER + len > bytes.len() {
-            break;
-        }
-        let sum = blake3::hash(&bytes[at + RECORD_HEADER..at + RECORD_HEADER + len]);
-        if sum.as_bytes()[..8] != bytes[at + 4..at + RECORD_HEADER] {
-            break;
-        }
-        out.push((at, len));
-        at += RECORD_HEADER + len;
-    }
-    (out, at)
-}
-
 /// A crash in the middle of an append: the first half of a copy of the last
-/// record is left at the end of `log` (unless the kill already tore it, or
-/// it has no records yet).
-fn tear(log: &Path) {
+/// record is left at the end of `log`, unless the kill already tore it.
+/// Whether the log ends in a torn record now (`false`: it has no records).
+fn tear(log: &Path) -> bool {
     let Ok(bytes) = fs::read(log) else {
-        return;
+        return false;
     };
-    let (recs, end) = records(&bytes);
-    let Some(&(at, len)) = recs.last().filter(|_| end == bytes.len()) else {
-        return;
+    let (recs, end) = log_records(&bytes);
+    if end != bytes.len() {
+        return true;
+    }
+    let Some(&(at, len)) = recs.last() else {
+        return false;
     };
     let half = &bytes[at..at + (RECORD_HEADER + len) / 2];
     use std::io::Write;
@@ -452,18 +446,7 @@ fn tear(log: &Path) {
         .unwrap()
         .write_all(half)
         .unwrap();
-}
-
-/// Every file under `dir`.
-fn files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in fs::read_dir(dir).unwrap().flatten() {
-        let path = e.path();
-        if path.is_dir() {
-            files(&path, out);
-        } else {
-            out.push(path);
-        }
-    }
+    true
 }
 
 /// The shape of `updates/` after everyone quit cleanly: every log intact (torn
@@ -473,7 +456,7 @@ fn files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// total size.
 fn check_logs(dir: &Path) -> u64 {
     let mut all = Vec::new();
-    files(&dir.join("updates"), &mut all);
+    files_under(&dir.join("updates"), &mut all);
     let mut total = 0;
     for path in &all {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
@@ -488,7 +471,7 @@ fn check_logs(dir: &Path) -> u64 {
         }
         let bytes = fs::read(path).unwrap();
         total += bytes.len() as u64;
-        let (recs, end) = records(&bytes);
+        let (recs, end) = log_records(&bytes);
         assert_eq!(end, bytes.len(), "torn tail left in {}", path.display());
         // Header, then a snapshot if the log was ever compacted.
         let compacted = recs.get(1).and_then(|&(at, len)| {
@@ -562,12 +545,13 @@ fn finish(
 }
 
 /// Four processes edit one folder. Two are killed while editing and started
-/// again with the same `ClientId`: one after it is gone (with a torn append and
-/// a half-written compaction left in its place), one at once (it waits for the
-/// lock the OS releases with the dead process). A second process with a client
-/// ID in use is refused. In the end every process and a fresh one agree,
-/// nothing that reached the folder before a kill is lost, and the logs stay
-/// within their compaction thresholds.
+/// again with the same `ClientId`: one after it is gone (with a torn append,
+/// which its successor cuts, and a half-written compaction left in its place),
+/// one while its successor already waits for the lock (which the OS releases
+/// with the dead process). A second process with a client ID in use is
+/// refused. In the end every process and a fresh one agree, nothing that
+/// reached the folder before a kill is lost, and the logs stay within their
+/// compaction thresholds.
 #[test]
 fn processes_share_a_folder_through_kills_and_restarts() {
     let (_tmp, dir) = project_dir();
@@ -613,7 +597,8 @@ fn processes_share_a_folder_through_kills_and_restarts() {
     }
 }
 
-/// Soak: four processes edit without pause while a random one is killed and
+/// Soak: four processes edit without pause (each every 10 ms, which a debug
+/// build keeps up with as the documents grow) while a random one is killed and
 /// restarted (either way of [`kill_and_restart`]) every 0.2–1.5 s, for
 /// `BAE_MP_SOAK_SECS` seconds (default 60). Run with
 ///
@@ -624,7 +609,7 @@ fn processes_share_a_folder_through_kills_and_restarts() {
 #[test]
 #[ignore = "soak test (a minute or more): run with --ignored, see its doc comment"]
 fn soak_random_kills_and_restarts() {
-    const EDITS: &str = "edit 4000000000 4";
+    const EDITS: &str = "edit 4000000000 10";
     let secs = std::env::var("BAE_MP_SOAK_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -638,12 +623,21 @@ fn soak_random_kills_and_restarts() {
     }
     let mut rng = Rng::new(secs);
     let (mut durable, mut sent, mut kills) = (Vec::new(), 0, 0u64);
+    // Compactions by processes started after a kill, over the whole run: each
+    // is killed again a few seconds later, and late in a run (large documents,
+    // so a compaction threshold far above the minimum) most do not live long
+    // enough to reach it.
+    let mut compactions = 0;
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(secs) {
         std::thread::sleep(Duration::from_millis(200 + rng.below(1300) as u64));
         let i = rng.below(clients.len());
         let at_once = rng.chance(50);
+        let restarted = clients[i].restarted;
         let before = kill_and_restart(&dir, &mut clients, i, at_once, EDITS, 100 + kills);
+        if restarted {
+            compactions += before.compactions;
+        }
         durable.push(before.vv);
         sent += before.sent;
         kills += 1;
@@ -653,7 +647,8 @@ fn soak_random_kills_and_restarts() {
         .map(|c| field(&c.proc.ask("stop", "stopped", ANSWER), "vv").to_owned())
         .collect();
     println!("{kills} kills in {secs} s");
-    // Some were killed again before they wrote enough to compact.
-    let compactions = finish(&dir, clients, &durable, &finals, sent);
-    assert!(compactions.iter().any(|(_, n)| *n > 0), "{compactions:?}");
+    let last = finish(&dir, clients, &durable, &finals, sent);
+    compactions += last.iter().map(|(_, n)| n).sum::<u64>();
+    println!("{compactions} compactions by restarted processes");
+    assert!(compactions > 0, "no process compacted after a restart");
 }

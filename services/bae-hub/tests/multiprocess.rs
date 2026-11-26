@@ -25,9 +25,9 @@ mod procs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -54,7 +54,8 @@ const SETTLE: Duration = Duration::from_secs(90);
 fn mp_child() {
     match role().as_deref() {
         None => {}
-        Some("hub") => hub_client(),
+        Some("client") => hub_client(),
+        Some("hub") => hub_guard(),
         Some(other) => panic!("unknown role {other}"),
     }
 }
@@ -84,7 +85,10 @@ fn connect(url: &str, wake: &Sender<Input>) -> Receiver<Result<ThreadedTransport
 ///
 /// It connects as the app does, and after a lost connection keeps editing
 /// offline and reconnects (new transport, `SyncSession::reset`) every 50 ms
-/// until the hub answers. Answers `ready`, then takes commands: `edit <count>
+/// until the hub answers. Unlike the app it sends no periodic `Hello`: after a
+/// reconnect only `reset` makes the two sides compare versions, so the tests
+/// fail if it does not (the app's periodic `Hello` would make up for it within
+/// seconds). Answers `ready`, then takes commands: `edit <count>
 /// <ms between>` (answers `edited vv=…` when done), `stop` (`stopped vv=…`),
 /// `state` (`fp= vv= connected=0|1 unsynced= made= offline= drops=
 /// reconnects=`: edits made, those made while not connected, connections
@@ -101,7 +105,9 @@ fn hub_client() {
         Some(path) if path.is_file() => client_stage(&read_snapshots(path)),
         _ => client_stage(&read_snapshots(Path::new(&env("BAE_MP_BASE")))),
     };
-    let mut session = SyncSession::new(SessionConfig::new(id));
+    let mut config = SessionConfig::new(id);
+    config.hello_interval = None;
+    let mut session = SyncSession::new(config);
     let (wake, input) = input();
     reply("ready", "");
 
@@ -110,7 +116,7 @@ fn hub_client() {
     let mut retry_at = Instant::now();
     let (mut made, mut offline, mut drops, mut reconnects, mut connected_once) =
         (0u64, 0u64, 0u64, 0u64, false);
-    let (mut left, mut every, mut next_edit, mut n) = (0u32, Duration::ZERO, Instant::now(), 0);
+    let (mut schedule, mut n) = (Schedule::default(), 0);
     loop {
         let now = Instant::now();
         if link.is_none() {
@@ -131,19 +137,14 @@ fn hub_client() {
                 None => {}
             }
         }
-        // Keep to the schedule where a wait lasts a whole timer tick (about
-        // 16 ms on Windows): make the edits that are due at once.
-        let mut burst = 0;
-        while left > 0 && now >= next_edit && burst < 16 {
+        let due = schedule.due(now);
+        for _ in 0..due {
             random_edit(&mut stage, &who, &mut rng, &tag, &mut n);
             made += 1;
             offline += u64::from(link.is_none() || !session.is_connected());
-            left -= 1;
-            burst += 1;
-            next_edit += every;
-            if left == 0 {
-                reply("edited", &format!("vv={}", versions(&stage)));
-            }
+        }
+        if due > 0 && schedule.left() == 0 {
+            reply("edited", &format!("vv={}", versions(&stage)));
         }
         if let Some(l) = link.as_mut()
             && session.pump(&mut stage, l).is_err()
@@ -153,75 +154,137 @@ fn hub_client() {
             link = None;
             drops += 1;
         }
-        let wait = if left > 0 {
-            next_edit.saturating_duration_since(Instant::now())
-        } else {
-            Duration::from_millis(5)
-        };
-        let line = match input.recv_timeout(wait.min(Duration::from_millis(5))) {
-            Ok(Input::Line(line)) => line,
-            Ok(Input::Wake) | Err(RecvTimeoutError::Timeout) => continue,
-            Ok(Input::Eof) | Err(RecvTimeoutError::Disconnected) => return,
-        };
-        let words: Vec<&str> = line.split_whitespace().collect();
-        match words.as_slice() {
-            ["edit", count, ms] => {
-                left = count.parse().unwrap();
-                every = Duration::from_millis(ms.parse().unwrap());
-                next_edit = Instant::now();
-            }
-            ["stop"] => {
-                left = 0;
-                reply("stopped", &format!("vv={}", versions(&stage)));
-            }
-            ["state"] => reply(
-                "state",
-                &format!(
-                    "fp={} vv={} connected={} unsynced={} made={made} offline={offline} \
-                     drops={drops} reconnects={reconnects}",
-                    digest(&fingerprint(&stage)),
-                    versions(&stage),
-                    u8::from(link.is_some() && session.is_connected()),
-                    session.unsynced(&stage).len(),
+        let (lines, eof) = commands(&input, schedule.wait());
+        for line in lines {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            match words.as_slice() {
+                ["edit", count, ms] => schedule.start(
+                    count.parse().unwrap(),
+                    Duration::from_millis(ms.parse().unwrap()),
                 ),
-            ),
-            ["save"] => {
-                let layers: Vec<_> = stage
-                    .sublayers()
-                    .map(|s| (s.id().clone(), s.export_snapshot().unwrap()))
-                    .collect();
-                write_snapshots(saved.as_deref().expect("BAE_MP_STATE"), &layers);
-                reply("saved", &format!("vv={}", versions(&stage)));
-            }
-            ["quit"] => {
-                let result = match link.as_mut() {
-                    Some(l) => session
-                        .pump(&mut stage, l)
-                        .and_then(|_| session.flush(&stage, l))
-                        .and_then(|_| l.close()),
-                    None => Err(SyncError::Closed),
-                };
-                reply(
-                    "bye",
+                ["stop"] => {
+                    schedule.stop();
+                    reply("stopped", &format!("vv={}", versions(&stage)));
+                }
+                ["state"] => reply(
+                    "state",
                     &format!(
-                        "vv={} close={}",
+                        "fp={} vv={} connected={} unsynced={} made={made} offline={offline} \
+                         drops={drops} reconnects={reconnects}",
+                        digest(&fingerprint(&stage)),
                         versions(&stage),
-                        result.map_or_else(|e| e.to_string().replace(' ', "_"), |_| "ok".into())
+                        u8::from(link.is_some() && session.is_connected()),
+                        session.unsynced(&stage).len(),
                     ),
-                );
-                return;
+                ),
+                ["save"] => {
+                    let layers: Vec<_> = stage
+                        .sublayers()
+                        .map(|s| (s.id().clone(), s.export_snapshot().unwrap()))
+                        .collect();
+                    write_snapshots(saved.as_deref().expect("BAE_MP_STATE"), &layers);
+                    reply("saved", &format!("vv={}", versions(&stage)));
+                }
+                ["quit"] => {
+                    let result = match link.as_mut() {
+                        Some(l) => session
+                            .pump(&mut stage, l)
+                            .and_then(|_| session.flush(&stage, l))
+                            .and_then(|_| l.close()),
+                        None => Err(SyncError::Closed),
+                    };
+                    reply(
+                        "bye",
+                        &format!(
+                            "vv={} close={}",
+                            versions(&stage),
+                            result
+                                .map_or_else(|e| e.to_string().replace(' ', "_"), |_| "ok".into())
+                        ),
+                    );
+                    return;
+                }
+                other => panic!("unknown command {other:?}"),
             }
-            other => panic!("unknown command {other:?}"),
+        }
+        if eof {
+            return;
         }
     }
 }
 
 // ---- the hub process ----
 
-/// The `bae-hub` binary, configured the way a NAS deployment is (command line
-/// and environment, see `deploy/`).
+/// Runs the `bae-hub` binary, configured the way a NAS deployment is (command
+/// line and environment, see `deploy/`): `BAE_MP_DATA` (data directory),
+/// `BAE_MP_LISTEN` (address). This guard process sits between the test and
+/// the hub so that a test process that dies (a CI timeout, an abort) does not
+/// leave a hub running, holding its port and data directory: like a client,
+/// it exits when its stdin closes, and kills the hub first.
+///
+/// Answers `listening addr=<address>` once the hub logged the address it got,
+/// or, if the hub exited before that (the port or the data directory's lock
+/// still held), its log as `log <line>` answers and then `listening
+/// addr=none`. Takes one command: `kill` (kill the hub, no shutdown runs in
+/// it; answers `killed`).
+fn hub_guard() {
+    let mut hub = Command::new(env!("CARGO_BIN_EXE_bae-hub"))
+        .arg("serve")
+        .arg("--data")
+        .arg(env("BAE_MP_DATA"))
+        .args(["--listen", &env("BAE_MP_LISTEN"), "--log", "info"])
+        .env("BAE_HUB_TOKEN", WRITE)
+        .env_remove("BAE_HUB_CONFIG")
+        .env_remove("BAE_HUB_READ_TOKEN")
+        .env_remove("BAE_HUB_ANONYMOUS")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start bae-hub");
+    let stderr = hub.stderr.take().expect("piped");
+    std::thread::spawn(move || {
+        let mut stderr = BufReader::new(stderr);
+        let (mut log, mut buf) = (Vec::new(), Vec::new());
+        while matches!(stderr.read_until(b'\n', &mut buf), Ok(n) if n > 0) {
+            let line = String::from_utf8_lossy(&buf).trim_end().to_owned();
+            buf.clear();
+            if line.contains("listening")
+                && let Some(addr) = line.split("addr=").nth(1)
+            {
+                let addr = addr.split_whitespace().next().unwrap_or_default();
+                reply("listening", &format!("addr={addr}"));
+                // Keep reading, or the hub would block on a full pipe.
+                let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+                return;
+            }
+            log.push(line);
+        }
+        for line in log {
+            reply("log", &line);
+        }
+        reply("listening", "addr=none");
+    });
+    let (_wake, input) = input();
+    loop {
+        let (lines, eof) = commands(&input, Duration::from_secs(1));
+        for line in lines {
+            assert_eq!(line, "kill", "unknown command");
+            let _ = hub.kill();
+            let _ = hub.wait();
+            reply("killed", "");
+        }
+        if eof {
+            let _ = hub.kill();
+            let _ = hub.wait();
+            return;
+        }
+    }
+}
+
+/// A `bae-hub` process (under its guard, see [`hub_guard`]).
 struct Hub {
-    child: Child,
+    guard: Proc,
     addr: SocketAddr,
 }
 
@@ -235,69 +298,37 @@ impl Hub {
         let mut tries = 0;
         loop {
             tries += 1;
-            let mut child = Command::new(env!("CARGO_BIN_EXE_bae-hub"))
-                .arg("serve")
-                .arg("--data")
-                .arg(data)
-                .args(["--listen", &listen.to_string(), "--log", "info"])
-                .env("BAE_HUB_TOKEN", WRITE)
-                .env_remove("BAE_HUB_CONFIG")
-                .env_remove("BAE_HUB_READ_TOKEN")
-                .env_remove("BAE_HUB_ANONYMOUS")
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("start bae-hub");
-            let stderr = child.stderr.take().expect("piped");
-            let log = Arc::new(Mutex::new(Vec::new()));
-            let (tx, rx) = mpsc::channel();
-            let lines = log.clone();
-            // Keeps reading after the address showed up, or the hub would block
-            // on a full pipe.
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines() {
-                    let Ok(line) = line else { break };
-                    if line.contains("listening")
-                        && let Some(addr) = line.split("addr=").nth(1)
-                    {
-                        let addr = addr.split_whitespace().next().unwrap_or_default();
-                        let _ = tx.send(addr.parse::<SocketAddr>().ok());
-                    }
-                    lines.lock().unwrap().push(line);
-                }
-                let _ = tx.send(None);
-            });
+            let vars = [
+                ("BAE_MP_DATA", data.display().to_string()),
+                ("BAE_MP_LISTEN", listen.to_string()),
+            ];
+            let mut guard = Proc::spawn(ENTRY, "bae-hub", "hub", &vars);
             let left = deadline.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(left) {
-                Ok(Some(addr)) => return Hub { child, addr },
-                Ok(None) | Err(RecvTimeoutError::Disconnected) => {
-                    let status = child.wait();
-                    let log = log.lock().unwrap().join("\n");
-                    assert!(
-                        Instant::now() < deadline,
-                        "bae-hub did not start after {tries} tries ({status:?}):\n{log}"
-                    );
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    let _ = child.kill();
-                    panic!("bae-hub did not start:\n{}", log.lock().unwrap().join("\n"));
-                }
+            let listening = guard.wait_for("listening", left);
+            if let Ok(addr) = field(&listening, "addr").parse() {
+                return Hub { guard, addr };
             }
+            let log = guard.take("log").join("\n");
+            guard.end(ANSWER);
+            assert!(
+                Instant::now() < deadline,
+                "bae-hub did not start after {tries} tries:\n{log}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 
     /// Kill it (no shutdown runs: whatever it had not written yet is lost).
     fn kill(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.guard.ask("kill", "killed", ANSWER);
+        self.guard.end(ANSWER);
     }
 }
 
 impl Drop for Hub {
     fn drop(&mut self) {
-        self.kill();
+        // The guard kills the hub when told to end.
+        self.guard.end(ANSWER);
     }
 }
 
@@ -520,8 +551,13 @@ impl Setup {
     /// Start client `id` (layers it creates are named after `tag`), saving to
     /// and starting from its state file if `saved`.
     fn start(&self, id: &str, tag: &str, seed: u64, saved: bool) -> Client {
+        self.start_at(&self.url, id, tag, seed, saved)
+    }
+
+    /// [`Setup::start`] with the hub at `url`.
+    fn start_at(&self, url: &str, id: &str, tag: &str, seed: u64, saved: bool) -> Client {
         let mut vars = vec![
-            ("BAE_MP_URL", self.url.clone()),
+            ("BAE_MP_URL", url.to_owned()),
             ("BAE_MP_ID", id.to_owned()),
             ("BAE_MP_TAG", tag.to_owned()),
             ("BAE_MP_SEED", seed.to_string()),
@@ -530,7 +566,7 @@ impl Setup {
         if saved {
             vars.push(("BAE_MP_STATE", self.state_file(id).display().to_string()));
         }
-        let mut proc = Proc::spawn(ENTRY, tag, "hub", &vars);
+        let mut proc = Proc::spawn(ENTRY, tag, "client", &vars);
         proc.wait_for("ready", START);
         Client {
             id: id.to_owned(),
@@ -665,6 +701,11 @@ fn client_processes_converge_through_the_hub_process() {
 /// editing offline, and once a new hub process runs on the same data directory
 /// and port they reconnect and converge: whatever the killed hub had not
 /// written is uploaded again, nothing any client made is lost.
+///
+/// Then the hub's disk holds the only copy: once the clients quit and the hub
+/// wrote everything, it is killed again and restarted, and a newcomer alone
+/// gets everything from what the new hub process loaded. No temporary or
+/// corrupt files are left in the data directory.
 #[test]
 fn the_hub_process_is_killed_and_restarted_while_clients_edit() {
     let tmp = tempfile::tempdir().unwrap();
@@ -686,7 +727,7 @@ fn the_hub_process_is_killed_and_restarted_while_clients_edit() {
     hub.kill();
     wait_all(&mut clients, "the clients to notice", |s| !s.connected);
     wait_all(&mut clients, "offline edits", |s| s.offline >= 20);
-    let hub = Hub::start(&data, addr);
+    hub = Hub::start(&data, addr);
 
     let finals = edited(&mut clients);
     let states = finish(&setup, clients, &[], &finals);
@@ -703,28 +744,64 @@ fn the_hub_process_is_killed_and_restarted_while_clients_edit() {
             .map(|s| (s.made, s.offline, s.reconnects))
             .collect::<Vec<_>>()
     );
+
+    let all = states.last().expect("the newcomer").clone();
+    let want = parse_versions(&all.vv);
+    let project = data.join("projects").join(PROJECT);
+    wait_until("the hub to write everything", SETTLE, || {
+        includes(&logged_versions(&project), &want)
+    });
+    hub.kill();
+    hub = Hub::start(&data, addr);
+    let mut late = setup.start("late", "late", 2, false);
+    wait_until(
+        "a newcomer to get everything from the hub's disk",
+        SETTLE,
+        || {
+            let s = late.state();
+            s.connected && s.fp == all.fp && same_versions(&s.vv, &all.vv)
+        },
+    );
+    late.quit();
+    let mut files = Vec::new();
+    files_under(&data, &mut files);
+    for path in files {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            !name.contains(".tmp-") && !name.contains(".corrupt-"),
+            "left in the data directory: {}",
+            path.display()
+        );
+    }
     drop(hub);
 }
 
 /// Client processes are killed while they edit and started again with the
-/// same `ClientId`: alice from the state she saved before (edits made after
-/// the save and not yet through the hub die with the process), bob from
-/// scratch (the base project). Both catch up and go on; nothing that had gone
-/// through the hub, and nothing alice had saved, is lost.
+/// same `ClientId`. Alice edits offline (her hub address never answers), so
+/// what she saves exists nowhere else; started again from her saved state,
+/// connected this time, she uploads it (edits she made after saving die with
+/// the process). Bob is started again from scratch (the base project) after
+/// his edits went through the hub. Both catch up and go on; nothing that had
+/// gone through the hub, and nothing alice had saved, is lost.
 #[test]
 fn killed_client_processes_restart_from_saved_state_or_from_scratch() {
     let tmp = tempfile::tempdir().unwrap();
     let hub = Hub::start(&tmp.path().join("data"), loopback_any_port());
     let setup = Setup::new(tmp.path(), hub.addr);
+    // Takes connections into its backlog and never answers them; held until
+    // alice is gone, so nothing else gets its port.
+    let door = TcpListener::bind(loopback_any_port()).unwrap();
+    let nowhere = common::url(door.local_addr().unwrap(), PROJECT);
     let mut clients = vec![
-        setup.start("alice", "alice", 1, true),
+        setup.start_at(&nowhere, "alice", "alice", 1, true),
         setup.start("bob", "bob", 2, false),
         setup.start("carol", "carol", 3, false),
     ];
-    // Bob is still editing when he is killed, however slow the machine.
+    // Alice and bob are still editing when they are killed, however slow the
+    // machine.
     for (c, edits) in clients
         .iter_mut()
-        .zip(["edit 500 4", "edit 1000000 4", "edit 500 4"])
+        .zip(["edit 1000000 4", "edit 1000000 4", "edit 500 4"])
     {
         c.proc.send(edits);
     }
@@ -733,11 +810,10 @@ fn killed_client_processes_restart_from_saved_state_or_from_scratch() {
     wait_until("alice to edit", SETTLE, || clients[0].state().made >= 40);
     let saved = clients[0].proc.ask("save", "saved", ANSWER);
     kept.push(field(&saved, "vv").to_owned());
-    wait_until("alice to edit on", SETTLE, || clients[0].state().made >= 80);
-    let before = clients[0].state();
-    wait_through(&mut clients[2], &before);
-    kept.push(before.vv);
+    let alice = clients[0].state();
+    assert!(alice.offline == alice.made && !alice.connected, "{alice:?}");
     clients[0].proc.kill_and_wait();
+    drop(door);
     clients[0] = setup.start("alice", "alice2", 11, true);
     clients[0].proc.send("edit 200 4");
 
