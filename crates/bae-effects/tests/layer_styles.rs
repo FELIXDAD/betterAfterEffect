@@ -135,15 +135,19 @@ fn gradient_stops_and_precise_glow_use_the_original_shape() {
         }
     });
     let fx = get(RENDER_ID).unwrap();
+    // Cross two uniform page boundaries while interpolating red, green and blue.
+    let stops = (0..=200)
+        .flat_map(|i| {
+            let x = f64::from(i) / 200.;
+            let r = (1. - 2. * x).max(0.);
+            let b = (2. * x - 1.).max(0.);
+            [x, r, 1. - r - b, b, 1.]
+        })
+        .collect();
     let params = vec![
         (800, Value::Bool(true)),
         (805, Value::Float(0.)),
-        (
-            803,
-            Value::FloatList(vec![
-                0., 1., 0., 0., 1., 0.5, 0., 1., 0., 1., 1., 0., 0., 1., 1.,
-            ]),
-        ),
+        (803, Value::FloatList(stops)),
         (300, Value::Bool(true)),
         (308, Value::Int(2)),
     ];

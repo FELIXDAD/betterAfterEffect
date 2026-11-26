@@ -234,26 +234,56 @@ impl Effect for Stack {
     }
 }
 
-/// Interpolate every authored color/alpha stop into the preview shader's ramp.
-fn ramp(style: Style<'_>) -> [[f32; 4]; 128] {
-    let mut points: Vec<_> = match style.val("gradient") {
+/// Upload authored stops in overlapping pages. GPU threads interpolate the
+/// ramp once, shared by every shaded pixel regardless of the stop count.
+fn gradient_lut(
+    target: &mut dyn EffectTarget,
+    style: Style<'_>,
+    source: &GpuImage,
+) -> Result<GpuImage, RenderError> {
+    let mut stops = match style.val("gradient") {
         Some(Value::FloatList(v)) => v.as_chunks::<5>().0.to_vec(),
         _ => Vec::new(),
     };
-    if points.is_empty() {
-        points.extend([[0., 0., 0., 0., 1.], [1., 1., 1., 1., 1.]]);
+    if stops.is_empty() {
+        stops.extend([[0., 0., 0., 0., 1.], [1., 1., 1., 1., 1.]]);
     }
-    points.sort_by(|a, b| a[0].total_cmp(&b[0]));
-    let smooth = style.n("gradientSmoothness") * 0.01;
-    std::array::from_fn(|i| {
-        let x = i as f64 / 127.;
-        let right = points.partition_point(|pt| pt[0] <= x);
-        let a = points[right.saturating_sub(1)];
-        let b = points[right.min(points.len() - 1)];
-        let t = ((x - a[0]) / (b[0] - a[0]).max(1e-8)).clamp(0., 1.);
-        let t = t + smooth * (t * t * (3. - 2. * t) - t);
-        std::array::from_fn(|j| (a[j + 1] + (b[j + 1] - a[j + 1]) * t) as f32)
-    })
+    stops.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let mut previous = None;
+    let mut start = 0;
+    loop {
+        let end = (start + 96).min(stops.len());
+        let page = &stops[start..end];
+        let image = SHADER.dispatch_at(
+            "raw_values",
+            target,
+            style.p,
+            IRect::from_size(1024, 1),
+            source,
+            [previous.as_ref()],
+            [10, page.len() as u32],
+            |w, h| {
+                w.f32(h + 200 * 16, (style.n("gradientSmoothness") * 0.01) as f32);
+                for (i, stop) in page.iter().enumerate() {
+                    w.f32s(
+                        h + (2 * i) * 16,
+                        &[
+                            stop[1] as f32,
+                            stop[2] as f32,
+                            stop[3] as f32,
+                            stop[4] as f32,
+                        ],
+                    );
+                    w.f32(h + (2 * i + 1) * 16, stop[0] as f32);
+                }
+            },
+        )?;
+        if end == stops.len() {
+            return Ok(image);
+        }
+        previous = Some(image);
+        start = end - 1;
+    }
 }
 
 impl TargetEffect for Stack {
@@ -451,7 +481,9 @@ fn edge(
         shading.width = stroke.length("size") as f32;
         shading.technique = shading.technique.max(2);
     }
-    let colors = (s.n("AEColorChoice") == 2.).then(|| ramp(s));
+    let colors = (s.n("AEColorChoice") == 2.)
+        .then(|| gradient_lut(target, s, source))
+        .transpose()?;
     shading.encode(
         target,
         s.p,
@@ -480,7 +512,7 @@ fn distance_field(
     let radius = width.ceil() as u32 + 1;
     let region = roi.inflate(radius as i32);
     let mut field = SHADER.dispatch_at(
-        "distance_field",
+        "raw_values",
         target,
         params,
         region,
@@ -492,7 +524,7 @@ fn distance_field(
     let mut step = radius.next_power_of_two();
     while step > 0 {
         field = SHADER.dispatch_at(
-            "distance_field",
+            "raw_values",
             target,
             params,
             region,
@@ -516,6 +548,9 @@ fn coating(
     distance: Option<&GpuImage>,
 ) -> Result<GpuImage, RenderError> {
     let mut extra = None;
+    let gradient = (stage == 2)
+        .then(|| gradient_lut(target, s, source))
+        .transpose()?;
     let index = match stage {
         2 => s.n("type") as u32,
         3 => {
@@ -546,7 +581,7 @@ fn coating(
         s.p,
         roi,
         source,
-        [Some(base), extra.as_ref()],
+        [Some(base), extra.as_ref(), gradient.as_ref()],
         [stage, index],
         |w, h| {
             w.f32s(
@@ -599,9 +634,6 @@ fn coating(
                         0.,
                     ],
                 );
-                for (i, color) in ramp(s).iter().enumerate() {
-                    w.f32s(h + (16 + i) * 16, color);
-                }
             }
         },
     )

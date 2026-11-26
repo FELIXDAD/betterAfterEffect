@@ -16,6 +16,6 @@ pub(crate) fn register(r: &mut Registry) {
 fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     edge::SHADER.kernel(rt, format)?;
     native::SHADER.kernel(rt, format)?;
-    native::SHADER.kernel_at(rt, format, "distance_field")?;
+    native::SHADER.kernel_at(rt, format, "raw_values")?;
     Ok(())
 }

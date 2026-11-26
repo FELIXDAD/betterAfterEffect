@@ -52,7 +52,7 @@ pub(super) struct Shading {
 #[derive(Default)]
 pub(super) struct Paint<'a> {
     pub backdrop: bool,
-    pub ramp: Option<&'a [[f32; 4]; 128]>,
+    pub ramp: Option<&'a GpuImage>,
     pub distance: Option<&'a GpuImage>,
 }
 
@@ -147,7 +147,7 @@ impl Shading {
             params,
             roi,
             source,
-            [Some(&soft), Some(composite), paint.distance],
+            [Some(&soft), Some(composite), paint.distance, paint.ramp],
             [self.kind as u32, u32::from(paint.backdrop)],
             |u, header| {
                 // These slots follow the definition's parameters in the shared uniform.
@@ -189,11 +189,6 @@ impl Shading {
                             f32::from(self.knockout),
                         ],
                     );
-                if let Some(ramp) = paint.ramp {
-                    for (i, color) in ramp.iter().enumerate() {
-                        u.f32s(header + (16 + i) * 16, color);
-                    }
-                }
             },
         )
     }

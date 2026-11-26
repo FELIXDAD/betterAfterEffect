@@ -7,6 +7,22 @@ fn blend_range(v:f32,limits:vec4f)->f32 {
 fn original(p:vec2f)->f32 { return fx_sample(input_tex,u.images[0],p,false).a; }
 fn field_at(p:vec2f)->vec4f { return fx_sample(map_b,u.images[2],p,false); }
 fn shade(p:vec2f)->vec4f {
+    if u.stage==10u {
+        let x=(p.x-.5)/1023.;
+        if x<u.values[1].x && has(0u) {return textureLoad(map_a,vec2i(i32(p.x),0),0);}
+        var lo=0u;
+        var hi=u.index;
+        while lo<hi {
+            let mid=(lo+hi)/2u;
+            if u.values[2u*mid+1u].x<=x {lo=mid+1u;} else {hi=mid;}
+        }
+        let a=max(1u,lo)-1u;
+        let b=min(lo,u.index-1u);
+        let left=u.values[2u*a+1u].x;
+        let right=u.values[2u*b+1u].x;
+        let t=saturate((x-left)/max(right-left,1e-8));
+        return mix(u.values[2u*a],u.values[2u*b],mix(t,t*t*(3.-2.*t),value(200)));
+    }
     let source=fx_sample(input_tex,u.images[0],p,false);
     let shape=source.a;
     if u.stage==5u {
@@ -94,8 +110,7 @@ fn shade(p:vec2f)->vec4f {
             default: {}
         }
         if axis.z!=0. {f=1.-f;}
-        let n=saturate(f)*127.;
-        color=mix(u.values[16u+u32(n)],u.values[16u+min(127u,u32(n)+1u)],fract(n));
+        color=style_gradient(f,map_c);
     }
     if u.stage==3u {
         let d=u.values[202].xy;
@@ -120,7 +135,7 @@ fn shade(p:vec2f)->vec4f {
 }
 
 @compute @workgroup_size(8,8)
-fn distance_field(@builtin(global_invocation_id) id:vec3u) {
+fn raw_values(@builtin(global_invocation_id) id:vec3u) {
     let p=u.roi.xy+vec2i(id.xy);
     if all(p<u.roi.zw){textureStore(out_tex,vec2i(id.xy),shade(vec2f(p)+0.5));}
 }

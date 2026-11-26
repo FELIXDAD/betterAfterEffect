@@ -56,8 +56,8 @@ fn shade(p: vec2f) -> vec4f {
     let random=style_random(p,19273u);
     density=saturate(density+(random-0.5)*4.*density*(1.-density)*paint.x);
     if paint.z!=0. {
-        let t=saturate(density+(random-0.5)*paint.y)*127.;
-        let stop=mix(u.values[16u+u32(t)],u.values[16u+min(127u,u32(t)+1u)],fract(t));
+        let t=density+(random-0.5)*paint.y;
+        let stop=style_gradient(t,map_d);
         color=vec4f(stop.rgb,color.a*stop.a);
     }
     let a=density*color.a*support;

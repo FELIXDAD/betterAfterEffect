@@ -33,3 +33,9 @@ fn style_blend(base:vec4f,color:vec3f,alpha:f32,mode:u32,p:vec2f)->vec4f {
     }
     return vec4f((1.-a)*base.rgb+a*mix(color,overlap,base.a),combined_alpha);
 }
+
+fn style_gradient(t:f32, ramp:texture_2d<f32>)->vec4f {
+    let x=saturate(t)*1023.;
+    let i=i32(x);
+    return mix(textureLoad(ramp,vec2i(i,0),0),textureLoad(ramp,vec2i(min(i+1,1023),0),0),fract(x));
+}
