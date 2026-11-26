@@ -531,9 +531,10 @@ fn effect_controls_flyout_uses_only_the_measured_panel_commands() {
     app.add_module(crate::MotionUiModule);
     let _app = app.build();
     fx.ctx.enable_accesskit();
-    let out = fx
+    let mut out = fx
         .ctx
         .run_ui(Default::default(), |ui| panel.menu(ui, &mut cx));
+    out.textures_delta.clear();
     let tree = out.platform_output.accesskit_update.unwrap();
     let rows: Vec<_> = tree
         .nodes

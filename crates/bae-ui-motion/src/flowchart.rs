@@ -53,8 +53,7 @@ fn icon_menu_for(stage: &Stage, node: &Node) -> Option<IconMenu> {
 fn node_label(stage: &Stage, node: &Node) -> usize {
     if let Some(label) = stage
         .prim(&node.item)
-        .and_then(|v| query::static_value(&v, "label"))
-        .and_then(|v| v.as_f64())
+        .and_then(|v| v.value("label").and_then(|label| label.as_f64()))
     {
         return label.clamp(0.0, 16.0) as usize;
     }
