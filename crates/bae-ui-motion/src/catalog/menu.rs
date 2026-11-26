@@ -662,7 +662,7 @@ const LAYER: &[Node] = &[
             it(8912912, "Fit to Comp Width", "motion.layer.fit_to_comp_width", "", B, Done),
             it(8912913, "Fit to Comp Height", "motion.layer.fit_to_comp_height", "", B, Done),
             SEP,
-            it(8912915, "Auto-Orient...", "motion.layer.auto_orient", "", E, Todo),
+            it(8912915, "Auto-Orient...", "motion.layer.auto_orient", "", E, Done),
         ],
     ),
     sub(
@@ -670,7 +670,7 @@ const LAYER: &[Node] = &[
         &[
             it(1966081, "Enable Time Remapping", "motion.layer.enable_time_remapping", "", B, Done),
             it(1966082, "Time-Reverse Layer", "motion.layer.time_reverse_layer", "", B, Done),
-            it(1966083, "Time Stretch...", "motion.layer.time_stretch", "", E, Todo),
+            it(1966083, "Time Stretch...", "motion.layer.time_stretch", "", E, Done),
             it(1966084, "Freeze Frame", "motion.layer.freeze_frame", "", B, Done),
             it(1966085, "Freeze On Last Frame", "motion.layer.freeze_on_last_frame", "", B, Done),
             it(1966086, "Align Video to Data", "motion.layer.align_video_to_data", "", B, Later),
