@@ -1,8 +1,11 @@
 mod definition;
+mod key;
 mod menus;
 mod secondary_curve;
 
 pub use secondary_curve::LumetriCurve;
+
+pub use key::lumetri_key_edits;
 
 use crate::blur::{self, Edge};
 use crate::effects::{
@@ -107,6 +110,20 @@ fn soften(u: &mut UniformWriter, amount: f64) {
         }
         u.u32(220, n as u32);
     }
+}
+
+/// Invert the basic correction gains for a sampled neutral. The selector writes
+/// these two sliders, so an imported sample does not apply the correction twice.
+pub fn lumetri_white_balance_settings([r, g, b, _]: [f64; 4]) -> Option<[f64; 2]> {
+    if ![r, g, b].iter().all(|v| v.is_finite() && *v > 0.) {
+        return None;
+    }
+    let red = 2.4 * (g.log2() - r.log2());
+    let blue = 2.4 * (g.log2() - b.log2());
+    Some([
+        (50. * (red - blue)).clamp(-300., 300.),
+        ((red + blue) / 0.03).clamp(-300., 300.),
+    ])
 }
 
 fn white_balance(temp: f64, tint: f64) -> [f32; 3] {
@@ -413,6 +430,8 @@ impl TargetEffect for Lumetri {
             .inflate(sharpen_radius(v.f(29)) * i32::from(v.b(23)))
             .intersect(&input_grid);
         let mut image = input.clone();
+        let hdr = v.b(62);
+        let white = |id| if hdr { (v.f(id) * 0.01) as f32 } else { 1. };
         if v.b(3) {
             if let Some(Value::Bytes(data)) = p.value(125) {
                 image = self
@@ -423,10 +442,20 @@ impl TargetEffect for Lumetri {
                 .iter()
                 .any(|&id| v.f(id) != 0.)
                 || v.f(20) != 100.
+                || (hdr && v.f(64) != 0.)
             {
                 let mut u = UniformWriter::with_size(BASIC_BYTES);
                 u.u32(40, u32::from(p.float))
                     .f32s(64, &white_balance(v.f(7), v.f(8)))
+                    .f32(92, white(63))
+                    .f32(
+                        96,
+                        if hdr {
+                            (v.f(64) * 0.01).exp2() as f32
+                        } else {
+                            1.
+                        },
+                    )
                     .f32(76, (v.f(20) * 0.01) as f32)
                     .f32s(
                         80,
@@ -518,10 +547,13 @@ impl TargetEffect for Lumetri {
             };
             u.f32s(80 + 16 * i, &rgb.map(|x| x - y + light));
         }
+        // RGB curves and color wheels operate on encoded values.
+        u.f32(140, white(65).powf(1. / 2.4))
+            .f32(156, white(66).powf(1. / 2.4));
         soften(&mut u, v.f(29));
         u.f32(92, (v.f(33) * 0.01) as f32).u32(108, active);
         u.f32s(160, &color(v, 70))
-            .u32(172, u32::from(p.value(70).is_some()));
+            .u32(172, u32::from(p.value(70).is_some() && v.b(1017)));
         u.f32s(
             176,
             &[

@@ -113,6 +113,7 @@ impl Waveforms {
         entry.peaks.as_ref().map_or(&[], |(_, levels)| levels)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
         ui: &Ui,
@@ -121,6 +122,7 @@ impl Waveforms {
         axis: &TimeAxis,
         rect: Rect,
         tint: egui::Color32,
+        rectified: bool,
     ) {
         let Some(file) = bae_media::audio::layer_file(stage, layer) else {
             return;
@@ -164,12 +166,15 @@ impl Waveforms {
                     hi = hi.max(peak[1]);
                 }
                 let mid = rect.top() + height * (ch as f32 + 0.5);
+                let (top, bottom) = if rectified {
+                    let bottom = mid + height * 0.47;
+                    (bottom - hi.max(-lo) * height * 0.94, bottom)
+                } else {
+                    (mid - hi * height * 0.47, mid - lo * height * 0.47)
+                };
                 let x = x as f32;
                 mesh.add_colored_rect(
-                    Rect::from_min_max(
-                        egui::pos2(x - 0.5, mid - hi * height * 0.47),
-                        egui::pos2(x + 0.5, mid - lo * height * 0.47 + 1.0),
-                    ),
+                    Rect::from_min_max(egui::pos2(x - 0.5, top), egui::pos2(x + 0.5, bottom + 1.0)),
                     tint,
                 );
             }

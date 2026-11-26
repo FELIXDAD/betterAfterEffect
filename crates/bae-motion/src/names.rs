@@ -37,6 +37,7 @@ const ZH: &[(&str, &str)] = &[
     ("Adjustment Layer", "调整图层"),
     ("Pre-comp", "预合成"),
     ("Footage", "素材"),
+    ("Layers", "图层"),
     ("Audio", "音频"),
     // Shape contents.
     ("Rectangle", "矩形"),
