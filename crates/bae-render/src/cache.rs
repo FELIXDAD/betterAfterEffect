@@ -20,7 +20,46 @@
 use bae_model::{Change, PrimPath, StageEvent, Time};
 use rustc_hash::FxHashMap;
 
+use crate::GpuImage;
 use crate::input::Dependency;
+use std::hash::BuildHasher;
+
+/// Frame-local writes and submitted intermediates share the renderer's LRU budget.
+pub(crate) struct IntermediateImages<'a> {
+    pub submitted: &'a mut FrameCache<GpuImage>,
+    pub pending: &'a mut FrameCache<GpuImage>,
+    pub request: u64,
+}
+
+impl IntermediateImages<'_> {
+    fn key(&self, mut key: FrameKey) -> FrameKey {
+        key.request =
+            rustc_hash::FxBuildHasher.hash_one(("effect intermediate", self.request, key.request));
+        key
+    }
+
+    pub(crate) fn get(&mut self, key: FrameKey) -> Option<GpuImage> {
+        let key = self.key(key);
+        self.pending
+            .get(&key)
+            .or_else(|| self.submitted.get(&key))
+            .cloned()
+    }
+
+    pub(crate) fn store(&mut self, key: FrameKey, image: GpuImage) {
+        let bytes = image.byte_size();
+        self.pending
+            .insert(self.key(key), image, bytes, Vec::new(), 0);
+    }
+}
+
+impl FrameCache<GpuImage> {
+    pub(crate) fn publish(self, submitted: &mut Self, comp: &crate::RenderComp) {
+        for (key, entry) in self.entries {
+            submitted.insert(key, entry.value, entry.bytes, comp.dependencies(), 0);
+        }
+    }
+}
 
 /// Key of a cached frame.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
