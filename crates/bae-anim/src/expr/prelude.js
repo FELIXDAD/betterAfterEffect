@@ -279,47 +279,58 @@ function noise(v) {
 function __compId() { return __env_c; }
 var __env_c = 0;
 function timeToFrames(t, fps, isDuration) {
-  var c = __h.compInfo(__env_c);
-  if (t === undefined) t = __now + c.displayStartTime;
-  if (fps === undefined) fps = 1 / c.frameDuration;
-  var f = t * fps;
-  return isDuration ? Math.round(f) : Math.floor(f + 1e-9);
+  if (t === undefined || fps === undefined) {
+    var c = __h.compInfo(__env_c);
+    if (t === undefined) t = __now + c.displayStartTime;
+    if (fps === undefined) fps = 1 / c.frameDuration;
+  }
+  var f = __val(t) * __val(fps);
+  var near = Math.round(f);
+  if (Math.abs(f - near) <= 4 * Number.EPSILON * Math.max(1, Math.abs(f))) f = near;
+  return isDuration && f > 0 ? Math.ceil(f) : Math.floor(f);
 }
 function framesToTime(frames, fps) {
   if (fps === undefined) fps = 1 / __h.compInfo(__env_c).frameDuration;
-  return frames / fps;
+  return __val(frames) / __val(fps);
 }
 function __pad(n, w) { var s = String(Math.floor(Math.abs(n))); while (s.length < w) s = "0" + s; return s; }
-function timeToTimecode(t, timecodeBase, isDuration) {
-  if (t === undefined) t = __now + __h.compInfo(__env_c).displayStartTime;
-  if (timecodeBase === undefined) timecodeBase = 30;
-  var neg = t < 0, total = Math.floor(Math.abs(t) * timecodeBase + 1e-9);
-  var fr = total % timecodeBase, s = Math.floor(total / timecodeBase);
-  return (neg ? "-" : "") + __pad(Math.floor(s / 3600), 1) + ":" + __pad(Math.floor(s / 60) % 60, 2) + ":" +
-    __pad(s % 60, 2) + ":" + __pad(fr, String(timecodeBase - 1).length);
-}
-function timeToCurrentFormat(t, fps, isDuration) { return timeToTimecode(t, fps, isDuration); }
-// NTSC (29.97) timecode; drop frame skips frames 0 and 1 of every minute except
-// each tenth, with ";" separators.
-function timeToNTSCTimecode(t, ntscDropFrame, isDuration) {
-  if (t === undefined) t = __now + __h.compInfo(__env_c).displayStartTime;
-  var neg = t < 0, frames = Math.floor(Math.abs(t) * 30000 / 1001 + 1e-9);
-  if (ntscDropFrame) {
-    var d = Math.floor(frames / 17982), m = frames % 17982;
-    frames += 18 * d + (m > 1 ? 2 * Math.floor((m - 2) / 1798) : 0);
+function __timecode(frames, base, drop) {
+  var total = Math.abs(frames);
+  // Skip two frame labels per minute at 29.97, four at 59.94, except each tenth minute.
+  var skip = drop && (base === 30 || base === 60) ? base / 15 : 0;
+  if (skip) {
+    var minute = 60 * base - skip, ten = 600 * base - 9 * skip;
+    total += 9 * skip * Math.floor(total / ten) + skip * Math.max(0, Math.floor((total % ten - skip) / minute));
   }
-  var sep = ntscDropFrame ? ";" : ":", s = Math.floor(frames / 30);
-  return (neg ? "-" : "") + __pad(Math.floor(s / 3600), 2) + sep + __pad(Math.floor(s / 60) % 60, 2) + sep +
-    __pad(s % 60, 2) + sep + __pad(frames % 30, 2);
+  var sep = skip ? ";" : ":", seconds = Math.floor(total / base);
+  return (frames < 0 ? "-" : "") + __pad(Math.floor(seconds / 3600), 2) + sep + __pad(Math.floor(seconds / 60) % 60, 2) +
+    sep + __pad(seconds % 60, 2) + sep + __pad(total % base, Math.max(2, String(base - 1).length));
 }
-// Film feet and frames: "FFFF+ff".
+function timeToTimecode(t, timecodeBase, isDuration) {
+  if (timecodeBase === undefined) timecodeBase = 30;
+  return __timecode(timeToFrames(t, timecodeBase, isDuration), timecodeBase, false);
+}
+function timeToCurrentFormat(t, fps, isDuration, ntscDropFrame) {
+  if (fps === undefined || ntscDropFrame === undefined) {
+    var c = __h.compInfo(__env_c);
+    if (fps === undefined) fps = 1 / c.frameDuration;
+    if (ntscDropFrame === undefined) ntscDropFrame = c.ntscDropFrame;
+  }
+  var frames = timeToFrames(t, fps, isDuration);
+  if (__h.projectInfo().displayFrames) return String(frames);
+  var ntsc = Math.abs(fps - 29.97) < 0.01 || Math.abs(fps - 59.94) < 0.01;
+  return __timecode(frames, Math.round(fps), ntsc && ntscDropFrame);
+}
+function timeToNTSCTimecode(t, ntscDropFrame, isDuration) {
+  return __timecode(timeToFrames(t, 30000 / 1001, isDuration), 30, ntscDropFrame);
+}
 function timeToFeetAndFrames(t, fps, framesPerFoot, isDuration) {
-  if (t === undefined) t = __now + __h.compInfo(__env_c).displayStartTime;
-  if (fps === undefined) fps = 1 / __h.compInfo(__env_c).frameDuration;
   if (framesPerFoot === undefined) framesPerFoot = 16;
-  var neg = t < 0, frames = Math.floor(Math.abs(t) * fps + 1e-9);
-  return (neg ? "-" : "") + __pad(Math.floor(frames / framesPerFoot), 4) + "+" +
-    __pad(frames % framesPerFoot, String(framesPerFoot - 1).length);
+  var total = timeToFrames(t, fps, isDuration);
+  var feet = Math.trunc(total / framesPerFoot), frames = total % framesPerFoot;
+  var width = String(framesPerFoot - 1).length;
+  return (feet < 0 ? "-" : "") + __pad(feet, feet < 0 ? 3 : 4) + "+" +
+    (frames < 0 ? "-" : "") + __pad(frames, frames < 0 ? width - 1 : width);
 }
 
 // ---- project and footage (AE: thisProject, colorDepth, footage(name)) ----
@@ -762,6 +773,11 @@ Layer.prototype = {
         "It may have been renamed, moved, deleted, or the name may have been mistyped.");
     }
     return __prop(this.__c, this.__l, "", "audio:levels");
+  },
+  sampleImage: function (point, radius, postEffect, t) {
+    var p = __val(point), r = radius === undefined ? [0.5, 0.5] : __val(radius);
+    return __h.sampleImage(this.__c, this.__l, [p[0], p[1], r[0], r[1],
+      postEffect === undefined || postEffect ? 1 : 0, t === undefined ? __now : t]);
   },
   sourceTime: function (t) {
     if (t === undefined) t = __now;

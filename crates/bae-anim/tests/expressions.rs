@@ -415,6 +415,30 @@ fn comp_by_name_and_source() {
 }
 
 #[test]
+fn time_conversions_follow_the_display_settings_and_rounding_mode() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT).set(
+            "/project",
+            "time_display",
+            Value::Enum("frames".into()),
+        );
+        b.set(MAIN, "display_start_time", Value::Time(secs(2.0)))
+            .set(MAIN, "drop_frame", true);
+        let l = b.layer(MAIN, "Clock", "text");
+        b.expr(&l, "text:source", doc(""), r#"posterizeTime(0);
+            [time, timeToFrames(undefined,24), framesToTime(6,24), timeToFrames(0.01,24,true),
+             timeToTimecode(-0.01,24), timeToFeetAndFrames(-0.11,24,16,true), timeToNTSCTimecode(60.06,true),
+             timeToCurrentFormat(0.11,24,true),thisComp.ntscDropFrame].join("|")"#);
+    });
+    let comp = eval(&s, 0.5);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "0|48|0.25|1|-00:00:00:01|0000+-3|00;01;00;02|3|true"
+    );
+}
+
+#[test]
 fn posterize_time_and_frames() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");
@@ -1164,4 +1188,88 @@ fn traced_attribute_reports_its_reads() {
         .evaluate_attribute_traced(&s, &p(&c), "transform:scale", secs(2.0))
         .unwrap();
     assert_eq!(plain, vec![attr(&c, "transform:scale", 2.0)]);
+}
+
+/// sampleImage reads layer pixels through the shared sample cache: a miss is
+/// transparent black and asks for the sample; once the renderer fills it in,
+/// the next evaluation reads it.
+#[test]
+fn sample_image_through_the_sample_cache() {
+    let s = stage(|b| {
+        b.layer(MAIN, "Plate", "solid");
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var c = thisComp.layer("Plate").sampleImage([10, 20], [2, 1], false, 1);
+               c.map(function (v) { return Math.round(v * 100) / 100; }).join(",")"#,
+        );
+    });
+    let samples = std::sync::Arc::new(bae_anim::ImageSamples::new());
+    let mut ev = bae_anim::Evaluator::new();
+    ev.set_image_samples(Some(samples.clone()));
+    let ec = ev.evaluate_comp(&s, &p(MAIN), secs(0.0)).unwrap();
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[1].text.as_ref().unwrap().text, "0,0,0,0");
+    let taken = samples.take_requests();
+    assert_eq!(taken.keys.len(), 1);
+    let key = &taken.keys[0];
+    assert_eq!(key.layer, p(&format!("{MAIN}/layers/Plate")));
+    assert_eq!((key.time, key.post_effect), (secs(1.0), false));
+    assert_eq!(key.area(), [8.0, 19.0, 12.0, 21.0]);
+    samples.fulfil(taken.generation, key.clone(), [1.0, 0.5, 0.25, 0.75]);
+    let ec = ev.evaluate_comp(&s, &p(MAIN), secs(0.0)).unwrap();
+    assert_eq!(ec.layers[1].text.as_ref().unwrap().text, "1,0.5,0.25,0.75");
+    assert!(!samples.is_waiting());
+}
+
+/// A live drag's values (overrides) reach everything that depends on them —
+/// children through parenting, expressions reading them — without changing the
+/// stage; clearing them shows the committed values again.
+#[test]
+fn overrides_show_uncommitted_values_everywhere() {
+    use bae_anim::{AttrOverride, Evaluator};
+    use bae_model::AttrSpec;
+    let s = stage(|b| {
+        let parent = b.layer(MAIN, "P", "null");
+        let child = b.layer(MAIN, "C", "null");
+        b.set(&child, "parent", Value::PrimRef(p(&parent))).set(
+            &child,
+            "transform:position",
+            Value::Vec3([10.0, 0.0, 0.0]),
+        );
+        let reader = b.layer(MAIN, "R", "null");
+        b.expr(
+            &reader,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("P").transform.position[0]"#,
+        );
+    });
+    let parent = p(&format!("{MAIN}/layers/P"));
+    let mut ev = Evaluator::new();
+    let world_x = |ev: &mut Evaluator| {
+        let ec = ev.evaluate_comp(&s, &p(MAIN), Time::ZERO).unwrap();
+        (
+            ec.layers[1].world_matrix.w_axis.x,
+            ec.layers[2].transform.rotation.z,
+        )
+    };
+    assert_eq!(world_x(&mut ev), (10.0, 0.0));
+    ev.set_overrides(vec![AttrOverride {
+        prim: parent.clone(),
+        attr: "transform:position".into(),
+        spec: AttrSpec {
+            value: Some(Value::Vec3([100.0, 0.0, 0.0])),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(
+        world_x(&mut ev),
+        (110.0, 100.0),
+        "child and expression follow"
+    );
+    ev.set_overrides(Vec::new());
+    assert_eq!(world_x(&mut ev), (10.0, 0.0), "committed values again");
 }
