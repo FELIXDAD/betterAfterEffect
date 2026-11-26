@@ -43,7 +43,7 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | New ▸ New Project | 16187393 | `file.new_project` |  | Ctrl+Alt+N | Cmd+Opt+N | B | ✅ |
-| New ▸ New Folder | 16187394 | `motion.file.new_folder` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | B | ☐ |
+| New ▸ New Folder | 16187394 | `motion.file.new_folder` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | B | ✅ |
 | New ▸ Adobe Photoshop File... | 16187395 | `motion.file.adobe_photoshop_file` |  |  |  | B | Ⓐ |
 | New ▸ Maxon Cinema 4D File... | 16187396 | `motion.file.maxon_cinema_4d_file` |  |  |  | B | Ⓐ |
 | Open Project... | 131074 | `file.open_project` |  | Ctrl+O | Cmd+O | B | ✅ |
@@ -57,8 +57,8 @@
 | Save As ▸ Save a Copy As XML... | 21889027 | `motion.file.save_a_copy_as_xml` |  |  |  | B | Ⓐ |
 | Save As ▸ Save a Copy As 25.x... | 21889028 | `motion.file.save_a_copy_as_25_x` |  |  |  | B | Ⓐ |
 | Save As ▸ Save a Copy As 24.x... | 21889029 | `motion.file.save_a_copy_as_24_x` |  |  |  | B | Ⓐ |
-| Increment and Save | 131082 | `motion.file.increment_and_save` |  | Ctrl+Alt+Shift+S | Cmd+Opt+Shift+S | B | ☐ |
-| Revert | 131083 | `motion.file.revert` |  |  |  | B | ☐ |
+| Increment and Save | 131082 | `file.increment_and_save` |  | Ctrl+Alt+Shift+S | Cmd+Opt+Shift+S | B | ✅ |
+| Revert | 131083 | `file.revert` |  |  |  | B | ✅ |
 | Import ▸ File... | 9764865 | `motion.file.import_file` |  | Ctrl+I | Cmd+I | E | ✅ |
 | Import ▸ Multiple Files... | 9764866 | `motion.file.import_multiple_files` |  | Ctrl+Alt+I | Cmd+Opt+I | E | ✅ |
 | Import ▸ From Libraries... | 9764867 | `motion.file.from_libraries` |  |  |  | B | Ⓐ |
@@ -247,8 +247,8 @@
 | New ▸ Cone | 11862032 | `motion.layer.new_3d_shape` | `{"shape":"cone"}` |  |  | B | ⏸ |
 | New ▸ Cylinder | 11862033 | `motion.layer.new_3d_shape` | `{"shape":"cylinder"}` |  |  | B | ⏸ |
 | Layer Settings... | 393218 | `motion.layer.layer_settings` |  | Ctrl+Shift+Y | Cmd+Shift+Y | E | ✅ |
-| Open Layer | 393220 | `motion.layer.open_layer` |  |  |  | E | ⏸ |
-| Open Layer Source | 393221 | `motion.layer.open_layer_source` |  | Alt+PadEnter | Opt+PadEnter | B | ☐ |
+| Open Layer | 393220 | `motion.layer.open_layer` |  |  |  | E | ✅ |
+| Open Layer Source | 393221 | `motion.layer.open_layer_source` |  | Alt+PadEnter | Opt+PadEnter | B | ✅ |
 | Reveal in Explorer | 393222 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
 | Mask ▸ New Mask | 8519681 | `motion.layer.new_mask` |  | Ctrl+Shift+N | Cmd+Shift+N | A | ✅ |
 | Mask ▸ Mask Shape... | 8519683 | `motion.layer.mask_shape` |  | Ctrl+Shift+M | Cmd+Shift+M | E | ✅ |
