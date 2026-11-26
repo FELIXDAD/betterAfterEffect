@@ -503,7 +503,7 @@ fn param_row(
 #[allow(clippy::too_many_arguments)]
 fn value_control(
     ui: &mut Ui,
-    cx: &PanelContext<'_>,
+    cx: &mut PanelContext<'_>,
     effect: &PrimPath,
     def: &EffectDef,
     param: &EffectParamDef,
@@ -575,7 +575,18 @@ fn value_control(
         }
         ParamKind::Popup { .. } => {
             let options = super::option_labels(&def.match_name, param);
-            let raw = popup_index(value);
+            let lut = (def.match_name == "ADBE Lumetri")
+                .then(|| bae_effects::LumetriLut::from_menu(param.id))
+                .flatten();
+            let (mut raw, mut filename) = (popup_index(value), None);
+            if let Some(slot) = lut
+                && let Some(prim) = cx.stage.prim(effect)
+            {
+                let [first, second, file] = slot.parameters().map(param_attr);
+                let asset = prim.value(&file);
+                raw = slot.choice(prim.value(&first), prim.value(&second), asset);
+                filename = bae_effects::LumetriLut::filename(asset).map(str::to_owned);
+            }
             let current = if def.match_name.starts_with("ADBE OCIO ") && raw > options.len() as i64
             {
                 1
@@ -588,7 +599,11 @@ fn value_control(
                 .unwrap_or_default();
             let mut chosen = None;
             egui::ComboBox::from_id_salt(id)
-                .selected_text(shown)
+                .selected_text(if current == 2 {
+                    filename.as_deref().unwrap_or(&shown)
+                } else {
+                    &shown
+                })
                 .show_ui(ui, |ui| {
                     for (i, o) in options.iter().enumerate() {
                         let n = i as i64 + 1;
@@ -602,6 +617,20 @@ fn value_control(
                         }
                     }
                 });
+            if let Some(slot) = lut {
+                let needs_file = current > 4 || current == 2 && filename.is_none();
+                if needs_file {
+                    ui.label(tr("Load your own LUT"));
+                }
+                if chosen == Some(3) || needs_file && ui.button(tr("Browse...")).clicked() {
+                    cx.invoke_with(super::lut::BROWSE, json!({"path": effect, "menu":param.id}));
+                } else if let Some(n) = chosen
+                    && n != current
+                {
+                    super::lut::commit(cx, effect, slot, n, None);
+                }
+                return Edit::None;
+            }
             match chosen {
                 Some(n) if n != current => Edit::Commit(Value::Int(n)),
                 _ => Edit::None,
