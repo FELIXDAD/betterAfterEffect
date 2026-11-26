@@ -291,13 +291,7 @@ impl FlowchartPanel {
 
     fn label_menu(&self, ui: &mut Ui, cx: &mut PanelContext<'_>, node: &Node, nodes: &[Node]) {
         let project_item = matches!(node.kind, Kind::Comp | Kind::Footage | Kind::Solid);
-        let label = |n: &Node| {
-            cx.stage
-                .prim(&n.item)
-                .and_then(|p| query::static_value(&p, "label"))
-                .and_then(|v| v.as_f64())
-                .map_or(usize::from(n.kind == Kind::Comp), |v| v as usize)
-        };
+        let label = |n: &Node| crate::actions::label_of(cx.stage, &n.item) as usize;
         let current = label(node);
         if ui
             .add_enabled(project_item, egui::Button::new(tr("Select Label Group")))
@@ -781,16 +775,42 @@ mod tests {
         let mut app = bae_app::AppBuilder::new();
         app.add_module(crate::MotionUiModule);
         let _app = app.build();
-        let stage = Stage::new();
+        let mut stage = Stage::new();
         let author = bae_model::AuthorId::new("user:test").unwrap();
+        let mut reg = bae_model::CommandRegistry::with_builtins();
+        bae_motion::register_commands(&mut reg);
+        let mut run = |command, args| {
+            reg.execute(&mut stage, &author, command, args)
+                .unwrap()
+                .output
+        };
+        let comp = run("comp.create", serde_json::json!({"width":64,"height":64}))["path"].clone();
+        let layer = run(
+            "layer.create",
+            serde_json::json!({"comp":comp,"kind":"solid"}),
+        )["path"]
+            .clone();
+        run(
+            "attr.set",
+            serde_json::json!({"path":comp,"attr":"label","value":{"type":"int","value":1}}),
+        );
+        run(
+            "attr.set",
+            serde_json::json!({"path":layer,"attr":"label","value":{"type":"int","value":8}}),
+        );
         let resources = bae_app::Resources::new();
         let id = bae_ui::PanelId::new("flowchart");
         let mut requests = bae_ui::PanelRequests::default();
         let mut cx =
             PanelContext::new(&id, "Flowchart", &stage, &author, &resources, &mut requests);
-        for kind in [Kind::Comp, Kind::Layer] {
+        for (kind, path) in [(Kind::Comp, comp), (Kind::Layer, layer)] {
             let mut nodes = Vec::new();
-            push(&mut nodes, &PrimPath::new("/comps/a").unwrap(), kind, None);
+            push(
+                &mut nodes,
+                &PrimPath::new(path.as_str().unwrap()).unwrap(),
+                kind,
+                None,
+            );
             let ctx = egui::Context::default();
             ctx.enable_accesskit();
             let mut out = ctx.run_ui(Default::default(), |ui| {
@@ -806,6 +826,7 @@ mod tests {
                     false,
                 ),
                 ("Red", "红色", true, kind == Kind::Comp),
+                ("Blue", "蓝色", true, kind == Kind::Layer),
                 ("Edit Label Colors...", "编辑标签颜色...", true, false),
             ] {
                 assert_eq!(bae_ui::i18n::translation(key), Some(zh));
