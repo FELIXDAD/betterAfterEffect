@@ -37,6 +37,7 @@ mod i18n_scan;
 mod layers;
 #[cfg(target_os = "macos")]
 mod layout;
+mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
 #[cfg(target_os = "macos")]
