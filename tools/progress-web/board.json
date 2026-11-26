@@ -48,5 +48,11 @@
         }
       ]
     }
+  },
+  "module_items": {
+    "面板 / 工作区": "ae-panels-workspace",
+    "文字": "text-panels",
+    "音频": "audio",
+    "效果": "fx-a"
   }
 }

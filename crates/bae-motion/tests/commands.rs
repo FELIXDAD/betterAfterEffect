@@ -19,6 +19,25 @@ fn p(s: &str) -> PrimPath {
 
 const SEC: i64 = Time::FLICKS_PER_SECOND;
 
+#[test]
+fn precomp_creation_rejects_direct_and_transitive_cycles() {
+    let mut f = Fx::new();
+    let (a, b, c) = (f.comp(), f.comp(), f.comp());
+    f.layer(&a, "pre_comp", json!({"source": b}));
+    f.layer(&b, "pre_comp", json!({"source": c}));
+    f.layer(&a, "pre_comp", json!({"source": c}));
+    for source in [&c, &a] {
+        assert!(
+            f.try_run(
+                "layer.create",
+                json!({"comp": c, "kind": "pre_comp", "source": source})
+            )
+            .is_err()
+        );
+        assert!(query::comp_layers(&f.stage, &c).is_empty());
+    }
+}
+
 impl Fx {
     fn new() -> Self {
         let mut reg = CommandRegistry::with_builtins();
