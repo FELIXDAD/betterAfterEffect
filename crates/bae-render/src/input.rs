@@ -285,6 +285,8 @@ pub struct RenderLayer {
     pub opacity: f32,
     /// Blending mode with the layers below.
     pub blend_mode: BlendMode,
+    /// Layer sampling quality after any nested quality limit.
+    pub quality: bae_anim::LayerQuality,
     /// 保留基础透明度: the layer only shows where the layers below are opaque.
     pub preserve_transparency: bool,
     /// Track matte (AE 23.0+ model: any layer of the same comp).
@@ -451,6 +453,7 @@ impl RenderLayer {
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             track_matte: None,
             visible: true,
@@ -502,6 +505,7 @@ impl RenderLayer {
         }
         self.opacity.to_bits().hash(h);
         self.blend_mode.hash(h);
+        self.quality.hash(h);
         self.preserve_transparency.hash(h);
         self.track_matte.hash(h);
         self.visible.hash(h);

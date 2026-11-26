@@ -345,6 +345,8 @@ pub struct LayerOp {
     pub blend: BlendMode,
     /// Stable per-layer dissolve seed, mixed with the comp frame for Dancing Dissolve.
     pub dissolve_seed: u32,
+    /// Sampling quality of the source layer.
+    pub quality: bae_anim::LayerQuality,
     /// Only draw where the backdrop has alpha.
     pub preserve_transparency: bool,
     /// Track matte image (composite space, same units as the composite).
@@ -685,6 +687,7 @@ pub fn build_layer_image(
                 opacity: 1.0,
                 blend: BlendMode::Normal,
                 dissolve_seed: 0,
+                quality: bae_anim::LayerQuality::Best,
                 preserve_transparency: false,
                 matte: None,
                 mask: None,
@@ -1303,6 +1306,7 @@ impl Builder<'_, '_> {
             opacity: 1.0,
             blend,
             dissolve_seed,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             matte: None,
             mask: None,
@@ -1809,6 +1813,7 @@ impl Builder<'_, '_> {
             opacity: layer.opacity.clamp(0.0, 1.0),
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
+            quality: layer.quality,
             preserve_transparency: layer.preserve_transparency,
             matte,
             mask: op_mask,
@@ -1989,6 +1994,7 @@ impl Builder<'_, '_> {
                 opacity: weight,
                 blend: BlendMode::AlphaAdd,
                 dissolve_seed: 0,
+                quality: bae_anim::LayerQuality::Best,
                 preserve_transparency: false,
                 matte: None,
                 mask: None,
@@ -2047,6 +2053,7 @@ impl Builder<'_, '_> {
             opacity: 1.0,
             blend: BlendMode::Normal,
             dissolve_seed: 0,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             matte: None,
             mask: Some(mask),
@@ -2315,6 +2322,7 @@ impl Builder<'_, '_> {
             opacity: 1.0,
             blend: BlendMode::Normal,
             dissolve_seed: 0,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             matte: None,
             mask: None,
