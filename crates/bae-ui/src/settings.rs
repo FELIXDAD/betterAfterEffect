@@ -577,7 +577,7 @@ impl SettingsDialog {
             }
             Item::Group(title, list) => {
                 ui.add_space(4.0);
-                ui.add_enabled_ui(*title != "Mercury Transmit", |ui| {
+                ui.add_enabled_ui(!Item::unsupported(list), |ui| {
                     ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
                     egui::Frame::new()
                         .stroke(egui::Stroke::new(1.0, color::DIVIDER))
@@ -607,11 +607,6 @@ impl SettingsDialog {
             Item::Info(label, value) => {
                 ui.horizontal(|ui| {
                     if !label.is_empty() {
-                        let label = if *value == "<InstalledRAM - ReservedRAM> GB" {
-                            "RAM Available for BAE:"
-                        } else {
-                            label
-                        };
                         ui.label(tr(label));
                     }
                     if *label == "Sample Rate:" && self.page() == "audio" {
@@ -688,10 +683,7 @@ impl SettingsDialog {
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
-        let enabled = !matches!(
-            p.key,
-            "project.dynamic_link_highest_number" | "export.preview_output_during_render_queue"
-        ) && self.draft.enabled(p);
+        let enabled = !p.unsupported && self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 if p.indent {
@@ -709,7 +701,7 @@ impl SettingsDialog {
         let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = p.key != "video.enable_mercury_transmit" && draft.bool(p.key);
+                let mut v = draft.bool(p.key);
                 if widgets::checkbox(ui, &mut v, label).changed() {
                     self.set(p.key, v);
                 }

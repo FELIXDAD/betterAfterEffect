@@ -143,7 +143,12 @@ pub(crate) fn open_clicked(
                         }),
                     );
                 }
-                s.open_comp(&source);
+                // The Composition Navigator's path runs through the comp it
+                // was opened from.
+                match query::owning_comp(cx.stage, layer) {
+                    Some(parent) => s.open_from(&parent, &source),
+                    None => s.open_comp(&source),
+                }
                 drop(s);
                 cx.open_panel("composition");
                 cx.open_panel("timeline");
