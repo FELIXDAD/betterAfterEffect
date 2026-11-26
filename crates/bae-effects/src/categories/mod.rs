@@ -28,6 +28,7 @@ pub(super) mod color;
 pub(super) mod controls;
 pub(super) mod distort;
 pub(super) mod generate;
+pub(super) mod immersive;
 pub(super) mod keying;
 pub(super) mod layer_styles;
 pub(super) mod matte;

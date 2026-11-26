@@ -66,6 +66,36 @@ fn new_composition_asks_for_settings_first() {
     assert_eq!(undo.as_deref(), Some("New Composition"));
 }
 
+/// #467, as AE: Enter in a number field commits what was typed and presses
+/// OK; Tab commits it and opens the next number with its text selected, and
+/// the dialog stays open.
+#[test]
+fn enter_commits_the_typed_number_and_tab_moves_on() {
+    let mut h = gui();
+    let size = |h: &Ui| {
+        let comp = h.state().active_comp().expect("OK made a comp");
+        let info = bae_motion::query::comp_info(h.state().stage(), &comp).unwrap();
+        (info.width, info.height)
+    };
+    key(&mut h, Modifiers::COMMAND, Key::N);
+    let width = dialog_control(&h, "Width");
+    click_at(&mut h, width.center());
+    type_text(&mut h, "1000+200");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(&h), "Enter in Width did not press OK");
+    assert_eq!(size(&h).0, 1200);
+    key(&mut h, Modifiers::COMMAND, Key::N);
+    let width = dialog_control(&h, "Width");
+    click_at(&mut h, width.center());
+    type_text(&mut h, "1280");
+    key(&mut h, Modifiers::NONE, Key::Tab);
+    assert!(dialog_open(&h), "Tab closed the dialog");
+    type_text(&mut h, "720");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(&h));
+    assert_eq!(size(&h), (1280, 720));
+}
+
 #[test]
 fn cancel_escape_and_blocked_shortcuts() {
     let mut h = gui();

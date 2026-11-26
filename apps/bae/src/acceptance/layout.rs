@@ -141,7 +141,7 @@ fn check_default_workspace_at(screen: &str, size: [f32; 2], ppp: f32) -> Vec<Str
     check(&mut h, "empty project", &mut problems);
     comp_with(&mut h, &["motion.layer.new.solid"]);
     check(&mut h, "comp with a solid", &mut problems);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(h.state().render_queue().lock().items().len(), 1);
     check(&mut h, "render queue: queued", &mut problems);
     // Project, Effect Controls and Render Queue share the left column: all
@@ -370,7 +370,7 @@ fn narrow_windows_scroll_instead_of_clipping() {
     for size in [[1280.0, 720.0], [1024.0, 640.0], [900.0, 600.0]] {
         let mut h = gui_scaled(Gui::new(), vec2(size[0], size[1]), 2.0);
         comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         settle(&mut h);
         let areas = panel_areas(&h.ctx);
         // More than rounding (a 152-point column holding 153.4 points of
@@ -509,7 +509,7 @@ fn render_queue_content_is_inset_from_the_panel_edges() {
     for size in [[1440.0, 880.0], [1920.0, 1009.0]] {
         let mut h = gui_sized(Gui::new(), vec2(size[0], size[1]));
         comp_with(&mut h, &["motion.layer.new.solid"]);
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         settle(&mut h);
         let area = panel_areas(&h.ctx)
             .into_iter()
