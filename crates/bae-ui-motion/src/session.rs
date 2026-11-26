@@ -152,10 +152,14 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    /// Last UI frame in which a visible timeline requested per-layer CPU timings.
+    pub(crate) timing_column_frame: Option<u64>,
+    pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
     /// Comp shown in the viewer and timeline.
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
     pub selected_keys: Vec<KeyRef>,
@@ -313,12 +317,29 @@ impl Session {
 
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
-        self.times.insert(info.path.clone(), info.playhead_time(t));
+        let at = self.update_time(info, t);
+        if let Some(pb) = &mut self.playback
+            && pb.comp == info.path
+        {
+            if pb.range.contains(at) {
+                pb.from = at;
+                pb.started = Instant::now();
+            } else {
+                self.stop();
+            }
+        }
+    }
+
+    fn update_time(&mut self, info: &CompInfo, t: Time) -> Time {
+        let at = info.playhead_time(t);
+        self.times.insert(info.path.clone(), at);
+        at
     }
 
     /// Make `comp` the active comp (opening a timeline tab for it).
     pub fn open_comp(&mut self, comp: &PrimPath) {
         if self.active_comp.as_ref() != Some(comp) {
+            self.mini_flow = None;
             self.selected_layers.clear();
             self.selected_keys.clear();
             self.selected_props.clear();
@@ -334,6 +355,7 @@ impl Session {
     pub fn close_comp(&mut self, comp: &PrimPath) {
         self.open_comps.retain(|c| c != comp);
         if self.active_comp.as_ref() == Some(comp) {
+            self.mini_flow = None;
             self.active_comp = self.open_comps.last().cloned();
             self.selected_layers.clear();
             self.selected_keys.clear();
@@ -606,6 +628,13 @@ impl Session {
     /// Advance playback to the wall-clock time. Returns whether it is still playing
     /// (the caller then requests a repaint).
     pub fn tick(&mut self, info: &CompInfo) -> bool {
+        if self
+            .playback
+            .as_ref()
+            .is_some_and(|p| p.comp == info.path && p.range != info.work_area)
+        {
+            self.play(info);
+        }
         let Some(pb) = self.playback.clone() else {
             return false;
         };
@@ -647,7 +676,7 @@ impl Session {
                 return false;
             }
         }
-        self.set_time(info, t);
+        self.update_time(info, t);
         true
     }
 }
@@ -724,7 +753,11 @@ mod tests {
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
         assert!(s.tick(&i));
-        s.stop();
+        let seek = i.frame_rate.frame_to_time(42);
+        s.set_time(&i, seek);
+        assert_eq!(s.playback.as_ref().unwrap().from, seek);
+        s.set_time(&i, Time::ZERO);
+        assert!(!s.is_playing());
         assert!(!s.tick(&i));
     }
 }

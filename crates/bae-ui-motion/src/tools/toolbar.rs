@@ -24,8 +24,8 @@ use egui::{Align2, Color32, Id, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
 use super::{
-    AxisMode, FillRequest, Group, Paint, PaintKind, SharedTools, Tool, ToolOptions, ViewRequest,
-    ids,
+    AxisMode, FillRequest, GizmoMode, Group, Paint, PaintKind, SharedTools, Tool, ToolOptions,
+    ViewRequest, ids,
 };
 use crate::common;
 
@@ -303,6 +303,16 @@ impl AeToolbar {
             | Group::Pan
             | Group::Dolly => {
                 axis_modes(ui, &mut o);
+                if tool == Tool::Selection {
+                    let items = [tr("Position"), tr("Scale"), tr("Rotation")];
+                    let mut i = o.gizmo as usize;
+                    if widgets::dropdown(ui, "gizmo", &mut i, &items, 74.0)
+                        .on_hover_text(tr("Toggle 3D Gizmo Mode"))
+                        .changed()
+                    {
+                        o.gizmo = [GizmoMode::Position, GizmoMode::Scale, GizmoMode::Rotation][i];
+                    }
+                }
                 if tool == Tool::Rotation {
                     let items = [tr("Orientation"), tr("Rotation")];
                     let mut i = usize::from(!o.rotation_sets_orientation);
