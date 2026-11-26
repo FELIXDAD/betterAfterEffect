@@ -80,6 +80,8 @@ const ATTRS: &[&str] = &[
     "loop",
     "label",
     "color_space",
+    "timecode:start_frame",
+    "timecode:drop_frame",
 ];
 
 /// The folder `rel` (`a/b`) under `parent`, created as needed (matched by
@@ -206,6 +208,9 @@ pub struct ReplaceFileParams {
     /// Keep the item's name (File > Reload Footage reads the same file again).
     #[serde(default)]
     pub keep_name: bool,
+    /// Reapply the current interpretation to the replacement file.
+    #[serde(default)]
+    pub keep_interpretation: bool,
 }
 
 impl Command for ReplaceFile {
@@ -229,6 +234,24 @@ impl Command for ReplaceFile {
         if let Some(bad) = p.file.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
             return Err(fail(format!("{bad} is not a footage attribute")));
         }
+        let mut attrs = p.file.attrs;
+        // An item's label belongs to the project. Imported labels only initialize new items.
+        attrs.remove("label");
+        let original_rate = attrs.get("frame_rate").cloned();
+        let mut stored_file_rate = None;
+        if p.keep_interpretation {
+            for key in ["alpha_mode", "pixel_aspect", "loop", "color_space"] {
+                if let Some(value) = view.value(key) {
+                    attrs.insert(key.to_owned(), value.clone());
+                }
+            }
+            if view.value(crate::interpret::FILE_FRAME_RATE).is_some()
+                && let (Some(rate), Some(assumed)) = (original_rate, view.value("frame_rate"))
+            {
+                attrs.insert("frame_rate".into(), assumed.clone());
+                stored_file_rate = Some(rate);
+            }
+        }
         let name = p
             .file
             .name
@@ -241,7 +264,7 @@ impl Command for ReplaceFile {
         // What the old file had and the new one does not say goes back to its
         // default (a sequence pattern, a duration of a movie …); the label stays.
         for attr in ATTRS.iter().filter(|a| **a != "label" && **a != "kind") {
-            if !p.file.attrs.contains_key(*attr) {
+            if !attrs.contains_key(*attr) {
                 tx.apply(bae_model::Op::SetValue {
                     path: p.item.clone(),
                     attr: (*attr).to_owned(),
@@ -249,10 +272,16 @@ impl Command for ReplaceFile {
                 })?;
             }
         }
-        if !p.file.attrs.contains_key("kind") {
+        tx.apply(bae_model::Op::SetValue {
+            path: p.item.clone(), attr: crate::interpret::FILE_FRAME_RATE.into(), value: stored_file_rate,
+        })?;
+        if !p.keep_interpretation {
+            tx.apply(bae_model::Op::SetValue { path: p.item.clone(), attr: "premultiply_color".into(), value: None })?;
+        }
+        if !attrs.contains_key("kind") {
             set(tx, &p.item, "kind", Value::Enum("footage".into()))?;
         }
-        for (attr, value) in p.file.attrs {
+        for (attr, value) in attrs {
             set(tx, &p.item, &attr, value)?;
         }
         for op in file.to_ops(&p.item) {

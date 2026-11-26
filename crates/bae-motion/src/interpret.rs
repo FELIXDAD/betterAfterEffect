@@ -87,6 +87,7 @@ impl Command for InterpretFootage {
             if p.use_file_frame_rate {
                 if let Some(rate) = file_rate {
                     set(tx, item, "frame_rate", rate)?;
+                    tx.apply(bae_model::Op::SetValue {path:item.clone(), attr:FILE_FRAME_RATE.into(), value:None})?;
                 }
             } else if let Some(fps) = p.frame_rate {
                 // Keep the file's rate the first time another is assumed.

@@ -33,6 +33,8 @@ struct Footage {
     size: [u32; 2],
     frame_rate: Option<FrameRate>,
     duration: Option<Time>,
+    start_frame: u64,
+    drop_frame: bool,
 }
 
 impl Footage {
@@ -56,6 +58,8 @@ impl Footage {
                 Some(v) => v.as_f64().filter(|f| *f > 0.0).map(FrameRate::from_fps),
                 None => None,
             },
+            start_frame: match get("timecode:start_frame") { Some(Value::Int(n)) => n.max(0) as u64, _ => 0 },
+            drop_frame: get("timecode:drop_frame").and_then(|v| v.as_bool()).unwrap_or(false),
             duration: match get("duration") {
                 Some(Value::Time(t)) => Some(t),
                 _ => None,
@@ -329,7 +333,8 @@ impl FootagePanel {
         );
         if let Some(f) = f.filter(|f| f.timed()) {
             let rate = f.rate();
-            let code = bae_ui::widgets::timecode(rate.time_to_frame(self.time), rate.as_f64());
+            let frame = f.start_frame.saturating_add(rate.time_to_frame(self.time).max(0) as u64);
+            let code = bae_media::time::Timecode::from_frame_number(frame, rate, f.drop_frame).to_string();
             p.text(
                 pos2(r.left() + 70.0, y),
                 Align2::LEFT_CENTER,
