@@ -454,10 +454,11 @@ impl CompEvaluator for AnimEvaluator {
     ) -> Option<Arc<crate::effect::ScalarTrack>> {
         let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
         crate::parameter_track::prepare(slot, attr, frame, |t| {
-            self.inner
-                .evaluate_attribute(stage, path, name, t)
-                .ok()?
-                .as_f64()
+            let (value, reads) = self
+                .inner
+                .evaluate_attribute_traced(stage, path, name, t)
+                .ok()?;
+            Some((value.as_f64()?, reads))
         })
     }
 

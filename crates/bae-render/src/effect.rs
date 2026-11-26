@@ -114,6 +114,10 @@ impl ScalarTrack {
         let through = self.knots.partition_point(|k| k.time <= time.as_seconds());
         self.knots.truncate(through.saturating_sub(1));
     }
+    /// Keeps the first `len` knots (samples recomputed after an edit).
+    pub(crate) fn truncate_to(&mut self, len: usize) {
+        self.knots.truncate(len);
+    }
     pub(crate) fn len(&self) -> usize {
         self.knots.len()
     }
