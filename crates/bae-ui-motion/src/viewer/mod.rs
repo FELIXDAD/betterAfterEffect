@@ -36,6 +36,7 @@ mod menu;
 mod motion_path;
 mod motion_sketch;
 mod overlay;
+mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
@@ -232,7 +233,6 @@ impl CompositionViewer {
     }
 
     fn paint_guides(
-        &self,
         cx: &PanelContext<'_>,
         painter: &egui::Painter,
         clip: &egui::Painter,
@@ -809,7 +809,7 @@ impl Panel for CompositionViewer {
                     s.expr_errors = errors.to_vec();
                 }
             }
-            self.paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
+            Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
             self.banner.ui(ui, cx, &session, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
             return;
@@ -991,7 +991,7 @@ impl Panel for CompositionViewer {
             );
         }
 
-        self.paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
+        Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
 
         // Selection: bounding boxes, handles, anchor points (AE draws them in the
         // layer's label color).
@@ -1035,6 +1035,7 @@ impl Panel for CompositionViewer {
         }
 
         overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected, view_camera);
         // Cameras and lights in the 3D views (not the camera looked through).
         let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
             None | Some(view3d::View3d::Active) => comp.camera.map(|i| comp.layers[i].path.clone()),
