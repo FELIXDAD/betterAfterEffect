@@ -17,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use bae_app::{App, AppBuilder, AppModule};
 use bae_model::EffectDef;
@@ -34,12 +35,14 @@ use crate::package::{DirSource, Package, PackageSource};
 /// project scope; for plugin development.
 pub const PLUGIN_PATH_ENV: &str = "BAE_PLUGIN_PATH";
 
+type PackageProblems = Vec<(PathBuf, Vec<Diagnostic>)>;
+
 /// The running plugin host (an app resource).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PluginRuntime {
-    host: Mutex<PluginHost>,
+    host: Arc<Mutex<PluginHost>>,
     registries: AppEffectRegistries,
-    problems: Mutex<Vec<(PathBuf, Vec<Diagnostic>)>>,
+    problems: Arc<Mutex<PackageProblems>>,
     notices: crate::native::Notices,
 }
 
@@ -47,9 +50,9 @@ impl PluginRuntime {
     fn new(registries: AppEffectRegistries, host: PluginHost) -> Self {
         let notices = host.notices().clone();
         Self {
-            host: Mutex::new(host),
+            host: Arc::new(Mutex::new(host)),
             registries,
-            problems: Mutex::new(Vec::new()),
+            problems: Arc::default(),
             notices,
         }
     }

@@ -3,6 +3,7 @@ mod color;
 mod matte;
 mod noise_utility;
 mod spatial;
+mod weather;
 
 use super::{Builtin, EffectInfo, Registry};
 use crate::params::Params;
@@ -185,6 +186,7 @@ pub(super) fn register(r: &mut Registry) {
         color::register(target, &mut aliases);
         spatial::register(target, &mut aliases);
         matte::register(target, &mut aliases);
+        weather::register(target, &mut aliases);
     }
     r.effects.extend(aliases);
 }
