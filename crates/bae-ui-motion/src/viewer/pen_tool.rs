@@ -207,7 +207,11 @@ pub(super) fn frame(
     }
     let options = tools.lock().options.clone();
     let prefs = super::prefs::ViewerPrefs::current(cx.resources);
-    let paths = overlay::editable_paths(stage, comp, &selected, Some(prefs));
+    let paths = if session.lock().view_options.paths {
+        overlay::editable_paths(stage, comp, &selected, Some(prefs))
+    } else {
+        Vec::new()
+    };
     let (alt, shift, space, primary_down, pressed) = ui.input(|i| {
         (
             i.modifiers.alt,
