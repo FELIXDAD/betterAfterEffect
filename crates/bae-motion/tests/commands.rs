@@ -380,6 +380,31 @@ fn parenting_keeps_the_layer_in_place() {
         json!({"layers": [child], "parent": parent, "keep_transform": false}),
     );
     assert!((fx.world_pos(&comp, &child) - before).length() > 1.0);
+    // Shift: onto the parent (its anchor point, on screen where the parent is).
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": null, "keep_transform": false}),
+    );
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": parent, "move_to_parent": true}),
+    );
+    let at = fx.world_pos(&comp, &child);
+    let p = fx.world_pos(&comp, &parent);
+    let anchor = match fx.value(&parent, "transform:anchor_point") {
+        Some(Value::Vec3(a)) => DVec3::from_array(a),
+        _ => DVec3::ZERO,
+    };
+    let e = bae_anim::evaluate_comp(&fx.stage, &comp, Time::ZERO).unwrap();
+    let parent_anchor = e
+        .layer(&parent)
+        .unwrap()
+        .world_matrix
+        .transform_point3(anchor);
+    assert!(
+        (at - parent_anchor).length() < 1e-6,
+        "{at} vs {parent_anchor} ({p})"
+    );
 }
 
 #[test]
