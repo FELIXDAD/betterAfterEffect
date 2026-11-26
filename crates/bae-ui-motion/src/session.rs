@@ -315,6 +315,7 @@ pub struct Session {
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
     /// A keyframe drag in progress (Graph Editor, layer bars): the dragged
     /// properties as the release will leave them, evaluated live like a value
