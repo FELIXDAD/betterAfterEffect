@@ -248,6 +248,9 @@ pub struct Session {
     /// Expression): the Timeline focuses its field with the text selected, so
     /// typing replaces it (AE). Dropped after a second if never shown.
     pub(crate) focus_expression: Option<(PrimPath, String, Instant)>,
+    /// Frames in the GPU preview cache (the timeline's green bar): comp,
+    /// stage revision, cached spans.
+    pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
@@ -617,9 +620,10 @@ impl Session {
         }
     }
 
-    /// Start playing the active comp (Preview panel options): from the current
-    /// time or the start of the range, through the range.
-    pub fn play(&mut self, info: &CompInfo) {
+    /// Where playback of `info` would start and the range it plays (Preview
+    /// panel options): the current time inside the range (not on its last
+    /// frame) when playing from the current time, else the range's start.
+    pub fn play_start(&self, info: &CompInfo) -> (Time, TimeRange) {
         let now = self.time(&info.path);
         let range = self.preview_range(info, now);
         let from = if self.preview.from_current
@@ -630,6 +634,14 @@ impl Session {
         } else {
             range.start
         };
+        (from, range)
+    }
+
+    /// Start playing the active comp (Preview panel options): from the current
+    /// time or the start of the range, through the range.
+    pub fn play(&mut self, info: &CompInfo) {
+        let now = self.time(&info.path);
+        let (from, range) = self.play_start(info);
         self.times.insert(info.path.clone(), from);
         self.playback = Some(Playback {
             comp: info.path.clone(),

@@ -217,9 +217,17 @@ pub struct CompositionViewer {
     esc_taken: bool,
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
+    /// The current time and since when it has not changed (idle prefetch).
+    idle: Option<(Time, std::time::Instant)>,
     /// A camera tool drag.
     camera_drag: Option<camera_tool::CameraDrag>,
 }
+
+/// How long the current time stays put before the frames playback would
+/// start with are prepared.
+const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300);
+/// Frames prepared from where playback would start.
+const PREFETCH_FRAMES: i64 = 3;
 
 impl CompositionViewer {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
@@ -767,42 +775,97 @@ impl Panel for CompositionViewer {
             );
         }
         let clip = painter.with_clip_rect(comp_rect.intersect(area));
-        let playback = session.lock().playback.clone();
-        if let (Some(pb), Some(gpu)) = (playback, self.gpu.as_mut())
-            && pb.comp == info.path
-            && !resp.dragged()
-            && !resp.clicked()
-        {
-            let looping = session.lock().loop_playback;
-            let ready = gpu.playback.poll(
-                cx.stage,
-                cx.resources,
-                &info.path,
-                time,
-                info.frame_rate,
-                pb.range,
-                looping,
-                resolution,
-                ui.ctx(),
-            );
-            self.on_gpu = ready.is_some();
-            if let Some((image, _, errors)) = ready {
-                paint_image(&clip, &view, image);
-                let mut s = session.lock();
-                if s.expr_errors != errors {
-                    s.expr_errors = errors.to_vec();
+        if resp.dragged() || resp.clicked() {
+            session.lock().stop();
+        }
+        // A value drag that ended without a commit (e.g. cancelled) must not leave
+        // its preview behind (a committed one stays until its command has run).
+        if !ui.input(|i| i.pointer.any_down()) {
+            let mut s = session.lock();
+            if s.scrub.as_ref().is_some_and(|s| s.committed.is_none()) {
+                s.scrub = None;
+            }
+        }
+        let scrub = session.lock().scrub.clone();
+        let editing = scrub.is_some()
+            || self.select.drag.is_some()
+            || self.type_tool.edited_layer().is_some();
+        let playback = session
+            .lock()
+            .playback
+            .clone()
+            .filter(|pb| pb.comp == info.path);
+        let mut completed = None;
+        if let Some(gpu) = self.gpu.as_mut() {
+            if editing {
+                gpu.playback.stop();
+            } else {
+                let range = playback.as_ref().map_or(
+                    bae_model::TimeRange::new(
+                        time,
+                        info.frame_rate
+                            .frame_to_time(info.frame_rate.time_to_frame(time) + 1),
+                    ),
+                    |pb| pb.range,
+                );
+                let looping = playback.is_some() && session.lock().loop_playback;
+                if let Some((image, actual, errors)) = gpu.playback.poll(
+                    cx.stage,
+                    cx.resources,
+                    &info.path,
+                    time,
+                    info.frame_rate,
+                    range,
+                    looping,
+                    resolution,
+                    ui.ctx(),
+                ) {
+                    completed = Some(image);
+                    if actual == time || playback.is_some() {
+                        let mut s = session.lock();
+                        if s.expr_errors != errors {
+                            s.expr_errors = errors.to_vec();
+                        }
+                    }
                 }
+                // Idle (the current time still for a moment): prepare the first
+                // frames playback would show, so pressing play shows them at
+                // once while the pipeline fills.
+                if playback.is_none() {
+                    let now = std::time::Instant::now();
+                    match self.idle {
+                        Some((at, since)) if at == time => {
+                            if now.duration_since(since) >= IDLE_PREFETCH {
+                                let (from, range) = session.lock().play_start(&info);
+                                let rate = info.frame_rate;
+                                let first = rate.time_to_frame(from);
+                                let times = (0..PREFETCH_FRAMES)
+                                    .map(|k| rate.frame_to_time(first + k))
+                                    .filter(|t| *t != time && range.contains(*t))
+                                    .collect();
+                                gpu.playback.prefetch(times);
+                            } else {
+                                ui.ctx().request_repaint_after(IDLE_PREFETCH);
+                            }
+                        }
+                        _ => {
+                            self.idle = Some((time, now));
+                            ui.ctx().request_repaint_after(IDLE_PREFETCH);
+                        }
+                    }
+                }
+                gpu.playback.publish_ranges(&session, info.frame_rate);
+            }
+        }
+        if playback.is_some() && self.gpu.is_some() && !editing {
+            self.on_gpu = completed.is_some();
+            if let Some(image) = completed {
+                paint_image(&clip, &view, image);
             }
             Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
             self.banner.ui(ui, cx, &session, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
             return;
-        }
-        if let Some(gpu) = self.gpu.as_mut() {
-            gpu.playback.stop();
-        }
-        if resp.dragged() || resp.clicked() {
-            session.lock().stop();
         }
 
         // Evaluate, with the value a panel drag has reached (live, uncommitted).
@@ -825,14 +888,6 @@ impl Panel for CompositionViewer {
             let mut s = session.lock();
             if s.expr_errors != comp.errors {
                 s.expr_errors = comp.errors.clone();
-            }
-        }
-        // A value drag that ended without a commit (e.g. cancelled) must not leave
-        // its preview behind (a committed one stays until its command has run).
-        if !ui.input(|i| i.pointer.any_down()) {
-            let mut s = session.lock();
-            if s.scrub.as_ref().is_some_and(|s| s.committed.is_none()) {
-                s.scrub = None;
             }
         }
         apply_overrides(&mut comp, self.select.drag.as_ref());
@@ -896,16 +951,35 @@ impl Panel for CompositionViewer {
             .lock()
             .timing_column_frame
             .is_some_and(|shown| frame_nr.saturating_sub(shown) <= 1);
-        let image = self.gpu.as_mut().and_then(|g| {
-            g.frame(
-                cx.resources,
-                cx.stage,
-                &comp,
-                resolution,
-                view_camera,
-                measure,
-            )
-        });
+        // Live edits, other 3D views than the active camera, the Render Time
+        // column (it times this render), Show Channel / Exposure and a region
+        // of interest render here; otherwise the frame comes from the
+        // background renderer and its cache.
+        let direct = editing
+            || view_camera.is_some()
+            || measure
+            || self.display.render() != bae_render::Display::default()
+            || self.display.roi().is_some();
+        let image = if direct {
+            self.gpu.as_mut().and_then(|g| {
+                g.frame(
+                    cx.resources,
+                    cx.stage,
+                    &comp,
+                    resolution,
+                    view_camera,
+                    measure,
+                )
+            })
+        } else {
+            if completed.is_some()
+                && let Some(g) = self.gpu.as_mut()
+                && let Some((texture, rect)) = g.playback.shown_texture()
+            {
+                g.show_cached(texture, rect);
+            }
+            completed
+        };
         // Show Snapshot while F5–F8 (or the bar button) is held.
         let keys = [egui::Key::F5, egui::Key::F6, egui::Key::F7, egui::Key::F8];
         if let Some(s) = self.snapshot_shown
@@ -939,7 +1013,16 @@ impl Panel for CompositionViewer {
         if let Some(img) = image {
             paint_image(&clip, &view, img);
             // Until 05's text source is registered, text layers are drawn here.
-            let has_text = self.gpu.as_ref().is_some_and(|g| g.has_text);
+            let has_text = cx
+                .resources
+                .get::<crate::PreviewSources>()
+                .is_some_and(|sources| {
+                    sources
+                        .0
+                        .snapshot()
+                        .iter()
+                        .any(|p| p.item().id() == bae_render::anim::TEXT_PROVIDER)
+                });
             let mut text_only = comp.clone();
             for l in &mut text_only.layers {
                 if has_text || l.kind != LayerKind::Text {

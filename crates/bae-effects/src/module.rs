@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bae_app::{AppBuilder, AppModule};
 use bae_model::EffectDef;
 use bae_render::Effect;
-use bae_render::effect::registry_id;
+use bae_render::effect::{FRAME_INTERPOLATOR_ID, registry_id};
 
 use crate::catalog::EffectInfo;
 
@@ -79,6 +79,13 @@ impl AppModule for EffectsModule {
             }
         });
         effects.batch(|tx| {
+            if let Err(e) = tx.register_arc(
+                owner.clone(),
+                FRAME_INTERPOLATOR_ID,
+                crate::effects::temporal::interpolator(),
+            ) {
+                tracing::warn!("frame interpolator not registered: {e}");
+            }
             for b in crate::builtins() {
                 if let Err(e) =
                     tx.register_arc(owner.clone(), registry_id(&b.info.match_name), b.effect())
@@ -118,11 +125,12 @@ mod tests {
         let effects = app.get_registry::<dyn Effect>().expect("effects");
         let infos = app.get_registry::<EffectInfo>().expect("infos");
         assert_eq!(defs.len(), n);
-        assert_eq!(effects.len(), n);
+        assert_eq!(effects.len(), n + 1);
         assert_eq!(infos.len(), n);
         let mut library = bae_render::EffectLibrary::new();
         assert!(library.sync(&effects));
         assert!(!library.sync(&effects));
+        assert!(library.frame_interpolator().is_some());
         assert_eq!(library.len(), n);
         assert!(library.get("ADBE Gaussian Blur 2").is_some());
         for b in crate::builtins() {
