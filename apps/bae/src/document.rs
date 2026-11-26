@@ -301,6 +301,52 @@ impl Document {
         Ok(())
     }
 
+    /// Keep the template's stage, manifest and asset locator in an untitled document.
+    pub fn load_template(path: &Path) -> anyhow::Result<OpenedProject> {
+        let opened = Self::load(path)?;
+        let mut project = Project::from_stage(opened.project.stage);
+        project.manifest = opened.project.manifest;
+        // The new document has no base directory. Point loose media at the
+        // template's actual files. Embedded media travels with its package.
+        if let Some(base) = opened.assets.base_dir() {
+            let mut relinks = Vec::new();
+            for path in project.stage.traverse() {
+                let Some(mut file) = project
+                    .stage
+                    .prim(&path)
+                    .filter(|prim| prim.is_a(&bae_model::PrimType::ASSET))
+                    .and_then(|prim| bae_model::AssetFile::from_prim(&prim))
+                else {
+                    continue;
+                };
+                let Some(rel) = &file.relative else { continue };
+                if opened.assets.package().is_some_and(|pkg| pkg.contains(rel)) {
+                    continue;
+                }
+                let media = base.join(rel);
+                if media.is_file() {
+                    file.original = bae_model::asset::to_slash(&fs::canonicalize(media)?);
+                    file.relative = None;
+                    relinks.push(bae_package::Relink { path, file });
+                }
+            }
+            if !relinks.is_empty() {
+                let mut commands = CommandRegistry::new();
+                commands.register(bae_package::commands::SetAssetFiles)?;
+                commands.execute(
+                    &mut project.stage,
+                    &AuthorId::system(),
+                    "asset.set_files",
+                    serde_json::json!({"assets": relinks}),
+                )?;
+            }
+        }
+        Ok(OpenedProject {
+            project,
+            assets: opened.assets,
+        })
+    }
+
     /// Replace the open project with a new untitled one.
     pub fn new_project(&mut self) {
         self.replace(OpenedProject {
@@ -681,6 +727,51 @@ mod tests {
         other.new_project();
         assert!(other.location().is_none() && !other.is_dirty());
         assert!(!has(&other, "/Comp1"));
+    }
+
+    #[test]
+    fn saving_a_template_copy_keeps_its_external_media() {
+        let dir = tempfile::tempdir().unwrap();
+        let template = dir.path().join("Template.bae");
+        let mut source = Project::new();
+        let mut commands = CommandRegistry::with_builtins();
+        commands
+            .register(bae_package::commands::SetAssetFiles)
+            .unwrap();
+        for (id, params) in [
+            (
+                "prim.create",
+                serde_json::json!({"path": "/Card", "prim_type": "Asset"}),
+            ),
+            (
+                "asset.set_files",
+                serde_json::json!({"assets": [{"path": "/Card", "file": {
+                    "relative": "card.png", "original": "/old-location/card.png", "size": 4
+                }}]}),
+            ),
+        ] {
+            commands
+                .execute(&mut source.stage, &AuthorId::system(), id, params)
+                .unwrap();
+        }
+        source.save_as(&template).unwrap();
+        let media = template.join("card.png");
+        fs::write(&media, b"card").unwrap();
+        let mut doc = Document::new(None);
+        doc.replace(Document::load_template(&template).unwrap());
+        let target = dir.path().join("Work.baez");
+        doc.save_as(&target).unwrap();
+        let reopened = Document::load(&target).unwrap();
+        let prim = reopened
+            .project
+            .stage
+            .prim(&"/Card".parse().unwrap())
+            .unwrap();
+        let file = bae_model::AssetFile::from_prim(&prim).unwrap();
+        assert!(same_path(
+            reopened.assets.locate(&file).path().unwrap(),
+            &media
+        ));
     }
 
     #[test]
