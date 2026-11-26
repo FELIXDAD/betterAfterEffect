@@ -139,11 +139,8 @@ fn photo_filter(target: &Builtin) -> Builtin {
                 2 | 3 => old + 1,
                 _ => old + 2,
             };
-            let color = match p.value(2) {
-                Some(Value::Color(rgb)) => Some(Value::Color(*rgb)),
-                _ => None,
-            };
-            Translation::patch(p, [(1, Some(Value::Int(new))), (2, color)])
+            // The colour keeps its value whatever its type (a None would hide it).
+            Translation::patch(p, [(1, Some(Value::Int(new))), (2, p.value(2).cloned())])
         }),
     )
 }

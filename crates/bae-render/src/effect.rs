@@ -7,6 +7,8 @@
 //! equivalent of AE SmartFX pre-render), then encodes GPU work. Effects whose
 //! definition says `thread_safe: false` are called one at a time.
 
+pub use bae_anim::effect_history::{HISTORY_PARAM, PROFILE_SAMPLES};
+
 use std::fmt;
 use std::sync::Arc;
 
@@ -113,6 +115,10 @@ impl ScalarTrack {
         // the edited segment starts between samples, resample its left neighbor.
         let through = self.knots.partition_point(|k| k.time <= time.as_seconds());
         self.knots.truncate(through.saturating_sub(1));
+    }
+    /// Keeps the first `len` knots (samples recomputed after an edit).
+    pub(crate) fn truncate_to(&mut self, len: usize) {
+        self.knots.truncate(len);
     }
     pub(crate) fn len(&self) -> usize {
         self.knots.len()
@@ -375,6 +381,15 @@ pub trait Effect: Send + Sync {
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
 
+    /// Attach derived scene inputs before the render node computes its cache key.
+    fn prepare_scene(
+        &self,
+        _instance: &mut RenderEffect,
+        _comp: &crate::RenderComp,
+        _layer: &crate::RenderLayer,
+    ) {
+    }
+
     /// Whether this effect contributes a render node. Parameter-only controls
     /// are registered so their definitions are available without encoding GPU work.
     fn renders_pixels(&self) -> bool {
@@ -494,10 +509,17 @@ pub fn registry_id(match_name: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// Implementation-only registry entry for the two-frame Pixel Motion interpolator.
+pub const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
+
 /// Effect implementations by effect ID (match name).
 #[derive(Default)]
 pub struct EffectLibrary {
     effects: FxHashMap<String, Arc<dyn Effect>>,
+    /// Frame interpolation for Pixel Motion frame blending (not a listed
+    /// effect): params 1 = phase 0–1, 2 = the next frame's comp time (flicks,
+    /// read through [`LayerDependency::source`] of the layer).
+    interpolator: Option<Arc<dyn Effect>>,
     /// Generation of the app registry last synced from ([`Self::sync`]).
     synced: Option<u64>,
 }
@@ -516,6 +538,16 @@ impl EffectLibrary {
     /// Removes an implementation.
     pub fn unregister(&mut self, match_name: &str) -> Option<Arc<dyn Effect>> {
         self.effects.remove(match_name)
+    }
+
+    /// Sets the frame interpolator for a manually built library.
+    pub fn set_frame_interpolator(&mut self, effect: Arc<dyn Effect>) {
+        self.interpolator = Some(effect);
+    }
+
+    /// The frame interpolator, when one is registered.
+    pub fn frame_interpolator(&self) -> Option<&Arc<dyn Effect>> {
+        self.interpolator.as_ref()
     }
 
     /// The implementation of `match_name`.
@@ -545,9 +577,14 @@ impl EffectLibrary {
         }
         self.synced = Some(generation);
         self.effects.clear();
+        self.interpolator = None;
         for entry in registry.snapshot().iter() {
             let effect = entry.item().clone();
-            self.effects.insert(effect.def().match_name.clone(), effect);
+            if entry.id().as_ref() == FRAME_INTERPOLATOR_ID {
+                self.interpolator = Some(effect);
+            } else {
+                self.effects.insert(effect.def().match_name.clone(), effect);
+            }
         }
         true
     }

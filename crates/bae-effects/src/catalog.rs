@@ -75,6 +75,7 @@ pub fn category_zh(category: &str) -> &'static str {
         "Distort" => "扭曲",
         "Expression Controls" => "表达式控制",
         "Generate" => "生成",
+        "Immersive Video" => "沉浸式视频",
         "Keying" => "抠像",
         "Matte" => "遮罩",
         "Noise & Grain" => "杂色和颗粒",
@@ -295,6 +296,7 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "Alpha 差值",
             "仅 Alpha 差值",
         ],
+        ("ADBE OFMotionBlur", 1) => &["手动", "自动"],
         ("ADBE Timewarp", 1) => &["全帧", "帧混合", "像素运动"],
         ("ADBE Timewarp", 2) => &["速度", "源帧"],
         ("ADBE Timewarp", 14) => &["正常", "极端"],
@@ -318,6 +320,16 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
         ("ADBE Displacement Map", 6) => &["中心图", "伸缩对应图以适合", "拼贴图"],
         ("ADBE Texturize", 4) => &["拼贴纹理", "居中纹理", "拉伸纹理以适合"],
         ("ADBE Dropdown Control", 1) => &["项目 1", "项目 2", "项目 3"],
+        (
+            "ADBE Camera Lens Blur"
+            | "ADBE Smart Blur"
+            | "ADBE Channel Blur"
+            | "CC Radial Blur"
+            | "CC Radial Fast Blur"
+            | "CC Vector Blur"
+            | "CS CrossBlur",
+            id,
+        ) => return crate::categories::blur_sharpen::optics::definitions::options(match_name, id),
         ("ADBE Minimax", 1) => &["最小值", "最大值", "先最小值再最大值", "先最大值再最小值"],
         ("ADBE Minimax", 3) => &["颜色", "Alpha 和颜色", "红色", "绿色", "蓝色", "Alpha"],
         ("ADBE Minimax", 4) => &["水平和垂直", "仅水平", "仅垂直"],
