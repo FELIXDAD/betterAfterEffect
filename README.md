@@ -2,16 +2,16 @@
 
 一个以 GPU 运算为基础、轻量、跨平台、支持多人协同和 Agent 操作的动画制作应用。目标是让分镜、动效、剪辑在同一个平台、同一个工程里工作，并且能和 After Effects / Illustrator 工程互相转换。
 
-> 状态：**0.0.1 技术预览**，第一个可运行版本，见 [发布说明](docs/releases/0.0.1.md) 和 [更新记录](CHANGELOG.md)。
+当前开发版本为 0.1.0。[0.1.0 发布说明](docs/release/0.1.0.md) · [更新记录](CHANGELOG.md)
 
 ## 下载后首次打开
 
-0.0.1 的发布包没有正式签名，第一次打开要手动放行一次（之后正常双击即可）：
+请从项目的 [GitHub Releases](https://github.com/FELIXDAD/betterAfterEffects/releases) 选择与你的系统对应的文件。
 
-- **Windows**：解压 `BAE-0.0.1-x86_64-windows.zip`，双击 `bae.exe`。出现“Windows 已保护你的电脑”（SmartScreen）时，点“更多信息”，再点“仍要运行”。
-- **macOS**：解压 `BAE-0.0.1-aarch64-macos.zip`，把 `BAE.app` 拖到“应用程序”。应用没有经过公证，第一次打开会提示无法验证开发者：在访达里右键点 `BAE.app`，选“打开”，再点“打开”；如果没有“打开”按钮，到“系统设置 ▸ 隐私与安全性”，在“安全性”一节里点“仍要打开”。
+- **Windows x64**。将 ZIP 完整解压到一个文件夹，双击 `bae.exe`。
+- **Apple Silicon Mac**。打开 0.1.0 的 DMG，将 `BAE.app` 拖到“应用程序”，推出磁盘映像后打开应用。0.0.1 提供 ZIP，解压后同样安装。
 
-详见 [发布说明](docs/releases/0.0.1.md) 的“安装和首次打开”和“已知限制”。
+系统要求和首次打开提示见各版本说明。[0.1.0](docs/release/0.1.0.md) · [0.0.1](docs/releases/0.0.1.md)
 
 ## 文档
 
@@ -43,7 +43,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 
 cargo xtask size                         # release 构建 + 体积报告，并对照 tools/size-budget/budget.toml 检查
-cargo xtask dist                         # 打包：macOS 生成 ad-hoc 签名的 BAE.app 和 zip，Windows 生成 zip
+cargo xtask dist                         # 打包：macOS 生成 ad-hoc 签名的 BAE.app 和 DMG，Windows 生成 zip
 cargo xtask bench                        # 性能基准入口（criterion）
 ```
 

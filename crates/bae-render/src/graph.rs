@@ -172,6 +172,31 @@ pub enum NodeKind {
     Mask(MaskNode),
     /// An adjustment layer's result mixed into its backdrop.
     Mix(MixNode),
+    /// A 3D layer drawn alone, blurred by the camera's depth of field.
+    DepthBlur(DepthBlurNode),
+}
+
+/// Depth of field of one 3D layer (AE's camera Depth of Field): the layer
+/// drawn alone, blurred per pixel by the distance of its plane from the
+/// camera's focus plane (`exec/dof.rs`). All lengths in space pixels.
+#[derive(Debug)]
+pub struct DepthBlurNode {
+    /// The layer (diagnostics).
+    pub layer: PrimPath,
+    /// The layer drawn alone onto transparent black.
+    pub input: NodeId,
+    /// `1 / depth` of the layer's plane at space pixel `(x, y)`:
+    /// `a·x + b·y + c` (camera-space depth).
+    pub inv_depth: [f64; 3],
+    /// Camera depth of the plane in focus.
+    pub focus: f64,
+    /// The blur's diameter far away: at depth `z` it is
+    /// `coc · |1 − focus / z|`.
+    pub coc: f64,
+    /// Largest blur radius over the layer.
+    pub max_radius: f64,
+    /// The blur's iris and highlights.
+    pub iris: bae_anim::Iris,
 }
 
 /// `base + (over − base) · coverage.alpha`, per pixel (all three in the
@@ -219,6 +244,7 @@ impl NodeKind {
                 f(m.over);
                 f(m.coverage);
             }
+            NodeKind::DepthBlur(d) => f(d.input),
             NodeKind::Fill(_) | NodeKind::Source(_) | NodeKind::Mask(_) => {}
         }
     }
@@ -232,6 +258,7 @@ impl NodeKind {
             NodeKind::Effect(_) => "effect",
             NodeKind::Mask(_) => "mask",
             NodeKind::Mix(_) => "mix",
+            NodeKind::DepthBlur(_) => "depth of field",
         }
     }
 }
@@ -351,6 +378,8 @@ impl std::fmt::Debug for SourceNode {
 
 /// An effect invocation.
 pub struct EffectNode {
+    /// Effect whose previous output supplies temporal feedback.
+    pub feedback: Option<PrimPath>,
     /// The layer.
     pub layer: PrimPath,
     /// The implementation.
@@ -629,6 +658,9 @@ pub fn build_layer_image(
 }
 
 /// Converts a rectangle in space pixels to texel units at `pixel_scale`.
+/// Largest depth-of-field blur radius (space pixels).
+const MAX_DOF_RADIUS: f64 = 500.0;
+
 pub fn units(rect: &Rect, pixel_scale: f64) -> IRect {
     Rect::new(
         rect.x0 / pixel_scale,
@@ -856,10 +888,24 @@ impl Builder<'_, '_> {
             }
         }
         attach_shadows(comp, &mut planned);
-        if planned.len() <= 1 {
-            ops.extend(planned.into_iter().map(|(_, op)| op));
-            return Ok(());
+        // Casts Shadows: Only: a caster that is not drawn itself.
+        planned.retain(|(index, _)| {
+            comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
+        });
+        let drawn = Self::depth_order_3d(comp, planned);
+        for (index, op) in drawn {
+            let op = self.depth_of_field(comp, index, op, canvas, scale, depth);
+            ops.push(op);
         }
+        Ok(())
+    }
+
+    /// The ops of a 3D group back to front, cut where layers intersect.
+    fn depth_order_3d(comp: &RenderComp, planned: Vec<(usize, LayerOp)>) -> Vec<(usize, LayerOp)> {
+        if planned.len() <= 1 {
+            return planned;
+        }
+        let mut drawn = Vec::with_capacity(planned.len());
         // Layers whose drawn areas do not overlap cannot hide each other: sort
         // and cut only within clusters of overlapping layers (fewer cuts, and
         // no cut where nothing is in front).
@@ -894,7 +940,7 @@ impl Builder<'_, '_> {
                 .filter(|&i| root(&mut cluster, i) == first)
                 .collect();
             if members.len() == 1 {
-                ops.push(planned[first].1.clone());
+                drawn.push(planned[first].clone());
                 continue;
             }
             let plates: Vec<Plate> = members
@@ -905,12 +951,148 @@ impl Builder<'_, '_> {
                 })
                 .collect();
             for fragment in depth_order(&plates, eye) {
-                let mut op = planned[members[fragment.item]].1.clone();
+                let (index, op) = &planned[members[fragment.item]];
+                let mut op = op.clone();
                 op.clips = fragment.clips;
-                ops.push(op);
+                drawn.push((*index, op));
             }
         }
-        Ok(())
+        drawn
+    }
+
+    /// Depth of field (AE's camera Depth of Field): a 3D layer away from the
+    /// focus plane is drawn alone onto transparent black, blurred by the
+    /// distance of its plane from the focus plane ([`DepthBlurNode`]), and the
+    /// result drawn in its place with its blend mode.
+    fn depth_of_field(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        op: LayerOp,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+    ) -> LayerOp {
+        let camera = comp.view_camera();
+        let Some(matrix) = comp.layers[index].matrix_3d else {
+            return op;
+        };
+        if !camera.depth_of_field
+            || camera.projection != crate::camera::Projection::Perspective
+            || camera.focus_distance <= 0.0
+            || camera.aperture <= 0.0
+            || camera.blur_level <= 0.0
+            || op.blend.is_stencil()
+            || op.preserve_transparency
+        {
+            return op;
+        }
+        let focus = camera.focus_distance;
+        let coc = camera.blur_level / 100.0 * camera.aperture * camera.zoom / focus;
+        // The plane's homography has the camera depth as w, so 1 / depth is
+        // affine on screen (composite pixels are comp pixels).
+        let size = DVec2::new(f64::from(comp.width), f64::from(comp.height));
+        let inv = camera.plane_homography(&matrix, size).inverse();
+        let inv_depth = [inv.x_axis.z, inv.y_axis.z, inv.z_axis.z];
+        // The blur is largest at a corner of the drawn area.
+        let b = op.bounds;
+        let max_radius = [(b.x0, b.y0), (b.x1, b.y0), (b.x0, b.y1), (b.x1, b.y1)]
+            .into_iter()
+            .map(|(x, y)| {
+                let (x, y) = (f64::from(x) * scale, f64::from(y) * scale);
+                let inv_z = inv_depth[0] * x + inv_depth[1] * y + inv_depth[2];
+                if inv_z <= 0.0 || 1.0 / inv_z <= crate::camera::NEAR {
+                    MAX_DOF_RADIUS
+                } else {
+                    0.5 * coc * (1.0 - focus * inv_z).abs()
+                }
+            })
+            .fold(0.0, f64::max)
+            .min(MAX_DOF_RADIUS);
+        // Under half a texel everywhere: sharp.
+        if max_radius < 0.5 * scale {
+            return op;
+        }
+        let grow = (max_radius / scale).ceil() as i32 + 1;
+        let rect = IRect::new(
+            op.bounds.x0 - grow,
+            op.bounds.y0 - grow,
+            op.bounds.x1 + grow,
+            op.bounds.y1 + grow,
+        )
+        .intersect(&canvas);
+        if rect.is_empty() {
+            return op;
+        }
+        let blend = op.blend;
+        let dissolve_seed = op.dissolve_seed;
+        let layer = op.layer.clone();
+        let key = hash_of(&(
+            "depth of field",
+            &comp.path,
+            &layer,
+            op.clips
+                .iter()
+                .map(|c| c.map(f64::to_bits))
+                .collect::<Vec<_>>(),
+            rect,
+            scale.to_bits(),
+            self.nodes.len(),
+        ));
+        let clamp = self.clamp;
+        let blurred = self.owned(comp, index, depth, |b| {
+            let mut alone = op;
+            alone.blend = BlendMode::Normal;
+            let input = b.push(Node {
+                kind: NodeKind::Composite(CompositeNode {
+                    prim: comp.path.clone(),
+                    time: comp.time,
+                    ops: vec![alone],
+                    clamp,
+                }),
+                rect,
+                pixel_scale: scale,
+                key,
+                cacheable: false,
+            });
+            b.push(Node {
+                kind: NodeKind::DepthBlur(DepthBlurNode {
+                    layer: layer.clone(),
+                    input,
+                    inv_depth,
+                    focus,
+                    coc,
+                    max_radius,
+                    iris: camera.iris,
+                }),
+                rect,
+                pixel_scale: scale,
+                key: hash_of(&("depth blur", key)),
+                cacheable: false,
+            })
+        });
+        LayerOp {
+            layer,
+            input: OpInput::Image(blurred),
+            transform: DAffine2::IDENTITY,
+            opacity: 1.0,
+            blend,
+            dissolve_seed,
+            preserve_transparency: false,
+            matte: None,
+            mask: None,
+            bounds: rect,
+            content: Rect::new(
+                f64::from(rect.x0) * scale,
+                f64::from(rect.y0) * scale,
+                f64::from(rect.x1) * scale,
+                f64::from(rect.y1) * scale,
+            ),
+            projection: None,
+            motion: None,
+            clips: Vec::new(),
+            lighting: None,
+        }
     }
 
     /// Plans layer `index` of `comp` drawn into a composite covering `canvas`.
@@ -1199,6 +1381,28 @@ impl Builder<'_, '_> {
                     .collect();
                 (!lights.is_empty()).then(|| {
                     let camera = comp.view_camera();
+                    // Motion blur: the layer, its lights and the eye at every
+                    // sample.
+                    let samples: Arc<[_]> = match &comp.motion_blur {
+                        Some(mb) if mb.lights.len() == layer.motion_samples.len() => layer
+                            .motion_samples
+                            .iter()
+                            .zip(&mb.lights)
+                            .enumerate()
+                            .filter_map(|(k, (s, sample_lights))| {
+                                Some(crate::light::LightingSample {
+                                    matrix: s.matrix_3d?,
+                                    lights: sample_lights
+                                        .iter()
+                                        .filter(|l| l.scope_below.is_none_or(|light| index > light))
+                                        .copied()
+                                        .collect(),
+                                    eye: comp.sample_camera(k).eye(),
+                                })
+                            })
+                            .collect(),
+                        _ => Arc::new([]),
+                    };
                     Arc::new(Lighting {
                         matrix,
                         material: layer.material,
@@ -1206,6 +1410,7 @@ impl Builder<'_, '_> {
                         eye: camera.eye(),
                         world_per_pixel: camera.world_per_pixel(),
                         casters: Arc::new([]),
+                        samples,
                     })
                 })
             });
@@ -1775,6 +1980,8 @@ impl Builder<'_, '_> {
         }
         rect.hash(&mut h);
         let params = frame.params(&instance);
+        let feedback = effect.feedback_source(&params, &layer.effects);
+        self.time_dependent |= feedback.is_some();
         let scene = effect.uses_scene(&params).then(|| {
             let world = layer.matrix_3d.unwrap_or_else(|| {
                 let m = layer.transform;
@@ -1924,6 +2131,7 @@ impl Builder<'_, '_> {
         });
         Ok(self.push(Node {
             kind: NodeKind::Effect(Box::new(EffectNode {
+                feedback,
                 scene,
                 layer: layer.path.clone(),
                 effect,

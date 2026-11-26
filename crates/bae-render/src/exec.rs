@@ -29,6 +29,7 @@ use crate::graph::{CompositeNode, LayerOp, Node, NodeId, NodeKind, OpInput, Rend
 use rustc_hash::FxHashMap;
 
 pub(crate) mod adjust;
+pub(crate) mod dof;
 mod masks;
 mod shadow;
 use crate::pool::TexturePool;
@@ -177,6 +178,7 @@ impl ImageAllocator for PoolAllocator<'_> {
 /// Share whole-surface effect outputs between ROI requests in the renderer's
 /// existing byte-limited frame cache. Entries are published after submission.
 pub(crate) struct TileCache<'a> {
+    pub feedback: bool,
     pub frames: &'a mut crate::cache::FrameCache<GpuImage>,
     pub request: u64,
     pub comp: &'a crate::RenderComp,
@@ -294,19 +296,28 @@ pub(crate) fn execute(
             t.write(&mut encoder, index);
         }
         let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
-            NodeKind::Effect(fx) if fx.effect.full_surface() => Some(crate::cache::FrameKey {
-                comp: fx.instance.path.clone(),
-                time: fx.frame.comp_time,
-                request: cache.request,
-            }),
+            NodeKind::Effect(fx)
+                if fx.feedback.is_some() || (!cache.feedback && fx.effect.full_surface()) =>
+            {
+                Some(crate::cache::FrameKey {
+                    comp: fx.instance.path.clone(),
+                    time: fx.frame.comp_time,
+                    request: cache.request,
+                })
+            }
             _ => None,
         });
-        let cached = surface_key.as_ref().and_then(|key| {
-            let frames = &mut tiles.as_mut()?.frames;
-            (frames.content_hash(key) == Some(node.key))
-                .then(|| frames.get(key).cloned())
-                .flatten()
-        });
+        // A feedback pass depends on cache residency of the preceding frame.
+        // Re-encode one pass; never walk or regenerate the history.
+        let cached = surface_key
+            .as_ref()
+            .filter(|_| tiles.as_ref().is_some_and(|cache| !cache.feedback))
+            .and_then(|key| {
+                let frames = &mut tiles.as_mut()?.frames;
+                (frames.content_hash(key) == Some(node.key))
+                    .then(|| frames.get(key).cloned())
+                    .flatten()
+            });
         let image = match (&node.kind, cached) {
             (_, Some(image)) => {
                 surface_key = None;
@@ -384,6 +395,22 @@ pub(crate) fn execute(
                     .filter_map(|(m, id)| Some((m.clone(), outputs[id.index()].clone()?)))
                     .collect();
                 let mut params = fx.frame.params(&fx.instance);
+                let previous = fx.feedback.as_ref().and_then(|path| {
+                    let cache = tiles.as_mut()?;
+                    let time = fx.frame.comp_time - fx.frame.time_step;
+                    if time < fx.frame.layer_in {
+                        return None;
+                    }
+                    cache
+                        .frames
+                        .get(&crate::FrameKey {
+                            comp: path.clone(),
+                            time,
+                            request: cache.request,
+                        })
+                        .cloned()
+                });
+                params.previous_frame = previous.as_ref();
                 params.scene = fx.scene.as_deref();
                 params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
                 if let Some(samples) = &fx.samples {
@@ -433,6 +460,25 @@ pub(crate) fn execute(
                 ctx.passes += 1;
                 target
             }
+            (NodeKind::DepthBlur(blur), None) => {
+                let input = outputs[blur.input.index()]
+                    .clone()
+                    .ok_or_else(|| RenderError::Other("depth of field input missing".into()))?;
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let dof = ctx.pipelines.dof();
+                ctx.passes += dof::encode(
+                    &mut dof.lock(),
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    pool,
+                    format,
+                    blur,
+                    &input,
+                    &target,
+                )?;
+                target
+            }
             (NodeKind::Mask(_), None) => ctx.mask_outs[index]
                 .as_ref()
                 .map(|m| m.image.clone())
@@ -479,9 +525,14 @@ pub(crate) fn execute(
     {
         for (key, hash, image) in surfaces {
             let bytes = image.byte_size();
-            cache
-                .frames
-                .insert(key, image, bytes, cache.comp.dependencies(), hash);
+            cache.frames.insert_surface(
+                key,
+                image,
+                bytes,
+                cache.comp.dependencies(),
+                hash,
+                cache.feedback,
+            );
         }
     }
     Ok(Executed {
@@ -1102,7 +1153,26 @@ fn plan_op(
             let img = outputs[id.index()].as_ref()?;
             Some(shadow::uv_map(img, *slots.get(&id)?, image.texture_size()))
         };
-        data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
+        let per_sample = op.motion.as_ref().is_some_and(|m| {
+            m.len() == l.samples.len() && l.samples.iter().all(|s| s.lights.len() == l.lights.len())
+        });
+        if per_sample {
+            // Motion blur: the layer lit at every sample, records back to back.
+            data.extra[3] = lighting.len() as u32;
+            for s in l.samples.iter() {
+                let at = crate::light::Lighting {
+                    matrix: s.matrix,
+                    lights: s.lights.clone(),
+                    eye: s.eye,
+                    samples: std::sync::Arc::new([]),
+                    ..(**l).clone()
+                };
+                at.pack(&from_texel, node.pixel_scale, &map, lighting);
+            }
+            data.mode[1] |= flags::LIT_SAMPLES;
+        } else {
+            data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
+        }
         data.mode[1] |= flags::LIT;
     }
     if !op.clips.is_empty() {

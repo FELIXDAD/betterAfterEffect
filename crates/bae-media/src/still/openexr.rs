@@ -85,7 +85,10 @@ pub(super) fn decode(
             });
         }
         if ids[3].is_none() {
-            rgba.iter_mut().skip(3).step_by(4).for_each(|a| *a = f16::ONE);
+            rgba.iter_mut()
+                .skip(3)
+                .step_by(4)
+                .for_each(|a| *a = f16::ONE);
         }
     }
     let size = [width as u32, height as u32];

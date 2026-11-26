@@ -153,6 +153,12 @@ impl RenderComp {
                 for c in &mb.cameras {
                     hash_camera(c, h);
                 }
+                for lights in &mb.lights {
+                    lights.len().hash(h);
+                    for l in lights.iter() {
+                        hash_light(l, h);
+                    }
+                }
             }
         }
         if any_blur && let Some(mb) = &self.motion_blur {
@@ -416,6 +422,26 @@ pub(crate) fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
         c.zoom.to_bits().hash(h);
         if let crate::camera::Projection::Orthographic { scale } = c.projection {
             scale.to_bits().hash(h);
+        }
+        // Depth of field changes the pixels of 3D layers.
+        c.depth_of_field.hash(h);
+        if c.depth_of_field {
+            let i = &c.iris;
+            for v in [
+                c.focus_distance,
+                c.aperture,
+                c.blur_level,
+                i.rotation,
+                i.roundness,
+                i.aspect_ratio,
+                i.diffraction_fringe,
+                i.highlight_gain,
+                i.highlight_threshold,
+                i.highlight_saturation,
+            ] {
+                v.to_bits().hash(h);
+            }
+            i.shape.hash(h);
         }
     }
 }

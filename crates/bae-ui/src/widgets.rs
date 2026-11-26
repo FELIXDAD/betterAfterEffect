@@ -17,6 +17,9 @@ use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::{self, color};
 
+/// Reads typed text as a value ([`HotNumber::text`]).
+type ParseText<'a> = &'a dyn Fn(&str) -> Option<f64>;
+
 /// Hot text: a blue number that changes when dragged and turns into a text
 /// field when clicked, like AE's property values.
 pub struct HotNumber<'a> {
@@ -30,6 +33,10 @@ pub struct HotNumber<'a> {
     /// Accessibility name (the property, e.g. "Position X").
     label: &'a str,
     tint: Color32,
+    mixed: bool,
+    /// Custom text for a value (a timecode …) and the parser of typed text.
+    display: Option<&'a dyn Fn(f64) -> String>,
+    parse: Option<ParseText<'a>>,
 }
 
 impl<'a> HotNumber<'a> {
@@ -44,7 +51,28 @@ impl<'a> HotNumber<'a> {
             font: theme::body(),
             label: "",
             tint: color::ACCENT,
+            mixed: false,
+            display: None,
+            parse: None,
         }
+    }
+
+    /// Leave the field blank until the user chooses a common value.
+    pub fn mixed(mut self, mixed: bool) -> Self {
+        self.mixed = mixed;
+        self
+    }
+
+    /// Show values as `display` gives them (a timecode for a time) and read
+    /// typed text with `parse` instead of as a number.
+    pub fn text(
+        mut self,
+        display: &'a dyn Fn(f64) -> String,
+        parse: &'a dyn Fn(&str) -> Option<f64>,
+    ) -> Self {
+        self.display = Some(display);
+        self.parse = Some(parse);
+        self
     }
 
     /// Color of the number (AE: blue; red when an expression drives it).
@@ -93,7 +121,10 @@ impl<'a> HotNumber<'a> {
     }
 
     fn format(&self, v: f64) -> String {
-        format!("{:.*}", self.decimals, v)
+        match self.display {
+            Some(f) => f(v),
+            None => format!("{:.*}", self.decimals, v),
+        }
     }
 }
 
@@ -157,7 +188,11 @@ impl Widget for HotNumber<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let id = ui.next_auto_id();
         let mut state: HotState = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        let text = self.format(*self.value);
+        let text = if self.mixed {
+            String::new()
+        } else {
+            self.format(*self.value)
+        };
         let height = ui.spacing().interact_size.y;
         register_hot(ui, id);
         // Tabbed into from the previous (or next) value.
@@ -278,9 +313,9 @@ impl Widget for HotNumber<'_> {
             if escape {
                 ui.data_mut(|d| d.insert_temp(id, HotState::default()));
             } else if enter || tab.is_some() || resp.lost_focus() {
-                if let Some(v) = eval(&buf) {
+                if let Some(v) = self.parse.map_or_else(|| eval(&buf), |p| p(&buf)) {
                     let v = v.clamp(*self.range.start(), *self.range.end());
-                    if v != *self.value {
+                    if v != *self.value || self.mixed {
                         *self.value = v;
                         resp.mark_changed();
                     }
@@ -303,7 +338,7 @@ impl Widget for HotNumber<'_> {
         let layout = |tint: Color32| {
             let mut job = LayoutJob::default();
             job.append(&text, 0.0, TextFormat::simple(self.font.clone(), tint));
-            if !self.suffix.is_empty() {
+            if !self.suffix.is_empty() && !self.mixed {
                 job.append(
                     self.suffix,
                     0.0,
@@ -317,7 +352,7 @@ impl Widget for HotNumber<'_> {
             .width
             .unwrap_or(0.0)
             .max(galley.size().x + 3.0)
-            .max(8.0);
+            .max(if self.mixed { 32.0 } else { 8.0 });
         let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
         let spoken = format!("{text}{}", self.suffix);
         resp = resp.labeled_value(egui::WidgetType::DragValue, self.label, &spoken);
@@ -342,7 +377,7 @@ impl Widget for HotNumber<'_> {
             state.carry = raw - applied;
             if applied != 0.0 {
                 let v = (*self.value + applied).clamp(*self.range.start(), *self.range.end());
-                if v != *self.value {
+                if v != *self.value || self.mixed {
                     *self.value = v;
                     resp.mark_changed();
                 }
