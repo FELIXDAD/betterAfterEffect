@@ -555,3 +555,122 @@ fn graph_area_menu_matches_ae() {
         .collect();
     assert_eq!(ours, ae.map(|t| t.map(str::to_owned)));
 }
+
+/// ; zooms to frames and back, Shift+; to the whole comp and back, Ctrl+`
+/// opens and closes every property of the selected layer, Ctrl+Alt+V pastes
+/// layers at the CTI (AE).
+#[test]
+fn zoom_twirl_and_paste_at_time_shortcuts() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let mut tl = TimelinePanel::default();
+    h.session().lock().selected_layers = vec![solid.clone()];
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let run = |h: &mut H, tl: &mut TimelinePanel, id: &str| {
+        let r = h.action(tl, Invocation::new(id));
+        h.apply(&r);
+    };
+    run(&mut h, &mut tl, ids::ZOOM_FRAMES);
+    assert_eq!(tl.zoom, 1.0);
+    run(&mut h, &mut tl, ids::ZOOM_FRAMES);
+    assert_eq!(tl.zoom, 0.0);
+    tl.zoom = 0.5;
+    run(&mut h, &mut tl, ids::ZOOM_TOGGLE);
+    assert_eq!(tl.zoom, 0.0);
+    run(&mut h, &mut tl, ids::ZOOM_TOGGLE);
+    assert_eq!(tl.zoom, 0.5);
+    // Ctrl+`: the layer and its Transform group open; again: closed.
+    run(&mut h, &mut tl, ids::TWIRL);
+    assert!(tl.expanded.contains(solid.as_str()));
+    assert!(
+        tl.expanded.iter().any(|id| id.ends_with("#transform")),
+        "{:?}",
+        tl.expanded
+    );
+    run(&mut h, &mut tl, ids::TWIRL);
+    assert!(tl.expanded.is_empty(), "{:?}", tl.expanded);
+    // Copy, then Ctrl+Alt+V at 2 s: the copy starts at 2 s.
+    run(&mut h, &mut tl, ids::COPY);
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    h.session().lock().set_time(&info, Time::from_seconds(2.0));
+    let before = query::comp_layers(&h.stage, &comp);
+    run(&mut h, &mut tl, ids::PASTE_AT_TIME);
+    let pasted: Vec<PrimPath> = query::comp_layers(&h.stage, &comp)
+        .into_iter()
+        .filter(|l| !before.contains(l))
+        .collect();
+    assert_eq!(pasted.len(), 1);
+    assert_eq!(
+        query::layer_timing(&h.stage, &pasted[0]).in_point,
+        Time::from_seconds(2.0)
+    );
+}
+
+/// The parent pick whip with AE's modifiers: Shift moves the layer onto its
+/// new parent; Cmd/Ctrl-click removes the parent.
+#[test]
+fn parent_pick_whip_shift_and_cmd_click() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let nul = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    h.run(
+        "attr.set",
+        json!({"path": nul, "attr": "transform:position", "value": {"type": "vec3", "value": [100.0, 50.0, 0.0]}}),
+    );
+    let mut tl = TimelinePanel::default();
+    h.session().lock().graph_editor = false;
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let nones = |h: &H| -> Vec<Rect> {
+        let mut v: Vec<Rect> = h
+            .painted_text
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|(s, _)| s == bae_ui::tr("None"))
+            .map(|(_, r)| *r)
+            .collect();
+        v.sort_by(|a, b| a.center().y.total_cmp(&b.center().y));
+        v
+    };
+    let rows = nones(&h);
+    assert_eq!(rows.len(), 2);
+    // The solid is layer 2; its pick whip sits left of its Parent dropdown.
+    let whip = |r: Rect| pos2(r.left() - 18.0, r.center().y);
+    let r = h.drag(&mut tl, whip(rows[1]), rows[0].center(), Modifiers::SHIFT);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    assert_eq!(r.invocations[0].params["move_to_parent"], true);
+    h.apply(&r);
+    let parent = |h: &H| {
+        h.stage
+            .prim(&solid)
+            .and_then(|p| p.value("parent").and_then(|v| v.as_prim_ref().cloned()))
+    };
+    assert_eq!(parent(&h), Some(nul.clone()));
+    let e = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    // The solid's anchor lands on the null's anchor.
+    let anchor_on_screen = |l: &PrimPath| {
+        let a = match query::attr_spec(&h.stage, l, "transform:anchor_point")
+            .and_then(|s| s.value.clone())
+            .or_else(|| {
+                h.stage
+                    .prim(l)
+                    .and_then(|v| query::static_value(&v, "transform:anchor_point"))
+            }) {
+            Some(Value::Vec3(a)) => bae_anim::glam::DVec3::from_array(a),
+            _ => bae_anim::glam::DVec3::ZERO,
+        };
+        e.layer(l).unwrap().world_matrix.transform_point3(a)
+    };
+    let (s_at, n_at) = (anchor_on_screen(&solid), anchor_on_screen(&nul));
+    assert!((s_at - n_at).length() < 1e-6, "{s_at} vs {n_at}");
+    // Cmd/Ctrl-click the pick whip: no parent.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let r = h.click(&mut tl, whip(rows[1]), cmd());
+    h.apply(&r);
+    assert_eq!(parent(&h), None);
+}

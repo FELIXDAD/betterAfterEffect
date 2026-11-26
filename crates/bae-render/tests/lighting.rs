@@ -383,6 +383,7 @@ fn shadow_worst(img: &Image, comp: &RenderComp) -> u8 {
         opacity: 1.0,
         transmission: caster.material.light_transmission,
         pixels: CasterPixels::Solid(color),
+        footprints: Arc::new([]),
     }];
     let cam = comp.view_camera();
     let size = DVec2::splat(200.0);
@@ -498,4 +499,39 @@ fn shadow_only_modes() {
     let shadow = only_shadows.px(185, 185);
     assert!(shadow[3] > 240 && shadow[0] < 8, "the shadow: {shadow:?}");
     assert!(only_shadows.px(10, 190)[3] < 8, "no receiver where lit");
+}
+
+/// Shadows that hold still are drawn into a receiver-space map once (the
+/// second frame with the same layers and lights) and sampled from then on;
+/// the map matches the per-pixel shadows closely.
+#[test]
+fn still_shadows_come_from_a_cached_map() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::with_config(
+        gpu,
+        bae_render::RendererConfig {
+            frame_cache_bytes: 0,
+            ..bae_render::RendererConfig::default()
+        },
+    );
+    let comp = shadow_scene(10.0, 80.0, 0.0);
+    let frame = |r: &mut Renderer| {
+        let f = r.render_frame(&comp, &RenderRequest::full()).unwrap();
+        let img = r.read_rgba8(&f, OutputAlpha::Straight).unwrap();
+        (f.stats.passes, img)
+    };
+    let (per_pixel_passes, per_pixel) = frame(&mut r);
+    let (map_passes, mapped) = frame(&mut r);
+    assert_eq!(map_passes, per_pixel_passes + 1, "the map is drawn");
+    let (cached_passes, cached) = frame(&mut r);
+    assert_eq!(cached_passes, per_pixel_passes, "then reused");
+    assert_eq!(cached.data, mapped.data);
+    let worst = per_pixel
+        .data
+        .iter()
+        .zip(&mapped.data)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap();
+    assert!(worst <= 24, "map vs per pixel: {worst}");
 }

@@ -140,6 +140,33 @@ fn snapping_reaches_inside_collapsed_precomps() {
     assert!(close3(p, [287.0, 103.0, 0.0]), "{p:?}");
 }
 
+#[test]
+fn collapsed_child_wireframe_follows_the_preference() {
+    let mut h = H::new();
+    let inner = path(&h.run("comp.create", json!({"width":640,"height":360}))["path"]);
+    h.run(
+        "layer.create",
+        json!({"comp":inner,"kind":"solid","size":[20,20],"position":[400,100]}),
+    );
+    let layer = path(
+        &h.run(
+            "layer.create",
+            json!({"comp":h.comp,"kind":"pre_comp","source":inner}),
+        )["path"],
+    );
+    h.select(&[&layer]);
+    for (collapse, show) in [(true, true), (true, false), (false, true)] {
+        h.run("layer.set_attr", json!({"layers":[layer],"attr":"collapse_transformation","value":{"type":"bool","value":collapse}}));
+        let mut p = bae_prefs::Preferences::default();
+        p.set("composition.show_bounding_box_precomp_layers", show);
+        h.resources
+            .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(p)));
+        h.frame(Vec::new(), Modifiers::NONE);
+        let corner = h.screen(390.0, 90.0);
+        assert_eq!(h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(path) if path.closed && path.fill == egui::Color32::TRANSPARENT && path.points.len() == 4 && path.points[0].distance(corner)<1.0)), collapse && show);
+    }
+}
+
 /// Right-clicking a keyframe square on a motion path opens AE's keyframe
 /// menu (and selects the keyframe), not the layer menu.
 #[test]

@@ -33,6 +33,7 @@ pub struct HotNumber<'a> {
     /// Accessibility name (the property, e.g. "Position X").
     label: &'a str,
     tint: Color32,
+    mixed: bool,
     /// Custom text for a value (a timecode …) and the parser of typed text.
     display: Option<&'a dyn Fn(f64) -> String>,
     parse: Option<ParseText<'a>>,
@@ -50,9 +51,16 @@ impl<'a> HotNumber<'a> {
             font: theme::body(),
             label: "",
             tint: color::ACCENT,
+            mixed: false,
             display: None,
             parse: None,
         }
+    }
+
+    /// Leave the field blank until the user chooses a common value.
+    pub fn mixed(mut self, mixed: bool) -> Self {
+        self.mixed = mixed;
+        self
     }
 
     /// Show values as `display` gives them (a timecode for a time) and read
@@ -180,7 +188,11 @@ impl Widget for HotNumber<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let id = ui.next_auto_id();
         let mut state: HotState = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        let text = self.format(*self.value);
+        let text = if self.mixed {
+            String::new()
+        } else {
+            self.format(*self.value)
+        };
         let height = ui.spacing().interact_size.y;
         register_hot(ui, id);
         // Tabbed into from the previous (or next) value.
@@ -303,7 +315,7 @@ impl Widget for HotNumber<'_> {
             } else if enter || tab.is_some() || resp.lost_focus() {
                 if let Some(v) = self.parse.map_or_else(|| eval(&buf), |p| p(&buf)) {
                     let v = v.clamp(*self.range.start(), *self.range.end());
-                    if v != *self.value {
+                    if v != *self.value || self.mixed {
                         *self.value = v;
                         resp.mark_changed();
                     }
@@ -326,7 +338,7 @@ impl Widget for HotNumber<'_> {
         let layout = |tint: Color32| {
             let mut job = LayoutJob::default();
             job.append(&text, 0.0, TextFormat::simple(self.font.clone(), tint));
-            if !self.suffix.is_empty() {
+            if !self.suffix.is_empty() && !self.mixed {
                 job.append(
                     self.suffix,
                     0.0,
@@ -340,7 +352,7 @@ impl Widget for HotNumber<'_> {
             .width
             .unwrap_or(0.0)
             .max(galley.size().x + 3.0)
-            .max(8.0);
+            .max(if self.mixed { 32.0 } else { 8.0 });
         let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
         let spoken = format!("{text}{}", self.suffix);
         resp = resp.labeled_value(egui::WidgetType::DragValue, self.label, &spoken);
@@ -365,7 +377,7 @@ impl Widget for HotNumber<'_> {
             state.carry = raw - applied;
             if applied != 0.0 {
                 let v = (*self.value + applied).clamp(*self.range.start(), *self.range.end());
-                if v != *self.value {
+                if v != *self.value || self.mixed {
                     *self.value = v;
                     resp.mark_changed();
                 }
@@ -657,9 +669,24 @@ pub fn dropdown(
     items: &[&str],
     width: f32,
 ) -> Response {
+    dropdown_with_source(ui, id_salt, selected, items, width, |_| None)
+}
+
+/// A dropdown whose selected value and popup rows can carry their data source.
+pub(crate) fn dropdown_with_source(
+    ui: &mut Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    selected: &mut usize,
+    items: &[&str],
+    width: f32,
+    source: impl Fn(usize) -> Option<&'static str>,
+) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 17.0), Sense::click());
     let current = items.get(*selected).copied().unwrap_or("");
     resp = resp.labeled_value(egui::WidgetType::ComboBox, current, current);
+    if let Some(class) = source(*selected) {
+        crate::a11y::value_source(&resp, class);
+    }
     let id = ui.id().with(id_salt);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
@@ -686,7 +713,11 @@ pub fn dropdown(
     let mut picked = None;
     egui::Popup::menu(&resp).id(id).width(width).show(|ui| {
         for (i, item) in items.iter().enumerate() {
-            if ui.selectable_label(i == *selected, *item).clicked() {
+            let response = ui.selectable_label(i == *selected, *item);
+            if let Some(class) = source(i) {
+                crate::a11y::value_source(&response, class);
+            }
+            if response.clicked() {
                 picked = Some(i);
             }
         }

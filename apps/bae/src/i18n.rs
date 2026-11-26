@@ -32,6 +32,10 @@ const ZH: &[(&str, &str)] = &[
     ("Workspace", "工作区"),
     ("Minimize", "最小化"),
     ("Settings...", "设置..."),
+    (
+        "The project template could not be opened. A blank project is created instead.",
+        "无法打开项目模板，已改为新建空白项目。",
+    ),
     ("App", "应用"),
     ("Full Screen", "全屏"),
     ("frame {ms} ms", "帧 {ms} 毫秒"),
@@ -73,6 +77,13 @@ const ZH: &[(&str, &str)] = &[
         "“{file}”是一个文件夹，但不是 BAE 项目。请换一个名字。",
     ),
     ("Could not open the project.", "无法打开项目。"),
+    ("RAM Available for BAE:", "BAE 可用内存："),
+    ("Memory Usage Details", "内存使用情况详细信息"),
+    ("Resident Memory:", "驻留内存："),
+    ("GPU Information", "GPU 信息"),
+    ("Driver:", "驱动程序："),
+    ("Maximum Texture Dimension:", "最大纹理尺寸："),
+    ("No active GPU device.", "当前没有可用的 GPU 设备。"),
     // AE 2026 zh_CN: RevertCancelAlert
     (
         "Revert the project to the last saved version? All changes will be lost.",

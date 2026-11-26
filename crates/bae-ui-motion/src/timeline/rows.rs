@@ -37,6 +37,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
+        last_visible: bool,
         switch_input: switches::SwitchInput,
         layers: &super::TimelineLayers,
         parent_items: &[&str],
@@ -162,14 +163,20 @@ impl TimelinePanel {
                     .filter(|c| cols.visible(*c))
                     .collect();
                 if let (Some(first), Some(last)) = (lead_cols.first(), lead_cols.last()) {
-                    let lead = ui.interact(
-                        Rect::from_min_max(
-                            pos2(l + cols.x(*first), rect.top()),
-                            pos2(l + cols.right(*last), rect.bottom()),
-                        ),
-                        rid("lead"),
-                        Sense::click(),
-                    );
+                    let lead = ui
+                        .interact(
+                            Rect::from_min_max(
+                                pos2(l + cols.x(*first), rect.top()),
+                                pos2(l + cols.right(*last), rect.bottom()),
+                            ),
+                            rid("lead"),
+                            Sense::click(),
+                        )
+                        .labeled_toggle(
+                            egui::WidgetType::SelectableLabel,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Label and Layer Number")]),
+                            layer_selected,
+                        );
                     if lead.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
@@ -267,10 +274,15 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    // AE: a double-click opens a pre-comp's comp, any other layer
-                    // in the Layer panel; Enter renames.
-                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) {
-                        crate::layer_panel::open(cx, session, layer);
+                    if resp.double_clicked() {
+                        crate::layer_panel::open_clicked(
+                            cx,
+                            session,
+                            layer,
+                            ui.input(|i| i.modifiers.alt),
+                            crate::tools::shared(cx.resources).current(),
+                            &mut self.eval,
+                        );
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {
@@ -369,10 +381,22 @@ impl TimelinePanel {
                         vec2(14.0, 14.0),
                     );
                     icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
-                    let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
-                        egui::WidgetType::Button,
-                        &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
-                    );
+                    let wresp = ui
+                        .interact(whip, rid("whip"), Sense::click_and_drag())
+                        .labeled(
+                            egui::WidgetType::Button,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
+                        );
+                    // Cmd/Ctrl-click: remove the parent (Alt too: the layer jumps).
+                    if wresp.clicked() && ui.input(|i| i.modifiers.command) {
+                        let layers = if layer_selected {
+                            session.lock().selected_layers.clone()
+                        } else {
+                            vec![layer.clone()]
+                        };
+                        let mods = ui.input(|i| i.modifiers);
+                        cx.invoke_with("layer.set_parent", parent_params(&layers, None, now, mods));
+                    }
                     if wresp.drag_started() {
                         let layers = if layer_selected {
                             session.lock().selected_layers.clone()
@@ -420,9 +444,15 @@ impl TimelinePanel {
                     if sel != before {
                         let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
                         if parent.as_ref() != Some(layer) {
+                            let mods = ui.input(|i| i.modifiers);
                             cx.invoke_with(
                                 "layer.set_parent",
-                                json!({"layers": [layer], "parent": parent, "time": now}),
+                                parent_params(
+                                    std::slice::from_ref(layer),
+                                    parent.as_ref(),
+                                    now,
+                                    mods,
+                                ),
                             );
                         }
                     }
@@ -512,8 +542,15 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
-                self.waveforms
-                    .draw(ui, stage, layer, axis, graph, color::TEXT);
+                self.waveforms.draw(
+                    ui,
+                    stage,
+                    layer,
+                    axis,
+                    graph,
+                    color::TEXT,
+                    self.display.rectified,
+                );
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
@@ -651,6 +688,7 @@ impl TimelinePanel {
                     layer,
                     &layer_ctx,
                     (*line, *lines),
+                    last_visible,
                 );
             }
         }
@@ -733,7 +771,7 @@ impl TimelinePanel {
                             json!({"keys": [KeyRef::new(path.clone(), attr, key_now)]}),
                         );
                     } else if let Some(v) =
-                        common::current_value(self.eval.get(cx.resources), stage, path, attr, now)
+                        common::current_value(self.eval.get(cx.stage), stage, path, attr, now)
                     {
                         cx.invoke_with(
                             "attr.set_at",
@@ -877,7 +915,7 @@ impl TimelinePanel {
             .as_ref()
             .and_then(|s| s.value_for(path, attr))
             .cloned()
-            .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
+            .or_else(|| common::current_value(self.eval.get(cx.stage), stage, path, attr, now));
         if attr == "text:path" {
             // Path Options > Path: a popup of the layer's masks, even when unset.
             let vr = Rect::from_min_max(
@@ -914,7 +952,10 @@ impl TimelinePanel {
                 _ => &[],
             };
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
-            let edit = if let bae_model::Value::Bool(on) = value {
+            let style_edit = crate::layer_styles::edit(&mut child, id, path, attr, &value);
+            let edit = if let Some(edit) = style_edit {
+                edit
+            } else if let bae_model::Value::Bool(on) = value {
                 // AE's timeline switches On/Off with hot text, not a checkbox.
                 let text = tr(if on { "On" } else { "Off" });
                 if widgets::link(&mut child, text)
@@ -938,8 +979,14 @@ impl TimelinePanel {
                 }
             } else if let bae_model::Value::Time(t) = value {
                 // Time Remap: the source time as hot timecode, a frame per point.
+                // The dragged value is kept here until the release, like the
+                // other hot numbers: another panel may drop the session's
+                // live value first (the viewer on pointer-up).
                 let rate = info.frame_rate;
-                let mut frames = rate.time_to_frame(t) as f64;
+                let scrub_key = id.with("time_scrub");
+                let mut frames = child
+                    .data(|d| d.get_temp::<f64>(scrub_key))
+                    .unwrap_or(rate.time_to_frame(t) as f64);
                 let display = |f: f64| widgets::timecode(f.round() as i64, rate.as_f64());
                 let parse = |s: &str| super::markers::parse_timecode(info, s).map(|f| f as f64);
                 let resp = child
@@ -958,10 +1005,14 @@ impl TimelinePanel {
                     })
                     .inner;
                 let to = bae_model::Value::Time(rate.frame_to_time(frames.round() as i64));
-                if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                if resp.drag_stopped() {
+                    child.data_mut(|d| d.remove::<f64>(scrub_key));
                     common::Edit::Commit(to)
-                } else if resp.dragged() && resp.changed() {
+                } else if resp.dragged() {
+                    child.data_mut(|d| d.insert_temp(scrub_key, frames));
                     common::Edit::Live(to)
+                } else if resp.changed() {
+                    common::Edit::Commit(to)
                 } else {
                     common::Edit::None
                 }
@@ -1020,6 +1071,7 @@ impl TimelinePanel {
         layer: &PrimPath,
         layer_ctx: &str,
         (line, lines): (usize, usize),
+        last_visible: bool,
     ) {
         let stage = cx.stage;
         let Some(expr) = query::attr_spec(stage, path, attr).and_then(|s| s.expression.clone())
@@ -1146,14 +1198,15 @@ impl TimelinePanel {
                     ));
             }
         }
-        if line + 1 < lines {
+        if line + 1 < lines && !last_visible {
             return;
         }
         let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
+        let top = rect.top() - line as f32 * ROW_H;
         let field = Rect::from_min_max(
-            pos2(axis.left + 4.0, rect.bottom() - lines as f32 * ROW_H + 1.0),
-            pos2(rect.right() - 4.0, rect.bottom() - 1.0),
+            pos2(axis.left + 4.0, top),
+            pos2(rect.right() - 4.0, top + lines as f32 * ROW_H),
         );
         let mut buf = match &self.expr_edit {
             Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
@@ -1315,4 +1368,22 @@ fn footage_frame_blending(stage: &Stage, layer: &PrimPath) -> Option<FrameBlendi
     } else {
         None
     }
+}
+
+/// `layer.set_parent` for a pick whip or Parent & Link choice with `mods`
+/// held (AE): Shift moves the layers to the parent, Alt lets them jump
+/// instead of staying where they are.
+pub(super) fn parent_params(
+    layers: &[PrimPath],
+    parent: Option<&PrimPath>,
+    now: Time,
+    mods: egui::Modifiers,
+) -> serde_json::Value {
+    json!({
+        "layers": layers,
+        "parent": parent,
+        "time": now,
+        "keep_transform": !mods.alt,
+        "move_to_parent": mods.shift && parent.is_some(),
+    })
 }

@@ -52,7 +52,7 @@ impl PathMode {
         let store = resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>();
         let prefs = store.map_or_else(
             || std::sync::Arc::new(bae_prefs::Preferences::default()),
-            |s| s.current(),
+            |s| s.display(),
         );
         match prefs.str(bae_prefs::keys::MOTION_PATH_MODE) {
             "no_motion_path" => PathMode::None,
@@ -387,7 +387,7 @@ pub(crate) fn frame(
         cursor: None,
     };
     // View Options: Motion Paths, Keyframes, Motion Path Tangents.
-    let shown = session.lock().layer_controls;
+    let shown = super::view_options::shown_controls(&session.lock());
     if mode == PathMode::None || !shown.motion_paths {
         state.drag = None;
         state.pressed = None;

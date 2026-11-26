@@ -3,6 +3,9 @@
 use crate::{PrimPath, Stage, Value};
 
 pub const PRIM: &str = "layer_styles";
+/// Imported Blend If thresholds, eight normalized source/destination black
+/// and white endpoints per channel (gray, red, green, blue).
+pub const SOURCE_BLEND_RANGES: u32 = 9;
 pub const RENDER_ID: &str = "bae.effects/layer-styles";
 
 pub struct Group {

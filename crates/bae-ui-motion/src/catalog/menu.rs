@@ -236,7 +236,7 @@ const FILE: &[Node] = &[
     SEP,
     it(131093, "Find", "motion.file.find", "", E, Done),
     SEP,
-    it(131095, "Add Footage to Comp", "motion.file.add_footage_to_comp", "", E, Todo),
+    it(131095, "Add Footage to Comp", "motion.file.add_footage_to_comp", "", E, Done),
     it(131096, "New Comp from Selection...", "motion.file.new_comp_from_selection", "", E, Todo),
     SEP,
     sub(
@@ -301,7 +301,7 @@ const FILE: &[Node] = &[
     sub(
         "Interpret Footage",
         &[
-            it(10420225, "Main...", "motion.file.interpret_footage_main", "", E, Todo),
+            it(10420225, "Main...", "motion.file.interpret_footage_main", "", E, Done),
             it(10420226, "Proxy...", "motion.file.interpret_footage_proxy", "", E, Later),
             SEP,
             it(10420228, "Remember Interpretation", "motion.file.remember_interpretation", "", E, Todo),
@@ -381,7 +381,7 @@ const EDIT: &[Node] = &[
             it(16646163, "Sandstone", "motion.edit.label", r#"{"label":15}"#, B, Done),
             it(16646164, "Dark Green", "motion.edit.label", r#"{"label":16}"#, B, Done),
             SEP,
-            it(16646166, "Edit Label Colors...", "motion.edit.edit_label_colors", "", D, Later),
+            it(16646166, "Edit Label Colors...", "motion.edit.edit_label_colors", "", D, Done),
         ],
     ),
     sub(
@@ -409,7 +409,7 @@ const EDIT: &[Node] = &[
         ],
     ),
     SEP,
-    it(196636, "Edit Original...", "motion.edit.edit_original", "", B, Later),
+    it(196636, "Edit Original...", "motion.edit.edit_original", "", B, Done),
     it(196637, "Edit in Adobe Audition", "motion.edit.edit_in_adobe_audition", "", B, Adobe),
     SEP,
     sub(
@@ -834,7 +834,7 @@ const LAYER: &[Node] = &[
             it(21954567, "Link Focus Distance to Layer", "motion.layer.link_focus_distance_to_layer", "", B, Later),
             it(21954568, "Set Focus Distance to Layer", "motion.layer.set_focus_distance_to_layer", "", B, Later),
             SEP,
-            it(21954570, "Camera Settings...", "motion.layer.camera_settings", "", E, Todo),
+            it(21954570, "Camera Settings...", "motion.layer.camera_settings", "", E, Done),
             it(21954571, "Reset 3D View", "motion.view.reset_3d_view", "", A, Later),
         ],
     ),
@@ -964,7 +964,7 @@ const ANIMATION: &[Node] = &[
     it(851984, "Remove All Text Animators", "motion.anim.remove_all_text_animators", "", A, Done),
     SEP,
     it(851986, "Add Expression", "motion.anim.add_expression", "", C, Todo),
-    it(851987, "Separate Dimensions", "motion.anim.separate_dimensions", "", B, Todo),
+    it(851987, "Separate Dimensions", "motion.anim.separate_dimensions", "", B, Done),
     it(851988, "Track Camera", "motion.anim.track_camera", "", B, Later),
     it(851989, "Warp Stabilizer VFX", "motion.anim.warp_stabilizer_vfx", "", B, Later),
     it(851990, "Track Motion", "motion.anim.track_motion", "", B, Done),
@@ -1041,9 +1041,9 @@ const VIEW: &[Node] = &[
     it(589846, "Snap to Grid", "motion.view.snap_to_grid", "", B, Todo),
     SEP,
     it(589848, "View Options...", "motion.view.view_options", "", E, Later),
-    it(589849, "Show Layer Controls", "motion.view.show_layer_controls", "", B, Todo),
+    it(589849, "Show Layer Controls", "motion.view.show_layer_controls", "", B, Done),
     SEP,
-    it(589851, "Camera Settings...", "motion.layer.camera_settings", "", E, Todo),
+    it(589851, "Camera Settings...", "motion.layer.camera_settings", "", E, Done),
     it(589852, "Reset 3D View", "motion.view.reset_3d_view", "", A, Later),
     it(589853, "Create Camera from 3D View", "motion.view.create_camera_from_3d_view", "", A, Later),
     sub(
@@ -1125,9 +1125,9 @@ const WINDOW: &[Node] = &[
     sub(
         "Assign Shortcut to Workspace",
         &[
-            it(12779521, "Shift+F10", "motion.window.assign_workspace_shortcut", r#"{"slot":0}"#, B, Todo),
-            it(12779522, "Shift+F11", "motion.window.assign_workspace_shortcut", r#"{"slot":1}"#, B, Todo),
-            it(12779523, "Shift+F12", "motion.window.assign_workspace_shortcut", r#"{"slot":2}"#, B, Todo),
+            it(12779521, "Shift+F10", "workspace.assign_shortcut", r#"{"slot":0}"#, B, Done),
+            it(12779522, "Shift+F11", "workspace.assign_shortcut", r#"{"slot":1}"#, B, Done),
+            it(12779523, "Shift+F12", "workspace.assign_shortcut", r#"{"slot":2}"#, B, Done),
         ],
     ),
     SEP,
@@ -1141,7 +1141,7 @@ const WINDOW: &[Node] = &[
     ),
     SEP,
     s(it(524296, "Lumetri Scopes", "window.panel", r#"{"id":"lumetri_scopes","toggle":true}"#, E, Later)),
-    s(it(524297, "Review with Frame.io", "window.panel", r#"{"id":"frame_io","toggle":true}"#, B, Adobe)),
+    s(it(524297, "Review with Frame.io", "window.panel", r#"{"id":"frame_io","toggle":true}"#, B, Done)),
     s(it(524298, "Info", "window.panel", r#"{"id":"info","toggle":true}"#, E, Todo)),
     s(it(524299, "Metadata", "window.panel", r#"{"id":"metadata","toggle":true}"#, E, Later)),
     s(it(524300, "Content-Aware Fill", "window.panel", r#"{"id":"content_aware_fill","toggle":true}"#, E, Later)),
@@ -1176,7 +1176,7 @@ const WINDOW: &[Node] = &[
     s(it(524329, "Project", "window.panel", r#"{"id":"project","toggle":true}"#, B, Done)),
     SEP,
     win(it(524331, "Create Nulls From Paths.jsx", "window.panel", r#"{"id":"create_nulls_from_paths","toggle":true}"#, B, Done)),
-    win(it(524338, "VR Comp Editor.jsx", "motion.window.script_panel", r#"{"script":"VR Comp Editor.jsx"}"#, B, Later)),
+    win(it(524338, "VR Comp Editor.jsx", "window.panel", r#"{"id":"vr_comp_editor","toggle":true}"#, B, Done)),
 ];
 
 /// Help.

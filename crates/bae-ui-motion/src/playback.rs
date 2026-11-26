@@ -29,6 +29,7 @@ struct SceneKey {
     revision: u64,
     path: PrimPath,
     resolution: u32,
+    scope_source: bool,
     sources: Option<u64>,
     effects: Option<u64>,
 }
@@ -45,6 +46,7 @@ impl SceneKey {
     fn same_view(&self, other: &Self) -> bool {
         self.path == other.path
             && self.resolution == other.resolution
+            && self.scope_source == other.scope_source
             && self.sources == other.sources
             && self.effects == other.effects
     }
@@ -58,12 +60,14 @@ struct Scene {
 }
 
 struct Slot {
+    channels: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
     rect: IRect,
     time: Time,
     errors: Vec<AttrError>,
     bytes: u64,
+    source: Option<bae_render::GpuImage>,
     /// The published texture (the Info panel and snapshots read it).
     texture: wgpu::Texture,
     /// Its target, handed to [`Spares`] when the frame is dropped.
@@ -277,6 +281,17 @@ impl PlaybackPreview {
         }
     }
 
+    pub(super) fn invalidate_source(&mut self, event: &bae_model::StageEvent) {
+        self.stop();
+        let mut state = self.shared.state.lock().unwrap();
+        if state.cache.dynamic {
+            state.cache.frames.clear();
+        } else {
+            state.cache.frames.invalidate(event);
+        }
+        state.cache.revision += 1;
+    }
+
     pub(super) fn stop(&mut self) {
         let mut state = self.shared.state.lock().unwrap();
         if state.demand.take().is_some() {
@@ -319,18 +334,26 @@ impl PlaybackPreview {
             revision: stage.revision(),
             path: path.clone(),
             resolution,
+            scope_source: crate::scopes::needs_working_frame(repaint),
             sources: sources.map(|s| s.0.generation()),
             effects: effects.map(|e| e.0.generation()),
         };
         let mut state = self.shared.state.lock().unwrap();
-        let budget_mib = resources
-            .get::<Arc<bae_prefs::PrefsStore>>()
-            .map_or(1024, |store| {
-                store.current().int(bae_prefs::keys::PREVIEW_CACHE_MIB)
-            });
-        state
-            .cache
-            .sync(stage, &key, (budget_mib.max(0) as u64) << 20);
+        let (budget_mib, reserved_gb) =
+            resources
+                .get::<Arc<bae_prefs::PrefsStore>>()
+                .map_or((1024, 0), |store| {
+                    let prefs = store.current();
+                    (
+                        prefs.int(bae_prefs::keys::PREVIEW_CACHE_MIB),
+                        prefs.int(bae_prefs::keys::RAM_RESERVED_GB),
+                    )
+                });
+        state.cache.sync(
+            stage,
+            &key,
+            cache_budget(budget_mib, reserved_gb, bae_platform::memory::total_bytes()),
+        );
         let frame_key = key.frame(time);
         let replaced = state.demand.as_ref().is_none_or(|d| d.scene.key != key);
         if replaced {
@@ -425,7 +448,15 @@ impl PlaybackPreview {
         Some((shown.image()?, shown.time, &shown.errors))
     }
 
+    pub(super) fn scope_source(&self) -> Option<bae_render::GpuImage> {
+        self.shown.as_ref()?.source.clone()
+    }
+
     /// The texture and rect of the frame [`Self::poll`] returned last.
+    pub(super) fn shown_channels(&self) -> Option<Arc<crate::gpu_preview::ChannelFrame>> {
+        self.shown.as_ref()?.channels.clone()
+    }
+
     pub(super) fn shown_texture(&self) -> Option<(wgpu::Texture, IRect)> {
         let shown = self.shown.as_ref()?;
         Some((shown.texture.clone(), shown.rect))
@@ -716,23 +747,33 @@ fn render_worker(
                 spare,
             )
             .map_err(|e| e.to_string())
-            .and_then(|(target, rect, temporal)| {
+            .and_then(|(target, source, temporal)| {
                 let mut spares_now = spares.lock().unwrap();
                 spares_now.size = Some(target.size());
                 // Not an interactive thread: it waits for the warm-up instead.
-                let Some(rect) = rect else {
+                let Some(source) = source else {
                     spares_now.give(target);
                     return Err("incomplete frame".to_owned());
                 };
                 drop(spares_now);
+                let rect = source.rect;
+                let source = job.scene.key.scope_source.then_some(source);
                 let texture = target.view().texture().clone();
+                let channels = engine.channels.clone();
+                let pick_bytes = channels
+                    .as_ref()
+                    .map_or(0, |c| c.layers.values().map(|l| l.pick_bytes()).sum());
                 let slot = Arc::new(Slot {
+                    channels,
                     registry: registry.clone(),
                     id: registry.create("playback frame"),
                     rect,
                     time: job.time,
                     errors: job.errors,
-                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
+                        + pick_bytes
+                        + source.as_ref().map_or(0, bae_render::GpuImage::byte_size),
+                    source,
                     texture,
                     target: Some(target),
                     spares: spares.clone(),
@@ -793,8 +834,26 @@ fn render_worker(
     }
 }
 
+/// The preview cache's byte budget: the GPU Preview Cache setting, never more
+/// than the RAM left after Memory & CPU ▸ RAM Reserved for Other Applications.
+fn cache_budget(cache_mib: i64, reserved_gb: i64, installed: Option<u64>) -> u64 {
+    let budget = (cache_mib.max(0) as u64) << 20;
+    installed.map_or(budget, |total| {
+        budget.min(total.saturating_sub((reserved_gb.max(0) as u64) << 30))
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_cache_leaves_the_reserved_ram_alone() {
+        let gib = 1u64 << 30;
+        assert_eq!(super::cache_budget(1024, 6, Some(16 * gib)), 1 << 30);
+        assert_eq!(super::cache_budget(32768, 6, Some(16 * gib)), 10 * gib);
+        assert_eq!(super::cache_budget(512, 64, Some(16 * gib)), 0);
+        assert_eq!(super::cache_budget(512, 6, None), 512 << 20);
+    }
+
     use super::*;
 
     #[test]

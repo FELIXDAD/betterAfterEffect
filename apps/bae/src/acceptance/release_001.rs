@@ -132,6 +132,17 @@ fn egui_modifiers(c: &bae_ui::keymap::Chord) -> Modifiers {
     }
 }
 
+/// The panel every AE shortcut of `action` is bound in, when they all are in
+/// the same one (`None`: application-wide).
+fn panel_only_scope(action: &str) -> Option<&'static str> {
+    let mut scopes = bae_ui_motion::catalog::keys()
+        .iter()
+        .filter(|k| k.action == action)
+        .map(|k| k.scope());
+    let first = scopes.next()??;
+    scopes.all(|s| s == Some(first)).then_some(first)
+}
+
 #[test]
 fn every_implemented_ae_shortcut_runs_its_command_once() {
     let rows = catalog_rows();
@@ -144,7 +155,14 @@ fn every_implemented_ae_shortcut_runs_its_command_once() {
         // Panels the harness can focus; the others are covered by their own tests.
         // Viewer actions work in the viewer (AE binds them to its viewer
         // contexts only); the rest with the Timeline focused.
-        let target = match row.scope.as_str() {
+        // A menu row whose AE shortcut works in one panel only (File ▸ New ▸
+        // New Folder: the Project panel, where View ▸ Split with New Locked
+        // Viewer has the same chord in the viewer) takes that panel's scope.
+        let scope = match row.scope.as_str() {
+            "" => panel_only_scope(&row.action).unwrap_or(""),
+            s => s,
+        };
+        let target = match scope {
             _ if row.action.starts_with("viewer.") => VIEWER,
             "" | "timeline" => TIMELINE,
             "composition" => VIEWER,
@@ -261,17 +279,20 @@ fn every_enabled_menu_item_does_something() {
         }
     }
     println!("enabled menu items run: {ran} of {}", items.len());
-    // 0.0.1 has no effects: the Effect menu is greyed as a whole.
+    // The layer has no effects: the Effect menu greys what needs one (Last
+    // Effect, Remove All). Effect Controls opens the panel and Manage
+    // Effects… its window, enabled in AE as well.
     let effect = bae_ui::tr("Effect");
     for item in items
         .iter()
         .filter(|i| i.path.first().is_some_and(|p| p == "Effect" || p == effect))
     {
-        // Effect ▸ Effect Controls opens the panel (enabled in AE as well).
-        if item.enabled && item.invocation.id != "window.panel" {
+        let always = ["window.panel", "motion.effect.manage_effects"];
+        if item.enabled && !always.contains(&item.invocation.id.as_str()) {
             problems.push(format!(
-                "Effect menu item enabled: {}",
-                item.path.join(" ▸ ")
+                "Effect menu item enabled: {} ({})",
+                item.path.join(" ▸ "),
+                item.invocation.id
             ));
         }
     }
@@ -647,13 +668,20 @@ const SETTINGS_PAGES: &[&str] = &[
 
 fn new_ui_in_one_language(zh: bool) {
     crate::i18n::init_from_env();
-    let (mut h, extra_ok) = super::i18n_retest::gui_with_status();
+    let mut h = super::i18n_retest::gui_with_status();
     comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
     let solid = h.state().layers()[1].clone();
     let mut problems = Vec::new();
     let mut scan = |h: &mut Ui, step: &str| {
         settle(h);
-        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok) {
+        // AE's zh_CN Preferences uses these exact labels on these two pages
+        // (docs/reference/ae/ui/preferences-dialog.json).
+        let expected_zh_label = match step {
+            "settings project" => Some("New Project"),
+            "settings scripting_expressions" => Some("px"),
+            _ => None,
+        };
+        for p in super::i18n_retest::wrong_language(h, zh, expected_zh_label) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -826,7 +854,8 @@ fn new_layer_properties_survive_save_as_bae_and_baez() {
             continue;
         }
         settle(&mut h);
-        if dialog_open(&h) {
+        // A dialog, or Preferences (Edit ▸ Label ▸ Edit Label Colors…).
+        if dialog_open(&h) || h.state().workspace.modal_open(h.state().app.resources()) {
             key(&mut h, Modifiers::NONE, Key::Escape);
         }
         ran.push(format!("{} ▸ {}", item.path.join(" ▸ "), item.title));

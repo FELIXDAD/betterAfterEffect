@@ -44,13 +44,12 @@ fn is_cjk(c: char) -> bool {
 
 /// Latin words (two letters or more) of `text` that a Chinese UI should not
 /// show; command ids (`viewer.fit`) are identifiers and pass.
-fn latin_words(text: &str, extra_ok: &[String]) -> Vec<String> {
+fn latin_words(text: &str) -> Vec<String> {
     // Whole English phrases AE's official Chinese shows as they are
     // (docs/reference/ae/ui/preferences-dialog.json: the Project page's group
-    // titles, titleZh "Project Options" / "Solids Folder"; Audio "System Default -
-    // <系统默认输出设备>").
+    // titles, titleZh "Project Options" / "Solids Folder").
     let mut text = text.to_owned();
-    for phrase in ["Project Options", "Solids Folder", "System Default"] {
+    for phrase in ["Project Options", "Solids Folder"] {
         text = text.replace(phrase, " ");
     }
     // Data, not words: colour codes (#2D2D2D) and numbers with a unit (50mm, 8bpc).
@@ -68,57 +67,202 @@ fn latin_words(text: &str, extra_ok: &[String]) -> Vec<String> {
         .flat_map(|w| w.split(['.', '_']))
         .filter(|w| w.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2)
         // The suite's one list of what AE's own Chinese UI keeps in Latin letters.
-        .filter(|w| !super::i18n_scan::ALLOWED.contains(w) && !extra_ok.iter().any(|o| o == w))
+        .filter(|w| !super::i18n_scan::ALLOWED.contains(w))
         .filter(|w| !KNOWN_ISSUES.iter().any(|(k, _)| k == w))
         .map(str::to_owned)
         .collect()
 }
 
-/// Labels and values of the accessibility tree; values of text fields are the
-/// user's and are left out.
-fn a11y_texts(h: &Ui) -> Vec<String> {
-    fn walk(n: AccessKitNode<'_>, out: &mut Vec<String>) {
-        let typed = matches!(
-            n.role(),
-            Role::TextInput | Role::MultilineTextInput | Role::SearchInput
-        );
-        out.extend(n.label());
-        if !typed {
-            out.extend(n.value());
-            for c in n.children() {
-                walk(c, out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(h.root().accesskit_node(), &mut out);
-    out
+/// The text drawn by a verbatim-value control and the UI-owned part to audit.
+struct DisplayValue {
+    bounds: Rect,
+    shown: String,
+    chrome: String,
 }
 
-/// Painted and accessible texts of the last frame that break the language:
-/// Latin words in Chinese, Chinese characters in English.
-pub(super) fn wrong_language(h: &Ui, zh: bool, extra_ok: &[String]) -> Vec<String> {
-    let mut texts = painted_texts(h);
-    texts.extend(a11y_texts(h));
+fn collect_texts(
+    n: AccessKitNode<'_>,
+    ppp: f32,
+    texts: &mut Vec<String>,
+    values: &mut Vec<DisplayValue>,
+) {
+    use bae_ui::a11y::{GPU_STATUS, SYSTEM_OUTPUT, VERBATIM_VALUE};
+
+    let label = n.label();
+    let value = n.value();
+    let typed = matches!(
+        n.role(),
+        Role::TextInput | Role::MultilineTextInput | Role::SearchInput
+    );
+    let shown = value.as_deref().or(label.as_deref()).unwrap_or_default();
+    let chrome = match n.class_name() {
+        Some(VERBATIM_VALUE) => Some(""),
+        // AE keeps "System Default" in Chinese on this control. Other captions
+        // remain subject to the scan, even if concatenated with a device name.
+        Some(SYSTEM_OUTPUT) => shown.split_once(" - ").map(|(caption, _)| {
+            if caption == "System Default" {
+                ""
+            } else {
+                caption
+            }
+        }),
+        Some(GPU_STATUS) => shown.rsplit_once(" (").map(|(_, details)| details),
+        _ => None,
+    };
+    if let Some(chrome) = chrome {
+        if let Some(caption) = label.as_deref().filter(|caption| *caption != shown) {
+            texts.push(caption.to_owned());
+        }
+        texts.push(chrome.to_owned());
+        if let Some(r) = n.bounding_box() {
+            values.push(DisplayValue {
+                bounds: Rect::from_min_max(
+                    egui::pos2(r.x0 as f32 / ppp, r.y0 as f32 / ppp),
+                    egui::pos2(r.x1 as f32 / ppp, r.y1 as f32 / ppp),
+                ),
+                shown: shown.to_owned(),
+                chrome: chrome.to_owned(),
+            });
+        }
+        // AccessKit may repeat the same value in a child text run.
+        return;
+    }
+    texts.extend(label);
+    if !typed {
+        texts.extend(value);
+        for child in n.children() {
+            collect_texts(child, ppp, texts, values);
+        }
+    }
+}
+
+fn a11y_texts(h: &Ui) -> Vec<String> {
+    let mut texts = Vec::new();
+    collect_texts(
+        h.root().accesskit_node(),
+        h.ctx.pixels_per_point(),
+        &mut texts,
+        &mut Vec::new(),
+    );
+    texts
+}
+
+/// Audit each painted occurrence before deduplicating: another widget may draw
+/// exactly the same string as a device, font or path and still need translating.
+pub(super) fn wrong_language(
+    h: &Harness<'_, impl Sized>,
+    zh: bool,
+    expected_zh_label: Option<&str>,
+) -> Vec<String> {
+    let mut texts = Vec::new();
+    let mut values = Vec::new();
+    collect_texts(
+        h.root().accesskit_node(),
+        h.ctx.pixels_per_point(),
+        &mut texts,
+        &mut values,
+    );
+    visit_painted_text(h, |clip, shape| {
+        let text = shape.galley.text();
+        let origin = shape.visual_bounding_rect().intersect(clip).left_center();
+        let chrome = values
+            .iter()
+            .find(|v| v.shown == text && v.bounds.contains(origin));
+        texts.push(chrome.map_or(text, |v| &v.chrome).to_owned());
+    });
     texts.sort();
     texts.dedup();
+    if zh && let Some(label) = expected_zh_label {
+        let index = texts
+            .iter()
+            .position(|text| text == label)
+            .unwrap_or_else(|| panic!("missing expected Chinese UI label {label:?}"));
+        texts.remove(index);
+    }
     texts
         .into_iter()
-        // File paths (the render queue's output) are the file system's.
-        .filter(|t| !(t.starts_with('/') || t.starts_with('~') || t.get(1..3) == Some(":\\")))
         // The language picker (Preferences > Appearance) names each language in
         // itself and the setting in both, to be found whatever the UI shows.
         .filter(|t| !matches!(t.as_str(), "简体中文" | "English"))
         .filter(|t| !t.starts_with("Language / 语言") && !t.starts_with("语言 / Language"))
         .filter_map(|t| {
             if zh {
-                let words = latin_words(&t, extra_ok);
+                let words = latin_words(&t);
                 (!words.is_empty()).then(|| format!("“{t}”: {}", words.join(", ")))
             } else {
                 (t.chars().any(is_cjk)).then(|| format!("“{t}”"))
             }
         })
         .collect()
+}
+
+/// Runners may have no audio device. Keep a real popup and real path field in
+/// the scan, including when an unrelated label happens to contain the same data.
+#[test]
+fn external_values_are_scoped_to_the_controls_that_display_them() {
+    use bae_ui::settings::SettingsDialog;
+
+    let name = "Studio Monitor 台";
+    let path = "/Client Files/镜头 One";
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set("disk.disk_cache_folder", path);
+    let mut settings = SettingsDialog::default();
+    settings.open(Some("audio"), &prefs);
+    settings.set_audio_output(
+        Some((name, 2, 48_000)),
+        None,
+        name,
+        vec![("test-output".to_owned(), name.to_owned())].into(),
+    );
+    let mut h = Harness::builder()
+        .with_pixels_per_point(2.0)
+        .with_size(egui::vec2(1200.0, 850.0))
+        .build_ui_state(
+            |ui, (settings, show_labels): &mut (SettingsDialog, bool)| {
+                if bae_ui::testing::first_pass_installs_fonts(ui.ctx()) {
+                    return;
+                }
+                if *show_labels {
+                    ui.label(name);
+                    ui.label(path);
+                }
+                settings.show(ui.ctx());
+            },
+            (settings, false),
+        );
+    h.run();
+    h.query_all_by_role(Role::ComboBox)
+        .find(|node| {
+            node.accesskit_node()
+                .label()
+                .is_some_and(|s| s.ends_with(name))
+        })
+        .expect("default output selector")
+        .click();
+    h.run();
+    assert!(h.query_by_role_and_label(Role::Button, name).is_some());
+    for zh in [false, true] {
+        let leaks = wrong_language(&h, zh, None);
+        assert!(!leaks.iter().any(|p| p.contains(name)), "{leaks:?}");
+    }
+
+    h.state_mut().0.open(Some("disk"), &prefs);
+    h.run_steps(2);
+    assert!(h.query_all_by_value(path).next().is_some());
+    for show_labels in [false, true] {
+        h.state_mut().1 = show_labels;
+        h.run_steps(2);
+        for zh in [false, true] {
+            let leaks = wrong_language(&h, zh, None);
+            for text in [name, path] {
+                assert_eq!(
+                    leaks.iter().any(|p| p.contains(text)),
+                    show_labels,
+                    "{leaks:?}"
+                );
+            }
+        }
+    }
 }
 
 /// Opens every closed timeline row: layer twirls (`图层 1“名称” · 展开`) and
@@ -231,21 +375,13 @@ fn contents(stage: &Stage, layer: &PrimPath) -> Vec<(String, String)> {
 }
 
 /// A GUI with the status bar showing the GPU like the window does.
-pub(super) fn gui_with_status() -> (Ui, Vec<String>) {
+pub(super) fn gui_with_status() -> Ui {
     let mut g = Gui::new();
-    let mut extra_ok = Vec::new();
     if let Some(gpu) = gpu() {
-        // The adapter's own name ("Apple M4") is a proper noun.
-        extra_ok.extend(
-            gpu.adapter_info()
-                .name
-                .split(|c: char| !c.is_ascii_alphanumeric())
-                .map(str::to_owned),
-        );
         g.set_gpu_status(crate::ui::gpu_summary(&gpu));
     }
     // Tall, so that the expanded timeline rows of two shape layers fit.
-    (gui_sized(g, egui::vec2(1600.0, 2600.0)), extra_ok)
+    gui_sized(g, egui::vec2(1600.0, 2600.0))
 }
 
 /// In the active (second, empty) comp: a rectangle and an ellipse layer, numbered
@@ -296,10 +432,10 @@ fn chinese_ui_names_new_items_in_chinese() {
         return;
     }
     crate::i18n::init_from_env();
-    let (mut h, extra_ok) = gui_with_status();
+    let mut h = gui_with_status();
     let mut problems = Vec::new();
     let check = |h: &Ui, step: &str, problems: &mut Vec<String>| {
-        for p in wrong_language(h, true, &extra_ok) {
+        for p in wrong_language(h, true, None) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -459,10 +595,10 @@ fn english_ui_names_new_items_in_english() {
         return;
     }
     crate::i18n::init_from_env();
-    let (mut h, extra_ok) = gui_with_status();
+    let mut h = gui_with_status();
     let mut problems = Vec::new();
     let check = |h: &Ui, step: &str, problems: &mut Vec<String>| {
-        for p in wrong_language(h, false, &extra_ok) {
+        for p in wrong_language(h, false, None) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -687,7 +823,7 @@ fn click_labelled(h: &mut Ui, role: Role, label: &str) {
 /// Chinese (AE zh_CN), px / px/sec in English.
 fn pixel_units(zh: bool) {
     crate::i18n::init_from_env();
-    let (mut h, extra_ok) = gui_with_status();
+    let mut h = gui_with_status();
     comp_with(&mut h, &["motion.layer.new.text", "shape:rect"]);
     let [rect, text]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
     // Position keyframes at 0 s and 1 s on the rectangle.
@@ -720,7 +856,7 @@ fn pixel_units(zh: bool) {
         painted_texts(&h)
     );
     problems.extend(
-        wrong_language(&h, zh, &extra_ok)
+        wrong_language(&h, zh, None)
             .into_iter()
             .map(|p| format!("speed graph: {p}")),
     );
@@ -743,7 +879,7 @@ fn pixel_units(zh: bool) {
         "still the speed graph"
     );
     problems.extend(
-        wrong_language(&h, zh, &extra_ok)
+        wrong_language(&h, zh, None)
             .into_iter()
             .map(|p| format!("value graph: {p}")),
     );
@@ -769,7 +905,7 @@ fn pixel_units(zh: bool) {
         painted_texts(&h)
     );
     problems.extend(
-        wrong_language(&h, zh, &extra_ok)
+        wrong_language(&h, zh, None)
             .into_iter()
             .map(|p| format!("character: {p}")),
     );

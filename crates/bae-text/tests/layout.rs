@@ -292,4 +292,73 @@ fn mixed_styles_share_a_line_and_paragraphs_have_independent_margins() {
         40.
     );
     assert_eq!(l.lines[1].x, 20.);
+    let c = &l.chars[4];
+    assert_eq!(
+        l.cursor_at(c.origin.x + 0.1 * c.advance, l.lines[1].baseline),
+        Some(4)
+    );
+}
+
+#[test]
+fn vertical_columns_keep_punctuation_and_combined_digits_together() {
+    let mut fonts = FontSystem::new();
+    let Some(font) = latin(&mut fonts) else {
+        return;
+    };
+    let mut d = doc("中日、文12A", &font);
+    d.line_orientation = bae_model::LineOrientation::Vertical;
+    d.box_size = Some([300., 101.]);
+    d.edit_styles(4..6, |s| {
+        s.baseline_direction = bae_model::BaselineDirection::TateChuYoko;
+        s.fill_color = [1., 0., 0., 1.];
+    });
+    let l = layout_text(&mut fonts, &d);
+    assert!(l.lines.len() >= 3);
+    assert!(l.lines.windows(2).all(|p| p[0].baseline > p[1].baseline));
+    assert_eq!(
+        l.chars[1].line, l.chars[2].line,
+        "closing punctuation stays with previous glyph"
+    );
+    let digits = &l.chars[4..6];
+    assert!(
+        digits
+            .iter()
+            .all(|c| c.combined_em.is_some() && c.paint.fill == Some([1., 0., 0., 1.]))
+    );
+    assert!(digits[1].origin.x > digits[0].origin.x);
+    assert_eq!(digits[1].origin.y, digits[0].origin.y);
+    let basis = |index| {
+        l.runs
+            .iter()
+            .find(|r| r.glyphs.iter().any(|g| g.char_index == index))
+            .unwrap()
+            .basis
+    };
+    assert_eq!(basis(0), kurbo::Affine::IDENTITY, "upright CJK");
+    assert_eq!(
+        basis(6).as_coeffs(),
+        [0., 1., -1., 0., 0., 0.],
+        "clockwise Latin"
+    );
+    assert!(l.bounds(false).unwrap().height() > 0.);
+}
+
+#[test]
+fn vertical_point_tracking_leading_shift_and_roman_alignment() {
+    let mut fonts = FontSystem::new();
+    let Some(font) = latin(&mut fonts) else {
+        return;
+    };
+    let mut d = doc("AB\nC", &font);
+    d.line_orientation = bae_model::LineOrientation::Vertical;
+    d.style.tracking = 100.;
+    d.style.leading = Some(70.);
+    d.style.baseline_shift = 5.;
+    d.style.baseline_direction = bae_model::BaselineDirection::UprightRoman;
+    let l = layout_text(&mut fonts, &d);
+    assert_eq!(l.lines.len(), 2);
+    assert_eq!(l.chars[0].origin, kurbo::Point::new(5., 0.));
+    assert_eq!(l.chars[1].origin.y, 55.);
+    assert_eq!(l.chars[3].origin.x, -65.);
+    assert!(l.runs.iter().all(|r| r.basis == kurbo::Affine::IDENTITY));
 }

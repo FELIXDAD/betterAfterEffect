@@ -214,7 +214,6 @@ fn map_rain(p: Params<'_>) -> Translation<'_> {
         (7, Value::Float(spread)),
         (9, Value::Float(p.f(6) * 100.)),
         (11, Value::Float(0.)),
-        (18, Value::Int(2)),
         (15, Value::Int(1)),
         (18, Value::Int(2)),
     ])
@@ -223,7 +222,8 @@ fn map_snow(p: Params<'_>) -> Translation<'_> {
     Translation::replace([
         (1, Value::Float(p.f(1))),
         (2, Value::Float(p.f(5))),
-        (4, Value::Float(if p.b(6) { 5000. } else { 0. })),
+        // Source Depth (0-1) scales the Scene Depth, it is not an on/off.
+        (4, Value::Float(5000. * p.f(6))),
         (5, Value::Float(250. * p.f(2))),
         (11, Value::Float(p.f(3) * 10.)),
         (13, Value::Float(p.f(4))),

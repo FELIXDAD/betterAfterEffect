@@ -19,6 +19,8 @@ pub(crate) struct View {
     pub origin: Pos2,
     /// Points per comp pixel.
     pub scale: f32,
+    /// Horizontal stretch from the source pixel aspect ratio.
+    pub aspect: f32,
     /// Path point and handle size in points (Preferences > Appearance).
     pub point: f32,
     /// The 3D view's camera and the comp size: 3D layers are seen through it
@@ -38,14 +40,14 @@ impl View {
 
     pub fn to_screen(self, p: DVec2) -> Pos2 {
         pos2(
-            self.origin.x + p.x as f32 * self.scale,
+            self.origin.x + p.x as f32 * self.scale * self.aspect,
             self.origin.y + p.y as f32 * self.scale,
         )
     }
 
     pub fn to_comp(self, p: Pos2) -> DVec2 {
         DVec2::new(
-            f64::from((p.x - self.origin.x) / self.scale),
+            f64::from((p.x - self.origin.x) / (self.scale * self.aspect)),
             f64::from((p.y - self.origin.y) / self.scale),
         )
     }
@@ -319,6 +321,11 @@ fn shape_items(items: &[EvaluatedPrim], m: &DMat4, opacity: f64) -> (Vec<Poly>, 
     (paths, draws)
 }
 
+/// The paths of shape contents, in their space.
+pub(crate) fn shape_paths(items: &[EvaluatedPrim]) -> Vec<Poly> {
+    shape_items(items, &DMat4::IDENTITY, 1.0).0
+}
+
 /// Draws of a shape layer's contents in layer space, front first.
 pub(crate) fn shape_draws(layer: &EvaluatedLayer) -> Vec<Draw> {
     shape_items(&layer.contents, &DMat4::IDENTITY, 1.0).1
@@ -355,7 +362,21 @@ pub(crate) fn layer_bounds(layer: &EvaluatedLayer) -> Option<(DVec2, DVec2)> {
             (min.x <= max.x).then_some((min, max))
         }
         LayerKind::Text => layer.text.as_ref().map(|t| {
-            let w = t.style.font_size * 0.55 * t.text.chars().count().max(1) as f64;
+            if let Some(rect) = bae_text::layout::box_rect(t) {
+                return (DVec2::new(rect.x0, rect.y0), DVec2::new(rect.x1, rect.y1));
+            }
+            let w = if t.runs.is_empty() {
+                t.style.font_size * 0.55 * t.text.chars().count().max(1) as f64
+            } else {
+                t.text
+                    .chars()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        let style = t.style_at(i);
+                        style.font_size * (0.55 + style.tracking / 1000.)
+                    })
+                    .sum()
+            };
             let x0 = match t.paragraph.justification.as_str() {
                 "center" => -w / 2.0,
                 "right" => -w,
@@ -528,12 +549,18 @@ pub(crate) fn paint_comp(
                 }
             }
             LayerKind::Text => {
-                if let Some(t) = &layer.text {
-                    let size = (t.style.font_size * xf.scale() * view_scale) as f32;
-                    let color = color32(t.style.fill_color, alpha);
-                    if size >= 1.0 && color.a() > 0 {
-                        shapes.push(text_shape(painter, t, size, color, xf, &screen, font));
-                    }
+                if let Some(t) = &layer.text
+                    && alpha > 0.
+                {
+                    shapes.push(text_shape(
+                        painter,
+                        t,
+                        (xf.scale() * view_scale) as f32,
+                        alpha,
+                        xf,
+                        &screen,
+                        font,
+                    ));
                 }
             }
             _ => {}
@@ -541,16 +568,59 @@ pub(crate) fn paint_comp(
     }
 }
 
+/// TextEdit and the lightweight viewer use the same character advances for hit testing.
+pub(crate) fn text_job(
+    doc: &bae_model::TextDocument,
+    scale: f32,
+    alpha: f64,
+    font: &dyn Fn(f32) -> FontId,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let mut chars = doc.text.char_indices().peekable();
+    let mut start = 0;
+    for (style, end) in std::iter::once(&doc.style)
+        .chain(doc.runs.iter().map(|r| &r.style))
+        .zip(
+            doc.runs
+                .iter()
+                .map(|r| r.start)
+                .chain(std::iter::once(usize::MAX)),
+        )
+    {
+        let from = chars.peek().map_or(doc.text.len(), |(i, _)| *i);
+        let n = chars.by_ref().take(end.saturating_sub(start)).count();
+        let to = chars.peek().map_or(doc.text.len(), |(i, _)| *i);
+        let size = style.font_size as f32 * scale;
+        let (factor, valign) = match style.baseline_option {
+            bae_model::BaselineOption::Normal => (1., egui::Align::BOTTOM),
+            bae_model::BaselineOption::Superscript => (0.6, egui::Align::TOP),
+            bae_model::BaselineOption::Subscript => (0.6, egui::Align::BOTTOM),
+        };
+        let mut format = egui::TextFormat::simple(
+            font((size * factor).max(1.)),
+            color32(style.fill_color, alpha),
+        );
+        format.italics = style.faux_italic;
+        format.valign = valign;
+        format.extra_letter_spacing = style.tracking as f32 / 1000. * size;
+        format.line_height = style.leading.map(|v| v as f32 * scale);
+        job.append(&doc.text[from..to], 0., format);
+        start += n;
+    }
+    job
+}
+
 fn text_shape(
     painter: &egui::Painter,
     t: &bae_model::TextDocument,
-    size: f32,
-    color: Color32,
+    scale: f32,
+    alpha: f64,
     xf: Affine,
     screen: &dyn Fn(DVec2) -> Pos2,
     font: &dyn Fn(f32) -> FontId,
 ) -> Shape {
-    let galley = painter.layout_no_wrap(t.text.clone(), font(size), color);
+    let size = t.style.font_size as f32 * scale;
+    let galley = painter.layout_job(text_job(t, scale, alpha, font));
     let ascent = galley
         .rows
         .first()
@@ -566,7 +636,7 @@ fn text_shape(
     let (sin, cos) = angle.sin_cos();
     let off = egui::vec2(dx * cos + ascent * sin, dx * sin - ascent * cos);
     let pos = screen(DVec2::ZERO) + off;
-    Shape::Text(TextShape::new(pos, galley, color).with_angle(angle))
+    Shape::Text(TextShape::new(pos, galley, Color32::WHITE).with_angle(angle))
 }
 
 /// Screen-space quad of a layer's bounds (for selection outlines).
@@ -575,15 +645,21 @@ pub(crate) fn bounds_quad(
     view: &View,
     outer: &Affine,
 ) -> Option<[Pos2; 4]> {
+    projected_bounds(layer, view, outer, is_3d(layer))
+}
+
+/// Project a nested layer with all ancestor transforms and the containing camera.
+pub(crate) fn projected_bounds(
+    layer: &EvaluatedLayer,
+    view: &View,
+    outer: &Affine,
+    three_d: bool,
+) -> Option<[Pos2; 4]> {
     let (min, max) = layer_bounds(layer)?;
     let c = [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)];
-    if is_3d(layer) {
-        let [a, b, c, d] =
-            c.map(|p| view.project(layer.world_matrix.transform_point3(p.extend(0.0)), true));
-        return Some([a?, b?, c?, d?]);
-    }
     let xf = outer.then(&layer.world_matrix);
-    Some(c.map(|p| view.to_screen(xf.apply(p))))
+    let [a, b, c, d] = c.map(|p| view.project(xf.m.transform_point3(p.extend(0.0)), three_d));
+    Some([a?, b?, c?, d?])
 }
 
 /// A 3D layer the camera sees (cameras and lights have no picture).

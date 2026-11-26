@@ -15,10 +15,13 @@ fn gpu() -> Option<Arc<GpuContext>> {
     bae_gpu::testing::shared_context()
 }
 
-fn source() -> Option<TextSource> {
+fn source(vertical: bool) -> Option<TextSource> {
     let mut fonts = FontSystem::new();
     let doc = {
         let mut doc = TextDocument::new("Hi 中文", "Arial", 48.0);
+        if vertical {
+            doc.line_orientation = bae_model::LineOrientation::Vertical;
+        }
         doc.style.fill_color = [1., 0., 0., 1.];
         doc.style.stroke_color = Some([1.; 4]);
         doc.style.stroke_width = 4.;
@@ -55,7 +58,7 @@ fn premultiplied(
 #[test]
 fn cpu_backend_draws_text() {
     let Some(gpu) = gpu() else { return };
-    let Some(source) = source() else { return };
+    let Some(source) = source(false) else { return };
     let cpu = VelloRenderer::with_backend(&gpu, VectorBackend::Cpu).unwrap();
     let px = premultiplied(&gpu, &cpu, &source);
     let opaque = px.iter().filter(|p| p[3] > 0.99).count();
@@ -77,27 +80,31 @@ fn cpu_text_matches_vello_on_hardware_adapters() {
         eprintln!("skipping the Vello comparison on a software adapter");
         return;
     }
-    let Some(source) = source() else { return };
-    let cpu = premultiplied(
-        &gpu,
-        &VelloRenderer::with_backend(&gpu, VectorBackend::Cpu).unwrap(),
-        &source,
-    );
-    let vello = premultiplied(
-        &gpu,
-        &VelloRenderer::with_backend(&gpu, VectorBackend::Gpu).unwrap(),
-        &source,
-    );
-    let coverage = |px: &[[f32; 4]]| px.iter().map(|p| p[3]).sum::<f32>();
-    let (c, v) = (coverage(&cpu), coverage(&vello));
-    assert!((c - v).abs() / v < 0.03, "coverage cpu {c} vs vello {v}");
-    let mean = cpu
-        .iter()
-        .zip(&vello)
-        .map(|(a, b)| (0..4).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max))
-        .sum::<f32>()
-        / cpu.len() as f32;
-    assert!(mean < 0.03, "mean difference {mean}");
+    for vertical in [false, true] {
+        let Some(source) = source(vertical) else {
+            return;
+        };
+        let cpu = premultiplied(
+            &gpu,
+            &VelloRenderer::with_backend(&gpu, VectorBackend::Cpu).unwrap(),
+            &source,
+        );
+        let vello = premultiplied(
+            &gpu,
+            &VelloRenderer::with_backend(&gpu, VectorBackend::Gpu).unwrap(),
+            &source,
+        );
+        let coverage = |px: &[[f32; 4]]| px.iter().map(|p| p[3]).sum::<f32>();
+        let (c, v) = (coverage(&cpu), coverage(&vello));
+        assert!((c - v).abs() / v < 0.03, "coverage cpu {c} vs vello {v}");
+        let mean = cpu
+            .iter()
+            .zip(&vello)
+            .map(|(a, b)| (0..4).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max))
+            .sum::<f32>()
+            / cpu.len() as f32;
+        assert!(mean < 0.03, "mean difference {mean}");
+    }
 }
 
 #[test]

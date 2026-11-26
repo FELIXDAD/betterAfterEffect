@@ -2,41 +2,6 @@
 
 use super::*;
 
-impl TimelinePanel {
-    pub(super) fn open_precomp(
-        &mut self,
-        cx: &PanelContext<'_>,
-        session: &SharedSession,
-        layer: &PrimPath,
-    ) -> bool {
-        let Some(source) = query::precomp_source(cx.stage, layer) else {
-            return false;
-        };
-        let mut s = session.lock();
-        if crate::prefs::current(cx.resources)
-            .bool("composition.synchronize_time_all_related_items")
-            && let Some(info) = query::comp_info(cx.stage, &source)
-        {
-            let now = s.active_time();
-            let source_time = if bool_attr(cx.stage, layer, "time_remap_enabled") {
-                self.eval
-                    .get(cx.resources)
-                    .evaluate_attribute(cx.stage, layer, "time_remap", now)
-                    .ok()
-                    .and_then(|v| v.as_time().or_else(|| v.as_f64().map(Time::from_seconds)))
-            } else {
-                None
-            };
-            s.set_time(
-                &info,
-                source_time.unwrap_or_else(|| query::layer_timing(cx.stage, layer).layer_time(now)),
-            );
-        }
-        s.open_comp(&source);
-        true
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct MiniFlow {
     parents: Vec<PrimPath>,

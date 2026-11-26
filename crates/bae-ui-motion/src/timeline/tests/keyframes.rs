@@ -554,3 +554,154 @@ fn sequence_layers_dialog_and_cti_snap() {
     h.click(&mut tl, p, Modifiers::NONE);
     assert_ne!(h.session().lock().time(&comp), Time(SEC));
 }
+
+/// AE's timeline keys: M / MM / F reveal masks under their groups, Alt+Shift+M
+/// keys the mask path, Shift+J / K step through the selected property's
+/// keyframes, Ctrl+Alt+A and Shift+F2 select and deselect what is shown.
+#[test]
+fn mask_reveals_mask_keys_and_keyframe_selection_shortcuts() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let solid = h.layer.clone();
+    let mask = path(
+        &h.run(
+            "mask.create",
+            json!({"layer": solid, "kind": "rect", "position": [10.0, 10.0], "size": [20.0, 20.0]}),
+        )["mask"],
+    );
+    h.keys(ROT, &[(1.0, float(0.0)), (2.0, float(90.0))]);
+    h.keys(POS, &[(3.0, vec3(0.0, 0.0))]);
+    let mut tl = h.bars();
+    let reveal = |what: &str, add: bool| {
+        Invocation::with_params(ids::REVEAL, json!({"what": what, "add": add}))
+    };
+    let shown = |h: &H, tl: &mut TimelinePanel| {
+        let s = h.session();
+        let s = s.lock();
+        tl.prop_rows(&h.stage, &h.comp, &s)
+    };
+    // M: the mask's path under Masks > Mask 1; MM: all four mask properties.
+    h.action(&mut tl, reveal("mask_path", false));
+    assert_eq!(shown(&h, &mut tl), vec![(mask.clone(), "path".to_owned())]);
+    {
+        let s = h.session();
+        let s = s.lock();
+        let groups = tl.group_rows(&h.stage, &h.comp, &s);
+        assert!(groups.iter().any(|g| g.ends_with("#masks")), "{groups:?}");
+        assert!(
+            groups.iter().any(|g| g.ends_with(mask.as_str())),
+            "{groups:?}"
+        );
+    }
+    h.action(&mut tl, reveal("mask_path", false));
+    assert_eq!(shown(&h, &mut tl).len(), 4, "MM");
+    // F: the feather.
+    h.action(&mut tl, reveal("mask_feather", false));
+    assert_eq!(
+        shown(&h, &mut tl),
+        vec![(mask.clone(), "feather".to_owned())]
+    );
+    // Alt+Shift+M: a Mask Path keyframe now.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::TOGGLE_KEY, json!({"attr": "mask_path"})),
+    );
+    h.apply(&r);
+    assert!(
+        query::attr_spec(&h.stage, &mask, "path").is_some_and(|s| s.is_animated()),
+        "mask path keyed"
+    );
+    // Shift+K on the selected Rotation: 1 s, 2 s, then stays (Position's 3 s key
+    // is not selected).
+    h.session().lock().selected_props = vec![(solid.clone(), ROT.to_owned())];
+    let now = |h: &H| h.session().lock().time(&h.comp);
+    for want in [1.0, 2.0, 2.0] {
+        h.action(&mut tl, Invocation::new(ids::NEXT_SELECTED_KEY));
+        assert_eq!(now(&h), Time::from_seconds(want));
+    }
+    h.action(&mut tl, Invocation::new(ids::PREV_SELECTED_KEY));
+    assert_eq!(now(&h), Time::from_seconds(1.0));
+    // U, then Ctrl+Alt+A: every shown keyframe; Shift+F2 deselects them.
+    h.session().lock().reveal.clear();
+    h.action(&mut tl, reveal("animated", false));
+    h.action(&mut tl, Invocation::new(ids::SELECT_VISIBLE_KEYS));
+    let selected = h.session().lock().selected_keys.len();
+    assert!(selected >= 3, "{selected}");
+    h.action(&mut tl, Invocation::new(ids::DESELECT_KEYS));
+    assert!(h.session().lock().selected_keys.is_empty());
+    assert!(h.session().lock().selected_props.is_empty());
+}
+
+/// Ctrl+Down / Ctrl+Shift+Up select through the stack, numpad 3 picks layer 3,
+/// Alt+PageDown nudges layers, Alt+Shift+Right nudges keyframes 10 frames,
+/// numpad + rotates, Ctrl+Alt+numpad − lowers the opacity (AE).
+#[test]
+fn layer_selection_and_nudge_shortcuts() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    h.keys(ROT, &[(1.0, float(0.0)), (2.0, float(90.0))]);
+    let b = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    let c = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    // Stack: c, b, solid.
+    let mut tl = h.bars();
+    let run = |h: &mut H, tl: &mut TimelinePanel, id: &str, params: Json| {
+        let r = h.action(tl, Invocation::with_params(id, params));
+        h.apply(&r);
+    };
+    let selected = |h: &H| h.session().lock().selected_layers.clone();
+    h.session().lock().selected_layers = vec![c.clone()];
+    run(
+        &mut h,
+        &mut tl,
+        ids::SELECT_NEXT_LAYER,
+        json!({"add": false}),
+    );
+    assert_eq!(selected(&h), vec![b.clone()]);
+    run(
+        &mut h,
+        &mut tl,
+        ids::SELECT_PREV_LAYER,
+        json!({"add": true}),
+    );
+    assert_eq!(selected(&h), vec![b.clone(), c.clone()]);
+    run(&mut h, &mut tl, ids::SELECT_LAYER_N, json!({"index": 3}));
+    assert_eq!(selected(&h), vec![solid.clone()]);
+    run(
+        &mut h,
+        &mut tl,
+        ids::SELECT_LAYER_N,
+        json!({"index": 1, "toggle": true}),
+    );
+    assert_eq!(selected(&h), vec![solid.clone(), c.clone()]);
+    // Alt+PageDown: one frame later.
+    h.session().lock().selected_layers = vec![b.clone()];
+    run(&mut h, &mut tl, ids::NUDGE_TIME, json!({"frames": 1}));
+    assert_eq!(query::layer_timing(&h.stage, &b).start_time, Time(SEC / 30));
+    // Alt+Shift+Right on the 1 s key: 10 frames later, still selected.
+    h.session().lock().selected_keys = vec![h.key(ROT, 1.0)];
+    run(&mut h, &mut tl, ids::NUDGE_KEYS, json!({"frames": 10}));
+    let moved = Time::from_seconds(1.0) + Time(10 * SEC / 30);
+    assert!(h.spec(ROT).keyframes.contains_key(&moved));
+    assert_eq!(h.session().lock().selected_keys[0].time, moved);
+    // Numpad +: rotation +1° at the CTI (a key, Rotation is animated);
+    // Ctrl+Alt+numpad −: opacity 99 %.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    run(&mut h, &mut tl, ids::NUDGE_ROTATION, json!({"delta": 1}));
+    assert_eq!(
+        h.spec(ROT)
+            .keyframes
+            .get(&Time::ZERO)
+            .map(|k| k.value.clone()),
+        Some(Value::Float(1.0))
+    );
+    run(&mut h, &mut tl, ids::NUDGE_OPACITY, json!({"delta": -1}));
+    assert_eq!(
+        h.stage
+            .prim(&solid)
+            .and_then(|v| query::static_value(&v, "transform:opacity")),
+        Some(Value::Float(99.0))
+    );
+}

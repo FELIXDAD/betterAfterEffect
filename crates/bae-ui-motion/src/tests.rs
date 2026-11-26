@@ -196,6 +196,66 @@ fn pointer(events: &mut Vec<Event>, pos: Pos2, pressed: Option<bool>) {
 }
 
 #[test]
+fn preview_observes_edits_without_a_shell_history_log() {
+    let mut h = Harness::new();
+    let mut changes = crate::common::StageChanges::default();
+    assert!(changes.sync(&h.stage, |_| panic!("new evaluator already has no plans")));
+    assert!(!changes.sync(&h.stage, |_| panic!("steady frame invalidated")));
+    let comp = h.run("comp.create", json!({"name": "Main"}));
+    let mut edits = Vec::new();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    h.stage.undo(&h.author).unwrap();
+    h.stage.redo(&h.author).unwrap();
+    changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
+    assert_eq!(
+        edits,
+        [
+            bae_model::EventOrigin::Local,
+            bae_model::EventOrigin::Undo,
+            bae_model::EventOrigin::Redo
+        ]
+    );
+    // An inactive panel can miss the entire retained history.
+    for i in 0..65 {
+        h.run(
+            "attr.set",
+            json!({"path":comp["path"],"attr":"name","value":Value::String(i.to_string())}),
+        );
+    }
+    let mut missed = false;
+    changes.sync(&h.stage, |event| missed = event.is_none());
+    assert!(missed);
+    let mut reset = false;
+    changes.sync(&Stage::new(), |event| reset = event.is_none());
+    assert!(reset);
+}
+
+#[test]
+fn preview_follows_a_solid_color_change() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    let mut cache = crate::common::EvalCache::default();
+    let color = |h: &Harness, cache: &mut crate::common::EvalCache| {
+        let ec = cache
+            .get(&h.stage)
+            .evaluate_comp(&h.stage, &comp, Time::ZERO)
+            .unwrap();
+        let layer = ec.layers.iter().find(|l| l.path == solid).unwrap();
+        match &layer.source {
+            bae_anim::LayerSource::Asset { info, .. } => info.solid_color,
+            _ => None,
+        }
+    };
+    assert_eq!(color(&h, &mut cache), Some([1.0, 0.0, 0.0, 1.0]));
+    // Solid Settings writes only the solid item, not the layer or comp.
+    h.run(
+        "solid.set_settings",
+        json!({"target": solid, "color": [0.0, 0.0, 1.0, 1.0]}),
+    );
+    assert_eq!(color(&h, &mut cache), Some([0.0, 0.0, 1.0, 1.0]));
+}
+
+#[test]
 fn module_registers_panels_shortcuts_and_commands() {
     let mut b = AppBuilder::new();
     b.add_module(bae_ui::UiModule)
@@ -532,6 +592,7 @@ fn gpu_preview_renders_a_value_drag_in_the_background() {
     preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
     let own = shown(&registry, &preview);
     h.session().lock().scrub = Some(crate::session::Scrub {
+        auto_key: false,
         path: solid.clone(),
         attr: "transform:opacity".into(),
         value: Value::Float(0.0),
@@ -581,6 +642,7 @@ fn value_drag_reads_samples_on_the_live_thread() {
     let mut eval = bae_anim::Evaluator::new();
     eval.set_image_samples(Some(preview.samples().clone()));
     h.session().lock().scrub = Some(crate::session::Scrub {
+        auto_key: false,
         path: solid.clone(),
         attr: "transform:opacity".into(),
         value: Value::Float(50.0),
@@ -761,11 +823,35 @@ fn catalog_lines() -> Vec<String> {
                     sort_run(&mut level, &mut run);
                     level.push(format!("{prefix} > {} ▸", sub.title));
                     let mut inner = Vec::new();
-                    walk(
-                        &format!("{prefix} > {}", sub.title),
-                        sub.children,
-                        &mut inner,
-                    );
+                    if sub.title == "Layer Styles" {
+                        let path = format!("{prefix} > {}", sub.title);
+                        // Both captured menu bars have an empty dynamic submenu.
+                        // The layer context-menu capture supplies its populated order.
+                        for title in [
+                            "Convert to Editable Styles",
+                            "Show All",
+                            "Remove All",
+                            "---",
+                            "Blending Options",
+                            "Drop Shadow",
+                            "Inner Shadow",
+                            "Outer Glow",
+                            "Inner Glow",
+                            "Bevel and Emboss",
+                            "Satin",
+                            "Color Overlay",
+                            "Gradient Overlay",
+                            "Stroke",
+                        ] {
+                            inner.push(format!("{path} > {title}"));
+                        }
+                    } else {
+                        walk(
+                            &format!("{prefix} > {}", sub.title),
+                            sub.children,
+                            &mut inner,
+                        );
+                    }
                     level.extend(inner);
                 }
                 Node::Effects => {
@@ -2435,7 +2521,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.comp.set_work_area_to_selection".into()]
+            vec!["motion.window.close_all".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2469,7 +2555,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.comp.set_work_area_to_selection")
+            .filter(|(_, a, _)| a == "motion.window.close_all")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2477,7 +2563,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Alt+B").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+W").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -3219,6 +3305,20 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
         bae_motion::paint::strokes_of(&h.stage, &effects[0]).len(),
         1
     );
+    // The Timeline shows Paint ▸ Brush 1 ▸ Path, Stroke Options, Transform.
+    let label = |n: &crate::props::Node| match n {
+        crate::props::Node::Group {
+            label, children, ..
+        } => (label.clone(), children.clone()),
+        crate::props::Node::Prop { label, .. } => (label.clone(), Vec::new()),
+    };
+    let fx = crate::props::effect_nodes(&h.stage, &solid);
+    let (_, rows) = label(&fx[0]);
+    let (brush, parts) = label(rows.last().unwrap());
+    assert_eq!(brush, "Brush 1");
+    let names: Vec<String> = parts.iter().map(|n| label(n).0).collect();
+    assert_eq!(names, ["Path", "Stroke Options", "Transform: Brush 1"]);
+    assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
 /// #599: the Project panel starts renaming the item another panel asks for.
@@ -3295,4 +3395,54 @@ fn new_folder_and_open_layer() {
     h.session().lock().selected_layers = vec![solid.clone()];
     h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
     assert_eq!(h.session().lock().layer_panel, Some(solid));
+}
+
+/// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label
+/// ▸ Edit Label Colors… and View ▸ Show Layer Controls.
+#[test]
+fn add_footage_separate_dimensions_and_layer_controls() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    // The comp item itself can't nest; another comp becomes a pre-comp layer.
+    let other = PrimPath::new(
+        h.run("comp.create", json!({"name": "Other"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().open_comp(&comp);
+    h.session().lock().selected_items = vec![other.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::ADD_FOOTAGE_TO_COMP));
+    assert_eq!(r.invocations[0].id, "layer.create");
+    assert_eq!(r.invocations[0].params["source"], json!(other));
+
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::SEPARATE_DIMENSIONS));
+    assert_eq!(r.invocations[0].id, "transform.separate_dimensions");
+    assert_eq!(r.invocations[0].params["separated"], true);
+    h.apply(r);
+    assert!(crate::actions::all_separated(
+        &h.stage,
+        std::slice::from_ref(&solid)
+    ));
+    let r = h.action(&mut viewer, Invocation::new(ids::SEPARATE_DIMENSIONS));
+    assert_eq!(r.invocations[0].params["separated"], false, "a toggle");
+
+    let r = h.action(&mut viewer, Invocation::new(ids::EDIT_LABEL_COLORS));
+    assert_eq!(r.invocations[0].id, bae_ui::settings::ACTION);
+    assert_eq!(r.invocations[0].params["page"], "labels");
+
+    let shown =
+        |h: &Harness| crate::viewer::view_options::shown_controls(&h.session().lock()).handles;
+    assert!(shown(&h));
+    // View ▸ Show Layer Controls off (the tools handler flips the option).
+    h.session().lock().view_options.layer_controls = false;
+    assert!(!shown(&h));
+    assert!(!crate::viewer::guides::checked(
+        &h.resources,
+        "motion.view.show_layer_controls"
+    ));
 }
