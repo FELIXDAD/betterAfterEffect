@@ -18,6 +18,7 @@
 //! (`motion.layer.blending_mode {"mode": "multiply"}`).
 
 mod blob;
+pub mod mnemonics;
 // The source tables are compiled into tests only; the app reads them from the
 // compressed `catalog.bin` that `build.rs` generates from them (see `blob`).
 #[cfg(test)]
@@ -83,7 +84,6 @@ pub fn mac_keys() -> &'static [(&'static str, &'static str, &'static str)] {
 pub const SAME_IN_CHINESE: &[&str] = &[
     "Adobe Dynamic Link",
     "Maxon Cinema 4D Exporter...",
-    "3D...",
     "Shift+F10",
     "Shift+F11",
     "Shift+F12",
@@ -97,11 +97,11 @@ pub const SAME_IN_CHINESE: &[&str] = &[
     "HDTV (Rec. 709)",
     "SDTV NTSC",
     "SDTV PAL",
-    "Kodak 5218 to Kodak 2383",
     "Boris FX Mocha",
     "Cinema 4D",
     "Vanishing Point (.vpe)...",
     "Track in Boris FX Mocha",
+    "Paste Mocha Mask",
 ];
 
 impl Key {
@@ -453,4 +453,25 @@ pub fn ae_bindings(keys: &[Key], live: &dyn Fn(&Key) -> bool) -> Vec<bae_ui::Bin
         }
     }
     out
+}
+
+/// AE's Windows mnemonic of the item with AE command id `ae` (Alt+letter).
+pub fn item_mnemonic(ae: u32) -> Option<char> {
+    let i = mnemonics::ITEMS
+        .binary_search_by_key(&ae, |(id, _)| *id)
+        .ok()?;
+    Some(mnemonics::ITEMS[i].1)
+}
+
+/// AE's Windows mnemonic of the menu or submenu titled `en` (looked up by its
+/// Chinese title, whatever the UI language).
+pub fn menu_mnemonic(en: &str) -> Option<char> {
+    let zh = bae_ui::i18n::translation(en)
+        .or_else(|| menu_zh().iter().find(|(e, _)| *e == en).map(|(_, z)| *z))
+        .unwrap_or(en);
+    let zh = zh.trim_end_matches("...").trim_end_matches('…');
+    mnemonics::MENUS
+        .iter()
+        .find(|(t, _)| *t == zh)
+        .map(|(_, c)| *c)
 }

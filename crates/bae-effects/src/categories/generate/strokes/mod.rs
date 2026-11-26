@@ -1,5 +1,7 @@
 //! Path and time based generators. Geometry is in layer pixels.
+mod contour;
 mod paint;
+mod paint_strokes;
 mod scribble;
 mod stroke;
 mod vegas;
@@ -14,7 +16,10 @@ use glam::DVec2;
 
 use crate::{Builtin, EffectTarget, TargetEffect, catalog::DefBuilder, params::Params};
 
-pub(crate) use self::{scribble::scribble, stroke::stroke, vegas::vegas, write_on::write_on};
+pub(crate) use self::{
+    paint_strokes::paint_effect, scribble::scribble, stroke::stroke, vegas::vegas,
+    write_on::write_on,
+};
 
 const STYLE: &[&str] = &[
     "On Original Image",
@@ -35,6 +40,7 @@ pub(crate) fn options_zh(effect: &str, id: u32) -> Option<&'static [&'static str
 
 #[derive(Clone, Copy)]
 enum Generator {
+    Paint,
     Stroke,
     WriteOn,
     Scribble,
@@ -135,10 +141,17 @@ impl TargetEffect for PaintEffect {
         }
         let v = Params::new(&self.def, p);
         let paint = match self.kind {
+            Generator::Paint => {
+                let clear = paint_strokes::on_transparent(v);
+                return paint_strokes::render(ctx, p, clear, input, roi);
+            }
             Generator::Stroke => stroke::paint(v),
             Generator::WriteOn => write_on::paint(v, input),
             Generator::Scribble => scribble::paint(v, input),
-            Generator::Vegas => vegas::paint(ctx, v, input)?,
+            Generator::Vegas if v.popup(52) == 1 => {
+                return vegas::render_contours(ctx, v, input, roi);
+            }
+            Generator::Vegas => vegas::paint(v),
         };
         paint.render(ctx, p, input, roi)
     }
@@ -287,5 +300,6 @@ pub(crate) fn prewarm(
 ) -> Result<(), RenderError> {
     paint::kernel(rt, format)?;
     vegas::contour_kernel(rt)?;
+    contour::prewarm(rt, format)?;
     Ok(())
 }

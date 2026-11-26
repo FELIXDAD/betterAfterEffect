@@ -105,6 +105,7 @@ impl Command for ImportItems {
     type Params = ImportParams;
     type Output = ImportOutput;
     const ID: &'static str = "item.import";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Import";
     const DESCRIPTION: &'static str = "Import files as footage items (AE File > Import > File, Cmd/Ctrl+I; files dropped on the Project panel). Pass each file's path and the asset attributes from probing it (kind, width, height, frame_rate, duration, pixel_aspect, alpha_mode, has_video, has_audio, sequence:first_frame, sequence:pattern); `folder` keeps a dropped folder's structure. One undo step.";
 

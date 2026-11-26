@@ -74,35 +74,8 @@ fn coverage(mark: Mark, point: vec2f) -> f32 {
     if (u.flags & 3u) <= 1u {
         return brush_coverage(rel, radius, hardness) * mark.dynamics.x;
     }
-    let delta = mark.points.zw - mark.points.xy;
-    let t = dot(rel, delta) / max(dot(delta, delta), 1e-9);
-    let h = clamp(t, 0.0, 1.0);
-    let dist = length(rel - h * delta);
-    let outside = mix(radius + 0.1, 0.6 * radius + 0.85, hardness);
-    let feather = max(1.0, mix(radius * 0.8, 1.0, hardness));
-    let alpha = clamp((outside - dist) / feather, 0.0, 1.0);
-    if alpha <= 0.0 { return 0.0; }
-    // Blur the opacity envelope along the contour as well as across it.
-    // Only extrapolate the first and last pieces of a dash.
-    let before = mark.dynamics.x <= 0.00001;
-    let after = mark.dynamics.y >= 0.99999;
-    let s = clamp(t, select(0.0, t, before && t < 0.0), select(1.0, t, after && t > 1.0));
-    let along = mix(mark.dynamics.x, mark.dynamics.y, s);
-    let stride = mix(radius, 0.8, hardness) / (4.0 * mark.dynamics.w);
-    var envelope = 0.0;
-    for (var tap = -4; tap <= 4; tap++) {
-        let q = along + f32(tap) * stride;
-        if q >= 0.0 && q <= 1.0 {
-            let m = u.gradient.w;
-            let opacity = select(
-                mix(u.gradient.y, u.gradient.z, (q - m) / (1.0 - m)),
-                mix(u.gradient.x, u.gradient.y, q / m),
-                q <= m,
-            );
-            envelope += opacity * f32(5 - abs(tap));
-        }
-    }
-    return alpha * envelope * 0.04;
+    return dash_coverage(point, mark.points.xy, mark.points.zw, radius, hardness,
+                         mark.dynamics.xy, mark.dynamics.w, u.gradient);
 }
 
 @compute @workgroup_size(8, 8)
@@ -140,6 +113,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         case 1u: { result = paint + base * (1.0 - paint.a); }
         case 3u: { result = base * paint.a; }
         case 4u: { result = base + paint * (1.0 - base.a); }
+        // The Paint effect's Eraser.
+        case 5u: { result = base * (1.0 - paint.a); }
         default: { result = paint; }
     }
     if (u.flags & 0x80000000u) == 0u {
