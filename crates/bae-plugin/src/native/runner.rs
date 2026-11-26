@@ -298,8 +298,22 @@ impl Runner {
 struct ClientState {
     runner: Option<Runner>,
     shm: Option<Shm>,
-    crashes: Vec<Instant>,
+}
+
+#[derive(Default)]
+struct CrashHistory {
+    recent: Vec<Instant>,
     disabled: bool,
+}
+
+impl CrashHistory {
+    fn record(&mut self, now: Instant) -> bool {
+        self.recent
+            .retain(|t| now.duration_since(*t) < CRASH_WINDOW);
+        self.recent.push(now);
+        self.disabled |= self.recent.len() >= MAX_CRASHES;
+        self.disabled
+    }
 }
 
 /// A native library served by a runner process.
@@ -310,6 +324,9 @@ pub struct RunnerClient {
     plugin_dir: PathBuf,
     abi: u32,
     state: Mutex<ClientState>,
+    // The second process serves overlapping calls only for CONCURRENT effects.
+    concurrent: Option<(Vec<bool>, Box<Mutex<ClientState>>)>,
+    crashes: Mutex<CrashHistory>,
 }
 
 impl std::fmt::Debug for RunnerClient {
@@ -329,19 +346,58 @@ impl RunnerClient {
         plugin_dir: &Path,
         abi: u32,
     ) -> Result<(RunnerClient, LibraryInfo), CallError> {
-        let client = RunnerClient {
+        let mut client = RunnerClient {
             command,
             library: library.to_owned(),
             plugin_id: plugin_id.to_owned(),
             plugin_dir: plugin_dir.to_owned(),
             abi,
-            state: Mutex::new(ClientState::default()),
+            state: Mutex::default(),
+            concurrent: None,
+            crashes: Mutex::default(),
         };
         let info = {
             let mut state = client.state.lock();
             client.spawn(&mut state)?
         };
+        let concurrent: Vec<_> = info
+            .effects
+            .iter()
+            .map(|e| e.threading == bae_plugin_sdk::abi::BAE_THREADING_CONCURRENT)
+            .collect();
+        if concurrent.contains(&true)
+            && std::thread::available_parallelism().is_ok_and(|n| n.get() > 1)
+        {
+            let mut lane = ClientState::default();
+            match client.spawn(&mut lane).and_then(|exports| {
+                if exports == info {
+                    Ok(())
+                } else {
+                    Err(CallError::Failed("runner exports differ".into()))
+                }
+            }) {
+                Ok(()) => client.concurrent = Some((concurrent, Box::new(Mutex::new(lane)))),
+                Err(error) => {
+                    if let Some(runner) = lane.runner.take() {
+                        runner.kill();
+                    }
+                    tracing::warn!(
+                        plugin = plugin_id,
+                        %error, "additional concurrent runner unavailable"
+                    );
+                }
+            }
+        }
         Ok((client, info))
+    }
+
+    fn lane(&self, effect: u32) -> parking_lot::MutexGuard<'_, ClientState> {
+        if let Some((effects, secondary)) = &self.concurrent
+            && effects.get(effect as usize) == Some(&true)
+        {
+            return self.state.try_lock().unwrap_or_else(|| secondary.lock());
+        }
+        self.state.lock()
     }
 
     /// Spawns the runner and loads the library; returns what it exported.
@@ -477,15 +533,9 @@ impl RunnerClient {
                 if let Some(r) = state.runner.take() {
                     r.kill();
                 }
-                let now = Instant::now();
-                state
-                    .crashes
-                    .retain(|t| now.duration_since(*t) < CRASH_WINDOW);
-                state.crashes.push(now);
-                state.disabled = state.crashes.len() >= MAX_CRASHES;
                 Err(CallError::Crashed {
                     message,
-                    disabled: state.disabled,
+                    disabled: self.crashes.lock().record(Instant::now()),
                 })
             }
         }
@@ -498,7 +548,7 @@ impl RunnerClient {
         request: &Request,
         timeout: Duration,
     ) -> Result<Reply, CallError> {
-        if state.disabled {
+        if self.crashes.lock().disabled {
             return Err(CallError::Disabled);
         }
         if state.runner.is_none() {
@@ -509,7 +559,7 @@ impl RunnerClient {
 
     /// `pre_render` in the runner.
     pub fn pre_render(&self, frame: &FrameRequest) -> Result<PreRenderOut, CallError> {
-        let mut state = self.state.lock();
+        let mut state = self.lane(frame.effect);
         match self.call(
             &mut state,
             &Request::PreRender(frame.clone()),
@@ -521,23 +571,24 @@ impl RunnerClient {
         }
     }
 
-    /// One frame in the runner: `input` covers `frame.input`, `output` covers
-    /// `frame.request` (see [`Library::render`]).
-    pub fn render(
+    /// Fills the mapped input and consumes the mapped output before the segment is reused.
+    pub fn render<R>(
         &self,
         frame: &FrameRequest,
-        input: &[u8],
-        output: &mut [u8],
-    ) -> Result<RenderOut, CallError> {
-        let mut state = self.state.lock();
-        if state.disabled {
+        write_input: impl FnOnce(&mut [u8]),
+        read_output: impl FnOnce(RenderOut, &[u8]) -> R,
+    ) -> Result<R, CallError> {
+        let mut state = self.lane(frame.effect);
+        if self.crashes.lock().disabled {
             return Err(CallError::Disabled);
         }
         if state.runner.is_none() {
             self.spawn(&mut state)?;
         }
-        let output_offset = input.len().next_multiple_of(pixels::ROW_ALIGN);
-        let len = output_offset + output.len();
+        let input_len = pixels::image_len(frame.format, rect(frame.input));
+        let output_offset = input_len;
+        let output_len = pixels::image_len(frame.format, rect(frame.request));
+        let len = (output_offset + output_len).max(1);
         if state.shm.as_ref().is_none_or(|s| s.map.len() < len) {
             // Grow with headroom so small size changes do not remap.
             let shm = Shm::create(len + len / 4)
@@ -549,7 +600,7 @@ impl RunnerClient {
         }
         let mapped = state.runner.as_ref().is_some_and(|r| r.shm_mapped);
         let shm = state.shm.as_mut().expect("created above");
-        shm.map[..input.len()].copy_from_slice(input);
+        write_input(&mut shm.map[..input_len]);
         let spec = (!mapped).then(|| shm.spec());
         let request = Request::Render {
             frame: frame.clone(),
@@ -561,8 +612,10 @@ impl RunnerClient {
             Reply::Rendered(out) => {
                 state.runner.as_mut().expect("runner replied").shm_mapped = true;
                 let shm = state.shm.as_ref().expect("created above");
-                output.copy_from_slice(&shm.map[output_offset..output_offset + output.len()]);
-                Ok(out)
+                Ok(read_output(
+                    out,
+                    &shm.map[output_offset..output_offset + output_len],
+                ))
             }
             Reply::Failed { status, message } => Err(CallError::Status { status, message }),
             other => Err(CallError::Failed(format!("unexpected reply {other:?}"))),
@@ -575,10 +628,9 @@ impl RunnerClient {
     }
 }
 
-impl Drop for RunnerClient {
+impl Drop for ClientState {
     fn drop(&mut self) {
-        let state = self.state.get_mut();
-        if let Some(mut runner) = state.runner.take() {
+        if let Some(mut runner) = self.runner.take() {
             let _ = write_message(&mut runner.stdin, &Request::Shutdown);
             let deadline = Instant::now() + Duration::from_millis(500);
             while Instant::now() < deadline {

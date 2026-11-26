@@ -141,6 +141,11 @@ const ZH: &[(&str, &str)] = &[
         "缺少 {n} 个素材文件，没有写出任何文件。",
     ),
     ("Could not save the project.", "无法保存项目。"),
+    ("copy", "副本"),
+    (
+        "“{file}” already exists. Choose another name.",
+        "“{file}”已存在。请选择其他名称。",
+    ),
     // Status bar: the kind of GPU
     ("Discrete GPU", "独立显卡"),
     ("Integrated GPU", "集成显卡"),

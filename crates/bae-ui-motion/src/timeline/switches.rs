@@ -83,6 +83,21 @@ fn set_switch(
     );
 }
 
+/// Whether `layer` has the `attr` switch and can change it.
+fn switch_applies(stage: &Stage, layer: &PrimPath, attr: &str) -> bool {
+    if !bae_model::editable_on_locked_layer(attr) && query::is_locked(stage, layer) {
+        return false;
+    }
+    match attr {
+        "audio_enabled" => matches!(
+            query::layer_kind(stage, layer).as_deref(),
+            Some("footage" | "audio" | "pre_comp")
+        ),
+        "effects_enabled" => !bae_motion::effect::effects_of(stage, layer).is_empty(),
+        _ => true,
+    }
+}
+
 impl TimelinePanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn switch_cell(
@@ -205,8 +220,27 @@ impl TimelinePanel {
         if input.cancel {
             self.switch_drag = None;
         } else if input.release {
-            if !drag.changed.is_empty() {
-                set_switch(cx, &drag.changed, drag.attr, drag.value);
+            let mut layers = std::mem::take(&mut drag.changed);
+            // AE: clicking the switch of one of several selected layers sets it
+            // on all of them (a sweep sets only the rows it crosses).
+            if layers.len() == 1 {
+                let session = common::session(cx.resources);
+                let s = session.lock();
+                if s.selected_layers.len() > 1
+                    && layers
+                        .first()
+                        .is_some_and(|l| s.selected_layers.contains(l))
+                {
+                    layers.extend(
+                        s.selected_layers
+                            .iter()
+                            .filter(|l| switch_applies(cx.stage, l, drag.attr))
+                            .cloned(),
+                    );
+                }
+            }
+            if !layers.is_empty() {
+                set_switch(cx, &layers, drag.attr, drag.value);
             }
             self.switch_drag = None;
         } else if let Some(pos) = input.pos {

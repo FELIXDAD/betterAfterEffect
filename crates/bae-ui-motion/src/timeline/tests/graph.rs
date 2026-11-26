@@ -370,7 +370,7 @@ fn clicks_marquee_and_alt_click_select_keys() {
     assert!(h.session().lock().selected_keys.is_empty());
     // Marquee around the first two keys.
     let p0 = key_pos(&mut tl, &h.key(ROT, 0.0), 0);
-    let a = pos2(p0.x - 10.0, p0.y.min(p1.y) - 10.0);
+    let a = pos2(p0.x - 4.0, p0.y.min(p1.y) - 10.0);
     let b = pos2(p1.x + 10.0, p0.y.max(p1.y) + 10.0);
     let r = h.drag(&mut tl, a, b, Modifiers::NONE);
     assert!(r.invocations.is_empty());
