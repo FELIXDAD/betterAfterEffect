@@ -912,11 +912,7 @@ impl Panel for CompositionViewer {
             None => comp_rect,
         };
         if self.checker {
-            checkerboard(
-                &painter,
-                comp_rect.intersect(area),
-                cx.resources,
-            );
+            checkerboard(&painter, comp_rect.intersect(area), cx.resources);
         } else {
             let c = info.bg_color;
             painter.rect_filled(
@@ -1038,6 +1034,7 @@ impl Panel for CompositionViewer {
                 color::TEXT_STRONG,
             );
             self.banner.ui(ui, cx, &session, area);
+            crate::tracker::camera::banner(ui, cx, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
             return;
         }
@@ -1609,6 +1606,7 @@ impl Panel for CompositionViewer {
         }
 
         self.banner.ui(ui, cx, &session, area);
+        crate::tracker::camera::banner(ui, cx, area);
         self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
         self.esc_taken = self.shape.is_some()

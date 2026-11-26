@@ -69,6 +69,7 @@
 //! (id = command id), from which the application builds its command registry.
 
 pub mod camera;
+pub mod camera_track;
 pub mod comp;
 pub mod content;
 pub mod dimensions;
@@ -145,6 +146,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(paint::AddStroke),
         r.register(tracker::CreateTracker),
+        r.register(camera_track::Record),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
