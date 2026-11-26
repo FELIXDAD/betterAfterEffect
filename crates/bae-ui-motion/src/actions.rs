@@ -1414,19 +1414,19 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::TRIM_COMP => {
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
-        ids::ADD_TO_RENDER_QUEUE => {
-            crate::render_queue::shared(cx.resources)
-                .lock()
-                .add(&info, &crate::render_queue::default_output_dir());
-            cx.open_panel("render_queue");
-        }
-        ids::SAVE_FRAME_AS => {
-            let frame = info.frame_rate.time_to_frame(now);
-            crate::render_queue::shared(cx.resources).lock().add_frame(
-                &info,
-                &crate::render_queue::default_output_dir(),
-                frame,
+        ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
+            let queue = crate::render_queue::shared(cx.resources);
+            let dir = crate::render_queue::default_output_dir();
+            let mut queue = queue.lock();
+            if id == ids::SAVE_FRAME_AS {
+                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
+            } else {
+                queue.add(&info, &dir);
+            }
+            queue.assign_output(
+                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
             );
+            drop(queue);
             cx.open_panel("render_queue");
         }
         // Relative to the selection (Shift / Alt+Shift+[ ]): the earliest in

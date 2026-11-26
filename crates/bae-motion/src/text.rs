@@ -133,12 +133,21 @@ impl Command for CreateText {
 
 pub struct SetText;
 
+/// One replacement captured by the viewer in character coordinates.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TextReplacement {
+    pub range: std::ops::Range<usize>,
+    pub text: String,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SetTextParams {
     /// The text layer.
     pub layer: PrimPath,
     /// The new characters (line breaks as `\n`).
     pub text: String,
+    #[serde(default)]
+    pub edits: Vec<TextReplacement>,
     /// Keyframe time in flicks (layer time) when Source Text is animated.
     #[serde(default)]
     pub time: Option<Time>,
@@ -184,10 +193,24 @@ impl Command for SetText {
             Some(Value::TextDocument(d)) => *d,
             _ => TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE),
         };
-        if doc.text == p.text {
+        let original = doc.clone();
+        if p.edits.is_empty() {
+            doc.set_text(&p.text);
+        } else {
+            for edit in p.edits {
+                doc.replace_range(edit.range, &edit.text);
+            }
+            // The edits were made on what the editor showed (an expression's
+            // result can differ from the stored text): keep the typing as a
+            // whole-text change instead of dropping it.
+            if doc.text != p.text {
+                doc = original.clone();
+                doc.set_text(&p.text);
+            }
+        }
+        if doc == original {
             return Ok(SetTextOutput { changed: false });
         }
-        doc.set_text(&p.text);
         SetAt.run(
             tx,
             SetAtParams {
@@ -198,5 +221,212 @@ impl Command for SetText {
             },
         )?;
         Ok(SetTextOutput { changed: true })
+    }
+}
+
+/// Character / Paragraph panel changes to the style of text layers; every field
+/// left out stays as it is.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct TextStyleChange {
+    /// PostScript font name (`ArialMT`).
+    pub font: Option<String>,
+    pub font_size: Option<f64>,
+    /// Leading in pixels.
+    pub leading: Option<f64>,
+    /// `true`: Auto leading (120 % of the size).
+    pub auto_leading: Option<bool>,
+    /// Tracking in 1/1000 em.
+    pub tracking: Option<f64>,
+    pub baseline_shift: Option<f64>,
+    pub fill_color: Option<[f64; 4]>,
+    pub stroke_color: Option<[f64; 4]>,
+    /// `false`: no stroke color (AE: the swatch with the red slash).
+    pub stroke: Option<bool>,
+    pub stroke_width: Option<f64>,
+    pub stroke_over_fill: Option<bool>,
+    pub faux_bold: Option<bool>,
+    pub faux_italic: Option<bool>,
+    pub all_caps: Option<bool>,
+    pub small_caps: Option<bool>,
+    pub baseline_option: Option<bae_model::BaselineOption>,
+    pub left_indent: Option<f64>,
+    pub right_indent: Option<f64>,
+    pub first_line_indent: Option<f64>,
+    pub space_before: Option<f64>,
+    pub space_after: Option<f64>,
+    /// Paragraph alignment (`left`, `center`, `right`, `justify_last_left`, …).
+    pub justification: Option<String>,
+}
+
+impl TextStyleChange {
+    /// `doc` with the change applied.
+    pub fn apply(&self, doc: &mut TextDocument, range: std::ops::Range<usize>) {
+        doc.edit_styles(range.clone(), |doc| {
+            if let Some(f) = &self.font {
+                doc.font = f.clone();
+            }
+            if let Some(v) = self.font_size {
+                doc.font_size = v.clamp(0.1, 1296.0);
+            }
+            if let Some(v) = self.leading {
+                doc.leading = Some(v.max(0.0));
+            }
+            if self.auto_leading == Some(true) {
+                doc.leading = None;
+            }
+            if let Some(v) = self.tracking {
+                doc.tracking = v;
+            }
+            if let Some(v) = self.baseline_shift {
+                doc.baseline_shift = v;
+            }
+            if let Some(c) = self.fill_color {
+                doc.fill_color = c;
+            }
+            if let Some(c) = self.stroke_color {
+                doc.stroke_color = Some(c);
+            }
+            if self.stroke == Some(false) {
+                doc.stroke_color = None;
+            }
+            if let Some(v) = self.stroke_width {
+                doc.stroke_width = v.max(0.0);
+            }
+            if let Some(v) = self.stroke_over_fill {
+                doc.stroke_over_fill = v;
+            }
+            if let Some(v) = self.faux_bold {
+                doc.faux_bold = v;
+            }
+            if let Some(v) = self.faux_italic {
+                doc.faux_italic = v;
+            }
+            if let Some(v) = self.all_caps {
+                doc.all_caps = v;
+            }
+            if let Some(v) = self.small_caps {
+                doc.small_caps = v;
+            }
+            if let Some(value) = self.baseline_option {
+                doc.baseline_option = value;
+            }
+        });
+        doc.edit_paragraphs(range, |p| {
+            if let Some(v) = &self.justification {
+                p.justification.clone_from(v);
+            }
+            if let Some(v) = self.left_indent {
+                p.left_indent = v;
+            }
+            if let Some(v) = self.right_indent {
+                p.right_indent = v;
+            }
+            if let Some(v) = self.first_line_indent {
+                p.first_line_indent = v;
+            }
+            if let Some(v) = self.space_before {
+                p.space_before = v;
+            }
+            if let Some(v) = self.space_after {
+                p.space_after = v;
+            }
+        });
+    }
+}
+
+pub struct SetTextStyle;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetTextStyleParams {
+    /// Text layers (others are ignored).
+    pub layers: Vec<PrimPath>,
+    /// Comp time of the change: a Source Text keyframe there when it is animated.
+    #[serde(default)]
+    pub time: Option<Time>,
+    pub style: TextStyleChange,
+    /// Selected character interval; omitted applies to every character and paragraph.
+    pub range: Option<std::ops::Range<usize>>,
+}
+
+impl Command for SetTextStyle {
+    type Params = SetTextStyleParams;
+    type Output = ();
+    const ID: &'static str = "text.set_style";
+    const TITLE: &'static str = "Change Text Style";
+    const DESCRIPTION: &'static str = "Character and Paragraph panel settings (font, size, leading, tracking, colors, stroke, faux styles, caps, alignment) on whole text layers, one undo step; a Source Text keyframe at `time` when it is animated.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        let layers: Vec<PrimPath> = p
+            .layers
+            .into_iter()
+            .filter(|l| query::layer_kind(tx.stage(), l).as_deref() == Some("text"))
+            .collect();
+        ensure_unlocked(tx.stage(), layers.iter())?;
+        for layer in layers {
+            let time = query::to_key_time(tx.stage(), &layer, p.time.unwrap_or(Time::ZERO));
+            let spec = query::attr_spec(tx.stage(), &layer, SOURCE).cloned();
+            let current = spec.as_ref().and_then(|s| {
+                if s.is_animated() {
+                    s.keyframes
+                        .range(..=time)
+                        .next_back()
+                        .or_else(|| s.keyframes.iter().next())
+                        .map(|(_, k)| k.value.clone())
+                } else {
+                    s.value.clone()
+                }
+            });
+            let mut doc = match current {
+                Some(Value::TextDocument(d)) => *d,
+                _ => TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE),
+            };
+            let before = doc.clone();
+            p.style
+                .apply(&mut doc, p.range.clone().unwrap_or(0..usize::MAX));
+            if doc == before {
+                continue;
+            }
+            SetAt.run(
+                tx,
+                SetAtParams {
+                    path: layer,
+                    attr: SOURCE.into(),
+                    time,
+                    value: Value::TextDocument(Box::new(doc)),
+                },
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    #[test]
+    fn style_changes_touch_only_what_they_name() {
+        let mut doc = TextDocument::new("Hi", "ArialMT", 72.0);
+        doc.style.leading = Some(80.0);
+        let change: TextStyleChange = serde_json::from_value(serde_json::json!({
+            "font_size": 120.0, "auto_leading": true, "stroke_color": [1.0, 0.0, 0.0, 1.0],
+            "stroke_width": 3.0, "faux_bold": true, "justification": "center"
+        }))
+        .unwrap();
+        change.apply(&mut doc, 0..usize::MAX);
+        assert_eq!(doc.style.font_size, 120.0);
+        assert_eq!(doc.style.leading, None, "Auto leading");
+        assert_eq!(doc.style.stroke_color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert!(doc.style.faux_bold && !doc.style.faux_italic);
+        assert_eq!(doc.paragraph.justification, "center");
+        assert_eq!(
+            (doc.style.font.as_str(), doc.text.as_str()),
+            ("ArialMT", "Hi")
+        );
+        let none: TextStyleChange =
+            serde_json::from_value(serde_json::json!({"stroke": false})).unwrap();
+        none.apply(&mut doc, 0..usize::MAX);
+        assert_eq!(doc.style.stroke_color, None);
     }
 }
