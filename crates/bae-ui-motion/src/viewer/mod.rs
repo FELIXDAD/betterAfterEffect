@@ -910,7 +910,7 @@ impl Panel for CompositionViewer {
         self.render_factor = resolution;
         // Paint.
         let painter = ui.painter_at(area);
-        let controls = session.lock().layer_controls;
+        let controls = view_options::shown_controls(&session.lock());
         let pasteboard = session.lock().panel_background.color();
         painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
