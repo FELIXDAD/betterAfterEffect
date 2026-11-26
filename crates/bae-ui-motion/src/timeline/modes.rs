@@ -11,37 +11,6 @@ use super::*;
 pub(super) const MODES_W: f32 = 286.0;
 const MODE_W: f32 = 96.0;
 
-/// Which column groups the outline shows.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Panes {
-    pub switches: bool,
-    pub modes: bool,
-    pub parent: bool,
-}
-
-/// AE's Timeline starts with Switches and Parent & Link; F4 swaps in Modes.
-impl Default for Panes {
-    fn default() -> Self {
-        Panes {
-            switches: true,
-            modes: false,
-            parent: true,
-        }
-    }
-}
-
-impl Panes {
-    /// F4: with both shown, hide Modes; then alternate Switches ↔ Modes.
-    pub(crate) fn toggle_switches_modes(&mut self) {
-        if self.switches && self.modes {
-            self.modes = false;
-        } else {
-            self.switches = !self.switches;
-            self.modes = !self.switches;
-        }
-    }
-}
-
 /// The blending modes in AE's menu order with their English names (the Layer ▸
 /// Blending Mode items of the command catalog).
 fn blend_modes() -> &'static [(&'static str, String)] {
@@ -117,7 +86,7 @@ impl TimelinePanel {
         base: Id,
     ) {
         let stage = cx.stage;
-        let x0 = rect.left() + cols.modes;
+        let x0 = rect.left() + cols.x(Column::Modes);
         let cy = rect.center().y;
         let targets: Vec<PrimPath> = if selected {
             session

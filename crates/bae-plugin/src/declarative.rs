@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use bae_gpu::GpuContext;
 use bae_gpu::wgpu::{self, util::DeviceExt as _};
-use bae_model::{EffectDef, Value};
+use bae_model::{EffectDef, Value, effect::PointDefaultSpace};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, ImageAlpha, RenderError};
 use parking_lot::Mutex;
 
@@ -33,7 +33,7 @@ struct Slot {
     id: u32,
     ty: ParamType,
     default: [f64; 4],
-    relative: bool,
+    point_space: PointDefaultSpace,
     range: Option<[f64; 2]>,
     choices: usize,
 }
@@ -89,7 +89,11 @@ impl DeclarativeEffect {
                     id: p.id,
                     ty: p.ty,
                     default,
-                    relative: p.is_relative_point(),
+                    point_space: if p.is_relative_point() {
+                        PointDefaultSpace::LayerFraction
+                    } else {
+                        PointDefaultSpace::Pixels
+                    },
                     range: matches!(p.ty, ParamType::Float | ParamType::Int)
                         .then(|| p.valid_range()),
                     choices: p.choices.as_ref().map_or(0, Vec::len),
@@ -273,12 +277,12 @@ impl DeclarativeEffect {
                     let p = match v {
                         Some(Value::Vec2([x, y])) => [*x, *y, 0.0],
                         Some(Value::Vec3([x, y, z])) => [*x, *y, *z],
-                        _ if s.relative => [
-                            s.default[0] * layer_size[0],
-                            s.default[1] * layer_size[1],
-                            s.default[2],
-                        ],
-                        _ => [s.default[0], s.default[1], s.default[2]],
+                        _ => {
+                            let [x, y] = s
+                                .point_space
+                                .layer_pixels([s.default[0], s.default[1]], layer_size);
+                            [x, y, s.default[2]]
+                        }
                     };
                     // Layer pixels → render pixels.
                     [p[0] * scale, p[1] * scale, p[2] * scale, 0.0]

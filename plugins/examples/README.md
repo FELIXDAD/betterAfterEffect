@@ -7,6 +7,8 @@
 | `posterize/` | 声明式 WGSL，像素式 | 最小的完整效果：整数、复选框参数；`identity_when`；快速开始文档 `docs/plugins/quickstart.md` 用的就是它 | §5.3、§11.4 |
 | `vignette/` | 声明式 WGSL，像素式（pixel style） | 浮点、点、弹出菜单、颜色参数；`identity_when`；线性光混合；可以与相邻像素式效果融合成一个内核 | §5.3.6、§11.3、§11.4、§10.9 |
 | `box-blur/` | 声明式 WGSL，计算式（compute style） | 两个 pass + 中间纹理；ROI（`read`、`grows`）；随降采样缩放半径 | §11.5、§11.6、§11.7 |
+| `composition-report/` | 脚本插件 | 只读菜单与 MCP 自动化，返回合成摘要 | §17 |
+| `fade-selected/` | 脚本插件 | 以播放头为起点给选中图层添加淡入关键帧，支持一次撤销 | §17 |
 | `align-to-grid/` | 脚本插件（JavaScript） | 命令（菜单、快捷键、MCP 工具）+ 自动化脚本（`[[automation]]`）；参数 JSON Schema；权限；一次调用 = 一个撤销步骤 | §5.3.8、§17 |
 | `../../sdk/c/examples/invert/` | 原生插件（纯 C，只依赖 `bae_plugin.h`） | 不用任何 SDK，直接实现 C ABI；进程内运行 | §14 |
 | `duotone-rs/` | 原生插件（Rust，`bae-plugin-sdk`） | `CpuEffect` + `export_plugin!`；参数来自 `define_params`（清单不写参数表）；进程外运行 | §8、§14、§15 |
