@@ -96,3 +96,24 @@ fn smart_zoom_keeps_pointer_fixed_then_restores_fit() {
     h.frame(Vec::new(), Modifiers::NONE);
     assert_eq!(h.viewer.last_view.unwrap().origin, fit.origin);
 }
+
+#[test]
+fn magnification_preferences_change_wheel_zoom() {
+    use crate::viewer::Magnification;
+    let smooth = Magnification::default();
+    let mut rest = 0.0;
+    assert!((smooth.wheel_zoom(1.0, 1.0, &mut rest) - 1.125).abs() < 1e-6);
+    assert!(smooth.follows_pointer(false) && !smooth.follows_pointer(true));
+    // Legacy steps through the zoom menu's levels, whole notches at a time.
+    let legacy = Magnification {
+        legacy: true,
+        centered: true,
+        trackpad_zooms: false,
+    };
+    assert_eq!(legacy.wheel_zoom(1.0, 1.0, &mut rest), 2.0);
+    assert_eq!(legacy.wheel_zoom(1.0, -2.0, &mut rest), 0.25);
+    assert_eq!(legacy.wheel_zoom(0.7, 1.0, &mut rest), 1.0);
+    assert_eq!(legacy.wheel_zoom(1.0, 0.6, &mut rest), 1.0);
+    assert_eq!(legacy.wheel_zoom(1.0, 0.6, &mut rest), 2.0);
+    assert!(!legacy.follows_pointer(false) && legacy.follows_pointer(true));
+}

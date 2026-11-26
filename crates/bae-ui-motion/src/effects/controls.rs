@@ -24,6 +24,7 @@ use crate::session::SharedSession;
 pub(crate) struct ControlsState {
     /// Collapsed effects (AE shows new effects expanded).
     collapsed: HashSet<String>,
+    pub(crate) show_presets: bool,
     /// Parameters whose slider / dial row is shown.
     open_params: HashSet<String>,
     /// Collapsed parameter groups.
@@ -69,6 +70,41 @@ pub(crate) fn show(
         if state.collapsed.contains(effect.as_str()) {
             continue;
         }
+        if state.show_presets {
+            widgets::menu_button(ui, tr("Animation Presets"), |ui| {
+                let indexed = cx
+                    .resources
+                    .get::<std::sync::Arc<crate::presets::PresetIndex>>()
+                    .map(|index| {
+                        index.refresh(false);
+                        index.entries()
+                    })
+                    .unwrap_or_default();
+                let mut available = false;
+                for preset in indexed.iter() {
+                    let [saved] = preset.effects.as_ref() else {
+                        continue;
+                    };
+                    if saved.match_name != match_name {
+                        continue;
+                    }
+                    available = true;
+                    if ui.button(&preset.name).clicked() {
+                        let time = query::to_key_time(cx.stage, effect, now);
+                        let edits: Vec<_> = saved.values.iter().map(|(attr,value)| {
+                            json!({"path":effect,"time":time,"attr":attr,"value":value})
+                        }).collect();
+                        if !edits.is_empty() {
+                            cx.invoke_with("attr.set_many", json!({"edits":edits}));
+                        }
+                        ui.close();
+                    }
+                }
+                if !available {
+                    ui.add_enabled(false, egui::Button::new(tr("None")));
+                }
+            });
+        }
         match def {
             Some(def) => params(ui, cx, session, eval, state, effect, &def, now),
             None => {
@@ -100,7 +136,7 @@ fn header(
         .and_then(|v| query::static_value(&v, "enabled"))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let name = query::display_name_of(stage, effect);
+    let name = super::instance_name(stage, effect);
     let session = common::session(cx.resources);
     let selected = session.lock().selected_effects.contains(effect);
     ui.add_space(2.0);
@@ -157,7 +193,7 @@ fn header(
         }
         title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let about = ui.add(egui::Label::new(tr("About...")).sense(Sense::click()));
+            let about = widgets::link(ui, tr("About..."));
             egui::Popup::menu(&about).show(|ui| {
                 let shown = super::effect_name(match_name, def);
                 ui.label(egui::RichText::new(shown).strong());
@@ -168,11 +204,7 @@ fn header(
                 };
                 ui.label(source);
             });
-            if def.is_some()
-                && ui
-                    .add(egui::Label::new(tr("Reset")).sense(Sense::click()))
-                    .clicked()
-            {
+            if def.is_some() && widgets::link(ui, tr("Reset")).clicked() {
                 reset(cx, effect, now);
             }
         });
@@ -212,6 +244,13 @@ fn params(
     def: &EffectDef,
     now: Time,
 ) {
+    if def.match_name == "ADBE Deflicker" && ui.button(tr("Set Frame")).clicked() {
+        let local = query::to_key_time(cx.stage, effect, now);
+        cx.invoke_with(
+            "attr.set_at",
+            json!({"path":effect,"attr":param_attr(9001),"time":local,"value":Value::Time(local)}),
+        );
+    }
     let mut depth = 1usize;
     // Depth at which a closed group hides its contents.
     let mut hidden_from: Option<usize> = None;

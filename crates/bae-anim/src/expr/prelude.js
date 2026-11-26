@@ -3,8 +3,7 @@
 // Host functions (implemented in Rust, see expr/mod.rs) live on `__h`:
 //   __h.prop(c, l, prim, attr, t, pre) -> number[]   property value at comp time t
 //   __h.vel(c, l, prim, attr, t, pre) -> number[]    AE velocity (see velocityAtTime)
-//   __h.keys(c, l, prim, attr) -> number[]           [t0, v0..., t1, v1..., ...] (comp time)
-//   __h.dims(c, l, prim, attr) -> number             value dimensions
+//   __h.keys(c, l, prim, attr) -> {time, value}[]   in composition-time order
 //   __h.layerIndex(c, nameOrIndex) -> number         0-based layer index or -1
 //   __h.layerInfo(c, l) -> object                    name, inPoint, outPoint, ...
 //   __h.compInfo(c) -> object                        name, width, height, ...
@@ -48,7 +47,7 @@ function $bm_sub(a, b) {
   a = __val(a); b = __val(b);
   if (__isNum(a) && __isNum(b)) return a - b;
   if (__isArr(a) && __isNum(b)) { a = a.slice(0); a[0] -= b; return a; }
-  if (__isNum(a) && __isArr(b)) { b = b.slice(0); b[0] = a - b[0]; return b; }
+  if (__isNum(a) && __isArr(b)) { return b.map(function (x, i) { return (i === 0 ? a : 0) - x; }); }
   if (__isArr(a) && __isArr(b)) {
     var n = Math.max(a.length, b.length), out = new Array(n);
     for (var i = 0; i < n; i++) out[i] = (i < a.length ? a[i] : 0) - (i < b.length ? b[i] : 0);
@@ -98,13 +97,13 @@ function mul(a, b) { return $bm_mul(a, b); }
 function div(a, b) { return $bm_div(a, b); }
 function clamp(v, lo, hi) {
   v = __val(v); lo = __val(lo); hi = __val(hi);
-  if (__isArr(v)) {
-    return v.map(function (x, i) {
-      var l = __isArr(lo) ? lo[i] : lo, h = __isArr(hi) ? hi[i] : hi;
-      return Math.min(Math.max(x, Math.min(l, h)), Math.max(l, h));
-    });
-  }
-  return Math.min(Math.max(v, Math.min(lo, hi)), Math.max(lo, hi));
+  function bound(x, l, h) { return Math.min(Math.max(x, Math.min(l, h)), Math.max(l, h)); }
+  if (!__isArr(v) && !__isArr(lo) && !__isArr(hi)) return bound(v, lo, hi);
+  var n = Math.max(__isArr(v) ? v.length : 0, __isArr(lo) ? lo.length : 0, __isArr(hi) ? hi.length : 0);
+  function at(a, i) { return __isArr(a) ? (i < a.length ? a[i] : 0) : a; }
+  var out = new Array(n);
+  for (var i = 0; i < n; i++) out[i] = bound(at(v, i), at(lo, i), at(hi, i));
+  return out;
 }
 function dot(a, b) {
   a = __val(a); b = __val(b);
@@ -114,7 +113,8 @@ function dot(a, b) {
 }
 function cross(a, b) {
   a = __val(a); b = __val(b);
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  var az = a.length > 2 ? a[2] : 0, bz = b.length > 2 ? b[2] : 0;
+  return [a[1] * bz - az * b[1], az * b[0] - a[0] * bz, a[0] * b[1] - a[1] * b[0]];
 }
 function length(a, b) {
   a = __val(a);
@@ -132,8 +132,11 @@ function normalize(a) {
 function lookAt(from, to) {
   from = __val(from); to = __val(to);
   var d = normalize($bm_sub(to, from));
-  var yaw = Math.atan2(d[0], d[2]), pitch = Math.atan2(-d[1], Math.sqrt(d[0] * d[0] + d[2] * d[2]));
-  return [radiansToDegrees(pitch), radiansToDegrees(yaw), 0];
+  // Decompose the upright look direction in AE's X-Y-Z Orientation order.
+  var x = d[0], y = d[1], z = d[2], horizontal = Math.hypot(x, z);
+  if (horizontal === 0) return [y === 0 ? 0 : (y > 0 ? -90 : 90), 0, 0];
+  return [radiansToDegrees(Math.atan2(-y, z)), radiansToDegrees(Math.asin(clamp(x, -1, 1))),
+          radiansToDegrees(Math.atan2(x * y, z))];
 }
 function degreesToRadians(d) { return d * Math.PI / 180; }
 function radiansToDegrees(r) { return r * 180 / Math.PI; }
@@ -144,7 +147,7 @@ function __interp(shape, args) {
   if (args.length <= 3) { t = args[0]; tMin = 0; tMax = 1; v1 = args[1]; v2 = args[2]; }
   else { t = args[0]; tMin = args[1]; tMax = args[2]; v1 = args[3]; v2 = args[4]; }
   t = __val(t); tMin = __val(tMin); tMax = __val(tMax); v1 = __val(v1); v2 = __val(v2);
-  if (tMin > tMax) { var x = tMin; tMin = tMax; tMax = x; x = v1; v1 = v2; v2 = x; }
+  if (tMin > tMax) { var x = tMin; tMin = tMax; tMax = x; }
   var f = tMax === tMin ? (t < tMin ? 0 : 1) : (t - tMin) / (tMax - tMin);
   f = Math.min(Math.max(f, 0), 1);
   var p = shape(f);
@@ -367,7 +370,7 @@ function __call(fn, c, l, prim, attr, t, seed) {
   try {
     var r = fn(c, l, prim, attr, t);
     // A Source Text expression may end with a text style (AE 17.0+).
-    if (r instanceof TextStyle) return { __style: true, changes: r.__c };
+    if (r instanceof TextStyle) return { __style: true, changes: r.__edits };
     return __val(r);
   } finally {
     __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __offset = saveOffset; __timeless = saveTl;
@@ -395,16 +398,11 @@ Property.prototype = {
   get speed() { return this.speedAtTime(__now); },
   get numKeys() { return this.__keys().length; },
   __keys: function () {
-    var raw = __h.keys(this.__c, this.__l, this.__p, this.__a), d = __h.dims(this.__c, this.__l, this.__p, this.__a);
-    var out = [];
-    for (var i = 0; i + d < raw.length; i += d + 1) {
-      out.push({ time: raw[i], value: d === 1 ? raw[i + 1] : raw.slice(i + 1, i + 1 + d) });
-    }
-    return out;
+    return __h.keys(this.__c, this.__l, this.__p, this.__a);
   },
   key: function (i) {
     var ks = this.__keys();
-    if (i < 1 || i > ks.length) throw new Error("Key index " + i + " out of range");
+    if (!Number.isInteger(i) || i < 1 || i > ks.length) throw new Error("Key index " + i + " out of range");
     var k = ks[i - 1];
     k.index = i;
     return k;
@@ -454,14 +452,16 @@ Property.prototype = {
     var ks = this.__keys(), t = __now;
     if (ks.length < 2) return this.__pre(t);
     var first, last;
+    var bounds = duration === 0 ? __h.layerInfo(this.__c, this.__l) : null;
+    if (["cycle", "pingpong", "offset", "continue"].indexOf(type) < 0) throw new Error("Unknown loop type " + type);
     if (out) {
       last = ks[ks.length - 1].time;
-      first = duration !== undefined && duration > 0 ? last - duration
+      first = bounds ? Math.min(bounds.inPoint, bounds.outPoint) : duration > 0 ? last - duration
         : ks[numKeyframes > 0 && numKeyframes < ks.length ? ks.length - 1 - numKeyframes : 0].time;
       if (t <= last) return this.__pre(t);
     } else {
       first = ks[0].time;
-      last = duration !== undefined && duration > 0 ? first + duration
+      last = bounds ? Math.max(bounds.inPoint, bounds.outPoint) : duration > 0 ? first + duration
         : ks[numKeyframes > 0 && numKeyframes < ks.length ? numKeyframes : ks.length - 1].time;
       if (t >= first) return this.__pre(t);
     }
@@ -496,7 +496,7 @@ Property.prototype = {
   loopIn: function (type, numKeyframes) { return this.__loop(false, type, numKeyframes || 0); },
   loopOutDuration: function (type, duration) { return this.__loop(true, type, 0, duration || 0); },
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
-  get propertyIndex() { return 1; },
+  get propertyIndex() { return this.__chain().index; },
 };
 // ---- property names and groups (AE: thisProperty.name, propertyGroup(n)) ----
 Property.prototype.__chain = function () {
@@ -508,20 +508,21 @@ Object.defineProperty(Property.prototype, "active", { get: function () { return 
 Object.defineProperty(Property.prototype, "enabled", { get: function () { return true; } });
 Property.prototype.propertyGroup = function (countUp) {
   var n = countUp === undefined ? 1 : countUp;
+  if (n === 0) return this;
   var g = this.__chain().groups[n - 1];
   if (!g) throw new Error("Property group " + n + " is out of range");
   var c = this.__c, l = this.__l, layer = new Layer(c, l);
   switch (g.kind) {
     case "layer": return layer;
     case "transform": var t = layer.transform; t.name = g.name; return t;
-    case "mask": var m = layer.mask(g.name); m.name = g.name; return m;
-    case "effect": var e = layer.effect(g.name); if (!e.name) e.name = g.name; return e;
+    case "mask": var m = layer.mask(g.index); m.name = g.name; m.propertyIndex = g.index; return m;
+    case "effect": return layer.effect(g.index);
     case "cameraOption": return layer.cameraOption;
     case "lightOption": return layer.lightOption;
     case "materialOption": return layer.materialOption;
     case "shape":
       if (typeof __ShapeItem === "function") {
-        return new __ShapeItem(c, l, { path: g.path, type: g.type, op: g.op, name: g.name });
+        return new __ShapeItem(c, l, { path: g.path, type: g.type, op: g.op, name: g.name, index: g.index });
       }
       return { name: g.name };
     default: return { name: g.name };
@@ -538,7 +539,7 @@ function __content(c, l, parent, which) {
 }
 function __ShapeItem(c, l, info) {
   this.__c = c; this.__l = l; this.__p = info.path; this.__t = info.type; this.__o = info.op;
-  this.name = info.name;
+  this.name = info.name; this.propertyIndex = info.index;
 }
 __ShapeItem.prototype = {
   content: function (which) { return __content(this.__c, this.__l, this.__p, which); },
@@ -623,7 +624,7 @@ Property.prototype.createPath = function (points, inTangents, outTangents, isClo
 
 // ---- text (AE: thisLayer.text.sourceText and the 17.0+ style API) ----
 Property.prototype.getStyleAt = function (charIndex, t) {
-  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t), {});
+  return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t, charIndex || 0), {}, [], charIndex || 0);
 };
 Property.prototype.createStyle = function () { return this.getStyleAt(0, __now); };
 Object.defineProperty(Property.prototype, "style", { get: function () { return this.getStyleAt(0, __now); } });
@@ -647,7 +648,12 @@ __TextGroup.prototype = {
 
 // A text style: what the text uses (`__f`, from the host) plus the `set…`
 // calls made on it (`__c`), each returning a new style.
-function TextStyle(fields, changes) { this.__f = fields; this.__c = changes; }
+function TextStyle(fields, changes, edits, index) {
+  this.__f = fields;
+  this.__c = changes;
+  this.__edits = edits;
+  this.__index = index;
+}
 TextStyle.prototype = {
   get horizontalScale() { return "horizontalScale" in this.__c ? this.__c.horizontalScale : 100; },
   get verticalScale() { return "verticalScale" in this.__c ? this.__c.verticalScale : 100; },
@@ -655,7 +661,7 @@ TextStyle.prototype = {
 [
   ["font", "font"], ["fontSize", "fontSize"], ["fillColor", "fillColor"], ["strokeColor", "strokeColor"],
   ["strokeWidth", "strokeWidth"], ["tracking", "tracking"], ["leading", "leading"], ["autoLeading", "autoLeading"],
-  ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
+  ["baselineOption", "baselineOption"], ["baselineShift", "baselineShift"], ["isFauxBold", "fauxBold"], ["isFauxItalic", "fauxItalic"],
   ["isAllCaps", "allCaps"], ["isSmallCaps", "smallCaps"], ["applyFill", "applyFill"], ["applyStroke", "applyStroke"],
 ].forEach(function (p) {
   Object.defineProperty(TextStyle.prototype, p[0], {
@@ -665,16 +671,20 @@ TextStyle.prototype = {
 [
   ["setText", "text"], ["setFont", "font"], ["setFontSize", "fontSize"], ["setFillColor", "fillColor"],
   ["setStrokeColor", "strokeColor"], ["setStrokeWidth", "strokeWidth"], ["setTracking", "tracking"],
-  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineShift", "baselineShift"],
+  ["setLeading", "leading"], ["setAutoLeading", "autoLeading"], ["setBaselineOption", "baselineOption"], ["setBaselineShift", "baselineShift"],
   ["setFauxBold", "fauxBold"], ["setFauxItalic", "fauxItalic"], ["setAllCaps", "allCaps"],
   ["setSmallCaps", "smallCaps"], ["setApplyFill", "applyFill"], ["setApplyStroke", "applyStroke"],
   ["setHorizontalScale", "horizontalScale"], ["setVerticalScale", "verticalScale"],
 ].forEach(function (p) {
-  TextStyle.prototype[p[0]] = function (v) {
+  TextStyle.prototype[p[0]] = function (v, start, count) {
     var c = {};
     for (var k in this.__c) c[k] = this.__c[k];
-    c[p[1]] = __val(v);
-    return new TextStyle(this.__f, c);
+    start = Math.max(0, Math.trunc(start || 0));
+    count = count === undefined ? undefined : Math.max(0, Math.trunc(count));
+    var change = {start: start, count: count};
+    change[p[1]] = __val(v);
+    if (this.__index >= start && (count === undefined || this.__index < start + count)) c[p[1]] = change[p[1]];
+    return new TextStyle(this.__f, c, this.__edits.concat([change]), this.__index);
   };
 });
 
@@ -762,11 +772,7 @@ Layer.prototype = {
   get rotationX() { return this.transform.xRotation; },
   get rotationY() { return this.transform.yRotation; },
   get rotationZ() { return this.transform.rotation; },
-  get cameraOption() {
-    var g = __optionGroup(this, "Camera Options", __CAMERA_OPTIONS);
-    for (var k in __CAMERA_DEFAULTS) g[k] = __CAMERA_DEFAULTS[k];
-    return g;
-  },
+  get cameraOption() { return __optionGroup(this, "Camera Options", __CAMERA_OPTIONS); },
   get lightOption() { return __optionGroup(this, "Light Options", __LIGHT_OPTIONS); },
   get materialOption() { return __optionGroup(this, "Material Options", __MATERIAL_OPTIONS); },
   get audioLevels() {
@@ -799,6 +805,8 @@ Layer.prototype = {
       return __prop(c, l, p, a);
     };
     fx.param = fx;
+    Object.defineProperty(fx, "name", { value: effect.name });
+    fx.propertyIndex = effect.index;
     fx.active = effect.active;
     return fx;
   },
@@ -814,11 +822,7 @@ Layer.prototype = {
     };
   },
   __xf: function (kind, point, t) {
-    if (t === undefined) t = __now;
-    var p = point.slice(0);
-    while (p.length < 3) p.push(0);
-    var r = __h.xform(this.__c, this.__l, t, kind, p);
-    return point.length === 2 ? [r[0], r[1]] : r;
+    return __h.xform(this.__c, this.__l, t === undefined ? __now : __val(t), kind, __val(point));
   },
   toComp: function (p, t) { return this.__xf(0, p, t); },
   fromComp: function (p, t) { return this.__xf(1, p, t); },
@@ -835,11 +839,10 @@ Layer.prototype = {
 var __CAMERA_OPTIONS = {
   zoom: "camera:zoom", depthOfField: "camera:depth_of_field", focusDistance: "camera:focus_distance",
   aperture: "camera:aperture", blurLevel: "camera:blur_level",
-};
-// Iris and highlight options are not modelled yet: AE's defaults.
-var __CAMERA_DEFAULTS = {
-  irisShape: 1, irisRotation: 0, irisRoundness: 0, irisAspectRatio: 1, irisDiffractionFringe: 0,
-  highlightGain: 0, highlightThreshold: 255, highlightSaturation: 0,
+  irisShape: "camera:iris_shape", irisRotation: "camera:iris_rotation",
+  irisRoundness: "camera:iris_roundness", irisAspectRatio: "camera:iris_aspect_ratio",
+  irisDiffractionFringe: "camera:iris_diffraction_fringe", highlightGain: "camera:highlight_gain",
+  highlightThreshold: "camera:highlight_threshold", highlightSaturation: "camera:highlight_saturation",
 };
 var __LIGHT_OPTIONS = {
   intensity: "light:intensity", color: "light:color", coneAngle: "light:cone_angle",
@@ -871,9 +874,6 @@ function __optionGroup(layer, name, options) {
   function attrGetter(attr) { return function () { return __prop(this.__c, this.__l, "", attr); }; }
   [__CAMERA_OPTIONS, __LIGHT_OPTIONS, __MATERIAL_OPTIONS].forEach(function (options) {
     for (var k in options) if (k !== "castsShadows") define(k, attrGetter(options[k]));
-  });
-  Object.keys(__CAMERA_DEFAULTS).forEach(function (k) {
-    define(k, function () { return __CAMERA_DEFAULTS[k]; });
   });
   // A light's own Casts Shadows; any other layer's Material Option.
   define("castsShadows", function () {
