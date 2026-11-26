@@ -867,8 +867,8 @@ const EFFECT: &[Node] = &[
 #[rustfmt::skip]
 const ANIMATION: &[Node] = &[
     it(851969, "Track in Boris FX Mocha", "motion.anim.track_in_boris_fx_mocha", "", B, Adobe),
-    it(851970, "Save Animation Preset...", "motion.anim.save_animation_preset", "", E, Later),
-    it(851971, "Apply Animation Preset...", "motion.anim.apply_animation_preset", "", E, Later),
+    it(851970, "Save Animation Preset...", "motion.anim.save_animation_preset", "", E, Done),
+    it(851971, "Apply Animation Preset...", "motion.anim.apply_animation_preset", "", E, Done),
     sub(
         "Recent Animation Presets",
         &[
