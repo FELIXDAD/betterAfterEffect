@@ -283,6 +283,17 @@ impl PlaybackPreview {
         }
     }
 
+    pub(super) fn invalidate_source(&mut self, event: &bae_model::StageEvent) {
+        self.stop();
+        let mut state = self.shared.state.lock().unwrap();
+        if state.cache.dynamic {
+            state.cache.frames.clear();
+        } else {
+            state.cache.frames.invalidate(event);
+        }
+        state.cache.revision += 1;
+    }
+
     pub(super) fn stop(&mut self) {
         let mut state = self.shared.state.lock().unwrap();
         if state.demand.take().is_some() {

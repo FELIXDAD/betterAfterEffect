@@ -17,6 +17,20 @@ pub(crate) struct ViewerPrefs {
     pub label_handles: bool,
     pub cycle_mask_colors: bool,
     pub center_shape_anchor: bool,
+    pub checker_size: f32,
+    pub checker_colors: [Color32; 2],
+    /// Signed dolly steps per wheel notch. Zero leaves the wheel on composition zoom.
+    pub dolly_wheel: f32,
+    pub reverse_dolly_drag: bool,
+    pub alt_camera_navigation: bool,
+    pub camera_point: CameraPoint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CameraPoint {
+    Hidden,
+    Indicator,
+    Directional,
 }
 
 impl Default for ViewerPrefs {
@@ -32,6 +46,27 @@ impl ViewerPrefs {
             label_handles: p.bool(keys::LABEL_HANDLES),
             cycle_mask_colors: p.bool("appearance.cycle_mask_colors"),
             center_shape_anchor: p.bool(keys::CENTER_SHAPE_ANCHOR),
+            checker_size: match p.str("grids_guides.transparency_grid_size") {
+                "small" => 4.0,
+                "large" => 16.0,
+                _ => 8.0,
+            },
+            checker_colors: [keys::TRANSPARENCY_FIRST, keys::TRANSPARENCY_SECOND].map(|key| {
+                let [r, g, b] = p.color(key);
+                Color32::from_rgb(r, g, b)
+            }),
+            dolly_wheel: match p.str("3d.mouse_wheel_behavior") {
+                "dolly_camera" => 1.0,
+                "reverse_dolly" => -1.0,
+                _ => 0.0,
+            },
+            reverse_dolly_drag: p.str("3d.drag_direction") == "inverted",
+            alt_camera_navigation: p.bool("3d.override_alt_for_camera_navigation"),
+            camera_point: match p.str("3d.camera_point_of_interest") {
+                "none" => CameraPoint::Hidden,
+                "directional_indicator" => CameraPoint::Directional,
+                _ => CameraPoint::Indicator,
+            },
         }
     }
 
