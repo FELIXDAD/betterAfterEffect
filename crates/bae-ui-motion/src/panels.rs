@@ -319,12 +319,20 @@ pub struct EffectControlsPanel {
 }
 
 impl Panel for EffectControlsPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        // AE: "Effect Controls <layer>".
-        if self.title.is_empty() {
-            TabInfo::new(tr("Effect Controls"))
-        } else {
-            TabInfo::new(format!("{} {}", tr("Effect Controls"), self.title))
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        let layer = self
+            .locked
+            .clone()
+            .filter(|l| cx.stage.has_prim(l))
+            .or_else(|| selected_layer(cx.stage, &common::session(cx.resources)));
+        match layer {
+            Some(l) => common::related_tab(
+                cx,
+                "Effect Controls",
+                &l,
+                &query::display_name_of(cx.stage, &l),
+            ),
+            None => TabInfo::new(tr("Effect Controls")),
         }
     }
 
