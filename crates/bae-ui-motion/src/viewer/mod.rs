@@ -1188,10 +1188,25 @@ impl Panel for CompositionViewer {
         {
             ui.ctx().request_repaint();
         }
-        if let Some(frame) = self.gpu.as_ref().and_then(|g| g.output()) {
+        if let Some(gpu) = self.gpu.as_ref() {
             let mut s = session.lock();
-            if s.scope_frame.as_ref().map(|f| f.1) != Some(frame.1) {
+            if let Some(texture) = self
+                .snapshot_shown
+                .and_then(|slot| gpu.snapshot_texture(slot))
+            {
+                use std::hash::{Hash, Hasher};
+                let mut key = std::collections::hash_map::DefaultHasher::new();
+                texture.hash(&mut key);
+                s.scope_frame = Some((texture, key.finish()));
+                s.scope_source = None;
+            } else if let Some(frame) = gpu.output() {
                 s.scope_frame = Some(frame);
+                s.scope_source = crate::scopes::needs_working_frame(ui.ctx())
+                    .then(|| gpu.scope_source())
+                    .flatten();
+            } else if !self.on_gpu {
+                s.scope_frame = None;
+                s.scope_source = None;
             }
         }
         // The Info panel: the pointer in comp pixels and, while the panel shows
