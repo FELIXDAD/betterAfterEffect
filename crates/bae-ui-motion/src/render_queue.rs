@@ -384,6 +384,7 @@ pub struct RenderQueue {
     /// wait for the next Render, the snapshot does not have their edits).
     batch: Vec<u64>,
     sequence_files_per_folder: Option<usize>,
+    render_threads: Option<usize>,
     repaint: Option<egui::Context>,
 }
 
@@ -676,6 +677,7 @@ impl RenderQueue {
             outputs: item.outputs.clone(),
             log: item.log,
             sequence_files_per_folder: self.sequence_files_per_folder,
+            render_threads: self.render_threads,
             start: item.start,
             end: item.end,
             cancel: item.cancel.clone(),
@@ -794,15 +796,30 @@ pub(crate) struct Job {
     outputs: Vec<QueueOutput>,
     log: LogMode,
     sequence_files_per_folder: Option<usize>,
+    render_threads: Option<usize>,
     start: i64,
     end: i64,
     cancel: Arc<AtomicBool>,
 }
 
-/// Renders one item; `progress` gets the frames done so far.
-/// The export settings of a job's output module.
-fn export_settings(job: &QueueOutput, output: PathBuf) -> ExportSettings {
+fn render_threads(prefs: &bae_prefs::Preferences, cores: usize) -> usize {
+    if !prefs.bool("memory_cpu.enable_multi_frame_rendering") {
+        return 1;
+    }
+    let reserved = prefs
+        .int("memory_cpu.reserved_cpu_power_percent")
+        .clamp(0, 90) as usize;
+    (cores.saturating_mul(100 - reserved) / 100).max(1)
+}
+
+/// The export settings of a job's output module; `threads` from Memory &
+/// CPU (multi-frame rendering).
+fn export_settings(job: &QueueOutput, output: PathBuf, threads: Option<usize>) -> ExportSettings {
     let mut settings = ExportSettings::new(job.format, output);
+    if let Some(threads) = threads {
+        settings.threads = Some(threads);
+        settings.frames_in_flight = threads.min(bae_render::export::READBACK_DEPTH);
+    }
     settings.pcm_audio = job.pcm_audio && job.format.is_quicktime();
     settings.alpha = match job.channels {
         Channels::RgbAlpha if supports_alpha(job.format) => ExportAlpha::Straight,
@@ -890,7 +907,7 @@ pub(crate) fn render_job(
         .iter()
         .map(|o| {
             let path = output_path(Path::new(&o.output), o.format, &info.name)?;
-            let settings = export_settings(o, path.clone());
+            let settings = export_settings(o, path.clone(), job.render_threads);
             settings.validate(job.rate, &request)?;
             Ok((path, settings))
         })
@@ -1022,6 +1039,8 @@ pub fn start(
             return Ok(());
         }
         let prefs = crate::prefs::current(resources);
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        queue.render_threads = Some(render_threads(&prefs, cores));
         queue.sequence_files_per_folder = prefs
             .bool("export.segment_sequences_enabled")
             .then(|| prefs.int("export.segment_sequences_files").clamp(1, 99999) as usize);
@@ -2882,6 +2901,16 @@ mod tests {
     }
 
     #[test]
+    fn reserves_cpu_capacity_for_other_applications() {
+        let mut prefs = bae_prefs::Preferences::default();
+        prefs.set("memory_cpu.reserved_cpu_power_percent", 25);
+        assert_eq!(render_threads(&prefs, 16), 12);
+        assert_eq!(render_threads(&prefs, 1), 1);
+        prefs.set("memory_cpu.enable_multi_frame_rendering", false);
+        assert_eq!(render_threads(&prefs, 16), 1);
+    }
+
+    #[test]
     fn output_module_maps_to_export_settings() {
         let s = |format, channels| {
             export_settings(
@@ -2895,9 +2924,11 @@ mod tests {
                     pcm_audio: true,
                 },
                 PathBuf::from("/r/x"),
+                Some(1),
             )
         };
         let png = s(ExportFormat::Png, Channels::RgbAlpha);
+        assert_eq!((png.threads, png.frames_in_flight), (Some(1), 1));
         assert_eq!((png.alpha, png.bit_rate), (ExportAlpha::Straight, None));
         assert_eq!(
             s(ExportFormat::Png, Channels::Rgb).alpha,

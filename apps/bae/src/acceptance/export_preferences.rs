@@ -18,6 +18,22 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
     prefs.set("export.segment_sequences_enabled", true);
     prefs.set("export.segment_sequences_files", 2);
     h.state().prefs.set(prefs).unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page":"memory_cpu"}),
+    ));
+    settle(&mut h);
+    h.get_by_label("Enable Multi-Frame Rendering").click();
+    settle(&mut h);
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "OK")
+        .click();
+    settle(&mut h);
+    assert!(
+        !h.state()
+            .prefs
+            .current()
+            .bool("memory_cpu.enable_multi_frame_rendering")
+    );
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     let queue = h.state().render_queue();
     {
