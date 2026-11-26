@@ -34,12 +34,14 @@ pub mod dialogs;
 pub mod effects;
 mod expr;
 mod expr_menu;
+mod flowchart;
 pub mod footage_panel;
 mod gpu_preview;
 mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
+mod media_browser;
 pub mod menus;
 mod paint_panels;
 mod panels;
@@ -85,6 +87,8 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     render_queue::register,
     layer_panel::register,
     ae_panels::register,
+    media_browser::register,
+    flowchart::register,
     footage_panel::register,
     progress_metadata::register,
     paint_panels::register,
