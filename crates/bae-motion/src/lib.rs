@@ -77,6 +77,7 @@ pub mod layer;
 pub mod markers;
 pub mod matte;
 pub mod names;
+pub mod orient;
 pub mod paint;
 pub mod path;
 pub mod precompose;
@@ -117,6 +118,7 @@ pub use layer::{
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 pub use matte::SetTrackMatte;
+pub use orient::AutoOrient;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
@@ -183,6 +185,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(AutoOrient),
         r.register(SetProjectSettings),
         r.register(SetText),
         r.register(SetExpressions),

@@ -708,8 +708,10 @@ mod ui_flow {
         ui.press(Key::Space, Modifiers::NONE);
         assert!(!session.lock().is_playing());
 
-        // Composition > Add to Render Queue, then Tab to its output field.
-        ui.press(Key::M, Modifiers::COMMAND);
+        // Composition > Add to Render Queue, then Tab to its output field. These
+        // modifiers are Ctrl on Windows and ⌃⌘ on macOS, where AE moves the
+        // command off the system's ⌘M.
+        ui.press(Key::M, Modifiers::COMMAND | Modifiers::CTRL);
         let queue = ui
             .app
             .resource::<bae_ui_motion::SharedRenderQueue>()

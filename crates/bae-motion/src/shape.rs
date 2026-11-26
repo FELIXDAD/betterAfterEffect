@@ -282,6 +282,8 @@ impl Command for AddShape {
                         camera: None,
                         light: None,
                         label: None,
+                        position_3d: None,
+                        point_of_interest: None,
                     },
                 )?;
                 let center = [f64::from(info.width) / 2.0, f64::from(info.height) / 2.0];
