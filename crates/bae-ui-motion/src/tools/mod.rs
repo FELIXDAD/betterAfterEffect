@@ -787,6 +787,58 @@ pub struct PaintOptions {
     /// Pressure, 2 Pen Tilt, 3 Stylus Wheel.
     pub dynamics: [u8; 5],
     pub minimum_size: f64,
+    /// Clone Source Overlay (the source shown over the layer while cloning)
+    /// and its opacity in percent.
+    pub clone_overlay: bool,
+    pub overlay_opacity: f64,
+    /// The Paint panel's five Clone presets and the one in use.
+    pub clone_presets: [ClonePreset; 5],
+    pub clone_preset: usize,
+}
+
+/// One of the Paint panel's Clone presets: the Clone Options it recalls.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClonePreset {
+    pub source: Option<bae_model::PrimPath>,
+    pub aligned: bool,
+    pub lock_source_time: bool,
+    pub offset: [f64; 2],
+    pub time_shift: f64,
+}
+
+impl Default for ClonePreset {
+    fn default() -> Self {
+        ClonePreset {
+            source: None,
+            aligned: true,
+            lock_source_time: false,
+            offset: [0.0, 0.0],
+            time_shift: 0.0,
+        }
+    }
+}
+
+impl PaintOptions {
+    /// Recalls Clone preset `i`, keeping the current options in the one in
+    /// use first (AE: changes go to the selected preset).
+    pub fn choose_clone_preset(&mut self, i: usize) {
+        let i = i.min(4);
+        self.clone_presets[self.clone_preset.min(4)] = ClonePreset {
+            source: self.clone_source.clone(),
+            aligned: self.aligned,
+            lock_source_time: self.lock_source_time,
+            offset: self.clone_offset,
+            time_shift: self.clone_time_shift,
+        };
+        let p = self.clone_presets[i].clone();
+        self.clone_source = p.source;
+        self.aligned = p.aligned;
+        self.lock_source_time = p.lock_source_time;
+        self.clone_offset = p.offset;
+        self.clone_time_shift = p.time_shift;
+        self.clone_preset = i;
+    }
 }
 
 impl Default for PaintOptions {
@@ -813,6 +865,10 @@ impl Default for PaintOptions {
             spacing: 25.0,
             dynamics: [1, 0, 0, 0, 0],
             minimum_size: 1.0,
+            clone_overlay: false,
+            overlay_opacity: 50.0,
+            clone_presets: Default::default(),
+            clone_preset: 0,
         }
     }
 }

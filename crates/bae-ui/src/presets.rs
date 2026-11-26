@@ -20,6 +20,9 @@ use crate::workspace::WorkspacePreset;
 /// Id of the After Effects keymap.
 pub const AE_KEYMAP: &str = "ae";
 
+/// The three slots in Window > Assign Shortcut to Workspace.
+pub const WORKSPACE_KEYS: [&str; 3] = ["Shift+F10", "Shift+F11", "Shift+F12"];
+
 /// AE's Default workspace (id `motion`).
 pub fn motion() -> WorkspacePreset {
     WorkspacePreset::new(
@@ -159,9 +162,12 @@ pub fn ae_keymap() -> Keymap {
             // Window: workspaces (AE-UI-005). AE assigns Shift+F10 / F11 / F12 to
             // the Default, Review and Learn workspaces (Window ▸ Assign Shortcut
             // to Workspace), so the menu items show them.
-            Binding::new("Shift+F10", ids::SWITCH_WORKSPACE).params(json!({ "id": "motion" })),
-            Binding::new("Shift+F11", ids::SWITCH_WORKSPACE).params(json!({ "id": "review" })),
-            Binding::new("Shift+F12", ids::SWITCH_WORKSPACE).params(json!({ "id": "ae_learn" })),
+            Binding::new(WORKSPACE_KEYS[0], ids::SWITCH_WORKSPACE)
+                .params(json!({ "id": "motion" })),
+            Binding::new(WORKSPACE_KEYS[1], ids::SWITCH_WORKSPACE)
+                .params(json!({ "id": "review" })),
+            Binding::new(WORKSPACE_KEYS[2], ids::SWITCH_WORKSPACE)
+                .params(json!({ "id": "ae_learn" })),
         ],
     )
 }
