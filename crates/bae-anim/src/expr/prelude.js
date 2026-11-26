@@ -424,6 +424,99 @@ Property.prototype = {
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
   get propertyIndex() { return 1; },
 };
+// ---- shape layer contents (AE: content("Shape 1").content("Path 1").path) ----
+function __content(c, l, parent, which) {
+  var info = __h.content(c, l, parent, which);
+  if (info === null || info === undefined) {
+    throw new Error("Property " + JSON.stringify(which) + " is missing or does not exist");
+  }
+  return new __ShapeItem(c, l, info);
+}
+function __ShapeItem(c, l, info) {
+  this.__c = c; this.__l = l; this.__p = info.path; this.__t = info.type; this.__o = info.op;
+  this.name = info.name;
+}
+__ShapeItem.prototype = {
+  content: function (which) { return __content(this.__c, this.__l, this.__p, which); },
+  get transform() {
+    if (this.__t !== "ShapeGroup") return undefined;
+    var c = this.__c, l = this.__l, p = this.__p;
+    var t = {};
+    [["anchorPoint", "anchor_point"], ["position", "position"], ["scale", "scale"], ["skew", "skew"],
+     ["skewAxis", "skew_axis"], ["rotation", "rotation"], ["opacity", "opacity"]].forEach(function (n) {
+      Object.defineProperty(t, n[0], { get: function () { return __prop(c, l, p, "transform:" + n[1]); } });
+    });
+    return t;
+  },
+};
+// AE's property names by item type (and by operator).
+var __SHAPE_PROPS = {
+  Rect: { size: "size", position: "position", roundness: "roundness" },
+  Ellipse: { size: "size", position: "position" },
+  Star: { points: "points", position: "position", rotation: "rotation", innerRadius: "inner_radius",
+          outerRadius: "outer_radius", innerRoundness: "inner_roundness", outerRoundness: "outer_roundness" },
+  Path: { path: "path" },
+  Fill: { color: "color", opacity: "opacity" },
+  Stroke: { color: "color", opacity: "opacity", strokeWidth: "width", miterLimit: "miter_limit" },
+  GradientFill: { startPoint: "start_point", endPoint: "end_point", highlightLength: "highlight_length",
+                  highlightAngle: "highlight_angle", opacity: "opacity" },
+  GradientStroke: { startPoint: "start_point", endPoint: "end_point", highlightLength: "highlight_length",
+                    highlightAngle: "highlight_angle", opacity: "opacity", strokeWidth: "width",
+                    miterLimit: "miter_limit" },
+};
+var __OPERATOR_PROPS = {
+  trim: { start: "trim:start", end: "trim:end", offset: "trim:offset" },
+  repeater: { copies: "repeater:copies", offset: "repeater:offset" },
+};
+(function () {
+  var names = {};
+  [__SHAPE_PROPS, __OPERATOR_PROPS].forEach(function (group) {
+    for (var t in group) for (var n in group[t]) names[n] = true;
+  });
+  Object.keys(names).forEach(function (n) {
+    Object.defineProperty(__ShapeItem.prototype, n, {
+      get: function () {
+        var map = this.__t === "ShapeOperator" ? __OPERATOR_PROPS[this.__o] : __SHAPE_PROPS[this.__t];
+        var attr = map && map[n];
+        return attr ? __prop(this.__c, this.__l, this.__p, attr) : undefined;
+      },
+    });
+  });
+})();
+
+// ---- paths (AE: mask paths, shape paths) ----
+Property.prototype.__path = function (t) {
+  var p = __h.prop(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t, false);
+  if (!p || !p.__path) throw new Error("Property is not a path");
+  return p;
+};
+Property.prototype.points = function (t) { return this.__path(t).points; };
+Property.prototype.inTangents = function (t) { return this.__path(t).inTangents; };
+Property.prototype.outTangents = function (t) { return this.__path(t).outTangents; };
+Property.prototype.isClosed = function () { return this.__path(__now).closed; };
+[["pointOnPath", 0], ["tangentOnPath", 1], ["normalOnPath", 2]].forEach(function (m) {
+  Property.prototype[m[0]] = function (percentage, t) {
+    return __h.pathAt(this.__c, this.__l, this.__p, this.__a,
+      [percentage === undefined ? 0.5 : percentage, t === undefined ? __now : t, m[1]]);
+  };
+});
+// createPath(points = [[0,0], [100,0], [100,100], [0,100]], inTangents = [],
+// outTangents = [], is_closed = true): a path a path expression can return.
+Property.prototype.createPath = function (points, inTangents, outTangents, isClosed) {
+  if (points === undefined) points = [[0, 0], [100, 0], [100, 100], [0, 100]];
+  points = __val(points);
+  if (!__isArr(points) || points.length < 1) throw new Error("createPath needs at least one point");
+  function tangents(v) {
+    v = v === undefined ? [] : __val(v);
+    if (v.length !== 0 && v.length !== points.length) {
+      throw new Error("Tangent array length must equal the number of points");
+    }
+    return v.length ? v : points.map(function () { return [0, 0]; });
+  }
+  return { __path: true, points: points, inTangents: tangents(inTangents),
+           outTangents: tangents(outTangents), closed: isClosed === undefined ? true : !!isClosed };
+};
+
 // ---- text (AE: thisLayer.text.sourceText and the 17.0+ style API) ----
 Property.prototype.getStyleAt = function (charIndex, t) {
   return new TextStyle(__h.textStyle(this.__c, this.__l, this.__p, this.__a, t === undefined ? __now : t), {});
@@ -557,6 +650,7 @@ Layer.prototype = {
     var r = __h.sourceRect(this.__c, this.__l, t === undefined ? __now : t, !!includeExtents);
     return { top: r[1], left: r[0], width: r[2], height: r[3] };
   },
+  content: function (which) { return __content(this.__c, this.__l, "", which); },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;

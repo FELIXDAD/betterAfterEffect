@@ -1718,6 +1718,25 @@ fn enclosing_layer(stage: &Stage, prim: &PrimPath) -> Option<(PrimPath, PrimPath
 // ---------------------------------------------------------------------------
 
 impl CompiledPrim {
+    /// The prim at `path` (this one or one below it).
+    pub(crate) fn find_prim(&self, path: &str) -> Option<&CompiledPrim> {
+        if self.path.as_str() == path {
+            return Some(self);
+        }
+        self.children.iter().find_map(|c| c.find_prim(path))
+    }
+
+    /// A static string attribute (`name`, `operator`).
+    pub(crate) fn static_str(&self, attr: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(n, _)| n == attr)
+            .and_then(|(_, p)| match p {
+                Prop::Static(Value::String(s) | Value::Enum(s)) => Some(s.as_str()),
+                _ => None,
+            })
+    }
+
     fn find(&self, prim: &str, attr: &str) -> Option<&Prop> {
         if self.path.as_str() == prim {
             return self.attrs.iter().find(|(n, _)| n == attr).map(|(_, p)| p);

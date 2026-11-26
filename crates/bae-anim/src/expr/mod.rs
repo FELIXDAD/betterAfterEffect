@@ -11,6 +11,7 @@
 //!   calling back into JavaScript.
 
 pub(crate) mod fast;
+mod path;
 pub(crate) mod rewrite;
 
 use std::cell::RefCell;
@@ -603,6 +604,21 @@ const LOCALS: &[(&str, &str)] = &[
         "sourceRectAtTime",
         "thisLayer.sourceRectAtTime.bind(thisLayer)",
     ),
+    ("content", "thisLayer.content.bind(thisLayer)"),
+    ("points", "thisProperty.points.bind(thisProperty)"),
+    ("inTangents", "thisProperty.inTangents.bind(thisProperty)"),
+    ("outTangents", "thisProperty.outTangents.bind(thisProperty)"),
+    ("isClosed", "thisProperty.isClosed.bind(thisProperty)"),
+    ("pointOnPath", "thisProperty.pointOnPath.bind(thisProperty)"),
+    (
+        "tangentOnPath",
+        "thisProperty.tangentOnPath.bind(thisProperty)",
+    ),
+    (
+        "normalOnPath",
+        "thisProperty.normalOnPath.bind(thisProperty)",
+    ),
+    ("createPath", "thisProperty.createPath.bind(thisProperty)"),
     ("anchorPoint", "thisLayer.anchorPoint"),
     ("position", "thisLayer.position"),
     ("scale", "thisLayer.scale"),
@@ -774,6 +790,11 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
             )),
         };
     }
+    if let Value::Bezier(old) = template
+        && let Some(o) = js.as_object()
+    {
+        return path_from_js(o, old).map(Value::Bezier);
+    }
     if let Value::TextDocument(doc) = template {
         let mut doc = doc.clone();
         // A text style (`text.sourceText.style.setFontSize(60)` …, AE 17.0+).
@@ -828,6 +849,62 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         }
         Value::FloatList(_) => Value::FloatList(comps),
         other => other.clone(),
+    })
+}
+
+/// A path as expressions see it (`points()`, `value` of a path property):
+/// points and tangents rounded to four decimals, as AE returns them.
+fn path_to_js<'js>(ctx: &Ctx<'js>, p: &bae_model::BezierPath) -> rquickjs::Result<Object<'js>> {
+    let round = |v: &[[f64; 2]]| -> Vec<Vec<f64>> {
+        v.iter()
+            .map(|p| p.iter().map(|x| (x * 1e4).round() / 1e4).collect())
+            .collect()
+    };
+    let o = Object::new(ctx.clone())?;
+    o.set("__path", true)?;
+    o.set("points", round(&p.vertices))?;
+    o.set("inTangents", round(&p.in_tangents))?;
+    o.set("outTangents", round(&p.out_tangents))?;
+    o.set("closed", p.closed)?;
+    Ok(o)
+}
+
+/// A path returned by a path expression (`createPath(…)`, another path's
+/// value); `old` keeps its mask feather points.
+fn path_from_js(
+    o: &Object<'_>,
+    old: &bae_model::BezierPath,
+) -> Result<bae_model::BezierPath, String> {
+    let pairs = |k: &str| -> Result<Vec<[f64; 2]>, String> {
+        let v: Option<Vec<Vec<f64>>> = o.get(k).map_err(|e| e.to_string())?;
+        Ok(v.unwrap_or_default()
+            .into_iter()
+            .map(|p| {
+                [
+                    p.first().copied().unwrap_or(0.0),
+                    p.get(1).copied().unwrap_or(0.0),
+                ]
+            })
+            .collect())
+    };
+    let vertices = pairs("points")?;
+    if vertices.is_empty() {
+        return Err("Path must have at least one point".into());
+    }
+    let fill = |mut v: Vec<[f64; 2]>| {
+        v.resize(vertices.len(), [0.0; 2]);
+        v
+    };
+    Ok(bae_model::BezierPath {
+        in_tangents: fill(pairs("inTangents")?),
+        out_tangents: fill(pairs("outTangents")?),
+        closed: o
+            .get::<_, Option<bool>>("closed")
+            .ok()
+            .flatten()
+            .unwrap_or(true),
+        feather: old.feather.clone(),
+        vertices,
     })
 }
 
@@ -1073,6 +1150,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 } else {
                     prop.sample(&cx)
                 };
+                // A path is an object (points, tangents, closed), as AE's.
+                if let Value::Bezier(p) = &v {
+                    return path_to_js(&ctx, p)?.into_js(&ctx);
+                }
                 // Source Text reads as its string (AE).
                 if let Value::TextDocument(doc) = &v {
                     return doc.text.as_str().into_js(&ctx);
@@ -1085,6 +1166,87 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     out.truncate(2);
                 }
                 out.into_js(&ctx)
+            },
+        )?,
+    )?;
+
+    h.set(
+        "content",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, parent: String, which: rquickjs::Value<'js>| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                // The items of the layer's Contents, or of a group's Contents.
+                let items: &[crate::eval::CompiledPrim] = if parent.is_empty() {
+                    &layer.contents
+                } else {
+                    layer
+                        .contents
+                        .iter()
+                        .find_map(|p| p.find_prim(&parent))
+                        .and_then(|g| g.children.iter().find(|c| c.path.name() == "contents"))
+                        .map_or(&[], |f| f.children.as_slice())
+                };
+                let name_of = |p: &crate::eval::CompiledPrim| {
+                    p.static_str("name").unwrap_or(p.path.name()).to_owned()
+                };
+                let found = if let Some(n) = which.as_number() {
+                    items.get((n as usize).wrapping_sub(1))
+                } else {
+                    let name = which
+                        .as_string()
+                        .and_then(|s| s.to_string().ok())
+                        .unwrap_or_default();
+                    items.iter().find(|p| name_of(p) == name)
+                };
+                let Some(item) = found else {
+                    return Ok::<_, rquickjs::Error>(None);
+                };
+                let o = Object::new(ctx.clone())?;
+                o.set("path", item.path.as_str())?;
+                o.set("type", item.prim_type.as_ref().map_or("", |t| t.as_str()))?;
+                o.set("op", item.static_str("operator").unwrap_or(""))?;
+                o.set("name", name_of(item))?;
+                Ok(Some(o))
+            },
+        )?,
+    )?;
+
+    h.set(
+        "pathAt",
+        Function::new(
+            ctx.clone(),
+            // `args`: percentage, time, kind (0 point, 1 tangent, 2 normal).
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, args: Vec<f64>| {
+                let (pct, t, kind) = (args[0], args[1], args[2] as i32);
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                let Some(prop) = layer.find_prop(own(&prim, layer), &attr) else {
+                    return throw(&ctx, &format!("property {attr} does not exist"));
+                };
+                note_dependency(c as usize, li);
+                let ct = Time::from_seconds(t);
+                let cx = Cx {
+                    comp: c as usize,
+                    layer: li,
+                    ct,
+                    lt: layer.timing.layer_time(ct),
+                    js: Some(&ctx),
+                };
+                let Value::Bezier(p) = prop.sample(&cx) else {
+                    return throw(&ctx, "not a path property");
+                };
+                let Some((point, tangent)) = path::at(&p, pct) else {
+                    return throw(&ctx, "the path has no points");
+                };
+                Ok::<_, rquickjs::Error>(match kind {
+                    0 => point.to_vec(),
+                    1 => tangent.to_vec(),
+                    _ => path::normal(tangent).to_vec(),
+                })
             },
         )?,
     )?;

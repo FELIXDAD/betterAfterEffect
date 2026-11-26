@@ -765,3 +765,100 @@ fn markers_in_expressions() {
     );
     assert_eq!(ec.layers[0].transform.opacity, 50.0);
 }
+
+fn rect_path() -> Value {
+    Value::Bezier(bae_model::BezierPath {
+        vertices: vec![
+            [100.0, 100.0],
+            [300.0, 100.0],
+            [300.0, 200.0],
+            [100.0, 200.0],
+        ],
+        in_tangents: vec![[0.0; 2]; 4],
+        out_tangents: vec![[0.0; 2]; 4],
+        closed: true,
+        feather: Vec::new(),
+    })
+}
+
+/// Path properties: points / tangents / isClosed, pointOnPath at an arc-length
+/// percentage (AE 26: 174.9986, 100 on this rectangle), and a path expression
+/// returning createPath(…).
+#[test]
+fn path_property_methods_and_create_path() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "A", "solid");
+        b.prim(&format!("{l}/masks"), PrimType::FOLDER)
+            .prim(&format!("{l}/masks/m1"), PrimType::MASK)
+            .set(&format!("{l}/masks/m1"), "name", "Mask 1")
+            .set(&format!("{l}/masks/m1"), "path", rect_path())
+            .prim(&format!("{l}/masks/m2"), PrimType::MASK)
+            .set(&format!("{l}/masks/m2"), "name", "Mask 2")
+            .expr(
+                &format!("{l}/masks/m2"),
+                "path",
+                rect_path(),
+                r#"var p = mask("Mask 1").maskPath;
+                   createPath(p.points().map(function (v) { return [v[0] + 10, v[1]]; }),
+                              p.inTangents(), p.outTangents(), false)"#,
+            )
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var p = mask("Mask 1").maskPath; p.points()[1][0] + p.isClosed() * 1000 + p.tangentOnPath(0.875)[1]"#,
+            )
+            .expr(
+                &l,
+                "transform:position",
+                Value::Vec3([0.0; 3]),
+                r#"mask(1).maskPath.pointOnPath(0.125) + mask(1).maskPath.normalOnPath(0.125)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let l = &ec.layers[0];
+    assert_eq!(l.transform.rotation.z, 300.0 + 1000.0 - 1.0);
+    // (175, 100) plus the normal (0, 1).
+    assert!(
+        (l.transform.position.x - 175.0).abs() < 0.01,
+        "{:?}",
+        l.transform.position
+    );
+    assert!((l.transform.position.y - 101.0).abs() < 0.01);
+    let shifted = &l.masks[1].shape;
+    assert_eq!(shifted.vertices[0], [110.0, 100.0]);
+    assert!(!shifted.closed);
+}
+
+/// Shape layer contents: content(name / index) down to a path, a fill and the
+/// group's transform, with AE's property names.
+#[test]
+fn shape_contents_in_expressions() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "S", "shape");
+        let g = format!("{l}/contents/g");
+        b.prim(&format!("{l}/contents"), PrimType::FOLDER)
+            .prim(&g, PrimType::SHAPE_GROUP)
+            .set(&g, "name", "Group 1")
+            .set(&g, "transform:position", Value::Vec2([40.0, 50.0]))
+            .prim(&format!("{g}/contents"), PrimType::FOLDER)
+            .prim(&format!("{g}/contents/p"), PrimType::PATH)
+            .set(&format!("{g}/contents/p"), "name", "Path 1")
+            .set(&format!("{g}/contents/p"), "path", rect_path())
+            .prim(&format!("{g}/contents/f"), PrimType::FILL)
+            .set(&format!("{g}/contents/f"), "name", "Fill 1")
+            .set(&format!("{g}/contents/f"), "color", Value::Color([0.25, 0.5, 1.0, 1.0]))
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var g = content("Group 1");
+                   g.content("Path 1").path.points()[1][0] + g.transform.position[1] * 10
+                   + content(1).content(2).color[0] * 4 + (g.content(1).path.pointOnPath(0)[0] == 100)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 300.0 + 500.0 + 1.0 + 1.0);
+}
