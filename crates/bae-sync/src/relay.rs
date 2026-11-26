@@ -188,12 +188,16 @@ impl Relay {
             }
             failed.sort_by_key(|(h, _)| *h);
             failed.dedup_by_key(|(h, _)| *h);
+            // A failed peer's last messages were imported before its error (see
+            // `SyncSession::pump_at`) but are not counted in `received`: go round
+            // once more so they reach the others in this call too.
+            let any_failed = !failed.is_empty();
             for (handle, e) in failed {
                 self.disconnect_at(handle, now);
                 out.disconnected.push((handle, e));
             }
             out.received += received;
-            if received == 0 {
+            if received == 0 && !any_failed {
                 break;
             }
         }

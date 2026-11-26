@@ -165,8 +165,6 @@ impl SyncSession {
         &self.stats
     }
 
-    /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
-    /// says hello again and nothing is sent until the remote answers.
     /// Publish our presence (sent on the next pump, then as a heartbeat).
     pub fn set_presence(&mut self, state: PresenceState) {
         if self.presence.as_ref() != Some(&state) {
@@ -203,6 +201,8 @@ impl SyncSession {
             .collect()
     }
 
+    /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
+    /// says hello again and nothing is sent until the remote answers.
     pub fn reset(&mut self) {
         self.remote = None;
         self.remote_client = None;
@@ -236,8 +236,10 @@ impl SyncSession {
     /// the transport signals incoming data (or on a timer).
     ///
     /// Errors are transport failures; the link must be re-established (then call
-    /// [`reset`](Self::reset)). Problems with single messages are in
-    /// [`PumpOutcome::errors`].
+    /// [`reset`](Self::reset)). Payloads received before the failure are still
+    /// imported (their [`StageEvent`]s reach `Stage::subscribe` listeners; the
+    /// outcome itself is lost with the error). Problems with single messages are
+    /// in [`PumpOutcome::errors`].
     pub fn pump(
         &mut self,
         docs: &mut dyn DocSet,
@@ -256,15 +258,12 @@ impl SyncSession {
         let mut out = PumpOutcome::default();
         self.maybe_hello(docs, transport, now, &mut out)?;
         let mut incoming = Incoming::new();
-        for _ in 0..self.config.max_messages_per_pump {
-            let Some(msg) = transport.recv()? else {
-                break;
-            };
-            out.received += 1;
-            self.stats.messages_received += 1;
-            self.handle(docs, transport, msg, &mut incoming, now, &mut out)?;
-        }
+        let received = self.receive(docs, transport, &mut incoming, now, &mut out);
+        // Import what arrived even when the link failed part-way: the remote
+        // counts it as delivered (a client that sends its last edits and closes
+        // at once must not lose them), and the CRDT import does not need the link.
         self.import(docs, incoming, &mut out);
+        received?;
         out.presence_changed |= self.peers.expire(now);
         self.maybe_presence(transport, now, &mut out)?;
         // A document that appeared since the last hello (created locally, or the
@@ -278,6 +277,28 @@ impl SyncSession {
             self.last_send = Some(now);
         }
         Ok(out)
+    }
+
+    /// Handle up to `max_messages_per_pump` received messages; payloads are
+    /// collected in `incoming` for [`import`](Self::import). Stops at the first
+    /// transport error, keeping what was collected before it.
+    fn receive(
+        &mut self,
+        docs: &dyn DocSet,
+        transport: &mut dyn Transport,
+        incoming: &mut Incoming,
+        now: Instant,
+        out: &mut PumpOutcome,
+    ) -> Result<(), SyncError> {
+        for _ in 0..self.config.max_messages_per_pump {
+            let Some(msg) = transport.recv()? else {
+                break;
+            };
+            out.received += 1;
+            self.stats.messages_received += 1;
+            self.handle(docs, transport, msg, incoming, now, out)?;
+        }
+        Ok(())
     }
 
     fn maybe_hello(

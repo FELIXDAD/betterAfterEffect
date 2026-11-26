@@ -311,3 +311,103 @@ fn nothing_is_sent_before_the_remote_says_hello() {
     assert_eq!(session.remote_client().unwrap().as_str(), "b");
     assert!(stage.version(&DocKey::History).is_none());
 }
+
+/// Delivers what is queued, then fails once `dead` is set: a WebSocket whose
+/// client sent its last edits and closed in the same breath.
+struct DyingLink {
+    inner: bae_sync::MemoryTransport,
+    dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl bae_sync::Transport for DyingLink {
+    fn send(&mut self, msg: bae_sync::Message) -> Result<(), bae_sync::SyncError> {
+        if self.dead.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(bae_sync::SyncError::Closed);
+        }
+        self.inner.send(msg)
+    }
+
+    fn recv(&mut self) -> Result<Option<bae_sync::Message>, bae_sync::SyncError> {
+        match self.inner.recv()? {
+            Some(m) => Ok(Some(m)),
+            None if self.dead.load(std::sync::atomic::Ordering::Relaxed) => {
+                Err(bae_sync::SyncError::Closed)
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+#[test]
+fn edits_received_just_before_a_link_fails_are_kept() {
+    use bae_sync::MemoryTransport;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let base = base_snapshots();
+    let mut relay = Relay::new(ClientId::new("hub").unwrap());
+    let dead = Arc::new(AtomicBool::new(false));
+    let (hub_end, mut leaving_end) = MemoryTransport::pair();
+    relay.connect(Box::new(DyingLink {
+        inner: hub_end,
+        dead: dead.clone(),
+    }));
+    let (hub_end, mut staying_end) = MemoryTransport::pair();
+    relay.connect(Box::new(hub_end));
+    let mut leaving = client_stage(&base);
+    let mut leaving_session = SyncSession::new(SessionConfig::new(ClientId::new("a").unwrap()));
+    let mut staying = client_stage(&base);
+    let mut staying_session = SyncSession::new(SessionConfig::new(ClientId::new("b").unwrap()));
+    for _ in 0..3 {
+        leaving_session
+            .pump(&mut leaving, &mut leaving_end)
+            .unwrap();
+        staying_session
+            .pump(&mut staying, &mut staying_end)
+            .unwrap();
+        relay.pump();
+    }
+    assert!(leaving_session.is_connected() && staying_session.is_connected());
+
+    // The last edit goes out, and the link fails before the hub reads it.
+    let who = author("user:a");
+    leaving
+        .transact(&who, "last edit", |tx| {
+            tx.apply(Op::CreatePrim {
+                path: p("/last"),
+                specifier: Specifier::Def,
+                prim_type: Some(PrimType::new("Folder")),
+                index: None,
+            })
+        })
+        .unwrap();
+    leaving_session
+        .pump(&mut leaving, &mut leaving_end)
+        .unwrap();
+    assert!(leaving_session.unsynced(&leaving).is_empty());
+    dead.store(true, Ordering::Relaxed);
+
+    // One relay pump: the hub imports the edit, drops the link and passes the
+    // edit on to the client that stayed.
+    let out = relay.pump();
+    assert_eq!(out.disconnected.len(), 1);
+    let root = DocKey::sublayer(&SublayerId::root());
+    assert!(
+        relay
+            .docs()
+            .version(&root)
+            .unwrap()
+            .includes_vv(&leaving.version(&root).unwrap()),
+        "the hub lost the edit sent just before the link failed"
+    );
+    staying_session
+        .pump(&mut staying, &mut staying_end)
+        .unwrap();
+    assert!(
+        staying
+            .sublayer(&SublayerId::root())
+            .unwrap()
+            .has_spec(&p("/last"))
+    );
+    assert_eq!(fingerprint(&staying), fingerprint(&leaving));
+}
