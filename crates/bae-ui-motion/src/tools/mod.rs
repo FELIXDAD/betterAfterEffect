@@ -518,6 +518,20 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// Whether a mask or shape path is selected: vertices in the Composition
+/// viewer, or its path property in the Timeline.
+fn path_selected(cx: &PanelContext<'_>) -> bool {
+    let session = crate::common::session(cx.resources);
+    let s = session.lock();
+    s.vertex_path.is_some()
+        || s.selected_props.iter().any(|(p, attr)| {
+            attr == "path"
+                && cx.stage.prim(p).is_some_and(|v| {
+                    v.is_a(&bae_model::PrimType::MASK) || v.is_a(&bae_model::PrimType::PATH)
+                })
+        })
+}
+
 /// `(id, English title)` of the tool actions, for the shortcut editor.
 pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
     SHORTCUTS
@@ -1279,6 +1293,15 @@ impl ActionHandler for ToolActions {
             return true;
         }
         if crate::viewer::view_options::handle(inv, cx) {
+            return true;
+        }
+        // Ctrl+T with a mask or shape path selected: Free Transform Points,
+        // else the Type tools (AE).
+        if inv.id == ids::TYPE && path_selected(cx) {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            t.set(Tool::Selection);
+            t.free_transform_request = true;
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
