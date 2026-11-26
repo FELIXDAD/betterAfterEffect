@@ -131,6 +131,7 @@ pub fn apply(prefs: &Preferences) {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
+    crate::theme::set_accessible_contrast(prefs.bool("appearance.accessibility_color_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
     ));
@@ -1014,7 +1015,7 @@ fn label_index(key: &str) -> usize {
 }
 
 /// A label's name as shown: the user's name, or the translated default.
-fn label_name(p: &Preferences, i: usize) -> String {
+pub fn label_name(p: &Preferences, i: usize) -> String {
     let name = p.label_name(i);
     if i == 0 || name.is_empty() || name == schema::LABEL_NAMES[i] {
         tr(schema::LABEL_NAMES[i]).to_owned()

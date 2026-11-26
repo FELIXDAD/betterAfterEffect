@@ -38,7 +38,7 @@ pub struct Probed {
     pub photoshop: Vec<(PathBuf, Option<String>)>,
     pub failed: Vec<String>,
     notices: Vec<String>,
-    sequences_to_verify: Vec<(PathBuf, String)>,
+    sequences_to_verify: Vec<(PathBuf, String, SequenceMode)>,
 }
 
 /// AE's name for a sequence item: the frame range in brackets
@@ -126,7 +126,7 @@ impl ImportDefaults {
 fn probe_file(
     path: &Path,
     folder: Option<&str>,
-    sequences: bool,
+    sequence: SequenceMode,
     defaults: &ImportDefaults,
     seen: &mut HashSet<PathBuf>,
     out: &mut Probed,
@@ -139,11 +139,7 @@ fn probe_file(
         return;
     }
     let options = OpenOptions {
-        sequence: if sequences {
-            SequenceMode::Sequence
-        } else {
-            SequenceMode::Single
-        },
+        sequence,
         sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
         ..Default::default()
     };
@@ -170,7 +166,7 @@ fn probe_file(
                         ));
                     }
                     if defaults.verify_frames {
-                        out.sequences_to_verify.push((info.path.clone(), name.clone()));
+                        out.sequences_to_verify.push((info.path.clone(), name.clone(), sequence));
                     }
                     name
                 }
@@ -235,17 +231,24 @@ fn probe_dir(
                 if name.starts_with('.') || name.eq_ignore_ascii_case("thumbs.db") {
                     continue;
                 }
-                probe_file(&p, Some(rel), false, defaults, seen, out);
+                probe_file(&p, Some(rel), SequenceMode::Single, defaults, seen, out);
             }
             ScannedItem::Sequence(seq) if is_photoshop(&seq.path_for(seq.first())) => {
                 for &frame in &seq.frames {
-                    probe_file(&seq.path_for(frame), Some(rel), false, defaults, seen, out);
+                    probe_file(
+                        &seq.path_for(frame),
+                        Some(rel),
+                        SequenceMode::Single,
+                        defaults,
+                        seen,
+                        out,
+                    );
                 }
             }
             ScannedItem::Sequence(seq) => probe_file(
                 &seq.path_for(seq.first()),
                 Some(rel),
-                true,
+                SequenceMode::Sequence,
                 defaults,
                 seen,
                 out,
@@ -274,13 +277,17 @@ fn probe_dir(
 
 /// Probe chosen or dropped paths: files (with their sequences) and folders.
 pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
+    probe_selected(paths, defaults, SequenceMode::Sequence)
+}
+
+fn probe_selected(paths: &[PathBuf], defaults: &ImportDefaults, sequence: SequenceMode) -> Probed {
     let mut out = Probed::default();
     let mut seen = HashSet::new();
     for path in paths {
         if path.is_dir() {
             probe_dir(path, &file_name(path), defaults, &mut seen, &mut out);
         } else {
-            probe_file(path, None, true, defaults, &mut seen, &mut out);
+            probe_file(path, None, sequence, defaults, &mut seen, &mut out);
         }
     }
     out
@@ -305,14 +312,30 @@ pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
             .resources
             .get::<crate::SharedSession>()
             .and_then(|s| s.lock().active_comp.clone());
-        import_into(cx, &paths, None, comp);
+        import_into(
+            cx,
+            &paths,
+            None,
+            comp,
+            SequenceMode::Sequence,
+            false,
+            Default::default(),
+        );
     }
 }
 
 /// Import `paths` into `parent` (default the assets folder): one
 /// `item.import`; unreadable files are reported in an alert.
 pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent: Option<PrimPath>) {
-    import_into(cx, paths, parent, None);
+    import_into(
+        cx,
+        paths,
+        parent,
+        None,
+        SequenceMode::Sequence,
+        false,
+        Default::default(),
+    );
 }
 
 fn import_into(
@@ -320,12 +343,15 @@ fn import_into(
     paths: &[PathBuf],
     parent: Option<PrimPath>,
     comp: Option<PrimPath>,
+    sequence: SequenceMode,
+    create_comp: bool,
+    photoshop_kind: bae_model::psd::ImportKind,
 ) {
     if paths.is_empty() {
         return;
     }
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
-    let mut probed = probe(paths, &defaults);
+    let mut probed = probe_selected(paths, &defaults, sequence);
     for (path, folder) in probed.photoshop.drain(..) {
         crate::dialogs::shared(cx.resources)
             .lock()
@@ -336,10 +362,14 @@ fn import_into(
                 comp.clone(),
                 folder,
                 defaults.clone(),
+                photoshop_kind,
             ));
     }
     if !probed.files.is_empty() {
-        let mut params = json!({ "files": probed.files });
+        let mut params = json!({ "files": probed.files, "folder_label": crate::prefs::current(cx.resources).int("labels.label_default_folder") });
+        if create_comp {
+            params["create_comp"] = json!(true);
+        }
         if let Some(p) = parent {
             params["parent"] = json!(p);
         }
@@ -381,9 +411,38 @@ fn request() -> OpenRequest {
 
 /// File > Import > File (Cmd/Ctrl+I): one open panel.
 pub(crate) fn import_file(cx: &mut PanelContext<'_>, session: &SharedSession) {
-    let paths = SharedFilePicker::open(cx.resources, &request());
     let folder = import_folder(cx, session);
-    import_paths(cx, &paths, folder);
+    choose_import(cx, &request(), folder);
+}
+
+fn choose_import(
+    cx: &mut PanelContext<'_>,
+    request: &OpenRequest,
+    folder: Option<PrimPath>,
+) -> bool {
+    let Some(picker) = cx.resources.get::<SharedFilePicker>() else {
+        return false;
+    };
+    let selection = picker.0.import(request);
+    if selection.paths.is_empty() {
+        return false;
+    }
+    import_into(
+        cx,
+        &selection.paths,
+        folder,
+        None,
+        if !selection.sequences {
+            SequenceMode::Single
+        } else if selection.alphabetical {
+            SequenceMode::Alphabetical
+        } else {
+            SequenceMode::Sequence
+        },
+        selection.create_comp,
+        selection.photoshop_kind,
+    );
+    true
 }
 
 /// The footage item File > Replace Footage acts on: the one selected in the
@@ -446,7 +505,21 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         if queue_psd_replace(cx, &path, &item, &defaults, true) {
             continue;
         }
-        let mut probed = probe(&[path], &defaults);
+        let Some(view) = cx.stage.prim(&item) else {
+            continue;
+        };
+        let sequence = if view.value("kind").and_then(|v| v.as_str()) != Some("sequence") {
+            SequenceMode::Single
+        } else if view
+            .value("sequence:pattern")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.starts_with("*."))
+        {
+            SequenceMode::Alphabetical
+        } else {
+            SequenceMode::Sequence
+        };
+        let mut probed = probe_selected(&[path], &defaults, sequence);
         if let Some(file) = probed.files.pop() {
             cx.invoke_with(
                 "item.replace_file",
@@ -526,6 +599,7 @@ fn queue_psd_replace(
         None,
         None,
         defaults.clone(),
+        Default::default(),
     );
     job.replace(item.clone(), &view, reload);
     crate::dialogs::shared(cx.resources)
@@ -543,11 +617,9 @@ pub(crate) fn import_multiple(cx: &mut PanelContext<'_>, session: &SharedSession
     request.title = tr("Import Multiple Files").to_owned();
     // A guard against a picker that never cancels (a script).
     for _ in 0..1000 {
-        let paths = SharedFilePicker::open(cx.resources, &request);
-        if paths.is_empty() {
+        if !choose_import(cx, &request, folder.clone()) {
             break;
         }
-        import_paths(cx, &paths, folder.clone());
     }
 }
 
@@ -558,6 +630,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Unreadable frames", "无法读取的帧"),
     ("Could not verify the image sequence.", "无法校验图像序列。"),
     // File > Import and dropped files (`import`).
+    ("Force alphabetical order", "强制按字母顺序排列"),
+    ("Import As:", "导入为："),
+    ("Create Composition", "创建合成"),
+    ("Render Queue Complete", "渲染队列已完成"),
     ("Import File", "导入文件"),
     ("Import Multiple Files", "导入多个文件"),
     ("File", "文件"),

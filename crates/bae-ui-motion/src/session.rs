@@ -89,7 +89,12 @@ pub struct Playback {
     /// The current time before playing (kept on stop when Move Time To
     /// Preview Time is off).
     before: Time,
+    /// When playback was asked for: the pre-roll waits a little at most.
+    requested: Instant,
 }
+
+/// Longest the clock waits for playback's first frame (a cold start).
+const PREROLL_MAX: Duration = Duration::from_millis(250);
 
 impl Playback {
     fn ordinal_at(&self, now: Instant) -> u64 {
@@ -236,6 +241,18 @@ impl Scrub {
     }
 }
 
+/// The properties a keyframe drag changes, as they will be when it ends.
+#[derive(Clone, Debug)]
+pub struct KeyPreview {
+    /// The panel mode dragging ("graph", "bars"): only it clears an
+    /// unfinished preview.
+    pub owner: &'static str,
+    pub specs: Vec<bae_anim::AttrOverride>,
+    /// The drag ended and its command was sent (stage revision then): shown
+    /// until it has run, like [`Scrub::committed`].
+    pub committed: Option<(u64, Instant)>,
+}
+
 /// Copied keyframes (one attribute at a time, like AE's paste target).
 #[derive(Clone, Debug)]
 pub struct KeyClipboard {
@@ -266,6 +283,9 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Open the comps a command creates (those not in `before`; New Comp
+    /// from Selection) and, with `queue`, add them to the Render Queue.
+    NewComps { before: Vec<PrimPath>, queue: bool },
     /// Select the shape group a command adds to a shape layer (AE: a shape
     /// tool's new group is selected, its box shown): the first of `layer`'s
     /// groups not in `before`.
@@ -305,6 +325,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// The mask or shape path whose vertices the Composition viewer has
+    /// selected (Ctrl+T then runs Free Transform Points, AE).
+    pub(crate) vertex_path: Option<PrimPath>,
     /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
     /// mask, effect or text animator; [`group_prim`] gives the prim).
     pub selected_groups: Vec<String>,
@@ -356,6 +379,8 @@ pub struct Session {
     pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
+    pub(crate) open_liquify: Option<PrimPath>,
+    pub(crate) liquify_tool: usize,
     /// An expression just added (Alt+click on the stopwatch, Animation ▸ Add
     /// Expression): the Timeline focuses its field with the text selected, so
     /// typing replaces it (AE). Dropped after a second if never shown.
@@ -369,6 +394,10 @@ pub struct Session {
     pub reveal: HashMap<PrimPath, Reveal>,
     pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
+    /// A keyframe drag in progress (Graph Editor, layer bars): the dragged
+    /// properties as the release will leave them, evaluated live like a value
+    /// drag (#593).
+    pub key_preview: Option<KeyPreview>,
     pub clipboard: Option<KeyClipboard>,
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
     /// copy wins over [`Session::clipboard`].
@@ -380,6 +409,8 @@ pub struct Session {
     /// properties (AE).
     pub(crate) expression_clipboard: Option<String>,
     pending: Vec<(Pending, u32)>,
+    /// New comps to add to the Render Queue (the dialogs host takes them).
+    pub(crate) queue_comps: Vec<PrimPath>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
     reserved: Vec<(PrimPath, String)>,
@@ -616,6 +647,24 @@ impl Session {
         }
     }
 
+    /// What panels evaluate in place of the stage while something is dragged:
+    /// the value drag ([`Scrub`]) and the keyframe drag ([`KeyPreview`]).
+    pub fn live_overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        let mut out: Vec<bae_anim::AttrOverride> = self
+            .key_preview
+            .iter()
+            .flat_map(|k| k.specs.iter().cloned())
+            .filter(|o| stage.has_prim(&o.prim))
+            .collect();
+        if let Some(s) = &self.scrub {
+            for o in s.overrides(stage) {
+                out.retain(|x| !(x.prim == o.prim && x.attr == o.attr));
+                out.push(o);
+            }
+        }
+        out
+    }
+
     /// The latest background enumeration for the audio preferences.
     pub fn output_devices(&self) -> &bae_media::playback::OutputDevices {
         &self.output_devices
@@ -685,6 +734,23 @@ impl Session {
     }
 
     /// Restart the frame clock at `t`: playback continues from there.
+    /// Pre-roll: while playback has not left its first frame and the viewer
+    /// cannot show that frame yet (a cold start right after a seek), the
+    /// clock waits for it ([`PREROLL_MAX`] at most) instead of skipping it.
+    /// Sound drives its own clock and is not held.
+    pub(crate) fn hold_first_frame(&mut self, ready: bool) {
+        if self.audio_clock {
+            return;
+        }
+        if let Some(pb) = &mut self.playback
+            && !ready
+            && pb.ordinal == 0
+            && pb.requested.elapsed() < PREROLL_MAX
+        {
+            pb.started = Instant::now();
+        }
+    }
+
     fn restart_clock(&mut self, t: Time) {
         if let Some(pb) = &mut self.playback {
             pb.frame = pb.rate.time_to_frame(t);
@@ -768,6 +834,11 @@ impl Session {
     /// Drop references to prims that no longer exist and resolve pending items.
     /// Called once per frame by the panels (cheap).
     pub fn sync(&mut self, stage: &Stage) {
+        if let Some((revision, at)) = self.key_preview.as_ref().and_then(|k| k.committed)
+            && (stage.revision() != revision || at.elapsed() > Duration::from_millis(500))
+        {
+            self.key_preview = None;
+        }
         if let Some((revision, at)) = self.scrub.as_ref().and_then(|s| s.committed)
             && (stage.revision() != revision
                 || at.elapsed() > std::time::Duration::from_millis(500))
@@ -776,6 +847,21 @@ impl Session {
         }
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewComps { before, queue } = &what {
+                let added: Vec<PrimPath> = query::comps(stage)
+                    .into_iter()
+                    .filter(|c| !before.contains(c))
+                    .collect();
+                if let Some(first) = added.first() {
+                    self.open_comp(first);
+                    if *queue {
+                        self.queue_comps.extend(added);
+                    }
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::Keys(keys) = &what {
                 let landed = keys.iter().all(|k| {
                     query::attr_spec(stage, &k.path, &k.attr)
@@ -828,7 +914,8 @@ impl Session {
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
                 | Pending::NewGroup { .. }
-                | Pending::Keys(_) => {
+                | Pending::Keys(_)
+                | Pending::NewComps { .. } => {
                     unreachable!("handled above")
                 }
             };
@@ -845,7 +932,8 @@ impl Session {
                     Pending::NewLayers { .. }
                     | Pending::NewEffects { .. }
                     | Pending::NewGroup { .. }
-                    | Pending::Keys(_) => {}
+                    | Pending::Keys(_)
+                    | Pending::NewComps { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -860,7 +948,8 @@ impl Session {
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
                 | Pending::NewGroup { .. }
-                | Pending::Keys(_) => None,
+                | Pending::Keys(_)
+                | Pending::NewComps { .. } => None,
             })
             .collect();
         self.reserved
@@ -981,6 +1070,7 @@ impl Session {
             revision: None,
             range,
             before: now,
+            requested: started,
         });
         self.playback_stats = PlaybackStats {
             sample: Some(started),
