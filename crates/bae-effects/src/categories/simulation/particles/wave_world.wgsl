@@ -35,7 +35,9 @@ fn evaluate(pixel:vec2f)->vec4f {
     let origin=vec2f(u.layer.xy);
     let size=max(vec2f(1.),vec2f(u.layer.zw-u.layer.xy));
     var p=pixel-origin;
-    let spacing=max(1.,size.x/max(10.,value(26u)*select(1./max(u.scale,.001),1.,enabled(92u))));
+    // Grid Resolution follows the render resolution when 92 is on (fewer
+    // cells at a lower resolution); otherwise it stays as set.
+    let spacing=max(1.,size.x/max(10.,value(26u)*select(1.,u.scale,enabled(92u))));
     let wire=value(2u)==2.;
     if wire{
         let a=radians(value(4u));

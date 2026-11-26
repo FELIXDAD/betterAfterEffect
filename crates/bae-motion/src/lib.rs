@@ -75,6 +75,7 @@ pub mod dimensions;
 pub mod effect;
 pub mod expressions;
 pub mod import;
+pub mod interpret;
 pub mod keys;
 pub mod layer;
 pub mod layer_styles;
@@ -84,6 +85,7 @@ pub mod names;
 pub mod orient;
 pub mod paint;
 pub mod path;
+pub mod photoshop;
 pub mod precompose;
 pub mod project_settings;
 pub mod query;
@@ -110,6 +112,7 @@ pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, 
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
+pub use interpret::InterpretFootage;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
     KeysOutput, MoveKeys, PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany,
@@ -151,9 +154,11 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(photoshop::ImportPhotoshop),
         r.register(ReplaceFile),
         r.register(CreateLayer),
         r.register(Precompose),
+        r.register(precompose::ReplaceWithPrecomp),
         r.register(SetSolidSettings),
         r.register(SetCameraSettings),
         r.register(SetLightSettings),
@@ -194,6 +199,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InsertVertex),
         r.register(DeleteVertex),
         r.register(CreateText),
+        r.register(InterpretFootage),
         r.register(AutoOrient),
         r.register(SetProjectSettings),
         r.register(SetText),

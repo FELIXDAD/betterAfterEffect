@@ -434,6 +434,72 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
 }
 
 #[test]
+fn browse_lumetri_look_commits_both_ae_selectors_and_owned_cube_in_one_edit() {
+    use bae_ui::files::{FilePicker, OpenRequest, SharedFilePicker};
+    use std::{
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
+    struct Picker(PathBuf);
+    impl FilePicker for Picker {
+        fn open(&self, req: &OpenRequest) -> Vec<PathBuf> {
+            assert_eq!(req.filters[0].1, ["cube"]);
+            vec![self.0.clone()]
+        }
+    }
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    fx.run(
+        "effect.apply",
+        json!({"match_name":"ADBE Lumetri","layers":[layer]}),
+    );
+    let target = bae_motion::effect::effects_of(&fx.stage, &layer)
+        .pop()
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("user.cube");
+    std::fs::write(&file, "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").unwrap();
+    fx.resources.insert(SharedFilePicker::new(Picker(file)));
+    let r = fx.handle(Invocation::with_params(
+        lut::BROWSE,
+        json!({"path":target,"menu":25}),
+    ));
+    assert!(r.invocations.is_empty());
+    let start = Instant::now();
+    let mut requests = PanelRequests::default();
+    while requests.invocations.is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        let id = PanelId::new("effects");
+        let mut cx = PanelContext::new(
+            &id,
+            "Effects",
+            &fx.stage,
+            &fx.author,
+            &fx.resources,
+            &mut requests,
+        );
+        let mut output = fx.ctx.run_ui(RawInput::default(), |ui| {
+            lut::poll(ui.ctx(), &mut cx);
+        });
+        output.textures_delta.clear();
+        std::thread::yield_now();
+    }
+    assert_eq!(requests.invocations.len(), 1);
+    assert_eq!(requests.invocations[0].id, "attr.set_many");
+    fx.exec_all(requests);
+    let effect = fx.stage.prim(&target).unwrap();
+    for id in [25, 128] {
+        assert_eq!(
+            effect.value(&bae_model::effect::param_attr(id)),
+            Some(&Value::Int(2))
+        );
+    }
+    assert!(
+        matches!(effect.value("param:0126"),Some(Value::Bytes(data)) if data.starts_with(b"user.cube\0"))
+    );
+}
+
+#[test]
 fn animation_presets_save_and_apply_effects_with_their_values() {
     let mut fx = Fx::new();
     let layer = fx.comp_with_layer();
@@ -600,5 +666,53 @@ fn panel_menus_match_chinese_and_selection() {
         menu_states(&fx, &mut crate::EffectControlsPanel::default())
             .iter()
             .any(|(label, enabled, _)| label == "显示动画预设" && *enabled)
+    );
+}
+
+#[test]
+fn effect_controls_flyout_uses_only_the_measured_panel_commands() {
+    let fx = Fx::new();
+    let mut panel = crate::panels::EffectControlsPanel::default();
+    let id = PanelId::new("effect_controls");
+    let mut requests = PanelRequests::default();
+    let mut cx = PanelContext::new(
+        &id,
+        "Effect Controls",
+        &fx.stage,
+        &fx.author,
+        &fx.resources,
+        &mut requests,
+    );
+    let mut app = AppBuilder::new();
+    app.add_module(crate::MotionUiModule);
+    let _app = app.build();
+    fx.ctx.enable_accesskit();
+    let mut out = fx
+        .ctx
+        .run_ui(Default::default(), |ui| panel.menu(ui, &mut cx));
+    out.textures_delta.clear();
+    let tree = out.platform_output.accesskit_update.unwrap();
+    let rows: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| {
+            let label = n.label()?;
+            Some((label, !n.is_disabled()))
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (bae_ui::tr("Show Animation Presets"), true),
+            (bae_ui::tr("Manage Effects..."), true)
+        ]
+    );
+    assert_eq!(
+        bae_ui::i18n::translation("Show Animation Presets"),
+        Some("显示动画预设")
+    );
+    assert_eq!(
+        bae_ui::i18n::translation("Manage Effects..."),
+        Some("管理效果...")
     );
 }

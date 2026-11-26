@@ -90,6 +90,43 @@ fn project_drop_inserts_one_undoable_precomp_and_blocks_cycles() {
 }
 
 #[test]
+fn composition_preferences_choose_the_pen_and_double_click_destination() {
+    use bae_ui_motion::{SharedTools, Tool};
+    let mut h = fixture();
+    let parent = h.state().active_comp().unwrap();
+    let header = timeline_header(&h).unwrap();
+    drop_item(&mut h, "Child", header.center() + vec2(0.0, 80.0));
+    let layer = h.state().layers()[0].clone();
+    let child = query::precomp_source(h.state().stage(), &layer).unwrap();
+    let mut prefs = (*h.state().prefs.current()).clone();
+    prefs.set("composition.double_click_comp_layer", "layer_panel");
+    prefs.set("composition.pen_shortcut_toggles_mask_feather", false);
+    h.state().prefs.set(prefs).unwrap();
+    let tools = h.state().app.resource::<SharedTools>().unwrap().clone();
+    for expected in [
+        Tool::Pen,
+        Tool::AddVertex,
+        Tool::DeleteVertex,
+        Tool::ConvertVertex,
+        Tool::MaskFeather,
+        Tool::Pen,
+    ] {
+        key(&mut h, Modifiers::NONE, Key::G);
+        assert_eq!(tools.current(), expected);
+    }
+    key(&mut h, Modifiers::NONE, Key::V);
+    let at = row(&h, "Child").center();
+    double_click_at(&mut h, at);
+    assert!(find_text(&h, "Layer Child").is_some());
+    assert_eq!(h.state().active_comp(), Some(parent));
+    pause(&mut h);
+    let at = row(&h, "Child").center();
+    click_at_mods(&mut h, at, Modifiers::ALT);
+    click_at_mods(&mut h, at, Modifiers::ALT);
+    assert_eq!(h.state().active_comp(), Some(child));
+}
+
+#[test]
 fn graph_drop_uses_the_ruler_frame_and_precomp_opens_at_its_source_frame() {
     use bae_model::Time;
 
@@ -211,4 +248,36 @@ fn tab_menu_and_toolbar_navigate_direct_parents_and_children() {
     let parent = button(&h, "Parent");
     click_at(&mut h, parent.center());
     assert!(find_text(&h, "Composition Parent").is_some());
+}
+
+/// #735: double-clicking footage in the Project panel opens it in the Footage
+/// panel (AE).
+#[test]
+fn double_clicking_project_footage_opens_the_footage_panel() {
+    let mut h = gui();
+    let dir = tempfile::tempdir().unwrap();
+    let clip = dir.path().join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        "item.import",
+        serde_json::json!({"files": [{"path": clip, "attrs": {
+            "width": {"type": "int", "value": 320},
+            "height": {"type": "int", "value": 180}}}]}),
+    ));
+    settle(&mut h);
+    let row = project_row(&h, "clip.mov");
+    double_click_at(&mut h, row);
+    let open = h.state().workspace.open_panels();
+    assert!(
+        open.iter().any(|p| p.kind() == "footage"),
+        "no Footage panel: {open:?}"
+    );
+    // A solid opens there too (AE).
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let solid = bae_motion::solid::layer_solid(h.state().stage(), &h.state().layers()[0]).unwrap();
+    let name = query::display_name_of(h.state().stage(), &solid);
+    let row = project_row(&h, &name);
+    double_click_at(&mut h, row);
+    let shown = h.state().session().lock().footage_view.clone();
+    assert_eq!(shown, Some(solid));
 }

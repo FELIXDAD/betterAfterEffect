@@ -19,6 +19,8 @@ pub(crate) struct View {
     pub origin: Pos2,
     /// Points per comp pixel.
     pub scale: f32,
+    /// Horizontal stretch from the source pixel aspect ratio.
+    pub aspect: f32,
     /// Path point and handle size in points (Preferences > Appearance).
     pub point: f32,
     /// The 3D view's camera and the comp size: 3D layers are seen through it
@@ -38,14 +40,14 @@ impl View {
 
     pub fn to_screen(self, p: DVec2) -> Pos2 {
         pos2(
-            self.origin.x + p.x as f32 * self.scale,
+            self.origin.x + p.x as f32 * self.scale * self.aspect,
             self.origin.y + p.y as f32 * self.scale,
         )
     }
 
     pub fn to_comp(self, p: Pos2) -> DVec2 {
         DVec2::new(
-            f64::from((p.x - self.origin.x) / self.scale),
+            f64::from((p.x - self.origin.x) / (self.scale * self.aspect)),
             f64::from((p.y - self.origin.y) / self.scale),
         )
     }
@@ -317,6 +319,11 @@ fn shape_items(items: &[EvaluatedPrim], m: &DMat4, opacity: f64) -> (Vec<Poly>, 
         }
     }
     (paths, draws)
+}
+
+/// The paths of shape contents, in their space.
+pub(crate) fn shape_paths(items: &[EvaluatedPrim]) -> Vec<Poly> {
+    shape_items(items, &DMat4::IDENTITY, 1.0).0
 }
 
 /// Draws of a shape layer's contents in layer space, front first.
@@ -638,15 +645,21 @@ pub(crate) fn bounds_quad(
     view: &View,
     outer: &Affine,
 ) -> Option<[Pos2; 4]> {
+    projected_bounds(layer, view, outer, is_3d(layer))
+}
+
+/// Project a nested layer with all ancestor transforms and the containing camera.
+pub(crate) fn projected_bounds(
+    layer: &EvaluatedLayer,
+    view: &View,
+    outer: &Affine,
+    three_d: bool,
+) -> Option<[Pos2; 4]> {
     let (min, max) = layer_bounds(layer)?;
     let c = [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)];
-    if is_3d(layer) {
-        let [a, b, c, d] =
-            c.map(|p| view.project(layer.world_matrix.transform_point3(p.extend(0.0)), true));
-        return Some([a?, b?, c?, d?]);
-    }
     let xf = outer.then(&layer.world_matrix);
-    Some(c.map(|p| view.to_screen(xf.apply(p))))
+    let [a, b, c, d] = c.map(|p| view.project(xf.m.transform_point3(p.extend(0.0)), three_d));
+    Some([a?, b?, c?, d?])
 }
 
 /// A 3D layer the camera sees (cameras and lights have no picture).

@@ -27,6 +27,8 @@ pub struct CreateText;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateTextParams {
+    #[serde(flatten)]
+    pub defaults: crate::layer::NewLayerDefaults,
     pub comp: PrimPath,
     /// The characters (line breaks as `\n`); empty makes an empty text layer
     /// (AE keeps those, named "<empty text layer>").
@@ -39,6 +41,10 @@ pub struct CreateTextParams {
     /// Paragraph text: the box size in pixels; omitted = point text.
     #[serde(default)]
     pub box_size: Option<[f64; 2]>,
+    #[serde(default)]
+    pub line_orientation: bae_model::LineOrientation,
+    #[serde(default)]
+    pub baseline_direction: bae_model::BaselineDirection,
     #[serde(default)]
     pub font: Option<String>,
     #[serde(default)]
@@ -83,22 +89,29 @@ impl Command for CreateText {
                 source: None,
                 index: p.index,
                 color: None,
+                solids_folder_name: None,
+                solids_folder_label: None,
                 size: None,
                 text: Some(p.text.clone()),
                 font_size: Some(size),
                 shape: None,
                 position: Some(p.position),
-                start: None,
+                defaults: crate::layer::NewLayerDefaults {
+                    separate_position: false,
+                    ..p.defaults
+                },
                 pixel_aspect: None,
                 camera: None,
                 light: None,
-                label: None,
+
                 position_3d: None,
                 point_of_interest: None,
             },
         )?;
         let mut doc =
             TextDocument::new(p.text, p.font.unwrap_or_else(|| DEFAULT_FONT.into()), size);
+        doc.line_orientation = p.line_orientation;
+        doc.style.baseline_direction = p.baseline_direction;
         if let Some(c) = p.fill_color {
             doc.style.fill_color = c;
         }
@@ -127,6 +140,7 @@ impl Command for CreateText {
             "transform:position",
             Value::Vec3([position[0], position[1], 0.0]),
         )?;
+        p.defaults.split_position(tx, &out.path)?;
         Ok(out)
     }
 }
@@ -214,6 +228,7 @@ impl Command for SetText {
         SetAt.run(
             tx,
             SetAtParams {
+                auto_key: false,
                 path: p.layer,
                 attr: SOURCE.into(),
                 time,
@@ -390,6 +405,7 @@ impl Command for SetTextStyle {
             SetAt.run(
                 tx,
                 SetAtParams {
+                    auto_key: false,
                     path: layer,
                     attr: SOURCE.into(),
                     time,
