@@ -2521,7 +2521,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.window.close_all".into()]
+            vec!["motion.comp.set_work_area_to_selection".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2555,7 +2555,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.window.close_all")
+            .filter(|(_, a, _)| a == "motion.comp.set_work_area_to_selection")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2563,7 +2563,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Alt+W").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+B").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
