@@ -98,3 +98,42 @@ fn fit_fills_the_panel_and_fit_up_to_100_stops_at_100() {
     h.frame(Vec::new(), Modifiers::NONE);
     assert!((mag(&h) - 1.0).abs() < 1e-4, "{}", mag(&h));
 }
+
+#[test]
+fn smart_zoom_keeps_pointer_fixed_then_restores_fit() {
+    let mut h = H::new();
+    h.viewer.zoom = None;
+    h.frame(Vec::new(), Modifiers::NONE);
+    let at = h.screen(100.0, 100.0);
+    h.move_to(at, Modifiers::NONE, Vec::new());
+    let fit = h.viewer.last_view.unwrap();
+    crate::request_smart_zoom(&h.ctx);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let zoomed = h.viewer.last_view.unwrap();
+    assert!(zoomed.scale > fit.scale);
+    assert!(zoomed.to_screen(fit.to_comp(at)).distance(at) < 0.01);
+    crate::request_smart_zoom(&h.ctx);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.viewer.last_view.unwrap().origin, fit.origin);
+}
+
+#[test]
+fn magnification_preferences_change_wheel_zoom() {
+    use crate::viewer::Magnification;
+    let smooth = Magnification::default();
+    let mut rest = 0.0;
+    assert!((smooth.wheel_zoom(1.0, 1.0, &mut rest) - 1.125).abs() < 1e-6);
+    assert!(smooth.follows_pointer(false) && !smooth.follows_pointer(true));
+    // Legacy steps through the zoom menu's levels, whole notches at a time.
+    let legacy = Magnification {
+        legacy: true,
+        centered: true,
+        trackpad_zooms: false,
+    };
+    assert_eq!(legacy.wheel_zoom(1.0, 1.0, &mut rest), 2.0);
+    assert_eq!(legacy.wheel_zoom(1.0, -2.0, &mut rest), 0.25);
+    assert_eq!(legacy.wheel_zoom(0.7, 1.0, &mut rest), 1.0);
+    assert_eq!(legacy.wheel_zoom(1.0, 0.6, &mut rest), 1.0);
+    assert_eq!(legacy.wheel_zoom(1.0, 0.6, &mut rest), 2.0);
+    assert!(!legacy.follows_pointer(false) && legacy.follows_pointer(true));
+}

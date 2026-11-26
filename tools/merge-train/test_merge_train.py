@@ -445,10 +445,11 @@ class UnstickTest(Base):
         st["head_since"] = (mt.now_utc() - mt.dt.timedelta(minutes=45)).isoformat()
         with mock.patch.object(mt, "decide", return_value=("update", "overlap", {})), \
                 mock.patch.object(mt, "do_merge") as merge, \
-                mock.patch.object(mt, "sh") as sh:
+                mock.patch.object(mt, "sh") as sh, \
+                mock.patch.dict(mt.CFG, {"preupdate_ahead": 0}):
             self.assertFalse(mt.skip_ahead(self.queue(), st))
         merge.assert_not_called()
-        sh.assert_not_called()  # later PRs are never updated or failed by the look-ahead
+        sh.assert_not_called()  # with pre-update off, later PRs are never updated by the look-ahead
 
     def test_one_pass_tracks_queue_head_and_skips_ahead(self):
         q = self.queue()
@@ -809,3 +810,18 @@ class RecentDevFailureTest(unittest.TestCase):
                 mock.patch.object(mt, "send") as send:
             self.assertFalse(mt.notify_recent_dev_failure({}))
         send.assert_not_called()
+
+
+class PreUpdateTest(unittest.TestCase):
+    def test_behind_prs_that_need_update_are_updated_while_head_waits(self):
+        q = [pr(number=1, headRefOid="h1"), pr(number=2, headRefOid="h2"), pr(number=3, headRefOid="h3")]
+        st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=10)).isoformat()}
+        calls = []
+        with mock.patch.object(mt, "decide", return_value=("update", "overlap", {})), \
+                mock.patch.object(mt, "mutate", return_value=True), \
+                mock.patch.object(mt, "sh", side_effect=lambda cmd, **kw: calls.append(cmd) or (0, "", "")), \
+                mock.patch.dict(mt.CFG, {"preupdate_ahead": 1}):
+            self.assertFalse(mt.skip_ahead(q, st))
+            self.assertFalse(mt.skip_ahead(q, st))
+        updates = [c for c in calls if c[:3] == ["gh", "pr", "update-branch"]]
+        self.assertEqual([c[3] for c in updates], ["2"])

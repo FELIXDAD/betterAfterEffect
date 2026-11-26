@@ -148,7 +148,7 @@ fn type_tool_edits_an_existing_text_layer() {
     assert_eq!(text, "!Hello");
     h.apply(&r);
     assert_eq!(h.doc(&layer).text, text);
-    assert_eq!(h.doc(&layer).font_size, 72.0, "style kept");
+    assert_eq!(h.doc(&layer).style.font_size, 72.0, "style kept");
     h.stage.undo(&h.author).unwrap();
     assert_eq!(h.doc(&layer).text, "Hello");
     // Past the end of the text: the caret goes to the end.

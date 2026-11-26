@@ -16,6 +16,7 @@
 //!
 //! See `docs/spec/app-shell.md`.
 
+pub(crate) mod builtin_scripts;
 mod dialogs;
 mod menu;
 mod numpad;
@@ -82,6 +83,7 @@ impl AppModule for ShellModule {
     }
 
     fn finish(&self, app: &mut AppBuilder) {
+        builtin_scripts::register(app);
         ui::register_panels(app);
         // BAE's own menu entries (History and Agent panels, Agent workspace),
         // registered next to the AE menus the motion workspace contributes.
@@ -241,6 +243,12 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         }
         match document.open(path) {
             Ok(()) => {
+                #[cfg(target_os = "macos")]
+                if global.smoke_test.is_none()
+                    && let Some(path) = document.location()
+                {
+                    open_documents::note_recent(path);
+                }
                 tracing::info!("opened {}", path.display());
                 crate::view_state::restore(&mut app, &document);
             }
@@ -619,12 +627,24 @@ impl Shell {
             id if files::is_file_command(id) => {
                 // Saves record the open comps; another project restores its own.
                 let mut dialogs = self.dialogs();
-                crate::view_state::run_file_command(
+                let outcome = crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.document,
                     &mut *dialogs,
                     &inv,
                 );
+                if cfg!(target_os = "macos")
+                    && self.smoke.is_none()
+                    && inv.id != ids::SAVE_A_COPY
+                    && matches!(
+                        outcome,
+                        Some(files::FileOutcome::Saved | files::FileOutcome::Replaced)
+                    )
+                    && let Some(_path) = self.document.location()
+                {
+                    #[cfg(target_os = "macos")]
+                    open_documents::note_recent(_path);
+                }
                 // A save or another project restarts the auto-save interval.
                 self.autosave.reset();
                 if let Some(file) = self.app.resource::<bae_ui::files::ProjectFile>() {
@@ -917,6 +937,14 @@ impl Shell {
         let Some(view) = self.view.as_mut() else {
             return;
         };
+        #[cfg(target_os = "macos")]
+        {
+            // A backing-scale notification can precede the physical resize event.
+            let size = view.window.inner_size();
+            if view.surface.size() != (size.width, size.height) {
+                view.surface.resize(size.width, size.height);
+            }
+        }
         let frame_start = Instant::now();
         tracing::trace!(frame = view.status.frames, "redraw");
 
@@ -1309,6 +1337,18 @@ impl ApplicationHandler<UserEvent> for Shell {
         {
             bae_ui::set_keypad_enter(code == winit::keyboard::KeyCode::NumpadEnter);
         }
+        #[cfg(target_os = "macos")]
+        if matches!(
+            event,
+            WindowEvent::DroppedFile(_) | WindowEvent::DoubleTapGesture { .. }
+        ) && let Some(pos) = open_documents::pointer_in_view(&view.window)
+        {
+            let pos = pos / view.egui_ctx.zoom_factor();
+            view.egui_state
+                .egui_input_mut()
+                .events
+                .push(egui::Event::PointerMoved(pos));
+        }
         let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
         // Numpad keys are their own keys in AE's shortcuts (#261).
@@ -1339,6 +1379,11 @@ impl ApplicationHandler<UserEvent> for Shell {
             view.window.request_redraw();
         }
         match event {
+            #[cfg(target_os = "macos")]
+            WindowEvent::DoubleTapGesture { .. } => {
+                bae_ui_motion::request_smart_zoom(&view.egui_ctx);
+                view.window.request_redraw();
+            }
             WindowEvent::CloseRequested => {
                 // Through the dispatch: unsaved changes are asked about first.
                 self.pending.push(Invocation::new(ids::QUIT));

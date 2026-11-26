@@ -34,16 +34,18 @@ fn embedded_luts_use_the_same_transform_as_bae_color() {
             transform.apply_premultiplied(std::slice::from_mut(&mut c));
             c
         });
-        let got = run(
-            &gpu,
-            Rgba32Float,
-            builtin("ADBE Apply Color LUT2"),
-            vec![(1, Value::Bytes(bytes))],
-            &input,
-            rect,
-            1.,
-        );
-        assert_close(&got, &expected, rect, 0.0001, name);
+        for identity in ["ADBE Apply Color LUT2", "ADBE Apply Color LUT"] {
+            let got = run(
+                &gpu,
+                Rgba32Float,
+                builtin(identity),
+                vec![(1, Value::Bytes(bytes.clone()))],
+                &input,
+                rect,
+                1.,
+            );
+            assert_close(&got, &expected, rect, 0.0001, name);
+        }
     }
 }
 
@@ -85,6 +87,86 @@ fn lumetri_input_and_creative_look_use_straight_color_in_order() {
         rect,
         0.0001,
         "Lumetri LUT order and intensity",
+    );
+}
+
+#[test]
+fn sampled_lumetri_ranges_preserve_knots_and_grade_the_picked_hue() {
+    use bae_effects::LumetriCurve;
+    for (picker, id, center) in [
+        (113, 42, 0.),
+        (114, 106, 0.),
+        (115, 108, 0.),
+        (116, 110, 0.2126),
+        (117, 112, 1.),
+    ] {
+        let curve = LumetriCurve::from_param(picker).unwrap();
+        assert_eq!(curve.id(), id);
+        let added = curve.pick([1., 0., 0.], None);
+        let knots = curve.points(Some(&added));
+        assert_eq!(knots.len(), 3);
+        assert!(knots.iter().any(|p| (p[0] - center).abs() < 1e-8));
+        assert!(knots.iter().all(|p| p[1] == 0.));
+        assert_eq!(curve.pick([1., 0., 0.], Some(&added)), added);
+    }
+    let Some(gpu) = context() else { return };
+    let curve = LumetriCurve::from_param(113).unwrap();
+    let mut knots = curve.points(Some(&curve.pick([1., 0., 0.], None)));
+    knots[0][1] = -1.;
+    let curve_value = LumetriCurve::value(&knots);
+    let more = curve.pick([0., 1., 0.], Some(&curve_value));
+    assert!(knots.iter().all(|p| curve.points(Some(&more)).contains(p)));
+    let rect = IRect::new(0, 0, 2, 1);
+    let input = Pixels::new(rect, |x, _| {
+        if x == 0 {
+            [0.5, 0., 0., 0.5]
+        } else {
+            [0., 0.5, 0., 0.5]
+        }
+    });
+    let got = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Lumetri"),
+        vec![(42, more)],
+        &input,
+        rect,
+        1.,
+    );
+    let mut want = input.clone();
+    let gray = 0.5 * 0.2126_f32.powf(1. / 2.4);
+    want.data[0] = [gray, gray, gray, 0.5];
+    assert_close(
+        &got,
+        &want,
+        rect,
+        0.0006,
+        "red range wraps at the hue seam; green stays green",
+    );
+    let curve = LumetriCurve::from_param(114).unwrap();
+    let orange = [1., 0.5, 0.];
+    let mut knots = curve.points(Some(&curve.pick(orange, None)));
+    let orange_x = 0.5_f64.powf(2.4) / 6.;
+    knots
+        .iter_mut()
+        .find(|p| (p[0] - orange_x).abs() < 1e-7)
+        .unwrap()[1] = 1. / 3.;
+    let input = Pixels::new(rect, |_, _| [0.5, 0.25, 0., 0.5]);
+    let got = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Lumetri"),
+        vec![(106, LumetriCurve::value(&knots))],
+        &input,
+        rect,
+        1.,
+    );
+    assert_close(
+        &got,
+        &input.map(|_| [0., 0.5, 0.25, 0.5]),
+        rect,
+        0.003,
+        "the picked orange hue rotates by one third of a turn",
     );
 }
 
@@ -393,4 +475,42 @@ fn ocio_file_and_cdl_apply_embedded_grades_on_gpu() {
             assert!((actual - expected).abs() < 0.0001, "{name}: {actual}");
         }
     }
+}
+
+#[test]
+fn three_way_preserves_alpha_and_limits_saturation_to_the_selected_range() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(12, 7);
+    let input = Pixels::new(rect, |x, _| {
+        if x < 6 {
+            [0.1, 0.05, 0., 0.5]
+        } else {
+            [0.5, 0.45, 0.4, 0.5]
+        }
+    });
+    let fx = builtin("ADBE Three-Way Color Corrector");
+    let neutral = run(&gpu, Rgba32Float, fx, vec![], &input, rect, 1.);
+    assert_close(&neutral, &input, rect, 0.00001, "neutral correction");
+    let changed = run(
+        &gpu,
+        Rgba32Float,
+        fx,
+        vec![(41, Value::Float(0.))],
+        &input,
+        rect,
+        1.,
+    );
+    assert!(
+        (changed.data[0][0] - changed.data[0][2]).abs() < 0.00001,
+        "shadow pixel {:?}",
+        changed.data[0]
+    );
+    assert_eq!(changed.data[0][3], 0.5);
+    assert_close(
+        &changed,
+        &input,
+        IRect::new(6, 0, 12, 7),
+        0.00001,
+        "highlights",
+    );
 }

@@ -121,6 +121,9 @@ pub(crate) mod flags {
 pub(crate) enum Variant {
     /// `fs_main`.
     Plain,
+    /// Ordinary textured 2D draws on Metal.
+    #[cfg(target_os = "macos")]
+    AffineImage,
     /// `fs_lit`: 3D layers lit by the comp's lights.
     Lit,
     /// `fs_motion`: motion-blurred layers (lit or not).
@@ -431,6 +434,7 @@ type CompositeKey = (wgpu::TextureFormat, BlendKind, Variant);
 /// compiled in the background and the frame is incomplete meanwhile.
 pub(crate) struct Shared {
     device: wgpu::Device,
+    outputs: Mutex<FxHashMap<wgpu::TextureFormat, wgpu::RenderPipeline>>,
     base: Pipelines,
     /// `None`: being compiled in the background.
     composite: Mutex<FxHashMap<CompositeKey, Option<wgpu::RenderPipeline>>>,
@@ -454,6 +458,7 @@ impl Shared {
         }
         let shared = Arc::new(Shared {
             device: gpu.device().clone(),
+            outputs: Default::default(),
             base: Pipelines::build(gpu.device()),
             composite: Mutex::new(FxHashMap::default()),
             masks: Arc::new(Mutex::new(None)),
@@ -541,6 +546,10 @@ impl Shared {
             } else {
                 &[BlendKind::Replace]
             };
+            #[cfg(target_os = "macos")]
+            if blendable {
+                self.warm_one((format, BlendKind::Normal, Variant::AffineImage));
+            }
             for &kind in kinds {
                 for variant in [Variant::Plain, Variant::Lit, Variant::Motion] {
                     self.warm_one((format, kind, variant));
@@ -599,12 +608,28 @@ impl bae_gpu::WarmUp for CompositorWarmUp {
                 BlendKind::Normal,
                 Variant::Plain,
             ));
+            #[cfg(target_os = "macos")]
+            shared.warm_one((
+                wgpu::TextureFormat::Rgba16Float,
+                BlendKind::Normal,
+                Variant::AffineImage,
+            ));
             return Ok(());
         }
         let float32 = wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE;
         let mut formats = vec![(wgpu::TextureFormat::Rgba16Float, true)];
         if gpu.features().contains(float32) {
             formats.push((wgpu::TextureFormat::Rgba32Float, true));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut pipelines = shared.fork();
+            for format in [
+                wgpu::TextureFormat::Bgra8Unorm,
+                wgpu::TextureFormat::Rgba16Float,
+            ] {
+                pipelines.output_for(gpu.device(), format);
+            }
         }
         shared.warm(&formats);
         Ok(())
@@ -622,9 +647,12 @@ impl Pipelines {
 
     /// The shared base: shader modules, layouts and the RGBA8 output.
     fn build(device: &wgpu::Device) -> Self {
+        let composite = wgsl!("composite.wgsl");
+        #[cfg(target_os = "macos")]
+        let composite = [composite, wgsl!("metal_image.wgsl")].concat();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.composite"),
-            source: wgpu::ShaderSource::Wgsl(wgsl!("composite.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(composite.into()),
         });
         let storage = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -782,7 +810,7 @@ impl Pipelines {
             output,
             output_module,
             output_pipeline_layout,
-            outputs: FxHashMap::default(),
+            outputs: Default::default(),
             bind_groups: FxHashMap::default(),
             frame: 0,
             shared: None,
@@ -822,10 +850,25 @@ impl Pipelines {
         if format == wgpu::TextureFormat::Rgba8Unorm {
             return &self.output;
         }
-        let (module, layout) = (&self.output_module, &self.output_pipeline_layout);
+        let build = || {
+            output_pipeline(
+                device,
+                &self.output_module,
+                &self.output_pipeline_layout,
+                format,
+            )
+        };
         self.outputs
             .entry(format)
-            .or_insert_with(|| output_pipeline(device, module, layout, format))
+            .or_insert_with(|| match &self.shared {
+                Some(shared) => shared
+                    .outputs
+                    .lock()
+                    .entry(format)
+                    .or_insert_with(build)
+                    .clone(),
+                None => build(),
+            })
     }
 
     /// The composite pipeline for a target format, blend kind and fragment
@@ -1174,12 +1217,19 @@ fn composite_pipeline(
     layout: &wgpu::PipelineLayout,
     (format, kind, variant): CompositeKey,
 ) -> wgpu::RenderPipeline {
+    let (vertex, fragment) = match variant {
+        Variant::Plain => ("vs_main", "fs_main"),
+        Variant::Lit => ("vs_main", "fs_lit"),
+        Variant::Motion => ("vs_main", "fs_motion"),
+        #[cfg(target_os = "macos")]
+        Variant::AffineImage => ("vs_image", "fs_image"),
+    };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("bae-render.composite"),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module,
-            entry_point: Some("vs_main"),
+            entry_point: Some(vertex),
             compilation_options: Default::default(),
             buffers: &[],
         },
@@ -1188,11 +1238,7 @@ fn composite_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module,
-            entry_point: Some(match variant {
-                Variant::Plain => "fs_main",
-                Variant::Lit => "fs_lit",
-                Variant::Motion => "fs_motion",
-            }),
+            entry_point: Some(fragment),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
