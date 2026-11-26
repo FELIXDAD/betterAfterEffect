@@ -81,7 +81,10 @@ impl Overlay {
         min: DVec2,
         layer: &PrimPath,
     ) {
-        let sh = shared(cx.resources);
+        let Some(sh) = cx.resources.get::<Shared>() else {
+            self.drag = None;
+            return;
+        };
         let s = sh.lock().unwrap();
         let Some(track) = s
             .current
