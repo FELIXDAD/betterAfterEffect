@@ -17,6 +17,7 @@ struct Gesture {
     dabs: Vec<Brush>,
     effect: PrimPath,
     time: Time,
+    auto_key: bool,
     start: DVec2,
     last: DVec2,
     released: bool,
@@ -61,6 +62,7 @@ impl Editor {
                 .is_none_or(|old| old.path != g.effect || old.value != *value)
             {
                 s.scrub = Some(crate::session::Scrub {
+                    auto_key: g.auto_key,
                     path: g.effect.clone(),
                     time: g.time,
                     value: value.clone(),
@@ -96,7 +98,7 @@ impl Editor {
                     "attr.set_at",
                     serde_json::json!({
                         "path":g.effect, "attr":bae_model::effect::param_attr(lq::MESH),
-                        "time": time, "value":value,
+                        "time": time, "value":value, "auto_key":g.auto_key,
                     }),
                 );
                 self.stroke = None;
@@ -241,6 +243,7 @@ impl Editor {
                 dabs: Vec::new(),
                 effect: fx.path.clone(),
                 time,
+                auto_key: session.lock().auto_key,
                 start,
                 last: start,
                 released: false,

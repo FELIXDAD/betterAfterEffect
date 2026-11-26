@@ -380,6 +380,7 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
     );
     let session = fx.resources.get::<SharedSession>().unwrap().clone();
     session.lock().layer_panel = Some(layer.clone());
+    session.lock().auto_key = true;
     let mut panel = crate::layer_panel::LayerPanel::new(None);
     panel.show = crate::layer_panel::Show::Effect(0);
     let frame = |fx: &Fx, panel: &mut crate::layer_panel::LayerPanel, events: Vec<egui::Event>| {
@@ -449,11 +450,20 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
     assert_eq!(set.params["attr"], "param:0014");
     fx.exec_all(last);
     let effect = bae_motion::effect::effects_of(&fx.stage, &layer)[0].clone();
-    let v =
-        bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0014").unwrap();
-    let mesh = bae_effects::effects::liquify::Mesh::from_value(&v).expect("a mesh");
+    let spec = bae_motion::query::attr_spec(&fx.stage, &effect, "param:0014").unwrap();
+    assert_eq!(spec.keyframes.len(), 1);
+    let mesh = bae_effects::effects::liquify::Mesh::from_value(
+        &spec.keyframes[&bae_model::Time::ZERO].value,
+    )
+    .expect("a keyed mesh");
     assert!(mesh.reach() > 1.0, "warped");
     fx.stage.undo(&fx.author).unwrap();
+    assert!(
+        bae_motion::query::attr_spec(&fx.stage, &effect, "param:0014")
+            .unwrap()
+            .keyframes
+            .is_empty()
+    );
     assert_eq!(
         bae_motion::query::static_value(&fx.stage.prim(&effect).unwrap(), "param:0014"),
         Some(Value::FloatList(vec![]))
