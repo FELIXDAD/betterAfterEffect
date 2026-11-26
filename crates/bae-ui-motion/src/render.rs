@@ -557,10 +557,13 @@ pub(crate) fn paint_comp(
                     && alpha > 0.
                 {
                     if t.line_orientation == bae_model::LineOrientation::Vertical {
+                        let scale =
+                            (xf.scale() * view_scale) as f32 * painter.ctx().pixels_per_point();
                         if let Some(preview) = vertical_text::Preview::get(
                             painter,
                             egui::Id::new(("vertical preview", &layer.path)),
                             t,
+                            scale,
                         ) {
                             shapes.push(
                                 preview.shape(|p| screen(DVec2::from_array(p)), alpha as f32),

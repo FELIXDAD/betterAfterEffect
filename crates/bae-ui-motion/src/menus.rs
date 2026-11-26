@@ -562,26 +562,6 @@ pub fn items() -> Vec<(String, MenuItemSpec)> {
         let mut path = vec![top];
         b.level(&mut path, &[], nodes);
     }
-    for (mode, title) in [
-        ("vertical", "Convert to Vertical Text"),
-        ("horizontal", "Convert to Horizontal Text"),
-    ] {
-        let spec = MenuItemSpec::new(&["Layer"], title, actions::ids::TEXT_ORIENTATION)
-            .workspace(WORKSPACE)
-            .group(9)
-            .params(serde_json::json!({"orientation":mode}))
-            .enabled_when(|cx| {
-                common::session(cx.resources)
-                    .lock()
-                    .selected_layers
-                    .iter()
-                    .any(|l| {
-                        bae_motion::query::layer_kind(cx.stage, l).as_deref() == Some("text")
-                            && !bae_motion::query::is_locked(cx.stage, l)
-                    })
-            });
-        b.push(format!("motion.layer.convert_to_{mode}_text"), spec);
-    }
     b.out
 }
 
@@ -610,8 +590,6 @@ impl ActionHandler for MotionActions {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
-    ("Convert to Vertical Text", "转换为直排文字"),
-    ("Convert to Horizontal Text", "转换为横排文字"),
     ("Text Orientation", "文字方向"),
     // New layer menu
     ("New", "新建"),

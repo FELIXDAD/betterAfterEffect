@@ -44,8 +44,24 @@ fn with_fonts<R>(f: impl FnOnce(&mut bae_text::FontSystem) -> R) -> Option<R> {
 
 /// Use the warmed font collection for a pointer hit without waiting for a font scan.
 pub(crate) fn hit_layout(doc: &TextDocument) -> Option<bae_text::TextLayout> {
+    // The viewer asks every frame (bounds, hit tests, the vertical preview):
+    // the last few layouts are kept.
+    static RECENT: std::sync::Mutex<Vec<(TextDocument, bae_text::TextLayout)>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(i) = recent.iter().position(|(d, _)| d == doc) {
+        let hit = recent.remove(i);
+        let layout = hit.1.clone();
+        recent.push(hit);
+        return Some(layout);
+    }
     let mut fonts = FONTS.get()?.try_lock().ok()?;
-    Some(bae_text::layout_text(&mut fonts, doc))
+    let layout = bae_text::layout_text(&mut fonts, doc);
+    if recent.len() >= 16 {
+        recent.remove(0);
+    }
+    recent.push((doc.clone(), layout.clone()));
+    Some(layout)
 }
 
 /// AE's size and leading presets (px).

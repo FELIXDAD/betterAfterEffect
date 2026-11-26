@@ -6,6 +6,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Viewer
     ("Magnification", "放大率"),
     ("Fit", "适合"),
+    // The text menu (AE's MenuID 0296).
+    ("Edit Text...", "编辑文本..."),
+    ("Show Text Panels", "显示文字面板"),
+    ("Reveal Source Text in Timeline", "在时间轴中显示源文字"),
     ("Resolution", "分辨率"),
     ("Full", "完整"),
     ("Half", "二分之一"),

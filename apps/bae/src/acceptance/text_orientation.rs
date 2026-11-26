@@ -16,18 +16,13 @@ fn tool(h: &Ui) -> Tool {
     h.state().app.resource::<SharedTools>().unwrap().current()
 }
 #[test]
-fn vertical_type_creates_ime_text_and_layer_menu_converts_it() {
+fn vertical_type_creates_ime_text_and_the_text_menu_converts_it() {
     let mut h = gui();
     let command = Modifiers {
         ctrl: !cfg!(target_os = "macos"),
         ..Modifiers::COMMAND
     };
     comp_with(&mut h, &[]);
-    assert!(
-        !h.state()
-            .menu_item("motion.layer.convert_to_vertical_text")
-            .enabled
-    );
     key(&mut h, command, Key::T);
     key(&mut h, command, Key::T);
     assert_eq!(tool(&h), Tool::TypeVertical);
@@ -75,17 +70,15 @@ fn vertical_type_creates_ime_text_and_layer_menu_converts_it() {
         document(&h).style_at(1).baseline_direction,
         bae_model::BaselineDirection::TateChuYoko
     );
-    for (menu, orientation) in [
-        (
-            "motion.layer.convert_to_horizontal_text",
-            bae_model::LineOrientation::Horizontal,
-        ),
-        (
-            "motion.layer.convert_to_vertical_text",
-            bae_model::LineOrientation::Vertical,
-        ),
+    // The viewer's text menu runs Horizontal / Vertical through this action.
+    for (direction, orientation) in [
+        ("horizontal", bae_model::LineOrientation::Horizontal),
+        ("vertical", bae_model::LineOrientation::Vertical),
     ] {
-        assert!(h.state_mut().menu(menu));
+        h.state_mut().invoke(bae_ui::Invocation::with_params(
+            "motion.layer.text_orientation",
+            serde_json::json!({ "orientation": direction }),
+        ));
         settle(&mut h);
         let d = document(&h);
         assert_eq!(d.line_orientation, orientation);

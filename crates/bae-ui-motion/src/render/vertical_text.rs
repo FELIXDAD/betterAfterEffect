@@ -1,14 +1,24 @@
-//! The editor and the lightweight viewer paint the same glyphs as the compositor.
+//! The editor and the lightweight viewer paint the same glyphs as the
+//! compositor: the layout rasterized off the UI thread at the screen's scale
+//! (rounded up to a power of two, so zooming re-rasterizes only now and then).
+//! Until a new image is ready the previous one stays on screen, so typing
+//! does not flicker.
 use std::sync::{Arc, OnceLock, Weak, mpsc};
 
 use bae_model::TextDocument;
 use bae_text::TextLayout;
 use egui::{Color32, Id, Painter, Pos2, Shape, TextureHandle};
 
+type Image = (TextureHandle, [f64; 4]);
+
 pub(crate) struct Preview {
     doc: TextDocument,
     pub layout: TextLayout,
-    image: OnceLock<(TextureHandle, [f64; 4])>,
+    /// Raster pixels per layer pixel.
+    scale: f32,
+    image: OnceLock<Image>,
+    /// The image shown before this one, until this one is ready.
+    fallback: Option<Image>,
 }
 
 type Job = (Weak<Preview>, egui::Context);
@@ -28,7 +38,10 @@ pub(crate) fn start_worker(init_fonts: impl FnOnce() + Send + 'static) {
                     let Some(preview) = preview.upgrade() else {
                         continue;
                     };
-                    if let Some((b, image)) = bae_text::render::preview_image(&preview.layout) {
+                    let scale = f64::from(preview.scale);
+                    if let Some((b, image)) =
+                        bae_text::render::preview_image(&preview.layout, scale)
+                    {
                         let size = [usize::from(image.width()), usize::from(image.height())];
                         let pixels = egui::ColorImage::from_rgba_premultiplied(
                             size,
@@ -45,23 +58,42 @@ pub(crate) fn start_worker(init_fonts: impl FnOnce() + Send + 'static) {
     });
 }
 
+/// `scale` rounded up to a power of two (1/8 … 8).
+fn bucket(scale: f32) -> f32 {
+    2f32.powf(scale.clamp(0.125, 8.0).log2().ceil())
+}
+
 impl Preview {
-    pub fn get(painter: &Painter, id: Id, doc: &TextDocument) -> Option<Arc<Self>> {
-        if let Some(previous) = painter.ctx().data(|d| d.get_temp::<Arc<Self>>(id))
-            && previous.doc == *doc
+    /// The preview of `doc` drawn at `scale` screen pixels per layer pixel.
+    pub fn get(painter: &Painter, id: Id, doc: &TextDocument, scale: f32) -> Option<Arc<Self>> {
+        let scale = bucket(scale);
+        let previous = painter.ctx().data(|d| d.get_temp::<Arc<Self>>(id));
+        if let Some(p) = &previous
+            && p.doc == *doc
+            && p.scale == scale
         {
-            return Some(previous);
+            return previous;
         }
-        let Some(layout) = crate::ae_panels::character::hit_layout(doc) else {
-            painter
-                .ctx()
-                .request_repaint_after(std::time::Duration::from_millis(25));
-            return None;
+        // Only the scale changed: the same layout.
+        let layout = match &previous {
+            Some(p) if p.doc == *doc => p.layout.clone(),
+            _ => {
+                let Some(layout) = crate::ae_panels::character::hit_layout(doc) else {
+                    painter
+                        .ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(25));
+                    return previous;
+                };
+                layout
+            }
         };
+        let fallback = previous.and_then(|p| p.image.get().cloned().or_else(|| p.fallback.clone()));
         let preview = Arc::new(Self {
             doc: doc.clone(),
             layout,
+            scale,
             image: OnceLock::new(),
+            fallback,
         });
         if let Some(queue) = QUEUE.get() {
             let _ = queue.send((Arc::downgrade(&preview), painter.ctx().clone()));
@@ -73,7 +105,7 @@ impl Preview {
     }
 
     pub fn shape(&self, screen: impl Fn([f64; 2]) -> Pos2, alpha: f32) -> Shape {
-        let Some((texture, [x0, y0, x1, y1])) = self.image.get() else {
+        let Some((texture, [x0, y0, x1, y1])) = self.image.get().or(self.fallback.as_ref()) else {
             return Shape::Noop;
         };
         let mut mesh = egui::Mesh::with_texture(texture.id());

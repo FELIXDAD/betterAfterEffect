@@ -4,7 +4,24 @@ use super::*;
 use egui::text::{CCursor, CCursorRange};
 
 impl Editing {
-    pub(super) fn update_preview(&mut self, template: Option<&TextDocument>, painter: &Painter) {
+    pub(super) fn update_preview(
+        &mut self,
+        template: Option<&TextDocument>,
+        painter: &Painter,
+        scale: f32,
+    ) {
+        // Unchanged since the last frame: nothing to rebuild (no document
+        // clone every frame).
+        let source = template.map_or(0, |t| std::ptr::from_ref(t) as usize);
+        if self.preview.is_some()
+            && self
+                .preview_key
+                .as_ref()
+                .is_some_and(|(s, text, k)| *s == source && *text == self.buffer && *k == scale)
+        {
+            return;
+        }
+        self.preview_key = Some((source, self.buffer.clone(), scale));
         let mut doc = template.cloned().unwrap_or_else(|| {
             TextDocument::new("", bae_motion::text::DEFAULT_FONT, self.font_size)
         });
@@ -21,7 +38,7 @@ impl Editing {
             doc.box_position = Some(pos);
             doc.box_size = Some(size);
         }
-        self.preview = Preview::get(painter, text_id().with("glyphs"), &doc);
+        self.preview = Preview::get(painter, text_id().with("glyphs"), &doc, scale);
     }
 
     fn screen_edge(&self, view: &View, points: [[f64; 2]; 2]) -> [Pos2; 2] {

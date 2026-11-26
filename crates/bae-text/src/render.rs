@@ -315,10 +315,12 @@ pub fn draw_cpu(ctx: &mut vello_cpu::RenderContext, text: &TextLayout, transform
     }
 }
 
-/// Rasterizes the editable layer preview with the same outlines and paints as a render.
-pub fn preview_image(layout: &TextLayout) -> Option<(Rect, vello_cpu::Pixmap)> {
+/// Rasterizes the editable layer preview with the same outlines and paints as
+/// a render, `scale` pixels per layer pixel (the screen's, so it stays sharp
+/// on Retina and zoomed in), at most 4096 pixels on a side.
+pub fn preview_image(layout: &TextLayout, scale: f64) -> Option<(Rect, vello_cpu::Pixmap)> {
     let ink = layout.bounds(true)?.inflate(1., 1.).expand();
-    let scale = (2048. / ink.width().max(ink.height())).min(1.);
+    let scale = (4096. / ink.width().max(ink.height())).min(scale.max(0.01));
     let width = (ink.width() * scale).ceil() as u16;
     let height = (ink.height() * scale).ceil() as u16;
     if width == 0 || height == 0 {
@@ -612,7 +614,7 @@ impl bae_gpu::WarmUp for VerticalGlyphWarmUp {
     fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
         let doc = crate::layout::vertical_warmup_document();
         let layout = self.0.layout(&doc);
-        let _ = preview_image(&layout);
+        let _ = preview_image(&layout, 1.);
         if !layout.is_empty() {
             VelloRenderer::shared(gpu)
                 .and_then(|r| r.render_region(gpu, pixel_bounds(&layout), 1., &layout))

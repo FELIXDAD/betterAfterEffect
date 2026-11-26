@@ -44,6 +44,9 @@ pub(crate) struct Editing {
     tool: Tool,
     orientation: LineOrientation,
     preview: Option<std::sync::Arc<Preview>>,
+    /// What the vertical preview was last built from: the template's address,
+    /// the text, the screen scale (rebuilt only when one changes).
+    preview_key: Option<(usize, String, f32)>,
     font_size: f64,
     align: egui::Align,
     color: Color32,
@@ -117,6 +120,7 @@ fn edit_layer(
         tool,
         orientation: doc.line_orientation,
         preview: None,
+        preview_key: None,
         font_size: doc.style.font_size,
         align: text_align(doc),
         color: color32(doc.style.fill_color),
@@ -160,6 +164,7 @@ fn new_text(
             LineOrientation::Horizontal
         },
         preview: None,
+        preview_key: None,
         font_size,
         align: defaults.map_or(egui::Align::Min, text_align),
         color,
@@ -562,10 +567,16 @@ pub(super) fn frame(
         .as_ref()
         .and_then(|layer| comp.layer(layer))
         .and_then(|l| l.text.as_deref());
-    let defaults = session.lock().text_defaults.clone();
     let vertical = e.orientation == LineOrientation::Vertical;
+    // New text starts from the Character panel's settings (cloned only then).
+    let defaults = if vertical && template.is_none() {
+        session.lock().text_defaults.clone()
+    } else {
+        None
+    };
+    let screen_scale = e.scale(view) * ui.ctx().pixels_per_point();
     if vertical {
-        e.update_preview(template.or(defaults.as_ref()), painter);
+        e.update_preview(template.or(defaults.as_ref()), painter, screen_scale);
         e.vertical_navigation(ui);
     }
     let mut layouter = |ui: &Ui, buffer: &dyn egui::TextBuffer, width: f32| {
@@ -688,7 +699,7 @@ pub(super) fn frame(
     }
     if vertical {
         if out.changed() {
-            e.update_preview(template.or(defaults.as_ref()), painter);
+            e.update_preview(template.or(defaults.as_ref()), painter, screen_scale);
         }
         e.paint_vertical(ui, painter, view, cursor);
     }

@@ -254,3 +254,42 @@ fn vertical_box_and_selected_range_survive_editing() {
         bae_model::BaselineDirection::Default
     );
 }
+
+/// With a Type tool, right-clicking a text layer shows AE's text menu; its
+/// Vertical runs the writing direction action, and the Layer menu has no
+/// such item (AE 26).
+#[test]
+fn the_text_menu_sets_the_writing_direction() {
+    let mut h = H::new();
+    let text = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": h.comp, "kind": "text", "text": "Hello World"}),
+        )["path"],
+    );
+    h.tools().lock().set(Tool::TypeHorizontal);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let c = {
+        let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
+        let l = comp.layer(&text).unwrap();
+        let (a, b) = crate::render::layer_bounds(l).unwrap();
+        let c = l.world_matrix.transform_point3(((a + b) / 2.0).extend(0.0));
+        (c.x, c.y)
+    };
+    h.right_click(c.0, c.1);
+    assert!(h.labeled("Edit Text...").is_some(), "the text menu");
+    assert!(h.labeled("Horizontal").is_some());
+    let r = h.choose("Vertical");
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == crate::actions::ids::TEXT_ORIENTATION)
+        .expect("writing direction");
+    assert_eq!(inv.params["orientation"], json!("vertical"));
+    assert!(
+        crate::menus::items()
+            .iter()
+            .all(|(id, _)| !id.contains("convert_to_vertical")),
+        "not in the Layer menu"
+    );
+}
