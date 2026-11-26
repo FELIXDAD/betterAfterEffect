@@ -1,5 +1,6 @@
 //! [`SyncSession`]: the transport-independent half of the protocol.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
@@ -137,13 +138,14 @@ pub struct SyncSession {
     /// What a pump that failed did before the error, until it is reported (by the
     /// next pump or [`SyncSession::take_interrupted`]).
     interrupted: Option<PumpOutcome>,
-    /// Data sent but not yet confirmed by a remote `Hello`: per document, the
-    /// version the remote has once it arrives, and when the oldest unconfirmed
-    /// part was sent. A `Hello` sent before the data arrived does not undo it
-    /// (see `handle`).
-    in_flight: BTreeMap<DocKey, (VersionVector, Instant)>,
-    /// The last pump that saw the transport's backlog above zero.
-    last_busy: Option<Instant>,
+    /// Encoded bytes of every message handed to the transport so far (the relay's
+    /// forwarded presence included, see `forward`). Minus the transport's
+    /// backlog, this is how far its queue has been written out (it sends in
+    /// order), which tells when a message left this process.
+    accepted: u64,
+    /// Data sent but not yet confirmed by a remote `Hello`, per document. A
+    /// `Hello` sent before the data arrived does not undo it (see `handle`).
+    in_flight: BTreeMap<DocKey, InFlight>,
     /// Documents listed in the remote's last `Hello`.
     listed: BTreeSet<DocKey>,
     /// Documents whose update did not fit in one message, with what the remote
@@ -169,8 +171,8 @@ impl SyncSession {
             last_presence: None,
             peers: PresenceTable::default(),
             interrupted: None,
+            accepted: 0,
             in_flight: BTreeMap::new(),
-            last_busy: None,
             listed: BTreeSet::new(),
             too_large: BTreeMap::new(),
         }
@@ -257,7 +259,6 @@ impl SyncSession {
         self.last_hello = None;
         self.announced.clear();
         self.in_flight.clear();
-        self.last_busy = None;
         self.listed.clear();
         self.too_large.clear();
     }
@@ -345,7 +346,7 @@ impl SyncSession {
         incoming: &mut Incoming,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        self.note_backlog(transport, now);
+        self.note_written(transport, now);
         self.maybe_hello(docs, transport, now, out)?;
         for _ in 0..self.config.max_messages_per_pump {
             let Some(msg) = transport.recv()? else {
@@ -365,17 +366,27 @@ impl SyncSession {
         let send_due = self
             .last_send
             .is_none_or(|t| now.saturating_duration_since(t) >= self.config.min_send_interval);
-        if send_due && self.flush(docs, transport, now, out)? {
+        if send_due && self.flush(docs, transport, out)? {
             self.last_send = Some(now);
         }
-        self.note_backlog(transport, now);
+        self.note_written(transport, now);
         Ok(())
     }
 
-    /// Remember when the transport last had data waiting (see `in_flight`).
-    fn note_backlog(&mut self, transport: &dyn Transport, now: Instant) {
-        if transport.backlog() > 0 {
-            self.last_busy = Some(now);
+    /// Note which data in flight has left this process by now: the transport
+    /// writes its queue in order, so everything handed to it up to `accepted`
+    /// minus what is still waiting is gone. Later messages (our own `Hello`s,
+    /// presence) wait behind it and do not hold it back; a large message counts
+    /// as waiting until its last byte is written. A transport whose backlog is
+    /// always zero lets everything go at once.
+    fn note_written(&mut self, transport: &dyn Transport, now: Instant) {
+        let written = self.accepted.saturating_sub(transport.backlog() as u64);
+        for f in self.in_flight.values_mut() {
+            for part in std::iter::once(&mut f.oldest).chain(f.newer.as_mut()) {
+                if part.left.is_none() && part.end <= written {
+                    part.left = Some(now);
+                }
+            }
         }
     }
 
@@ -452,20 +463,18 @@ impl SyncSession {
                 // hello intervals). Sending it again would only double the
                 // transfer.
                 let grace = self.in_flight_grace();
-                let (busy, before) = (self.last_busy, &self.listed);
-                self.in_flight.retain(|doc, (version, sent)| {
+                let before = &self.listed;
+                self.in_flight.retain(|doc, f| {
                     let has = remote.get(doc);
-                    let arrived = has.is_some_and(|v| v.includes_vv(version));
                     // The remote just added the document: it may have dropped
                     // what came before (2.5).
                     let added = has.is_some() && !before.contains(doc);
-                    // Left this process long ago: lost, not late.
-                    let left = busy.map_or(*sent, |b| b.max(*sent));
-                    let overdue = now.saturating_duration_since(left) >= grace;
-                    if arrived || added || overdue {
+                    // All of it arrived, or its oldest part left this process
+                    // long ago: lost, not late.
+                    if added || f.confirm(has) || f.overdue(now, grace) {
                         return false;
                     }
-                    remote.entry(doc.clone()).or_default().merge(version);
+                    remote.entry(doc.clone()).or_default().merge(f.version());
                     true
                 });
                 self.listed = listed;
@@ -496,12 +505,12 @@ impl SyncSession {
                             version: version.clone(),
                             data,
                         };
-                        match send(&mut self.stats, transport, msg, out) {
+                        match send(&mut self.stats, &mut self.accepted, transport, msg, out) {
                             Ok(()) => {
                                 if let Some(remote) = &mut self.remote {
                                     remote.entry(doc.clone()).or_default().merge(&version);
                                 }
-                                note_sent(&mut self.in_flight, doc, &version, now);
+                                note_sent(&mut self.in_flight, doc, &version, self.accepted);
                             }
                             // Only this message was refused.
                             Err(e @ SyncError::MessageTooLarge { .. }) => out.errors.push(e),
@@ -591,7 +600,6 @@ impl SyncSession {
         &mut self,
         docs: &dyn DocSet,
         transport: &mut dyn Transport,
-        now: Instant,
         out: &mut PumpOutcome,
     ) -> Result<bool, SyncError> {
         let Some(remote) = &mut self.remote else {
@@ -621,11 +629,11 @@ impl SyncSession {
                 version: local.clone(),
                 data,
             };
-            match send(&mut self.stats, transport, msg, out) {
+            match send(&mut self.stats, &mut self.accepted, transport, msg, out) {
                 Ok(()) => {
                     known.merge(&local);
                     self.too_large.remove(&key);
-                    note_sent(&mut self.in_flight, key, &local, now);
+                    note_sent(&mut self.in_flight, key, &local, self.accepted);
                     sent = true;
                 }
                 // Only this document is stuck (spec 3.1); the others go on. It
@@ -646,29 +654,114 @@ impl SyncSession {
         msg: Message,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        send(&mut self.stats, transport, msg, out)
+        send(&mut self.stats, &mut self.accepted, transport, msg, out)
+    }
+
+    /// Send a message on this session's transport for someone else (the relay
+    /// forwarding presence). Not in the session's stats, but counted in
+    /// `accepted`: it waits in the same queue (see `note_written`).
+    pub(crate) fn forward(
+        &mut self,
+        transport: &mut dyn Transport,
+        msg: Message,
+    ) -> Result<(), SyncError> {
+        let len = msg.encoded_len() as u64;
+        transport.send(msg)?;
+        self.accepted += len;
+        Ok(())
     }
 }
 
-/// Record data of `doc` up to `version` as on its way. An earlier send that is
-/// not confirmed yet keeps its time: the grace for lost data counts from the
-/// oldest unconfirmed send, so steady edits do not put off its repair.
-fn note_sent(
-    in_flight: &mut BTreeMap<DocKey, (VersionVector, Instant)>,
-    doc: DocKey,
-    version: &VersionVector,
-    now: Instant,
-) {
-    in_flight
-        .entry(doc)
-        .or_insert_with(|| (VersionVector::default(), now))
-        .0
-        .merge(version);
+/// Data of one document sent but not confirmed by a remote `Hello` yet: the
+/// oldest unconfirmed message, and the ones sent after it as one group. Each
+/// part's version includes everything sent before it (local versions only
+/// grow).
+#[derive(Debug)]
+struct InFlight {
+    oldest: Part,
+    newer: Option<Part>,
 }
 
-/// Send `msg` and count it.
+/// One or more messages of a document in flight.
+#[derive(Debug)]
+struct Part {
+    /// The remote has this once the part arrived.
+    version: VersionVector,
+    /// `SyncSession::accepted` right after its last message was handed to the
+    /// transport: it has left this process once the transport wrote that far.
+    end: u64,
+    /// The first pump that saw it gone from the transport's queue.
+    left: Option<Instant>,
+}
+
+impl InFlight {
+    /// What the remote has once everything arrived.
+    fn version(&self) -> &VersionVector {
+        &self.newer.as_ref().unwrap_or(&self.oldest).version
+    }
+
+    /// Apply the remote's version of the document (from its `Hello`): true if it
+    /// has everything. If it has the oldest part, the newer group becomes the
+    /// oldest, so the clock for lost data runs from when that group left.
+    fn confirm(&mut self, has: Option<&VersionVector>) -> bool {
+        let Some(has) = has else {
+            return false;
+        };
+        if has.includes_vv(self.version()) {
+            return true;
+        }
+        if has.includes_vv(&self.oldest.version)
+            && let Some(newer) = self.newer.take()
+        {
+            self.oldest = newer;
+        }
+        false
+    }
+
+    /// The oldest part left this process at least `grace` ago and the remote
+    /// still lacks it: it was lost.
+    fn overdue(&self, now: Instant, grace: Duration) -> bool {
+        self.oldest
+            .left
+            .is_some_and(|t| now.saturating_duration_since(t) >= grace)
+    }
+}
+
+/// Record data of `doc` up to `version`, whose message ends at `end` (see
+/// `Part::end`), as on its way. An earlier send that is not confirmed yet stays
+/// the oldest part: the grace for lost data counts from when it left, so steady
+/// edits do not put off its repair. Later sends join the newer group, which
+/// counts as gone once its latest message is.
+fn note_sent(
+    in_flight: &mut BTreeMap<DocKey, InFlight>,
+    doc: DocKey,
+    version: &VersionVector,
+    end: u64,
+) {
+    let mut part = Part {
+        version: version.clone(),
+        end,
+        left: None,
+    };
+    match in_flight.entry(doc) {
+        Entry::Vacant(e) => {
+            e.insert(InFlight {
+                oldest: part,
+                newer: None,
+            });
+        }
+        Entry::Occupied(mut e) => {
+            let f = e.get_mut();
+            part.version.merge(f.version());
+            f.newer = Some(part);
+        }
+    }
+}
+
+/// Send `msg` and count it; `accepted` grows by its encoded size.
 fn send(
     stats: &mut SyncStats,
+    accepted: &mut u64,
     transport: &mut dyn Transport,
     msg: Message,
     out: &mut PumpOutcome,
@@ -677,7 +770,9 @@ fn send(
         Message::Updates { data, .. } | Message::Snapshot { data, .. } => data.len() as u64,
         _ => 0,
     };
+    let len = msg.encoded_len() as u64;
     transport.send(msg)?;
+    *accepted += len;
     stats.bytes_sent += data_len;
     stats.messages_sent += 1;
     out.sent += 1;

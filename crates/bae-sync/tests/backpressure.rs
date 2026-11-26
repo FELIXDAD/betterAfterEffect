@@ -2,7 +2,8 @@
 //! fixed rate (`Transport::backlog` reports what is still queued) and arrive a
 //! while after their last byte left. A large update is sent once, even though
 //! the receiver's `Hello`s, sent before it arrived, keep saying it lacks it; a
-//! first sync of many documents goes out one document at a time.
+//! first sync of many documents goes out one document at a time; an update lost
+//! on the way is sent again while the session keeps the queue busy.
 
 mod common;
 
@@ -13,15 +14,17 @@ use std::time::{Duration, Instant};
 use bae_model::loro::{ExportMode, LoroDoc, VersionVector};
 use bae_model::{Op, SublayerId, Value};
 use bae_sync::{
-    ClientId, DocKey, DocSet, MemDocs, Message, SessionConfig, SyncError, SyncSession, Transport,
+    ClientId, DocKey, DocSet, MemDocs, MemoryTransport, Message, PresenceState, Relay,
+    SessionConfig, SyncError, SyncSession, Transport,
 };
 use common::*;
 
 /// One direction of the link.
 #[derive(Default)]
 struct Pipe {
-    /// Messages not fully sent, with their bytes still to go.
-    queue: VecDeque<(Message, usize)>,
+    /// Messages not fully sent: the tick they were queued in, the message, its
+    /// bytes still to go.
+    queue: VecDeque<(u64, Message, usize)>,
     /// Sent, arriving at the given tick.
     wire: VecDeque<(u64, Message)>,
     arrived: VecDeque<Message>,
@@ -29,20 +32,33 @@ struct Pipe {
     rate: usize,
     /// Ticks from a message's last byte leaving to its arrival.
     lag: u64,
+    /// Extra ticks a message waits in the queue before it starts to leave (a
+    /// busy I/O thread).
+    hold: u64,
+    /// The next this many `Updates` are lost once they left the queue, without
+    /// an error: the link stays up.
+    lose: usize,
 }
 
 impl Pipe {
     fn tick(&mut self, now: u64) {
         let mut budget = self.rate;
         while budget > 0 {
-            let Some((_, left)) = self.queue.front_mut() else {
+            let Some((queued, _, left)) = self.queue.front_mut() else {
                 break;
             };
+            if now <= *queued + self.hold {
+                break;
+            }
             let n = (*left).min(budget);
             *left -= n;
             budget -= n;
             if *left == 0 {
-                let (msg, _) = self.queue.pop_front().unwrap();
+                let (_, msg, _) = self.queue.pop_front().unwrap();
+                if self.lose > 0 && matches!(msg, Message::Updates { .. }) {
+                    self.lose -= 1;
+                    continue;
+                }
                 self.wire.push_back((now + self.lag, msg));
             }
         }
@@ -53,7 +69,7 @@ impl Pipe {
     }
 
     fn backlog(&self) -> usize {
-        self.queue.iter().map(|(_, left)| left).sum()
+        self.queue.iter().map(|(_, _, left)| left).sum()
     }
 }
 
@@ -104,9 +120,9 @@ struct End {
 impl Transport for End {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
         let len = msg.encode().len();
-        self.link.0.lock().unwrap().pipes[self.me]
-            .queue
-            .push_back((msg, len));
+        let mut s = self.link.0.lock().unwrap();
+        let now = s.now;
+        s.pipes[self.me].queue.push_back((now, msg, len));
         Ok(())
     }
 
@@ -144,6 +160,19 @@ fn letters(len: usize, seed: u64) -> String {
 /// session export and queue the whole edit again.
 #[test]
 fn a_large_update_is_sent_once_while_hellos_arrive() {
+    large_update_is_sent_once(false);
+}
+
+/// The same after a small edit of the same document that arrives at once: the
+/// receiver's hellos confirm the small edit long before the large one has left
+/// the sender's queue, and the large one is still counted as on its way. Its
+/// grace for lost data starts when it left, not when the small edit did.
+#[test]
+fn a_large_update_after_a_small_one_is_sent_once() {
+    large_update_is_sent_once(true);
+}
+
+fn large_update_is_sent_once(small_first: bool) {
     let base = base_snapshots();
     let mut a = client_stage(&base);
     let mut b = client_stage(&base);
@@ -160,9 +189,24 @@ fn a_large_update_is_sent_once_while_hellos_arrive() {
     }
 
     let root = DocKey::sublayer(&SublayerId::root());
+    a.set_edit_target(&SublayerId::root()).unwrap();
+    let mut start = 3;
+    if small_first {
+        a.transact(&author("user:a"), "rename", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: "label".into(),
+                value: Some(Value::String("small".into())),
+            })
+        })
+        .unwrap();
+        sa.pump_at(&mut a, &mut a_end, at(start)).unwrap();
+        sb.pump_at(&mut b, &mut b_end, at(start)).unwrap();
+        link.tick();
+        start += 1;
+    }
     let before = a.version(&root).unwrap();
     let big = letters(8 << 20, 1);
-    a.set_edit_target(&SublayerId::root()).unwrap();
     a.transact(&author("user:a"), "paste", |tx| {
         tx.apply(Op::SetValue {
             path: p("/comps/main/layers/title"),
@@ -177,7 +221,7 @@ fn a_large_update_is_sent_once_while_hellos_arrive() {
 
     let mut most = 0;
     let mut arrived = None;
-    for t in 3..200 {
+    for t in start..200 {
         sa.pump_at(&mut a, &mut a_end, at(t)).unwrap();
         most = most.max(a_end.backlog());
         sb.pump_at(&mut b, &mut b_end, at(t)).unwrap();
@@ -191,7 +235,7 @@ fn a_large_update_is_sent_once_while_hellos_arrive() {
     eprintln!(
         "{} KiB arrived after {} ticks; {} KiB sent, largest queue {} KiB",
         size >> 10,
-        arrived - 3,
+        arrived - start,
         sent >> 10,
         most >> 10
     );
@@ -263,4 +307,153 @@ fn a_first_sync_goes_out_one_document_at_a_time() {
         "queue reached {most} bytes"
     );
     assert!(sent < total + total / 10, "sent {sent} bytes for {total}");
+}
+
+/// A small edit is lost on the way while the link stays up. The receiver's
+/// `Hello`s keep lacking it; once it left the sender's queue two hello
+/// intervals ago it no longer counts as on its way, and the next of those
+/// `Hello`s makes the sender send it again.
+///
+/// The sender's own later messages keep its queue busy, as with
+/// `ThreadedTransport`, which counts each message until its I/O thread wrote
+/// it: first only its `Hello`s (the queue empties on every tick), then also a
+/// presence heartbeat on every pump into a queue that holds each message one
+/// extra tick, so the backlog is never zero when the session looks. Neither
+/// may put off the repair of the earlier edit. Before, any backlog restarted
+/// the clock, and the edit was not sent again while the link stayed up.
+#[test]
+fn a_lost_update_is_sent_again_while_the_queue_stays_busy() {
+    for chatty in [false, true] {
+        let base = base_snapshots();
+        let mut a = client_stage(&base);
+        let mut b = client_stage(&base);
+        let (link, mut a_end, mut b_end) = Link::new(usize::MAX, 0);
+        let mut ca = config("a");
+        if chatty {
+            link.0.lock().unwrap().pipes[0].hold = 1;
+            ca.presence_heartbeat = TICK;
+        }
+        let mut sa = SyncSession::new(ca);
+        if chatty {
+            sa.set_presence(PresenceState {
+                name: "a".into(),
+                ..PresenceState::default()
+            });
+        }
+        let mut sb = SyncSession::new(config("b"));
+        let t0 = Instant::now();
+        let at = |t: u64| t0 + TICK * u32::try_from(t).unwrap();
+        for t in 0..3 {
+            sa.pump_at(&mut a, &mut a_end, at(t)).unwrap();
+            sb.pump_at(&mut b, &mut b_end, at(t)).unwrap();
+            link.tick();
+        }
+
+        let root = DocKey::sublayer(&SublayerId::root());
+        link.0.lock().unwrap().pipes[0].lose = 1;
+        a.set_edit_target(&SublayerId::root()).unwrap();
+        a.transact(&author("user:a"), "rename", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: "notes".into(),
+                value: Some(Value::String("lost once".into())),
+            })
+        })
+        .unwrap();
+        let want = a.version(&root).unwrap();
+
+        let edit = 3;
+        let mut arrived = None;
+        let mut busy = 0;
+        for t in edit..edit + 100 {
+            let a_out = sa.pump_at(&mut a, &mut a_end, at(t)).unwrap();
+            busy += usize::from(a_end.backlog() > 0 && a_out.sent > 0);
+            sb.pump_at(&mut b, &mut b_end, at(t)).unwrap();
+            link.tick();
+            if b.version(&root).is_some_and(|v| v.includes_vv(&want)) {
+                arrived = Some(t);
+                break;
+            }
+        }
+        assert_eq!(link.0.lock().unwrap().pipes[0].lose, 0, "nothing was lost");
+        assert!(busy > 1, "the sender's queue was never busy");
+        let ticks = arrived.unwrap_or_else(|| {
+            panic!("chatty {chatty}: the lost edit was not sent again in 100 ticks")
+        }) - edit;
+        eprintln!("chatty {chatty}: the lost edit arrived {ticks} ticks after it was made");
+        // It leaves within two ticks, is overdue two hello intervals (10
+        // ticks) later and is sent again on the receiver's next `Hello` (every
+        // 5 ticks), arriving within two more ticks.
+        assert!(ticks <= 20, "chatty {chatty}: arrived after {ticks} ticks");
+    }
+}
+
+/// The same on the hub: the relay's link to one client loses the first update
+/// for it, while the relay forwards a large presence heartbeat from another
+/// client on every pump into that link's queue. Those forwarded messages wait
+/// in the same queue as the session's own; counted as the session's, they do
+/// not hold back the repair. Not counted, the lost update looked as if still
+/// queued until the session's own later messages outweighed them, about 480
+/// ticks here.
+#[test]
+fn a_lost_update_is_sent_again_while_the_relay_forwards_presence() {
+    let doc = DocKey::parse("d").unwrap();
+    let mut hub_docs = MemDocs::new();
+    {
+        let d = LoroDoc::new();
+        d.get_text("t").insert(0, "from the hub").unwrap();
+        d.commit();
+        hub_docs
+            .load(doc.clone(), &d.export(ExportMode::Snapshot).unwrap())
+            .unwrap();
+    }
+    let want = hub_docs.version(&doc).unwrap();
+    let mut relay = Relay::with_docs(ClientId::new("hub").unwrap(), hub_docs);
+    relay.set_hello_interval(Some(Duration::from_millis(500)));
+    // End 0 is the relay's: it holds each message one extra tick and loses
+    // the first update.
+    let (link, hub_end, mut x_end) = Link::new(usize::MAX, 0);
+    {
+        let mut s = link.0.lock().unwrap();
+        s.pipes[0].hold = 1;
+        s.pipes[0].lose = 1;
+    }
+    relay.connect(Box::new(hub_end));
+    let (mut y_end, hub_y) = MemoryTransport::pair();
+    relay.connect(Box::new(hub_y));
+    let mut x = SyncSession::new(config("x"));
+    let mut x_docs = MemDocs::new();
+    let mut cy = config("y");
+    cy.presence_heartbeat = TICK;
+    let mut y = SyncSession::new(cy);
+    y.set_presence(PresenceState {
+        name: "y".repeat(2000),
+        ..PresenceState::default()
+    });
+    let mut y_docs = MemDocs::new();
+
+    let t0 = Instant::now();
+    let at = |t: u64| t0 + TICK * u32::try_from(t).unwrap();
+    let mut arrived = None;
+    for t in 0..1000 {
+        x.pump_at(&mut x_docs, &mut x_end, at(t)).unwrap();
+        y.pump_at(&mut y_docs, &mut y_end, at(t)).unwrap();
+        let out = relay.pump_at(at(t));
+        assert!(out.disconnected.is_empty(), "{:?}", out.disconnected);
+        link.tick();
+        if x_docs.version(&doc).is_some_and(|v| v.includes_vv(&want)) {
+            arrived = Some(t);
+            break;
+        }
+    }
+    assert_eq!(link.0.lock().unwrap().pipes[0].lose, 0, "nothing was lost");
+    assert!(
+        x.presence().iter().any(|p| p.state.name.len() == 2000),
+        "x never saw y's presence"
+    );
+    let ticks = arrived.expect("the lost update was not sent again in 1000 ticks");
+    eprintln!("the lost update arrived after {ticks} ticks");
+    // Lost on the first ticks, overdue two hello intervals (10 ticks) after
+    // it left, sent again on x's next `Hello` (every 5 ticks).
+    assert!(ticks <= 25, "arrived after {ticks} ticks");
 }

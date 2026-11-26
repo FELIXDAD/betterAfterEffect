@@ -148,7 +148,7 @@ impl Relay {
             && let Some(leave) = self.presence.leave(client, now)
         {
             for p in &mut self.peers {
-                let _ = p.transport.send(leave.clone());
+                let _ = p.session.forward(&mut p.transport, leave.clone());
             }
         }
         true
@@ -217,7 +217,7 @@ impl Relay {
                 if !peer.greeted {
                     peer.greeted = true;
                     for (_, msg) in self.presence.raw() {
-                        if let Err(e) = peer.transport.send(msg.clone()) {
+                        if let Err(e) = peer.session.forward(&mut peer.transport, msg.clone()) {
                             failed.push((peer.handle, e));
                             break;
                         }
@@ -232,7 +232,7 @@ impl Relay {
                     continue;
                 }
                 for peer in self.peers.iter_mut().filter(|p| p.handle != from) {
-                    if let Err(e) = peer.transport.send(msg.clone()) {
+                    if let Err(e) = peer.session.forward(&mut peer.transport, msg.clone()) {
                         failed.push((peer.handle, e));
                     } else {
                         out.sent += 1;

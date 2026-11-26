@@ -84,6 +84,7 @@
   - **和旧版本不兼容**：上一轮把接收的单帧上限设成了 16 MiB，而旧版本（`origin/dev`，tungstenite 默认设置）一条消息只发一帧、收的消息最大 64 MiB。旧 Hub 转发来的 16–64 MiB 的消息，新客户端在帧头就拒收，重连后又是同一帧。现在单帧上限又等于消息上限（只读连接两者都是 16 MiB）；自己发送仍然是 256 KiB 的帧。超限的报错不再提示"两端用同样的 HubLimits"（只读连接、旧版本也会触发），改成说明发送方的上限更大。测试：`tests/hub_limits.rs` 的 `a_single_large_frame_from_an_older_build_is_received`（用 tungstenite 默认设置模拟旧 Hub、旧客户端，各发一个 20 MiB 的帧），修改前失败。
   - **内存说明**：原来写的"每个连接约一条消息 + 1 MiB"只算了发送。收一条大消息时 tungstenite 先拼成一整块，解码又复制一份数据，约两到三倍。现在 `HubTransport::recv` 用 `Message::decode_owned` 直接拿拼好的那块内存（单元测试 `decode_owned_does_not_copy_the_payload` 检查指针没变），新版本发来的大消息收的时候最多约两倍；旧版本的单帧消息仍然复制一次。spec 3.1、Hub 的 README、`deploy/README.md` 和自动生成的 `hub.toml` 注释都改成发送、接收分开写。
   - spec 3.1 和 `tests/backpressure.rs` 原来说第一次同步时队列"最多一个文档"，实际最多约 `max_backlog` 加一个文档（测试里约 1.75 MiB），已改正。
+  - **丢了的数据不补发**（spec 2.4）：在途数据"离开本进程超过两个 hello 间隔就算丢了"这条规则在 `ThreadedTransport` 上从不生效。原来的计时从最后一次看到 `backlog() > 0` 算起，而会话自己每个 hello 间隔发的 `Hello` 都会让它短暂大于 0，链路不断时丢了的数据就一直不补发。现在会话累计交给传输的字节数，每条数据记下发完它时的累计值，累计值减去 `backlog()` 达到它时才算离开，后面排着的消息不影响它；Relay 转发的在线状态改经会话发送（`SyncSession::forward`），也计入累计值。同一个文档确认前又发的数据合成一组，最早那条确认后这一组接着计时，先发的小修改确认了也不会让后面还在排队的大消息被当成丢了。测试：`tests/backpressure.rs` 的 `a_lost_update_is_sent_again_while_the_queue_stays_busy`（发送方的队列只有自己的 `Hello` 时，以及每次 `pump` 都有在线状态、队列从不为空时，丢了的修改都在 15 个 tick 内补发；修改前 100 个 tick 都没补发）、`a_large_update_after_a_small_one_is_sent_once`（去掉"这一组接着计时"时 8 MiB 发了两遍）、`a_lost_update_is_sent_again_while_the_relay_forwards_presence`（Relay 每轮转发 2 KB 的在线状态，18 个 tick 补发；修改前 1000 个 tick 都没补发，转发不计入累计值时 483 个 tick）。
 
 ## 请求（其他工作流在这里留言）
 

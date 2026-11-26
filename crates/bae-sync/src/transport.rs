@@ -20,11 +20,15 @@ pub trait Transport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError>;
     /// The next received message, or `None` if nothing is waiting.
     fn recv(&mut self) -> Result<Option<Message>, SyncError>;
-    /// Bytes accepted by `send` that have not left this process yet (roughly).
-    /// The session sends no more local changes while this is over
+    /// Bytes accepted by `send` that have not left this process yet (roughly),
+    /// counted as [`Message::encoded_len`]; messages leave in the order they
+    /// were sent. The session sends no more local changes while this is over
     /// [`crate::SessionConfig::max_backlog`], so a slow link gets one large
-    /// message at a time instead of all of them at once. Default: 0 (`send`
-    /// writes everything before it returns).
+    /// message at a time instead of all of them at once. It also tells the
+    /// session when a message has left: everything it handed over minus this.
+    /// Counting more than that only makes the session wait longer before it
+    /// takes unconfirmed data for lost. Default: 0 (`send` writes everything
+    /// before it returns).
     fn backlog(&self) -> usize {
         0
     }
