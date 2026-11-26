@@ -265,7 +265,7 @@ impl Panel for AlignPanel {
             let time = session.lock().time(&info.path);
             let Ok(comp) = self
                 .eval
-                .get(cx.resources)
+                .get(cx.stage)
                 .evaluate_comp(cx.stage, &info.path, time)
             else {
                 return;
