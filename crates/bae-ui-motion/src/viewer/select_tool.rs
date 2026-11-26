@@ -15,7 +15,7 @@
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
-use bae_model::PrimPath;
+use bae_model::{BezierPath, PrimPath};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::PanelContext;
 use bae_ui::theme;
@@ -64,6 +64,18 @@ pub(crate) struct SelectState {
 }
 
 impl SelectState {
+    /// The mask or shape path a vertex drag or free transform is changing,
+    /// and its previewed value.
+    pub(super) fn path_preview(&self) -> Option<(PrimPath, BezierPath)> {
+        if let Some(d) = &self.path_drag {
+            return Some((d.prim().clone(), d.preview().path));
+        }
+        self.free
+            .as_ref()
+            .filter(|f| f.dragging())
+            .map(|f| (f.prim.clone(), f.preview().clone()))
+    }
+
     /// A drag is in progress.
     pub(crate) fn busy(&self) -> bool {
         self.drag.is_some()
