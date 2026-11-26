@@ -244,6 +244,13 @@ pub mod ids {
     /// Layer ▸ Camera ▸ Camera Settings… (and View ▸): the selected camera, else
     /// the comp's active camera.
     pub const CAMERA_SETTINGS: &str = "motion.layer.camera_settings";
+    /// Layer ▸ Reveal ▸ Reveal Layer Source in Project / Reveal Composition in
+    /// Project: the Project panel selects and scrolls to the item.
+    pub const REVEAL_SOURCE_IN_PROJECT: &str = "motion.layer.reveal_layer_source_in_project";
+    /// File ▸ Interpret Footage ▸ Remember Interpretation (Cmd/Ctrl+Alt+C) /
+    /// Apply Interpretation (Cmd/Ctrl+Alt+V).
+    pub const REMEMBER_INTERPRETATION: &str = "motion.file.remember_interpretation";
+    pub const APPLY_INTERPRETATION: &str = "motion.file.apply_interpretation";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -454,6 +461,12 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EDIT_LABEL_COLORS, "Edit Label Colors..."),
     (ids::SEPARATE_DIMENSIONS, "Separate Dimensions"),
     (ids::CAMERA_SETTINGS, "Camera Settings..."),
+    (
+        ids::REVEAL_SOURCE_IN_PROJECT,
+        "Reveal Layer Source in Project",
+    ),
+    (ids::REMEMBER_INTERPRETATION, "Remember Interpretation"),
+    (ids::APPLY_INTERPRETATION, "Apply Interpretation"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -1335,6 +1348,42 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
             return true;
         }
+        ids::REVEAL_SOURCE_IN_PROJECT | ids::REVEAL_COMP_IN_PROJECT => {
+            let item = {
+                let s = session.lock();
+                if id == ids::REVEAL_COMP_IN_PROJECT {
+                    s.active_comp.clone()
+                } else {
+                    s.selected_layers.first().and_then(|l| {
+                        stage
+                            .prim(l)
+                            .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned())
+                    })
+                }
+            };
+            if let Some(item) = item {
+                let mut s = session.lock();
+                s.selected_items = vec![item.clone()];
+                s.reveal_in_project = Some(item);
+                drop(s);
+                cx.open_panel("project");
+            }
+            return true;
+        }
+        ids::REMEMBER_INTERPRETATION | ids::APPLY_INTERPRETATION => {
+            use crate::dialogs::interpret_footage::InterpretFootage;
+            let selected = session.lock().selected_items.clone();
+            let Some(current) = InterpretFootage::new(stage, &selected) else {
+                return true;
+            };
+            if id == ids::REMEMBER_INTERPRETATION {
+                session.lock().remembered_interpretation = Some(current.settings());
+            } else if let Some(mut params) = session.lock().remembered_interpretation.clone() {
+                params["items"] = json!(current.items());
+                cx.invoke_with("footage.interpret", params);
+            }
+            return true;
+        }
         ids::OPEN_LAYER | ids::OPEN_LAYER_SOURCE => {
             let layer = session.lock().selected_layers.first().cloned();
             if let Some(layer) = layer {
@@ -1638,10 +1687,6 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
         ids::COMP_FLOWCHART => cx.open_panel("flowchart"),
-        ids::REVEAL_COMP_IN_PROJECT => {
-            s.selected_items = vec![info.path.clone()];
-            cx.open_panel("project");
-        }
         ids::MINI_FLOW => {
             s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
                 stage, &info.path,
@@ -2891,6 +2936,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Open Layer Source", "打开图层源"),
     ("Add Footage to Comp", "将素材添加到合成"),
     ("Edit Original...", "编辑原稿..."),
+    ("Reveal Layer Source in Project", "在项目中显示图层源"),
+    ("Remember Interpretation", "记住解释"),
+    ("Apply Interpretation", "应用解释"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

@@ -3648,3 +3648,60 @@ fn add_footage_separate_dimensions_and_layer_controls() {
         "motion.view.show_layer_controls"
     ));
 }
+
+/// Layer ▸ Reveal ▸ Reveal Layer Source in Project selects the source in the
+/// Project panel; File ▸ Interpret Footage ▸ Remember / Apply Interpretation
+/// copy one item's interpretation to others.
+#[test]
+fn reveal_in_project_and_remember_interpretation() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (_, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::REVEAL_SOURCE_IN_PROJECT));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    assert_eq!(h.session().lock().reveal_in_project, Some(item.clone()));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    assert_eq!(h.session().lock().selected_items, vec![item]);
+    assert!(h.session().lock().reveal_in_project.is_none());
+
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<_> = ["a.mov", "b.mov"]
+        .iter()
+        .map(|n| {
+            let p = dir.path().join(n);
+            std::fs::write(&p, b"clip").unwrap();
+            json!({"path": p})
+        })
+        .collect();
+    let out = h.run("item.import", json!({ "files": files }));
+    let items: Vec<PrimPath> = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| PrimPath::new(v.as_str().unwrap()).unwrap())
+        .collect();
+    h.run(
+        "footage.interpret",
+        json!({"items": [items[0]], "alpha_mode": "premultiplied", "loop_count": 3}),
+    );
+    h.session().lock().selected_items = vec![items[0].clone()];
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::REMEMBER_INTERPRETATION))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().selected_items = vec![items[1].clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::APPLY_INTERPRETATION));
+    assert_eq!(r.invocations[0].id, "footage.interpret");
+    let p = &r.invocations[0].params;
+    assert_eq!(p["items"], json!([items[1]]));
+    assert_eq!(
+        (p["alpha_mode"].as_str(), p["loop_count"].as_i64()),
+        (Some("premultiplied"), Some(3))
+    );
+}

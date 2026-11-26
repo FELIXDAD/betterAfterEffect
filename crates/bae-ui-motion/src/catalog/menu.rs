@@ -304,8 +304,8 @@ const FILE: &[Node] = &[
             it(10420225, "Main...", "motion.file.interpret_footage_main", "", E, Done),
             it(10420226, "Proxy...", "motion.file.interpret_footage_proxy", "", E, Later),
             SEP,
-            it(10420228, "Remember Interpretation", "motion.file.remember_interpretation", "", E, Todo),
-            it(10420229, "Apply Interpretation", "motion.file.apply_interpretation", "", E, Todo),
+            it(10420228, "Remember Interpretation", "motion.file.remember_interpretation", "", E, Done),
+            it(10420229, "Apply Interpretation", "motion.file.apply_interpretation", "", E, Done),
         ],
     ),
     sub(
@@ -800,7 +800,7 @@ const LAYER: &[Node] = &[
         "Reveal",
         &[
             it(23003137, "Reveal in Explorer", "motion.file.reveal_in_explorer", "", B, Done),
-            it(23003138, "Reveal Layer Source in Project", "motion.layer.reveal_layer_source_in_project", "", B, Todo),
+            it(23003138, "Reveal Layer Source in Project", "motion.layer.reveal_layer_source_in_project", "", B, Done),
             it(23003139, "Reveal Layer in Project Flowchart", "motion.layer.reveal_layer_in_project_flowchart", "", E, Later),
             it(23003140, "Reveal Composition in Project", "motion.layer.reveal_composition_in_project", "", B, Done),
             it(23003141, "Reveal Expression Errors", "motion.layer.reveal_expression_errors", "", C, Later),
