@@ -296,3 +296,61 @@ fn vegas_selects_connected_image_contours_in_scan_order() {
         assert_eq!(output.get(other.0, other.1)[3], 0.);
     }
 }
+
+#[test]
+fn generated_sets_weave_and_brush_respond_to_controls() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(32, 24);
+    let input = Pixels::new(r, |_, _| [0.5, 0.4, 0.3, 1.]);
+    for (name, param, value) in [
+        ("ADBE Fractal", 2, Value::Int(5)),
+        ("CS Threads", 6, Value::Float(0.)),
+        ("CC Glue Gun", 2, Value::Float(20.)),
+    ] {
+        let fx = builtin(name);
+        let a = run(&gpu, F32, fx, vec![], &input, r, 1.);
+        let b = run(&gpu, F32, fx, vec![(param, value)], &input, r, 1.);
+        let (diff, _, _) = max_diff(&a, &b, r);
+        assert!(diff.is_finite() && diff > 0.001, "{name}: {diff}");
+    }
+}
+
+#[test]
+fn glue_gun_connects_historical_brush_positions() {
+    use bae_effects::Standalone;
+    use bae_render::EffectParams;
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(40, 16);
+    let input = Pixels::new(r, |_, _| [0.; 4]).upload(&gpu, F32);
+    let fx = builtin("CC Glue Gun");
+    let brush = |x| {
+        instance(
+            "CC Glue Gun",
+            vec![(1, Value::Vec2([x, 8.])), (4, Value::Float(0.5))],
+        )
+    };
+    let now = brush(32.);
+    let p = EffectParams {
+        comp_time: Time::from_seconds(3.),
+        ..EffectParams::new(&now)
+    };
+    let times = fx.effect().parameter_sample_times(&p);
+    assert!(times.len() > 1 && times.len() <= 64);
+    assert!(
+        times
+            .iter()
+            .all(|t| t.as_seconds() >= 2.5 && t.as_seconds() <= 3.)
+    );
+    let history = [(times[0], brush(8.))];
+    let mut target = Standalone::new(gpu.clone(), F32);
+    for (samples, expected) in [(&history[..], 1.), (&[][..], 0.)] {
+        let frame = EffectParams {
+            history: samples,
+            ..p
+        };
+        let out = fx.render(&mut target, &frame, &input, r).unwrap();
+        target.finish().unwrap();
+        let a = Pixels::download(&gpu, &out).get(20, 8)[3];
+        assert!((a - expected).abs() < 0.001, "stroke alpha {a}");
+    }
+}

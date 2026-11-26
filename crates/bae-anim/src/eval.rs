@@ -1602,6 +1602,8 @@ pub struct Evaluator {
     /// Every comp of the stage (expressions can reach any comp); rebuilt after
     /// structural changes.
     comp_list: Option<Vec<PrimPath>>,
+    /// Layer pixels for `sampleImage`, filled by the renderer that shares it.
+    samples: Option<Arc<crate::ImageSamples>>,
     /// Values shown before they are committed ([`Evaluator::set_overrides`]).
     overrides: Arc<[AttrOverride]>,
 }
@@ -1609,6 +1611,17 @@ pub struct Evaluator {
 impl Evaluator {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Serves `sampleImage` from `samples` (without one it reads transparent
+    /// black). The evaluator clears it whenever the project changes.
+    pub fn set_image_samples(&mut self, samples: Option<Arc<crate::ImageSamples>>) {
+        self.samples = samples;
+    }
+
+    /// The cache set by [`Evaluator::set_image_samples`].
+    pub fn image_samples(&self) -> Option<&Arc<crate::ImageSamples>> {
+        self.samples.as_ref()
     }
 
     /// Evaluates as if these attributes had these specs, without changing the
@@ -1719,7 +1732,10 @@ impl Evaluator {
             .project
             .get_or_insert_with(|| Arc::new(project_info(stage)))
             .clone();
-        (expr::Scope::new(comps).with_project(project), id)
+        let scope = expr::Scope::new(comps)
+            .with_project(project)
+            .with_samples(self.samples.clone());
+        (scope, id)
     }
 
     fn evaluate_with_expressions(
@@ -1902,6 +1918,9 @@ impl Evaluator {
             self.comp_list = None;
         }
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 
     /// Drop every compiled comp.
@@ -1909,6 +1928,9 @@ impl Evaluator {
         self.comps.clear();
         self.comp_list = None;
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 }
 

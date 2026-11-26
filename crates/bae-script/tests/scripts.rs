@@ -513,3 +513,28 @@ fn layer_attributes_and_order() {
         ]))
     );
 }
+
+#[test]
+fn effect_loops_read_each_snapshot_once() {
+    let mut fx = Fx::new();
+    let out = fx.ok(r#"
+        var c = app.project.items.addComp('FX', 64, 64, 1, 4, 24);
+        var s = c.layers.addSolid([1, 0, 0], "S", 64, 64, 1);
+        s.property("Effects").addProperty("Gaussian Blur");
+        s.property("Effects").addProperty("Gaussian Blur");
+        var calls = {}, host = __host;
+        globalThis.__host = function(m, args) {
+            calls[m] = (calls[m] || 0) + 1;
+            return host(m, args);
+        };
+        var params = 0, fxs = s.property("Effects");
+        for (var pass = 0; pass < 3; pass++) {
+            for (var i = 1; i <= fxs.numProperties; i++) {
+                var e = fxs.property(i);
+                params += e.numProperties + (e.enabled ? 1 : 0);
+            }
+        }
+        [(calls.effects || 0) <= 1, calls.effect, params > 0]
+    "#);
+    assert_eq!(out, norm(json!([true, 2, true])));
+}

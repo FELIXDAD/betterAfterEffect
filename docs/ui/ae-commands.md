@@ -70,7 +70,7 @@
 | Export ▸ Maxon Cinema 4D Exporter... | 11665409 | `motion.file.maxon_cinema_4d_exporter` |  |  |  | B | Ⓐ |
 | Export ▸ Export Adobe Premiere Project... | 11665410 | `motion.file.export_adobe_premiere_project` |  |  |  | B | Ⓐ |
 | Export ▸ Add to Adobe Media Encoder Queue... | 11665411 | `motion.comp.add_to_adobe_media_encoder_queue` |  | Ctrl+Alt+M | Cmd+Opt+M | B | Ⓐ |
-| Export ▸ Add to Render Queue | 11665412 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Cmd+M / Cmd+Shift+/ | B | ✅ |
+| Export ▸ Add to Render Queue | 11665412 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Fonts from Adobe... | 131089 | `motion.file.add_fonts_from_adobe` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ New Premiere Sequence... | 12845057 | `motion.file.new_premiere_sequence` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
@@ -109,7 +109,7 @@
 | Interpret Footage ▸ Proxy... | 10420226 | `motion.file.interpret_footage_proxy` |  |  |  | E | ⏸ |
 | Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ☐ |
 | Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ☐ |
-| Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Cmd+H | E | ✅ |
+| Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
 | Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
 | Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ⏸ |
@@ -207,7 +207,7 @@
 | Crop Comp to Region of Interest | 327686 | `motion.comp.crop_comp_to_region_of_interest` |  |  |  | B | ⏸ |
 | Crop Comp to Selected Layer(s) Bounds | 327687 | `motion.comp.crop_comp_to_selected_layer_bounds` |  |  |  | B | ⏸ |
 | Add to Adobe Media Encoder Queue... | 327689 | `motion.comp.add_to_adobe_media_encoder_queue` |  | Ctrl+Alt+M | Cmd+Opt+M | B | Ⓐ |
-| Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Cmd+M / Cmd+Shift+/ | B | ✅ |
+| Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
 | Preview ▸ Play Current Preview | 10682369 | `motion.play` |  | Space | Space | B | ✅ |
 | Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ⏸ |
@@ -441,7 +441,7 @@
 | Recent Animation Presets ▸ (recent presets) | 11599873 | `motion.anim.recent_animation_preset` |  | Ctrl+Alt+Shift+F | Cmd+Opt+Shift+F | E | ⋯ |
 | Browse Presets... | 851973 | `motion.anim.browse_presets` |  |  |  | E | ◐ |
 | Set Keyframe | 851975 | `motion.anim.set_keyframe` |  |  |  | B | ☐ |
-| Toggle Hold Keyframe | 851976 | `motion.toggle_hold` |  | Ctrl+Alt+H | Cmd+Opt+H | B | ✅ |
+| Toggle Hold Keyframe | 851976 | `motion.toggle_hold` |  | Ctrl+Alt+H | Control+Cmd+Opt+H | B | ✅ |
 | Keyframe Interpolation... | 851977 | `motion.anim.keyframe_interpolation` |  | Ctrl+Alt+K | Cmd+Opt+K | C | ✅ |
 | Keyframe Velocity... | 851978 | `motion.anim.keyframe_velocity` |  | Ctrl+Shift+K | Cmd+Shift+K | C | ✅ |
 | Keyframe Assistant ▸ RPF Camera Import | 11075585 | `motion.anim.rpf_camera_import` |  |  |  | B | Ⓐ |
@@ -673,8 +673,8 @@
 | Settings ▸ 3D... |  | `app.settings` | `{"page":"3d"}` |  |  | D | ☐ |
 | Settings ▸ Scripting & Expressions... |  | `app.settings` | `{"page":"scripting_expressions"}` |  |  | D | ☐ |
 | Services |  | `app.services` |  |  |  | B | ✅ |
-| Hide BAE |  | `app.hide` |  |  | Control+Cmd+H / Cmd+H | B | ✅ |
-| Hide Others |  | `app.hide_others` |  |  | Control+Cmd+Opt+H / Cmd+Opt+H | B | ✅ |
+| Hide BAE |  | `app.hide` |  |  | Cmd+H | B | ✅ |
+| Hide Others |  | `app.hide_others` |  |  | Cmd+Opt+H | B | ✅ |
 | Show All |  | `app.show_all` |  |  |  | B | ✅ |
 | Quit BAE |  | `app.quit` |  | Ctrl+Q | Cmd+Q | B | ✅ |
 
@@ -1172,7 +1172,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `MacSysMenuMinimize` | `window.minimize` |  |  | Control+Cmd+M |  | B | ☐ |
+| `MacSysMenuMinimize` | `window.minimize` |  |  |  |  | B | ☐ |
 
 ### `MacSysShortcutsStd`
 
