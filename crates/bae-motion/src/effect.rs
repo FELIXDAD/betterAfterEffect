@@ -623,6 +623,8 @@ impl bae_model::Command for AudioAmplitude {
             camera: None,
             light: None,
             label: None,
+            position_3d: None,
+            point_of_interest: None,
         };
         let layer = crate::CreateLayer.run(tx, params)?;
         for (ch, name) in p.channel_names.into_iter().enumerate() {

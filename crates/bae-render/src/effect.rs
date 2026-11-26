@@ -7,6 +7,8 @@
 //! equivalent of AE SmartFX pre-render), then encodes GPU work. Effects whose
 //! definition says `thread_safe: false` are called one at a time.
 
+pub use bae_anim::effect_history::{HISTORY_PARAM, PROFILE_SAMPLES};
+
 use std::fmt;
 use std::sync::Arc;
 

@@ -1185,9 +1185,12 @@ impl CompiledComp {
                     effects: layer
                         .effects
                         .iter()
-                        .map(|e| sample_effect(e, &cx))
+                        .map(|e| sample_effect(e, &cx, &layer.timing))
                         .collect(),
-                    layer_styles: layer.layer_styles.as_ref().map(|e| sample_effect(e, &cx)),
+                    layer_styles: layer
+                        .layer_styles
+                        .as_ref()
+                        .map(|e| sample_effect(e, &cx, &layer.timing)),
                     contents: sample_prims(&layer.contents, layer.fixed_contents.as_ref(), &cx),
                     text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
                         Value::TextDocument(doc) => Some(doc),
@@ -1554,16 +1557,30 @@ fn sample_mask(m: &CompiledMask, cx: &Cx<'_, '_>) -> EvaluatedMask {
     }
 }
 
-fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
+fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>, timing: &LayerTiming) -> EvaluatedEffect {
+    let mut params: BTreeMap<_, _> = e
+        .params
+        .iter()
+        .map(|(id, p)| (id.clone(), p.sample(cx)))
+        .collect();
+    if e.enabled
+        && e.match_name == "CC Ripple Pulse"
+        && let Some((_, level)) = e
+            .params
+            .iter()
+            .find(|(id, p)| id == "0002" && !matches!(p, Prop::Static(_)))
+    {
+        let span = params.get("0003").and_then(Value::as_f64).unwrap_or(1.0);
+        let profile = crate::effect_history::ripple_profile(cx.lt, span, |t| {
+            level.f64(&cx.at_layer_time(t, timing))
+        });
+        params.insert(crate::effect_history::HISTORY_PARAM.to_string(), profile);
+    }
     EvaluatedEffect {
         path: e.path.clone(),
         match_name: e.match_name.clone(),
         enabled: e.enabled,
-        params: e
-            .params
-            .iter()
-            .map(|(id, p)| (id.clone(), p.sample(cx)))
-            .collect(),
+        params,
         children: e.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }

@@ -321,6 +321,16 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
         ("ADBE Displacement Map", 6) => &["中心图", "伸缩对应图以适合", "拼贴图"],
         ("ADBE Texturize", 4) => &["拼贴纹理", "居中纹理", "拉伸纹理以适合"],
         ("ADBE Dropdown Control", 1) => &["项目 1", "项目 2", "项目 3"],
+        (
+            "ADBE Camera Lens Blur"
+            | "ADBE Smart Blur"
+            | "ADBE Channel Blur"
+            | "CC Radial Blur"
+            | "CC Radial Fast Blur"
+            | "CC Vector Blur"
+            | "CS CrossBlur",
+            id,
+        ) => return crate::categories::blur_sharpen::optics::definitions::options(match_name, id),
         ("ADBE Minimax", 1) => &["最小值", "最大值", "先最小值再最大值", "先最大值再最小值"],
         ("ADBE Minimax", 3) => &["颜色", "Alpha 和颜色", "红色", "绿色", "蓝色", "Alpha"],
         ("ADBE Minimax", 4) => &["水平和垂直", "仅水平", "仅垂直"],
