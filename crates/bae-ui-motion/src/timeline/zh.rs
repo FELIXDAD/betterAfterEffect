@@ -2,6 +2,9 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Close Other Timeline Panels", "关闭其他时间轴面板"),
+    ("Close Timeline Panels to the Left", "关闭左侧的时间轴面板"),
+    ("Close Timeline Panels to the Right", "关闭右侧的时间轴面板"),
     // Accessibility labels (timeline switches, keyframes, pick whip, ruler)
     ("Parent Pick Whip", "父级关联器"),
     ("Keyframe", "关键帧"),
@@ -134,6 +137,15 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Alpha / Luma Matte", "Alpha/亮度遮罩"),
     ("Invert Matte", "反转遮罩"),
     ("Toggle Switches / Modes", "切换开关/模式"),
+    // A property name's right-click menu and the Graph Editor's (AE 26).
+    ("Edit Property...", "编辑属性..."),
+    ("Add Keyframe", "添加关键帧"),
+    ("Remove All Keyframes", "移除所有关键帧"),
+    ("Previous Keyframe", "上一关键帧"),
+    ("Next Keyframe", "下一关键帧"),
+    ("Edit Expression", "编辑表达式"),
+    ("Reveal in Effect Controls", "在效果控件中显示"),
+    ("Auto-Zoom Graph Height", "自动缩放高度以适合视图"),
     (
         "Expand or Collapse the Layer Switches pane",
         "展开或折叠“图层切换”窗格",
@@ -243,6 +255,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Go to Previous Keyframe", "转到上一个关键帧"),
     ("Waveform", "波形"),
     ("Audio Levels", "音频电平"),
+    ("Time Remap", "时间重映射"),
     ("Reveal Audio Levels", "显示音频电平"),
     (
         "Add Audio Levels to Revealed Properties",

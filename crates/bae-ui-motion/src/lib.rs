@@ -42,6 +42,8 @@ mod i18n;
 pub mod import;
 mod layer_panel;
 mod layer_styles;
+mod live_preview;
+mod masks;
 mod media_browser;
 pub mod menus;
 mod paint_panels;
@@ -60,6 +62,7 @@ pub mod scripts;
 pub mod session;
 mod timeline;
 pub mod tools;
+mod tracker;
 mod viewer;
 mod workspaces;
 
@@ -74,7 +77,7 @@ pub use render_queue::{RenderQueuePanel, SharedRenderQueue};
 pub use session::{Session, SharedSession};
 pub use timeline::TimelinePanel;
 pub use tools::{SharedTools, Tool};
-pub use viewer::CompositionViewer;
+pub use viewer::{CompositionViewer, request_smart_zoom};
 
 /// What each module registers itself: its Chinese strings (`ZH`) and panels.
 /// A new module adds its `register` here, nothing else (new panels at the end
@@ -89,6 +92,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     effects::register,
     render_queue::register,
     layer_panel::register,
+    tracker::register,
     ae_panels::register,
     presets::register,
     scopes::register,

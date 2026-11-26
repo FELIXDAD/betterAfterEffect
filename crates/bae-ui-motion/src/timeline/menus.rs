@@ -15,6 +15,215 @@ pub(crate) fn keyframe_assistant_menu(
     }
 }
 
+/// A property name's right-click menu (AE 26: Anchor Point and Position show
+/// the same 15 entries): title (`None`: a separator) and whether it is enabled
+/// for `attr` of `path` at keyframe time `key_now`.
+pub(crate) fn property_menu_entries(
+    stage: &Stage,
+    path: &PrimPath,
+    attr: &str,
+    key_now: Time,
+) -> Vec<(Option<&'static str>, bool)> {
+    let spec = query::attr_spec(stage, path, attr);
+    let keys: Vec<Time> = spec
+        .map(|s| s.keyframes.keys().copied().collect())
+        .unwrap_or_default();
+    let on_layer = query::is_layer(stage, path);
+    let animatable = stage
+        .prim(path)
+        .is_some_and(|v| bae_model::schema::is_animatable(v.prim_type(), attr));
+    let edit_value = on_layer && crate::dialogs::TransformKind::of_attr(attr).is_some();
+    let separable = on_layer
+        && matches!(
+            attr,
+            "transform:position"
+                | "transform:position_x"
+                | "transform:position_y"
+                | "transform:position_z"
+                | "transform:anchor_point"
+        );
+    let effect = crate::effects::layer_of(path).is_some();
+    vec![
+        (Some("Edit Value..."), edit_value),
+        // Essential Graphics properties (not built): greyed, as AE greys it here.
+        (Some("Edit Property..."), false),
+        (Some("Separate Dimensions"), separable),
+        (None, true),
+        (Some("Add Keyframe"), animatable),
+        (Some("Remove All Keyframes"), !keys.is_empty()),
+        (Some("Previous Keyframe"), keys.iter().any(|t| *t < key_now)),
+        (Some("Next Keyframe"), keys.iter().any(|t| *t > key_now)),
+        (None, true),
+        (Some("Reset"), animatable),
+        (Some("Edit Expression"), animatable),
+        (Some("Copy Expression Only"), true),
+        (Some("Reveal in Effect Controls"), effect),
+        (Some("Keyframe Assistant"), true),
+        // The Essential Graphics panel is not built yet.
+        (Some("Add Property to Essential Graphics"), false),
+    ]
+}
+
+/// The Parent & Link column's right-click menu (AE 26): the parent list itself,
+/// `items[0]` None and then the comp's layers, the current parent (`current`)
+/// checked and the layer itself (`own`) greyed. Returns the picked index.
+pub(crate) fn parent_menu(
+    ui: &mut Ui,
+    items: &[&str],
+    current: usize,
+    own: usize,
+) -> Option<usize> {
+    let mut picked = None;
+    for (i, item) in items.iter().enumerate() {
+        if i == 1 {
+            ui.separator();
+        }
+        let mut on = i == current;
+        let resp = ui
+            .add_enabled_ui(i != own, |ui| widgets::checkbox(ui, &mut on, item))
+            .inner;
+        if resp.clicked() {
+            picked = Some(i);
+            ui.close();
+        }
+    }
+    picked
+}
+
+/// A property name's right-click menu ([`property_menu_entries`]) for `attr` of
+/// `path` at comp time `now`; a right-click on its value shows it too.
+pub(crate) fn property_menu(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    path: &PrimPath,
+    attr: &str,
+    now: Time,
+) {
+    let stage = cx.stage;
+    let key_now = query::to_key_time(stage, path, now);
+    for (title, enabled) in property_menu_entries(stage, path, attr, key_now) {
+        let Some(title) = title else {
+            ui.separator();
+            continue;
+        };
+        if title == "Keyframe Assistant" {
+            common::submenu(ui, tr(title), &mut |ui| {
+                keyframe_assistant_menu(ui, cx, session);
+            });
+            continue;
+        }
+        if !ui
+            .add_enabled(enabled, egui::Button::new(tr(title)))
+            .clicked()
+        {
+            continue;
+        }
+        ui.close();
+        let spec = query::attr_spec(stage, path, attr)
+            .cloned()
+            .unwrap_or_default();
+        match title {
+            "Edit Value..." => {
+                if let (Some(kind), Some(info)) = (
+                    crate::dialogs::TransformKind::of_attr(attr),
+                    common::active_comp(stage, session),
+                ) {
+                    let layers = [path.clone()];
+                    crate::dialogs::transform_value(cx, &info.path, &layers, now, kind, Some(attr));
+                }
+            }
+            "Separate Dimensions" => {
+                let separated = bae_motion::dimensions::is_separated(stage, path);
+                cx.invoke_with(
+                    "transform.separate_dimensions",
+                    json!({"layers": [path], "separated": !separated}),
+                );
+            }
+            "Add Keyframe" => {
+                if spec.is_animated() {
+                    let value = common::current_value(
+                        &mut bae_anim::Evaluator::new(),
+                        stage,
+                        path,
+                        attr,
+                        now,
+                    );
+                    if let Some(value) = value {
+                        cx.invoke_with(
+                            "attr.set_at",
+                            json!({"path": path, "attr": attr, "time": key_now, "value": value}),
+                        );
+                    }
+                } else {
+                    cx.invoke_with(
+                        "attr.set_animated",
+                        json!({"path": path, "attr": attr, "animated": true, "time": key_now}),
+                    );
+                }
+            }
+            "Remove All Keyframes" => {
+                cx.invoke_with(
+                    "attr.set_animated",
+                    json!({"path": path, "attr": attr, "animated": false, "time": key_now}),
+                );
+            }
+            "Previous Keyframe" | "Next Keyframe" => {
+                let target = if title == "Previous Keyframe" {
+                    spec.keyframes
+                        .keys()
+                        .copied()
+                        .filter(|t| *t < key_now)
+                        .max()
+                } else {
+                    spec.keyframes.keys().copied().find(|t| *t > key_now)
+                };
+                if let (Some(t), Some(info)) = (target, common::active_comp(stage, session)) {
+                    session
+                        .lock()
+                        .set_time(&info, query::to_comp_time(stage, path, t));
+                }
+            }
+            "Reset" => {
+                let default = stage
+                    .prim(path)
+                    .and_then(|v| v.prim_type().cloned())
+                    .and_then(|t| bae_model::schema::attr_def(&t, attr))
+                    .and_then(|d| d.default.to_value());
+                if let Some(value) = default {
+                    cx.invoke_with(
+                        "attr.set_at",
+                        json!({"path": path, "attr": attr, "time": key_now, "value": value}),
+                    );
+                }
+            }
+            "Edit Expression" => {
+                session.lock().focus_expression =
+                    Some((path.clone(), attr.to_owned(), std::time::Instant::now()));
+                if spec.expression.is_none() {
+                    cx.invoke_with(
+                        "attr.set_expression",
+                        json!({"path": path, "attr": attr,
+                               "source": crate::expr::default_expression(stage, path, attr)}),
+                    );
+                }
+            }
+            "Copy Expression Only" => {
+                session.lock().expression_clipboard = spec.expression.map(|e| e.source);
+            }
+            "Reveal in Effect Controls" => {
+                if let Some(layer) = crate::effects::layer_of(path) {
+                    let mut s = session.lock();
+                    s.selected_layers = vec![layer];
+                    s.selected_effects = vec![path.clone()];
+                }
+                cx.open_panel("effect_controls");
+            }
+            _ => {}
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Menus from the command catalog (`crate::catalog`): the same entries, action ids
 // and greying as the menu bar.
@@ -184,15 +393,6 @@ pub(crate) fn select_children(stage: &Stage, session: &SharedSession) {
             break;
         }
         s.selected_layers.extend(more);
-    }
-}
-
-/// The layer menu's keyframe items: Keyframe Assistant ▸ and Toggle Hold Keyframe.
-pub(crate) fn keyframe_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
-    keyframe_assistant_menu(ui, cx, session);
-    if ui.button(tr("Toggle Hold Keyframe")).clicked() {
-        actions::handle(&Invocation::new(ids::TOGGLE_HOLD), cx, session);
-        ui.close();
     }
 }
 

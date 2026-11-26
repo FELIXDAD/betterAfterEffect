@@ -64,6 +64,11 @@ pub trait Panel: 'static {
         let _ = (ui, cx);
     }
 
+    /// Draw related-document commands in Close Other Panels and return true when supplied.
+    fn related_tabs_menu(&mut self, _ui: &mut Ui, _cx: &mut PanelContext<'_>) -> bool {
+        false
+    }
+
     /// Handle a command routed to this panel while it is focused (view actions such
     /// as zoom). Return `true` if handled; otherwise the shell tries its own
     /// actions and then the model command registry.

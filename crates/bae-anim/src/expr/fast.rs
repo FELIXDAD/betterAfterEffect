@@ -362,7 +362,9 @@ fn bin(op: Op, a: V, b: V) -> Option<V> {
             A(a)
         }
         (Op::Sub, N(x), A(mut b)) => {
-            *b.first_mut()? = x - b[0];
+            for (i, component) in b.iter_mut().enumerate() {
+                *component = (if i == 0 { x } else { 0.0 }) - *component;
+            }
             A(b)
         }
         (Op::Add | Op::Sub, A(a), A(b)) => {
@@ -448,7 +450,7 @@ pub(crate) fn noise1(seed: u32, x: f64) -> f64 {
 }
 
 fn interp(shape: fn(f64) -> f64, args: Vec<V>) -> Option<V> {
-    let (t, t0, t1, mut v1, mut v2) = match args.len() {
+    let (t, t0, t1, v1, v2) = match args.len() {
         3 => {
             let mut it = args.into_iter();
             (num(&it.next()?)?, 0.0, 1.0, it.next()?, it.next()?)
@@ -468,7 +470,6 @@ fn interp(shape: fn(f64) -> f64, args: Vec<V>) -> Option<V> {
     let (mut t0, mut t1) = (t0, t1);
     if t0 > t1 {
         std::mem::swap(&mut t0, &mut t1);
-        std::mem::swap(&mut v1, &mut v2);
     }
     let f = if t1 == t0 {
         if t < t0 { 0.0 } else { 1.0 }
@@ -480,6 +481,19 @@ fn interp(shape: fn(f64) -> f64, args: Vec<V>) -> Option<V> {
     bin(Op::Add, v1, bin(Op::Mul, delta, V::N(p))?)
 }
 
+pub(super) fn wiggle_noise(seed: u32, dim: u32, mut x: f64, octaves: f64, mult: f64) -> f64 {
+    let (mut sum, mut amplitude) = (0.0, 1.0);
+    // More than 53 doublings exceed the precision of a double's mantissa.
+    for octave in 0..(octaves as u32).clamp(1, 53) {
+        let channel = hash(seed, dim.wrapping_mul(131).wrapping_add(octave));
+        let phase = f64::from(channel) / 4_294_967_296.0;
+        sum += noise1(channel, x + phase) * amplitude;
+        amplitude *= mult;
+        x *= 2.0;
+    }
+    sum
+}
+
 fn wiggle(env: &dyn Env, args: &[f64]) -> Option<V> {
     let (freq, amp) = (*args.first()?, *args.get(1)?);
     let octaves = args.get(2).copied().unwrap_or(1.0);
@@ -489,21 +503,15 @@ fn wiggle(env: &dyn Env, args: &[f64]) -> Option<V> {
     }
     let t = env.now();
     let seed = env.seed();
-    let w = |dim: usize| {
-        let (mut s, mut a, mut f) = (0.0, 1.0, freq);
-        for o in 0..(octaves.floor() as i64).max(1) {
-            s += noise1(
-                hash(seed, (dim as u32).wrapping_mul(131).wrapping_add(o as u32)),
-                t * f,
-            ) * a;
-            a *= mult;
-            f *= 2.0;
-        }
-        s * amp
-    };
+    let w = |dim| wiggle_noise(seed, dim, t * freq, octaves, mult) * amp;
     Some(match unwrap(env.pre(t)) {
         V::N(x) => V::N(x + w(0)),
-        V::A(a) => V::A(a.into_iter().enumerate().map(|(i, x)| x + w(i)).collect()),
+        V::A(a) => V::A(
+            a.into_iter()
+                .enumerate()
+                .map(|(i, x)| x + w(i as u32))
+                .collect(),
+        ),
         V::S(_) => return None,
     })
 }
