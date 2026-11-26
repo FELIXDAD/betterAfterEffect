@@ -61,6 +61,12 @@ pub mod ids {
     pub const IMPORT_FILE: &str = "motion.file.import_file";
     /// File > New Comp from Selection... (Alt+\).
     pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
+    /// File > Replace Footage > File... (Cmd/Ctrl+H).
+    pub const REPLACE_FOOTAGE: &str = "motion.file.replace_footage_file";
+    /// File > Reload Footage (Cmd/Ctrl+Alt+L).
+    pub const RELOAD_FOOTAGE: &str = "motion.file.reload_footage";
+    /// File / Layer > Reveal in Explorer (Finder on macOS).
+    pub const REVEAL_IN_EXPLORER: &str = "motion.file.reveal_in_explorer";
     /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
     pub const IMPORT_MULTIPLE: &str = "motion.file.import_multiple_files";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
@@ -68,6 +74,8 @@ pub mod ids {
     pub const TRIM_COMP: &str = "motion.trim_comp";
     /// Queue the active comp in the Render Queue (AE Cmd/Ctrl+M).
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
+    /// Composition > Save Frame As > File... (Cmd/Ctrl+Alt+S).
+    pub const SAVE_FRAME_AS: &str = "motion.comp.save_frame_as_file";
     /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
     pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
     /// Animation > Add Expression (AE Alt+Shift+=): toggles the selected
@@ -230,6 +238,10 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::REVERSE_KEYS, "Time-Reverse Keyframes"),
     (ids::SELECT_ALL, "Select All"),
     (ids::DESELECT_ALL, "Deselect All"),
+    (
+        "motion.anim.convert_audio_to_keyframes",
+        "Convert Audio to Keyframes",
+    ),
     (ids::REVEAL, "Reveal Animated Properties"),
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
@@ -240,10 +252,14 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
     (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
+    (ids::REPLACE_FOOTAGE, "Replace Footage File"),
+    (ids::RELOAD_FOOTAGE, "Reload Footage"),
+    (ids::REVEAL_IN_EXPLORER, "Reveal in Explorer"),
     (ids::IMPORT_MULTIPLE, "Import Multiple Files"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
+    (ids::SAVE_FRAME_AS, "Save Frame As File"),
     // Edit > Copy / Paste (Cmd+C / Cmd+V): selected keyframes.
     (ids::COPY, "Copy"),
     (ids::CUT, "Cut"),
@@ -889,6 +905,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::dialogs::comp_from_selection(cx, items, still);
             return true;
         }
+        ids::REPLACE_FOOTAGE => {
+            crate::import::replace_footage(cx, session);
+            return true;
+        }
+        ids::RELOAD_FOOTAGE => {
+            crate::import::reload_footage(cx, session);
+            return true;
+        }
+        ids::REVEAL_IN_EXPLORER => {
+            crate::import::reveal_footage(cx, session);
+            return true;
+        }
         ids::ADD_EXPRESSION => {
             // AE toggles: the selected properties get their default expression;
             // when all of them have one, the expressions are removed.
@@ -949,6 +977,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let Some(info) = common::active_comp(stage, session) else {
         return true;
     };
+    if id == "motion.anim.convert_audio_to_keyframes" {
+        crate::audio_analysis::convert(cx, &info);
+        return true;
+    }
     if id == ids::PLAY {
         session.retry_audio();
     }
@@ -1062,6 +1094,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::render_queue::shared(cx.resources)
                 .lock()
                 .add(&info, &crate::render_queue::default_output_dir());
+            cx.open_panel("render_queue");
+        }
+        ids::SAVE_FRAME_AS => {
+            let frame = info.frame_rate.time_to_frame(now);
+            crate::render_queue::shared(cx.resources).lock().add_frame(
+                &info,
+                &crate::render_queue::default_output_dir(),
+                frame,
+            );
             cx.open_panel("render_queue");
         }
         ids::TRIM_IN if !layers.is_empty() => {
