@@ -479,6 +479,7 @@ mod guides;
 mod masks;
 mod motion_sketch;
 mod navigation;
+mod navigator;
 mod parity;
 mod pen;
 mod resolution;

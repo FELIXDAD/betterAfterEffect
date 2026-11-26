@@ -254,11 +254,13 @@ pub(super) fn frame(
         )
     });
     let selected = session.lock().selected_layers.clone();
-    let mut paths: Vec<EditablePath> = if tool == Tool::Selection {
-        overlay::editable_paths(stage, comp, &selected, None)
-    } else {
-        Vec::new()
-    };
+    // The bar's Toggle Mask and Shape Path Visibility off: no paths to edit.
+    let mut paths: Vec<EditablePath> =
+        if tool == Tool::Selection && session.lock().view_options.paths {
+            overlay::editable_paths(stage, comp, &selected, None)
+        } else {
+            Vec::new()
+        };
     // A shape layer's path in Free Transform (double-clicked) stays editable.
     let prefs = super::prefs::ViewerPrefs::current(cx.resources);
     if state

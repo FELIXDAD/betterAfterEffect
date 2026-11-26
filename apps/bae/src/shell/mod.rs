@@ -425,6 +425,9 @@ struct WindowView {
     offscreen: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Screenshot replies for the next frame's input (the eyedropper).
     screenshots: Vec<egui::Event>,
+    /// Shift held as of the last modifier change, and when it last went up
+    /// ([`numpad::restore_shift`]).
+    shift: (bool, Option<std::time::Instant>),
 }
 
 impl Drop for WindowView {
@@ -512,6 +515,9 @@ impl Shell {
 
         let egui_ctx = egui::Context::default();
         bae_ui::theme::apply(&egui_ctx);
+        // Double-clicks follow the system setting, as in AE (egui's 0.3 s,
+        // measured between frames, missed ordinary double-clicks, #735).
+        egui_ctx.options_mut(|o| o.input_options.max_double_click_delay = double_click_time());
         // Extra egui viewports (floating panels) render embedded in the main
         // window until native multi-window support lands.
         egui_ctx.set_embed_viewports(true);
@@ -578,6 +584,7 @@ impl Shell {
             lost_subscription,
             offscreen: None,
             screenshots: Vec::new(),
+            shift: (false, None),
         })
     }
 
@@ -1301,6 +1308,30 @@ fn screenshot(
     ))
 }
 
+/// The system's double-click interval, seconds (Windows: Mouse settings,
+/// 500 ms by default; macOS: Double-click speed). 0.5 s elsewhere.
+fn double_click_time() -> f64 {
+    #[cfg(windows)]
+    {
+        // SAFETY: no arguments; reads a per-user system setting.
+        let ms = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+        if ms > 0 {
+            return f64::from(ms) / 1000.0;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::{class, msg_send};
+        // SAFETY: `+[NSEvent doubleClickInterval]` returns an NSTimeInterval
+        // (double) and has no preconditions.
+        let s: f64 = unsafe { msg_send![class!(NSEvent), doubleClickInterval] };
+        if s > 0.0 {
+            return s;
+        }
+    }
+    0.5
+}
+
 /// The command for projects Finder asked to open: one project at a time, like AE and
 /// like `bae <project>`, so only the first is opened. Goes through the normal
 /// `file.open_project` (unsaved-changes question, error dialog).
@@ -1395,8 +1426,27 @@ impl ApplicationHandler<UserEvent> for Shell {
                 .events
                 .push(egui::Event::PointerMoved(pos));
         }
+        if let WindowEvent::ModifiersChanged(m) = &event {
+            let held = m.state().shift_key();
+            if view.shift.0 && !held {
+                view.shift.1 = Some(std::time::Instant::now());
+            }
+            view.shift.0 = held;
+        }
         let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
+        // Shift+numpad navigation keys (Windows drops Shift around them, #468).
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
+        {
+            numpad::restore_shift(
+                &mut view.egui_state.egui_input_mut().events,
+                before,
+                code,
+                &key.logical_key,
+                view.shift.1,
+            );
+        }
         // Numpad keys are their own keys in AE's shortcuts (#261).
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
