@@ -553,12 +553,19 @@ impl TimelinePanel {
                 );
             }
         }
-        self.expression_lines(stage, out)
+        out
     }
 
     /// Multi-line expressions take one row per line (the text being edited, else
     /// the expression; at most [`MAX_EXPR_LINES`]).
-    fn expression_lines(&self, stage: &Stage, rows: Vec<Row>) -> Vec<Row> {
+    fn expression_lines(
+        &self,
+        stage: &Stage,
+        rows: Vec<Row>,
+        ui: &Ui,
+        resources: &bae_app::Resources,
+        width: f32,
+    ) -> Vec<Row> {
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
             let RowKind::Expression { path, attr, .. } = &row.kind else {
@@ -566,15 +573,19 @@ impl TimelinePanel {
                 continue;
             };
             let stored = query::attr_spec(stage, path, attr).and_then(|s| s.expression.as_ref());
-            let lines = match &self.expr_edit {
+            let source = match &self.expr_edit {
                 Some((p, a, buf, base))
                     if p == path && a == attr && stored.is_some_and(|e| e.source == *base) =>
                 {
-                    buf.split('\n').count()
+                    buf.as_str()
                 }
-                _ => stored.map_or(1, |e| e.source.split('\n').count()),
-            }
-            .clamp(1, MAX_EXPR_LINES);
+                _ => stored.map_or("", |e| e.source.as_str()),
+            };
+            let height = crate::expr_menu::field_height(ui, resources, source, width);
+            let hard_lines = source.bytes().filter(|c| *c == b'\n').count() + 1;
+            let lines = ((height / ROW_H).ceil() as usize)
+                .max(hard_lines)
+                .min(MAX_EXPR_LINES);
             for line in 0..lines {
                 out.push(Row {
                     kind: RowKind::Expression {
@@ -882,6 +893,7 @@ impl TimelinePanel {
             }
             self.rows(stage, &layers, &s)
         };
+        let rows = self.expression_lines(stage, rows, ui, cx.resources, graph_body.width() - 8.0);
         if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
             self.press_mods = m;
         }
@@ -965,6 +977,7 @@ impl TimelinePanel {
                 let mut clip = ui.clip_rect();
                 clip.max.x = clip.max.x.min(graph_left - 2.0);
                 outline.set_clip_rect(clip);
+                let visible_end = range.end;
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =
@@ -992,6 +1005,7 @@ impl TimelinePanel {
                         &axis,
                         row,
                         rect,
+                        i + 1 == visible_end,
                         switch_input,
                         &layers,
                         &parent_items,

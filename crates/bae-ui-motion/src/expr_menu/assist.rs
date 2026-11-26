@@ -4,7 +4,7 @@ use bae_app::Resources;
 use bae_ui::i18n::tr;
 use egui::text::{CCursor, CCursorRange, LayoutJob};
 use egui::text_edit::{TextEditOutput, TextEditState};
-use egui::{Id, Key, Modifiers, Rect, TextEdit, TextFormat, Ui};
+use egui::{Id, Key, Modifiers, Rect, TextFormat, Ui};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -275,23 +275,7 @@ pub(crate) fn show(
             }
         }
     }
-    let (font, text, bg) = crate::common::expression_style(resources);
-    let mut shown = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-            let edit = if let Some(n) = rows {
-                TextEdit::multiline(buffer).desired_rows(n)
-            } else {
-                TextEdit::singleline(buffer)
-            };
-            edit.id(id)
-                .font(font)
-                .text_color(text)
-                .background_color(bg)
-                .min_size(rect.size())
-                .desired_width(rect.width())
-                .show(ui)
-        })
-        .inner;
+    let mut shown = super::field::show(ui, resources, rect, id, buffer, rows);
     let response = &shown.response.response;
     state.popup = None;
     if enabled

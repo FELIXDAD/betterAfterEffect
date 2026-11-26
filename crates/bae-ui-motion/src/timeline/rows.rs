@@ -37,6 +37,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
+        last_visible: bool,
         switch_input: switches::SwitchInput,
         layers: &super::TimelineLayers,
         parent_items: &[&str],
@@ -669,6 +670,7 @@ impl TimelinePanel {
                     layer,
                     &layer_ctx,
                     (*line, *lines),
+                    last_visible,
                 );
             }
         }
@@ -932,71 +934,81 @@ impl TimelinePanel {
                 _ => &[],
             };
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
-            let edit =
-                if let Some(edit) = crate::layer_styles::edit(&mut child, id, path, attr, &value) {
-                    edit
-                } else if let bae_model::Value::Bool(on) = value {
-                    // AE's timeline switches On/Off with hot text, not a checkbox.
-                    let text = tr(if on { "On" } else { "Off" });
-                    if widgets::link(&mut child, text)
-                        .labeled_toggle(egui::WidgetType::Checkbox, &prop_name, on)
-                        .clicked()
-                    {
-                        common::Edit::Commit(bae_model::Value::Bool(!on))
-                    } else {
-                        common::Edit::None
-                    }
-                } else if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
-                    let names: Vec<&str> = options.iter().map(|o| option_label(o)).collect();
-                    let mut sel = options.iter().position(|o| o == cur).unwrap_or(0);
-                    let before = sel;
-                    widgets::dropdown(&mut child, id.with("choice"), &mut sel, &names, 160.0)
-                        .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
-                    if sel != before {
-                        common::Edit::Commit(bae_model::Value::Enum(options[sel].into()))
-                    } else {
-                        common::Edit::None
-                    }
-                } else if let bae_model::Value::Time(t) = value {
-                    // Time Remap: the source time as hot timecode, a frame per point.
-                    let rate = info.frame_rate;
-                    let mut frames = rate.time_to_frame(t) as f64;
-                    let display = |f: f64| widgets::timecode(f.round() as i64, rate.as_f64());
-                    let parse = |s: &str| super::markers::parse_timecode(info, s).map(|f| f as f64);
-                    let resp = child
-                        .push_id(id.with("ed"), |ui| {
-                            ui.add(
-                                widgets::HotNumber::new(&mut frames)
-                                    .tint(if expression {
-                                        common::EXPRESSION_VALUE
-                                    } else {
-                                        color::ACCENT
-                                    })
-                                    .speed(1.0)
-                                    .text(&display, &parse)
-                                    .label(&prop_name),
-                            )
-                        })
-                        .inner;
-                    let to = bae_model::Value::Time(rate.frame_to_time(frames.round() as i64));
-                    if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
-                        common::Edit::Commit(to)
-                    } else if resp.dragged() && resp.changed() {
-                        common::Edit::Live(to)
-                    } else {
-                        common::Edit::None
-                    }
+            let style_edit = crate::layer_styles::edit(&mut child, id, path, attr, &value);
+            let edit = if let Some(edit) = style_edit {
+                edit
+            } else if let bae_model::Value::Bool(on) = value {
+                // AE's timeline switches On/Off with hot text, not a checkbox.
+                let text = tr(if on { "On" } else { "Off" });
+                if widgets::link(&mut child, text)
+                    .labeled_toggle(egui::WidgetType::Checkbox, &prop_name, on)
+                    .clicked()
+                {
+                    common::Edit::Commit(bae_model::Value::Bool(!on))
                 } else {
-                    common::value_editor(
-                        &mut child,
-                        id.with("ed"),
-                        attr,
-                        &value,
-                        dims,
-                        &prop_name,
-                        expression,
-                    )
-                };
+                    common::Edit::None
+                }
+            } else if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
+                let names: Vec<&str> = options.iter().map(|o| option_label(o)).collect();
+                let mut sel = options.iter().position(|o| o == cur).unwrap_or(0);
+                let before = sel;
+                widgets::dropdown(&mut child, id.with("choice"), &mut sel, &names, 160.0)
+                    .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
+                if sel != before {
+                    common::Edit::Commit(bae_model::Value::Enum(options[sel].into()))
+                } else {
+                    common::Edit::None
+                }
+            } else if let bae_model::Value::Time(t) = value {
+                // Time Remap: the source time as hot timecode, a frame per point.
+                // The dragged value is kept here until the release, like the
+                // other hot numbers: another panel may drop the session's
+                // live value first (the viewer on pointer-up).
+                let rate = info.frame_rate;
+                let scrub_key = id.with("time_scrub");
+                let mut frames = child
+                    .data(|d| d.get_temp::<f64>(scrub_key))
+                    .unwrap_or(rate.time_to_frame(t) as f64);
+                let display = |f: f64| widgets::timecode(f.round() as i64, rate.as_f64());
+                let parse = |s: &str| super::markers::parse_timecode(info, s).map(|f| f as f64);
+                let resp = child
+                    .push_id(id.with("ed"), |ui| {
+                        ui.add(
+                            widgets::HotNumber::new(&mut frames)
+                                .tint(if expression {
+                                    common::EXPRESSION_VALUE
+                                } else {
+                                    color::ACCENT
+                                })
+                                .speed(1.0)
+                                .text(&display, &parse)
+                                .label(&prop_name),
+                        )
+                    })
+                    .inner;
+                let to = bae_model::Value::Time(rate.frame_to_time(frames.round() as i64));
+                if resp.drag_stopped() {
+                    child.data_mut(|d| d.remove::<f64>(scrub_key));
+                    common::Edit::Commit(to)
+                } else if resp.dragged() {
+                    child.data_mut(|d| d.insert_temp(scrub_key, frames));
+                    common::Edit::Live(to)
+                } else if resp.changed() {
+                    common::Edit::Commit(to)
+                } else {
+                    common::Edit::None
+                }
+            } else {
+                common::value_editor(
+                    &mut child,
+                    id.with("ed"),
+                    attr,
+                    &value,
+                    dims,
+                    &prop_name,
+                    expression,
+                )
+            };
             common::apply_edit(cx, session, path, attr, now, edit);
             // AE: a right-click on the value shows the property name's menu. The
             // value widgets take the click, so read it from the pointer.
@@ -1041,6 +1053,7 @@ impl TimelinePanel {
         layer: &PrimPath,
         layer_ctx: &str,
         (line, lines): (usize, usize),
+        last_visible: bool,
     ) {
         let stage = cx.stage;
         let Some(expr) = query::attr_spec(stage, path, attr).and_then(|s| s.expression.clone())
@@ -1167,14 +1180,15 @@ impl TimelinePanel {
                     ));
             }
         }
-        if line + 1 < lines {
+        if line + 1 < lines && !last_visible {
             return;
         }
         let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
+        let top = rect.top() - line as f32 * ROW_H;
         let field = Rect::from_min_max(
-            pos2(axis.left + 4.0, rect.bottom() - lines as f32 * ROW_H + 1.0),
-            pos2(rect.right() - 4.0, rect.bottom() - 1.0),
+            pos2(axis.left + 4.0, top),
+            pos2(rect.right() - 4.0, top + lines as f32 * ROW_H),
         );
         let mut buf = match &self.expr_edit {
             Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
