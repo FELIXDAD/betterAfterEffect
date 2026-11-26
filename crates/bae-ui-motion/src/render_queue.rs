@@ -28,7 +28,9 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
 mod item_menu;
+mod templates;
 use item_menu::{ItemAction, LogMode, RenderLog};
+use templates::{Library, NameDialog, Span, Store, Template};
 
 /// Formats offered in the panel and by `bae render --format`.
 pub const FORMATS: [ExportFormat; 8] = [
@@ -108,35 +110,51 @@ fn om_template(item: &QueueOutput) -> Option<&'static str> {
     })
 }
 
-/// A small ▾ button opening a template menu: `items` (name, enabled) sorted
-/// by their shown names, then Custom… and the greyed Make Template….
-/// Returns the picked item or `Some(None)` for Custom….
+enum TemplatePick {
+    Name(String),
+    Custom,
+    Save,
+}
+
+/// The template arrow lists localized built-ins and verbatim user names.
 fn template_menu(
     ui: &mut egui::Ui,
     id: egui::Id,
     label: &str,
-    items: &[(&'static str, bool)],
-) -> Option<Option<&'static str>> {
+    mut items: Vec<(&str, bool)>,
+    selected: Option<&str>,
+    can_save: bool,
+) -> Option<TemplatePick> {
     let resp = ui
         .add(egui::Button::new("▾").frame(false).small())
         .labeled(egui::WidgetType::Button, label);
     let mut picked = None;
     egui::Popup::menu(&resp).id(id).show(|ui| {
-        let mut sorted = items.to_vec();
-        sorted.sort_by_key(|(n, _)| tr(n));
-        for (name, enabled) in &sorted {
+        items.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, enabled) in items {
             if ui
-                .add_enabled(*enabled, egui::Button::new(tr(name)))
+                .add_enabled(
+                    enabled,
+                    egui::RadioButton::new(selected == Some(name), name),
+                )
                 .clicked()
             {
-                picked = Some(Some(*name));
+                picked = Some(TemplatePick::Name(name.to_owned()));
+                ui.close();
             }
         }
         ui.separator();
         if ui.button(tr("Custom...")).clicked() {
-            picked = Some(None);
+            picked = Some(TemplatePick::Custom);
+            ui.close();
         }
-        ui.add_enabled(false, egui::Button::new(tr("Make Template...")));
+        if ui
+            .add_enabled(can_save, egui::Button::new(tr("Make Template...")))
+            .clicked()
+        {
+            picked = Some(TemplatePick::Save);
+            ui.close();
+        }
     });
     picked
 }
@@ -245,6 +263,7 @@ pub struct QueueItem {
     pub outputs: Vec<QueueOutput>,
     log: LogMode,
     log_file: Option<PathBuf>,
+    render_template: Option<String>,
     /// First and last frame (comp frames, inclusive).
     pub start: i64,
     /// Last frame (inclusive).
@@ -268,6 +287,7 @@ impl QueueItem {
 
 #[derive(Clone, Debug)]
 pub struct QueueOutput {
+    template: Option<String>,
     /// Output format.
     pub format: ExportFormat,
     /// Output file; for sequences a pattern (`name_[####].png`).
@@ -356,7 +376,9 @@ impl RenderQueue {
             comp: comp.path.clone(),
             comp_name: comp.name.clone(),
             rate,
+            render_template: None,
             outputs: vec![QueueOutput {
+                template: None,
                 format,
                 output: output.to_string_lossy().into_owned(),
                 channels: default_channels(format),
@@ -988,6 +1010,7 @@ fn reveal_label() -> &'static str {
 #[derive(Debug, Default)]
 pub struct RenderQueuePanel {
     error: Option<String>,
+    naming: Option<(u64, Option<usize>, NameDialog)>,
 }
 
 impl Panel for RenderQueuePanel {
@@ -1096,6 +1119,26 @@ impl RenderQueuePanel {
             q.repaint = Some(ui.ctx().clone());
             (q.running, q.queued())
         };
+        let store = cx.resources.get::<Arc<Store>>();
+        let library = store.and_then(|s| s.snapshot());
+        if let Some((id, module, dialog)) = &mut self.naming
+            && let Some(store) = store
+            && dialog.show(ui, store)
+        {
+            if dialog.saved
+                && let Some(item) = queue.lock().item_mut(*id)
+            {
+                let name = Some(dialog.name.trim().to_owned());
+                if let Some(index) = module {
+                    if let Some(output) = item.outputs.get_mut(*index) {
+                        output.template = name;
+                    }
+                } else {
+                    item.render_template = name;
+                }
+            }
+            self.naming = None;
+        }
         let mut render = false;
         ui.horizontal(|ui| {
             render = ui
@@ -1136,6 +1179,7 @@ impl RenderQueuePanel {
                     i + 1,
                     item,
                     comp.as_ref(),
+                    library.as_deref(),
                     &mut remove,
                     &mut cancel,
                     &mut requeue,
@@ -1171,6 +1215,9 @@ impl RenderQueuePanel {
         match open {
             Some((id, QueueLink::RenderSettings)) => crate::dialogs::render_settings(cx, id),
             Some((id, QueueLink::Output(module))) => crate::dialogs::output_module(cx, id, module),
+            Some((id, QueueLink::Make(module, template))) => {
+                self.naming = Some((id, module, NameDialog::new(template)));
+            }
             Some((id, QueueLink::File(module))) => cx.invoke_with(
                 CHOOSE_OUTPUT,
                 serde_json::json!({"item": id, "module":module}),
@@ -1184,6 +1231,7 @@ enum QueueLink {
     RenderSettings,
     Output(usize),
     File(usize),
+    Make(Option<usize>, Template),
 }
 
 const CHOOSE_OUTPUT: &str = "motion.render_queue.choose_output";
@@ -1194,6 +1242,7 @@ fn item_ui(
     number: usize,
     item: &mut QueueItem,
     comp: Option<&CompInfo>,
+    library: Option<&Library>,
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
@@ -1335,24 +1384,50 @@ fn item_ui(
     // Render Settings and Log (AE's templates; BAE renders at Best Settings).
     ui.add_enabled_ui(editable, |ui| {
         ui.horizontal_wrapped(|ui| {
-            let rs: Vec<(&str, bool)> = RS_TEMPLATES
+            let span = comp.map(|comp| Span::capture(item, comp));
+            let mut rs: Vec<_> = RS_TEMPLATES
                 .iter()
-                .map(|t| (*t, *t == "Best Settings"))
+                .map(|t| (tr(t), *t == "Best Settings" && comp.is_some()))
                 .collect();
+            if let Some(lib) = library {
+                rs.extend(lib.render.keys().map(|n| (n.as_str(), comp.is_some())));
+            }
+            let selected = item
+                .render_template
+                .as_deref()
+                .filter(|n| {
+                    library
+                        .and_then(|l| l.render.get(*n))
+                        .is_some_and(|s| Some(s) == span.as_ref())
+                })
+                .or_else(|| (span == Some(Span::WorkArea)).then(|| tr("Best Settings")));
+            let render_label = selected.unwrap_or_else(|| tr("Custom")).to_owned();
             let id = egui::Id::new(("rq-rs-templates", item.id));
-            match template_menu(ui, id, &name("Render Settings Templates"), &rs) {
-                Some(Some("Best Settings")) => {
+            match template_menu(
+                ui,
+                id,
+                &name("Render Settings Templates"),
+                rs,
+                selected,
+                library.is_some() && span.is_some(),
+            ) {
+                Some(TemplatePick::Name(n)) => {
                     if let Some(comp) = comp {
-                        let rate = comp.frame_rate;
-                        item.start = rate.time_to_frame(comp.work_area.start);
-                        item.end = (rate.time_to_frame(comp.work_area.end) - 1).max(item.start);
+                        let preset = library.and_then(|l| l.render.get(&n));
+                        (item.start, item.end) = preset.unwrap_or(&Span::WorkArea).range(comp);
+                        item.render_template = preset.map(|_| n);
                     }
                 }
-                Some(None) => *open = Some((item.id, QueueLink::RenderSettings)),
-                _ => {}
+                Some(TemplatePick::Custom) => *open = Some((item.id, QueueLink::RenderSettings)),
+                Some(TemplatePick::Save) => {
+                    if let Some(s) = span {
+                        *open = Some((item.id, QueueLink::Make(None, Template::Render(s))));
+                    }
+                }
+                None => {}
             }
             ui.label(tr("Render Settings:"));
-            if bae_ui::widgets::link(ui, tr("Best Settings"))
+            if bae_ui::widgets::link(ui, &render_label)
                 .labeled(egui::WidgetType::Link, &name("Render Settings"))
                 .clicked()
             {
@@ -1382,29 +1457,74 @@ fn item_ui(
         ui.push_id(("output_module", index), |ui| {
             ui.add_enabled_ui(editable, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let om: Vec<(&str, bool)> = OM_TEMPLATES
+                    let mut om: Vec<_> = OM_TEMPLATES
                         .iter()
-                        .map(|(n, t)| (*n, t.is_some_and(|(f, ..)| format_available(f))))
+                        .map(|(n, t)| (tr(n), t.is_some_and(|(f, ..)| format_available(f))))
                         .collect();
+                    if let Some(lib) = library {
+                        om.extend(lib.outputs.iter().map(|(name, p)| {
+                            (
+                                name.as_str(),
+                                p.settings().is_some_and(|(f, ..)| format_available(f)),
+                            )
+                        }));
+                    }
+                    let selected = module
+                        .template
+                        .as_deref()
+                        .filter(|n| {
+                            library
+                                .and_then(|l| l.outputs.get(*n))
+                                .and_then(|p| p.settings())
+                                .is_some_and(|(f, c, b)| {
+                                    module.format == f
+                                        && module.channels == c
+                                        && (!has_bit_rate(f)
+                                            || (module.bit_rate_mbps - b).abs() < 1e-6)
+                                })
+                        })
+                        .or_else(|| om_template(module).map(tr));
+                    let output_label = selected
+                        .unwrap_or_else(|| tr(format_label(module.format)))
+                        .to_owned();
                     let popup_id = egui::Id::new(("rq-om-templates", id, index));
-                    match template_menu(ui, popup_id, &name("Output Module Templates"), &om) {
-                        Some(None) => *open = Some((id, QueueLink::Output(index))),
-                        Some(Some(t)) => {
-                            if let Some((_, Some((f, c, rate)))) =
-                                OM_TEMPLATES.iter().find(|(n, _)| *n == t)
-                            {
-                                if module.format != *f {
-                                    module.set_format(*f);
-                                }
-                                module.channels = *c;
-                                module.bit_rate_mbps = *rate;
+                    match template_menu(
+                        ui,
+                        popup_id,
+                        &name("Output Module Templates"),
+                        om,
+                        selected,
+                        library.is_some(),
+                    ) {
+                        Some(TemplatePick::Custom) => *open = Some((id, QueueLink::Output(index))),
+                        Some(TemplatePick::Save) => {
+                            *open = Some((
+                                id,
+                                QueueLink::Make(
+                                    Some(index),
+                                    Template::Output(templates::Output::capture(module)),
+                                ),
+                            ))
+                        }
+                        Some(TemplatePick::Name(name)) => {
+                            let user = library.and_then(|l| l.outputs.get(&name));
+                            let settings = user.and_then(|p| p.settings()).or_else(|| {
+                                OM_TEMPLATES
+                                    .iter()
+                                    .find(|(n, _)| tr(n) == name)
+                                    .and_then(|(_, s)| *s)
+                            });
+                            if let Some((f, c, rate)) = settings {
+                                module.set_format(f);
+                                module.channels = c;
+                                module.bit_rate_mbps = rate;
+                                module.template = user.map(|_| name);
                             }
                         }
                         None => {}
                     }
                     ui.label(tr("Output Module:"));
-                    let om_label = om_template(module).unwrap_or(format_label(module.format));
-                    if bae_ui::widgets::link(ui, tr(om_label))
+                    if bae_ui::widgets::link(ui, &output_label)
                         .labeled(egui::WidgetType::Link, &name("Output Module"))
                         .clicked()
                     {
@@ -1746,6 +1866,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    templates::register(app);
     crate::register_panel(
         app,
         "render_queue",
@@ -1779,6 +1900,40 @@ mod tests {
             bg_color: [0.0, 0.0, 0.0, 1.0],
             display_start: Time::ZERO,
         }
+    }
+
+    #[test]
+    fn user_templates_round_trip_and_apply_to_another_composition() {
+        let source = comp_info("/comps/a", "A");
+        let mut target = comp_info("/comps/b", "B");
+        target.frame_rate = FrameRate::FPS_24;
+        target.work_area = bae_model::TimeRange::new(Time::ZERO, Time::ONE_SECOND);
+        let mut queue = RenderQueue::default();
+        let id = queue.add(&source, Path::new("output"));
+        let item = queue.item_mut(id).unwrap();
+        let work = Span::capture(item, &source);
+        assert_eq!(work.range(&target), (0, 23));
+        item.start = 0;
+        item.end = 14;
+        let custom = Span::capture(item, &source);
+        item.outputs[0].set_format(ExportFormat::Tiff);
+        item.outputs[0].channels = Channels::RgbAlpha;
+        let mut lib = Library::default();
+        lib.render.insert("半秒".into(), custom);
+        lib.outputs.insert(
+            "带透明".into(),
+            templates::Output::capture(&item.outputs[0]),
+        );
+        let restored: Library = serde_json::from_value(serde_json::to_value(lib).unwrap()).unwrap();
+        assert_eq!(restored.render["半秒"].range(&target), (0, 11));
+        assert_eq!(
+            restored.outputs["带透明"].settings().unwrap(),
+            (
+                ExportFormat::Tiff,
+                Channels::RgbAlpha,
+                DEFAULT_BIT_RATE_MBPS
+            )
+        );
     }
 
     /// Save Frame As ▸ File…: one PNG of the current frame named like AE's;
@@ -2296,6 +2451,7 @@ mod tests {
         let s = |format, channels| {
             export_settings(
                 &QueueOutput {
+                    template: None,
                     format,
                     channels,
                     output: "/r/x".into(),
