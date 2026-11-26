@@ -114,6 +114,8 @@ pub enum PreviewRange {
 /// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewOptions {
+    /// Prefer an open Active Camera view when previewing a 3D composition.
+    pub favor_active_camera: bool,
     pub range: PreviewRange,
     /// Play From: the current time (else the start of the range).
     pub from_current: bool,
@@ -131,6 +133,7 @@ pub struct PreviewOptions {
 impl Default for PreviewOptions {
     fn default() -> Self {
         PreviewOptions {
+            favor_active_camera: true,
             range: PreviewRange::default(),
             from_current: true,
             fps: None,
