@@ -143,15 +143,13 @@ impl Overlay {
                 && d.point == *pt
                 && let Some(p) = pointer
             {
-                let delta = (p - d.start) / view.scale;
-                g = d
-                    .base
-                    .moved(d.handle, DVec2::new(f64::from(delta.x), f64::from(delta.y)));
+                let delta = view.to_comp(p) - view.to_comp(d.start);
+                g = d.base.moved(d.handle, delta);
             }
             let center = screen(g.center);
             if s.display.magnify && self.drag.as_ref().is_some_and(|drag| drag.point == *pt) {
                 let scale = 4.0 / ui.ctx().pixels_per_point();
-                let size = vec2(g.feature.x as f32, g.feature.y as f32) * scale;
+                let size = vec2(g.feature.x as f32 * view.aspect, g.feature.y as f32) * scale;
                 let lens = Rect::from_center_size(center, size);
                 if lens.intersects(area) {
                     magnify(
@@ -223,10 +221,8 @@ impl Overlay {
             && let Some(p) = pointer
             && p != d.start
         {
-            let delta = (p - d.start) / view.scale;
-            let new = d
-                .base
-                .moved(d.handle, DVec2::new(f64::from(delta.x), f64::from(delta.y)));
+            let delta = view.to_comp(p) - view.to_comp(d.start);
+            let new = d.base.moved(d.handle, delta);
             let time = query::to_key_time(cx.stage, &d.point, d.time);
             let edits:Vec<_>=new.edits(d.handle).into_iter().map(|(attr,v)|json!({"path":d.point,"attr":attr,"value":Value::Vec2(v.to_array()),"time":time})).collect();
             cx.invoke_with("attr.set_many", json!({"edits":edits}));
