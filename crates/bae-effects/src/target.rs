@@ -16,6 +16,14 @@ use bae_render::{EffectParams, EncodeContext, GpuImage, IRect, ImageAlpha, Rende
 
 /// GPU access while an effect is encoded.
 pub trait EffectTarget {
+    /// Encode an existing declarative pass into this target and its texture pool.
+    fn declarative(
+        &mut self,
+        effect: &bae_plugin::DeclarativeEffect,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError>;
     /// The shared GPU context.
     fn gpu(&self) -> &Arc<GpuContext>;
     /// Working texture format.
@@ -50,6 +58,15 @@ pub trait EffectTarget {
 }
 
 impl EffectTarget for EncodeContext<'_> {
+    fn declarative(
+        &mut self,
+        effect: &bae_plugin::DeclarativeEffect,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        bae_render::Effect::render(effect, self, p, input, roi)
+    }
     fn gpu(&self) -> &Arc<GpuContext> {
         self.gpu
     }
@@ -207,6 +224,15 @@ impl Standalone {
 }
 
 impl EffectTarget for Standalone {
+    fn declarative(
+        &mut self,
+        effect: &bae_plugin::DeclarativeEffect,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        self.render_declarative(effect, p, input, roi)
+    }
     fn gpu(&self) -> &Arc<GpuContext> {
         &self.gpu
     }
