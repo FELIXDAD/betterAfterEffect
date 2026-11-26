@@ -301,17 +301,17 @@ impl TextFx {
             _ => [1.; 4],
         };
         let mut doc = TextDocument::new(string(1), string(2), v.f(3));
-        doc.tracking = v.f(4);
-        doc.justification = match v.popup(8) {
+        doc.style.tracking = v.f(4);
+        doc.paragraph.justification = match v.popup(8) {
             2 => "center",
             3 => "right",
             _ => "left",
         }
         .into();
-        doc.fill_color = if v.popup(9) == 2 { [0.; 4] } else { color(5) };
-        doc.stroke_color = (v.popup(9) != 1).then(|| color(6));
-        doc.stroke_width = v.f(7);
-        doc.stroke_over_fill = v.popup(9) == 4;
+        doc.style.fill_color = if v.popup(9) == 2 { [0.; 4] } else { color(5) };
+        doc.style.stroke_color = (v.popup(9) != 1).then(|| color(6));
+        doc.style.stroke_width = v.f(7);
+        doc.style.stroke_over_fill = v.popup(9) == 4;
         let path = self.path.then(|| path_style(v, layer));
         if let Some(entry) = self
             .cache
@@ -331,7 +331,12 @@ impl TextFx {
                 first_margin: style.first,
                 last_margin: style.last,
             };
-            bae_text::path::place_on_path(&mut layout, &style.shape, &options, &doc.justification);
+            bae_text::path::place_on_path(
+                &mut layout,
+                &style.shape,
+                &options,
+                &doc.paragraph.justification,
+            );
         }
         let source = Arc::new(TextSource::new(Arc::new(layout)));
         let mut cache = self.cache.lock();
