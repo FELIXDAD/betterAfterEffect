@@ -906,11 +906,7 @@ impl Panel for CompositionViewer {
             None => comp_rect,
         };
         if self.checker {
-            checkerboard(
-                &painter,
-                comp_rect.intersect(area),
-                cx.resources,
-            );
+            checkerboard(&painter, comp_rect.intersect(area), cx.resources);
         } else {
             let c = info.bg_color;
             painter.rect_filled(
