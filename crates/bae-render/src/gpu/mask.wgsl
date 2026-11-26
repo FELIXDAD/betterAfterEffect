@@ -21,6 +21,9 @@ struct Edge {
     xmax: f32,
     chan: u32,
     size: vec2<f32>,
+    // Winding contribution: 1, or 1/N for variable-width feather contours.
+    weight: f32,
+    pad: f32,
 }
 
 struct Pass {
@@ -102,7 +105,7 @@ fn fs_edge(in: EdgeOut) -> @location(0) vec4<f32> {
     } else {
         avg = (area_g(tb) - area_g(ta)) / (tb - ta);
     }
-    let v = sign(dy) * (yb - ya) * avg;
+    let v = sign(dy) * (yb - ya) * avg * e.weight;
     return select(vec4<f32>(v, 0.0, 0.0, 0.0), vec4<f32>(0.0, v, 0.0, 0.0), e.chan == 1u);
 }
 

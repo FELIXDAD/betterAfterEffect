@@ -27,6 +27,7 @@ mod camera_tool;
 pub(crate) mod display;
 mod effect_points;
 pub(crate) mod errors;
+mod feather_tool;
 mod free_transform;
 mod gizmo3d;
 pub(crate) mod guides;
@@ -192,6 +193,7 @@ pub struct CompositionViewer {
     shape: Option<shape_tool::ShapeDrag>,
     /// Pen tools: the open path being drawn, a Convert Vertex drag.
     pen: pen_tool::PenState,
+    feather: feather_tool::FeatherState,
     sketch: motion_sketch::SketchState,
     /// Selection, Rotation and Pan Behind tools: transform drags, marquee,
     /// selected mask vertices.
@@ -1196,6 +1198,18 @@ impl Panel for CompositionViewer {
         }
         let pen = pen_tool::frame(
             &mut self.pen,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &comp,
+            &view,
+            effective,
+            &painter,
+        );
+        feather_tool::frame(
+            &mut self.feather,
             ui,
             &resp,
             cx,
