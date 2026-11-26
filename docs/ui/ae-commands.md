@@ -105,7 +105,7 @@
 | Create Proxy ▸ Movie... | 10813442 | `motion.file.create_proxy_movie` |  |  |  | E | ⏸ |
 | Set Proxy ▸ File... | 9830401 | `motion.file.set_proxy_file` |  | Ctrl+Alt+P | Cmd+Opt+P | E | ⏸ |
 | Set Proxy ▸ None | 9830403 | `motion.file.set_proxy_none` |  |  |  | E | ⏸ |
-| Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ☐ |
+| Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ✅ |
 | Interpret Footage ▸ Proxy... | 10420226 | `motion.file.interpret_footage_proxy` |  |  |  | E | ⏸ |
 | Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ☐ |
 | Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ☐ |
@@ -630,7 +630,7 @@
 | Footage | 524328 | `window.panel` | `{"id":"footage","toggle":true}` |  |  | E | ⏸ |
 | Project | 524329 | `window.panel` | `{"id":"project","toggle":true}` | Ctrl+0 | Cmd+0 | B | ✅ |
 | Create Nulls From Paths.jsx（仅 Windows） | 524331 | `window.panel` | `{"id":"create_nulls_from_paths","toggle":true}` |  |  | B | ✅ |
-| VR Comp Editor.jsx（仅 Windows） | 524338 | `motion.window.script_panel` | `{"script":"VR Comp Editor.jsx"}` |  |  | B | ⏸ |
+| VR Comp Editor.jsx（仅 Windows） | 524338 | `window.panel` | `{"id":"vr_comp_editor","toggle":true}` |  |  | B | ✅ |
 
 ### Help
 
