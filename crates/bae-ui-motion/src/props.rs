@@ -417,22 +417,100 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             let match_name = query::static_value(&v, "match_name")
                 .and_then(|m| m.as_str().map(str::to_owned))
                 .unwrap_or_default();
+            let mut children: Vec<Node> = params
+                .into_iter()
+                .map(|a| Node::Prop {
+                    path: e.clone(),
+                    attr: a.to_owned(),
+                    label: bae_model::effect::param_id(a)
+                        .and_then(|id| crate::effects::param_label_of(&match_name, id))
+                        .unwrap_or_else(|| {
+                            format!("{} {}", tr("Param"), a.trim_start_matches("param:"))
+                        }),
+                })
+                .collect();
+            if match_name == bae_motion::paint::PAINT {
+                children.extend(paint_strokes(stage, layer, &e));
+            }
             Some(Node::Group {
                 id: format!("{layer}#{e}"),
                 label: crate::effects::instance_name(stage, &e),
-                children: params
-                    .into_iter()
-                    .map(|a| Node::Prop {
-                        path: e.clone(),
-                        attr: a.to_owned(),
-                        label: bae_model::effect::param_id(a)
-                            .and_then(|id| crate::effects::param_label_of(&match_name, id))
-                            .unwrap_or_else(|| {
-                                format!("{} {}", tr("Param"), a.trim_start_matches("param:"))
-                            }),
-                    })
-                    .collect(),
+                children,
             })
+        })
+        .collect()
+}
+
+/// A stroke's name as AE shows it in the UI language ("Brush 1" → "画笔 1").
+fn stroke_label(stage: &Stage, stroke: &PrimPath) -> String {
+    let name = query::display_name_of(stage, stroke);
+    ["Brush", "Clone", "Eraser"]
+        .into_iter()
+        .find_map(|base| {
+            let n = name.strip_prefix(base)?.strip_prefix(' ')?;
+            n.parse::<u32>().ok().map(|n| format!("{} {n}", tr(base)))
+        })
+        .unwrap_or(name)
+}
+
+/// The Paint effect's strokes, newest first (AE): each with its Path, Stroke
+/// Options and Transform: <stroke> (all keyframable, previewed live).
+fn paint_strokes(stage: &Stage, layer: &PrimPath, effect: &PrimPath) -> Vec<Node> {
+    const OPTIONS: &[(&str, &str)] = &[
+        ("start", "Start"),
+        ("end", "End"),
+        ("color", "Color"),
+        ("diameter", "Diameter"),
+        ("angle", "Angle"),
+        ("hardness", "Hardness"),
+        ("roundness", "Roundness"),
+        ("spacing", "Spacing"),
+        ("channels", "Channels"),
+        ("opacity", "Opacity"),
+        ("flow", "Flow"),
+    ];
+    const TRANSFORM: &[(&str, &str)] = &[
+        ("transform:anchor_point", "Anchor Point"),
+        ("transform:position", "Position"),
+        ("transform:scale", "Scale"),
+        ("transform:rotation", "Rotation"),
+    ];
+    let props = |s: &PrimPath, attrs: &[(&str, &str)]| -> Vec<Node> {
+        attrs
+            .iter()
+            .map(|(attr, label)| Node::Prop {
+                path: s.clone(),
+                attr: (*attr).to_owned(),
+                label: tr(label).to_owned(),
+            })
+            .collect()
+    };
+    bae_motion::paint::strokes_of(stage, effect)
+        .into_iter()
+        .rev()
+        .map(|s| {
+            let label = stroke_label(stage, &s);
+            Node::Group {
+                id: format!("{layer}#{s}"),
+                label: label.clone(),
+                children: vec![
+                    Node::Prop {
+                        path: s.clone(),
+                        attr: "path".to_owned(),
+                        label: tr("Path").to_owned(),
+                    },
+                    Node::Group {
+                        id: format!("{layer}#{s}#options"),
+                        label: tr("Stroke Options").to_owned(),
+                        children: props(&s, OPTIONS),
+                    },
+                    Node::Group {
+                        id: format!("{layer}#{s}#transform"),
+                        label: format!("{} {label}", tr("Transform:")),
+                        children: props(&s, TRANSFORM),
+                    },
+                ],
+            }
         })
         .collect()
 }
