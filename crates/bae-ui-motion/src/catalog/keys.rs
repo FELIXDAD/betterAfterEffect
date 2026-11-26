@@ -544,7 +544,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "ShowHideTools", "Ctrl+1", "window.panel", r#"{"id":"tools","toggle":true}"#, A, Todo, 0),
     k("CSwitchboard", "ShowProjectTree", "Ctrl+F11", "motion.file.project_flowchart", "", E, Later, 0),
     k("CSwitchboard", "ShowRulers", "Ctrl+R", "motion.view.show_rulers", "", B, Todo, 0),
-    k("CSwitchboard", "SpeculativePreview", "Alt+Shift+I", "motion.comp.cache_frames_when_idle", "", B, Later, 0),
+    k("CSwitchboard", "SpeculativePreview", "Alt+Shift+I", "motion.comp.cache_frames_when_idle", "", B, Done, 0),
     k("CSwitchboard", "SplitLayer", "Ctrl+Shift+D", "motion.split", "", B, Done, 0),
     k("CSwitchboard", "SwitchTo3DViewA", "F10", "motion.view.switch_3d_view_shortcut", r#"{"slot":"a"}"#, A, Later, 0),
     k("CSwitchboard", "SwitchTo3DViewB", "F11", "motion.view.switch_3d_view_shortcut", r#"{"slot":"b"}"#, A, Later, 0),

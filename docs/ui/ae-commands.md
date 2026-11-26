@@ -210,7 +210,7 @@
 | Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
 | Preview ▸ Play Current Preview | 10682369 | `motion.play` |  | Space | Space | B | ✅ |
-| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ⏸ |
+| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ✅ |
 | Preview ▸ Audio | 10682372 | `motion.comp.preview_audio` |  |  |  | B | ⏸ |
 | Save Frame As ▸ File... | 15335425 | `motion.comp.save_frame_as_file` |  | Ctrl+Alt+S | Cmd+Opt+S | B | ✅ |
 | Save Frame As ▸ Photoshop Layers... | 15335427 | `motion.comp.save_frame_as_photoshop_layers` |  |  |  | B | ⏸ |
