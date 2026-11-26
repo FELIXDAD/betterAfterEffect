@@ -76,6 +76,7 @@ pub fn category_zh(category: &str) -> &'static str {
         "Distort" => "扭曲",
         "Expression Controls" => "表达式控制",
         "Generate" => "生成",
+        "Immersive Video" => "沉浸式视频",
         "Keying" => "抠像",
         "Matte" => "遮罩",
         "Noise & Grain" => "杂色和颗粒",

@@ -486,6 +486,10 @@ impl CompEvaluator for AnimEvaluator {
         self.inner.invalidate(event);
     }
 
+    fn set_image_samples(&mut self, samples: Option<Arc<bae_anim::ImageSamples>>) {
+        self.inner.set_image_samples(samples);
+    }
+
     fn take_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.warnings)
     }
