@@ -12,6 +12,10 @@ fn advance_emitter(@builtin(global_invocation_id) tid: vec3u) {
         sprites[tid.x] = Sprite();
         return;
     }
+    if cfg.kind == CLASSIC || cfg.kind == CLASSIC_LE {
+        sprites[tid.x] = classic_particle(particle_birth, age);
+        return;
+    }
     let hold = select(0., f(91) * .01 * life, cfg.kind == WORLD);
     sprites[tid.x] = particle(id,frame.timing.x,at_age(id,birth,max(0.,age-hold),life),life);
 }

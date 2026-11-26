@@ -124,6 +124,8 @@ pub struct EvaluatedLayer {
 pub struct LayerSwitches {
     /// Video switch (eye).
     pub enabled: bool,
+    /// Sampling quality of this layer.
+    pub quality: LayerQuality,
     /// Effect switch (fx): the layer's effects render (AE default on).
     pub effects: bool,
     pub solo: bool,
@@ -137,6 +139,26 @@ pub struct LayerSwitches {
     pub preserve_transparency: bool,
     /// The layer's Frame Blending switch (AE-CMP-065).
     pub frame_blending: FrameBlending,
+}
+
+/// Quality in increasing sampling order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayerQuality {
+    Wireframe,
+    Draft,
+    #[default]
+    Best,
+}
+
+impl LayerQuality {
+    pub fn from_token(token: Option<&str>) -> Self {
+        match token {
+            Some("wireframe") => Self::Wireframe,
+            Some("draft") => Self::Draft,
+            _ => Self::Best,
+        }
+    }
 }
 
 /// A layer's Frame Blending switch.

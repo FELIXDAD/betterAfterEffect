@@ -288,3 +288,34 @@ fn particle_texture_clocks_match_in_playback_and_after_a_seek() {
         assert_eq!(render(&mut r, 30), cold);
     }
 }
+
+#[test]
+fn classic_emitters_render_births_with_the_selected_animation_and_opacity() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(96, 64);
+    let format = TextureFormat::Rgba16Float;
+    let input = test_image(rect).upload(&gpu, format);
+    let mut target = Standalone::new(gpu.clone(), format);
+    for (name, offset) in [("CC PS Classic", 0), ("CC PS LE Classic", 3)] {
+        let mut draw = |mode, opacity| {
+            let emit = instance(
+                name,
+                vec![
+                    (offset + 6, Value::Float(opacity)),
+                    (offset + 9, Value::Int(mode)),
+                ],
+            );
+            let mut params = EffectParams::new(&emit);
+            params.time = Time::from_seconds(0.5);
+            let out = builtin(name)
+                .render(&mut target, &params, &input, rect)
+                .unwrap();
+            target.finish().unwrap();
+            Pixels::download(&gpu, &out).data
+        };
+        let burst = draw(1, 75.);
+        assert!(burst.iter().any(|p| p[3] > 0.1));
+        assert_ne!(burst, draw(5, 75.), "{name} twirl");
+        assert!(draw(1, 0.).iter().all(|p| p[3] == 0.), "{name} opacity");
+    }
+}

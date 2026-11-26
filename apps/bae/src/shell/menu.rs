@@ -187,6 +187,8 @@ pub struct AppMenu {
     redo: Option<String>,
     /// Window ▸ Workspace ▸ Reset "<workspace>" to Saved Layout: id and text.
     reset: Option<(String, String)>,
+    assign: Option<Submenu>,
+    assign_slots: Vec<(String, &'static str, Chord)>,
     /// Action ids modules handle (`bae_ui::menu::handled_actions`).
     actions: HashSet<String>,
     /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
@@ -199,18 +201,19 @@ impl AppMenu {
     pub fn new(contributed: &MenuTree, actions: HashSet<String>) -> muda::Result<Self> {
         let menu = Menu::new();
         let mut items: HashMap<String, Contributed> = HashMap::new();
+        let mut assign = None;
         for (title, entries) in &contributed.menus {
             if title == APP_MENU {
                 // The macOS application menu, under the application's name.
                 if cfg!(target_os = "macos") {
                     let app = Submenu::new(bae_platform::APP_NAME, true);
-                    append_entries(&app, entries, &mut items)?;
+                    append_entries(&app, entries, &mut items, &mut assign)?;
                     menu.append(&app)?;
                 }
                 continue;
             }
             let sub = Submenu::new(menu_text(tr(title), menu_mnemonic(title)), true);
-            append_entries(&sub, entries, &mut items)?;
+            append_entries(&sub, entries, &mut items, &mut assign)?;
             #[cfg(target_os = "macos")]
             if title == "View" {
                 sub.append(&PredefinedMenuItem::separator())?;
@@ -227,6 +230,15 @@ impl AppMenu {
         let undo = find(ids::UNDO);
         let redo = find(ids::REDO);
         let reset = find(ids::RESET_WORKSPACE).map(|id| (id, String::new()));
+        let assign_slots = items
+            .iter()
+            .filter(|(_, c)| c.spec.action == ids::ASSIGN_WORKSPACE_SHORTCUT)
+            .filter_map(|(id, c)| {
+                let slot = usize::try_from(c.spec.params["slot"].as_u64()?).ok()?;
+                let key = *bae_ui::presets::WORKSPACE_KEYS.get(slot)?;
+                Some((id.clone(), key, Chord::parse(key).ok()?))
+            })
+            .collect();
         let mut menu = Self {
             menu,
             undo_state: (Some(String::new()), None),
@@ -234,6 +246,8 @@ impl AppMenu {
             undo,
             redo,
             reset,
+            assign,
+            assign_slots,
             actions,
             generation: 0,
         };
@@ -304,16 +318,43 @@ impl AppMenu {
 
     /// Names the active workspace in Window ▸ Workspace ▸ Reset “<name>” to Saved
     /// Layout, as AE does (`title`: its English title).
-    pub fn set_workspace_title(&mut self, title: &str) {
+    pub fn sync_workspace_titles(&mut self, workspace: &crate::ui::Workspace) {
         let Some((id, shown)) = &mut self.reset else {
             return;
         };
+        let title = workspace.active_workspace_title();
         let text = tr("Reset “{name}” to Saved Layout").replace("{name}", tr(title));
         if text != *shown {
             if let Some(c) = self.contributed.get(id.as_str()) {
                 c.item.set_text(&native_text(&text));
             }
+            if let Some(sub) = &self.assign {
+                sub.set_text(native_text(
+                    &tr("Assign Shortcut to “{name}” Workspace").replace("{name}", tr(title)),
+                ));
+            }
             *shown = text;
+        }
+        for (id, key, chord) in &self.assign_slots {
+            let Some(c) = self.contributed.get_mut(id) else {
+                continue;
+            };
+            let target = workspace
+                .keymap()
+                .lookup(chord, None)
+                .filter(|b| b.action == ids::SWITCH_WORKSPACE)
+                .and_then(|b| b.params["id"].as_str())
+                .and_then(|id| workspace.workspace_title(id));
+            let label = match target {
+                Some(name) => tr("{key} (replaces “{name}”)")
+                    .replace("{key}", key)
+                    .replace("{name}", tr(name)),
+                None => (*key).to_owned(),
+            };
+            if c.label.as_ref() != Some(&label) {
+                c.item.set_text(&native_text(&label));
+                c.label = Some(label);
+            }
         }
     }
 
@@ -454,6 +495,7 @@ fn append_entries(
     menu: &Submenu,
     entries: &[MenuEntry],
     items: &mut HashMap<String, Contributed>,
+    assign: &mut Option<Submenu>,
 ) -> muda::Result<()> {
     for e in entries {
         match e {
@@ -502,7 +544,10 @@ fn append_entries(
                     menu_text(tr(title), menu_mnemonic(title)),
                     !entries.is_empty(),
                 );
-                append_entries(&sub, entries, items)?;
+                if title == "Assign Shortcut to Workspace" {
+                    *assign = Some(sub.clone());
+                }
+                append_entries(&sub, entries, items, assign)?;
                 menu.append(&sub)?;
             }
         }
@@ -596,6 +641,9 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         K::Enter => Code::Enter,
         K::Escape => Code::Escape,
         K::Tab => Code::Tab,
+        #[cfg(target_os = "macos")]
+        key => mac_extended_key(key)?,
+        #[cfg(not(target_os = "macos"))]
         _ => return None,
     };
     let mut mods = Modifiers::empty();
@@ -616,6 +664,38 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         mods |= Modifiers::SHIFT;
     }
     Some(Accelerator::new(mods, code))
+}
+
+/// NumericPad is part of an AppKit key equivalent, so the main digits stay distinct.
+#[cfg(target_os = "macos")]
+fn mac_extended_key(key: egui::Key) -> Option<Code> {
+    use egui::Key as K;
+    Some(match key {
+        K::F13 => Code::F13,
+        K::F14 => Code::F14,
+        K::F15 => Code::F15,
+        K::F16 => Code::F16,
+        K::F17 => Code::F17,
+        K::F18 => Code::F18,
+        K::F19 => Code::F19,
+        K::F20 => Code::F20,
+        K::F21 => Code::NumpadMultiply,
+        K::F22 => Code::NumpadDivide,
+        K::F23 => Code::NumpadAdd,
+        K::F24 => Code::NumpadSubtract,
+        K::F25 => Code::NumpadDecimal,
+        K::F26 => Code::Numpad0,
+        K::F27 => Code::Numpad1,
+        K::F28 => Code::Numpad2,
+        K::F29 => Code::Numpad3,
+        K::F30 => Code::Numpad4,
+        K::F31 => Code::Numpad5,
+        K::F32 => Code::Numpad6,
+        K::F33 => Code::Numpad7,
+        K::F34 => Code::Numpad8,
+        K::F35 => Code::Numpad9,
+        _ => return None,
+    })
 }
 
 #[cfg(target_os = "macos")]
