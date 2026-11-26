@@ -374,7 +374,7 @@ pub(crate) fn frame(
         cursor: None,
     };
     // View Options: Motion Paths, Keyframes, Motion Path Tangents.
-    let shown = session.lock().layer_controls;
+    let shown = super::view_options::shown_controls(&session.lock());
     if mode == PathMode::None || !shown.motion_paths {
         state.drag = None;
         state.pressed = None;

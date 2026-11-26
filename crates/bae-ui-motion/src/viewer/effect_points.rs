@@ -137,7 +137,7 @@ pub(crate) fn frame(
     now: Time,
 ) -> PointsFrame {
     // View Options ▸ Effect Controls off: no crosshairs, nothing to drag.
-    if !session.lock().layer_controls.effect_controls {
+    if !super::view_options::shown_controls(&session.lock()).effect_controls {
         state.drag = None;
         return PointsFrame {
             owns: false,

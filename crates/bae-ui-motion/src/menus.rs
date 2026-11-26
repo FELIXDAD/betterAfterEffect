@@ -449,6 +449,11 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 crate::viewer::view_options::background_checked(cx.resources, &key)
             })
         }
+        actions::ids::SEPARATE_DIMENSIONS => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let layers = session.lock().selected_layers.clone();
+            actions::all_separated(cx.stage, &layers)
+        }),
         crate::viewer::view3d::ids::CREATE_CAMERA => {
             spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
         }
