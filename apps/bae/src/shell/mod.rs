@@ -24,6 +24,8 @@ mod open_documents;
 #[cfg(any(windows, test))]
 mod save_guard;
 mod script_bindings;
+#[cfg(any(windows, test))]
+mod win_keys;
 #[cfg(windows)]
 mod win_save;
 mod window_state;
@@ -169,7 +171,13 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => None,
     };
 
-    let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows as _;
+        builder.with_msg_hook(win_keys::hook);
+    }
+    let event_loop = match builder.build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             tracing::error!("cannot create the event loop: {error}");
@@ -262,6 +270,9 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => bae_prefs::PrefsStore::default(),
     });
     app.insert_resource(prefs.clone());
+    let project_file = bae_ui::files::ProjectFile::default();
+    project_file.set(document.location().map(std::path::Path::to_owned));
+    app.insert_resource(project_file);
     crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());
@@ -593,6 +604,11 @@ impl Shell {
                 return;
             }
             ids::ABOUT => self.workspace.show_about(),
+            ids::REVEAL_PROJECT => {
+                if let Some(path) = self.document.location() {
+                    bae_platform::reveal(path);
+                }
+            }
             bae_ui::settings::ACTION => self
                 .workspace
                 .show_settings(inv.params.get("page").and_then(|p| p.as_str())),
@@ -607,6 +623,9 @@ impl Shell {
                 );
                 // A save or another project restarts the auto-save interval.
                 self.autosave.reset();
+                if let Some(file) = self.app.resource::<bae_ui::files::ProjectFile>() {
+                    file.set(self.document.location().map(std::path::Path::to_owned));
+                }
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
@@ -1118,23 +1137,7 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
 
 /// Shows `path` in Finder / Explorer (Reveal Preferences).
 fn reveal(path: &std::path::Path) {
-    let result = if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(path)
-            .spawn()
-    } else if cfg!(windows) {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .spawn()
-    } else {
-        std::process::Command::new("xdg-open")
-            .arg(path.parent().unwrap_or(path))
-            .spawn()
-    };
-    if let Err(error) = result {
-        tracing::warn!("could not reveal {}: {error}", path.display());
-    }
+    bae_platform::reveal(path);
 }
 
 /// Draws `shapes` (this frame's UI, textures already uploaded) offscreen and

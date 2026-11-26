@@ -121,7 +121,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         now: Time,
     ) {
-        let p = ui.painter();
+        let p = ui.painter().clone();
         // Current time: big blue timecode, scrubbable.
         let tc = Rect::from_min_size(head.min + vec2(8.0, 2.0), vec2(120.0, head.height() - 4.0));
         p.text(
@@ -161,15 +161,31 @@ impl TimelinePanel {
             }
         }
 
+        // Search field, between the current time and the comp switches.
+        let left = tc.right() + 12.0;
+        let right = (left + 170.0).min(head.left() + cols.end - 140.0);
+        if right - left > 60.0 {
+            self.search_ui(
+                ui,
+                Rect::from_min_max(
+                    pos2(left, head.center().y - 10.0),
+                    pos2(right, head.center().y + 10.0),
+                ),
+            );
+        }
+
         // Graph Editor switch (AE's comp button; Shift+F3).
         let ge = Rect::from_center_size(
             pos2(head.left() + cols.viewport - 14.0, head.center().y),
             vec2(20.0, 20.0),
         );
-        let on = session.lock().graph_editor;
-        let gresp = ui
-            .interact(ge, ui.id().with("graph_editor_switch"), Sense::click())
-            .labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
+        let gresp = ui.interact(ge, ui.id().with("graph_editor_switch"), Sense::click());
+        if gresp.clicked() {
+            self.graph_mode = !self.graph_mode;
+            session.lock().graph_editor = self.graph_mode;
+        }
+        let on = self.graph_mode;
+        let gresp = gresp.labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
         if on {
             ui.painter().rect_filled(ge, 2.0, color::BUTTON_ON);
         }
@@ -185,9 +201,6 @@ impl TimelinePanel {
                 color::ICON_DIM
             },
         );
-        if gresp.clicked() {
-            session.lock().graph_editor = !on;
-        }
         gresp.on_hover_text(tr("Graph Editor"));
 
         let flow = ge.translate(vec2(-5.0 * 26.0, 0.0));
@@ -195,14 +208,13 @@ impl TimelinePanel {
         let button = ui
             .interact(flow, ui.id().with("mini_flow"), Sense::click())
             .labeled(egui::WidgetType::Button, title);
-        icons::paint(p, flow.shrink(3.0), Icon::MiniFlowchart, color::ICON);
+        icons::paint(&p, flow.shrink(3.0), Icon::MiniFlowchart, color::ICON);
         if button.on_hover_text(title).clicked() {
             cx.invoke(ids::MINI_FLOW);
         }
 
         // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
-        // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
-        // comp, as AE does.
+        // Frame Blending, Motion Blur.
         for (i, (attr, icon, name, tip, enabled)) in [
             (
                 "motion_blur",
@@ -216,7 +228,7 @@ impl TimelinePanel {
                 Icon::FrameBlend,
                 "Enable Frame Blending",
                 "Enables Frame Blending for all layers with the Frame Blend switch set",
-                false,
+                true,
             ),
             (
                 "hide_shy_layers",
@@ -230,7 +242,7 @@ impl TimelinePanel {
                 Icon::Cube,
                 "Draft 3D",
                 "Turn fast 3D previews on or off",
-                true,
+                false,
             ),
         ]
         .into_iter()
@@ -238,8 +250,16 @@ impl TimelinePanel {
         {
             let r = ge.translate(vec2(-26.0 * (i as f32 + 1.0), 0.0));
             let on = enabled && bool_attr(cx.stage, &info.path, attr);
-            let resp = ui
-                .interact(r, ui.id().with(("comp_switch", attr)), Sense::click())
+            let mut cell = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(r)
+                    .id_salt(("comp_switch", attr)),
+            );
+            if !enabled {
+                cell.disable();
+            }
+            let resp = cell
+                .interact(r, cell.id().with("button"), Sense::click())
                 .labeled_toggle(egui::WidgetType::Button, tr(name), on);
             if on {
                 ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
@@ -458,6 +478,20 @@ impl TimelinePanel {
             }
             f += step;
         }
+        if let Some((path, revision, spans)) = &session.lock().cached_preview
+            && path == &info.path
+            && *revision == cx.stage.revision()
+        {
+            // AE: green segments directly under the work area bar, above the
+            // ruler ticks, one per cached run of frames (AE-UI-064).
+            for span in spans {
+                p.hline(
+                    axis.x(span.start)..=axis.x(span.end),
+                    wa_top + 8.0 + 2.0,
+                    Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
+                );
+            }
+        }
         // CTI handle.
         let x = axis.x(now);
         p.add(Shape::convex_polygon(
@@ -549,8 +583,67 @@ impl TimelinePanel {
         graph_left: f32,
     ) {
         ui.painter().rect_filled(foot, 0.0, color::PANEL);
+        // AE's pane buttons at the bottom left: show or hide the Layer Switches,
+        // Transfer Controls (Modes), In/Out/Duration/Stretch and Render Time
+        // columns, highlighted while shown.
+        const PANES: [(Icon, &str, &[Column]); 4] = [
+            (
+                Icon::PaneSwitches,
+                "Expand or Collapse the Layer Switches pane",
+                &[Column::Switches],
+            ),
+            (
+                Icon::PaneModes,
+                "Expand or Collapse the Transfer Controls pane",
+                &[Column::Modes],
+            ),
+            (
+                Icon::PaneInOut,
+                "Expand or Collapse the In/Out/Duration/Stretch panes",
+                &[Column::In, Column::Out, Column::Duration, Column::Stretch],
+            ),
+            (
+                Icon::PaneRenderTime,
+                "Expand or Collapse the Render Time pane",
+                &[Column::RenderTime],
+            ),
+        ];
+        let size = (foot.height() - 4.0).min(20.0);
+        let mut x = foot.left() + 6.0;
+        for (i, (icon, label, cols)) in PANES.into_iter().enumerate() {
+            let r = Rect::from_min_size(pos2(x, foot.center().y - size / 2.0), vec2(size, size));
+            x += size + 2.0;
+            let shown = cols.iter().any(|c| self.columns.visible(*c));
+            let resp = ui
+                .interact(r, ui.id().with(("pane", i)), Sense::click())
+                .labeled_toggle(egui::WidgetType::Button, tr(label), shown)
+                .on_hover_text(tr(label));
+            if shown {
+                ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
+            }
+            icons::paint(
+                ui.painter(),
+                r.shrink(2.0),
+                icon,
+                if shown || resp.hovered() {
+                    color::ICON
+                } else {
+                    color::ICON_DIM
+                },
+            );
+            if resp.clicked() {
+                self.columns.toggle_pane(cols);
+            }
+            #[cfg(test)]
+            {
+                self.last_panes[i] = Some(r);
+            }
+        }
         // Toggle Switches / Modes (AE's button under the outline; F4).
-        let b = Rect::from_min_size(foot.min + vec2(8.0, 3.0), vec2(150.0, foot.height() - 6.0));
+        let b = Rect::from_min_size(
+            pos2(x + 8.0, foot.top() + 3.0),
+            vec2(150.0, foot.height() - 6.0),
+        );
         let resp = ui
             .interact(b, ui.id().with("toggle_switches_modes"), Sense::click())
             .labeled(egui::WidgetType::Button, tr("Toggle Switches / Modes"));

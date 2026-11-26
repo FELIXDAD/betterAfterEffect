@@ -11,6 +11,7 @@
 //!   calling back into JavaScript.
 
 pub(crate) mod fast;
+mod path;
 pub(crate) mod rewrite;
 
 use std::cell::RefCell;
@@ -25,6 +26,7 @@ use rquickjs::{
 
 use crate::eval::{CompiledComp, Cx, ExprProp, num};
 use crate::evaluated::AttrError;
+use crate::reads::{ExprRead, ReadKind};
 use crate::schema::transform as tr;
 
 const PRELUDE: &str = include_str!("prelude.js");
@@ -147,9 +149,23 @@ thread_local! {
     static MEMO_POOL: RefCell<Memo> = RefCell::new(Memo::default());
 }
 
+/// Project settings and footage items for expressions (`colorDepth`,
+/// `thisProject`, `footage(name)`, a footage layer's `source`).
+#[derive(Debug, Default)]
+pub(crate) struct ProjectInfo {
+    /// The `Project` prim, when there is one.
+    pub(crate) path: Option<PrimPath>,
+    pub(crate) bit_depth: u32,
+    pub(crate) linear_blending: bool,
+    pub(crate) display_frames: bool,
+    /// Display name, path, facts.
+    pub(crate) assets: Vec<(String, PrimPath, crate::AssetInfo)>,
+}
+
 /// State of one top-level evaluation.
 pub(crate) struct Scope {
     comps: Vec<Arc<CompiledComp>>,
+    project: Arc<ProjectInfo>,
     by_path: HashMap<PrimPath, usize>,
     by_name: HashMap<String, usize>,
     memo: Memo,
@@ -158,6 +174,8 @@ pub(crate) struct Scope {
     errors: Vec<(usize, AttrError)>,
     /// (comp id, layer) → layers it read through expressions.
     deps: BTreeSet<((usize, usize), (usize, usize))>,
+    /// Every read, when tracing ([`crate::Evaluator::evaluate_attribute_traced`]).
+    reads: Option<BTreeSet<ExprRead>>,
     /// Set when an evaluation hit [`MAX_DEPTH`]: everything above it on the stack is
     /// incomplete (not memoised, errors not recorded) and is retried by the caller's
     /// warm-up passes ([`warm_up`]).
@@ -182,14 +200,27 @@ impl Scope {
         }
         Scope {
             comps,
+            project: Arc::default(),
             by_path,
             by_name,
             memo: MEMO_POOL.with(|p| std::mem::take(&mut *p.borrow_mut())),
             stack: Vec::new(),
             errors: Vec::new(),
             deps: BTreeSet::new(),
+            reads: None,
             deferred: false,
         }
+    }
+
+    /// Records every read for [`ScopeResult::reads`].
+    pub(crate) fn traced(mut self) -> Scope {
+        self.reads = Some(BTreeSet::new());
+        self
+    }
+
+    pub(crate) fn with_project(mut self, project: Arc<ProjectInfo>) -> Scope {
+        self.project = project;
+        self
     }
 
     pub(crate) fn comp_id(&self, path: &PrimPath) -> Option<usize> {
@@ -202,6 +233,8 @@ pub(crate) struct ScopeResult {
     pub errors: Vec<(usize, AttrError)>,
     pub deps: BTreeSet<((usize, usize), (usize, usize))>,
     pub comps: Vec<Arc<CompiledComp>>,
+    /// Sorted reads of a traced scope.
+    pub reads: Vec<ExprRead>,
 }
 
 /// Install `scope` for the duration of `f` (no-op nesting: an active scope is reused).
@@ -236,6 +269,7 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
                 errors: s.errors,
                 deps: s.deps,
                 comps: s.comps,
+                reads: s.reads.map(|r| r.into_iter().collect()).unwrap_or_default(),
             }
         });
     drop(reset);
@@ -245,6 +279,36 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
 /// Comp id of `path` in the active scope.
 pub(crate) fn scope_comp_id(path: &PrimPath) -> Option<usize> {
     SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.comp_id(path)))
+}
+
+fn scope_project() -> Arc<ProjectInfo> {
+    SCOPE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map(|s| s.project.clone())
+            .unwrap_or_default()
+    })
+}
+
+/// A footage item as expressions see it.
+fn footage_to_js<'js>(
+    ctx: &Ctx<'js>,
+    name: &str,
+    a: &crate::AssetInfo,
+) -> rquickjs::Result<Object<'js>> {
+    let o = Object::new(ctx.clone())?;
+    o.set("name", name)?;
+    o.set("width", a.width)?;
+    o.set("height", a.height)?;
+    o.set("pixelAspect", a.pixel_aspect)?;
+    o.set("duration", a.duration.map_or(0.0, |d| d.as_seconds()))?;
+    o.set(
+        "frameDuration",
+        a.frame_rate
+            .map_or(0.0, |r| r.frame_duration().as_seconds()),
+    )?;
+    o.set("ntscDropFrame", false)?;
+    Ok(o)
 }
 
 fn scope_comp(c: usize) -> Option<Arc<CompiledComp>> {
@@ -384,6 +448,7 @@ struct FastEnv<'a, 'b, 'js> {
 
 impl FastEnv<'_, '_, '_> {
     fn sample(&self, ct: Time) -> Vec<f64> {
+        self.note(Some(ct));
         let cx = Cx {
             ct,
             lt: self.layer.timing.layer_time(ct),
@@ -399,6 +464,11 @@ impl FastEnv<'_, '_, '_> {
     fn grid(&self, t: f64) -> f64 {
         (t / self.tick).round() * self.tick
     }
+
+    /// The property read its own value (at `ct`) or keyframes (`None`).
+    fn note(&self, ct: Option<Time>) {
+        note_read(|| ExprRead::attr(self.e.prim.clone(), &self.e.attr, ct));
+    }
 }
 
 impl fast::Env for FastEnv<'_, '_, '_> {
@@ -411,6 +481,7 @@ impl fast::Env for FastEnv<'_, '_, '_> {
     }
 
     fn keys(&self) -> Vec<(f64, Vec<f64>)> {
+        self.note(None);
         self.e.base.curve().map_or_else(Vec::new, |c| {
             c.keys()
                 .map(|(t, v)| (self.layer.timing.comp_time(t).as_seconds(), components(v)))
@@ -603,6 +674,55 @@ const LOCALS: &[(&str, &str)] = &[
         "sourceRectAtTime",
         "thisLayer.sourceRectAtTime.bind(thisLayer)",
     ),
+    ("content", "thisLayer.content.bind(thisLayer)"),
+    ("points", "thisProperty.points.bind(thisProperty)"),
+    ("inTangents", "thisProperty.inTangents.bind(thisProperty)"),
+    ("outTangents", "thisProperty.outTangents.bind(thisProperty)"),
+    ("isClosed", "thisProperty.isClosed.bind(thisProperty)"),
+    ("pointOnPath", "thisProperty.pointOnPath.bind(thisProperty)"),
+    (
+        "tangentOnPath",
+        "thisProperty.tangentOnPath.bind(thisProperty)",
+    ),
+    (
+        "normalOnPath",
+        "thisProperty.normalOnPath.bind(thisProperty)",
+    ),
+    ("createPath", "thisProperty.createPath.bind(thisProperty)"),
+    ("rotationX", "thisLayer.rotationX"),
+    ("rotationY", "thisLayer.rotationY"),
+    ("rotationZ", "thisLayer.rotationZ"),
+    ("lightTransmission", "thisLayer.lightTransmission"),
+    ("castsShadows", "thisLayer.castsShadows"),
+    ("acceptsShadows", "thisLayer.acceptsShadows"),
+    ("acceptsLights", "thisLayer.acceptsLights"),
+    ("ambient", "thisLayer.ambient"),
+    ("diffuse", "thisLayer.diffuse"),
+    ("specular", "thisLayer.specular"),
+    ("specularIntensity", "thisLayer.specularIntensity"),
+    ("shininess", "thisLayer.shininess"),
+    ("specularShininess", "thisLayer.specularShininess"),
+    ("metal", "thisLayer.metal"),
+    ("cameraOption", "thisLayer.cameraOption"),
+    ("lightOption", "thisLayer.lightOption"),
+    ("materialOption", "thisLayer.materialOption"),
+    ("zoom", "thisLayer.zoom"),
+    ("depthOfField", "thisLayer.depthOfField"),
+    ("focusDistance", "thisLayer.focusDistance"),
+    ("aperture", "thisLayer.aperture"),
+    ("blurLevel", "thisLayer.blurLevel"),
+    ("intensity", "thisLayer.intensity"),
+    ("coneAngle", "thisLayer.coneAngle"),
+    ("coneFeather", "thisLayer.coneFeather"),
+    ("shadowDarkness", "thisLayer.shadowDarkness"),
+    ("shadowDiffusion", "thisLayer.shadowDiffusion"),
+    ("colorDepth", "__h.projectInfo().bitsPerChannel"),
+    ("thisProject", "__project()"),
+    ("audioActive", "thisLayer.audioActive"),
+    (
+        "fromCompToSurface",
+        "thisLayer.fromCompToSurface.bind(thisLayer)",
+    ),
     ("anchorPoint", "thisLayer.anchorPoint"),
     ("position", "thisLayer.position"),
     ("scale", "thisLayer.scale"),
@@ -614,6 +734,7 @@ const LOCALS: &[(&str, &str)] = &[
     ("opacity", "thisLayer.opacity"),
     ("pointOfInterest", "thisLayer.pointOfInterest"),
     ("timeRemap", "thisLayer.timeRemap"),
+    ("audioLevels", "thisLayer.audioLevels"),
     ("effect", "thisLayer.effect.bind(thisLayer)"),
     ("mask", "thisLayer.mask.bind(thisLayer)"),
     ("toComp", "thisLayer.toComp.bind(thisLayer)"),
@@ -666,7 +787,7 @@ pub(crate) fn wrapper_source(source: &str) -> Result<String, String> {
     }
     if r.idents.contains("posterizeTime") && !r.declared.contains("posterizeTime") {
         prologue.push_str(
-            "function posterizeTime(f){if(f>0){time=Math.floor(time*f+1e-9)/f;__now=time;__reseed();",
+            "function posterizeTime(f){if(f>=0){time=f===0?0:Math.floor(time*f+1e-9)/f;__now=time;__reseed();",
         );
         if r.idents.contains("value") && !r.declared.contains("value") {
             prologue.push_str("value=thisProperty.__pre(time);");
@@ -774,6 +895,11 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
             )),
         };
     }
+    if let Value::Bezier(old) = template
+        && let Some(o) = js.as_object()
+    {
+        return path_from_js(o, old).map(Value::Bezier);
+    }
     if let Value::TextDocument(doc) = template {
         let mut doc = doc.clone();
         // A text style (`text.sourceText.style.setFontSize(60)` …, AE 17.0+).
@@ -828,6 +954,216 @@ fn to_value(js: rquickjs::Value<'_>, template: &Value) -> Result<Value, String> 
         }
         Value::FloatList(_) => Value::FloatList(comps),
         other => other.clone(),
+    })
+}
+
+/// One property group above a property (AE's `propertyGroup(n)`).
+struct Group {
+    name: String,
+    kind: &'static str,
+    path: String,
+    prim_type: String,
+    op: String,
+}
+
+impl Group {
+    fn named(name: &str, kind: &'static str) -> Group {
+        Group {
+            name: name.to_owned(),
+            kind,
+            path: String::new(),
+            prim_type: String::new(),
+            op: String::new(),
+        }
+    }
+}
+
+/// A property's AE name and its groups up to the layer (`propertyGroup(1)` first).
+fn property_chain(
+    layer: &crate::eval::CompiledLayer,
+    prim: &str,
+    attr: &str,
+) -> (String, Vec<Group>) {
+    let three_d = layer.switches.three_d;
+    let mut groups = Vec::new();
+    let name = if prim == layer.path.as_str() {
+        let group = match attr.split_once(':').map_or("", |(g, _)| g) {
+            "transform" => Some(("Transform", "transform")),
+            "camera" => Some(("Camera Options", "cameraOption")),
+            "light" => Some(("Light Options", "lightOption")),
+            "material" => Some(("Material Options", "materialOption")),
+            "text" => Some(("Text", "text")),
+            _ => None,
+        };
+        if let Some((n, k)) = group {
+            groups.push(Group::named(n, k));
+        }
+        ae_attr_name(attr, three_d)
+    } else if let Some(m) = layer.masks.iter().find(|m| m.path.as_str() == prim) {
+        let mut g = Group::named(&m.name, "mask");
+        g.path = prim.to_owned();
+        groups.push(g);
+        groups.push(Group::named("Masks", "masks"));
+        match attr {
+            "path" => "Mask Path".to_owned(),
+            "feather" => "Mask Feather".to_owned(),
+            "opacity" => "Mask Opacity".to_owned(),
+            "expansion" => "Mask Expansion".to_owned(),
+            other => ae_attr_name(other, three_d),
+        }
+    } else if let Some(e) = layer.effects.iter().find(|e| e.path.as_str() == prim) {
+        let mut g = Group::named(&e.name, "effect");
+        g.path = prim.to_owned();
+        groups.push(g);
+        groups.push(Group::named("Effects", "effects"));
+        attr.to_owned()
+    } else {
+        // Shape contents and text animators: every prim up to the layer; a
+        // group's own transform sits in its "Transform: <group>" group.
+        let all = layer.contents.iter().chain(&layer.text_animators);
+        let find = |p: &str| all.clone().find_map(|c| c.find_prim(p));
+        let mut path = PrimPath::new(prim).ok();
+        if attr.starts_with("transform:") {
+            let gname = find(prim)
+                .map(|g| g.static_str("name").unwrap_or(g.path.name()).to_owned())
+                .unwrap_or_default();
+            groups.push(Group::named(
+                &format!("Transform: {gname}"),
+                "shapeTransform",
+            ));
+        }
+        while let Some(p) = path.filter(|p| p != &layer.path) {
+            if p.name() == "contents" || p.name() == "animators" {
+                let mut g = Group::named(
+                    if p.name() == "contents" {
+                        "Contents"
+                    } else {
+                        "Text Animators"
+                    },
+                    "contents",
+                );
+                g.path = p.to_string();
+                groups.push(g);
+            } else if let Some(item) = find(p.as_str()) {
+                groups.push(Group {
+                    name: item
+                        .static_str("name")
+                        .unwrap_or(item.path.name())
+                        .to_owned(),
+                    kind: "shape",
+                    path: p.to_string(),
+                    prim_type: item
+                        .prim_type
+                        .as_ref()
+                        .map_or("", |t| t.as_str())
+                        .to_owned(),
+                    op: item.static_str("operator").unwrap_or("").to_owned(),
+                });
+            }
+            path = p.parent();
+        }
+        ae_attr_name(attr, three_d)
+    };
+    groups.push(Group::named(&layer.name, "layer"));
+    (name, groups)
+}
+
+/// AE's English name of a property (`thisProperty.name`).
+fn ae_attr_name(attr: &str, three_d: bool) -> String {
+    let known = match attr {
+        "transform:anchor_point" => "Anchor Point",
+        "transform:position" => "Position",
+        "transform:position_x" => "X Position",
+        "transform:position_y" => "Y Position",
+        "transform:position_z" => "Z Position",
+        "transform:scale" => "Scale",
+        "transform:rotation" if three_d => "Z Rotation",
+        "transform:rotation" => "Rotation",
+        "transform:rotation_x" => "X Rotation",
+        "transform:rotation_y" => "Y Rotation",
+        "transform:orientation" => "Orientation",
+        "transform:opacity" => "Opacity",
+        "transform:point_of_interest" => "Point of Interest",
+        "transform:skew" => "Skew",
+        "transform:skew_axis" => "Skew Axis",
+        "time_remap" => "Time Remap",
+        "text:source" => "Source Text",
+        "width" => "Stroke Width",
+        "material:specular_intensity" => "Specular Intensity",
+        "material:specular_shininess" => "Specular Shininess",
+        "material:light_transmission" => "Light Transmission",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_owned();
+    }
+    // `camera:focus_distance` → "Focus Distance", `trim:start` → "Start".
+    let last = attr.rsplit(':').next().unwrap_or(attr);
+    last.split('_')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A path as expressions see it (`points()`, `value` of a path property):
+/// points and tangents rounded to four decimals, as AE returns them.
+fn path_to_js<'js>(ctx: &Ctx<'js>, p: &bae_model::BezierPath) -> rquickjs::Result<Object<'js>> {
+    let round = |v: &[[f64; 2]]| -> Vec<Vec<f64>> {
+        v.iter()
+            .map(|p| p.iter().map(|x| (x * 1e4).round() / 1e4).collect())
+            .collect()
+    };
+    let o = Object::new(ctx.clone())?;
+    o.set("__path", true)?;
+    o.set("points", round(&p.vertices))?;
+    o.set("inTangents", round(&p.in_tangents))?;
+    o.set("outTangents", round(&p.out_tangents))?;
+    o.set("closed", p.closed)?;
+    Ok(o)
+}
+
+/// A path returned by a path expression (`createPath(…)`, another path's
+/// value); `old` keeps its mask feather points.
+fn path_from_js(
+    o: &Object<'_>,
+    old: &bae_model::BezierPath,
+) -> Result<bae_model::BezierPath, String> {
+    let pairs = |k: &str| -> Result<Vec<[f64; 2]>, String> {
+        let v: Option<Vec<Vec<f64>>> = o.get(k).map_err(|e| e.to_string())?;
+        Ok(v.unwrap_or_default()
+            .into_iter()
+            .map(|p| {
+                [
+                    p.first().copied().unwrap_or(0.0),
+                    p.get(1).copied().unwrap_or(0.0),
+                ]
+            })
+            .collect())
+    };
+    let vertices = pairs("points")?;
+    if vertices.is_empty() {
+        return Err("Path must have at least one point".into());
+    }
+    let fill = |mut v: Vec<[f64; 2]>| {
+        v.resize(vertices.len(), [0.0; 2]);
+        v
+    };
+    Ok(bae_model::BezierPath {
+        in_tangents: fill(pairs("inTangents")?),
+        out_tangents: fill(pairs("outTangents")?),
+        closed: o
+            .get::<_, Option<bool>>("closed")
+            .ok()
+            .flatten()
+            .unwrap_or(true),
+        feather: old.feather.clone(),
+        vertices,
     })
 }
 
@@ -1019,6 +1355,25 @@ fn note_dependency(c: usize, l: usize) {
     });
 }
 
+/// Record a read of a traced scope (no-op otherwise).
+pub(crate) fn note_read(read: impl FnOnce() -> ExprRead) {
+    SCOPE.with(|s| {
+        if let Some(s) = s.borrow_mut().as_mut()
+            && let Some(reads) = &mut s.reads
+        {
+            reads.insert(read());
+        }
+    });
+}
+
+/// The prim of a property reference (empty: the layer itself).
+fn prim_path(prim: &str, layer: &crate::eval::CompiledLayer) -> PrimPath {
+    if prim.is_empty() {
+        return layer.path.clone();
+    }
+    PrimPath::new(prim).unwrap_or_else(|_| layer.path.clone())
+}
+
 /// Prim path of a property reference: empty means the layer itself.
 fn own<'a>(prim: &'a str, layer: &'a crate::eval::CompiledLayer) -> &'a str {
     if prim.is_empty() {
@@ -1061,6 +1416,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 // AE's valueAtTime works on a grid of 1/1024 frame.
                 let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
                 let ct = Time::from_seconds((t / tick).round() * tick);
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(ct)));
                 let cx = Cx {
                     comp: c as usize,
                     layer: li,
@@ -1073,6 +1429,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 } else {
                     prop.sample(&cx)
                 };
+                // A path is an object (points, tangents, closed), as AE's.
+                if let Value::Bezier(p) = &v {
+                    return path_to_js(&ctx, p)?.into_js(&ctx);
+                }
                 // Source Text reads as its string (AE).
                 if let Value::TextDocument(doc) = &v {
                     return doc.text.as_str().into_js(&ctx);
@@ -1090,6 +1450,115 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
     )?;
 
     h.set(
+        "propertyChain",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                let (name, groups) = property_chain(layer, own(&prim, layer), &attr);
+                let o = Object::new(ctx.clone())?;
+                o.set("name", name)?;
+                let list = Array::new(ctx.clone())?;
+                for (i, g) in groups.into_iter().enumerate() {
+                    let e = Object::new(ctx.clone())?;
+                    e.set("name", g.name)?;
+                    e.set("kind", g.kind)?;
+                    e.set("path", g.path)?;
+                    e.set("type", g.prim_type)?;
+                    e.set("op", g.op)?;
+                    list.set(i, e)?;
+                }
+                o.set("groups", list)?;
+                Ok::<_, rquickjs::Error>(o)
+            },
+        )?,
+    )?;
+
+    h.set(
+        "content",
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, parent: String, which: rquickjs::Value<'js>| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                // The items of the layer's Contents, or of a group's Contents.
+                let items: &[crate::eval::CompiledPrim] = if parent.is_empty() {
+                    &layer.contents
+                } else {
+                    layer
+                        .contents
+                        .iter()
+                        .find_map(|p| p.find_prim(&parent))
+                        .and_then(|g| g.children.iter().find(|c| c.path.name() == "contents"))
+                        .map_or(&[], |f| f.children.as_slice())
+                };
+                let name_of = |p: &crate::eval::CompiledPrim| {
+                    p.static_str("name").unwrap_or(p.path.name()).to_owned()
+                };
+                let found = if let Some(n) = which.as_number() {
+                    items.get((n as usize).wrapping_sub(1))
+                } else {
+                    let name = which
+                        .as_string()
+                        .and_then(|s| s.to_string().ok())
+                        .unwrap_or_default();
+                    items.iter().find(|p| name_of(p) == name)
+                };
+                let Some(item) = found else {
+                    return Ok::<_, rquickjs::Error>(None);
+                };
+                let o = Object::new(ctx.clone())?;
+                o.set("path", item.path.as_str())?;
+                o.set("type", item.prim_type.as_ref().map_or("", |t| t.as_str()))?;
+                o.set("op", item.static_str("operator").unwrap_or(""))?;
+                o.set("name", name_of(item))?;
+                Ok(Some(o))
+            },
+        )?,
+    )?;
+
+    h.set(
+        "pathAt",
+        Function::new(
+            ctx.clone(),
+            // `args`: percentage, time, kind (0 point, 1 tangent, 2 normal).
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String, args: Vec<f64>| {
+                let (pct, t, kind) = (args[0], args[1], args[2] as i32);
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                let layer = &comp.layers[li];
+                let Some(prop) = layer.find_prop(own(&prim, layer), &attr) else {
+                    return throw(&ctx, &format!("property {attr} does not exist"));
+                };
+                note_dependency(c as usize, li);
+                let ct = Time::from_seconds(t);
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(ct)));
+                let cx = Cx {
+                    comp: c as usize,
+                    layer: li,
+                    ct,
+                    lt: layer.timing.layer_time(ct),
+                    js: Some(&ctx),
+                };
+                let Value::Bezier(p) = prop.sample(&cx) else {
+                    return throw(&ctx, "not a path property");
+                };
+                let Some((point, tangent)) = path::at(&p, pct) else {
+                    return throw(&ctx, "the path has no points");
+                };
+                Ok::<_, rquickjs::Error>(match kind {
+                    0 => point.to_vec(),
+                    1 => tangent.to_vec(),
+                    _ => path::normal(tangent).to_vec(),
+                })
+            },
+        )?,
+    )?;
+
+    h.set(
         "textStyle",
         Function::new(
             ctx.clone(),
@@ -1102,6 +1571,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 };
                 note_dependency(c as usize, li);
                 let ct = Time::from_seconds(t);
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(ct)));
                 let cx = Cx {
                     comp: c as usize,
                     layer: li,
@@ -1127,6 +1597,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let layer = &comp.layers[li];
                 note_dependency(c as usize, li);
                 let ct = Time::from_seconds(t);
+                note_read(|| ExprRead::prim(layer.path.clone(), ReadKind::Subtree, Some(ct)));
                 let cx = Cx {
                     comp: c as usize,
                     layer: li,
@@ -1178,6 +1649,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 (&comp.layers[li].markers, Some(&comp.layers[li]))
             };
+            let owner = layer.map_or(&comp.path, |l| &l.path);
+            if let Ok(folder) = owner.child("markers") {
+                note_read(|| ExprRead::prim(folder, ReadKind::Subtree, None));
+            }
             let out = Array::new(ctx.clone())?;
             for (i, m) in marks.iter().enumerate() {
                 let comp_time = |t: Time| layer.map_or(t, |l| l.timing.comp_time(t));
@@ -1214,6 +1689,9 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
                 let q = (t / tick).round() * tick;
                 let (t0, t1) = (Time::from_seconds(q), Time::from_seconds(q + tick));
+                for t in [t0, t1] {
+                    note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(t)));
+                }
                 let at = |ct: Time| {
                     let cx = Cx {
                         comp: c as usize,
@@ -1250,6 +1728,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, None));
                 let mut out = Vec::new();
                 if let Some(curve) = layer
                     .find_prop(own(&prim, layer), &attr)
@@ -1326,6 +1805,14 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             let comp = comp_or_throw(&ctx, c)?;
             let li = layer_or_throw(&ctx, &comp, l)?;
             let layer = &comp.layers[li];
+            note_read(|| ExprRead::prim(layer.path.clone(), ReadKind::Prim, None));
+            match &layer.source {
+                crate::eval::CompiledSource::Asset(p, _)
+                | crate::eval::CompiledSource::Comp { path: p, .. } => {
+                    note_read(|| ExprRead::prim(p.clone(), ReadKind::Prim, None));
+                }
+                crate::eval::CompiledSource::None => {}
+            }
             let o = Object::new(ctx.clone())?;
             o.set("path", layer.path.as_str())?;
             o.set("name", &*layer.name)?;
@@ -1335,6 +1822,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             o.set("stretch", layer.timing.stretch)?;
             o.set("parent", layer.parent.map_or(-1, |p| p as i32))?;
             o.set("enabled", layer.switches.enabled)?;
+            o.set("kind", layer.kind.as_str())?;
             let (w, h) = layer.source_size(&comp);
             o.set("width", w)?;
             o.set("height", h)?;
@@ -1343,6 +1831,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 .and_then(scope_comp_id)
                 .map_or(-1, |i| i as i32);
             o.set("sourceComp", source)?;
+            let comp_of = |p: &PrimPath| scope_comp_id(p).and_then(scope_comp);
+            let (video, audio) = layer.has_video_audio(&comp_of, 0);
+            o.set("hasVideo", video)?;
+            o.set("hasAudio", audio)?;
             Ok::<_, rquickjs::Error>(o)
         })?,
     )?;
@@ -1351,6 +1843,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         "compInfo",
         Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32| {
             let comp = comp_or_throw(&ctx, c)?;
+            note_read(|| ExprRead::prim(comp.path.clone(), ReadKind::Prim, None));
             let o = Object::new(ctx.clone())?;
             o.set("name", comp.name.as_str())?;
             o.set("width", comp.width)?;
@@ -1362,7 +1855,8 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             )?;
             o.set("pixelAspect", comp.pixel_aspect)?;
             o.set("numLayers", comp.layers.len() as i32)?;
-            o.set("displayStartTime", 0.0)?;
+            o.set("ntscDropFrame", comp.drop_frame)?;
+            o.set("displayStartTime", comp.display_start.as_seconds())?;
             o.set("bgColor", comp.bg_color.to_vec())?;
             o.set("shutterAngle", comp.motion_blur.shutter_angle)?;
             o.set("shutterPhase", comp.motion_blur.shutter_phase)?;
@@ -1411,6 +1905,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let Some(e) = found else {
                     return Ok::<_, rquickjs::Error>(None);
                 };
+                note_read(|| ExprRead::attr(e.path.clone(), "enabled", None));
                 let info = Object::new(ctx.clone())?;
                 info.set("path", e.path.as_str())?;
                 info.set("active", e.enabled)?;
@@ -1475,6 +1970,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     return Ok::<_, rquickjs::Error>(li as i32);
                 };
                 let ct = Time::from_seconds(t);
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(ct)));
                 let cx = Cx {
                     comp: c as usize,
                     layer: li,
@@ -1536,6 +2032,26 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     p.get(2).copied().unwrap_or(0.0),
                 );
                 let r = match kind {
+                    // fromCompToSurface: the comp point seen through the active
+                    // camera, where its ray meets the layer's plane (2D layers:
+                    // fromComp).
+                    8 if comp.layers[li].switches.three_d => {
+                        let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
+                        let (cx, cy) = (comp.width as f64 / 2.0, comp.height as f64 / 2.0);
+                        let to_world = view.inverse();
+                        let origin = to_world.transform_point3(glam::DVec3::ZERO);
+                        let dir =
+                            to_world.transform_vector3(glam::DVec3::new(v.x - cx, v.y - cy, zoom));
+                        let inv = m.inverse();
+                        let (o, d) = (inv.transform_point3(origin), inv.transform_vector3(dir));
+                        if d.z.abs() < 1e-12 {
+                            glam::DVec3::new(o.x, o.y, 0.0)
+                        } else {
+                            let s = -o.z / d.z;
+                            glam::DVec3::new(o.x + s * d.x, o.y + s * d.y, 0.0)
+                        }
+                    }
+                    8 => m.inverse().transform_point3(v),
                     // toComp of a 3D layer is in the comp's view: through the active
                     // camera (AE 26: matches the default camera's projection exactly).
                     0 if comp.layers[li].switches.three_d => {
@@ -1557,6 +2073,63 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 Ok::<_, rquickjs::Error>(r.to_array().to_vec())
             },
         )?,
+    )?;
+
+    h.set(
+        "projectInfo",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>| {
+            let p = scope_project();
+            if let Some(path) = &p.path {
+                note_read(|| ExprRead::prim(path.clone(), ReadKind::Prim, None));
+            }
+            let o = Object::new(ctx.clone())?;
+            o.set(
+                "bitsPerChannel",
+                if p.bit_depth == 0 { 8 } else { p.bit_depth },
+            )?;
+            o.set("linearBlending", p.linear_blending)?;
+            o.set("displayFrames", p.display_frames)?;
+            // The project file is not part of the document (AE: "" until saved).
+            o.set("fullPath", "")?;
+            Ok::<_, rquickjs::Error>(o)
+        })?,
+    )?;
+
+    h.set(
+        "footage",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, name: String| {
+            let p = scope_project();
+            match p.assets.iter().find(|(n, ..)| *n == name) {
+                Some((n, path, a)) => {
+                    note_read(|| ExprRead::prim(path.clone(), ReadKind::Prim, None));
+                    Ok::<_, rquickjs::Error>(Some(footage_to_js(&ctx, n, a)?))
+                }
+                None => Ok(None),
+            }
+        })?,
+    )?;
+
+    h.set(
+        "layerFootage",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32, l: i32| {
+            let comp = comp_or_throw(&ctx, c)?;
+            let li = layer_or_throw(&ctx, &comp, l)?;
+            let p = scope_project();
+            let found = match &comp.layers[li].source {
+                crate::eval::CompiledSource::Asset(path, info) => {
+                    note_read(|| ExprRead::prim(path.clone(), ReadKind::Prim, None));
+                    Some(p.assets.iter().find(|(_, ap, _)| ap == path).map_or_else(
+                        || (path.name().to_owned(), info.clone()),
+                        |(n, _, a)| (n.clone(), a.clone()),
+                    ))
+                }
+                _ => None,
+            };
+            match found {
+                Some((n, a)) => Ok::<_, rquickjs::Error>(Some(footage_to_js(&ctx, &n, &a)?)),
+                None => Ok(None),
+            }
+        })?,
     )?;
 
     h.set(

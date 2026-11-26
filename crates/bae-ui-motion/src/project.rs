@@ -81,6 +81,8 @@ impl ItemDrag {
 pub struct ProjectPanel {
     collapsed: HashSet<PrimPath>,
     search: String,
+    /// Edit ▸ Find: focus the search field next frame.
+    focus_search: bool,
     rename: Option<(PrimPath, String)>,
 }
 
@@ -251,11 +253,14 @@ impl Panel for ProjectPanel {
 
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            widgets::search_field(
+            let field = widgets::search_field(
                 ui,
                 &mut self.search,
                 (ui.available_width() - 12.0).max(60.0),
             );
+            if std::mem::take(&mut self.focus_search) {
+                field.request_focus();
+            }
         });
         ui.add_space(4.0);
 
@@ -425,8 +430,14 @@ impl Panel for ProjectPanel {
                                 s.selected_items = vec![row.path.clone()];
                             }
                         }
-                        let chosen =
-                            crate::context_menu::show(ui, cx, crate::context_menu::PROJECT_ITEM);
+                        use crate::context_menu as m;
+                        let kind = match row.kind {
+                            ItemKind::Comp => m::COMP,
+                            ItemKind::Folder => m::FOLDER,
+                            ItemKind::Solid => m::SOLID,
+                            ItemKind::Footage => m::FOOTAGE,
+                        };
+                        let chosen = m::show_item(ui, cx, m::PROJECT_ITEM, &[], kind);
                         if chosen == Some("Rename") {
                             self.rename = Some((row.path.clone(), name.clone()));
                         }
@@ -559,6 +570,11 @@ impl Panel for ProjectPanel {
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
+        // Edit ▸ Find (Ctrl+F): the search field.
+        if action.id == "motion.file.find" {
+            self.focus_search = true;
+            return true;
+        }
         if action.id == crate::actions::ids::DELETE {
             let items = session.lock().selected_items.clone();
             if !items.is_empty() {
@@ -639,6 +655,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "新建 Maxon Cinema 4D 文件...",
     ),
     ("Reveal Project in Finder", "在 Finder 中显示项目"),
+    ("Reveal Project in Explorer", "在资源管理器中显示项目"),
     ("New Comp from Selection", "基于所选项新建合成"),
     ("Replace with Precomp", "替换为预合成"),
     ("Reveal in Composition", "在合成中显示"),

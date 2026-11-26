@@ -328,6 +328,30 @@ fn comp_by_name_and_source() {
 }
 
 #[test]
+fn time_conversions_follow_the_display_settings_and_rounding_mode() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT).set(
+            "/project",
+            "time_display",
+            Value::Enum("frames".into()),
+        );
+        b.set(MAIN, "display_start_time", Value::Time(secs(2.0)))
+            .set(MAIN, "drop_frame", true);
+        let l = b.layer(MAIN, "Clock", "text");
+        b.expr(&l, "text:source", doc(""), r#"posterizeTime(0);
+            [time, timeToFrames(undefined,24), framesToTime(6,24), timeToFrames(0.01,24,true),
+             timeToTimecode(-0.01,24), timeToFeetAndFrames(-0.11,24,16,true), timeToNTSCTimecode(60.06,true),
+             timeToCurrentFormat(0.11,24,true),thisComp.ntscDropFrame].join("|")"#);
+    });
+    let comp = eval(&s, 0.5);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "0|48|0.25|1|-00:00:00:01|0000+-3|00;01;00;02|3|true"
+    );
+}
+
+#[test]
 fn posterize_time_and_frames() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");
@@ -764,4 +788,367 @@ fn markers_in_expressions() {
         "{r}"
     );
     assert_eq!(ec.layers[0].transform.opacity, 50.0);
+}
+
+fn rect_path() -> Value {
+    Value::Bezier(bae_model::BezierPath {
+        vertices: vec![
+            [100.0, 100.0],
+            [300.0, 100.0],
+            [300.0, 200.0],
+            [100.0, 200.0],
+        ],
+        in_tangents: vec![[0.0; 2]; 4],
+        out_tangents: vec![[0.0; 2]; 4],
+        closed: true,
+        feather: Vec::new(),
+    })
+}
+
+/// Path properties: points / tangents / isClosed, pointOnPath at an arc-length
+/// percentage (AE 26: 174.9986, 100 on this rectangle), and a path expression
+/// returning createPath(…).
+#[test]
+fn path_property_methods_and_create_path() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "A", "solid");
+        b.prim(&format!("{l}/masks"), PrimType::FOLDER)
+            .prim(&format!("{l}/masks/m1"), PrimType::MASK)
+            .set(&format!("{l}/masks/m1"), "name", "Mask 1")
+            .set(&format!("{l}/masks/m1"), "path", rect_path())
+            .prim(&format!("{l}/masks/m2"), PrimType::MASK)
+            .set(&format!("{l}/masks/m2"), "name", "Mask 2")
+            .expr(
+                &format!("{l}/masks/m2"),
+                "path",
+                rect_path(),
+                r#"var p = mask("Mask 1").maskPath;
+                   createPath(p.points().map(function (v) { return [v[0] + 10, v[1]]; }),
+                              p.inTangents(), p.outTangents(), false)"#,
+            )
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var p = mask("Mask 1").maskPath; p.points()[1][0] + p.isClosed() * 1000 + p.tangentOnPath(0.875)[1]"#,
+            )
+            .expr(
+                &l,
+                "transform:position",
+                Value::Vec3([0.0; 3]),
+                r#"mask(1).maskPath.pointOnPath(0.125) + mask(1).maskPath.normalOnPath(0.125)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let l = &ec.layers[0];
+    assert_eq!(l.transform.rotation.z, 300.0 + 1000.0 - 1.0);
+    // (175, 100) plus the normal (0, 1).
+    assert!(
+        (l.transform.position.x - 175.0).abs() < 0.01,
+        "{:?}",
+        l.transform.position
+    );
+    assert!((l.transform.position.y - 101.0).abs() < 0.01);
+    let shifted = &l.masks[1].shape;
+    assert_eq!(shifted.vertices[0], [110.0, 100.0]);
+    assert!(!shifted.closed);
+}
+
+/// Shape layer contents: content(name / index) down to a path, a fill and the
+/// group's transform, with AE's property names.
+#[test]
+fn shape_contents_in_expressions() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "S", "shape");
+        let g = format!("{l}/contents/g");
+        b.prim(&format!("{l}/contents"), PrimType::FOLDER)
+            .prim(&g, PrimType::SHAPE_GROUP)
+            .set(&g, "name", "Group 1")
+            .set(&g, "transform:position", Value::Vec2([40.0, 50.0]))
+            .prim(&format!("{g}/contents"), PrimType::FOLDER)
+            .prim(&format!("{g}/contents/p"), PrimType::PATH)
+            .set(&format!("{g}/contents/p"), "name", "Path 1")
+            .set(&format!("{g}/contents/p"), "path", rect_path())
+            .prim(&format!("{g}/contents/f"), PrimType::FILL)
+            .set(&format!("{g}/contents/f"), "name", "Fill 1")
+            .set(&format!("{g}/contents/f"), "color", Value::Color([0.25, 0.5, 1.0, 1.0]))
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"var g = content("Group 1");
+                   g.content("Path 1").path.points()[1][0] + g.transform.position[1] * 10
+                   + content(1).content(2).color[0] * 4 + (g.content(1).path.pointOnPath(0)[0] == 100)"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 300.0 + 500.0 + 1.0 + 1.0);
+}
+
+/// Camera, light and material options, AE property names and property groups.
+#[test]
+fn camera_light_material_and_property_names() {
+    let s = stage(|b| {
+        let cam = b.layer(MAIN, "Cam", "camera");
+        b.set(&cam, "camera:zoom", 1500.0)
+            .set(&cam, "camera:depth_of_field", true);
+        let light = b.layer(MAIN, "Key", "light");
+        b.set(&light, "light:intensity", 80.0)
+            .set(&light, "light:casts_shadows", true);
+        let solid = b.layer(MAIN, "Plate", "solid");
+        b.set(&solid, "three_d", true)
+            .set(&solid, "material:accepts_lights", false)
+            .prim(&format!("{solid}/masks"), PrimType::FOLDER)
+            .prim(&format!("{solid}/masks/m"), PrimType::MASK)
+            .set(&format!("{solid}/masks/m"), "name", "Mask 1")
+            .set(
+                &format!("{solid}/masks/m"),
+                "path",
+                Value::Bezier(bae_model::BezierPath {
+                    vertices: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+                    in_tangents: vec![[0.0; 2]; 3],
+                    out_tangents: vec![[0.0; 2]; 3],
+                    closed: true,
+                    feather: Vec::new(),
+                }),
+            );
+        let t = b.layer(MAIN, "Names", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var c = thisComp.layer("Cam"), k = thisComp.layer("Key"), p = thisComp.layer("Plate");
+               [c.zoom.value, c.cameraOption.zoom.value, c.depthOfField.value, c.irisShape,
+                k.intensity.value, k.castsShadows.value, p.castsShadows.value, p.acceptsLights.value,
+                p.transform.position.name, p.transform.rotation.name, p.mask(1).maskPath.name,
+                p.transform.position.propertyGroup(1).name, p.transform.position.propertyGroup(2).name,
+                p.mask(1).maskPath.propertyGroup(1).name, p.mask(1).maskPath.propertyGroup(2).name].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "1500|1500|1|1|80|1|0|0|Position|Z Rotation|Mask Path|Transform|Plate|Mask 1|Masks"
+    );
+}
+
+/// footage(name), a footage layer's source, colorDepth / thisProject, NTSC and
+/// feet + frames timecode, and fromCompToSurface on a 2D layer.
+#[test]
+fn footage_project_and_timecodes() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT)
+            .set("/project", "bit_depth", Value::Enum("32".into()))
+            .prim("/assets", PrimType::FOLDER)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .set("/assets/clip", "kind", Value::Enum("footage".into()))
+            .set("/assets/clip", "width", 640.0)
+            .set("/assets/clip", "height", 360.0)
+            .set("/assets/clip", "duration", Value::Time(secs(4.0)));
+        let l = b.layer(MAIN, "Shot", "footage");
+        b.set(&l, "source", Value::AssetRef(p("/assets/clip")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var s = thisComp.layer("Shot");
+               [s.source.width, footage("Clip").duration, footage("Clip").name, colorDepth,
+                thisProject.bitsPerChannel, timeToNTSCTimecode(61, true), timeToNTSCTimecode(1),
+                timeToFeetAndFrames(1, 30), thisComp.ntscDropFrame,
+                fromCompToSurface([10, 20])[0] == fromComp([10, 20])[0]].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[1].text.as_ref().unwrap().text,
+        "640|4|Clip|32|32|00;01;01;00|00:00:00:29|0001+14|false|true"
+    );
+}
+
+/// hasVideo / hasAudio follow the layer's source (a pre-comp has audio when a
+/// layer inside it does), and audioLevels exists only on layers with audio.
+#[test]
+fn audio_levels_and_has_audio() {
+    let s = stage(|b| {
+        b.prim("/assets", PrimType::FOLDER)
+            .prim("/assets/song", PrimType::ASSET)
+            .set("/assets/song", "name", "Song")
+            .set("/assets/song", "has_video", false)
+            .set("/assets/song", "has_audio", true)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .comp("/comps/other", "Other");
+        let a = b.layer("/comps/other", "Music", "audio");
+        b.set(&a, "source", Value::AssetRef(p("/assets/song")));
+        let music = b.layer(MAIN, "Music", "audio");
+        b.set(&music, "source", Value::AssetRef(p("/assets/song")))
+            .set(&music, "audio:levels", Value::Vec2([-6.0, -3.0]));
+        let clip = b.layer(MAIN, "Clip", "footage");
+        b.set(&clip, "source", Value::AssetRef(p("/assets/clip")));
+        let pre = b.layer(MAIN, "Pre", "pre_comp");
+        b.set(&pre, "source", Value::PrimRef(p("/comps/other")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var m = thisComp.layer("Music"), c = thisComp.layer("Clip"), p = thisComp.layer("Pre");
+               var e = "";
+               try { c.audioLevels; } catch (err) { e = err.message.split(".")[0]; }
+               [m.audioLevels.value.join(","), m.hasAudio, m.hasVideo, m.audioActive, c.hasAudio,
+                c.hasVideo, p.hasAudio, p.audioLevels.value.join(","), e].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "-6,-3|true|false|true|false|true|true|0,0|\
+         property or method named 'audioLevels' in Class 'Layer' is missing or does not exist"
+    );
+}
+
+/// evaluate_attribute_traced reports what the value was read from: the
+/// attribute itself, same-layer and other-layer properties at the times read,
+/// and what nested expressions read; edits to anything else leave it valid.
+#[test]
+fn traced_attribute_reports_its_reads() {
+    use bae_anim::{ExprRead, ReadKind};
+    use bae_model::{Change, TimeRange};
+    let a = format!("{MAIN}/layers/A");
+    let fx = format!("{a}/effects/rate");
+    let s = stage(|b| {
+        b.layer(MAIN, "A", "null");
+        let l = b.layer(MAIN, "B", "null");
+        b.expr(
+            &l,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("C").transform.scale[0]"#,
+        );
+        b.layer(MAIN, "C", "null");
+        b.prim(&format!("{a}/effects"), PrimType::FOLDER)
+            .prim(&fx, PrimType::EFFECT)
+            .set(&fx, "match_name", "ADBE Slider Control")
+            .set(&fx, "name", "Rate")
+            .expr(
+                &fx,
+                "param:0001",
+                0.0,
+                r#"var b = thisComp.layer("B");
+                   transform.opacity + b.transform.position.valueAtTime(time - 1)[0] + b.transform.rotation
+                   + thisComp.layer("C").marker.numKeys"#,
+            );
+    });
+    let mut ev = bae_anim::Evaluator::new();
+    let (v, reads) = ev
+        .evaluate_attribute_traced(&s, &p(&fx), "param:0001", secs(2.0))
+        .unwrap();
+    assert_eq!(v, Value::Float(100.0 + 0.0 + 100.0));
+    let attr = |prim: &str, attr: &str, t: f64| ExprRead {
+        prim: p(prim),
+        kind: ReadKind::Attr(attr.into()),
+        time: Some(secs(t)),
+    };
+    let (b, c) = (format!("{MAIN}/layers/B"), format!("{MAIN}/layers/C"));
+    for want in [
+        attr(&fx, "param:0001", 2.0),
+        attr(&a, "transform:opacity", 2.0),
+        attr(&b, "transform:position", 1.0),
+        attr(&b, "transform:rotation", 2.0),
+        attr(&c, "transform:scale", 2.0),
+        ExprRead {
+            prim: p(&format!("{c}/markers")),
+            kind: ReadKind::Subtree,
+            time: None,
+        },
+    ] {
+        assert!(reads.contains(&want), "missing {want:?} in {reads:#?}");
+    }
+    let set = |path: &str, attr: &str| Change::AttrChanged {
+        path: p(path),
+        attr: attr.into(),
+        range: TimeRange::ALL,
+    };
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:scale")]
+    ));
+    assert!(bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:opacity")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&c, "transform:position")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&a, "transform:rotation")]
+    ));
+    assert!(!bae_anim::reads_touched(
+        &reads,
+        [&set(&b, "transform:opacity")]
+    ));
+    // Without an expression: the attribute itself.
+    let (_, plain) = ev
+        .evaluate_attribute_traced(&s, &p(&c), "transform:scale", secs(2.0))
+        .unwrap();
+    assert_eq!(plain, vec![attr(&c, "transform:scale", 2.0)]);
+}
+
+/// A live drag's values (overrides) reach everything that depends on them —
+/// children through parenting, expressions reading them — without changing the
+/// stage; clearing them shows the committed values again.
+#[test]
+fn overrides_show_uncommitted_values_everywhere() {
+    use bae_anim::{AttrOverride, Evaluator};
+    use bae_model::AttrSpec;
+    let s = stage(|b| {
+        let parent = b.layer(MAIN, "P", "null");
+        let child = b.layer(MAIN, "C", "null");
+        b.set(&child, "parent", Value::PrimRef(p(&parent))).set(
+            &child,
+            "transform:position",
+            Value::Vec3([10.0, 0.0, 0.0]),
+        );
+        let reader = b.layer(MAIN, "R", "null");
+        b.expr(
+            &reader,
+            "transform:rotation",
+            0.0,
+            r#"thisComp.layer("P").transform.position[0]"#,
+        );
+    });
+    let parent = p(&format!("{MAIN}/layers/P"));
+    let mut ev = Evaluator::new();
+    let world_x = |ev: &mut Evaluator| {
+        let ec = ev.evaluate_comp(&s, &p(MAIN), Time::ZERO).unwrap();
+        (
+            ec.layers[1].world_matrix.w_axis.x,
+            ec.layers[2].transform.rotation.z,
+        )
+    };
+    assert_eq!(world_x(&mut ev), (10.0, 0.0));
+    ev.set_overrides(vec![AttrOverride {
+        prim: parent.clone(),
+        attr: "transform:position".into(),
+        spec: AttrSpec {
+            value: Some(Value::Vec3([100.0, 0.0, 0.0])),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(
+        world_x(&mut ev),
+        (110.0, 100.0),
+        "child and expression follow"
+    );
+    ev.set_overrides(Vec::new());
+    assert_eq!(world_x(&mut ev), (10.0, 0.0), "committed values again");
 }
