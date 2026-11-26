@@ -134,6 +134,27 @@ pub enum PreviewRange {
     EntireDuration,
 }
 
+impl PreviewRange {
+    pub(crate) fn bounds(self, info: &CompInfo, now: Time) -> TimeRange {
+        let wa = info.work_area;
+        match self {
+            PreviewRange::WorkArea => wa,
+            // The work area, grown to take in the current time (AE).
+            PreviewRange::WorkAreaExtended => {
+                let end = (info.duration).max(info.frame_duration());
+                let start = wa.start.min(now);
+                let stop = if now >= wa.end {
+                    (now + info.frame_duration()).min(end)
+                } else {
+                    wa.end
+                };
+                TimeRange::new(start, stop)
+            }
+            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
+        }
+    }
+}
+
 /// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewOptions {
@@ -618,6 +639,14 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    /// Cached preview spans displayed on the timeline for this composition revision.
+    pub fn cached_frames(&self, comp: &PrimPath, revision: u64) -> &[TimeRange] {
+        match &self.cached_preview {
+            Some((path, rev, spans)) if path == comp && *rev == revision => spans,
+            _ => &[],
+        }
+    }
+
     /// What panels evaluate in place of the stage while something is dragged:
     /// the value drag ([`Scrub`]) and the keyframe drag ([`KeyPreview`]).
     pub fn live_overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
@@ -997,22 +1026,7 @@ impl Session {
 
     /// The range Preview ▸ Range plays for the current time `now`.
     pub fn preview_range(&self, info: &CompInfo, now: Time) -> TimeRange {
-        let wa = info.work_area;
-        match self.preview.range {
-            PreviewRange::WorkArea => wa,
-            // The work area, grown to take in the current time (AE).
-            PreviewRange::WorkAreaExtended => {
-                let end = (info.duration).max(info.frame_duration());
-                let start = wa.start.min(now);
-                let stop = if now >= wa.end {
-                    (now + info.frame_duration()).min(end)
-                } else {
-                    wa.end
-                };
-                TimeRange::new(start, stop)
-            }
-            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
-        }
+        self.preview.range.bounds(info, now)
     }
 
     /// Where playback of `info` would start and the range it plays (Preview
