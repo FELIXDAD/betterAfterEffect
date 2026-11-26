@@ -11,6 +11,31 @@ use egui::Ui;
 
 use crate::common;
 
+/// A diagnostic for the expression the viewer evaluated.
+pub(crate) fn inline_error(
+    resources: &bae_app::Resources,
+    path: &bae_model::PrimPath,
+    attr: &str,
+) -> Option<String> {
+    let session = resources.get::<crate::SharedSession>()?;
+    let session = session.lock();
+    let error = session
+        .expr_errors
+        .iter()
+        .find(|e| e.prim == *path && e.attr == attr)?;
+    crate::prefs::current(resources)
+        .bool("scripting_expressions.expr_inline_errors")
+        .then(|| error.message.clone())
+}
+
+/// One row of the editor, with the complete diagnostic available on hover.
+pub(crate) fn error_line(ui: &mut egui::Ui, area: egui::Rect, message: &str) {
+    let text = egui::RichText::new(message.lines().next().unwrap_or(message))
+        .color(crate::viewer::errors::YELLOW);
+    ui.put(area, egui::Label::new(text).truncate())
+        .on_hover_text(message);
+}
+
 enum Group {
     Items(&'static [&'static str]),
     Sub(&'static [(&'static str, &'static [&'static str])]),
