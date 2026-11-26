@@ -13,7 +13,7 @@ use bae_motion::query;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
-use egui::{Sense, Ui, pos2, vec2};
+use egui::{Key, Modifiers, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::common::{self, Edit, EvalCache};
@@ -684,12 +684,50 @@ fn value_control(
             ui.add_enabled(false, egui::Button::new(caption));
             Edit::None
         }
+        ParamKind::Text => text_field(
+            ui,
+            id,
+            match value {
+                Some(Value::String(s)) => s,
+                _ => "",
+            },
+        ),
         ParamKind::ArbitraryData | ParamKind::CurvePoints => {
             ui.colored_label(color::TEXT_DISABLED, "—");
             Edit::None
         }
         ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Display => Edit::None,
     }
+}
+
+/// An effect's text parameter: previewed while typing, one command on Enter
+/// or when focus leaves (one undo step, no relayout per key); Shift+Enter
+/// breaks the line.
+fn text_field(ui: &mut Ui, id: egui::Id, model: &str) -> Edit {
+    let key = id.with("typing");
+    let mut text = ui
+        .data(|d| d.get_temp::<String>(key))
+        .unwrap_or_else(|| model.to_owned());
+    let resp = ui.add(
+        egui::TextEdit::multiline(&mut text)
+            .id(id)
+            .desired_rows(1)
+            .return_key(egui::KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter)),
+    );
+    let enter = |e: &egui::Event| matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. } if modifiers.is_none());
+    if resp.has_focus() && ui.input(|i| i.events.iter().any(enter)) {
+        ui.memory_mut(|m| m.surrender_focus(id));
+    }
+    if resp.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(key));
+        if text != model {
+            return Edit::Commit(Value::String(text));
+        }
+    } else if resp.changed() {
+        ui.data_mut(|d| d.insert_temp(key, text.clone()));
+        return Edit::Live(Value::String(text));
+    }
+    Edit::None
 }
 
 /// The twirled-open row: a slider over AE's slider range, or an angle dial.
@@ -902,5 +940,48 @@ pub(crate) fn effect_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, effect: &PrimP
     if ui.button(tr("Remove Effect")).clicked() {
         cx.invoke_with("effect.remove", json!({"effects": [effect]}));
         ui.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Event, RawInput, Rect};
+
+    #[test]
+    fn effect_text_previews_while_typing_and_commits_once_on_enter() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("fx text test");
+        let frame = |events: Vec<Event>| {
+            let raw = RawInput {
+                events,
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400., 200.))),
+                ..Default::default()
+            };
+            let mut edit = Edit::None;
+            let mut output = ctx.run_ui(raw, |ui| edit = text_field(ui, id, "Text"));
+            output.textures_delta.clear();
+            edit
+        };
+        let enter = |modifiers| Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frame(vec![]);
+        ctx.memory_mut(|m| m.request_focus(id));
+        frame(vec![]);
+        // Typing (Shift+Enter breaks the line) only previews...
+        let typed = vec![Event::Text("ab".into()), enter(Modifiers::SHIFT)];
+        assert!(matches!(frame(typed), Edit::Live(_)), "preview, no command");
+        assert!(matches!(frame(vec![]), Edit::None));
+        // ...Enter commits it all at once.
+        let Edit::Commit(Value::String(text)) = frame(vec![enter(Modifiers::NONE)]) else {
+            panic!("no commit on Enter");
+        };
+        assert_eq!(text, "ab\nText");
+        assert!(matches!(frame(vec![]), Edit::None), "committed once");
     }
 }

@@ -359,6 +359,7 @@ impl Panel for EffectControlsPanel {
             &mut self.controls.show_presets,
             tr("Show Animation Presets"),
         );
+        ui.separator();
         if ui.button(tr("Manage Effects...")).clicked() {
             crate::effects::manager::open(cx);
             ui.close();

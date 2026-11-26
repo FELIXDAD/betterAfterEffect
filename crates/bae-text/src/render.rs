@@ -153,10 +153,15 @@ fn draw(
         .font_size(run.font_size)
         .transform(transform)
         .normalized_coords(coords);
-    if skew != 0.0 {
+    if skew != 0.0 || run.basis != Affine::IDENTITY {
         // Vello applies the glyph transform in font space (y up): leaning right
         // moves points above the baseline (y > 0) to +x.
-        builder = builder.glyph_transform(Some(Affine::new([1.0, 0.0, skew, 1.0, 0.0, 0.0])));
+        builder = builder.glyph_transform(Some(
+            Affine::FLIP_Y
+                * run.basis
+                * Affine::FLIP_Y
+                * Affine::new([1.0, 0.0, skew, 1.0, 0.0, 0.0]),
+        ));
     }
     if run.embolden > 0.0 {
         let e = f64::from(run.embolden);
@@ -348,7 +353,7 @@ fn glyph_outlines(run: &GlyphRun) -> Vec<Option<BezPath>> {
                 let e = f64::from(run.embolden);
                 path = kurbo::expand_path(&path, Diagonal2::new(e, e), Join::Miter, 4.0, 0.01);
             }
-            Some(Affine::translate((f64::from(g.x), f64::from(g.y))) * path)
+            Some(Affine::translate((f64::from(g.x), f64::from(g.y))) * run.basis * path)
         })
         .collect()
 }
@@ -414,12 +419,22 @@ impl LayerSource for TextSource {
 #[derive(Debug, Default)]
 pub struct TextProvider {
     fonts: Mutex<Option<FontSystem>>,
-    /// The fonts are loaded (scanning the system fonts takes a while).
-    ready: std::sync::atomic::AtomicBool,
     cache: Mutex<SourceCache<TextSource>>,
 }
 
 impl TextProvider {
+    /// The process-wide system font provider used by layers and text effects.
+    pub fn shared() -> Arc<Self> {
+        static SYSTEM: std::sync::LazyLock<Arc<TextProvider>> =
+            std::sync::LazyLock::new(|| Arc::new(TextProvider::new()));
+        SYSTEM.clone()
+    }
+
+    pub fn layout_for_render(&self, doc: &TextDocument) -> Result<TextLayout, RenderError> {
+        let mut fonts = self.render_fonts()?;
+        Ok(layout_text(fonts.get_or_insert_with(FontSystem::new), doc))
+    }
+
     /// A provider with the system fonts (scanned on first use).
     pub fn new() -> Self {
         Self::default()
@@ -429,7 +444,6 @@ impl TextProvider {
     pub fn with_fonts(fonts: FontSystem) -> Self {
         Self {
             fonts: Mutex::new(Some(fonts)),
-            ready: std::sync::atomic::AtomicBool::new(true),
             cache: Mutex::default(),
         }
     }
@@ -444,24 +458,19 @@ impl TextProvider {
     /// text layer.
     pub fn load_fonts(&self) {
         self.fonts.lock().get_or_insert_with(FontSystem::new);
-        self.ready.store(true, std::sync::atomic::Ordering::Release);
     }
 
     /// The fonts for the render path. On an interactive thread it never waits
     /// for the warm-up still scanning them (the frame is drawn again later).
     fn render_fonts(&self) -> Result<parking_lot::MutexGuard<'_, Option<FontSystem>>, RenderError> {
-        if !self.ready.load(std::sync::atomic::Ordering::Acquire)
-            && bae_render::is_interactive_thread()
-            && bae_gpu::warm_up::is_running()
-        {
+        if bae_render::is_interactive_thread() && bae_gpu::warm_up::is_running() {
             return match self.fonts.try_lock() {
                 Some(fonts) if fonts.is_some() => Ok(fonts),
-                _ => Err(bae_render::warming_up("the font list")),
+                _ => Err(bae_render::warming_up("text layout")),
             };
         }
         let mut fonts = self.fonts.lock();
         fonts.get_or_insert_with(FontSystem::new);
-        self.ready.store(true, std::sync::atomic::Ordering::Release);
         Ok(fonts)
     }
 
@@ -478,11 +487,7 @@ impl TextProvider {
             return Ok(Arc::new(layout.clone()));
         }
         if let Some(doc) = content.data.downcast_ref::<TextDocument>() {
-            let mut fonts = self.render_fonts()?;
-            return Ok(Arc::new(layout_text(
-                fonts.get_or_insert_with(FontSystem::new),
-                doc,
-            )));
+            return self.layout_for_render(doc).map(Arc::new);
         }
         if let Some(layer) = content.data.downcast_ref::<EvaluatedLayer>() {
             return Ok(Arc::new(match &layer.text {
@@ -569,8 +574,37 @@ impl bae_gpu::WarmUp for TextProvider {
         0
     }
 
-    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+    fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
         self.load_fonts();
+        VelloRenderer::warm(gpu).map_err(|e| e.to_string())?;
+        let doc = TextDocument::new("Text 文字 0123456789", "ArialMT", 48.);
+        let source = TextSource::new(Arc::new(self.layout(&doc)));
+        source
+            .render_on(gpu, source.bounds, 1.)
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Primes vertical substitution, placement and Vello glyph drawing on the
+/// existing warm-up worker, after the font collection and renderer are ready.
+pub struct VerticalGlyphWarmUp(pub Arc<TextProvider>);
+
+impl bae_gpu::WarmUp for VerticalGlyphWarmUp {
+    fn name(&self) -> &str {
+        "vertical text"
+    }
+    fn priority(&self) -> u8 {
+        2
+    }
+    fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
+        let doc = crate::layout::vertical_warmup_document();
+        let layout = self.0.layout(&doc);
+        if !layout.is_empty() {
+            VelloRenderer::shared(gpu)
+                .and_then(|r| r.render_region(gpu, pixel_bounds(&layout), 1., &layout))
+                .map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 }

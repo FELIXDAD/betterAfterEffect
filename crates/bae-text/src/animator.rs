@@ -187,8 +187,18 @@ pub fn apply_animators(layout: &mut TextLayout, groups: &[EvaluatedPrim]) {
             line = Some(c.line);
         }
         previous = adj.tracking;
-        let pivot = c.origin.to_vec2() + Vec2::new(c.advance * 0.5, 0.0);
-        let transform = Affine::translate(adj.position + Vec2::new(tracking, 0.0) + pivot)
+        let axis = if layout.vertical() {
+            Vec2::new(0., 1.)
+        } else {
+            Vec2::new(1., 0.)
+        };
+        let pivot_axis = if c.combined_em.is_some() {
+            Vec2::new(1., 0.)
+        } else {
+            axis
+        };
+        let pivot = c.origin.to_vec2() + pivot_axis * c.advance * 0.5;
+        let transform = Affine::translate(adj.position + axis * tracking + pivot)
             * Affine::rotate(adj.rotation)
             * Affine::scale_non_uniform(adj.scale.x, adj.scale.y)
             * Affine::translate(-pivot);
