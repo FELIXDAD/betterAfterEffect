@@ -51,6 +51,24 @@ pub fn group_prim(id: &str) -> Option<PrimPath> {
         .flatten()
 }
 
+/// The top-level shape groups of the shape layer `layer`.
+pub(crate) fn shape_groups(stage: &Stage, layer: &PrimPath) -> Vec<PrimPath> {
+    layer.child(query::CONTENTS).map_or_else(
+        |_| Vec::new(),
+        |contents| {
+            stage
+                .children(&contents)
+                .into_iter()
+                .filter(|g| {
+                    stage
+                        .prim(g)
+                        .is_some_and(|v| v.is_a(&bae_model::PrimType::SHAPE_GROUP))
+                })
+                .collect()
+        },
+    )
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
@@ -239,6 +257,15 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Select the shape group a command adds to a shape layer (AE: a shape
+    /// tool's new group is selected, its box shown): the first of `layer`'s
+    /// groups not in `before`.
+    NewGroup {
+        /// The shape layer.
+        layer: PrimPath,
+        /// Its groups before the command.
+        before: Vec<PrimPath>,
+    },
     /// Keep these keys selected although they do not exist yet: the selection
     /// already names where a queued command (a keyframe drag) puts them, and
     /// panels drawn before it runs must not drop them (#551).
@@ -259,6 +286,10 @@ pub struct Session {
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    /// The Composition Navigator's path: the active comp and the comps it was
+    /// opened through (double-clicking pre-comp layers), the containing comp
+    /// first.
+    pub(crate) comp_flow: Vec<PrimPath>,
     pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
@@ -690,7 +721,22 @@ impl Session {
         if !self.open_comps.contains(comp) {
             self.open_comps.push(comp.clone());
         }
+        // A comp on the navigator's path keeps the path; any other starts one.
+        if !self.comp_flow.contains(comp) {
+            self.comp_flow = vec![comp.clone()];
+        }
         self.active_comp = Some(comp.clone());
+    }
+
+    /// Open `comp` from a pre-comp layer in `parent`: the navigator's path runs
+    /// through `parent` to `comp`.
+    pub fn open_from(&mut self, parent: &PrimPath, comp: &PrimPath) {
+        match self.comp_flow.iter().position(|c| c == parent) {
+            Some(i) => self.comp_flow.truncate(i + 1),
+            None => self.comp_flow = vec![parent.clone()],
+        }
+        self.comp_flow.push(comp.clone());
+        self.open_comp(comp);
     }
 
     /// Close a timeline tab.
@@ -763,6 +809,17 @@ impl Session {
                 }
                 continue;
             }
+            if let Pending::NewGroup { layer, before } = &what {
+                match shape_groups(stage, layer)
+                    .into_iter()
+                    .find(|g| !before.contains(g))
+                {
+                    Some(g) => self.selected_groups = vec![format!("{layer}#{g}")],
+                    None if age < PENDING_FRAMES => self.pending.push((what, age + 1)),
+                    None => {}
+                }
+                continue;
+            }
             if let Pending::NewLayers { comp, before } = &what {
                 let added: Vec<PrimPath> = query::comp_layers(stage, comp)
                     .into_iter()
@@ -778,7 +835,10 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {
+                Pending::NewLayers { .. }
+                | Pending::NewEffects { .. }
+                | Pending::NewGroup { .. }
+                | Pending::Keys(_) => {
                     unreachable!("handled above")
                 }
             };
@@ -792,7 +852,10 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {}
+                    Pending::NewLayers { .. }
+                    | Pending::NewEffects { .. }
+                    | Pending::NewGroup { .. }
+                    | Pending::Keys(_) => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -804,7 +867,10 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => None,
+                Pending::NewLayers { .. }
+                | Pending::NewEffects { .. }
+                | Pending::NewGroup { .. }
+                | Pending::Keys(_) => None,
             })
             .collect();
         self.reserved
