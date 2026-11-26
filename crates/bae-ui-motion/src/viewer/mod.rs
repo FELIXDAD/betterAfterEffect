@@ -42,7 +42,7 @@ mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
-mod puppet_tool;
+pub(crate) mod puppet_tool;
 mod scene_icons;
 mod select_tool;
 mod shape_tool;
@@ -1357,6 +1357,7 @@ impl Panel for CompositionViewer {
             time,
         );
         // Puppet tools: pins added and dragged.
+        let selected_layers = session.lock().selected_layers.clone();
         let puppet = puppet_tool::frame(
             &mut self.puppet,
             ui,
@@ -1368,6 +1369,7 @@ impl Panel for CompositionViewer {
             effective,
             &painter,
             time,
+            &selected_layers,
         );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.

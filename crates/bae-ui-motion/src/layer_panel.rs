@@ -50,6 +50,8 @@ pub struct LayerPanel {
     pub(crate) render: bool,
     /// The stroke being painted: layer pixels, when it started.
     stroke: Option<(Vec<DVec2>, std::time::Instant)>,
+    /// Puppet tools: pins added, selected and dragged here too (AE).
+    puppet: crate::viewer::puppet_tool::PuppetState,
     /// Clone Stamp: the source point (Alt/Option-click), layer pixels.
     clone_point: Option<DVec2>,
     /// An end of the layer being dragged on the ruler: the in point (`true`)
@@ -194,6 +196,7 @@ impl Panel for LayerPanel {
             // Space pans whatever the tool (AE).
             if !panning {
                 self.paint(ui, cx, area, &view, min, evaluated);
+                self.puppet(ui, cx, &session, area, &view, &comp, &layer, time);
             }
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
@@ -372,6 +375,46 @@ impl LayerPanel {
             }
         }
         view
+    }
+
+    /// The Puppet tools on the shown layer: its pins in layer space (the
+    /// picture's), added, selected and dragged as in the Composition viewer.
+    #[allow(clippy::too_many_arguments)]
+    fn puppet(
+        &mut self,
+        ui: &Ui,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        area: Rect,
+        view: &View,
+        comp: &EvaluatedComp,
+        layer: &PrimPath,
+        time: Time,
+    ) {
+        let tool = crate::tools::shared(cx.resources).lock().current();
+        if crate::viewer::puppet_tool::pin_type(tool).is_none() {
+            return;
+        }
+        // The layer alone with all its effects (the pins), placed as in the
+        // picture.
+        let Some((with_pins, _)) = alone(comp, layer, usize::MAX) else {
+            return;
+        };
+        let resp = ui.interact(area, ui.id().with("puppet"), Sense::click_and_drag());
+        let painter = ui.painter_at(area);
+        crate::viewer::puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            session,
+            &with_pins,
+            view,
+            tool,
+            &painter,
+            time,
+            std::slice::from_ref(layer),
+        );
     }
 
     /// The paint tools: drag to paint a stroke; Alt/Option-click with the

@@ -102,9 +102,8 @@ fn color(kind: &str) -> Color32 {
     }
 }
 
-/// The pins of the selected layers' Puppet effects.
-fn handles(session: &SharedSession, comp: &EvaluatedComp, view: &View) -> Vec<Handle> {
-    let selected = session.lock().selected_layers.clone();
+/// The pins of the `selected` layers' Puppet effects.
+fn handles(selected: &[PrimPath], comp: &EvaluatedComp, view: &View) -> Vec<Handle> {
     let mut out = Vec::new();
     for layer in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
         for e in layer
@@ -190,10 +189,9 @@ pub(crate) struct PuppetFrame {
     pub cursor: Option<CursorIcon>,
 }
 
-/// Mesh ▸ Show: the selected layers' Puppet meshes, deformed by their pins.
-fn paint_meshes(session: &SharedSession, comp: &EvaluatedComp, view: &View, painter: &Painter) {
+/// Mesh ▸ Show: the `selected` layers' Puppet meshes, deformed by their pins.
+fn paint_meshes(selected: &[PrimPath], comp: &EvaluatedComp, view: &View, painter: &Painter) {
     use bae_effects::effects::puppet::{DENSITY, EXPANSION, Mesh, REFINEMENT, deform};
-    let selected = session.lock().selected_layers.clone();
     let stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(250, 215, 40, 150));
     for layer in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
         let Some((min, max)) = crate::render::layer_bounds(layer) else {
@@ -226,6 +224,9 @@ fn paint_meshes(session: &SharedSession, comp: &EvaluatedComp, view: &View, pain
     }
 }
 
+/// One frame of the Puppet tools over `comp` seen through `view`, showing
+/// the pins of `selected` (the Composition viewer: the selected layers; the
+/// Layer panel: its layer).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn frame(
     state: &mut PuppetState,
@@ -238,15 +239,16 @@ pub(crate) fn frame(
     tool: Tool,
     painter: &Painter,
     now: Time,
+    selected: &[PrimPath],
 ) -> PuppetFrame {
     let show_mesh = crate::tools::shared(cx.resources)
         .lock()
         .options
         .puppet_show_mesh;
     if show_mesh && pin_type(tool).is_some() {
-        paint_meshes(session, comp, view, painter);
+        paint_meshes(selected, comp, view, painter);
     }
-    let handles = handles(session, comp, view);
+    let handles = handles(selected, comp, view);
     state
         .selected
         .retain(|p| handles.iter().any(|h| h.pin == *p));
