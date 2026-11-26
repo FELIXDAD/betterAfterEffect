@@ -269,12 +269,60 @@ fn move_in(
     Ok(out)
 }
 
+/// Points outlining the shape item `item` at `t` in its container's space:
+/// path vertices, through nested groups' transforms (skew left out).
+fn outline_points(stage: &Stage, item: &PrimPath, t: Time, out: &mut Vec<[f64; 2]>) {
+    let Some(ty) = stage.prim(item).and_then(|v| v.prim_type().cloned()) else {
+        return;
+    };
+    if ty == PrimType::PATH {
+        if let Some(Value::Bezier(b)) = query::sample_attr(stage, item, "path", t) {
+            out.extend(b.vertices);
+        }
+    } else if ty == PrimType::SHAPE_GROUP {
+        let Ok(inner) = child(item, query::CONTENTS) else {
+            return;
+        };
+        let mut pts = Vec::new();
+        for c in stage.children(&inner) {
+            outline_points(stage, &c, t, &mut pts);
+        }
+        let v2 = |a: &str, d: [f64; 2]| match query::sample_attr(stage, item, a, t) {
+            Some(Value::Vec2(v)) => v,
+            _ => d,
+        };
+        let anchor = v2("transform:anchor_point", [0.0, 0.0]);
+        let position = v2("transform:position", [0.0, 0.0]);
+        let scale = v2("transform:scale", [100.0, 100.0]);
+        let r = query::sample_attr(stage, item, "transform:rotation", t)
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+            .to_radians();
+        let (sin, cos) = r.sin_cos();
+        out.extend(pts.into_iter().map(|[x, y]| {
+            let (x, y) = (
+                (x - anchor[0]) * scale[0] / 100.0,
+                (y - anchor[1]) * scale[1] / 100.0,
+            );
+            [
+                position[0] + x * cos - y * sin,
+                position[1] + x * sin + y * cos,
+            ]
+        }));
+    } else if let Some(b) = crate::shape::parametric_outline(stage, item, t) {
+        out.extend(b.vertices);
+    }
+}
+
 pub struct GroupShapes;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GroupShapesParams {
     /// Shape groups and items of one shape layer's or group's contents.
     pub items: Vec<PrimPath>,
+    /// Layer time of the outline that places the group's anchor point.
+    #[serde(default)]
+    pub time: Option<Time>,
 }
 
 impl Command for GroupShapes {
@@ -300,6 +348,21 @@ impl Command for GroupShapes {
             .iter()
             .map(|i| (i.name().to_owned(), composed_tree(tx.stage(), i)))
             .collect();
+        // AE puts the new group's anchor point at the center of its contents'
+        // bounding box (and its position there: nothing moves).
+        let mut pts = Vec::new();
+        for i in &items {
+            outline_points(tx.stage(), i, p.time.unwrap_or(Time::ZERO), &mut pts);
+        }
+        let center = pts.split_first().map(|(first, rest)| {
+            let (lo, hi) = rest.iter().fold((*first, *first), |(lo, hi), q| {
+                (
+                    [lo[0].min(q[0]), lo[1].min(q[1])],
+                    [hi[0].max(q[0]), hi[1].max(q[1])],
+                )
+            });
+            [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]
+        });
         crate::layer::delete_prims(tx, &items, Time::ZERO)?;
         let name = query::next_numbered_name(tx.stage(), &parent, crate::names::localized("Group"));
         let group = child(
@@ -308,6 +371,10 @@ impl Command for GroupShapes {
         )?;
         create(tx, &group, PrimType::SHAPE_GROUP, index)?;
         set(tx, &group, "name", Value::String(name))?;
+        if let Some(c) = center {
+            set(tx, &group, "transform:anchor_point", Value::Vec2(c))?;
+            set(tx, &group, "transform:position", Value::Vec2(c))?;
+        }
         let inner = child(&group, query::CONTENTS)?;
         create(tx, &inner, PrimType::FOLDER, None)?;
         move_in(tx, &inner, trees, None)?;

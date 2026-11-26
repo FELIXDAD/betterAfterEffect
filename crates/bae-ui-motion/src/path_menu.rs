@@ -182,6 +182,18 @@ pub(crate) fn one_vertex(cx: &MenuContext<'_>) -> bool {
     single_vertex(&crate::common::session(cx.resources)).is_some()
 }
 
+/// The current time in the layer of `items`.
+fn layer_time(
+    stage: &Stage,
+    session: &SharedSession,
+    items: &[PrimPath],
+) -> Option<bae_model::Time> {
+    let first = items.first()?;
+    let info = crate::common::active_comp(stage, session)?;
+    let now = session.lock().time(&info.path);
+    Some(query::to_key_time(stage, first, now))
+}
+
 /// Runs a Mask and Shape Path item; `false` for other actions.
 pub(crate) fn handle(id: &str, cx: &mut PanelContext<'_>) -> bool {
     let session = crate::common::session(cx.resources);
@@ -211,18 +223,18 @@ pub(crate) fn handle(id: &str, cx: &mut PanelContext<'_>) -> bool {
         }
         CONVERT => {
             let items = parametric(stage, &session);
-            let time = items.first().and_then(|i| {
-                let info = crate::common::active_comp(stage, &session)?;
-                let now = session.lock().time(&info.path);
-                Some(query::to_key_time(stage, i, now))
-            });
-            (!items.is_empty())
-                .then(|| json!({"items": items, "time": time}))
-                .map(|p| ("shape.convert_to_path", p))
+            let time = layer_time(stage, &session, &items);
+            (!items.is_empty()).then(|| {
+                (
+                    "shape.convert_to_path",
+                    json!({"items": items, "time": time}),
+                )
+            })
         }
         GROUP => {
             let items = selected_shapes(stage, &session);
-            (!items.is_empty()).then(|| ("shape.group", json!({ "items": items })))
+            let time = layer_time(stage, &session, &items);
+            (!items.is_empty()).then(|| ("shape.group", json!({"items": items, "time": time})))
         }
         UNGROUP => {
             let g = groups(stage, &session);

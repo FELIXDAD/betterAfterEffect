@@ -423,6 +423,16 @@ fn convert_group_and_ungroup_shapes() {
     let top = h.contents(&layer);
     assert_eq!(top.len(), 1);
     assert_eq!(h.name(&top[0]), "Group 1");
+    // Its anchor point and position at the center of both shapes (layer
+    // space: x −220…180, y −130…120); nothing moves.
+    assert!(close(
+        vec2v(h.value(&top[0], "transform:anchor_point")),
+        [-20.0, -5.0]
+    ));
+    assert!(close(
+        vec2v(h.value(&top[0], "transform:position")),
+        [-20.0, -5.0]
+    ));
     let inner: Vec<String> = h.contents(&top[0]).iter().map(|p| h.name(p)).collect();
     assert_eq!(inner, ["Ellipse 1", "Rectangle 1"]);
     h.session().lock().selected_groups = vec![row(&top[0])];
