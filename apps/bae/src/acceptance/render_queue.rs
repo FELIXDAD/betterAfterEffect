@@ -840,16 +840,11 @@ fn typed_frame_numbers_stay_inside_the_comp() {
     let Some(mut h) = gpu_gui() else { return };
     comp_with(&mut h, &["motion.layer.new.solid"]);
     key(&mut h, Modifiers::COMMAND, Key::M);
-    // The start and end fields: the Render Queue's two spin buttons (the first
-    // two in the tree apart from the viewer bar's exposure; the Properties
-    // panel has more further on).
-    let fields = |h: &Ui| -> Vec<(Rect, String)> {
-        h.root()
-            .query_all_by_role(egui::accesskit::Role::SpinButton)
-            .filter(|n| n.accesskit_node().label().as_deref() != Some("Adjust Exposure"))
-            .map(|n| (n.rect(), n.value().unwrap_or_default()))
-            .take(2)
-            .collect()
+    let fields = |h: &Ui| {
+        ["Frames · Start", "Frames · End"].map(|name| {
+            let node = queue_control(h, 1, name).expect("frame range control");
+            (node.rect(), node.value().unwrap_or_default())
+        })
     };
     let f = fields(&h);
     assert_eq!(
