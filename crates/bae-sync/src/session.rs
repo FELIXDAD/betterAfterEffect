@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
 use bae_model::StageEvent;
-use bae_model::loro::VersionVector;
+use bae_model::loro::{Counter, PeerID, VersionVector};
 
 use crate::client::ClientId;
 use crate::docs::{DocSet, Imported};
@@ -84,9 +84,10 @@ pub struct PumpOutcome {
     /// usable: received data that could not be imported (corrupt payload, model
     /// error), a document that could not be exported (for a reply or for
     /// sending), or one whose update is larger than the transport may send
-    /// ([`SyncError::MessageTooLarge`]; tried again once the remote's version of
-    /// it changes, e.g. after a reconnect). Messages of unknown types never get
-    /// here: transports skip them.
+    /// ([`SyncError::MessageTooLarge`]; tried again only once the remote got more
+    /// of the ops it lacked, e.g. another way, or after [`SyncSession::reset`],
+    /// so it is reported once, not on every edit of the document). Messages of
+    /// unknown types never get here: transports skip them.
     pub errors: Vec<SyncError>,
     /// Someone came online, went offline or changed their presence.
     pub presence_changed: bool,
@@ -148,9 +149,9 @@ pub struct SyncSession {
     in_flight: BTreeMap<DocKey, InFlight>,
     /// Documents listed in the remote's last `Hello`.
     listed: BTreeSet<DocKey>,
-    /// Documents whose update did not fit in one message, with what the remote
-    /// had then: not exported again until that changes.
-    too_large: BTreeMap<DocKey, VersionVector>,
+    /// Documents whose update did not fit in one message: not exported again
+    /// until it can have become smaller (see `TooLarge`).
+    too_large: BTreeMap<DocKey, TooLarge>,
 }
 
 impl SyncSession {
@@ -614,7 +615,9 @@ impl SyncSession {
                 continue;
             };
             let known = remote.entry(key.clone()).or_default();
-            if known.includes_vv(&local) || self.too_large.get(&key) == Some(known) {
+            if known.includes_vv(&local)
+                || self.too_large.get(&key).is_some_and(|t| !t.may_fit(known))
+            {
                 continue;
             }
             let data = match docs.export_updates(&key, known) {
@@ -637,9 +640,9 @@ impl SyncSession {
                     sent = true;
                 }
                 // Only this document is stuck (spec 3.1); the others go on. It
-                // is tried again when the remote's version of it changes.
+                // is tried again once the remote has more of the ops it lacked.
                 Err(e @ SyncError::MessageTooLarge { .. }) => {
-                    self.too_large.insert(key, known.clone());
+                    self.too_large.insert(key, TooLarge::new(&local, known));
                     out.errors.push(e);
                 }
                 Err(e) => return Err(e),
@@ -670,6 +673,44 @@ impl SyncSession {
         self.accepted += len;
         Ok(())
     }
+}
+
+/// What a document's update that did not fit in one message consisted of: for
+/// each peer whose ops the remote lacked, how far the remote had them. Local
+/// ops only add to the update, and so does the remote getting other peers'
+/// ops (collaborators' edits) or losing some; it can only get smaller once the
+/// remote has more of one of these peers' ops (it got them another way, e.g.
+/// from a shared folder or another client of the hub). Until then exporting
+/// it again (hundreds of MiB) would only fail again.
+#[derive(Debug)]
+struct TooLarge {
+    lacked: Vec<(PeerID, Counter)>,
+}
+
+impl TooLarge {
+    fn new(local: &VersionVector, known: &VersionVector) -> Self {
+        let lacked = local
+            .iter()
+            .filter_map(|(peer, &end)| {
+                let had = counter(known, peer);
+                (end.max(0) > had).then_some((*peer, had))
+            })
+            .collect();
+        TooLarge { lacked }
+    }
+
+    /// Whether the update may have become smaller now that the remote has
+    /// `known`.
+    fn may_fit(&self, known: &VersionVector) -> bool {
+        self.lacked
+            .iter()
+            .any(|(peer, had)| counter(known, peer) > *had)
+    }
+}
+
+/// How many ops of `peer` `vv` includes.
+fn counter(vv: &VersionVector, peer: &PeerID) -> Counter {
+    vv.get(peer).copied().unwrap_or(0).max(0)
 }
 
 /// Data of one document sent but not confirmed by a remote `Hello` yet: the

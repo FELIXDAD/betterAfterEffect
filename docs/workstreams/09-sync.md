@@ -85,6 +85,7 @@
   - **内存说明**：原来写的"每个连接约一条消息 + 1 MiB"只算了发送。收一条大消息时 tungstenite 先拼成一整块，解码又复制一份数据，约两到三倍。现在 `HubTransport::recv` 用 `Message::decode_owned` 直接拿拼好的那块内存（单元测试 `decode_owned_does_not_copy_the_payload` 检查指针没变），新版本发来的大消息收的时候最多约两倍；旧版本的单帧消息仍然复制一次。spec 3.1、Hub 的 README、`deploy/README.md` 和自动生成的 `hub.toml` 注释都改成发送、接收分开写。
   - spec 3.1 和 `tests/backpressure.rs` 原来说第一次同步时队列"最多一个文档"，实际最多约 `max_backlog` 加一个文档（测试里约 1.75 MiB），已改正。
   - **丢了的数据不补发**（spec 2.4）：在途数据"离开本进程超过两个 hello 间隔就算丢了"这条规则在 `ThreadedTransport` 上从不生效。原来的计时从最后一次看到 `backlog() > 0` 算起，而会话自己每个 hello 间隔发的 `Hello` 都会让它短暂大于 0，链路不断时丢了的数据就一直不补发。现在会话累计交给传输的字节数，每条数据记下发完它时的累计值，累计值减去 `backlog()` 达到它时才算离开，后面排着的消息不影响它；Relay 转发的在线状态改经会话发送（`SyncSession::forward`），也计入累计值。同一个文档确认前又发的数据合成一组，最早那条确认后这一组接着计时，先发的小修改确认了也不会让后面还在排队的大消息被当成丢了。测试：`tests/backpressure.rs` 的 `a_lost_update_is_sent_again_while_the_queue_stays_busy`（发送方的队列只有自己的 `Hello` 时，以及每次 `pump` 都有在线状态、队列从不为空时，丢了的修改都在 15 个 tick 内补发；修改前 100 个 tick 都没补发）、`a_large_update_after_a_small_one_is_sent_once`（去掉"这一组接着计时"时 8 MiB 发了两遍）、`a_lost_update_is_sent_again_while_the_relay_forwards_presence`（Relay 每轮转发 2 KB 的在线状态，18 个 tick 补发；修改前 1000 个 tick 都没补发，转发不计入累计值时 483 个 tick）。
+  - **放不下的文档反复导出**（spec 2.4）：一个文档的增量超过消息上限后，原来只要对方的版本一变就再试。协作者在改这个文档时，对方的版本每收到一次修改就变一次，于是每次都再导出几百 MiB、再失败、再报一次错（Hub 每次都写日志）。现在记下增量由哪些 peer 的操作组成、对方当时有到哪里，只有对方这些 peer 的操作变多了（从别的途径拿到了）或者 `reset()` 之后才再试；其他变化只会让增量变大。测试：`tests/too_large.rs` 的 `an_oversized_update_is_not_exported_again_while_the_remote_edits`（对方改 20 次只导出、报错一次，修改前 21 次；`reset()` 后再试一次；对方从别的途径拿到数据后，之后的修改照常发过去，改成从不再试时这一步失败）。
 
 ## 请求（其他工作流在这里留言）
 
