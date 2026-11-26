@@ -159,7 +159,9 @@ fn edit_pins(
     let Some(((pin, value), peers)) = values.split_first() else {
         return;
     };
+    let auto_key = session.lock().auto_key;
     session.lock().scrub = Some(Scrub {
+        auto_key,
         path: pin.clone(),
         attr: attr.to_owned(),
         value: value.clone(),

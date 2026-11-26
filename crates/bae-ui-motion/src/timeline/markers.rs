@@ -377,6 +377,8 @@ pub struct MarkerDialog {
     pub comment: String,
     pub label: usize,
     pub protected_region: bool,
+    /// Layer markers: Segmentation Marker (else Comment Marker).
+    pub segment: bool,
 }
 
 impl MarkerDialog {
@@ -406,6 +408,7 @@ impl MarkerDialog {
             protected_region: get("protected_region")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            segment: get("segment").and_then(|v| v.as_bool()).unwrap_or(false),
         })
     }
 
@@ -420,6 +423,7 @@ impl MarkerDialog {
             comment: String::new(),
             label: 0,
             protected_region: false,
+            segment: false,
         }
     }
 
@@ -437,6 +441,8 @@ impl MarkerDialog {
         });
         if self.owner == self.info.path {
             fields["protected_region"] = json!(self.protected_region);
+        } else {
+            fields["segment"] = json!(self.segment);
         }
         match &self.marker {
             Some(m) => {
@@ -526,13 +532,14 @@ pub(super) fn marker_body(ui: &mut Ui, d: &mut MarkerDialog) {
     if d.owner == d.info.path {
         widgets::checkbox(ui, &mut d.protected_region, tr("Protected Region"));
     } else {
-        // Layer markers: Comment Marker / Segment Marker (AE 26). The model has no
-        // marker type yet, so only the default is shown.
-        ui.add_enabled_ui(false, |ui| {
-            ui.horizontal(|ui| {
-                let _ = ui.radio(true, tr("Comment Marker"));
-                let _ = ui.radio(false, tr("Segment Marker"));
-            });
+        // Layer markers: Comment Marker / Segmentation Marker (AE 26).
+        ui.horizontal(|ui| {
+            if ui.radio(!d.segment, tr("Comment Marker")).clicked() {
+                d.segment = false;
+            }
+            if ui.radio(d.segment, tr("Segment Marker")).clicked() {
+                d.segment = true;
+            }
         });
     }
 }

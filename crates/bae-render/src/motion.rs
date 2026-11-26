@@ -33,6 +33,9 @@ pub struct CompMotionBlur {
     pub times: Vec<Time>,
     /// The active camera at each sample time (`None` = the default camera).
     pub cameras: Vec<Option<Camera>>,
+    /// The comp's lights at each sample time (empty: the frame's lights at
+    /// every sample).
+    pub lights: Vec<std::sync::Arc<[crate::light::Light]>>,
     /// Adaptive Sample Limit: the most samples a 2D layer gets (AE default 128).
     pub adaptive_limit: u32,
 }

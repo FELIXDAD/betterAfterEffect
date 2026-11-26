@@ -320,6 +320,7 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             .map(|a| prop(stage, layer, a, three_d))
             .collect(),
     });
+    out.extend(crate::layer_styles::node(stage, layer));
     out
 }
 
@@ -437,6 +438,9 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             if match_name == bae_motion::puppet::PUPPET {
                 children.extend(puppet_mesh(stage, layer, &e));
             }
+            if match_name == bae_motion::paint::PAINT {
+                children.extend(paint_strokes(stage, layer, &e));
+            }
             Some(Node::Group {
                 id: format!("{layer}#{e}"),
                 label: crate::effects::instance_name(stage, &e),
@@ -450,6 +454,18 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
 fn pin_label(stage: &Stage, pin: &PrimPath) -> String {
     let name = query::display_name_of(stage, pin);
     ["Puppet Pin", "Overlap", "Starch"]
+        .into_iter()
+        .find_map(|base| {
+            let n = name.strip_prefix(base)?.strip_prefix(' ')?;
+            n.parse::<u32>().ok().map(|n| format!("{} {n}", tr(base)))
+        })
+        .unwrap_or(name)
+}
+
+/// A stroke's name as AE shows it in the UI language ("Brush 1" → "画笔 1").
+fn stroke_label(stage: &Stage, stroke: &PrimPath) -> String {
+    let name = query::display_name_of(stage, stroke);
+    ["Brush", "Clone", "Eraser"]
         .into_iter()
         .find_map(|base| {
             let n = name.strip_prefix(base)?.strip_prefix(' ')?;
@@ -543,6 +559,68 @@ fn puppet_mesh(stage: &Stage, layer: &PrimPath, effect: &PrimPath) -> Option<Nod
     })
 }
 
+/// The Paint effect's strokes, newest first (AE): each with its Path, Stroke
+/// Options and Transform: <stroke> (all keyframable, previewed live).
+fn paint_strokes(stage: &Stage, layer: &PrimPath, effect: &PrimPath) -> Vec<Node> {
+    const OPTIONS: &[(&str, &str)] = &[
+        ("start", "Start"),
+        ("end", "End"),
+        ("color", "Color"),
+        ("diameter", "Diameter"),
+        ("angle", "Angle"),
+        ("hardness", "Hardness"),
+        ("roundness", "Roundness"),
+        ("spacing", "Spacing"),
+        ("channels", "Channels"),
+        ("opacity", "Opacity"),
+        ("flow", "Flow"),
+    ];
+    const TRANSFORM: &[(&str, &str)] = &[
+        ("transform:anchor_point", "Anchor Point"),
+        ("transform:position", "Position"),
+        ("transform:scale", "Scale"),
+        ("transform:rotation", "Rotation"),
+    ];
+    let props = |s: &PrimPath, attrs: &[(&str, &str)]| -> Vec<Node> {
+        attrs
+            .iter()
+            .map(|(attr, label)| Node::Prop {
+                path: s.clone(),
+                attr: (*attr).to_owned(),
+                label: tr(label).to_owned(),
+            })
+            .collect()
+    };
+    bae_motion::paint::strokes_of(stage, effect)
+        .into_iter()
+        .rev()
+        .map(|s| {
+            let label = stroke_label(stage, &s);
+            Node::Group {
+                id: format!("{layer}#{s}"),
+                label: label.clone(),
+                children: vec![
+                    Node::Prop {
+                        path: s.clone(),
+                        attr: "path".to_owned(),
+                        label: tr("Path").to_owned(),
+                    },
+                    Node::Group {
+                        id: format!("{layer}#{s}#options"),
+                        label: tr("Stroke Options").to_owned(),
+                        children: props(&s, OPTIONS),
+                    },
+                    Node::Group {
+                        id: format!("{layer}#{s}#transform"),
+                        label: format!("{} {label}", tr("Transform:")),
+                        children: props(&s, TRANSFORM),
+                    },
+                ],
+            }
+        })
+        .collect()
+}
+
 fn flatten_props(nodes: &[Node], out: &mut Vec<Node>) {
     for n in nodes {
         match n {
@@ -553,6 +631,33 @@ fn flatten_props(nodes: &[Node], out: &mut Vec<Node>) {
 }
 
 /// The properties a reveal filter shows directly under the layer.
+/// The masks of `layer`, in order.
+pub(crate) fn masks_of(stage: &Stage, layer: &PrimPath) -> Vec<PrimPath> {
+    layer.child("masks").map_or_else(
+        |_| Vec::new(),
+        |masks| {
+            stage
+                .children(&masks)
+                .into_iter()
+                .filter(|m| stage.prim(m).is_some_and(|v| v.is_a(&PrimType::MASK)))
+                .collect()
+        },
+    )
+}
+
+/// The mask attributes a reveal list asks for (M: Mask Path, F: Mask Feather,
+/// MM: all), as the masks' own attribute names (`*` = all).
+pub(crate) fn revealed_mask_attrs(list: &[String]) -> Vec<&'static str> {
+    list.iter()
+        .filter_map(|a| match a.as_str() {
+            "mask_path" => Some("path"),
+            "mask_feather" => Some("feather"),
+            "masks" => Some("*"),
+            _ => None,
+        })
+        .collect()
+}
+
 pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<Node> {
     let mut all = Vec::new();
     flatten_props(&layer_tree(stage, layer), &mut all);

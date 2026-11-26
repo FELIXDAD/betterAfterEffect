@@ -41,6 +41,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    display: crate::source_view_menu::SourceView,
     tracks: crate::tracker::overlay::Overlay,
     eval: EvalCache,
     gpu: Option<GpuPreview>,
@@ -68,25 +69,78 @@ pub struct LayerPanel {
     pan: egui::Vec2,
 }
 
-/// Double-clicking a layer (AE): a pre-comp layer opens its composition, any
-/// other layer opens in the Layer panel.
-pub(crate) fn open(cx: &mut PanelContext<'_>, session: &SharedSession, layer: &PrimPath) {
-    let source = cx
-        .stage
-        .prim(layer)
-        .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned())
-        .filter(|s| query::comp_info(cx.stage, s).is_some());
-    if let Some(comp) = source {
-        match query::owning_comp(cx.stage, layer) {
-            Some(parent) => session.lock().open_from(&parent, &comp),
-            None => session.lock().open_comp(&comp),
+/// Resolve a timeline or Composition viewer double-click with AE's Composition preferences.
+pub(crate) fn open_clicked(
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    layer: &PrimPath,
+    alt: bool,
+    tool: crate::tools::Tool,
+    eval: &mut EvalCache,
+) {
+    let prefs = crate::prefs::current(cx.resources);
+    let paint =
+        tool.is_layer_paint() && prefs.bool("composition.double_click_paint_roto_opens_layer");
+    if !paint {
+        if let Some(source) = query::precomp_source(cx.stage, layer) {
+            if (prefs.str("composition.double_click_comp_layer") == "source_comp_panel") != alt {
+                let mut s = session.lock();
+                if prefs.bool("composition.synchronize_time_all_related_items")
+                    && let Some(info) = query::comp_info(cx.stage, &source)
+                {
+                    let now = s.active_time();
+                    let remap = cx
+                        .stage
+                        .prim(layer)
+                        .and_then(|p| query::static_value(&p, "time_remap_enabled"))
+                        .and_then(|v| v.as_bool())
+                        == Some(true);
+                    let time = if remap {
+                        eval.get(cx.stage)
+                            .evaluate_attribute(cx.stage, layer, "time_remap", now)
+                            .ok()
+                            .and_then(|v| {
+                                v.as_time().or_else(|| v.as_f64().map(Time::from_seconds))
+                            })
+                    } else {
+                        None
+                    };
+                    s.set_time(
+                        &info,
+                        time.unwrap_or_else(|| {
+                            query::layer_timing(cx.stage, layer).layer_time(now)
+                        }),
+                    );
+                }
+                // The Composition Navigator's path runs through the comp it
+                // was opened from.
+                match query::owning_comp(cx.stage, layer) {
+                    Some(parent) => s.open_from(&parent, &source),
+                    None => s.open_comp(&source),
+                }
+                drop(s);
+                cx.open_panel("composition");
+                cx.open_panel("timeline");
+                return;
+            }
+        } else if (prefs.str("composition.double_click_footage_layer") == "source_footage_panel")
+            != alt
+            && matches!(
+                query::layer_kind(cx.stage, layer).as_deref(),
+                Some("footage" | "audio")
+            )
+            && let Some(asset) = cx
+                .stage
+                .prim(layer)
+                .and_then(|p| p.value("source")?.as_prim_ref().cloned())
+        {
+            session.lock().footage_view = Some(asset);
+            cx.open_panel("footage");
+            return;
         }
-        cx.open_panel("timeline");
-        cx.open_panel("composition");
-    } else {
-        session.lock().layer_panel = Some(layer.clone());
-        cx.open_panel("layer");
     }
+    session.lock().layer_panel = Some(layer.clone());
+    cx.open_panel("layer");
 }
 
 /// The layer the panel shows: the one opened last, or the selected one.
@@ -134,14 +188,16 @@ pub(crate) fn alone(
 }
 
 impl Panel for LayerPanel {
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        self.display.menu(ui);
+    }
+
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         let session = common::session(cx.resources);
         match shown_layer(&session) {
-            Some(l) if cx.stage.prim(&l).is_some() => TabInfo::new(format!(
-                "{} {}",
-                tr("Layer"),
-                query::display_name_of(cx.stage, &l)
-            )),
+            Some(l) if cx.stage.prim(&l).is_some() => {
+                common::related_tab(cx, "Layer", &l, &query::display_name_of(cx.stage, &l))
+            }
             _ => TabInfo::new(tr("Layer")),
         }
     }
@@ -162,7 +218,8 @@ impl Panel for LayerPanel {
         );
         let bar = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
         ui.allocate_rect(full, Sense::hover());
-        ui.painter().rect_filled(area, 0.0, Color32::from_gray(35));
+        ui.painter()
+            .rect_filled(area, 0.0, self.display.background(ui));
         let info = common::active_comp(cx.stage, &session);
         let layer = shown_layer(&session).filter(|l| cx.stage.prim(l).is_some());
         let (Some(info), Some(layer)) = (info, layer) else {
@@ -195,9 +252,16 @@ impl Panel for LayerPanel {
             _ => 0,
         };
         if let Some((one, min)) = alone(&comp, &layer, effects) {
-            let size = vec2(one.width as f32, one.height as f32);
+            let source = cx
+                .stage
+                .prim(&evaluated.path)
+                .and_then(|l| l.value("source").and_then(|v| v.as_prim_ref()).cloned());
+            let aspect = self.display.aspect(cx.stage, source.as_ref());
+            let size = vec2(one.width as f32 * aspect, one.height as f32);
             let panning = self.navigate(ui, cx, area, size);
-            let view = self.picture(ui, cx, area, &one, min, evaluated);
+            let (mut view, _) = self.view(area, size, ui.ctx().pixels_per_point());
+            view.aspect = aspect;
+            self.picture(ui, cx, area, &one, min, evaluated, &view);
             // Space pans whatever the tool (AE); a paint tool paints, a
             // Puppet tool places pins, otherwise a shown Liquify effect brushes.
             if !panning
@@ -222,13 +286,16 @@ impl Panel for LayerPanel {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({ "render": self.render }))
+        Some(serde_json::json!({ "render": self.render, "display": self.display }))
     }
 }
 
 impl LayerPanel {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
         LayerPanel {
+            display: state
+                .and_then(|v| serde_json::from_value(v["display"].clone()).ok())
+                .unwrap_or_default(),
             render: state
                 .and_then(|s| s.get("render"))
                 .and_then(|v| v.as_bool())
@@ -247,6 +314,7 @@ impl LayerPanel {
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let view = View {
             origin: area.center() - size * scale / 2.0 + self.pan,
+            aspect: 1.0,
             scale,
             point: 6.0,
             camera: None,
@@ -325,6 +393,7 @@ impl LayerPanel {
     }
 
     /// The layer's picture, fitted in `area`, and the masks in Masks view.
+    #[allow(clippy::too_many_arguments)]
     fn picture(
         &mut self,
         ui: &Ui,
@@ -333,14 +402,16 @@ impl LayerPanel {
         one: &EvaluatedComp,
         min: DVec2,
         layer: &bae_anim::EvaluatedLayer,
-    ) -> View {
-        let ppp = ui.ctx().pixels_per_point();
-        let (view, _) = self.view(area, vec2(one.width as f32, one.height as f32), ppp);
-        let frame = render::comp_rect(&view, one.width, one.height);
+        view: &View,
+    ) {
+        let frame = render::comp_rect(view, one.width, one.height);
         let painter = ui.painter_at(area);
+        if self.display.grid {
+            crate::viewer::checkerboard(&painter, frame.intersect(area), cx.resources);
+        }
         if self.gpu.is_none() && !self.gpu_tried {
             self.gpu_tried = true;
-            self.gpu = GpuPreview::new(cx.resources);
+            self.gpu = GpuPreview::new(cx.resources, ui.ctx());
         }
         let image = self
             .gpu
@@ -387,13 +458,16 @@ impl LayerPanel {
             ui,
             cx,
             area,
-            &view,
+            view,
             min,
             &layer.path,
             |painter, lens, source, scale| {
                 let to_screen = |v: DVec2| {
                     lens.center()
-                        + egui::vec2((v.x - source.x) as f32, (v.y - source.y) as f32) * scale
+                        + egui::vec2(
+                            (v.x - source.x) as f32 * view.aspect,
+                            (v.y - source.y) as f32,
+                        ) * scale
                 };
                 painter.rect_filled(lens, 0., Color32::from_gray(35));
                 if let Some(img) = image {
@@ -429,11 +503,10 @@ impl LayerPanel {
             for m in &layer.masks {
                 let stroke = Stroke::new(1.0, crate::viewer::mask_color(cx.stage, &m.path));
                 painter.extend(crate::viewer::path_shapes(
-                    &m.shape, &to_panel, &view, stroke,
+                    &m.shape, &to_panel, view, stroke,
                 ));
             }
         }
-        view
     }
 
     /// The Puppet tools on the shown layer: its pins in layer space (the

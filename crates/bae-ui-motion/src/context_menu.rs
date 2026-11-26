@@ -174,7 +174,7 @@ pub(crate) fn show_item(
             }
             // Filled from the project in AE (Reveal in Composition): greyed.
             Sub(title, []) => {
-                ui.add_enabled(false, egui::Button::new(tr(title)));
+                ui.add_enabled_ui(false, |ui| common::submenu(ui, tr(title), &mut |_| {}));
             }
             Sub(title, list) => common::submenu(ui, tr(title), &mut |ui| {
                 chosen = chosen.or(show_item(ui, cx, list, off, kind));
@@ -345,34 +345,6 @@ pub(crate) const PROJECT_ITEM: &[Entry] = &[
     Sub("Reveal in Composition", &[]),
     Off("Solids Folder"),
     Own("Rename"),
-];
-
-/// Project panel, right-click on the column headers.
-pub(crate) const PROJECT_HEADER: &[Entry] = &[
-    Off("Hide This"),
-    Off("Rename This..."),
-    Sep,
-    Sub(
-        "Columns",
-        &[
-            Off("Name"),
-            Off("Label"),
-            Off("Type"),
-            Off("Size"),
-            Off("Frame Rate"),
-            Off("Media Start"),
-            Off("Media End"),
-            Off("Media Duration"),
-            Off("In Point"),
-            Off("Out Point"),
-            Off("Duration"),
-            Off("Tape Name"),
-            Off("Comment"),
-            Off("File Path"),
-            Off("Date"),
-            Off("Video Info"),
-        ],
-    ),
 ];
 
 /// Chinese strings of this module (keys are the English text, see

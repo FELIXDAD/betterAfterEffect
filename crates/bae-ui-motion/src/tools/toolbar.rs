@@ -528,9 +528,29 @@ fn axis_modes(ui: &mut Ui, o: &mut ToolOptions) {
 /// snap to features of collapsed and text layers) are not available yet.
 fn snapping(ui: &mut Ui, o: &mut ToolOptions) {
     widgets::checkbox(ui, &mut o.snapping, tr("Snapping"));
-    ui.add_enabled_ui(false, |ui| {
-        icons::button(ui, Icon::SnapEdges, 20.0, false);
-        icons::button(ui, Icon::SnapFeatures, 20.0, false);
+    // AE's two snapping options, usable while Snapping is on.
+    ui.add_enabled_ui(o.snapping, |ui| {
+        for (flag, icon, name) in [
+            (
+                &mut o.snap_edges,
+                Icon::SnapEdges,
+                "Snap to edges extended beyond layer bounds",
+            ),
+            (
+                &mut o.snap_features,
+                Icon::SnapFeatures,
+                "Snap to features inside collapsed compositions and text layers",
+            ),
+        ] {
+            let on = *flag;
+            if icons::button(ui, icon, 20.0, on)
+                .labeled_toggle(egui::WidgetType::Checkbox, tr(name), on)
+                .on_hover_text(tr(name))
+                .clicked()
+            {
+                *flag = !on;
+            }
+        }
     });
 }
 

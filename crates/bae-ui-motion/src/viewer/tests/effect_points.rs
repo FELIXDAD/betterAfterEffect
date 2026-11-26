@@ -146,3 +146,55 @@ fn particle_world_guides_follow_the_selected_layer_and_guide_controls() {
         .set_time(&info, bae_model::Time::from_seconds(0.5));
     assert_eq!(lines(&mut h).len(), plain.len() + 6);
 }
+
+#[test]
+fn cryptomatte_click_commits_one_stable_object_id() {
+    use bae_effects::exr_controls::{self, CryptoSelection};
+    use bae_gpu::channels::{ChannelInfo, CryptoLayer};
+    use std::sync::Arc;
+    let mut h = H::new();
+    let mut builder = bae_app::AppBuilder::new();
+    builder.add_module(bae_effects::EffectsModule);
+    let mut app = builder.build();
+    let regs = crate::effects::EffectRegistries {
+        defs: app.registry::<bae_model::EffectDef>(),
+        infos: app.registry::<bae_effects::EffectInfo>(),
+    };
+    bae_motion::effect::register_effect_commands(&mut h.reg, regs.defs.clone());
+    h.resources.insert(regs);
+    let layer = h.layer("solid");
+    h.select(&[&layer]);
+    let applied = h.run(
+        "effect.apply",
+        json!({"layers":[layer],"match_name":"Cryptomatte"}),
+    );
+    let effect = path(&applied["effects"][0]);
+    h.run("attr.set",json!({"path":effect,"attr":bae_model::effect::param_attr(3),"value":{"type":"bool","value":true}}));
+    h.frame(Vec::new(), Modifiers::NONE);
+    let dominant = (0..640 * 360)
+        .map(|i| if i % 640 < 320 { 98 } else { 99 })
+        .collect();
+    let info = ChannelInfo {
+        channels: vec![],
+        size: [640, 360],
+        crypto: vec![CryptoLayer {
+            name: "Object".into(),
+            ranks: vec![],
+            manifest: Default::default(),
+            dominant,
+        }],
+    };
+    h.session().lock().channel_frame = Some(Arc::new(crate::gpu_preview::ChannelFrame {
+        comp: h.comp.clone(),
+        time: bae_model::Time::ZERO,
+        layers: [(layer, Arc::new(info))].into(),
+    }));
+    h.tools().lock().set(Tool::Selection);
+    let result = h.click(400., 125., Modifiers::NONE);
+    assert_eq!(result.invocations.len(), 1);
+    h.apply(&result);
+    let value = h.value(&effect, &bae_model::effect::param_attr(1));
+    let sel: CryptoSelection = exr_controls::read(value.as_ref());
+    assert_eq!(sel.object, Some(99));
+    assert_eq!(sel.layer, "Object");
+}

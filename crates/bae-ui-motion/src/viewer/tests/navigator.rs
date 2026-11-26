@@ -26,7 +26,14 @@ fn the_navigator_shows_the_path_through_pre_comps() {
             &h.resources,
             &mut requests,
         );
-        crate::layer_panel::open(&mut cx, &h.session(), &layer);
+        crate::layer_panel::open_clicked(
+            &mut cx,
+            &h.session(),
+            &layer,
+            false,
+            Tool::Selection,
+            &mut crate::common::EvalCache::default(),
+        );
     }
     assert_eq!(h.session().lock().comp_flow, [outer.clone(), inner.clone()]);
     h.frame(Vec::new(), Modifiers::NONE);

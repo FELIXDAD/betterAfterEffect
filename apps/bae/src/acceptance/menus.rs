@@ -101,8 +101,6 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
 /// BAE-only items (no AE counterpart): the History and Agent panels, the Agent
 /// workspace.
 const BAE_ONLY: &[&str] = &[
-    #[cfg(target_os = "macos")]
-    "shell.app.settings",
     "shell.window.history",
     "shell.window.agent_activity",
     "shell.window.agent_proposals",
@@ -488,7 +486,8 @@ use egui_kittest::kittest::Queryable as _;
 // ---- Retest of #109 / #112 / #117 / #118 (dev 763eaad) ----
 
 fn render_queue_open(h: &Ui) -> bool {
-    h.query_by_label("Render").is_some()
+    h.query_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+        .is_some()
 }
 
 #[test]
