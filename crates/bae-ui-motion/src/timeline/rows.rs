@@ -396,7 +396,7 @@ impl TimelinePanel {
                             .id_salt(rid("parent")),
                     );
                     let current = parent_items[sel];
-                    widgets::dropdown(
+                    let dresp = widgets::dropdown(
                         &mut child,
                         rid("parent_dd"),
                         &mut sel,
@@ -408,6 +408,15 @@ impl TimelinePanel {
                         &bae_ui::a11y::context(&[&layer_ctx, tr("Parent & Link")]),
                         current,
                     );
+                    // AE: a right-click pops the same list.
+                    if !locked {
+                        let mut picked = None;
+                        crate::common::context_menu(&dresp, &mut |ui| {
+                            picked =
+                                menus::parent_menu(ui, parent_items, before, row.layer_index + 1);
+                        });
+                        sel = picked.unwrap_or(sel);
+                    }
                     if sel != before {
                         let parent = (sel > 0).then(|| layers.paths[sel - 1].clone());
                         if parent.as_ref() != Some(layer) {
@@ -968,6 +977,22 @@ impl TimelinePanel {
                 )
             };
             common::apply_edit(cx, session, path, attr, now, edit);
+            // AE: a right-click on the value shows the property name's menu. The
+            // value widgets take the click, so read it from the pointer.
+            let used = child.min_rect();
+            let right_click = ui.input(|i| {
+                i.pointer.secondary_clicked()
+                    && i.pointer.interact_pos().is_some_and(|p| used.contains(p))
+            });
+            if query::locked_layer_of(stage, path).is_none() {
+                let mut vresp = ui.interact(used, id.with("val_menu"), Sense::hover());
+                if right_click {
+                    vresp.flags |= egui::response::Flags::CLICKED;
+                }
+                crate::common::context_menu(&vresp, &mut |ui| {
+                    menus::property_menu(ui, cx, session, path, attr, now);
+                });
+            }
         }
         // Keyframes (layer bar mode; the Graph Editor draws its own).
         if !self.graph_mode {
