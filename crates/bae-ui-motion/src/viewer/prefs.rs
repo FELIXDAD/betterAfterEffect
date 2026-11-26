@@ -17,6 +17,7 @@ pub(crate) struct ViewerPrefs {
     pub label_handles: bool,
     pub cycle_mask_colors: bool,
     pub center_shape_anchor: bool,
+    pub show_precomp_bounds: bool,
 }
 
 impl Default for ViewerPrefs {
@@ -32,6 +33,7 @@ impl ViewerPrefs {
             label_handles: p.bool(keys::LABEL_HANDLES),
             cycle_mask_colors: p.bool("appearance.cycle_mask_colors"),
             center_shape_anchor: p.bool(keys::CENTER_SHAPE_ANCHOR),
+            show_precomp_bounds: p.bool("composition.show_bounding_box_precomp_layers"),
         }
     }
 

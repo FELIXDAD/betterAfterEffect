@@ -1290,6 +1290,9 @@ impl Panel for CompositionViewer {
                 .and_then(|v| v.as_f64())
                 .map_or(8, |v| v as usize);
             let c = self.prefs.handle_color(theme::label_color(label));
+            if self.prefs.show_precomp_bounds {
+                overlay::precomp_bounds(&painter, l, &view, &outer, false, c);
+            }
             if let Some(q) = render::bounds_quad(l, &view, &outer) {
                 painter.add(egui::Shape::closed_line(q.to_vec(), Stroke::new(1.0, c)));
                 for i in (0..4).filter(|_| controls.handles) {
