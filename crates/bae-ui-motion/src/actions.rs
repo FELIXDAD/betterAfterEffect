@@ -47,6 +47,7 @@ pub mod ids {
     /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
+    pub const MINI_FLOW: &str = "motion.comp.composition_mini_flowchart";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
@@ -134,6 +135,15 @@ pub mod ids {
     pub const SELECT_LABEL_GROUP: &str = "motion.edit.select_label_group";
     /// Layer ▸ Transform ▸ Flip Horizontal / Flip Vertical (Scale X / Y negated).
     pub const FLIP_HORIZONTAL: &str = "motion.layer.flip_horizontal";
+    /// Layer ▸ Transform ▸ Anchor Point… / Position… / Scale… / Orientation… /
+    /// Rotation… / Opacity…: params `{"attr": "position"}` (the value dialog).
+    pub const TRANSFORM_DIALOG: &str = "motion.layer.transform_dialog";
+    /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
+    /// middle of the content, at the comp's center, 100%, no rotation).
+    pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
+    /// Layer ▸ Transform ▸ Center Anchor Point in Layer Content
+    /// (Cmd/Ctrl+Alt+Home): the layer stays where it is.
+    pub const CENTER_ANCHOR: &str = "motion.layer.center_anchor_point_in_layer_content";
     pub const FLIP_VERTICAL: &str = "motion.layer.flip_vertical";
     /// Layer ▸ Transform ▸ Center In View (AE Ctrl+Home): the anchor point to the
     /// middle of the comp.
@@ -221,6 +231,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
+    (ids::MINI_FLOW, "Composition Mini-Flowchart"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
@@ -249,6 +260,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::QUALITY, "Quality"),
     (ids::LABEL, "Label"),
     (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
+    (ids::TRANSFORM_DIALOG, "Transform"),
+    (ids::RESET_TRANSFORM, "Reset"),
+    (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
     (ids::FIT_TO_COMP, "Fit to Comp"),
@@ -391,6 +405,21 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
             (*name).to_owned(),
         );
     }
+    // Layer ▸ Transform's value dialogs: one row each.
+    for (attr, name) in [
+        ("anchor_point", "Anchor Point..."),
+        ("position", "Position..."),
+        ("scale", "Scale..."),
+        ("orientation", "Orientation..."),
+        ("rotation", "Rotation..."),
+        ("opacity", "Opacity..."),
+    ] {
+        add(
+            ids::TRANSFORM_DIALOG,
+            json!({ "attr": attr }),
+            name.to_owned(),
+        );
+    }
     for (quality, name) in [
         ("best", "Best Quality"),
         ("draft", "Draft Quality"),
@@ -436,9 +465,10 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
 /// `ae` keymap already binds. Commands other modules handle are bound when the
 /// app starts ([`late_bindings`]).
 pub fn bindings() -> KeymapBindings {
-    let v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
+    let mut v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
         k.status.works()
     }));
+    v.push(Binding::new("Tab", ids::MINI_FLOW).when("timeline"));
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
 }
 
@@ -652,6 +682,26 @@ fn transform_edits(
                 let anchor = t.anchor_point;
                 land(&mut t, parent, anchor, three_d);
             }
+            ids::CENTER_ANCHOR | ids::RESET_TRANSFORM => {
+                // The middle of the content (the comp's middle for layers
+                // without content, as AE).
+                let c = crate::render::layer_bounds(l).map_or(t.anchor_point, |(a, b)| {
+                    let c = (a + b) / 2.0;
+                    DVec3::new(c.x, c.y, t.anchor_point.z)
+                });
+                if id == ids::CENTER_ANCHOR {
+                    // The new anchor goes where the content's middle is now.
+                    t.position = t.matrix(three_d).transform_point3(c);
+                    t.anchor_point = c;
+                } else {
+                    t.anchor_point = c;
+                    t.scale = DVec3::splat(100.0);
+                    t.rotation = DVec3::ZERO;
+                    t.orientation = DVec3::ZERO;
+                    t.opacity = 100.0;
+                    t.position = parent.inverse().transform_point3(center);
+                }
+            }
             _ => {
                 let Some((a, b)) = crate::render::layer_bounds(l) else {
                     continue;
@@ -680,6 +730,31 @@ fn transform_edits(
         if t.scale != l.transform.scale {
             let v = t.scale;
             push("transform:scale", Value::Vec3([v.x, v.y, v.z]));
+        }
+        if t.anchor_point != l.transform.anchor_point {
+            let a = t.anchor_point;
+            let value = match query::sample_attr(stage, &l.path, "transform:anchor_point", time) {
+                Some(Value::Vec2(_)) => Value::Vec2([a.x, a.y]),
+                _ => Value::Vec3([a.x, a.y, a.z]),
+            };
+            push("transform:anchor_point", value);
+        }
+        if t.orientation != l.transform.orientation && three_d {
+            let o = t.orientation;
+            push("transform:orientation", Value::Vec3([o.x, o.y, o.z]));
+        }
+        let r = (t.rotation, l.transform.rotation);
+        if r.0.z != r.1.z {
+            push("transform:rotation", Value::Float(r.0.z));
+        }
+        if three_d && r.0.x != r.1.x {
+            push("transform:rotation_x", Value::Float(r.0.x));
+        }
+        if three_d && r.0.y != r.1.y {
+            push("transform:rotation_y", Value::Float(r.0.y));
+        }
+        if t.opacity != l.transform.opacity {
+            push("transform:opacity", Value::Float(t.opacity));
         }
         if t.position != l.transform.position {
             let p = t.position;
@@ -905,6 +980,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
+        ids::MINI_FLOW => {
+            s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
+                stage, &info.path,
+            ));
+            cx.open_panel("timeline");
+        }
         ids::GO_START => s.set_time(&info, Time::ZERO),
         ids::GO_END => s.set_time(&info, info.duration),
         ids::STEP => {
@@ -1395,8 +1476,22 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
+        ids::TRANSFORM_DIALOG => {
+            let kind = inv
+                .params
+                .get("attr")
+                .and_then(|v| v.as_str())
+                .and_then(crate::dialogs::TransformKind::from_param);
+            if let Some(kind) = kind
+                && !layers.is_empty()
+            {
+                crate::dialogs::transform_value(cx, &info.path, &layers, now, kind, None);
+            }
+        }
         ids::FLIP_HORIZONTAL
         | ids::FLIP_VERTICAL
+        | ids::RESET_TRANSFORM
+        | ids::CENTER_ANCHOR
         | ids::CENTER_IN_VIEW
         | ids::FIT_TO_COMP
         | ids::FIT_TO_COMP_WIDTH

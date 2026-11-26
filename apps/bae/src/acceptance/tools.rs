@@ -6,7 +6,7 @@
 use bae_model::{PrimPath, Value};
 use bae_motion::query;
 use bae_ui_motion::{SharedTools, Tool};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Rect, vec2};
 use egui_kittest::kittest::Queryable as _;
 
 use super::*;
@@ -39,35 +39,6 @@ fn button(h: &Ui, label: &str) -> Rect {
         .map(|n| n.rect())
         .min_by(|a, b| a.top().total_cmp(&b.top()))
         .unwrap_or_else(|| panic!("no “{label}”"))
-}
-
-fn drag(h: &mut Ui, from: Pos2, to: Pos2, modifiers: Modifiers) {
-    send(h, Event::PointerMoved(from));
-    send(h, Event::ModifiersChanged(modifiers));
-    send(
-        h,
-        Event::PointerButton {
-            pos: from,
-            button: PointerButton::Primary,
-            pressed: true,
-            modifiers,
-        },
-    );
-    for i in 1..=6 {
-        let t = i as f32 / 6.0;
-        send(h, Event::PointerMoved(from + (to - from) * t));
-    }
-    send(
-        h,
-        Event::PointerButton {
-            pos: to,
-            button: PointerButton::Primary,
-            pressed: false,
-            modifiers,
-        },
-    );
-    send(h, Event::ModifiersChanged(Modifiers::NONE));
-    settle(h);
 }
 
 fn key_down(h: &mut Ui, modifiers: Modifiers, key: Key, pressed: bool) {

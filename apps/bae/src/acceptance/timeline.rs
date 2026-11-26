@@ -11,9 +11,9 @@ use super::*;
 
 const POSITION: &str = "transform:position";
 
-/// The timeline's "Layer Name" column header.
+/// The timeline's name column header ("Source Name" or "Layer Name").
 fn header(h: &Ui) -> Rect {
-    find_texts(h, |t| t == "Layer Name")
+    find_texts(h, |t| t == "Source Name" || t == "Layer Name")
         .into_iter()
         .next()
         .unwrap_or_else(|| panic!("no timeline header in {:?}", painted_texts(h)))
