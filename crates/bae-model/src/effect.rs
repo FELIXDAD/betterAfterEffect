@@ -71,6 +71,8 @@ pub enum ParamKind {
     Path,
     /// A button (no value; clicking triggers the plugin).
     Button,
+    /// A read-only visualization derived from other parameters. Stores no value.
+    Display,
 }
 
 fn none_str() -> String {
@@ -78,7 +80,7 @@ fn none_str() -> String {
 }
 
 impl ParamKind {
-    /// Value type stored in the `param:NNNN` attribute; `None` for groups and buttons.
+    /// Value type stored in the `param:NNNN` attribute, if this control owns one.
     pub fn value_type(&self) -> Option<ValueType> {
         Some(match self {
             ParamKind::Slider { integer: true, .. } => ValueType::Int,
@@ -91,7 +93,10 @@ impl ParamKind {
             ParamKind::Layer | ParamKind::Path => ValueType::PrimRef,
             ParamKind::CurvePoints => ValueType::FloatList,
             ParamKind::ArbitraryData => ValueType::Bytes,
-            ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Button => return None,
+            ParamKind::GroupStart
+            | ParamKind::GroupEnd
+            | ParamKind::Button
+            | ParamKind::Display => return None,
         })
     }
 }
@@ -124,6 +129,37 @@ pub struct ParamFlags {
     /// The default is in AE reference-layer pixels (640 × 360), rather than layer pixels.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reference_point_default: bool,
+}
+
+/// Coordinate units of an unauthored effect point. Authored points use layer pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointDefaultSpace {
+    Pixels,
+    LayerFraction,
+    AeReference,
+}
+
+impl ParamFlags {
+    pub fn point_default_space(self) -> PointDefaultSpace {
+        if self.relative_default {
+            PointDefaultSpace::LayerFraction
+        } else if self.reference_point_default {
+            PointDefaultSpace::AeReference
+        } else {
+            PointDefaultSpace::Pixels
+        }
+    }
+}
+
+impl PointDefaultSpace {
+    /// Resolve the default in layer pixels, relative to the layer's origin.
+    pub fn layer_pixels(self, [x, y]: [f64; 2], [w, h]: [f64; 2]) -> [f64; 2] {
+        match self {
+            Self::Pixels => [x, y],
+            Self::LayerFraction => [x * w, y * h],
+            Self::AeReference => [x * w * (1. / 640.), y * h * (1. / 360.)],
+        }
+    }
 }
 
 /// One parameter of an effect definition.

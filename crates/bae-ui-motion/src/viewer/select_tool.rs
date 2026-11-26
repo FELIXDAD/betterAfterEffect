@@ -23,6 +23,7 @@ use egui::{CursorIcon, Painter, PointerButton, Pos2, Rect, Response, Ui};
 use serde_json::json;
 
 use super::free_transform::FreeTransform;
+use super::gizmo3d::{self, Gizmo, Style};
 use super::overlay::{self, EditablePath};
 use super::path_edit::{self, PathDrag, VertexSelection};
 use super::transform::{self, Kind, TransformDrag};
@@ -37,6 +38,8 @@ enum Press {
     Free,
     Path(path_edit::Hit),
     Handle(PrimPath, transform::Handle),
+    /// A 3D layer's axis arrow or rotation ring (0 X, 1 Y, 2 Z).
+    Axis(PrimPath, usize),
     Anchor(PrimPath),
     Layer(PrimPath),
     Empty,
@@ -90,12 +93,41 @@ pub(super) fn layers_at<'a>(
     let outer = Affine::new(DMat4::IDENTITY);
     comp.layers
         .iter()
-        .filter(|l| l.visible && !l.switches.guide || l.kind == bae_model::LayerKind::Null)
+        .filter(|l| {
+            l.visible && !l.switches.guide || l.kind == bae_model::LayerKind::Null || eye_layer(l)
+        })
         .filter(|l| !query::is_locked(stage, &l.path))
         .filter(move |l| {
             render::bounds_quad(l, view, &outer).is_some_and(|q| render::quad_contains(&q, pos))
+                || eye_near(l, view, pos)
         })
         .map(|l| l.path.clone())
+}
+
+/// Cameras and lights: picked by their position.
+fn eye_layer(l: &bae_anim::EvaluatedLayer) -> bool {
+    matches!(
+        l.kind,
+        bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+    )
+}
+
+/// A camera or light whose position is near `pos` in a 3D view (not the
+/// camera the view looks through).
+fn eye_near(l: &bae_anim::EvaluatedLayer, view: &View, pos: Pos2) -> bool {
+    if !eye_layer(l) {
+        return false;
+    }
+    let m = l.camera.as_ref().map_or(l.world_matrix, |c| c.world_matrix);
+    let eye = m.w_axis.truncate();
+    if view
+        .camera
+        .is_some_and(|(c, _)| c.position().distance(eye) < 1e-6)
+    {
+        return false;
+    }
+    view.project(eye, true)
+        .is_some_and(|p| p.distance(pos) <= transform::ANCHOR_PICK)
 }
 
 /// Whether a convex quad and a rectangle overlap (separating axes).
@@ -288,6 +320,7 @@ pub(super) fn frame(
     }
 
     // What is under the pointer.
+    let style = gizmo_style(tool, options.gizmo);
     let target = |pos: Pos2, state: &SelectState| -> Press {
         if tool == Tool::Selection
             && let Some(h) = path_edit::hit(&paths, &state.vertices, view, pos)
@@ -295,6 +328,12 @@ pub(super) fn frame(
             return Press::Path(h);
         }
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+            if let Some(style) = style
+                && let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode))
+                && let Some(i) = g.hit(view, pos, style)
+            {
+                return Press::Axis(l.path.clone(), i);
+            }
             if tool == Tool::PanBehind
                 && transform::anchor_screen(l, view).distance(pos) <= transform::ANCHOR_PICK
             {
@@ -405,6 +444,59 @@ pub(super) fn frame(
                     ));
                 }
             }
+            Press::Axis(layer, axis) => {
+                if let Some(style) = style
+                    && let Some(l) = comp.layer(&layer)
+                    && let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode))
+                    && let Some((camera, size)) = view.camera
+                {
+                    let kind = if style == Style::Rings {
+                        let center = view.project(g.origin, true).map_or(at, |c| view.to_comp(c));
+                        Kind::Spin {
+                            axis,
+                            center,
+                            start: at,
+                            last: 0.0,
+                            sign: gizmo3d::spin_sign(&camera, g.origin, g.axes[axis]),
+                            orientation: options.rotation_sets_orientation,
+                        }
+                    } else {
+                        let dir = g.axes[axis];
+                        let start = gizmo3d::along(&camera, size, at, g.origin, dir).unwrap_or(0.0);
+                        let camera = Box::new(camera);
+                        if style == Style::Scale {
+                            Kind::AxisScale {
+                                axis,
+                                origin: g.origin,
+                                dir,
+                                camera,
+                                size,
+                                start,
+                            }
+                        } else {
+                            Kind::Axis {
+                                axis,
+                                origin: g.origin,
+                                dir,
+                                camera,
+                                size,
+                                start,
+                            }
+                        }
+                    };
+                    let mut layers = vec![layer.clone()];
+                    layers.extend(
+                        selected
+                            .iter()
+                            .filter(|p| **p != layer && comp.layer(p).is_some_and(render::is_3d))
+                            .cloned(),
+                    );
+                    state.drag = Some(primary_first(
+                        TransformDrag::new(stage, comp, &layers, kind),
+                        &layer,
+                    ));
+                }
+            }
             Press::Anchor(layer) => {
                 let anchor = comp
                     .layer(&layer)
@@ -436,14 +528,11 @@ pub(super) fn frame(
                     }
                     s.selected_layers.clone()
                 };
+                let grabbed = comp.layer(&layer);
                 let kind = match tool {
                     Tool::Rotation => {
-                        let center = comp
-                            .layer(&layer)
-                            .map(|l| {
-                                let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-                                DVec2::new(a.x, a.y)
-                            })
+                        let center = grabbed
+                            .map(|l| view.to_comp(transform::anchor_screen(l, view)))
                             .unwrap_or(at);
                         Kind::Rotate {
                             center,
@@ -458,8 +547,40 @@ pub(super) fn frame(
                     },
                     _ => Kind::Move { start: at },
                 };
-                let drag = TransformDrag::new(stage, comp, &layers, kind);
-                state.drag = Some(primary_first(drag.with_snapping(comp, &layer, at), &layer));
+                // A 3D layer moves parallel to the view, at its depth.
+                let plane = grabbed
+                    .filter(|l| {
+                        render::is_3d(l)
+                            || matches!(
+                                l.kind,
+                                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+                            )
+                    })
+                    .and_then(|l| {
+                        let (camera, size) = view.camera?;
+                        let a = match &l.camera {
+                            // A camera moves at its own depth (its anchor is the point of interest).
+                            Some(c) => c.world_matrix.w_axis.truncate(),
+                            None => l.world_matrix.transform_point3(l.transform.anchor_point),
+                        };
+                        Some(transform::ViewPlane {
+                            camera,
+                            size,
+                            depth: camera.view().transform_point3(a).z,
+                        })
+                    });
+                let drag = TransformDrag::new(stage, comp, &layers, kind).with_plane(plane);
+                let lines = super::guides::snap_lines(
+                    stage,
+                    info,
+                    &session.lock().view_options,
+                    &bae_ui::settings::GridGuides::current(cx.resources),
+                );
+                let reach = f64::from(transform::SNAP_DISTANCE / view.scale.max(1e-6));
+                let drag = drag
+                    .with_snapping(comp, &layer, at)
+                    .with_lines(lines, reach);
+                state.drag = Some(primary_first(drag, &layer));
             }
             Press::Empty if tool == Tool::Selection => {
                 state.marquee = Some(Marquee {
@@ -571,6 +692,29 @@ pub(super) fn frame(
     if let Some(d) = &state.drag {
         d.paint_guides(painter, view, info);
     }
+    // The axis gizmo of the selected 3D layers (rings for the Rotation tool).
+    if let Some(style) = style {
+        let active = match (&state.drag, hover) {
+            (Some(d), _) => d
+                .axis()
+                .zip(d.edits.first())
+                .map(|(a, e)| (e.path.clone(), a)),
+            (None, Some(pos)) => match target(pos, state) {
+                Press::Axis(l, a) => Some((l, a)),
+                _ => None,
+            },
+            _ => None,
+        };
+        for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+            if let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode)) {
+                let on = active
+                    .as_ref()
+                    .filter(|(p, _)| *p == l.path)
+                    .map(|(_, a)| *a);
+                g.paint(painter, view, style, on);
+            }
+        }
+    }
     let mut cursor = None;
     if let Some(f) = &state.free
         && let Some(pos) = hover
@@ -592,6 +736,26 @@ pub(super) fn frame(
         }
     }
     cursor
+}
+
+/// The 3D gizmo of `tool` (the Selection tool's follows the 3D Gizmo mode).
+fn gizmo_style(tool: Tool, mode: crate::tools::GizmoMode) -> Option<Style> {
+    use crate::tools::GizmoMode;
+    match (tool, mode) {
+        (Tool::Rotation, _) | (Tool::Selection, GizmoMode::Rotation) => Some(Style::Rings),
+        (Tool::Selection, GizmoMode::Scale) => Some(Style::Scale),
+        (Tool::Selection, GizmoMode::Position) => Some(Style::Arrows),
+        _ => None,
+    }
+}
+
+/// Scaling is along the layer's own axes whatever the axis mode.
+fn gizmo_axes(style: Style, mode: crate::tools::AxisMode) -> crate::tools::AxisMode {
+    if style == Style::Scale {
+        crate::tools::AxisMode::Local
+    } else {
+        mode
+    }
 }
 
 /// Put the edit of `primary` first (scale and rotate measure on it).

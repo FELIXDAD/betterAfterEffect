@@ -4,7 +4,7 @@
 //! in degrees; scale and opacity in percent. Everything is `f64` (comps can be large);
 //! the renderer converts to `f32` when uploading.
 
-use glam::{DMat4, DVec3};
+use glam::{DMat4, DVec3, DVec4};
 use serde::Serialize;
 
 /// Evaluated transform group of a layer, in AE units.
@@ -76,12 +76,25 @@ impl Transform {
                 AutoOrientRotation::Angle(a) => a,
                 _ => 0.0,
             };
+            // T(p) · Rz · S · T(-a), written out (four 4×4 products per layer
+            // and frame otherwise).
             let p = self.position;
             let a = self.anchor_point;
-            return DMat4::from_translation(DVec3::new(p.x, p.y, 0.0))
-                * DMat4::from_rotation_z((self.rotation.z + extra).to_radians())
-                * DMat4::from_scale(DVec3::new(self.scale.x / 100.0, self.scale.y / 100.0, 1.0))
-                * DMat4::from_translation(DVec3::new(-a.x, -a.y, 0.0));
+            let (sin, cos) = (self.rotation.z + extra).to_radians().sin_cos();
+            let (sx, sy) = (self.scale.x / 100.0, self.scale.y / 100.0);
+            let x = DVec4::new(cos * sx, sin * sx, 0.0, 0.0);
+            let y = DVec4::new(-sin * sy, cos * sy, 0.0, 0.0);
+            return DMat4::from_cols(
+                x,
+                y,
+                DVec4::Z,
+                DVec4::new(
+                    p.x - x.x * a.x - y.x * a.y,
+                    p.y - x.y * a.x - y.y * a.y,
+                    0.0,
+                    1.0,
+                ),
+            );
         }
         DMat4::from_translation(self.position)
             * self.auto_orient.matrix()

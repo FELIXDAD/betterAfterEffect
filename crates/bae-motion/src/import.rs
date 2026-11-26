@@ -105,6 +105,7 @@ impl Command for ImportItems {
     type Params = ImportParams;
     type Output = ImportOutput;
     const ID: &'static str = "item.import";
+    const FILESYSTEM: bool = true;
     const TITLE: &'static str = "Import";
     const DESCRIPTION: &'static str = "Import files as footage items (AE File > Import > File, Cmd/Ctrl+I; files dropped on the Project panel). Pass each file's path and the asset attributes from probing it (kind, width, height, frame_rate, duration, pixel_aspect, alpha_mode, has_video, has_audio, sequence:first_frame, sequence:pattern); `folder` keeps a dropped folder's structure. One undo step.";
 
@@ -158,5 +159,74 @@ impl Command for ImportItems {
             items.push(item);
         }
         Ok(ImportOutput { items })
+    }
+}
+
+/// File ▸ Replace Footage ▸ File… (Cmd/Ctrl+H): a footage or placeholder item
+/// takes another file; its layers keep their place and now show the new file.
+pub struct ReplaceFile;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReplaceFileParams {
+    pub item: PrimPath,
+    /// The new file and the asset attributes from probing it (as for
+    /// `item.import`; `folder` is ignored).
+    pub file: ImportFile,
+    /// Keep the item's name (File > Reload Footage reads the same file again).
+    #[serde(default)]
+    pub keep_name: bool,
+}
+
+impl Command for ReplaceFile {
+    type Params = ReplaceFileParams;
+    type Output = ();
+    const ID: &'static str = "item.replace_file";
+    const TITLE: &'static str = "Replace Footage";
+    const DESCRIPTION: &'static str = "Replace a footage or placeholder item's file (AE File > Replace Footage > File..., Cmd/Ctrl+H): the item takes the new file, its name and probed attributes; layers using it keep their timing and transform. One undo step.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        let view = tx.stage().require_prim(&p.item)?;
+        let kind = query::static_value(&view, "kind")
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        if !view.is_a(&PrimType::ASSET) || kind == "solid" {
+            return Err(fail(format!("{} is not a footage item", p.item)));
+        }
+        let path = Path::new(&p.file.path);
+        let file = AssetFile::from_path(path, None, false)
+            .map_err(|e| fail(format!("cannot use {}: {e}", p.file.path)))?;
+        if let Some(bad) = p.file.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
+            return Err(fail(format!("{bad} is not a footage attribute")));
+        }
+        let name = p
+            .file
+            .name
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "Footage".to_owned());
+        if !p.keep_name {
+            set(tx, &p.item, "name", Value::String(name))?;
+        }
+        // What the old file had and the new one does not say goes back to its
+        // default (a sequence pattern, a duration of a movie …); the label stays.
+        for attr in ATTRS.iter().filter(|a| **a != "label" && **a != "kind") {
+            if !p.file.attrs.contains_key(*attr) {
+                tx.apply(bae_model::Op::SetValue {
+                    path: p.item.clone(),
+                    attr: (*attr).to_owned(),
+                    value: None,
+                })?;
+            }
+        }
+        if !p.file.attrs.contains_key("kind") {
+            set(tx, &p.item, "kind", Value::Enum("footage".into()))?;
+        }
+        for (attr, value) in p.file.attrs {
+            set(tx, &p.item, &attr, value)?;
+        }
+        for op in file.to_ops(&p.item) {
+            tx.apply(op)?;
+        }
+        Ok(())
     }
 }
