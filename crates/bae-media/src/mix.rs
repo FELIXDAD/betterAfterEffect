@@ -16,6 +16,7 @@ struct Track {
     timing: LayerTiming,
     levels: [f64; 2],
     automation: Option<Curve>,
+    effects: crate::audio_fx::Rack,
 }
 
 /// A snapshot of layer switches, trims, stretch and stereo dB automation.
@@ -68,6 +69,7 @@ impl AudioMix {
                     timing: bae_anim::layer_timing(&view, duration),
                     levels,
                     automation,
+                    effects: crate::audio_fx::Rack::read(stage, l),
                 })
             })
             .collect();
@@ -135,12 +137,16 @@ impl Track {
             self.timing
                 .layer_time(sample_to_time(start + i as i64, rate))
         };
-        let head = layer_time(a).as_seconds() * src_rate;
+        self.effects.begin(start + a as i64, start + b as i64, rate);
         let step = source_step(self.timing, src_rate, rate);
+        let (head, step) = if self.effects.reverse {
+            let mirror = first_at(self.timing.in_point) + first_at(self.timing.out_point) - 1;
+            let time = sample_to_time(mirror - start - a as i64, rate);
+            (self.timing.layer_time(time).as_seconds() * src_rate, -step)
+        } else {
+            (layer_time(a).as_seconds() * src_rate, step)
+        };
         let tail = head + (b - a - 1) as f64 * step;
-        if head.max(tail) < 0.0 {
-            return Ok(());
-        }
         let aligned = (step.abs() - 1.0).abs() < 1e-9 && (head - head.round()).abs() < 1e-5;
         let kernel = if aligned {
             None
@@ -153,16 +159,14 @@ impl Track {
         };
         let radius = kernel.map_or(0, |k| k.radius as u64);
         let base = (head.min(tail).max(0.0).floor() as u64).saturating_sub(radius);
-        if source.info().frame_count.is_some_and(|n| base >= n) {
-            return Ok(());
-        }
         let last = head.max(tail).ceil() as u64 + radius + 1;
         let channels = usize::from(source.info().channels);
-        let data = source.read_window(base, last - base)?;
+        let data = if head.max(tail) < 0.0 || source.info().frame_count.is_some_and(|n| base >= n) {
+            &[][..]
+        } else {
+            source.read_window(base, last - base)?
+        };
         let frames = data.len() / channels;
-        if frames == 0 {
-            return Ok(());
-        }
         let static_gain = self.levels.map(db_gain);
         let gain_at = |i| match self
             .automation
@@ -183,15 +187,15 @@ impl Track {
             };
             for (i, dst) in out[offset..end].iter_mut().enumerate() {
                 let pos = head + (offset + i - a) as f64 * step - base as f64;
-                if pos < -1e-5 || pos >= frames as f64 {
-                    continue;
-                }
-                let sample = if let Some(k) = kernel {
+                let sample = if frames == 0 || pos < -1e-5 || pos >= frames as f64 {
+                    [0.0; 2]
+                } else if let Some(k) = kernel {
                     k.sample(data, channels, pos.max(0.0))
                 } else {
                     let frame = (pos.round() as usize).min(frames - 1) * channels;
                     [data[frame], data[frame + 1.min(channels - 1)]]
                 };
+                let sample = self.effects.process(sample, layer_time(offset + i), rate);
                 let t = i as f32 / (end - offset) as f32;
                 for c in 0..2 {
                     dst[c] += sample[c] * (from[c] + (to[c] - from[c]) * t);
