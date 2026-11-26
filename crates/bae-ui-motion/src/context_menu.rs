@@ -224,9 +224,31 @@ pub(crate) const VIEWER_LAYER: &[Entry] = &[
     Menu("Layer/Scene Edit Detection..."),
 ];
 
-/// Composition panel or Timeline, the comp menu (AE 26: the Timeline's has Rename
-/// enabled; it renames the comp, not built in the Timeline yet).
-pub(crate) const TIMELINE_BLANK: &[Entry] = VIEWER_BLANK;
+/// Timeline, right-click on empty space: the Composition panel's comp menu with
+/// Rename enabled (AE 26: it renames the comp, in the Project panel).
+pub(crate) const TIMELINE_BLANK: &[Entry] = &[
+    Sub(
+        "New",
+        &[
+            Menu("View/Split with New Locked Viewer"),
+            Sep,
+            Items("Layer/New"),
+        ],
+    ),
+    Sep,
+    Menu("Composition/Composition Settings..."),
+    Menu("Layer/Reveal/Reveal Composition in Project"),
+    Sep,
+    Menu("Composition/Preview"),
+    Menu("View/Switch View Layout"),
+    Menu("View/Switch 3D View"),
+    Own("Rename"),
+    Sep,
+    Menu("Composition/Open in Essential Graphics"),
+    Sep,
+    Menu("Composition/Composition Flowchart"),
+    Menu("Composition/Composition Mini-Flowchart"),
+];
 
 /// Project panel, right-click on empty space.
 pub(crate) const PROJECT_BLANK: &[Entry] = &[

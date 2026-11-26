@@ -219,6 +219,9 @@ pub struct Session {
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
+    /// A project item to rename in the Project panel (the Timeline's Rename
+    /// on empty space renames its comp there, AE 26).
+    pub(crate) rename_item: Option<PrimPath>,
     /// Frames in the GPU preview cache (the timeline's green bar): comp,
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,

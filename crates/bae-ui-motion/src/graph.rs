@@ -67,7 +67,9 @@ pub(crate) struct GraphSettings {
     pub show_set: bool,
     pub graph_type: GraphType,
     pub show_reference: bool,
+    pub show_waveforms: bool,
     pub show_in_out: bool,
+    pub show_markers: bool,
     pub show_tooltips: bool,
     pub show_expression_editor: bool,
     pub allow_between_frames: bool,
@@ -84,7 +86,9 @@ impl Default for GraphSettings {
             show_set: false,
             graph_type: GraphType::Auto,
             show_reference: true,
+            show_waveforms: true,
             show_in_out: true,
+            show_markers: true,
             show_tooltips: true,
             show_expression_editor: false,
             allow_between_frames: false,
@@ -181,6 +185,8 @@ pub(crate) struct TestGeometry {
     pub selection_box: Option<Rect>,
     pub vaxes: Vec<((PrimPath, String), VAxis)>,
     pub buttons: Vec<(String, Rect)>,
+    /// Layer markers drawn (x).
+    pub markers: Vec<f32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1524,6 +1530,7 @@ impl GraphEditor {
         axis: &TimeAxis,
         rect: Rect,
         now: Time,
+        waveform: &mut dyn FnMut(&Ui, &PrimPath, Rect),
     ) -> GraphOut {
         let mut out = GraphOut::default();
         let stage = cx.stage;
@@ -1641,7 +1648,11 @@ impl GraphEditor {
         self.ranges.retain(|k, _| shown.contains(k));
         self.cache.retain(|_, e| e.used);
 
-        self.paint(ui, stage, &frame, axis, area, &selected);
+        let _markers = self.paint(ui, stage, &frame, axis, area, &selected, waveform);
+        #[cfg(test)]
+        {
+            self.last.markers = _markers;
+        }
         let p = ui.painter().with_clip_rect(area);
         if let Some(x) = vline {
             p.vline(x, area.y_range(), Stroke::new(1.0, SNAP));
@@ -2050,6 +2061,8 @@ impl GraphEditor {
         f
     }
 
+    /// Draws the graphs; returns the x of the layer markers drawn.
+    #[allow(clippy::too_many_arguments)]
     fn paint(
         &self,
         ui: &Ui,
@@ -2058,7 +2071,20 @@ impl GraphEditor {
         axis: &TimeAxis,
         area: Rect,
         selected: &[KeyRef],
-    ) {
+        waveform: &mut dyn FnMut(&Ui, &PrimPath, Rect),
+    ) -> Vec<f32> {
+        let mut layers: Vec<&PrimPath> = Vec::new();
+        for prop in &f.props {
+            if !layers.contains(&&prop.layer) {
+                layers.push(&prop.layer);
+            }
+        }
+        // Audio waveforms of the shown layers, behind everything (AE).
+        if self.settings.show_waveforms {
+            for layer in &layers {
+                waveform(ui, layer, area);
+            }
+        }
         let p = ui.painter().with_clip_rect(area);
         let focus = f
             .props
@@ -2115,6 +2141,22 @@ impl GraphEditor {
                         theme::font(16.0),
                         color::TEXT_DIM,
                     );
+                }
+            }
+        }
+        // Layer markers along the bottom (AE).
+        let mut marker_xs = Vec::new();
+        if self.settings.show_markers {
+            for layer in &layers {
+                for (m, t) in bae_motion::markers::markers_of(stage, layer) {
+                    let x = axis.x(query::to_comp_time(stage, &m, t));
+                    let b = area.bottom() - 2.0;
+                    p.add(egui::Shape::convex_polygon(
+                        vec![pos2(x, b - 7.0), pos2(x + 4.0, b), pos2(x - 4.0, b)],
+                        color::TEXT_DIM,
+                        Stroke::NONE,
+                    ));
+                    marker_xs.push(x);
                 }
             }
         }
@@ -2201,6 +2243,7 @@ impl GraphEditor {
                 color::TEXT_DIM,
             );
         }
+        marker_xs
     }
 }
 
@@ -2454,13 +2497,6 @@ fn menu_check(ui: &mut Ui, on: &mut bool, label: &str) -> bool {
     widgets::checkbox(ui, on, label).clicked()
 }
 
-fn menu_check_disabled(ui: &mut Ui, label: &str) {
-    ui.add_enabled_ui(false, |ui| {
-        let mut off = false;
-        widgets::checkbox(ui, &mut off, label);
-    });
-}
-
 const POSITION_FAMILY: [&str; 4] = [
     "transform:position",
     "transform:position_x",
@@ -2567,9 +2603,9 @@ impl GraphEditor {
             }
             ui.separator();
             menu_check(ui, &mut s.show_reference, tr("Show Reference Graph"));
-            menu_check_disabled(ui, tr("Show Audio Waveforms"));
+            menu_check(ui, &mut s.show_waveforms, tr("Show Audio Waveforms"));
             menu_check(ui, &mut s.show_in_out, tr("Show Layer In/Out Points"));
-            menu_check_disabled(ui, tr("Show Layer Markers"));
+            menu_check(ui, &mut s.show_markers, tr("Show Layer Markers"));
             menu_check(ui, &mut s.show_tooltips, tr("Show Graph Tool Tips"));
             menu_check(
                 ui,

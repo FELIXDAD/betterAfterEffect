@@ -2823,3 +2823,32 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
         1
     );
 }
+
+/// #599: the Project panel starts renaming the item another panel asks for.
+#[test]
+fn project_panel_renames_the_item_another_panel_asks_for() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    h.session().lock().rename_item = Some(comp.clone());
+    let mut project = ProjectPanel::default();
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("project");
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+        ..Default::default()
+    };
+    let mut out = h.ctx.run_ui(raw, |ui| {
+        let mut cx = PanelContext::new(
+            &id,
+            "Project",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        project.ui(ui, &mut cx);
+    });
+    out.textures_delta.clear();
+    assert!(project.is_renaming());
+    assert!(h.session().lock().rename_item.is_none());
+}
