@@ -41,6 +41,8 @@ use crate::session::SharedSession;
 pub enum Dialog {
     /// Analysis of the composition work area for the Keyframe Assistant.
     AudioAnalysis(crate::audio_analysis::Analysis),
+    /// Display units and slider floor of the Audio panel.
+    AudioOptions(crate::panels::audio::AudioOptionsDialog),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
@@ -321,6 +323,17 @@ pub(crate) fn project_settings(cx: &PanelContext<'_>) {
     }
 }
 
+pub(crate) fn audio_options(
+    cx: &PanelContext<'_>,
+    options: crate::panels::audio::AudioOptionsDialog,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::AudioOptions(options));
+    }
+}
+
 /// Open Render Settings for render queue item `item`.
 pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
     let queue = crate::render_queue::shared(cx.resources);
@@ -450,6 +463,7 @@ impl bae_ui::DialogHost for MotionDialogs {
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
+            Dialog::AudioOptions(d) => d.ui(ctx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
