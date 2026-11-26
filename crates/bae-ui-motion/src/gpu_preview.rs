@@ -216,6 +216,7 @@ pub(crate) struct GpuPreview {
     pub(super) playback: super::playback::PlaybackPreview,
     changes: StageChanges,
     sources_gen: Option<u64>,
+    solid_reload: u64,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
@@ -262,10 +263,16 @@ type LiveKey = ((u64, Time, u32), (bae_render::Display, Option<IRect>));
 impl GpuPreview {
     /// A preview on the app's GPU context, if the app has one (the headless test
     /// harness and agents do not).
-    pub fn new(resources: &Resources) -> Option<Self> {
+    pub fn new(resources: &Resources, ui: &egui::Context) -> Option<Self> {
         let gpu = resources.get::<Arc<GpuContext>>()?.clone();
         let registry = resources.get::<Arc<ViewportTextureRegistry>>()?.clone();
-        Some(Self::with(gpu, registry))
+        let mut preview = Self::with(gpu, registry);
+        let ui = ui.clone();
+        preview
+            .engine
+            .anim
+            .prepare_preview_audio(move || ui.request_repaint());
+        Some(preview)
     }
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
@@ -283,6 +290,7 @@ impl GpuPreview {
             playback,
             changes: StageChanges::default(),
             sources_gen: None,
+            solid_reload: 0,
             last: None,
             rect: None,
             target: None,
@@ -350,6 +358,23 @@ impl GpuPreview {
         }
     }
 
+    pub(super) fn reload_solid(&mut self, generation: u64, item: &bae_model::PrimPath) {
+        if self.solid_reload == generation {
+            return;
+        }
+        let event = bae_model::StageEvent {
+            origin: bae_model::EventOrigin::Local,
+            author: None,
+            sublayers: vec![],
+            changes: vec![bae_model::Change::Resynced { path: item.clone() }],
+        };
+        self.engine.renderer.invalidate(&event);
+        self.engine.anim.clear_compiled();
+        self.last = None;
+        self.playback.invalidate_source(&event);
+        self.solid_reload = generation;
+    }
+
     /// Render `comp` (if it changed) and return the texture to draw. `None` until
     /// the shell has registered the texture with egui (the frame after the first
     /// publish) or when rendering failed.
@@ -388,6 +413,9 @@ impl GpuPreview {
                 return None;
             }
         };
+        if self.engine.anim.audio_preparation_pending() {
+            return self.image();
+        }
         // A 3D view other than Active Camera (the output never changes).
         if let Some(camera) = camera {
             rc.camera = Some(camera);
@@ -498,7 +526,11 @@ impl GpuPreview {
             self.live_texture = None;
             self.sampled = None;
         }
-        // Back from a snapshot: show the frame again.
+        self.image()
+    }
+
+    /// The frame to draw; back from a snapshot, the frame is shown again.
+    fn image(&mut self) -> Option<PreviewImage> {
         if !self.target_shown
             && let Some(t) = &self.target
             && self

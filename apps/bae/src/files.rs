@@ -196,9 +196,30 @@ pub fn run(
     doc: &mut Document,
     dialogs: &mut dyn FileDialogs,
     inv: &Invocation,
+    new_template: Option<&Path>,
 ) -> Option<FileOutcome> {
     Some(match inv.id.as_str() {
         ids::NEW_PROJECT | ids::CLOSE_PROJECT => {
+            if inv.id == ids::NEW_PROJECT
+                && let Some(path) = new_template
+            {
+                match Document::load_template(path) {
+                    Ok(opened) => {
+                        if !confirm_discard(doc, dialogs) {
+                            return Some(FileOutcome::Cancelled);
+                        }
+                        doc.replace(opened);
+                        return Some(FileOutcome::Replaced);
+                    }
+                    // A missing or broken template still gives a new project:
+                    // a blank one, after saying why.
+                    Err(error) => dialogs.error(&format!(
+                        "{}\n\n{}",
+                        tr("The project template could not be opened. A blank project is created instead."),
+                        crate::file_error::describe_open(path, &error)
+                    )),
+                }
+            }
             // AE: Close Project leaves an empty untitled project.
             if !confirm_discard(doc, dialogs) {
                 return Some(FileOutcome::Cancelled);
@@ -248,13 +269,27 @@ pub fn open(
     let Some(path) = path.or_else(|| dialogs.pick_project()) else {
         return FileOutcome::Cancelled;
     };
-    let opened = match Document::load(&path) {
+    replace_from_disk(doc, dialogs, &path, Document::load)
+}
+
+pub fn template_path(prefs: &bae_prefs::Preferences) -> Option<&Path> {
+    let path = prefs.str("project.project_template");
+    (prefs.bool("project.new_project_loads_template") && !path.is_empty()).then(|| Path::new(path))
+}
+
+fn replace_from_disk(
+    doc: &mut Document,
+    dialogs: &mut dyn FileDialogs,
+    path: &Path,
+    load: fn(&Path) -> anyhow::Result<bae_package::OpenedProject>,
+) -> FileOutcome {
+    let opened = match load(path) {
         Ok(opened) => opened,
         Err(error) => {
             dialogs.error(&format!(
                 "{}\n\n{}",
                 tr("Could not open the project."),
-                crate::file_error::describe_open(&path, &error)
+                crate::file_error::describe_open(path, &error)
             ));
             return FileOutcome::Failed;
         }
@@ -570,7 +605,7 @@ mod tests {
     }
 
     fn cmd(doc: &mut Document, d: &mut Script, id: &str) -> FileOutcome {
-        run(doc, d, &Invocation::new(id)).expect("file command")
+        run(doc, d, &Invocation::new(id), None).expect("file command")
     }
 
     /// Increment and Save goes on in “Film 2.bae”, then “Film 3.bae”; Revert
@@ -692,10 +727,35 @@ mod tests {
             ids::OPEN_PROJECT,
             serde_json::json!({ "path": dir.path().join("Film.baez") }),
         );
-        assert_eq!(run(&mut other, &mut d, &inv), Some(FileOutcome::Replaced));
+        assert_eq!(
+            run(&mut other, &mut d, &inv, None),
+            Some(FileOutcome::Replaced)
+        );
         assert!(has(&other, "/Comp2"));
         assert!(d.errors.is_empty(), "{:?}", d.errors);
-        assert_eq!(run(&mut other, &mut d, &Invocation::new(ids::UNDO)), None);
+        assert_eq!(
+            run(&mut other, &mut d, &Invocation::new(ids::UNDO), None),
+            None
+        );
+    }
+
+    /// #677: a missing project template still gives a new project (blank),
+    /// after saying why.
+    #[test]
+    fn a_missing_template_falls_back_to_a_blank_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(None);
+        let mut d = Script::default();
+        edit(&mut doc, "/Old");
+        d.answers.push_back(UnsavedChoice::DontSave);
+        let missing = dir.path().join("Template.bae");
+        let inv = Invocation::new(ids::NEW_PROJECT);
+        assert_eq!(
+            run(&mut doc, &mut d, &inv, Some(&missing)),
+            Some(FileOutcome::Replaced)
+        );
+        assert_eq!(d.errors.len(), 1);
+        assert!(!has(&doc, "/Old") && doc.location().is_none());
     }
 
     #[test]
