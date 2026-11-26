@@ -621,10 +621,9 @@ impl bae_model::Command for AudioAmplitude {
             font_size: None,
             shape: None,
             position: None,
-            start: Some(Time::ZERO),
+            defaults: crate::layer::NewLayerDefaults::default(),
             camera: None,
             light: None,
-            label: None,
             position_3d: None,
             point_of_interest: None,
         };

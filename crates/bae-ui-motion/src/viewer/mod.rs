@@ -593,16 +593,18 @@ fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformD
     }
 }
 
-pub(crate) fn checkerboard(p: &egui::Painter, r: Rect) {
-    p.rect_filled(r, 0.0, Color32::from_gray(200));
-    let s = 8.0;
+pub(crate) fn checkerboard(p: &egui::Painter, r: Rect, resources: &bae_app::Resources) {
+    let prefs = prefs::ViewerPrefs::current(resources);
+    let s = prefs.checker_size;
+    let colors = prefs.checker_colors;
+    p.rect_filled(r, 0.0, colors[1]);
     let mut y = r.top();
     let mut row = 0;
     while y < r.bottom() {
         let mut x = r.left() + if row % 2 == 0 { 0.0 } else { s };
         while x < r.right() {
             let cell = Rect::from_min_size(pos2(x, y), vec2(s, s)).intersect(r);
-            p.rect_filled(cell, 0.0, Color32::from_gray(150));
+            p.rect_filled(cell, 0.0, colors[0]);
             x += 2.0 * s;
         }
         y += s;
@@ -614,11 +616,12 @@ impl Panel for CompositionViewer {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // Read from the session every frame, so New / Open / Close Project
         // update the tab (and its accessible name) at once (issue #215).
-        let title = match common::active_comp(cx.stage, &common::session(cx.resources)) {
-            Some(info) => format!("{} {}", tr("Composition"), info.name),
-            None => tr("Composition").to_owned(),
-        };
-        TabInfo::new(title).viewer().locked(self.locked)
+        match common::active_comp(cx.stage, &common::session(cx.resources)) {
+            Some(info) => common::related_tab(cx, "Composition", &info.path, &info.name),
+            None => TabInfo::new(tr("Composition")),
+        }
+        .viewer()
+        .locked(self.locked)
     }
 
     fn set_locked(&mut self, locked: bool) {
@@ -895,7 +898,7 @@ impl Panel for CompositionViewer {
         self.render_factor = resolution;
         // Paint.
         let painter = ui.painter_at(area);
-        let controls = session.lock().layer_controls;
+        let controls = view_options::shown_controls(&session.lock());
         let pasteboard = session.lock().panel_background.color();
         painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
@@ -909,7 +912,11 @@ impl Panel for CompositionViewer {
             None => comp_rect,
         };
         if self.checker {
-            checkerboard(&painter, comp_rect.intersect(area));
+            checkerboard(
+                &painter,
+                comp_rect.intersect(area),
+                cx.resources,
+            );
         } else {
             let c = info.bg_color;
             painter.rect_filled(
@@ -945,6 +952,9 @@ impl Panel for CompositionViewer {
             .filter(|pb| pb.comp == info.path);
         let mut completed = None;
         if let Some(gpu) = self.gpu.as_mut() {
+            if let Some((generation, item)) = &session.lock().solid_reload {
+                gpu.reload_solid(*generation, item);
+            }
             if editing {
                 gpu.playback.stop();
             } else {

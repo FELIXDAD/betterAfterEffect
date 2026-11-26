@@ -21,6 +21,7 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
 mod comp_navigation;
@@ -35,6 +36,7 @@ mod i18n_retest;
 #[cfg(target_os = "macos")]
 mod i18n_scan;
 mod import_preferences;
+mod layer_creation_preferences;
 #[cfg(target_os = "macos")]
 mod layers;
 #[cfg(target_os = "macos")]
@@ -48,7 +50,6 @@ mod project_preferences;
 mod release_001;
 #[cfg(target_os = "macos")]
 mod render_queue;
-#[cfg(target_os = "macos")]
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;
