@@ -257,10 +257,19 @@ pub(super) fn frame(
     }
     let request = std::mem::take(&mut tools.lock().free_transform_request);
     if request && tool == Tool::Selection {
+        // The path with selected vertices, else the one selected in the
+        // Timeline, else the first.
+        let in_timeline = session
+            .lock()
+            .selected_props
+            .iter()
+            .find(|(p, attr)| attr == "path" && paths.iter().any(|e| &e.prim == p))
+            .map(|(p, _)| p.clone());
         let prim = state
             .vertices
             .prim
             .clone()
+            .or(in_timeline)
             .or_else(|| paths.first().map(|p| p.prim.clone()));
         if let Some(p) = prim.and_then(|prim| paths.iter().find(|p| p.prim == prim)) {
             let sel = if state.vertices.prim.as_ref() == Some(&p.prim) {
