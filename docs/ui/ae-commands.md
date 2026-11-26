@@ -448,7 +448,7 @@
 | Keyframe Assistant ▸ Create Keyframes from Data | 11075586 | `motion.anim.create_keyframes_from_data` |  |  |  | B | ⏸ |
 | Keyframe Assistant ▸ Null Controllers for Positional Points | 11075587 | `motion.anim.null_controllers_for_positional_points` |  |  |  | B | ⏸ |
 | Keyframe Assistant ▸ Convert Expression to Keyframes | 11075588 | `motion.anim.convert_expression_to_keyframes` |  |  |  | C | ⏸ |
-| Keyframe Assistant ▸ Convert Audio to Keyframes | 11075589 | `motion.anim.convert_audio_to_keyframes` |  |  |  | B | ⏸ |
+| Keyframe Assistant ▸ Convert Audio to Keyframes | 11075589 | `motion.anim.convert_audio_to_keyframes` |  |  |  | B | ✅ |
 | Keyframe Assistant ▸ Sequence Layers... | 11075590 | `motion.anim.sequence_layers` |  |  |  | E | ⏸ |
 | Keyframe Assistant ▸ Exponential Scale | 11075591 | `motion.anim.exponential_scale` |  |  |  | B | ⏸ |
 | Keyframe Assistant ▸ Time-Reverse Keyframes | 11075592 | `motion.reverse_keys` |  |  |  | B | ✅ |
@@ -619,7 +619,7 @@
 | Mask Interpolation | 524316 | `window.panel` | `{"id":"mask_interpolation","toggle":true}` |  |  | E | ⏸ |
 | Tracker | 524317 | `window.panel` | `{"id":"tracker","toggle":true}` |  |  | E | ⏸ |
 | Progress | 524318 | `window.panel` | `{"id":"progress","toggle":true}` |  |  | E | ⏸ |
-| Audio | 524319 | `window.panel` | `{"id":"audio","toggle":true}` | Ctrl+4 | Cmd+4 | E | ☐ |
+| Audio | 524319 | `window.panel` | `{"id":"audio","toggle":true}` | Ctrl+4 | Cmd+4 | E | ✅ |
 | Preview | 524320 | `window.panel` | `{"id":"preview","toggle":true}` | Ctrl+3 | Cmd+3 | B | ✅ |
 | Composition | 524322 | `window.panel` | `{"id":"composition","toggle":true}` |  |  | B | ✅ |
 | Layer | 524323 | `window.panel` | `{"id":"layer","toggle":true}` |  |  | E | ⏸ |

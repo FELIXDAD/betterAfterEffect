@@ -28,7 +28,8 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
 /// Formats offered in the panel and by `bae render --format`.
-pub const FORMATS: [ExportFormat; 7] = [
+pub const FORMATS: [ExportFormat; 8] = [
+    ExportFormat::Wav,
     ExportFormat::Png,
     ExportFormat::Tiff,
     ExportFormat::Exr,
@@ -50,7 +51,7 @@ pub fn format_available(format: ExportFormat) -> bool {
         }
         _ => {}
     }
-    format.is_image() || cfg!(target_os = "macos")
+    format == ExportFormat::Wav || format.is_image() || cfg!(target_os = "macos")
 }
 
 /// The output's channels (AE output module "Channels").
@@ -66,7 +67,10 @@ pub enum Channels {
 pub fn supports_alpha(format: ExportFormat) -> bool {
     match format {
         ExportFormat::Hevc => bae_media::VideoCodec::Hevc.supports_alpha(),
-        _ => !matches!(format, ExportFormat::H264 | ExportFormat::ProRes),
+        _ => !matches!(
+            format,
+            ExportFormat::Wav | ExportFormat::H264 | ExportFormat::ProRes
+        ),
     }
 }
 
@@ -1038,41 +1042,47 @@ fn item_ui(
             ui.end_row();
             // AE: Channels RGB / RGB + Alpha (RGB + Alpha only where the
             // codec has alpha).
-            ui.label(tr("Channels"));
-            let mut channels = item.channels;
-            egui::ComboBox::from_id_salt("channels")
-                .width(combo_w)
-                .truncate()
-                .selected_text(channels_label(channels))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut channels,
-                        Channels::Rgb,
-                        channels_label(Channels::Rgb),
+            if item.format == ExportFormat::Wav {
+                ui.label(tr("Audio"));
+                ui.label(tr("Stereo, 48 kHz, 24-bit PCM"));
+                ui.end_row();
+            } else {
+                ui.label(tr("Channels"));
+                let mut channels = item.channels;
+                egui::ComboBox::from_id_salt("channels")
+                    .width(combo_w)
+                    .truncate()
+                    .selected_text(channels_label(channels))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut channels,
+                            Channels::Rgb,
+                            channels_label(Channels::Rgb),
+                        );
+                        let alpha = supports_alpha(item.format);
+                        let r = ui.add_enabled(
+                            alpha,
+                            egui::Button::selectable(
+                                channels == Channels::RgbAlpha,
+                                channels_label(Channels::RgbAlpha),
+                            ),
+                        );
+                        if r.clicked() {
+                            channels = Channels::RgbAlpha;
+                        }
+                        if !alpha {
+                            r.on_disabled_hover_text(tr("This format has no alpha channel."));
+                        }
+                    })
+                    .response
+                    .labeled_value(
+                        egui::WidgetType::ComboBox,
+                        &name("Channels"),
+                        channels_label(item.channels),
                     );
-                    let alpha = supports_alpha(item.format);
-                    let r = ui.add_enabled(
-                        alpha,
-                        egui::Button::selectable(
-                            channels == Channels::RgbAlpha,
-                            channels_label(Channels::RgbAlpha),
-                        ),
-                    );
-                    if r.clicked() {
-                        channels = Channels::RgbAlpha;
-                    }
-                    if !alpha {
-                        r.on_disabled_hover_text(tr("This format has no alpha channel."));
-                    }
-                })
-                .response
-                .labeled_value(
-                    egui::WidgetType::ComboBox,
-                    &name("Channels"),
-                    channels_label(item.channels),
-                );
-            item.channels = channels;
-            ui.end_row();
+                item.channels = channels;
+                ui.end_row();
+            }
             if has_bit_rate(item.format) {
                 // AE's H.264 format options: VBR, target bitrate.
                 ui.label(tr("Target Bitrate"));
@@ -1145,6 +1155,7 @@ pub(crate) fn format_label(format: ExportFormat) -> &'static str {
     match format {
         ExportFormat::Png => "PNG Sequence",
         ExportFormat::Tiff => "TIFF Sequence",
+        ExportFormat::Wav => "Waveform Audio (WAV)",
         ExportFormat::Exr => "OpenEXR Sequence",
         ExportFormat::H264 => "H.264",
         ExportFormat::Hevc => "HEVC",
@@ -1570,6 +1581,82 @@ mod tests {
     }
 
     #[test]
+    fn wav_queue_writes_only_requested_samples_and_preserves_output_on_cancel() {
+        use bae_media::{AudioSource, FileAudio};
+        use bae_model::{AuthorId, CommandRegistry};
+        use serde_json::json;
+        let Some(gpu) = gpu() else { return };
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.wav");
+        let output = dir.path().join("mix.wav");
+        let mut wav = bae_media::wav::WavWriter::create(&source, 48_000).unwrap();
+        for pair in [[0.0, 0.0], [0.25, -0.5], [0.5, -0.25]] {
+            wav.write(&vec![pair; 1600]).unwrap();
+        }
+        wav.finish().unwrap();
+        let (mut stage, comp) = project();
+        let mut registry = CommandRegistry::with_builtins();
+        bae_motion::register_commands(&mut registry);
+        let author = AuthorId::new("test:wav").unwrap();
+        registry.execute(&mut stage,&author,"item.import",json!({"files":[{"path":source,"name":"source.wav","attrs":{"has_audio":{"type":"bool","value":true}}}]})).unwrap();
+        let asset = stage
+            .children(&PrimPath::new(bae_motion::query::ASSETS_FOLDER).unwrap())
+            .into_iter()
+            .find(|p| bae_motion::query::display_name_of(&stage, p) == "source.wav")
+            .unwrap();
+        registry
+            .execute(
+                &mut stage,
+                &author,
+                "layer.create",
+                json!({"comp":comp,"source":asset,"kind":"audio"}),
+            )
+            .unwrap();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let mut queue = RenderQueue::default();
+        let id = queue.add(&info, dir.path());
+        let item = queue.item_mut(id).unwrap();
+        item.set_format(ExportFormat::Wav);
+        item.output = output.to_string_lossy().into_owned();
+        (item.start, item.end) = (1, 2);
+        assert!(queue.begin());
+        let job = queue.take_next(&|_| Some(info.frame_count())).unwrap();
+        let mut renderer = Renderer::new(gpu);
+        let mut evaluator = AnimEvaluator::new(None);
+        let status =
+            render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |_, _| {}).unwrap();
+        assert!(
+            matches!(status, ItemStatus::Done { files: 1, .. }),
+            "{status:?}"
+        );
+        let mut decoded = FileAudio::open(&output).unwrap();
+        let pcm = decoded.read(0, 4800).unwrap();
+        assert_eq!(
+            (pcm.frames(), pcm.sample_rate, pcm.channels),
+            (3200, 48000, 2)
+        );
+        assert_eq!(&pcm.samples[..2], &[0.25, -0.5]);
+        assert_eq!(&pcm.samples[3198..3202], &[0.25, -0.5, 0.5, -0.25]);
+        drop(decoded);
+        let original = std::fs::read(&output).unwrap();
+        let cancel = job.cancel.clone();
+        let status = render_job(
+            &mut renderer,
+            &mut evaluator,
+            &stage,
+            &job,
+            &mut |done, _| {
+                if done == 1 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+        )
+        .unwrap();
+        assert!(matches!(status, ItemStatus::Stopped { .. }));
+        assert_eq!(std::fs::read(output).unwrap(), original);
+    }
+
+    #[test]
     fn default_output_dir_is_the_videos_folder() {
         let videos = PathBuf::from("D:/Media/Videos");
         let home = PathBuf::from("C:/Users/a");
@@ -1621,7 +1708,7 @@ mod tests {
             }
             assert_eq!(
                 format_available(f),
-                f.is_image() || cfg!(target_os = "macos"),
+                f == ExportFormat::Wav || f.is_image() || cfg!(target_os = "macos"),
                 "{f:?}"
             );
         }

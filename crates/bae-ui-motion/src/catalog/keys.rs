@@ -531,7 +531,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "SetSamplingQualityBilinear", "Alt+B", "motion.layer.sampling", r#"{"sampling":"bilinear"}"#, B, Todo, 0),
     k("CSwitchboard", "ShowCompTree", "Ctrl+Shift+F11", "motion.comp.composition_flowchart", "", E, Later, 0),
     k("CSwitchboard", "ShowFrameFileName", "Ctrl+Alt+E", "motion.file.reveal_frame_source", "", E, Later, 0),
-    k("CSwitchboard", "ShowHideAudio", "Ctrl+4", "window.panel", r#"{"id":"audio","toggle":true}"#, E, Todo, 0),
+    k("CSwitchboard", "ShowHideAudio", "Ctrl+4", "window.panel", r#"{"id":"audio","toggle":true}"#, E, Done, 0),
     k("CSwitchboard", "ShowHideBrushPal", "Ctrl+9", "window.panel", r#"{"id":"brushes","toggle":true}"#, E, Later, 0),
     k("CSwitchboard", "ShowHideCharPal", "Ctrl+6", "window.panel", r#"{"id":"character","toggle":true}"#, E, Todo, 0),
     k("CSwitchboard", "ShowHideFxPal", "Ctrl+5", "window.panel", r#"{"id":"effects","toggle":true}"#, E, Done, 0),
