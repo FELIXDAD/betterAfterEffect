@@ -362,7 +362,9 @@ fn bin(op: Op, a: V, b: V) -> Option<V> {
             A(a)
         }
         (Op::Sub, N(x), A(mut b)) => {
-            *b.first_mut()? = x - b[0];
+            for (i, component) in b.iter_mut().enumerate() {
+                *component = (if i == 0 { x } else { 0.0 }) - *component;
+            }
             A(b)
         }
         (Op::Add | Op::Sub, A(a), A(b)) => {
@@ -448,7 +450,7 @@ pub(crate) fn noise1(seed: u32, x: f64) -> f64 {
 }
 
 fn interp(shape: fn(f64) -> f64, args: Vec<V>) -> Option<V> {
-    let (t, t0, t1, mut v1, mut v2) = match args.len() {
+    let (t, t0, t1, v1, v2) = match args.len() {
         3 => {
             let mut it = args.into_iter();
             (num(&it.next()?)?, 0.0, 1.0, it.next()?, it.next()?)
@@ -468,7 +470,6 @@ fn interp(shape: fn(f64) -> f64, args: Vec<V>) -> Option<V> {
     let (mut t0, mut t1) = (t0, t1);
     if t0 > t1 {
         std::mem::swap(&mut t0, &mut t1);
-        std::mem::swap(&mut v1, &mut v2);
     }
     let f = if t1 == t0 {
         if t < t0 { 0.0 } else { 1.0 }
