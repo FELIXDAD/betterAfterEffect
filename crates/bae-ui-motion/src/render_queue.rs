@@ -571,6 +571,16 @@ impl RenderQueue {
     }
 }
 
+/// Desktop feedback for a single render batch (including when the window is minimized).
+#[derive(Debug, Clone, Copy)]
+pub enum RenderEvent {
+    Progress(u8),
+    Finished { succeeded: bool },
+}
+
+#[derive(Clone)]
+pub struct RenderFeedback(pub Arc<dyn Fn(RenderEvent) + Send + Sync>);
+
 /// The queue as an app resource.
 #[derive(Clone, Debug, Default)]
 pub struct SharedRenderQueue(Arc<Mutex<RenderQueue>>);
@@ -852,11 +862,27 @@ pub fn start(
     }
     let snapshot = crate::preview_snapshot::PreviewSnapshot::take(stage);
     let queue = queue.clone();
+    let feedback = resources.get::<RenderFeedback>().cloned();
+    let worker_queue = queue.clone();
     std::thread::Builder::new()
         .name("bae-render-queue".into())
-        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers, effects.as_deref()))
+        .spawn(move || {
+            run_worker(
+                &worker_queue,
+                &snapshot,
+                gpu,
+                &providers,
+                effects.as_deref(),
+                feedback.as_ref(),
+            )
+        })
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            let mut queue = queue.lock();
+            queue.running = false;
+            queue.batch.clear();
+            e.to_string()
+        })
 }
 
 fn provider_list(registry: &Registry<dyn SourceProvider>) -> Vec<Arc<dyn SourceProvider>> {
@@ -874,7 +900,18 @@ pub(crate) fn run_worker(
     gpu: Arc<GpuContext>,
     providers: &[Arc<dyn SourceProvider>],
     effects: Option<&Registry<dyn bae_render::Effect>>,
+    feedback: Option<&RenderFeedback>,
 ) {
+    let report = |event| {
+        if let Some(feedback) = feedback {
+            (feedback.0)(event);
+        }
+    };
+    let mut last_percent = 0;
+    let mut completed = 0usize;
+    let mut succeeded = true;
+    let count = queue.lock().batch.len().max(1);
+    report(RenderEvent::Progress(0));
     let stage = snapshot.restore();
     let mut renderer = Renderer::with_config(
         gpu,
@@ -902,6 +939,13 @@ pub(crate) fn run_worker(
             Err(error) => ItemStatus::Failed(error.clone()),
             Ok(stage) => {
                 let mut progress = |done: usize, total: usize| {
+                    let percent = ((100 * completed + done.saturating_mul(100) / total.max(1))
+                        / count)
+                        .min(100) as u8;
+                    if percent != last_percent {
+                        report(RenderEvent::Progress(percent));
+                        last_percent = percent;
+                    }
                     let mut q = queue.lock();
                     q.set_status(job.id, ItemStatus::Rendering { done, total });
                 };
@@ -911,9 +955,14 @@ pub(crate) fn run_worker(
                 }
             }
         };
+        completed += 1;
+        succeeded &= matches!(status, ItemStatus::Done { .. });
         queue.lock().set_status(job.id, status);
     }
     let mut q = queue.lock();
+    report(RenderEvent::Finished {
+        succeeded: succeeded && completed == count,
+    });
     q.running = false;
     q.batch.clear();
     if let Some(ctx) = &q.repaint {
@@ -2301,7 +2350,15 @@ mod tests {
             .store(true, Ordering::Relaxed);
 
         let snapshot = crate::preview_snapshot::PreviewSnapshot::take(&stage);
-        run_worker(&queue, &snapshot, gpu, &[], None);
+        let (send, received) = std::sync::mpsc::channel();
+        let feedback = RenderFeedback(Arc::new(move |event| send.send(event).unwrap()));
+        run_worker(&queue, &snapshot, gpu, &[], None, Some(&feedback));
+        let events: Vec<_> = received.try_iter().collect();
+        assert!(matches!(events.first(), Some(RenderEvent::Progress(0))));
+        assert!(matches!(
+            events.last(),
+            Some(RenderEvent::Finished { succeeded: false })
+        ));
 
         let q = queue.lock();
         assert!(!q.is_running());

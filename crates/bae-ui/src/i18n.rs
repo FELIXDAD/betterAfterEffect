@@ -131,6 +131,7 @@ macro_rules! tr {
 /// Shell strings. Keep in sync with docs/glossary.md.
 const ZH: &[(&str, &str)] = &[
     // Numpad keys in shortcuts (AE: 数字小键盘).
+    ("Num Clear", "数字小键盘 清除"),
     ("Num *", "数字小键盘 *"),
     ("Num /", "数字小键盘 /"),
     ("Num +", "数字小键盘 +"),

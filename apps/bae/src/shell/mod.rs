@@ -18,6 +18,8 @@
 
 pub(crate) mod builtin_scripts;
 mod dialogs;
+#[cfg(target_os = "macos")]
+mod mac_panels;
 mod menu;
 mod numpad;
 #[cfg(target_os = "macos")]
@@ -84,6 +86,11 @@ impl AppModule for ShellModule {
 
     fn finish(&self, app: &mut AppBuilder) {
         builtin_scripts::register(app);
+        #[cfg(target_os = "macos")]
+        let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
+            "bae.macos.notifications",
+            Arc::new(mac_panels::NotificationWarmUp),
+        );
         ui::register_panels(app);
         // BAE's own menu entries (History and Agent panels, Agent workspace),
         // registered next to the AE menus the motion workspace contributes.
@@ -131,6 +138,8 @@ enum UserEvent {
     /// see `open_documents`.
     #[cfg(target_os = "macos")]
     OpenFiles(Vec<std::path::PathBuf>),
+    #[cfg(target_os = "macos")]
+    Render(bae_ui_motion::render_queue::RenderEvent),
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -202,6 +211,12 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     // `run_app` (so a project double-clicked to launch BAE is not missed).
     #[cfg(target_os = "macos")]
     {
+        let render_proxy = proxy.clone();
+        app.insert_resource(bae_ui_motion::render_queue::RenderFeedback(Arc::new(
+            move |event| {
+                let _ = render_proxy.send_event(UserEvent::Render(event));
+            },
+        )));
         let proxy = std::sync::Mutex::new(proxy.clone());
         open_documents::install(move |paths| {
             let proxy = proxy
@@ -285,6 +300,10 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());
     let mut workspace = Workspace::new(&mut app, workbench_state);
+    #[cfg(target_os = "macos")]
+    workspace.set_standard_system_shortcuts(
+        prefs.current().bool("composition.use_system_shortcut_keys"),
+    );
     workspace.set_extra_commands(document.command_titles());
     if first_run {
         workspace.show_role_picker();
@@ -392,6 +411,8 @@ struct Shell {
 /// Everything tied to the window and the current GPU device.
 struct WindowView {
     window: Arc<Window>,
+    #[cfg(target_os = "macos")]
+    control_click: bool,
     gpu: Arc<GpuContext>,
     surface: WindowSurface,
     egui_ctx: egui::Context,
@@ -427,6 +448,8 @@ impl Shell {
             .window_state
             .apply(attributes, event_loop)
             .with_visible(false);
+        #[cfg(target_os = "macos")]
+        let attributes = attributes.with_theme(Some(winit::window::Theme::Dark));
         #[cfg(windows)]
         let attributes = with_exe_icon(attributes);
         let window = event_loop
@@ -547,6 +570,8 @@ impl Shell {
             ..StatusInfo::default()
         };
         Ok(WindowView {
+            #[cfg(target_os = "macos")]
+            control_click: false,
             window,
             gpu,
             surface,
@@ -683,6 +708,12 @@ impl Shell {
         let prefs = self.prefs.current();
         crate::i18n::apply_setting(prefs.str(bae_prefs::keys::LANGUAGE));
         bae_ui::settings::apply(&prefs);
+        #[cfg(target_os = "macos")]
+        {
+            let standard = prefs.bool("composition.use_system_shortcut_keys");
+            self.workspace.set_standard_system_shortcuts(standard);
+            mac_panels::system_shortcuts(standard);
+        }
         self.document.set_undo_limit(prefs.levels_of_undo());
         if let Some(menu) = &mut self.menu {
             menu.set_undo_state(self.document.undo_state());
@@ -721,6 +752,12 @@ impl Shell {
             Ok(mut menu) => {
                 menu.set_undo_state(self.document.undo_state());
                 menu.attach(&view.window);
+                #[cfg(target_os = "macos")]
+                mac_panels::system_shortcuts(
+                    self.prefs
+                        .current()
+                        .bool("composition.use_system_shortcut_keys"),
+                );
                 self.menu = Some(menu);
             }
             Err(error) => tracing::warn!("native menu unavailable: {error}"),
@@ -968,6 +1005,27 @@ impl Shell {
         input
             .viewports
             .insert(egui::ViewportId::ROOT, view.viewport_info.clone());
+        #[cfg(target_os = "macos")]
+        for event in &mut input.events {
+            if let egui::Event::PointerButton {
+                button,
+                pressed,
+                modifiers,
+                ..
+            } = event
+                && *button == egui::PointerButton::Primary
+            {
+                if *pressed {
+                    view.control_click = modifiers.ctrl;
+                }
+                if view.control_click {
+                    *button = egui::PointerButton::Secondary;
+                }
+                if !*pressed {
+                    view.control_click = false;
+                }
+            }
+        }
         input.events.append(&mut view.screenshots);
         view.viewport_info.events.clear();
 
@@ -1477,10 +1535,17 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
             #[cfg(target_os = "macos")]
+            UserEvent::Render(event) => mac_panels::render_event(
+                event,
+                self.prefs
+                    .current()
+                    .bool("export.auto_enable_render_notifications"),
+            ),
+            #[cfg(target_os = "macos")]
             UserEvent::OpenFiles(paths) => {
                 // A file command like File > Open: `dispatch` runs it through
                 // `view_state::run_file_command`, so the project's comps are restored.
-                if let Some(inv) = open_files_invocation(&paths) {
+                if let Some(inv) = open_documents::invocation(&paths) {
                     self.pending.push(inv);
                 }
             }

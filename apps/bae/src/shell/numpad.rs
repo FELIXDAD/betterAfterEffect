@@ -11,6 +11,10 @@ use winit::keyboard::KeyCode;
 /// 1 / 9 / 3 / . are arrows, Home, End, Page Up / Down and Delete
 /// and stay those keys.
 pub fn key(code: KeyCode, logical: &winit::keyboard::Key) -> Option<egui::Key> {
+    #[cfg(target_os = "macos")]
+    if matches!(code, KeyCode::NumLock | KeyCode::NumpadClear) {
+        return Some(egui::Key::BrowserBack);
+    }
     // AE binds both Num 0 and Num Insert to the same preview transport.
     let pad_insert = code == KeyCode::Numpad0
         && matches!(
@@ -25,7 +29,7 @@ pub fn key(code: KeyCode, logical: &winit::keyboard::Key) -> Option<egui::Key> {
         KeyCode::NumpadDivide => "PadSlash",
         KeyCode::NumpadAdd => "PadPlus",
         KeyCode::NumpadSubtract => "PadMinus",
-        KeyCode::NumpadDecimal => "PadDecimal",
+        KeyCode::NumpadDecimal | KeyCode::NumpadComma => "PadDecimal",
         KeyCode::Numpad0 => "Pad0",
         KeyCode::Numpad1 => "Pad1",
         KeyCode::Numpad2 => "Pad2",

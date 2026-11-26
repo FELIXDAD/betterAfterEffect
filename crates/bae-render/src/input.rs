@@ -536,6 +536,8 @@ pub struct FootageRef {
     /// Image sequences: the frame rate of the sequence (its numbered files are
     /// frames from `file` on); `None` opens `file` alone (a still or a movie).
     pub sequence: Option<FrameRate>,
+    /// Sequence uses actual filenames sorted alphabetically.
+    pub alphabetical: bool,
     /// Frame blending, when the comp and layer switches are on.
     pub blend: Option<FrameBlend>,
 }
@@ -754,6 +756,7 @@ mod tests {
                 size: None,
                 source_time: Time::ZERO,
                 sequence: None,
+                alphabetical: false,
                 blend: None,
             }),
         ));

@@ -52,6 +52,9 @@ pub struct ImportParams {
     /// Timeline panel (AE), in the same undo step.
     #[serde(default)]
     pub comp: Option<PrimPath>,
+    /// Create a composition matching the first imported source.
+    #[serde(default)]
+    pub create_comp: bool,
 }
 
 /// Output of `item.import`.
@@ -122,6 +125,26 @@ impl Command for ImportItems {
         if p.files.is_empty() {
             return Err(fail("no files given"));
         }
+        let comp = if p.create_comp {
+            if p.comp.is_some() {
+                return Err(fail("choose a new or an existing composition"));
+            }
+            let first = &p.files[0];
+            let mut settings = serde_json::json!({"name": first.name, "parent": p.parent});
+            for key in ["width", "height", "duration", "pixel_aspect", "frame_rate"] {
+                match first.attrs.get(key) {
+                    Some(Value::Int(value)) => settings[key] = (*value).into(),
+                    Some(Value::Float(value)) => settings[key] = (*value).into(),
+                    Some(Value::Time(value)) => settings[key] = value.0.into(),
+                    Some(Value::FrameRate(rate)) => settings["fps"] = rate.as_f64().into(),
+                    _ => {}
+                }
+            }
+            let params = serde_json::from_value(settings).map_err(|e| fail(e.to_string()))?;
+            Some(crate::comp::CreateComp.run(tx, params)?.path)
+        } else {
+            p.comp
+        };
         let parent = match p.parent {
             Some(parent) => {
                 tx.stage().require_prim(&parent)?;
@@ -168,13 +191,13 @@ impl Command for ImportItems {
             for op in file.to_ops(&item) {
                 tx.apply(op)?;
             }
-            if f.folder.is_none() {
+            if f.folder.is_none() || p.create_comp {
                 add.push((item.clone(), audio_only));
             }
             items.push(item);
         }
         let mut layers = Vec::new();
-        if let Some(comp) = p.comp {
+        if let Some(comp) = comp {
             // Added bottom-up at the top of the stack: the first file ends on top.
             for (item, audio_only) in add.into_iter().rev() {
                 let kind = if audio_only {

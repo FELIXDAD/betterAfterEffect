@@ -34,6 +34,7 @@ fn export_alpha(gpu: &Arc<GpuContext>, stage: &Stage, comp: &PrimPath, frame: i6
         gpu.clone(),
         &[],
         None,
+        None,
     );
     let (w, h, rgba) = bae_render::png_out::read_rgba8(&file).unwrap();
     assert_eq!((w, h), (120, 40));

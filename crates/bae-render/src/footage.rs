@@ -32,6 +32,7 @@ mod imp {
             &self,
             path: &Path,
             _sequence: Option<bae_model::FrameRate>,
+            _alphabetical: bool,
         ) -> Result<Arc<dyn LayerSource>, String> {
             Err(format!(
                 "footage {}: bae-render was built without the `media` feature",
@@ -99,13 +100,20 @@ mod imp {
             path: &Path,
             sequence: Option<FrameRate>,
         ) -> Result<Self, RenderError> {
-            let open = match sequence {
-                Some(rate) => OpenOptions {
-                    sequence: SequenceMode::Sequence,
-                    sequence_frame_rate: rate,
-                },
-                None => OpenOptions::default(),
-            };
+            Self::open_with_options(
+                library,
+                gpu,
+                path,
+                sequence.map(OpenOptions::sequence).unwrap_or_default(),
+            )
+        }
+
+        fn open_with_options(
+            library: Arc<MediaLibrary>,
+            gpu: Arc<MediaGpu>,
+            path: &Path,
+            open: OpenOptions,
+        ) -> Result<Self, RenderError> {
             let info = library
                 .info(path, &open)
                 .map_err(|e| RenderError::Footage {
@@ -174,11 +182,19 @@ mod imp {
         }
     }
 
+    fn open_options(sequence: Option<FrameRate>, alphabetical: bool) -> OpenOptions {
+        let mut options = sequence.map(OpenOptions::sequence).unwrap_or_default();
+        if alphabetical && sequence.is_some() {
+            options.sequence = SequenceMode::Alphabetical;
+        }
+        options
+    }
+
     /// Footage sources by path, over one [`MediaLibrary`].
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
-        sources: FxHashMap<(PathBuf, Option<FrameRate>), Result<Arc<FootageSource>, String>>,
+        sources: FxHashMap<(PathBuf, OpenOptions), Result<Arc<FootageSource>, String>>,
     }
 
     impl FootageCache {
@@ -206,14 +222,21 @@ mod imp {
             &mut self,
             path: &Path,
             sequence: Option<FrameRate>,
+            alphabetical: bool,
         ) -> Result<Arc<dyn LayerSource>, String> {
-            let key = (path.to_path_buf(), sequence);
+            let options = open_options(sequence, alphabetical);
+            let key = (path.to_path_buf(), options);
             if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
             }
-            let entry = FootageSource::open(self.library.clone(), self.gpu.clone(), path, sequence)
-                .map(Arc::new)
-                .map_err(|e| e.to_string());
+            let entry = FootageSource::open_with_options(
+                self.library.clone(),
+                self.gpu.clone(),
+                path,
+                options,
+            )
+            .map(Arc::new)
+            .map_err(|e| e.to_string());
             self.sources.insert(key, entry.clone());
             entry.map(|s| s as Arc<dyn LayerSource>)
         }
@@ -225,7 +248,10 @@ mod imp {
             let path = footage.file.as_ref()?;
             let source = self
                 .sources
-                .get(&(path.clone(), footage.sequence))?
+                .get(&(
+                    path.clone(),
+                    open_options(footage.sequence, footage.alphabetical),
+                ))?
                 .as_ref()
                 .ok()?;
             source
