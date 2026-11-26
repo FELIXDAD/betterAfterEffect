@@ -1230,6 +1230,7 @@ fn render_button_activates_with_space_and_enter() {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
+            item.set_format(bae_render::ExportFormat::Png);
             item.output = dir
                 .path()
                 .join(format!("k{n}/f_####.png"))
@@ -3147,7 +3148,7 @@ fn paint_and_brushes_panels_show_for_each_paint_tool() {
         h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
         h.frame(
             "brushes",
-            &mut crate::paint_panels::BrushesPanel,
+            &mut crate::paint_panels::BrushesPanel::default(),
             Vec::new(),
         );
     }

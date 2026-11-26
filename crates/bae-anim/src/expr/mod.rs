@@ -2218,6 +2218,13 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 note_dependency(c as usize, li);
                 let ct = Time::from_seconds(t);
+                if !(2..=3).contains(&p.len()) {
+                    return throw(
+                        &ctx,
+                        "Layer-space transforms require a 2D or 3D point or vector",
+                    );
+                }
+                let three_d = comp.layers[li].switches.three_d;
                 let m = comp.world_at(li, ct, c as usize, Some(&ctx));
                 let v = glam::DVec3::new(
                     p.first().copied().unwrap_or(0.0),
@@ -2228,7 +2235,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     // fromCompToSurface: the comp point seen through the active
                     // camera, where its ray meets the layer's plane (2D layers:
                     // fromComp).
-                    8 if comp.layers[li].switches.three_d => {
+                    8 if three_d => {
                         let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
                         let (cx, cy) = (comp.width as f64 / 2.0, comp.height as f64 / 2.0);
                         let to_world = view.inverse();
@@ -2247,7 +2254,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     8 => m.inverse().transform_point3(v),
                     // toComp of a 3D layer is in the comp's view: through the active
                     // camera (AE 26: matches the default camera's projection exactly).
-                    0 if comp.layers[li].switches.three_d => {
+                    0 if three_d => {
                         let w = m.transform_point3(v);
                         let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
                         let pc = view.transform_point3(w);
@@ -2258,12 +2265,38 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                             glam::DVec3::new(cx + pc.x * zoom / pc.z, cy + pc.y * zoom / pc.z, pc.z)
                         }
                     }
+                    1 if three_d => {
+                        let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
+                        let depth = p.get(2).copied().unwrap_or(zoom);
+                        let camera_point = glam::DVec3::new(
+                            (v.x - f64::from(comp.width) / 2.0) * depth / zoom,
+                            (v.y - f64::from(comp.height) / 2.0) * depth / zoom,
+                            depth,
+                        );
+                        (view * m).inverse().transform_point3(camera_point)
+                    }
+                    2 | 3 if three_d => {
+                        let (view, _) = comp.camera_at(ct, c as usize, Some(&ctx));
+                        let to_view = view * m;
+                        if kind == 2 {
+                            to_view.transform_vector3(v)
+                        } else {
+                            to_view.inverse().transform_vector3(v)
+                        }
+                    }
                     0 | 4 => m.transform_point3(v),
                     1 | 5 => m.inverse().transform_point3(v),
                     2 | 6 => m.transform_vector3(v),
                     _ => m.inverse().transform_vector3(v),
                 };
-                Ok::<_, rquickjs::Error>(r.to_array().to_vec())
+                let dimensions = if kind == 8 {
+                    2
+                } else if three_d {
+                    3
+                } else {
+                    p.len()
+                };
+                Ok::<_, rquickjs::Error>(r.to_array()[..dimensions].to_vec())
             },
         )?,
     )?;
