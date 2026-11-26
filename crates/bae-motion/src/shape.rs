@@ -188,6 +188,8 @@ pub struct AddShape;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct AddShapeParams {
+    #[serde(flatten)]
+    pub defaults: crate::layer::NewLayerDefaults,
     /// Shape layer to add the shape to (as a new group at the top of its
     /// contents). Omit to create a new shape layer in `comp`.
     #[serde(default)]
@@ -287,16 +289,18 @@ impl Command for AddShape {
                         source: None,
                         index: p.index,
                         color: None,
+                        solids_folder_name: None,
+                        solids_folder_label: None,
                         size: None,
                         text: None,
                         font_size: None,
                         shape: None,
                         position,
-                        start: None,
+                        defaults: p.defaults,
                         pixel_aspect: None,
                         camera: None,
                         light: None,
-                        label: None,
+
                         position_3d: None,
                         point_of_interest: None,
                     },
