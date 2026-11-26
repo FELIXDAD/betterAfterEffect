@@ -506,6 +506,119 @@ fn demo_project_builds_and_renders() {
     h.frame("composition", &mut viewer, Vec::new());
 }
 
+/// A value drag renders in the background (#593): the viewer shows the
+/// newest finished live frame without rendering it on its own thread, and
+/// its own target shows again once the drag ends.
+#[test]
+fn gpu_preview_renders_a_value_drag_in_the_background() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    let shown = |registry: &ViewportTextureRegistry, preview: &crate::gpu_preview::GpuPreview| {
+        registry
+            .get(preview.viewport())
+            .expect("published")
+            .view
+            .texture()
+            .clone()
+    };
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    let own = shown(&registry, &preview);
+    h.session().lock().scrub = Some(crate::session::Scrub {
+        path: solid.clone(),
+        attr: "transform:opacity".into(),
+        value: Value::Float(0.0),
+        peers: Vec::new(),
+        time: Time::ZERO,
+        committed: None,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while shown(&registry, &preview) == own {
+        assert!(std::time::Instant::now() < deadline, "no live frame");
+        let image = preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+        assert!(
+            image.is_some(),
+            "the last frame stays while the live one renders"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.session().lock().scrub = None;
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    assert_eq!(shown(&registry, &preview), own);
+}
+
+/// During a value drag the sampleImage reads run on the live renderer's thread
+/// too: the viewer keeps the last frame, the samples arrive, then the live
+/// frame (with the sampled value) shows.
+#[test]
+fn value_drag_reads_samples_on_the_live_thread() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let name = query::display_name_of(&h.stage, &solid);
+    h.run(
+        "attr.set_expression",
+        json!({"path": shape, "attr": "transform:rotation",
+               "source": format!("thisComp.layer(\"{name}\").sampleImage([2, 2])[3] * 90")}),
+    );
+    // A history log as in the app: without one every frame counts as an edit
+    // (which drops compiled comps and samples).
+    h.resources
+        .insert(std::sync::Arc::new(bae_ui::history::HistoryLog::new()));
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let mut eval = bae_anim::Evaluator::new();
+    eval.set_image_samples(Some(preview.samples().clone()));
+    h.session().lock().scrub = Some(crate::session::Scrub {
+        path: solid.clone(),
+        attr: "transform:opacity".into(),
+        value: Value::Float(50.0),
+        peers: Vec::new(),
+        time: Time::ZERO,
+        committed: None,
+    });
+    let rotation = |eval: &mut bae_anim::Evaluator, h: &Harness| {
+        let overrides = h
+            .session()
+            .lock()
+            .scrub
+            .as_ref()
+            .map(|s| s.overrides(&h.stage))
+            .unwrap_or_default();
+        eval.set_overrides(overrides);
+        let ec = eval.evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+        let r = ec.layer(&shape).unwrap().transform.rotation.z;
+        (ec, r)
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let (ec, r) = rotation(&mut eval, &h);
+        preview.frame(&h.resources, &h.stage, &ec, 1, None, false);
+        // The solid is opaque where it is sampled: 1 × 90 once read back.
+        if !preview.samples().is_waiting() && (r - 90.0).abs() < 1e-3 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "samples never arrived ({r})"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!preview.waiting_for_samples() || preview.samples().is_waiting());
+    h.session().lock().scrub = None;
+}
+
 /// The viewer's GPU path: 04's renderer draws the comp, the 8-bit texture is
 /// published, and the viewer gets the egui handle the shell set.
 #[test]
@@ -1082,11 +1195,17 @@ fn add_to_render_queue_action() {
             .any(|(id, item)| id == "motion.composition.render_queue"
                 && item.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
+    // On macOS ⌘M is the system's Minimize: AE uses ⌃⌘M.
+    let chord = if cfg!(target_os = "macos") {
+        "Ctrl+Cmd+M"
+    } else {
+        "Cmd+M"
+    };
     assert!(
         crate::actions::bindings()
             .bindings
             .iter()
-            .any(|b| b.chord == bae_ui::Chord::parse("Cmd+M").unwrap()
+            .any(|b| b.chord == bae_ui::Chord::parse(chord).unwrap()
                 && b.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
 }
@@ -1780,6 +1899,48 @@ fn import_fixture(tag: &str) -> std::path::PathBuf {
     }
     std::fs::write(dir.join("readme.txt"), b"notes").unwrap();
     dir
+}
+
+/// Opening a project keeps the audio device opened at startup, so Play on a
+/// comp with audio runs on the device clock. Skipped without an output device.
+#[test]
+fn playback_after_opening_a_project_uses_the_audio_clock() {
+    let mut h = Harness::new();
+    let session = h.session();
+    session.retry_audio();
+    let start = std::time::Instant::now();
+    while session.lock().audio_device().0 && start.elapsed().as_secs() < 10 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if !session.lock().audio_device().1 {
+        return;
+    }
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tone.wav");
+    std::fs::write(&file, b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\x40").unwrap();
+    h.run("item.import", json!({"files":[{"path":file,"name":"tone.wav",
+        "attrs":{"has_audio":{"type":"bool","value":true},"duration":{"type":"time","value":88200}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "tone.wav")
+        .unwrap();
+    h.run(
+        "layer.create",
+        json!({"kind":"audio","comp":comp,"source":asset}),
+    );
+    // What File > Open does to the session.
+    session.replace_project();
+    session.lock().open_comp(&comp);
+    let mut tl = TimelinePanel::default();
+    h.action(&mut tl, Invocation::new(crate::actions::ids::PLAY));
+    let s = session.lock();
+    assert!(
+        s.is_playing() && s.audio_clock(),
+        "playback runs on the audio clock"
+    );
 }
 
 #[test]
@@ -2599,6 +2760,118 @@ fn layer_copy_cut_and_paste() {
     );
 }
 
+/// The viewer's GPU path with an effect (the user's case): a red solid with
+/// Gaussian Blur 25 shows the same image at every preview resolution — with
+/// Repeat Edge Pixels a sharp rectangle filling its layer box, without it a
+/// blur spreading past the box (not a smaller copy in the box's corner).
+#[test]
+fn gpu_preview_keeps_blurred_solids_in_their_box() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let mut app = bae_app::AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    let mut app = app.build();
+    let defs = app.registry::<bae_model::EffectDef>();
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    h.resources.insert(crate::gpu_preview::PreviewEffects(
+        app.registry::<dyn bae_render::Effect>(),
+    ));
+    let comp = h.run("comp.create", json!({"width": 640, "height": 360}))["path"].clone();
+    let solid = h.run(
+        "layer.create",
+        json!({"comp": comp, "kind": "solid", "color": [1.0, 0.0, 0.0, 1.0], "size": [100, 250]}),
+    )["path"]
+        .clone();
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "transform:position", "value": {"type": "vec3", "value": [400.0, 180.0, 0.0]}}),
+    );
+    let fx = h.run(
+        "effect.apply",
+        json!({"layers": [solid], "match_name": "ADBE Gaussian Blur 2"}),
+    )["effects"][0]
+        .clone();
+    let set = |h: &mut Harness, id: u32, value: serde_json::Value| {
+        h.run(
+            "attr.set",
+            json!({"path": fx, "attr": format!("param:{id:04}"), "value": value}),
+        );
+    };
+    set(&mut h, 1, json!({"type": "float", "value": 25.0}));
+    let comp = PrimPath::new(comp.as_str().unwrap()).unwrap();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    // What the viewer draws: the published texture stretched over `rect`;
+    // returns the comp-pixel box of texels more than half opaque.
+    let mut shown = |h: &Harness, resolution: u32| {
+        let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+        preview.frame(&h.resources, &h.stage, &evaluated, resolution, None, false);
+        let img = preview
+            .frame(&h.resources, &h.stage, &evaluated, resolution, None, false)
+            .expect("image");
+        let rc = bae_render::AnimEvaluator::new(None)
+            .with_purpose(bae_render::RenderPurpose::Preview)
+            .convert(&h.stage, &evaluated, 0)
+            .unwrap();
+        let request = bae_render::RenderRequest {
+            resolution: match resolution {
+                1 => bae_render::Resolution::Full,
+                2 => bae_render::Resolution::Half,
+                _ => bae_render::Resolution::Quarter,
+            },
+            purpose: bae_render::RenderPurpose::Preview,
+            ..bae_render::RenderRequest::full()
+        };
+        let frame = preview.renderer().render_frame(&rc, &request).unwrap();
+        assert!(frame.from_cache, "the frame the preview published");
+        let data = preview
+            .renderer()
+            .read_rgba8(&frame, bae_render::OutputAlpha::Straight)
+            .unwrap();
+        let size = registry.get(preview.viewport()).unwrap().size;
+        assert_eq!(size, [data.width, data.height]);
+        let r = img.rect;
+        let s = r.width() as i32 / data.width as i32;
+        let mut bbox = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
+        for j in 0..data.height as i32 {
+            for i in 0..data.width as i32 {
+                if data.pixel(i as u32, j as u32)[3] > 128 {
+                    let (x, y) = (r.x0 + i * s, r.y0 + j * s);
+                    bbox = [
+                        bbox[0].min(x),
+                        bbox[1].min(y),
+                        bbox[2].max(x + s),
+                        bbox[3].max(y + s),
+                    ];
+                }
+            }
+        }
+        bbox
+    };
+    let close = |a: [i32; 4], b: [i32; 4], tol: i32| (0..4).all(|k| (a[k] - b[k]).abs() <= tol);
+    for repeat in [true, false] {
+        set(&mut h, 3, json!({"type": "bool", "value": repeat}));
+        // Half-opaque at the layer's edges either way (the blur used to come
+        // out shifted, cut or as stale pixels for larger layers).
+        let full = shown(&h, 1);
+        assert!(
+            close(full, [350, 55, 450, 305], 1),
+            "repeat {repeat}: {full:?}"
+        );
+        for (resolution, tol) in [(2, 4), (4, 8)] {
+            let got = shown(&h, resolution);
+            assert!(
+                close(got, full, tol),
+                "repeat {repeat}, 1/{resolution}: {got:?} vs {full:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn expression_errors_reach_the_session_banner_and_timeline() {
     let mut h = Harness::new();
@@ -2893,4 +3166,33 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
         bae_motion::paint::strokes_of(&h.stage, &effects[0]).len(),
         1
     );
+}
+
+/// #599: the Project panel starts renaming the item another panel asks for.
+#[test]
+fn project_panel_renames_the_item_another_panel_asks_for() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    h.session().lock().rename_item = Some(comp.clone());
+    let mut project = ProjectPanel::default();
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("project");
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+        ..Default::default()
+    };
+    let mut out = h.ctx.run_ui(raw, |ui| {
+        let mut cx = PanelContext::new(
+            &id,
+            "Project",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        project.ui(ui, &mut cx);
+    });
+    out.textures_delta.clear();
+    assert!(project.is_renaming());
+    assert!(h.session().lock().rename_item.is_none());
 }

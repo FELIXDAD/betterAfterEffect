@@ -39,6 +39,8 @@ use crate::session::SharedSession;
 pub enum Dialog {
     /// Analysis of the composition work area for the Keyframe Assistant.
     AudioAnalysis(crate::audio_analysis::Analysis),
+    /// Display units and slider floor of the Audio panel.
+    AudioOptions(crate::panels::audio::AudioOptionsDialog),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
@@ -67,6 +69,13 @@ pub enum Dialog {
     OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
     Alert { title: String, message: String },
+    /// View ▸ View Options (Cmd/Ctrl+Alt+U).
+    ViewOptions(Box<crate::viewer::view_options::LayerControls>),
+    /// View ▸ Panel Background Color ▸ Select Custom Background Color…
+    BackgroundColor([u8; 3]),
+    /// View ▸ Resolution ▸ Custom…: pixel steps (horizontal, vertical);
+    /// `nested`: also for the comps nested in the active one.
+    CustomResolution { steps: [u32; 2], nested: bool },
 }
 
 /// Open dialog and remembered values.
@@ -158,12 +167,13 @@ pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: O
 
 /// Open Composition Settings for an existing comp.
 pub(crate) fn comp_settings(cx: &PanelContext<'_>, comp: &PrimPath) {
-    let Some(settings) = CompSettings::edit(cx.stage, comp) else {
-        return;
-    };
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
-    if d.open.is_none() {
+    if d.open.is_some() {
+        return;
+    }
+    remember(cx.resources, &mut d);
+    if let Some(settings) = CompSettings::edit(cx.stage, comp, &d.comp) {
         d.open = Some(Dialog::CompSettings(Box::new(settings)));
     }
 }
@@ -202,6 +212,15 @@ pub(crate) fn layer_settings(cx: &PanelContext<'_>, session: &SharedSession, tar
     };
     if open.is_some() {
         d.open = open;
+    }
+}
+
+/// Open `dialog` unless one is open already.
+pub(crate) fn open(resources: &Resources, dialog: Dialog) {
+    let dialogs = shared(resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(dialog);
     }
 }
 
@@ -297,6 +316,17 @@ pub(crate) fn project_settings(cx: &PanelContext<'_>) {
         d.open = Some(Dialog::ProjectSettings(Box::new(
             project_settings::ProjectSettings::new(cx.stage),
         )));
+    }
+}
+
+pub(crate) fn audio_options(
+    cx: &PanelContext<'_>,
+    options: crate::panels::audio::AudioOptionsDialog,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::AudioOptions(options));
     }
 }
 
@@ -410,6 +440,7 @@ impl bae_ui::DialogHost for MotionDialogs {
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
+            Dialog::AudioOptions(d) => d.ui(ctx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
@@ -423,6 +454,13 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
+            Dialog::ViewOptions(v) => crate::viewer::view_options::view_options_ui(ctx, cx, v),
+            Dialog::BackgroundColor(c) => {
+                crate::viewer::view_options::background_color_ui(ctx, cx, *c)
+            }
+            Dialog::CustomResolution { steps, nested } => {
+                crate::viewer::view_options::custom_resolution_ui(ctx, cx, steps, *nested)
+            }
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {

@@ -867,8 +867,8 @@ const EFFECT: &[Node] = &[
 #[rustfmt::skip]
 const ANIMATION: &[Node] = &[
     it(851969, "Track in Boris FX Mocha", "motion.anim.track_in_boris_fx_mocha", "", B, Adobe),
-    it(851970, "Save Animation Preset...", "motion.anim.save_animation_preset", "", E, Later),
-    it(851971, "Apply Animation Preset...", "motion.anim.apply_animation_preset", "", E, Later),
+    it(851970, "Save Animation Preset...", "motion.anim.save_animation_preset", "", E, Done),
+    it(851971, "Apply Animation Preset...", "motion.anim.apply_animation_preset", "", E, Done),
     sub(
         "Recent Animation Presets",
         &[
@@ -967,7 +967,7 @@ const ANIMATION: &[Node] = &[
     it(851987, "Separate Dimensions", "motion.anim.separate_dimensions", "", B, Todo),
     it(851988, "Track Camera", "motion.anim.track_camera", "", B, Later),
     it(851989, "Warp Stabilizer VFX", "motion.anim.warp_stabilizer_vfx", "", B, Later),
-    it(851990, "Track Motion", "motion.anim.track_motion", "", B, Later),
+    it(851990, "Track Motion", "motion.anim.track_motion", "", B, Done),
     it(851991, "Track Mask", "motion.anim.track_mask", "", B, Later),
     it(851992, "Track this Property", "motion.anim.track_this_property", "", B, Later),
     SEP,
@@ -1175,8 +1175,10 @@ const WINDOW: &[Node] = &[
     s(it(524328, "Footage", "window.panel", r#"{"id":"footage","toggle":true}"#, E, Later)),
     s(it(524329, "Project", "window.panel", r#"{"id":"project","toggle":true}"#, B, Done)),
     SEP,
-    it(524331, "(script panel)", "motion.window.script_panel", "", B, Dynamic),
-    it(524338, "(script panel)", "motion.window.script_panel", "", B, Dynamic),
+    // AE's two bundled ScriptUI panels on Windows (greyed until scripts run,
+    // #456 #457); AE 26 on the Mac lists none.
+    win(it(524331, "Create Nulls From Paths.jsx", "motion.window.script_panel", r#"{"script":"Create Nulls From Paths.jsx"}"#, B, Later)),
+    win(it(524338, "VR Comp Editor.jsx", "motion.window.script_panel", r#"{"script":"VR Comp Editor.jsx"}"#, B, Later)),
 ];
 
 /// Help.

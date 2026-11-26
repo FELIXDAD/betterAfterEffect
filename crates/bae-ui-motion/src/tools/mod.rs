@@ -523,6 +523,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (crate::viewer::ZOOM_100, "Zoom to 100%"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
+        .chain(crate::viewer::view_options::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
         .chain([
             (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
@@ -578,9 +579,20 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
                 *title,
             )
         });
+    let custom = crate::viewer::view_options::VARIANTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (
+                crate::viewer::view_options::ids::CUSTOM_RESOLUTION,
+                params,
+                *title,
+            )
+        });
     nudges
         .chain(resolutions)
         .chain(views)
+        .chain(custom)
         .chain(channels)
         .map(|(id, params, title)| (id, params, title.to_owned()))
         .chain(crate::viewer::display::snapshot_names())
@@ -1099,7 +1111,8 @@ impl ActionHandler for ToolActions {
                 .unwrap_or(1);
             let session = crate::common::session(cx.resources);
             let nested = inv.params.get("nested").and_then(|v| v.as_bool()) == Some(true);
-            crate::viewer::set_resolution(cx, &session, factor.max(1) as u32, nested);
+            let f = factor.max(1) as u32;
+            crate::viewer::set_resolution(cx, &session, [f, f], nested);
             return true;
         }
         if inv.id == ids::NUDGE {
@@ -1131,6 +1144,9 @@ impl ActionHandler for ToolActions {
             shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
             return true;
         }
+        if crate::viewer::view_options::handle(inv, cx) {
+            return true;
+        }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
             let mut t = tools.lock();
@@ -1145,6 +1161,22 @@ impl ActionHandler for ToolActions {
 /// Chinese names of the tools and tool options (`docs/glossary.md`; names marked
 /// 待核 in the PR are best effort until R1 checks AE 26's Chinese UI).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // The shape tools' Add menu (AE's ShapeLayer/AddMenu).
+    ("Add Shape Item", "添加形状项"),
+    ("Group (empty)", "组（空）"),
+    ("Polystar", "多边星形"),
+    ("Gradient Fill", "渐变填充"),
+    ("Gradient Stroke", "渐变描边"),
+    ("Merge Paths", "合并路径"),
+    ("Offset Paths", "位移路径"),
+    ("Pucker & Bloat", "收缩和膨胀"),
+    ("Repeater", "中继器"),
+    ("Round Corners", "圆角"),
+    ("Trim Paths", "修剪路径"),
+    ("Twist", "扭转"),
+    ("Wiggle Paths", "摆动路径"),
+    ("Wiggle Transform", "摆动变换"),
+    ("Zig Zag", "Z 字形"),
     ("Zoom to 100%", "缩放到 100%"),
     ("3D Gizmo: Position", "3D 位置 Gizmo"),
     ("3D Gizmo: Scale", "三维缩放 Gizmo"),

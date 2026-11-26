@@ -82,6 +82,9 @@ pub fn mac_keys() -> &'static [(&'static str, &'static str, &'static str)] {
 
 /// Menu titles that read the same in Chinese (AE keeps them in English).
 pub const SAME_IN_CHINESE: &[&str] = &[
+    // AE's bundled script panels (file names; Windows only).
+    "Create Nulls From Paths.jsx",
+    "VR Comp Editor.jsx",
     "Adobe Dynamic Link",
     "Maxon Cinema 4D Exporter...",
     "Shift+F10",
@@ -106,19 +109,31 @@ pub const SAME_IN_CHINESE: &[&str] = &[
 
 impl Key {
     /// AE's default chords for this command on Windows (`mac = false`) or macOS,
-    /// in BAE notation (see [`chords`]).
+    /// in BAE notation (see [`chords`]). On macOS they are the ones AE uses with
+    /// "Use System Shortcut Keys" on (its default): the system keeps ⌘H, ⌥⌘H and
+    /// ⌘M (`MacSysShortcutsStd`; the `MacSysShortcutsAlt` set is for the setting
+    /// off) and AE's own commands on them get Control (see [`mac_system_key`]).
     pub fn chords(&self, mac: bool) -> Vec<String> {
-        if mac
-            && let Some((_, _, keys)) = mac_keys()
-                .iter()
-                .find(|(ctx, cmd, _)| *ctx == self.context && *cmd == self.command)
-        {
-            return mac_chords(keys);
+        if !mac {
+            if self.flags & MAC_ONLY != 0 {
+                return Vec::new();
+            }
+            return chords(self.keys, false);
         }
-        if self.flags & MAC_ONLY != 0 && !mac {
+        if self.context == "MacSysShortcutsAlt" {
             return Vec::new();
         }
-        chords(self.keys, mac)
+        let file = match mac_keys()
+            .iter()
+            .find(|(ctx, cmd, _)| *ctx == self.context && *cmd == self.command)
+        {
+            Some((_, _, keys)) => mac_chords(keys),
+            None => chords(self.keys, true),
+        };
+        if self.context == "MacSysShortcutsStd" {
+            return file;
+        }
+        file.into_iter().map(mac_system_key).collect()
     }
 
     /// The BAE panel kind the AE context corresponds to (`None` = everywhere).
@@ -235,6 +250,18 @@ pub fn chords(keys: &str, mac: bool) -> Vec<String> {
             Some(chord_string(ctrl, cmd, alt, shift, key))
         })
         .collect()
+}
+
+/// A macOS chord of AE's shortcut file as AE binds it: Hide (⌘H), Hide Others
+/// (⌥⌘H) and Minimize (⌘M) belong to the system, so with "Use System Shortcut
+/// Keys" on (AE's default) AE adds Control to its commands on them
+/// (`docs/reference/ae/mac/menus.md` 5.4).
+pub fn mac_system_key(chord: String) -> String {
+    if ["Cmd+H", "Cmd+Alt+H", "Cmd+M"].contains(&chord.as_str()) {
+        format!("Ctrl+{chord}")
+    } else {
+        chord
+    }
 }
 
 /// AE's macOS notation (`Cmd+Option+macControl+H`) in BAE chord strings.
