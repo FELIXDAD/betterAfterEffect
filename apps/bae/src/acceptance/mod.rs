@@ -22,6 +22,7 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
 mod appearance_preferences;
+mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
 mod camera_preferences;
