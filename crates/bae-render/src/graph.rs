@@ -176,6 +176,26 @@ pub enum NodeKind {
     Mix(MixNode),
     /// A 3D layer drawn alone, blurred by the camera's depth of field.
     DepthBlur(DepthBlurNode),
+    /// A lit 3D layer's shadows in its own space.
+    ShadowMap(ShadowMapNode),
+}
+
+/// How much of each shadow-casting light reaches every point of a lit 3D
+/// layer past the layer's shadow casters, in the layer's own pixels (AE's
+/// shadow maps): drawn when the layer, its lights or casters change and kept
+/// across frames; the layer's draws sample it (`exec/shadowmap.rs`).
+#[derive(Debug)]
+pub struct ShadowMapNode {
+    /// The layer (diagnostics).
+    pub layer: PrimPath,
+    /// The layer's lighting with its casters.
+    pub lighting: Arc<crate::light::Lighting>,
+    /// Output texels the layer covers: when they outnumber a map slot's
+    /// texels, testing the casters per output pixel costs more than the map.
+    pub screen_texels: u64,
+    /// Per slot, the key of its contents (the layer, its casters and that
+    /// light): a slot whose light did not change is copied, not drawn.
+    pub slot_keys: Vec<u64>,
 }
 
 /// Depth of field of one 3D layer (AE's camera Depth of Field): the layer
@@ -247,6 +267,13 @@ impl NodeKind {
                 f(m.coverage);
             }
             NodeKind::DepthBlur(d) => f(d.input),
+            NodeKind::ShadowMap(m) => {
+                for c in m.lighting.casters.iter() {
+                    if let crate::light::CasterPixels::Image(id) = c.pixels {
+                        f(id);
+                    }
+                }
+            }
             NodeKind::Fill(_) | NodeKind::Source(_) | NodeKind::Mask(_) => {}
         }
     }
@@ -261,6 +288,7 @@ impl NodeKind {
             NodeKind::Mask(_) => "mask",
             NodeKind::Mix(_) => "mix",
             NodeKind::DepthBlur(_) => "depth of field",
+            NodeKind::ShadowMap(_) => "shadow map",
         }
     }
 }
@@ -913,6 +941,9 @@ impl Builder<'_, '_> {
         planned.retain(|(index, _)| {
             comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
         });
+        for (index, op) in &mut planned {
+            self.shadow_map(comp, *index, op, depth);
+        }
         let drawn = Self::depth_order_3d(comp, planned);
         for (index, op) in drawn {
             let op = self.depth_of_field(comp, index, op, canvas, scale, depth);
@@ -979,6 +1010,75 @@ impl Builder<'_, '_> {
             }
         }
         drawn
+    }
+
+    /// Gives a lit layer with shadow casters its receiver-space shadow map
+    /// ([`ShadowMapNode`]). Motion-blurred layers (lit per sample) and
+    /// textures whose pixels are turned relative to the layer keep testing
+    /// the casters per pixel.
+    fn shadow_map(&mut self, comp: &RenderComp, index: usize, op: &mut LayerOp, depth: usize) {
+        let Some(lighting) = &op.lighting else {
+            return;
+        };
+        if lighting.casters.is_empty()
+            || !lighting.samples.is_empty()
+            || lighting.shadow_slots().is_empty()
+        {
+            return;
+        }
+        let mut h = FxHasher::default();
+        "shadow map".hash(&mut h);
+        for v in lighting.matrix.to_cols_array() {
+            v.to_bits().hash(&mut h);
+        }
+        let r = lighting.rect;
+        [r.x0, r.y0, r.x1, r.y1].map(f64::to_bits).hash(&mut h);
+        for c in lighting.casters.iter() {
+            for v in c.matrix.to_cols_array() {
+                v.to_bits().hash(&mut h);
+            }
+            [c.rect.x0, c.rect.y0, c.rect.x1, c.rect.y1]
+                .map(f64::to_bits)
+                .hash(&mut h);
+            c.opacity.to_bits().hash(&mut h);
+            c.transmission.to_bits().hash(&mut h);
+            match c.pixels {
+                crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
+                crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
+            }
+        }
+        let base = h.finish();
+        let slot_keys: Vec<u64> = lighting
+            .shadow_slots()
+            .into_iter()
+            .map(|li| {
+                let mut h = FxHasher::default();
+                base.hash(&mut h);
+                crate::input::hash_light(&lighting.lights[li], &mut h);
+                h.finish()
+            })
+            .collect();
+        let key = hash_of(&(base, &slot_keys));
+        let (_, [w, ht]) = lighting.shadow_map_size();
+        let slots = slot_keys.len() as i32;
+        let node = self.owned(comp, index, depth, |b| {
+            b.push(Node {
+                kind: NodeKind::ShadowMap(ShadowMapNode {
+                    layer: op.layer.clone(),
+                    lighting: lighting.clone(),
+                    screen_texels: u64::from(op.bounds.width()) * u64::from(op.bounds.height()),
+                    slot_keys,
+                }),
+                rect: IRect::new(0, 0, w as i32 * slots, ht as i32),
+                pixel_scale: 1.0,
+                key,
+                cacheable: true,
+            })
+        });
+        op.lighting = Some(Arc::new(crate::light::Lighting {
+            shadow_map: Some(node),
+            ..(**lighting).clone()
+        }));
     }
 
     /// Depth of field (AE's camera Depth of Field): a 3D layer away from the
@@ -1453,6 +1553,8 @@ impl Builder<'_, '_> {
                         world_per_pixel: camera.world_per_pixel(),
                         casters: Arc::new([]),
                         samples,
+                        rect: content_rect,
+                        shadow_map: None,
                     })
                 })
             });
@@ -2641,6 +2743,7 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
                     opacity: op.opacity,
                     transmission: comp.layers[*index].material.light_transmission,
                     pixels,
+                    footprints: Arc::new([]),
                 },
             ))
         })
@@ -2659,17 +2762,43 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
         }
         let receiver = lighting.matrix;
         let rect = op.content;
+        // Per light, where each caster's shadow can land: casters that miss
+        // the receiver for every light are dropped, the rest are skipped by
+        // the shader outside their footprint.
         let mine: Arc<[ShadowCaster]> = casters
             .iter()
-            .filter(|(i, c)| {
-                i != index
-                    && lighting
-                        .lights
-                        .iter()
-                        .filter(|l| l.casts_shadows)
-                        .any(|l| can_shadow(&receiver, &rect, c, l))
+            .filter(|(i, _)| i != index)
+            .filter_map(|(_, c)| {
+                let footprints: Arc<[Rect]> = lighting
+                    .lights
+                    .iter()
+                    .map(|l| {
+                        if !l.casts_shadows {
+                            return Rect::new(1.0, 1.0, 0.0, 0.0);
+                        }
+                        match shadow_footprint(&receiver, c, l) {
+                            None => Rect::new(1.0, 1.0, 0.0, 0.0),
+                            Some(None) => Rect::new(f64::MIN, f64::MIN, f64::MAX, f64::MAX),
+                            Some(Some(b))
+                                if b.x1 <= rect.x0
+                                    || b.x0 >= rect.x1
+                                    || b.y1 <= rect.y0
+                                    || b.y0 >= rect.y1 =>
+                            {
+                                Rect::new(1.0, 1.0, 0.0, 0.0)
+                            }
+                            Some(Some(b)) => b,
+                        }
+                    })
+                    .collect();
+                footprints
+                    .iter()
+                    .any(|f| !f.is_empty())
+                    .then(|| ShadowCaster {
+                        footprints,
+                        ..c.clone()
+                    })
             })
-            .map(|(_, c)| c.clone())
             .collect();
         if mine.is_empty() {
             continue;
@@ -2681,70 +2810,94 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
     }
 }
 
-/// Whether `caster` can throw a shadow of `light` onto the receiver plane
-/// `receiver` within `rect` (layer pixels). Conservative: only rules out casters
-/// behind the receiver as seen from the light, or whose shadow lands outside it.
-fn can_shadow(
+/// Where `caster` can throw a shadow of `light` on the receiver plane
+/// `receiver`, in receiver layer pixels with the softest edge included
+/// (conservative): `None` nowhere (behind the receiver as seen from the
+/// light), `Some(None)` anywhere (a corner's shadow is unbounded).
+fn shadow_footprint(
     receiver: &glam::DMat4,
-    rect: &Rect,
     caster: &crate::light::ShadowCaster,
     light: &crate::light::Light,
-) -> bool {
+) -> Option<Option<Rect>> {
     use crate::light::LightKind;
+    use glam::DVec3;
     let Some(n) = receiver
         .x_axis
         .truncate()
         .cross(receiver.y_axis.truncate())
         .try_normalize()
     else {
-        return true;
+        return Some(None);
     };
     let d = -n.dot(receiver.w_axis.truncate());
-    let side = |p: glam::DVec3| n.dot(p) + d;
-    let corners = caster
-        .rect
-        .corners()
-        .map(|c| caster.matrix.transform_point3(c.extend(0.0)));
-    // Where each corner's shadow falls on the receiver plane.
-    let shadow_of = |c: glam::DVec3| -> Option<glam::DVec3> {
-        match light.kind {
-            LightKind::Parallel => {
-                let dir = light.direction();
-                let toward = -n.dot(dir) * side(c);
-                (toward > 1e-9).then(|| c - dir * (side(c) / n.dot(dir)))
-            }
-            _ => {
-                let lp = light.position();
-                let (sl, sc) = (side(lp), side(c));
-                // Strictly between the light and the receiver plane.
-                (sl * sc > 1e-9 && sc.abs() < sl.abs()).then(|| lp + (c - lp) * (sl / (sl - sc)))
-            }
-        }
-    };
+    let side = |p: DVec3| n.dot(p) + d;
     let light_side = match light.kind {
         LightKind::Parallel => -n.dot(light.direction()),
         _ => side(light.position()),
     };
-    if corners.iter().all(|c| side(*c) * light_side <= 0.0) {
-        // Behind the receiver (or in its plane) as seen from the light.
-        return false;
+    if light_side.abs() < 1e-9 {
+        return Some(None);
     }
-    let Some(shadows) = corners
-        .iter()
-        .map(|c| shadow_of(*c))
-        .collect::<Option<Vec<_>>>()
-    else {
-        return true;
-    };
+    // The caster grown by its softest shadow edge (diffusion plus the
+    // shader's minimum softness), in its own pixels.
+    let caster_px = caster.matrix.x_axis.truncate().length().max(1e-12);
+    let grow = (f64::from(light.shadow_diffusion) + 8.0) / caster_px;
+    let r = caster.rect;
+    let grown = Rect::new(r.x0 - grow, r.y0 - grow, r.x1 + grow, r.y1 + grow);
+    let corners = grown
+        .corners()
+        .map(|c| caster.matrix.transform_point3(c.extend(0.0)));
+    // Only the part on the light's side of the receiver plane casts onto it
+    // (a point on the plane shadows itself).
+    let ahead = |p: DVec3| side(p) * light_side.signum();
+    let mut poly: Vec<DVec3> = Vec::with_capacity(8);
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        let (sa, sb) = (ahead(a), ahead(b));
+        if sa > 0.0 {
+            poly.push(a);
+        }
+        if (sa > 0.0) != (sb > 0.0) {
+            poly.push(a + (b - a) * (sa / (sa - sb)));
+        }
+    }
+    if poly.is_empty() {
+        // Behind the receiver (or in its plane) as seen from the light.
+        return None;
+    }
+    let mut shadows = Vec::with_capacity(poly.len());
+    for v in poly {
+        let sv = side(v);
+        let p = match light.kind {
+            LightKind::Parallel => {
+                let dir = light.direction();
+                v - dir * (sv / n.dot(dir))
+            }
+            _ => {
+                let lp = light.position();
+                // At or past the light's own plane: the shadow is unbounded.
+                if sv.abs() >= 0.999 * light_side.abs() {
+                    return Some(None);
+                }
+                lp + (v - lp) * (light_side / (light_side - sv))
+            }
+        };
+        shadows.push(p);
+    }
     let to_layer = receiver.inverse();
     let pts: Vec<glam::DVec2> = shadows
         .iter()
         .map(|p| to_layer.transform_point3(*p).truncate())
         .collect();
     let b = crate::three_d::points_bounds(&pts);
-    let px = 1.0 / receiver.x_axis.truncate().length().max(1e-12);
-    let pad = (2.0 * f64::from(light.shadow_diffusion) + 4.0) * px;
-    b.x1 + pad > rect.x0 && b.x0 - pad < rect.x1 && b.y1 + pad > rect.y0 && b.y0 - pad < rect.y1
+    // Anti-aliasing margin.
+    let pad = 2.0;
+    Some(Some(Rect::new(
+        b.x0 - pad,
+        b.y0 - pad,
+        b.x1 + pad,
+        b.y1 + pad,
+    )))
 }
 
 /// Whether every homography of `hs` is the same map.
