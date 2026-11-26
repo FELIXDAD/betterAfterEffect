@@ -470,22 +470,33 @@ fn param_row(
         });
     }
     if def.match_name == "ADBE Lumetri"
-        && (70..=72).contains(&param.id)
         && let Edit::Commit(Value::Color(sample)) = &edit
     {
-        let edits = bae_effects::lumetri_key_edits(param.id, *sample, |id| {
-            common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
-        });
-        let time = query::to_key_time(stage, effect, now);
-        let edits: Vec<_> = edits.into_iter().map(|(id, value)|
-            json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
-        session.lock().scrub = None;
-        if !edits.is_empty() {
-            cx.invoke_with("attr.set_many", json!({"edits": edits}));
+        let changes = match param.id {
+            70..=72 => Some(bae_effects::lumetri_key_edits(param.id, *sample, |id| {
+                common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
+            })),
+            94 => bae_effects::lumetri_white_balance_settings(*sample).map(|[temp, tint]| {
+                vec![
+                    (94, Value::Color(*sample)),
+                    (7, Value::Float(temp)),
+                    (8, Value::Float(tint)),
+                ]
+            }),
+            _ => None,
+        };
+        if let Some(changes) = changes {
+            session.lock().scrub = None;
+            if !changes.is_empty() {
+                let time = query::to_key_time(stage, effect, now);
+                let edits: Vec<_> = changes.into_iter().map(|(id, value)|
+                    json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
+                cx.invoke_with("attr.set_many", json!({"edits": edits}));
+            }
+            return;
         }
-    } else {
-        common::apply_edit(cx, session, effect, &attr, now, edit);
     }
+    common::apply_edit(cx, session, effect, &attr, now, edit);
 }
 
 /// The value column of one parameter (red when an expression drives it).
