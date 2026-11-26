@@ -44,6 +44,27 @@ pub fn prewarm_audio_analysis() {
     bae_media::visual_audio::SpectrumPlans::prewarm();
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct NestedSwitches {
+    quality: bae_anim::LayerQuality,
+    effects_off: bool,
+    frame_blending_off: bool,
+    motion_blur_off: bool,
+}
+
+impl NestedSwitches {
+    fn through(self, comp: &EvaluatedComp, layer: &EvaluatedLayer) -> Self {
+        Self {
+            quality: self.quality.min(layer.switches.quality),
+            effects_off: self.effects_off || !layer.switches.effects,
+            frame_blending_off: self.frame_blending_off || !comp.frame_blending,
+            motion_blur_off: self.motion_blur_off
+                || !comp.motion_blur.enabled
+                || !layer.switches.motion_blur,
+        }
+    }
+}
+
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
 /// frames; forward [`StageEvent`]s to [`CompEvaluator::invalidate`]).
 #[derive(Debug)]
@@ -58,6 +79,7 @@ pub struct AnimEvaluator {
     scalar_tracks: crate::parameter_track::TrackCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
+    propagate_switches: bool,
     warnings: Vec<String>,
     /// Shape and text layers' content of the previous conversion, by layer:
     /// reused while what the provider draws is unchanged, so a layer that only
@@ -81,6 +103,7 @@ impl AnimEvaluator {
             scalar_tracks: Default::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
+            propagate_switches: true,
             warnings: Vec::new(),
             customs: rustc_hash::FxHashMap::default(),
         }
@@ -104,6 +127,11 @@ impl AnimEvaluator {
     pub fn with_purpose(mut self, purpose: RenderPurpose) -> Self {
         self.purpose = purpose;
         self
+    }
+
+    /// Apply composition switches recursively when rendering nested comp instances.
+    pub fn set_nested_switches(&mut self, enabled: bool) {
+        self.propagate_switches = enabled;
     }
 
     /// Drops compiled animation when the caller observed edits without individual stage events.
@@ -175,6 +203,16 @@ impl AnimEvaluator {
         ec: &EvaluatedComp,
         depth: usize,
     ) -> Result<RenderComp, RenderError> {
+        self.convert_nested(stage, ec, depth, NestedSwitches::default())
+    }
+
+    fn convert_nested(
+        &mut self,
+        stage: &Stage,
+        ec: &EvaluatedComp,
+        depth: usize,
+        inherited: NestedSwitches,
+    ) -> Result<RenderComp, RenderError> {
         #[cfg(feature = "media")]
         if depth == 0
             && let Some(preview) = &mut self.preview_audio
@@ -198,7 +236,11 @@ impl AnimEvaluator {
             lights: comp_lights(ec).to_vec(),
             motion_blur: None,
         };
-        let mut samples = match self.motion_samples(stage, ec)? {
+        let mut samples = match if inherited.motion_blur_off {
+            None
+        } else {
+            self.motion_samples(stage, ec)?
+        } {
             Some((mb, samples)) => {
                 rc.motion_blur = Some(Arc::new(mb));
                 samples
@@ -206,7 +248,7 @@ impl AnimEvaluator {
             None => Vec::new(),
         };
         for (i, layer) in ec.layers.iter().enumerate() {
-            let mut out = self.layer(stage, ec, layer, depth)?;
+            let mut out = self.layer(stage, ec, layer, depth, inherited)?;
             if let Some(s) = samples.get_mut(i) {
                 out.motion_samples = std::mem::take(s).into();
             }
@@ -303,9 +345,16 @@ impl AnimEvaluator {
         ec: &EvaluatedComp,
         l: &EvaluatedLayer,
         depth: usize,
+        inherited: NestedSwitches,
     ) -> Result<RenderLayer, RenderError> {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
+        // The render queue renders at Best Settings (every layer, nested
+        // ones too, at Best); the Quality switches only change previews.
+        out.quality = match self.purpose {
+            RenderPurpose::Final => bae_anim::LayerQuality::Best,
+            _ => inherited.quality.min(l.switches.quality),
+        };
         out.time = l.layer_time;
         out.start_time = l.timing.start_time;
         out.time_scale = l.timing.stretch_percent() / 100.;
@@ -329,7 +378,7 @@ impl AnimEvaluator {
         out.track_matte = matte_mode(l.track_matte)
             .and_then(|mode| l.track_matte_layer.map(|layer| TrackMatte { layer, mode }));
         if out.active {
-            out.content = self.content(stage, ec, l, depth)?;
+            out.content = self.content(stage, ec, l, depth, inherited)?;
             // A mask a text layer uses as its path does not mask (AE).
             let text_path = l.text_path.as_ref().map(|t| &t.mask);
             out.masks = l
@@ -364,7 +413,7 @@ impl AnimEvaluator {
             out.effects = l
                 .effects
                 .iter()
-                .filter(|_| l.switches.effects)
+                .filter(|_| l.switches.effects && !inherited.effects_off)
                 .map(|e| {
                     let mut params: Vec<(u32, bae_model::Value)> = e
                         .params
@@ -526,9 +575,10 @@ impl AnimEvaluator {
     fn content(
         &mut self,
         stage: &Stage,
-        _ec: &EvaluatedComp,
+        ec: &EvaluatedComp,
         l: &EvaluatedLayer,
         depth: usize,
+        inherited: NestedSwitches,
     ) -> Result<LayerContent, RenderError> {
         if matches!(
             l.kind,
@@ -567,7 +617,12 @@ impl AnimEvaluator {
             LayerSource::Comp { comp, nested, .. } => match nested {
                 // bae-anim evaluates nested comps itself (at the mapped time).
                 Some(nested) => {
-                    let rc = self.convert(stage, nested, depth + 1)?;
+                    let switches = if self.propagate_switches {
+                        inherited.through(ec, l)
+                    } else {
+                        NestedSwitches::default()
+                    };
+                    let rc = self.convert_nested(stage, nested, depth + 1, switches)?;
                     Ok(LayerContent::Comp(Arc::new(rc)))
                 }
                 None => {
@@ -604,10 +659,13 @@ impl AnimEvaluator {
                     source_time: *time,
                     sequence: (info.kind == "sequence")
                         .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
-                    blend: l.frame_blend_span.map(|span| FrameBlend {
-                        span,
-                        pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
-                    }),
+                    blend: l
+                        .frame_blend_span
+                        .filter(|_| !inherited.frame_blending_off)
+                        .map(|span| FrameBlend {
+                            span,
+                            pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
+                        }),
                 }),
                 _ => LayerContent::None,
             }),
