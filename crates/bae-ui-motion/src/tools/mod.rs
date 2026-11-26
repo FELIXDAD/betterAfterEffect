@@ -520,9 +520,16 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::NUDGE, "Nudge Layer Position"),
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
+            (crate::viewer::ZOOM_100, "Zoom to 100%"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
+        .chain([
+            (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
+            (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
+            (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
+        ])
         .chain(GIZMOS.iter().map(|(id, title, ..)| (*id, *title)))
         .chain(crate::viewer::look_at_actions())
 }
@@ -556,6 +563,12 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
         (ids::RESOLUTION, params, *title)
     });
+    let channels = crate::viewer::display::CHANNEL_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::SHOW_CHANNEL, params, *title)
+        });
     let views = crate::viewer::view3d::SHORTCUT_NAMES
         .iter()
         .map(|(slot, title)| {
@@ -568,10 +581,13 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
     nudges
         .chain(resolutions)
         .chain(views)
+        .chain(channels)
+        .map(|(id, params, title)| (id, params, title.to_owned()))
+        .chain(crate::viewer::display::snapshot_names())
         .map(|(id, params, title)| {
             (
                 format!("{id}/{params}"),
-                bae_ui::CommandVariant::new(id, params, title.to_owned()),
+                bae_ui::CommandVariant::new(id, params, title),
             )
         })
         .collect()
@@ -1111,6 +1127,10 @@ impl ActionHandler for ToolActions {
         if crate::viewer::look_at(inv, cx) {
             return true;
         }
+        if inv.id == crate::viewer::ZOOM_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
+            return true;
+        }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
             let mut t = tools.lock();
@@ -1125,6 +1145,7 @@ impl ActionHandler for ToolActions {
 /// Chinese names of the tools and tool options (`docs/glossary.md`; names marked
 /// 待核 in the PR are best effort until R1 checks AE 26's Chinese UI).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Zoom to 100%", "缩放到 100%"),
     ("3D Gizmo: Position", "3D 位置 Gizmo"),
     ("3D Gizmo: Scale", "三维缩放 Gizmo"),
     ("3D Gizmo: Rotation", "三维旋转 Gizmo"),

@@ -281,6 +281,7 @@ pub(crate) fn execute(
         draw_calls: 0,
         passes: 0,
         mask_outs: Vec::new(),
+        incomplete: false,
     };
     // Every mask of the frame at once, in shared atlases (they have no inputs).
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
@@ -419,8 +420,9 @@ pub(crate) fn execute(
                 };
                 let images = [input(mix.base)?, input(mix.over)?, input(mix.coverage)?];
                 let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let mix = ctx.pipelines.mix();
                 adjust::encode(
-                    &mut ctx.pipelines.adjust,
+                    &mut mix.lock(),
                     device,
                     gpu.queue(),
                     &mut encoder,
@@ -454,6 +456,7 @@ pub(crate) fn execute(
     }
     let draw_calls = ctx.draw_calls;
     let passes = ctx.passes;
+    let incomplete = incomplete || ctx.incomplete;
     if gpu_timed && let Some(t) = gpu_timer.as_deref_mut() {
         t.write(&mut encoder, graph.nodes.len());
         t.finish(&mut encoder, graph.nodes.len() + 1, &graph.owners);
@@ -542,6 +545,8 @@ struct ExecCtx<'a> {
     passes: usize,
     /// Where each mask node's output lives (by node index).
     mask_outs: Vec<Option<masks::MaskOut>>,
+    /// A pipeline was still compiling for the UI thread (incomplete frame).
+    incomplete: bool,
 }
 
 /// A planned draw of one op.
@@ -799,7 +804,16 @@ impl ExecCtx<'_> {
                     break;
                 }
                 if current != Some((p.kind, p.variant)) {
-                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind, p.variant));
+                    let Some(pipeline) =
+                        self.pipelines.composite(device, format, p.kind, p.variant)
+                    else {
+                        // Still compiling for the UI thread: incomplete frame.
+                        self.incomplete = true;
+                        current = None;
+                        i += 1;
+                        continue;
+                    };
+                    pass.set_pipeline(pipeline);
                     current = Some((p.kind, p.variant));
                 }
                 // Batch a run of plain solids with the same pipeline.
@@ -882,10 +896,14 @@ impl ExecCtx<'_> {
         } else {
             BlendKind::Replace
         };
-        pass.set_pipeline(
-            self.pipelines
-                .composite(device, self.format, kind, Variant::Plain),
-        );
+        let Some(pipeline) = self
+            .pipelines
+            .composite(device, self.format, kind, Variant::Plain)
+        else {
+            self.incomplete = true;
+            return Ok(());
+        };
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, self.draws_group, &[]);
         pass.set_bind_group(1, &self.pipelines.empty_textures, &[]);
         pass.draw(0..6, first..first + 1);

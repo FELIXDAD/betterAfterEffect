@@ -241,39 +241,21 @@ impl LayerPanel {
             ui.id().with("layer_navigate"),
             Sense::click_and_drag(),
         );
+        // The viewer's wheel rules (#571): one shared reading.
         if let Some(pointer) = resp.hover_pos() {
-            let (pinch, notches, scroll, alt) = ui.input(|i| {
-                let (mut notches, mut scroll) = (0.0f32, egui::Vec2::ZERO);
-                for e in &i.events {
-                    if let egui::Event::MouseWheel {
-                        unit,
-                        delta,
-                        modifiers,
-                        ..
-                    } = e
-                    {
-                        match unit {
-                            egui::MouseWheelUnit::Point => scroll += *delta,
-                            _ if modifiers.shift => scroll.x += (delta.x + delta.y) * 40.0,
-                            egui::MouseWheelUnit::Line => notches += delta.y,
-                            egui::MouseWheelUnit::Page => notches += delta.y * 4.0,
-                        }
-                    }
-                }
-                (i.zoom_delta(), notches, scroll, i.modifiers.alt)
-            });
-            let around = if alt { area.center() } else { pointer };
-            if pinch != 1.0 {
-                self.zoom_by(pinch, pointer, area, size, ppp);
-            } else if notches != 0.0 {
-                let step = if notches > 0.0 {
+            let w = crate::viewer::wheel(ui);
+            let around = if w.alt { area.center() } else { pointer };
+            if w.pinch != 1.0 {
+                self.zoom_by(w.pinch, pointer, area, size, ppp);
+            } else if w.notches != 0.0 {
+                let step = if w.notches > 0.0 {
                     WHEEL_ZOOM_IN
                 } else {
                     WHEEL_ZOOM_OUT
                 };
-                self.zoom_by(step.powf(notches.abs()), around, area, size, ppp);
+                self.zoom_by(step.powf(w.notches.abs()), around, area, size, ppp);
             }
-            self.pan += scroll;
+            self.pan += w.pan;
         }
         let tool = crate::tools::shared(cx.resources).lock().current();
         let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
@@ -290,16 +272,8 @@ impl LayerPanel {
         {
             let (_, mag) = self.view(area, size, ppp);
             let out = ui.input(|i| i.modifiers.alt);
-            let next = if out {
-                crate::viewer::MAGNIFICATIONS
-                    .iter()
-                    .rev()
-                    .find(|m| **m < mag - 1e-3)
-            } else {
-                crate::viewer::MAGNIFICATIONS
-                    .iter()
-                    .find(|m| **m > mag + 1e-3)
-            };
+            // The viewer's steps: powers of two (#570).
+            let next = crate::viewer::next_step(mag, !out);
             if let Some(m) = next {
                 self.zoom_by(m / mag, p, area, size, ppp);
             }
@@ -390,16 +364,13 @@ impl LayerPanel {
         // Magnification (as in the Composition viewer).
         let mags = crate::viewer::MAGNIFICATIONS;
         let mut labels: Vec<String> = vec![tr("Fit").to_owned()];
-        labels.extend(
-            mags.iter()
-                .map(|m| format!("{:.1}%", m * 100.0).replace(".0%", "%")),
-        );
+        labels.extend(mags.iter().map(|(_, label)| (*label).to_owned()));
         let items: Vec<&str> = labels.iter().map(String::as_str).collect();
         let mut sel = match self.zoom {
             None => 0,
             Some(z) => mags
                 .iter()
-                .position(|m| (m - z).abs() < 1e-3)
+                .position(|(m, _)| (m - z).abs() < 1e-3)
                 .map_or(usize::MAX, |i| i + 1),
         };
         if widgets::dropdown(ui, "layer_mag", &mut sel, &items, 74.0)
@@ -407,11 +378,11 @@ impl LayerPanel {
             .changed()
         {
             self.pan = egui::Vec2::ZERO;
-            self.zoom = (sel > 0).then(|| mags[sel - 1]);
+            self.zoom = (sel > 0).then(|| mags[sel - 1].0);
         }
         if let Some(z) = self
             .zoom
-            .filter(|z| !mags.iter().any(|m| (m - z).abs() < 1e-3))
+            .filter(|z| !mags.iter().any(|(m, _)| (m - z).abs() < 1e-3))
         {
             ui.label(
                 egui::RichText::new(format!("{:.1}%", z * 100.0))
