@@ -481,7 +481,7 @@ const COMPOSITION: &[Node] = &[
     sub(
         "Save Frame As",
         &[
-            it(15335425, "File...", "motion.comp.save_frame_as_file", "", B, Todo),
+            it(15335425, "File...", "motion.comp.save_frame_as_file", "", B, Done),
             SEP,
             it(15335427, "Photoshop Layers...", "motion.comp.save_frame_as_photoshop_layers", "", B, Later),
             it(15335428, "ProEXR...", "motion.comp.save_frame_as_proexr", "", B, Adobe),
