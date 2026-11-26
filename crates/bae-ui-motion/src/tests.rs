@@ -1818,6 +1818,55 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
         "{block:?}"
     );
     assert_eq!(block[1], [0.0; 2]);
+    let mut builder = AppBuilder::new();
+    builder.add_module(bae_effects::EffectsModule);
+    let defs = builder
+        .build()
+        .get_registry::<bae_model::EffectDef>()
+        .unwrap();
+    for name in [
+        "ADBE Aud Stereo Mixer",
+        "ADBE Aud Reverse",
+        "ADBE Aud HiLo",
+        "ADBE Param EQ",
+        "ADBE Aud BT",
+        "ADBE Aud Delay",
+        "ADBE Aud Reverb",
+    ] {
+        assert!(
+            defs.snapshot()
+                .iter()
+                .any(|entry| entry.item().match_name == name),
+            "{name}"
+        );
+    }
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    let effect = h.run(
+        "effect.apply",
+        json!({"layers":[tracks[0]],"match_name":"ADBE Aud Stereo Mixer"}),
+    )["effects"][0]
+        .clone();
+    h.run(
+        "attr.set",
+        json!({"path":effect,"attr":"param:0004","value":{"type":"float","value":-100.0}}),
+    );
+    let read = |h: &Harness| {
+        let mut sample = [[0.0; 2]];
+        bae_media::mix::AudioMix::from_stage(&h.stage, &comp)
+            .render(0, 8000, &mut sample)
+            .unwrap();
+        sample[0]
+    };
+    let pan = read(&h);
+    assert!(
+        (pan[0] - 1.5).abs() < 1e-5 && (pan[1] - 0.25).abs() < 1e-5,
+        "{pan:?}"
+    );
+    h.run(
+        "attr.set",
+        json!({"path":effect,"attr":"enabled","value":{"type":"bool","value":false}}),
+    );
+    assert_eq!(read(&h), block[0]);
 
     // Distinguish the two enabled sources, then toggle the switches independently.
     h.run(
