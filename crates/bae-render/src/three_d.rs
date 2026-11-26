@@ -49,7 +49,7 @@ pub fn segments(layers: &[RenderLayer]) -> Vec<Segment> {
         if !draws {
             continue;
         }
-        if layer.matrix_3d.is_some() && !layer.adjustment {
+        if layer.matrix_3d.is_some() && !layer.adjustment && layer.layer_styles.is_none() {
             // A 3D pre-comp with effects, masks or a track matte is flattened
             // and composited on its own (AE-CMP-406); a plain one sorts with
             // the group like any 3D layer (measured in AE 26.2.1).

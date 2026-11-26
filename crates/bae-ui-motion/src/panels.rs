@@ -61,7 +61,7 @@ fn prop_line(
             .as_ref()
             .and_then(|s| s.value_for(path, attr))
             .cloned()
-            .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
+            .or_else(|| common::current_value(eval.get(cx.stage), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
@@ -71,7 +71,7 @@ fn prop_line(
     });
     // An expression pick whip dragged from the Timeline.
     if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
-        crate::expr::link(cx, eval.get(cx.resources), &whip, path, Some(attr), now);
+        crate::expr::link(cx, eval.get(cx.stage), &whip, path, Some(attr), now);
     }
 }
 
@@ -191,7 +191,7 @@ impl Panel for PropertiesPanel {
             // Text.
             if query::layer_kind(stage, &layer).as_deref() == Some("text") {
                 section(ui, tr("Text"));
-                let doc = common::current_value(self.eval.get(cx.resources), stage, &layer, "text:source", now);
+                let doc = common::current_value(self.eval.get(cx.stage), stage, &layer, "text:source", now);
                 if let Some(Value::TextDocument(doc)) = doc {
                     let key = ui.id().with(("text_src", layer.as_str()));
                     let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| doc.text.clone());
@@ -312,18 +312,42 @@ pub struct EffectControlsPanel {
 }
 
 impl Panel for EffectControlsPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        // AE: "Effect Controls <layer>".
-        if self.title.is_empty() {
-            TabInfo::new(tr("Effect Controls"))
-        } else {
-            TabInfo::new(format!("{} {}", tr("Effect Controls"), self.title))
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        let layer = self
+            .locked
+            .clone()
+            .filter(|l| cx.stage.has_prim(l))
+            .or_else(|| selected_layer(cx.stage, &common::session(cx.resources)));
+        match layer {
+            Some(l) => common::related_tab(
+                cx,
+                "Effect Controls",
+                &l,
+                &query::display_name_of(cx.stage, &l),
+            ),
+            None => TabInfo::new(tr("Effect Controls")),
         }
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
         actions::handle(action, cx, &session)
+    }
+
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        ui.checkbox(
+            &mut self.controls.show_presets,
+            tr("Show Animation Presets"),
+        );
+        ui.separator();
+        if ui.button(tr("Manage Effects...")).clicked() {
+            crate::effects::manager::open(cx);
+            ui.close();
+        }
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({"show_presets":self.controls.show_presets}))
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
@@ -726,8 +750,13 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "effect_controls",
-        bae_ui::PanelKind::new("Effect Controls", |_| {
-            Box::new(EffectControlsPanel::default())
+        bae_ui::PanelKind::new("Effect Controls", |spawn| {
+            let mut panel = EffectControlsPanel::default();
+            panel.controls.show_presets = spawn
+                .state
+                .and_then(|v| v["show_presets"].as_bool())
+                .unwrap_or(false);
+            Box::new(panel)
         }),
     );
     crate::register_panel(

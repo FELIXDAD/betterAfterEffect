@@ -70,6 +70,19 @@ impl SceneBuilder {
         path(p)
     }
 
+    /// Sets an expression.
+    pub fn expression(
+        &mut self,
+        prim: &PrimPath,
+        attr: &str,
+        source: &str,
+    ) -> Result<(), RenderError> {
+        self.run(
+            "attr.set_expression",
+            json!({"path": prim.as_str(), "attr": attr, "source": source}),
+        )
+    }
+
     /// Sets a static value.
     pub fn set(&mut self, prim: &PrimPath, attr: &str, value: Value) -> Result<(), RenderError> {
         let value = serde_json::to_value(&value).map_err(|e| RenderError::Other(e.to_string()))?;

@@ -434,6 +434,72 @@ fn liquify_brush_in_the_layer_panel_warps_the_mesh() {
 }
 
 #[test]
+fn browse_lumetri_look_commits_both_ae_selectors_and_owned_cube_in_one_edit() {
+    use bae_ui::files::{FilePicker, OpenRequest, SharedFilePicker};
+    use std::{
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
+    struct Picker(PathBuf);
+    impl FilePicker for Picker {
+        fn open(&self, req: &OpenRequest) -> Vec<PathBuf> {
+            assert_eq!(req.filters[0].1, ["cube"]);
+            vec![self.0.clone()]
+        }
+    }
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    fx.run(
+        "effect.apply",
+        json!({"match_name":"ADBE Lumetri","layers":[layer]}),
+    );
+    let target = bae_motion::effect::effects_of(&fx.stage, &layer)
+        .pop()
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("user.cube");
+    std::fs::write(&file, "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").unwrap();
+    fx.resources.insert(SharedFilePicker::new(Picker(file)));
+    let r = fx.handle(Invocation::with_params(
+        lut::BROWSE,
+        json!({"path":target,"menu":25}),
+    ));
+    assert!(r.invocations.is_empty());
+    let start = Instant::now();
+    let mut requests = PanelRequests::default();
+    while requests.invocations.is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        let id = PanelId::new("effects");
+        let mut cx = PanelContext::new(
+            &id,
+            "Effects",
+            &fx.stage,
+            &fx.author,
+            &fx.resources,
+            &mut requests,
+        );
+        let mut output = fx.ctx.run_ui(RawInput::default(), |ui| {
+            lut::poll(ui.ctx(), &mut cx);
+        });
+        output.textures_delta.clear();
+        std::thread::yield_now();
+    }
+    assert_eq!(requests.invocations.len(), 1);
+    assert_eq!(requests.invocations[0].id, "attr.set_many");
+    fx.exec_all(requests);
+    let effect = fx.stage.prim(&target).unwrap();
+    for id in [25, 128] {
+        assert_eq!(
+            effect.value(&bae_model::effect::param_attr(id)),
+            Some(&Value::Int(2))
+        );
+    }
+    assert!(
+        matches!(effect.value("param:0126"),Some(Value::Bytes(data)) if data.starts_with(b"user.cube\0"))
+    );
+}
+
+#[test]
 fn animation_presets_save_and_apply_effects_with_their_values() {
     let mut fx = Fx::new();
     let layer = fx.comp_with_layer();
@@ -466,5 +532,187 @@ fn animation_presets_save_and_apply_effects_with_their_values() {
     assert_eq!(
         bae_motion::query::static_value(&v, "param:1"),
         Some(Value::Float(25.0))
+    );
+}
+
+/// The text and enabled state users get from the actual panel menu.
+fn menu_states(fx: &Fx, panel: &mut dyn Panel) -> Vec<(String, bool, bool)> {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let id = PanelId::new("menu-test");
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(700.0, 900.0))),
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(raw, |ui| {
+        let mut requests = PanelRequests::default();
+        let mut cx = PanelContext::new(
+            &id,
+            "Panel",
+            &fx.stage,
+            &fx.author,
+            &fx.resources,
+            &mut requests,
+        );
+        panel.menu(ui, &mut cx);
+    });
+    output.textures_delta.clear();
+    let mut nodes = output.platform_output.accesskit_update.unwrap().nodes;
+    nodes.sort_by(|(_, a), (_, b)| {
+        let y = |node: &egui::accesskit::Node| node.bounds().map_or(0.0, |r| r.y0);
+        y(a).total_cmp(&y(b))
+    });
+    nodes
+        .into_iter()
+        .filter_map(|(_, n)| {
+            let label = n.label()?;
+            let zh = if label == "Save Animation Preset..." {
+                format!(
+                    "{}...",
+                    bae_ui::i18n::translation("Save Animation Preset").unwrap()
+                )
+            } else {
+                bae_ui::i18n::translation(label).unwrap_or(label).to_owned()
+            };
+            Some((
+                zh,
+                !n.is_disabled(),
+                n.toggled() == Some(egui::accesskit::Toggled::True),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn panel_menus_match_chinese_and_selection() {
+    let _app = {
+        let mut builder = AppBuilder::new();
+        builder.add_module(crate::MotionUiModule);
+        builder.build()
+    };
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    let mut browser = browser::EffectsPanel::default();
+    fx.run("project.set_settings", json!({"bit_depth": "8"}));
+    fx.run(
+        "effect.apply",
+        json!({"layers":[layer],"match_name":"ADBE Gaussian Blur 2"}),
+    );
+    let before = menu_states(&fx, &mut browser);
+    let expected = [
+        ("保存动画预设...", true, false),
+        ("浏览预设...", true, false),
+        ("类别", true, true),
+        (
+            if cfg!(windows) {
+                "资源管理器文件夹"
+            } else {
+                "查找程序文件夹"
+            },
+            true,
+            false,
+        ),
+        ("按字母顺序", true, false),
+        ("显示所有颜色深度的效果", false, true),
+        ("仅显示 GPU 能够实现的效果", true, false),
+        ("显示效果", true, true),
+        ("显示动画预设", true, true),
+        (
+            if cfg!(windows) {
+                "在资源管理器中显示"
+            } else {
+                "在 Finder 中显示"
+            },
+            false,
+            false,
+        ),
+        ("刷新列表", true, false),
+        ("管理效果...", true, false),
+    ];
+    let observed: Vec<_> = before
+        .iter()
+        .map(|(label, enabled, checked)| (label.as_str(), *enabled, *checked))
+        .collect();
+    assert_eq!(observed, expected);
+    fx.run("project.set_settings", json!({"bit_depth": "32"}));
+    assert!(menu_states(&fx, &mut browser).contains(&(
+        "显示所有颜色深度的效果".into(),
+        true,
+        true
+    )));
+    let tools = crate::tools::SharedTools::default();
+    fx.resources.insert(tools.clone());
+    let mut brushes = crate::paint_panels::BrushesPanel::default();
+    let brush = menu_states(&fx, &mut brushes);
+    assert_eq!(brush.len(), 9);
+    assert!(
+        brush
+            .iter()
+            .all(|(name, enabled, checked)| !enabled && *checked == (name == "小缩览图"))
+    );
+    tools.lock().set(crate::tools::Tool::Brush);
+    let brush = menu_states(&fx, &mut brushes);
+    for (label, enabled) in [
+        ("新建画笔...", true),
+        ("重命名画笔...", false),
+        ("删除画笔", false),
+        ("大列表", true),
+        ("重置画笔笔尖...", true),
+    ] {
+        assert!(brush.contains(&(label.into(), enabled, false)), "{label}");
+    }
+    assert!(menu_states(&fx, &mut crate::paint_panels::PaintPanel).is_empty());
+    assert!(
+        menu_states(&fx, &mut crate::EffectControlsPanel::default())
+            .iter()
+            .any(|(label, enabled, _)| label == "显示动画预设" && *enabled)
+    );
+}
+
+#[test]
+fn effect_controls_flyout_uses_only_the_measured_panel_commands() {
+    let fx = Fx::new();
+    let mut panel = crate::panels::EffectControlsPanel::default();
+    let id = PanelId::new("effect_controls");
+    let mut requests = PanelRequests::default();
+    let mut cx = PanelContext::new(
+        &id,
+        "Effect Controls",
+        &fx.stage,
+        &fx.author,
+        &fx.resources,
+        &mut requests,
+    );
+    let mut app = AppBuilder::new();
+    app.add_module(crate::MotionUiModule);
+    let _app = app.build();
+    fx.ctx.enable_accesskit();
+    let mut out = fx
+        .ctx
+        .run_ui(Default::default(), |ui| panel.menu(ui, &mut cx));
+    out.textures_delta.clear();
+    let tree = out.platform_output.accesskit_update.unwrap();
+    let rows: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| {
+            let label = n.label()?;
+            Some((label, !n.is_disabled()))
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (bae_ui::tr("Show Animation Presets"), true),
+            (bae_ui::tr("Manage Effects..."), true)
+        ]
+    );
+    assert_eq!(
+        bae_ui::i18n::translation("Show Animation Presets"),
+        Some("显示动画预设")
+    );
+    assert_eq!(
+        bae_ui::i18n::translation("Manage Effects..."),
+        Some("管理效果...")
     );
 }

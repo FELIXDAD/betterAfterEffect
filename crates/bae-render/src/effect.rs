@@ -21,6 +21,10 @@ use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Audio analysis and optional mask geometry supplied only for the two Generate effects.
+pub const AUDIO_VISUAL_VALUES: u32 = u32::MAX;
+pub const AUDIO_VISUAL_PATH: u32 = u32::MAX - 1;
+
 /// A parameter lookup can borrow the evaluated values and shadow individual IDs.
 /// A shadow with no value hides that ID from the target effect.
 #[derive(Clone, Copy, Debug)]
@@ -175,6 +179,8 @@ pub struct ParameterSample {
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
 pub struct EffectParams<'a> {
+    /// Previous complete surface selected by a temporal feedback effect.
+    pub previous_frame: Option<&'a GpuImage>,
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
     /// Values the implementation reads, after any effect alias translation.
@@ -239,6 +245,7 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            previous_frame: None,
             translated_values: None,
             parameter_samples: &[],
             tracks: &[],
@@ -378,6 +385,15 @@ pub enum MaskSelect {
 
 /// GPU implementation of an effect.
 pub trait Effect: Send + Sync {
+    /// Output surface to read at the immediately preceding comp frame.
+    fn feedback_source(
+        &self,
+        _params: &EffectParams<'_>,
+        _stack: &[RenderEffect],
+    ) -> Option<PrimPath> {
+        None
+    }
+
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
 
