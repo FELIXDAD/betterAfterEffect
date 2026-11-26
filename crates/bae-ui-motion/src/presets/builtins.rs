@@ -67,28 +67,9 @@ pub(crate) const LIBRARY: &[Recipe] = &[
 ];
 
 pub(super) const ZH: &[(&str, &str)] = &[
-    ("In", "进入"),
-    ("Looping", "循环播放"),
-    ("Out", "退出"),
-    ("Backgrounds", "背景"),
-    ("Behaviors", "行为"),
-    ("Image - Creative", "图像 - 创意"),
-    ("Image - Special Effects", "图像 - 特殊效果"),
-    ("Image - Utilities", "图像 - 实用工具"),
-    ("Legacy", "旧版"),
-    ("Shapes", "形状"),
-    ("Elements", "元素"),
-    ("Sprites - Animated", "精灵 - 动画"),
-    ("Sprites - Still", "精灵 - 静态"),
-    ("Sound Effects", "声音效果"),
-    ("Synthetics", "合成纹理"),
-    ("Animate In", "进入动画"),
-    ("Animate Out", "退出动画"),
-    ("Blurs", "模糊"),
-    ("Fill and Stroke", "填充和描边"),
-    ("Transitions - Dissolves", "过渡 - 溶解"),
-    ("Transitions - Movement", "过渡 - 移动"),
-    ("Transitions - Wipes", "过渡 - 擦除"),
+    // Preset folders keep their English names (AE's disk folders; the zh_CN
+    // dictionary has no entries for them). Translating "In" / "Out" here would
+    // also rename the Timeline's In / Out columns (one shared table).
     ("User Presets", "用户预设"),
     ("Soft Focus Entrance", "柔焦入场"),
     ("Light Drift", "光影渐变"),
