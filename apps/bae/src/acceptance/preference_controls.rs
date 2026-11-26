@@ -128,6 +128,9 @@ fn panel_coachmarks_can_be_dismissed_and_reset() {
     settle(&mut h);
     h.get_by_label("OK").click();
     settle(&mut h);
+    let project = find_text(&h, "Project").unwrap().center();
+    click_at(&mut h, project);
+    settle(&mut h);
     assert!(find_text(&h, tip).is_some());
     h.get_by_label("Got it").click();
     settle(&mut h);
@@ -144,6 +147,9 @@ fn panel_coachmarks_can_be_dismissed_and_reset() {
     settle(&mut h);
     assert!(h.state_mut().workspace.take_settings_requests().is_empty());
     h.get_by_label("OK").click();
+    settle(&mut h);
+    let project = find_text(&h, "Project").unwrap().center();
+    click_at(&mut h, project);
     settle(&mut h);
     assert!(find_text(&h, tip).is_some());
 }
