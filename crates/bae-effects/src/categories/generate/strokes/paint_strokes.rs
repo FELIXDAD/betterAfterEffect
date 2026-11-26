@@ -4,12 +4,12 @@
 //! along its path, composited with the shared dab compositor, newest on top.
 
 use bae_model::Value;
-use bae_render::paint::{self, Stroke, Tool};
+use bae_render::paint::{self, Erase, Stroke, Tool};
 use bae_render::{EffectParams, GpuImage, IRect, RenderError};
 use glam::DVec2;
 
 use super::Generator;
-use super::paint::{Mark, Paint};
+use super::paint::{CLONE, Mark, Paint, RESTORE};
 use crate::{Builtin, EffectTarget, catalog::DefBuilder};
 
 /// The compositor's styles: paint over the layer, paint only, erase.
@@ -75,17 +75,39 @@ pub(super) fn render(
     if on_transparent {
         image = Paint::new(ONLY, MAX, 0.0).render(ctx, p, &image, roi)?;
     }
+    // The layer before any paint (Eraser: Paint Only) and the image before
+    // the last Brush or Clone stroke (Eraser: Last Stroke Only).
+    let source = image.clone();
+    let mut before_last: Option<GpuImage> = None;
     for s in strokes
         .iter()
         .filter(|s| s.diameter > 0.0 && !s.points.is_empty())
     {
-        // Clone Stamp sampling is not drawn yet.
-        let style = match s.tool {
-            Tool::Brush => OVER,
-            Tool::Eraser => ERASE,
-            Tool::Clone => continue,
+        let mut paint = match (s.tool, s.erase) {
+            (Tool::Brush, _) => Paint::new(OVER, MAX, s.opacity),
+            // The Clone Stamp shows the image at its offset through its dabs
+            // (from this layer; another source layer and Source Time Shift
+            // are not drawn yet).
+            (Tool::Clone, _) => {
+                let mut paint = Paint::new(CLONE, MAX, s.opacity);
+                paint.offset = s.clone_offset;
+                paint
+            }
+            (Tool::Eraser, Erase::LayerAndPaint) => Paint::new(ERASE, MAX, s.opacity),
+            (Tool::Eraser, Erase::PaintOnly) => {
+                let mut paint = Paint::new(RESTORE, MAX, s.opacity);
+                paint.restore = Some(source.clone());
+                paint
+            }
+            (Tool::Eraser, Erase::LastStroke) => {
+                let mut paint = Paint::new(RESTORE, MAX, s.opacity);
+                paint.restore = Some(before_last.clone().unwrap_or_else(|| image.clone()));
+                paint
+            }
         };
-        let mut paint = Paint::new(style, MAX, s.opacity);
+        if s.tool != Tool::Eraser {
+            before_last = Some(image.clone());
+        }
         paint.marks = marks(s);
         image = paint.render(ctx, p, &image, roi)?;
     }

@@ -196,9 +196,20 @@ pub fn run(
     doc: &mut Document,
     dialogs: &mut dyn FileDialogs,
     inv: &Invocation,
+    new_template: Option<&Path>,
 ) -> Option<FileOutcome> {
     Some(match inv.id.as_str() {
         ids::NEW_PROJECT | ids::CLOSE_PROJECT => {
+            if inv.id == ids::NEW_PROJECT
+                && let Some(path) = new_template
+            {
+                return Some(replace_from_disk(
+                    doc,
+                    dialogs,
+                    path,
+                    Document::load_template,
+                ));
+            }
             // AE: Close Project leaves an empty untitled project.
             if !confirm_discard(doc, dialogs) {
                 return Some(FileOutcome::Cancelled);
@@ -248,13 +259,27 @@ pub fn open(
     let Some(path) = path.or_else(|| dialogs.pick_project()) else {
         return FileOutcome::Cancelled;
     };
-    let opened = match Document::load(&path) {
+    replace_from_disk(doc, dialogs, &path, Document::load)
+}
+
+pub fn template_path(prefs: &bae_prefs::Preferences) -> Option<&Path> {
+    let path = prefs.str("project.project_template");
+    (prefs.bool("project.new_project_loads_template") && !path.is_empty()).then(|| Path::new(path))
+}
+
+fn replace_from_disk(
+    doc: &mut Document,
+    dialogs: &mut dyn FileDialogs,
+    path: &Path,
+    load: fn(&Path) -> anyhow::Result<bae_package::OpenedProject>,
+) -> FileOutcome {
+    let opened = match load(path) {
         Ok(opened) => opened,
         Err(error) => {
             dialogs.error(&format!(
                 "{}\n\n{}",
                 tr("Could not open the project."),
-                crate::file_error::describe_open(&path, &error)
+                crate::file_error::describe_open(path, &error)
             ));
             return FileOutcome::Failed;
         }
@@ -570,7 +595,7 @@ mod tests {
     }
 
     fn cmd(doc: &mut Document, d: &mut Script, id: &str) -> FileOutcome {
-        run(doc, d, &Invocation::new(id)).expect("file command")
+        run(doc, d, &Invocation::new(id), None).expect("file command")
     }
 
     /// Increment and Save goes on in “Film 2.bae”, then “Film 3.bae”; Revert
@@ -692,10 +717,16 @@ mod tests {
             ids::OPEN_PROJECT,
             serde_json::json!({ "path": dir.path().join("Film.baez") }),
         );
-        assert_eq!(run(&mut other, &mut d, &inv), Some(FileOutcome::Replaced));
+        assert_eq!(
+            run(&mut other, &mut d, &inv, None),
+            Some(FileOutcome::Replaced)
+        );
         assert!(has(&other, "/Comp2"));
         assert!(d.errors.is_empty(), "{:?}", d.errors);
-        assert_eq!(run(&mut other, &mut d, &Invocation::new(ids::UNDO)), None);
+        assert_eq!(
+            run(&mut other, &mut d, &Invocation::new(ids::UNDO), None),
+            None
+        );
     }
 
     #[test]

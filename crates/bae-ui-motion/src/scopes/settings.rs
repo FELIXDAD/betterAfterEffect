@@ -4,6 +4,71 @@ use bae_color::{Chromaticities, ColorSpace, Encoding, TransferFunction, builtin}
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u32)]
+pub(super) enum Signal {
+    #[default]
+    Byte,
+    Float,
+    Hdr,
+}
+
+impl Signal {
+    pub(super) const ALL: [(Self, &str); 3] = [
+        (Self::Byte, "8 Bit"),
+        (Self::Float, "float"),
+        (Self::Hdr, "HDR"),
+    ];
+
+    pub(super) fn title(self) -> &'static str {
+        Self::ALL[self as usize].1
+    }
+
+    /// IRE at the left, code values or nits at the right.
+    pub(super) fn scale(
+        self,
+        clamp: bool,
+    ) -> impl Iterator<Item = (f32, &'static str, &'static str)> {
+        // SMPTE ST 2084 code levels for the labelled luminances, in cd/m².
+        const HDR: [(f32, &str, &str); 6] = [
+            (0.0, "", "0"),
+            (0.149946, "", "1"),
+            (0.299699, "", "10"),
+            (0.508078, "", "100"),
+            (0.751827, "", "1000"),
+            (1.0, "nits", "10000"),
+        ];
+        const SDR: [(f32, &str, &str, &str); 7] = [
+            (-0.2, "-20", "-51", "-0.20"),
+            (0.0, "0", "0", "0.00"),
+            (0.25, "25", "64", "0.25"),
+            (0.5, "50", "128", "0.50"),
+            (0.75, "75", "191", "0.75"),
+            (1.0, "100", "255", "1.00"),
+            (1.2, "120", "306", "1.20"),
+        ];
+        (0..if self == Self::Hdr {
+            HDR.len()
+        } else {
+            SDR.len()
+        })
+            .filter_map(move |i| {
+                if self == Self::Hdr {
+                    return Some(HDR[i]);
+                }
+                let (v, ire, byte, float) = SDR[i];
+                if clamp && !(0.0..=1.0).contains(&v) {
+                    return None;
+                }
+                Some((
+                    if clamp { v } else { (v + 0.2) / 1.4 },
+                    ire,
+                    if self == Self::Byte { byte } else { float },
+                ))
+            })
+    }
+}
+
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum Space {
@@ -70,39 +135,46 @@ pub(super) fn shader_source() -> String {
         TransferFunction::Rec709,
     );
     let mut source = String::new();
-    let mut selector =
-        String::from("fn scope_color(c: vec3f, space: u32) -> vec3f { switch space {");
-    for (id, space) in [
-        (Space::Rec601, ntsc),
-        (Space::Rec2020, builtin::REC2020),
-        (Space::Hlg, builtin::REC2100_HLG),
-        (Space::Pq, builtin::REC2100_PQ),
-    ] {
-        let code = bae_color::convert(&builtin::REC709, &space)
-            .expect("built-in color transform")
-            .to_wgsl(&format!("scope{}", id as u32));
-        source.push_str(&code.wgsl);
-        let values = code
-            .params
-            .iter()
-            .map(|v| format!("vec4f({:?},{:?},{:?},{:?})", v[0], v[1], v[2], v[3]))
-            .collect::<Vec<_>>()
-            .join(",");
-        let args = format!(
-            "{}(array<vec4f,{}>({values}))",
-            code.params_type(),
-            code.params.len()
-        );
-        writeln!(
-            selector,
-            "case {}u: {{ return {}; }}",
-            id as u32,
-            code.call("c", &args, &[], false)
-        )
-        .unwrap();
+    for (name, inverse) in [("scope_color", false), ("scope_to_709", true)] {
+        let mut selector = format!("fn {name}(c: vec3f, space: u32) -> vec3f {{ switch space {{");
+        for (id, space) in [
+            (Space::Rec601, ntsc.clone()),
+            (Space::Rec2020, builtin::REC2020),
+            (Space::Hlg, builtin::REC2100_HLG),
+            (Space::Pq, builtin::REC2100_PQ),
+        ] {
+            let canonical = &builtin::REC709;
+            let (from, to) = if inverse {
+                (&space, canonical)
+            } else {
+                (canonical, &space)
+            };
+            let code = bae_color::convert(from, to)
+                .expect("built-in color transform")
+                .to_wgsl(&format!("{name}{}", id as u32));
+            source.push_str(&code.wgsl);
+            let values = code
+                .params
+                .iter()
+                .map(|v| format!("vec4f({:?},{:?},{:?},{:?})", v[0], v[1], v[2], v[3]))
+                .collect::<Vec<_>>()
+                .join(",");
+            let args = format!(
+                "{}(array<vec4f,{}>({values}))",
+                code.params_type(),
+                code.params.len()
+            );
+            writeln!(
+                selector,
+                "case {}u: {{ return {}; }}",
+                id as u32,
+                code.call("c", &args, &[], false)
+            )
+            .unwrap();
+        }
+        selector.push_str("default: { return c; } } }");
+        source.push_str(&selector);
     }
-    selector.push_str("default: { return c; } } }");
-    source.push_str(&selector);
     source.push_str(include_str!("scopes.wgsl"));
     source
 }
@@ -115,7 +187,9 @@ pub(super) struct Preset {
 }
 impl Preset {
     pub(super) fn matches(&self, state: &State) -> bool {
-        state.shown == self.shown
+        (self.title != "Premiere 4 Scope YUV (Float, Unclamped)"
+            || state.signal == Signal::Float && !state.clamp)
+            && state.shown == self.shown
             && (!self.shown.contains(&Scope::Parade) || state.parade == self.parade)
             && (!self.shown.contains(&Scope::Waveform) || state.wave == self.wave)
     }
@@ -123,6 +197,10 @@ impl Preset {
         state.shown = self.shown.to_vec();
         state.parade = self.parade;
         state.wave = self.wave;
+        if self.title == "Premiere 4 Scope YUV (Float, Unclamped)" {
+            state.signal = Signal::Float;
+            state.clamp = false;
+        }
         if self.title == "SpeedGrade 4 Scope Luma/RGB (601 SD)" {
             state.space = Space::Rec601;
         }

@@ -1,8 +1,11 @@
 mod definition;
+mod key;
 mod menus;
 mod secondary_curve;
 
 pub use secondary_curve::LumetriCurve;
+
+pub use key::lumetri_key_edits;
 
 use crate::blur::{self, Edge};
 use crate::effects::{
@@ -14,7 +17,9 @@ use crate::{Builtin, EffectTarget, TargetEffect, params::Params, rust_builtin};
 use bae_gpu::wgpu;
 use bae_model::{EffectDef, Value};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+static LUTS: LazyLock<LutCache> = LazyLock::new(LutCache::default);
 
 const HEADER: usize = 256;
 const TONE: &[u8] = include_bytes!("tone.bin");
@@ -22,19 +27,99 @@ const KNOTS: usize = 64;
 
 struct Lumetri {
     def: EffectDef,
-    lut: LutCache,
+}
+
+/// A user-supplied Lumetri LUT, stored with the project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LumetriLut {
+    /// Applied before basic correction.
+    Input,
+    /// Applied at the creative stage with the selected intensity.
+    Look,
+}
+
+impl LumetriLut {
+    /// Primary menu, duplicate AE menu, embedded file.
+    pub fn parameters(self) -> [u32; 3] {
+        match self {
+            Self::Input => [5, 127, 125],
+            Self::Look => [25, 128, 126],
+        }
+    }
+
+    /// Returns the LUT slot addressed by an AE menu disk ID.
+    pub fn from_menu(id: u32) -> Option<Self> {
+        match id {
+            5 | 127 => Some(Self::Input),
+            25 | 128 => Some(Self::Look),
+            _ => None,
+        }
+    }
+
+    /// Both AE menus exist on disk. The later selector takes precedence when set.
+    pub fn choice(
+        self,
+        first: Option<&Value>,
+        second: Option<&Value>,
+        file: Option<&Value>,
+    ) -> i64 {
+        let index = |v: &Value| v.as_f64().map(|x| x.round() as i64);
+        let older = first.and_then(index);
+        let newer = second.and_then(index);
+        newer
+            .filter(|&n| n != 1)
+            .or(older)
+            .or(newer)
+            .unwrap_or_else(|| if Self::filename(file).is_some() { 2 } else { 1 })
+    }
+
+    /// Display name of a supported embedded LUT. Other AE payloads remain opaque.
+    pub fn filename(file: Option<&Value>) -> Option<&str> {
+        let Some(Value::Bytes(bytes)) = file else {
+            return None;
+        };
+        let name = bae_color::lutfile::embedded_name(bytes)?;
+        let (_, ext) = name.rsplit_once('.')?;
+        ["cube", "spi1d", "spi3d"]
+            .iter()
+            .any(|s| ext.eq_ignore_ascii_case(s))
+            .then_some(name)
+    }
+
+    fn bytes<'a>(self, p: &'a EffectParams<'_>) -> Option<&'a [u8]> {
+        let [a, b, id] = self.parameters();
+        if self.choice(p.value(a), p.value(b), p.value(id)) != 2 {
+            return None;
+        }
+        match p.value(id) {
+            Some(Value::Bytes(data)) if Self::filename(p.value(id)).is_some() => Some(data),
+            _ => None,
+        }
+    }
+}
+
+/// Runs on the import worker. Return only after the file can be rendered in either work format.
+pub fn prepare_lumetri_lut(
+    path: &std::path::Path,
+    gpu: Option<&Arc<bae_gpu::GpuContext>>,
+) -> Result<Vec<u8>, String> {
+    let bytes = bae_color::lutfile::embed(path).map_err(|e| e.to_string())?;
+    if let Some(gpu) = gpu {
+        for format in [
+            wgpu::TextureFormat::Rgba16Float,
+            wgpu::TextureFormat::Rgba32Float,
+        ] {
+            LUTS.prepare_file(gpu, format, &bytes)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(bytes)
 }
 
 pub(crate) fn builtin() -> Builtin {
     let (def, names) = definition::definition();
     let mut fx = rust_builtin(
-        (
-            Arc::new(Lumetri {
-                def,
-                lut: LutCache::default(),
-            }),
-            names,
-        ),
+        (Arc::new(Lumetri { def }), names),
         "lumetri-color",
         "Lumetri 颜色",
         &["grading", "调色"],
@@ -107,6 +192,20 @@ fn soften(u: &mut UniformWriter, amount: f64) {
         }
         u.u32(220, n as u32);
     }
+}
+
+/// Invert the basic correction gains for a sampled neutral. The selector writes
+/// these two sliders, so an imported sample does not apply the correction twice.
+pub fn lumetri_white_balance_settings([r, g, b, _]: [f64; 4]) -> Option<[f64; 2]> {
+    if ![r, g, b].iter().all(|v| v.is_finite() && *v > 0.) {
+        return None;
+    }
+    let red = 2.4 * (g.log2() - r.log2());
+    let blue = 2.4 * (g.log2() - b.log2());
+    Some([
+        (50. * (red - blue)).clamp(-300., 300.),
+        ((red + blue) / 0.03).clamp(-300., 300.),
+    ])
 }
 
 fn white_balance(temp: f64, tint: f64) -> [f32; 3] {
@@ -413,20 +512,30 @@ impl TargetEffect for Lumetri {
             .inflate(sharpen_radius(v.f(29)) * i32::from(v.b(23)))
             .intersect(&input_grid);
         let mut image = input.clone();
+        let hdr = v.b(62);
+        let white = |id| if hdr { (v.f(id) * 0.01) as f32 } else { 1. };
         if v.b(3) {
-            if let Some(Value::Bytes(data)) = p.value(125) {
-                image = self
-                    .lut
-                    .apply(target, p, &image, read, LutSource::File(data), 1.)?;
+            if let Some(data) = LumetriLut::Input.bytes(p) {
+                image = LUTS.apply(target, p, &image, read, LutSource::File(data), 1.)?;
             }
             if [7, 8, 11, 12, 13, 14, 15, 16]
                 .iter()
                 .any(|&id| v.f(id) != 0.)
                 || v.f(20) != 100.
+                || (hdr && v.f(64) != 0.)
             {
                 let mut u = UniformWriter::with_size(BASIC_BYTES);
                 u.u32(40, u32::from(p.float))
                     .f32s(64, &white_balance(v.f(7), v.f(8)))
+                    .f32(92, white(63))
+                    .f32(
+                        96,
+                        if hdr {
+                            (v.f(64) * 0.01).exp2() as f32
+                        } else {
+                            1.
+                        },
+                    )
                     .f32(76, (v.f(20) * 0.01) as f32)
                     .f32s(
                         80,
@@ -443,9 +552,9 @@ impl TargetEffect for Lumetri {
             }
         }
         if v.b(23)
-            && let Some(Value::Bytes(data)) = p.value(126)
+            && let Some(data) = LumetriLut::Look.bytes(p)
         {
-            image = self.lut.apply(
+            image = LUTS.apply(
                 target,
                 p,
                 &image,
@@ -518,10 +627,13 @@ impl TargetEffect for Lumetri {
             };
             u.f32s(80 + 16 * i, &rgb.map(|x| x - y + light));
         }
+        // RGB curves and color wheels operate on encoded values.
+        u.f32(140, white(65).powf(1. / 2.4))
+            .f32(156, white(66).powf(1. / 2.4));
         soften(&mut u, v.f(29));
         u.f32(92, (v.f(33) * 0.01) as f32).u32(108, active);
         u.f32s(160, &color(v, 70))
-            .u32(172, u32::from(p.value(70).is_some()));
+            .u32(172, u32::from(p.value(70).is_some() && v.b(1017)));
         u.f32s(
             176,
             &[
@@ -637,13 +749,7 @@ pub(crate) fn cc_vignette() -> Builtin {
     );
     let (def, labels) = b.reference_points().build();
     rust_builtin(
-        (
-            Arc::new(Lumetri {
-                def,
-                lut: LutCache::default(),
-            }),
-            labels,
-        ),
+        (Arc::new(Lumetri { def }), labels),
         "cc-vignette",
         "CC Vignette",
         &["晕影", "vignette"],
