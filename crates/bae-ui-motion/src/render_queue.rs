@@ -46,41 +46,46 @@ pub const FORMATS: [ExportFormat; 8] = [
     ExportFormat::ProRes4444,
 ];
 
-/// AE 26's Render Settings templates; BAE renders at Best Settings, the
-/// others are shown greyed.
+/// AE 26's Render Settings templates in its menu order; BAE renders at Best
+/// Settings, the others are shown greyed.
 const RS_TEMPLATES: [&str; 5] = [
     "Best Settings",
-    "Current Settings",
     "DV Settings",
-    "Draft Settings",
     "Multi-Machine Settings",
+    "Current Settings",
+    "Draft Settings",
 ];
 
 /// What BAE writes for an Output Module template: format, channels, video
 /// bit rate.
 type OmSettings = (ExportFormat, Channels, f64);
 
-/// AE 26's Output Module templates and what BAE writes for them (`None`:
-/// greyed, a format BAE does not write).
+/// AE 26's Output Module templates in its menu order and what BAE writes for
+/// them (`None`: greyed, a format BAE does not write).
 const OM_TEMPLATES: [(&str, Option<OmSettings>); 12] = [
-    ("AIFF 48kHz", None),
-    ("Alpha Only", None),
+    ("Multi-Machine Sequence", None),
     (
-        "H.264 - Match Render Settings - 15 Mbps",
-        Some((ExportFormat::H264, Channels::Rgb, 15.0)),
+        "TIFF Sequence with Alpha",
+        Some((
+            ExportFormat::Tiff,
+            Channels::RgbAlpha,
+            DEFAULT_BIT_RATE_MBPS,
+        )),
     ),
+    ("AIFF 48kHz", None),
     (
         "H.264 - Match Render Settings - 40 Mbps",
         Some((ExportFormat::H264, Channels::Rgb, 40.0)),
     ),
     (
+        "H.264 - Match Render Settings - 15 Mbps",
+        Some((ExportFormat::H264, Channels::Rgb, 15.0)),
+    ),
+    (
         "H.264 - Match Render Settings - 5 Mbps",
         Some((ExportFormat::H264, Channels::Rgb, 5.0)),
     ),
-    (
-        "High Quality",
-        Some((ExportFormat::ProRes, Channels::Rgb, DEFAULT_BIT_RATE_MBPS)),
-    ),
+    ("Photoshop", None),
     (
         "High Quality with Alpha",
         Some((
@@ -89,17 +94,12 @@ const OM_TEMPLATES: [(&str, Option<OmSettings>); 12] = [
             DEFAULT_BIT_RATE_MBPS,
         )),
     ),
-    ("Lossless", None),
     ("Lossless with Alpha", None),
-    ("Multi-Machine Sequence", None),
-    ("Photoshop", None),
+    ("Alpha Only", None),
+    ("Lossless", None),
     (
-        "TIFF Sequence with Alpha",
-        Some((
-            ExportFormat::Tiff,
-            Channels::RgbAlpha,
-            DEFAULT_BIT_RATE_MBPS,
-        )),
+        "High Quality",
+        Some((ExportFormat::ProRes, Channels::Rgb, DEFAULT_BIT_RATE_MBPS)),
     ),
 ];
 
@@ -118,12 +118,14 @@ enum TemplatePick {
     Save,
 }
 
-/// The template arrow lists localized built-ins and verbatim user names.
+/// The template arrow as AE lays it out: the current template first, a
+/// separator, the others in AE's order (user templates after the built-ins),
+/// Custom..., a separator and Make Template.... No check marks.
 fn template_menu(
     ui: &mut egui::Ui,
     id: egui::Id,
     label: &str,
-    mut items: Vec<(&str, bool)>,
+    items: Vec<(&str, bool)>,
     selected: Option<&str>,
     can_save: bool,
 ) -> Option<TemplatePick> {
@@ -132,24 +134,26 @@ fn template_menu(
         .labeled(egui::WidgetType::Button, label);
     let mut picked = None;
     egui::Popup::menu(&resp).id(id).show(|ui| {
-        items.sort_by(|a, b| a.0.cmp(b.0));
-        for (name, enabled) in items {
-            if ui
-                .add_enabled(
-                    enabled,
-                    egui::RadioButton::new(selected == Some(name), name),
-                )
-                .clicked()
-            {
+        let current = items.iter().find(|(name, _)| Some(*name) == selected);
+        let others = items.iter().filter(|(name, _)| Some(*name) != selected);
+        if let Some(&(name, _)) = current {
+            if ui.button(name).clicked() {
+                picked = Some(TemplatePick::Name(name.to_owned()));
+                ui.close();
+            }
+            ui.separator();
+        }
+        for &(name, enabled) in others {
+            if ui.add_enabled(enabled, egui::Button::new(name)).clicked() {
                 picked = Some(TemplatePick::Name(name.to_owned()));
                 ui.close();
             }
         }
-        ui.separator();
         if ui.button(tr("Custom...")).clicked() {
             picked = Some(TemplatePick::Custom);
             ui.close();
         }
+        ui.separator();
         if ui
             .add_enabled(can_save, egui::Button::new(tr("Make Template...")))
             .clicked()
@@ -1232,12 +1236,14 @@ impl RenderQueuePanel {
             q.requeue(id);
         }
         if let Some((id, action)) = command {
-            cx.invoke_with(
-                action.action_id(),
-                serde_json::json!({
-                    "queue_item": id, "keep_names": action == ItemAction::DuplicateWithName
-                }),
-            );
+            match action {
+                // On the queue itself: the global Duplicate is routed by focus
+                // and could duplicate the selected layers instead.
+                ItemAction::Duplicate | ItemAction::DuplicateWithName => {
+                    q.duplicate(id, action == ItemAction::DuplicateWithName)
+                }
+                _ => cx.invoke_with(action.action_id(), serde_json::json!({ "queue_item": id })),
+            }
         }
         if q.running {
             ui.ctx()
@@ -1568,12 +1574,27 @@ fn item_ui(
                         None => {}
                     }
                     ui.label(tr("Output Module:"));
-                    if bae_ui::widgets::link(ui, &output_label)
-                        .labeled(egui::WidgetType::Link, &name("Output Module"))
-                        .clicked()
-                    {
+                    let header = bae_ui::widgets::link(ui, &output_label)
+                        .labeled(egui::WidgetType::Link, &name("Output Module"));
+                    if header.clicked() {
                         *open = Some((id, QueueLink::Output(index)));
                     }
+                    // AE's Output Module header menu: Reveal (once the file
+                    // exists) and Add Output Module.
+                    crate::common::context_menu(&header, &mut |ui| {
+                        let file = Path::new(&module.output);
+                        if ui
+                            .add_enabled(file.exists(), egui::Button::new(tr("Reveal in Explorer")))
+                            .clicked()
+                        {
+                            bae_platform::reveal(file);
+                            ui.close();
+                        }
+                        if ui.button(tr("Add Output Module")).clicked() {
+                            *command = Some((id, ItemAction::AddOutput));
+                            ui.close();
+                        }
+                    });
                 });
             });
             ui.add_enabled_ui(editable, |ui| {
@@ -1718,8 +1739,8 @@ fn item_ui(
                         &name("Output To"),
                         &module.output,
                     );
-                    if let Some(extension) = extension_follows_format(&module.output, module.format)
-                    {
+                    let follows = extension_follows_format(&module.output, module.format);
+                    if let Some(extension) = follows {
                         file_link.clone().on_hover_text(
                             Path::new(&module.output)
                                 .with_extension(extension)
@@ -1739,6 +1760,15 @@ fn item_ui(
                         remove_output = Some(index);
                     }
                     ui.end_row();
+                    // AE: the format decides the extension.
+                    if let Some(extension) = follows {
+                        ui.label("");
+                        ui.weak(
+                            tr("The file will be saved as .{ext} to match the format.")
+                                .replace("{ext}", extension),
+                        );
+                        ui.end_row();
+                    }
                 });
             });
         });

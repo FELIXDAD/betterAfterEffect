@@ -256,6 +256,14 @@ fn invalid_output_paths_fail_with_a_message() {
         wait_done(&mut h, Duration::from_secs(120));
         let status = items(&h)[i].status.clone();
         report.push(format!("{label}: {status:?}"));
+        if i == 0 {
+            // Items with their output modules are taller than the short
+            // Timeline frame the queue shares (AE): maximize it (`).
+            to_front(&mut h, "render_queue");
+            h.state_mut()
+                .dispatch(Invocation::new(bae_ui::action::ids::MAXIMIZE_FRAME));
+            settle(&mut h);
+        }
         match status {
             ItemStatus::Failed(message) => {
                 assert!(!message.is_empty(), "{label}: empty message");

@@ -3,8 +3,10 @@ use super::*;
 use chrono::{Datelike, Local, Timelike};
 
 const SIMPLE: &str = "[compName].[extension]";
+/// AE 26's File Name and Location templates in its menu order.
 const PRESETS: &[(&str, &str)] = &[
     ("Comp Name", SIMPLE),
+    ("Comp Folder and Name", "[compName]/[compName].[extension]"),
     (
         "Comp and Output Module Name",
         "[compName]_[outputModule].[extension]",
@@ -25,7 +27,6 @@ const PRESETS: &[(&str, &str)] = &[
         "Comp Name and Date/Time",
         "[compName]_[year]-[month]-[day]_[hour]-[minute]-[second].[extension]",
     ),
-    ("Comp Folder and Name", "[compName]/[compName].[extension]"),
     (
         "Comp Name and Aspect Ratio",
         "[compName]_[aspectRatio].[extension]",
@@ -314,8 +315,11 @@ pub(super) fn menu(
         egui::WidgetType::Button,
         tr("File Name and Location Templates"),
     );
+    // As AE lays it out: the current template first, a separator, the others
+    // in AE's order (user templates after the built-ins), a separator and
+    // Custom.... No check marks; all enabled, as in AE.
     egui::Popup::menu(&button).show(|ui| {
-        let mut items: Vec<_> = PRESETS
+        let items: Vec<_> = PRESETS
             .iter()
             .map(|(n, p)| (tr(n), *p))
             .chain(
@@ -324,18 +328,21 @@ pub(super) fn menu(
                     .flat_map(|l| l.names.iter().map(|(n, p)| (n.as_str(), p.as_str()))),
             )
             .collect();
-        items.sort_by(|a, b| a.0.cmp(b.0));
-        for (name, pattern) in items {
-            let enabled = !pattern.contains("[projectFolder]") || context.project.is_some();
-            let checked = module.naming.pattern.as_deref() == Some(pattern);
-            if ui
-                .add_enabled(enabled, egui::RadioButton::new(checked, name))
-                .clicked()
-            {
+        let current = module.naming.pattern.as_deref().unwrap_or(SIMPLE);
+        let first = items.iter().position(|(_, p)| *p == current);
+        let order = first
+            .into_iter()
+            .chain((0..items.len()).filter(|i| Some(*i) != first));
+        for (n, i) in order.enumerate() {
+            let (name, pattern) = items[i];
+            if ui.button(name).clicked() {
                 if context.apply(module, pattern) && ui.input(|i| i.modifiers.command) {
                     *open = Some((id, QueueLink::DefaultNaming(pattern.to_owned())));
                 }
                 ui.close();
+            }
+            if n == 0 && first.is_some() {
+                ui.separator();
             }
         }
         ui.separator();
