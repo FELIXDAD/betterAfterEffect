@@ -147,6 +147,7 @@ impl Preferences {
                 }
             }
         }
+        prefs.apply_transparency_preset();
         (prefs, fixed)
     }
 
@@ -182,9 +183,37 @@ impl Preferences {
         } else {
             v
         };
-        let old = self.get(key) != Some(&v);
+        if self.values.get(p.key) == Some(&v) {
+            return false;
+        }
         self.values.insert(p.key, v);
-        old
+        match p.key {
+            keys::TRANSPARENCY_PRESET => self.apply_transparency_preset(),
+            keys::TRANSPARENCY_FIRST | keys::TRANSPARENCY_SECOND => {
+                self.values
+                    .insert(keys::TRANSPARENCY_PRESET, Value::from("custom"));
+            }
+            _ => {}
+        }
+        true
+    }
+
+    fn apply_transparency_preset(&mut self) {
+        let (first, second) = match self.str(keys::TRANSPARENCY_PRESET) {
+            "light" => ("#cccccc", "#ffffff"),
+            "medium" => ("#808080", "#b3b3b3"),
+            "dark" => ("#333333", "#666666"),
+            "red" => ("#cc6666", "#ffcccc"),
+            "orange" => ("#cc9966", "#ffe6cc"),
+            "green" => ("#66aa66", "#cce6cc"),
+            "blue" => ("#6699cc", "#cce6ff"),
+            "purple" => ("#9966cc", "#e6ccff"),
+            _ => return,
+        };
+        self.values
+            .insert(keys::TRANSPARENCY_FIRST, Value::from(first));
+        self.values
+            .insert(keys::TRANSPARENCY_SECOND, Value::from(second));
     }
 
     /// Resets `key` to its default.
@@ -192,7 +221,7 @@ impl Preferences {
         if matches!(key, keys::RAM_RESERVED_GB | keys::DISK_LIMIT_GB) {
             self.values.remove(key);
         } else if let Some(p) = schema::find(key) {
-            self.values.insert(p.key, default_json(p));
+            self.set(p.key, default_json(p));
         }
     }
 
@@ -318,6 +347,9 @@ impl Preferences {
 
 /// Keys features read (the schema has them all).
 pub mod keys {
+    pub const TRANSPARENCY_PRESET: &str = "grids_guides.transparency_grid_colors_preset";
+    pub const TRANSPARENCY_FIRST: &str = "grids_guides.transparency_grid_color_1";
+    pub const TRANSPARENCY_SECOND: &str = "grids_guides.transparency_grid_color_2";
     pub const PREVIEW_CACHE_MIB: &str = "memory_cpu.preview_cache_mib";
     pub const DISK_LIMIT_GB: &str = "disk.max_disk_cache_size_gb";
     pub const RAM_RESERVED_GB: &str = "memory_cpu.ram_reserved_for_other_apps_gb";

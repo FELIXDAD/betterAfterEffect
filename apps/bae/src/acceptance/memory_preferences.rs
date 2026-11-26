@@ -4,13 +4,11 @@ use egui_kittest::kittest::Queryable as _;
 #[test]
 fn memory_page_shows_machine_values_and_opens_both_reports() {
     let mut h = gui();
-    let gpu_name = bae_gpu::GpuContext::new_headless(Default::default())
-        .ok()
-        .map(|gpu| {
-            let name = gpu.adapter_info().name.clone();
-            h.state_mut().app.insert_resource(gpu);
-            name
-        });
+    let gpu_name = gpu().map(|gpu| {
+        let name = gpu.adapter_info().name.clone();
+        h.state_mut().app.insert_resource(gpu);
+        name
+    });
     let total = bae_platform::memory::total_bytes().expect("physical memory");
     let resident = bae_platform::memory::resident_bytes().expect("resident memory");
     assert!(resident > 0 && resident <= total);

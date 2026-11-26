@@ -237,8 +237,8 @@ impl Workspace {
         self.settings.draft()
     }
 
-    /// The Preferences window (acceptance tests, macOS run).
-    #[cfg(all(test, target_os = "macos"))]
+    /// The Preferences window for application acceptance tests.
+    #[cfg(test)]
     pub fn settings_dialog(&mut self) -> &mut bae_ui::settings::SettingsDialog {
         &mut self.settings
     }
