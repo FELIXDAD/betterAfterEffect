@@ -166,6 +166,8 @@ pub(crate) struct ProjectInfo {
 pub(crate) struct Scope {
     comps: Vec<Arc<CompiledComp>>,
     project: Arc<ProjectInfo>,
+    /// Layer pixels for `sampleImage` (none: transparent black).
+    samples: Option<Arc<crate::ImageSamples>>,
     by_path: HashMap<PrimPath, usize>,
     by_name: HashMap<String, usize>,
     memo: Memo,
@@ -201,6 +203,7 @@ impl Scope {
         Scope {
             comps,
             project: Arc::default(),
+            samples: None,
             by_path,
             by_name,
             memo: MEMO_POOL.with(|p| std::mem::take(&mut *p.borrow_mut())),
@@ -220,6 +223,11 @@ impl Scope {
 
     pub(crate) fn with_project(mut self, project: Arc<ProjectInfo>) -> Scope {
         self.project = project;
+        self
+    }
+
+    pub(crate) fn with_samples(mut self, samples: Option<Arc<crate::ImageSamples>>) -> Scope {
+        self.samples = samples;
         self
     }
 
@@ -279,6 +287,10 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
 /// Comp id of `path` in the active scope.
 pub(crate) fn scope_comp_id(path: &PrimPath) -> Option<usize> {
     SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.comp_id(path)))
+}
+
+fn scope_samples() -> Option<Arc<crate::ImageSamples>> {
+    SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.samples.clone()))
 }
 
 fn scope_project() -> Arc<ProjectInfo> {
@@ -735,6 +747,7 @@ const LOCALS: &[(&str, &str)] = &[
     ("pointOfInterest", "thisLayer.pointOfInterest"),
     ("timeRemap", "thisLayer.timeRemap"),
     ("audioLevels", "thisLayer.audioLevels"),
+    ("sampleImage", "thisLayer.sampleImage.bind(thisLayer)"),
     ("effect", "thisLayer.effect.bind(thisLayer)"),
     ("mask", "thisLayer.mask.bind(thisLayer)"),
     ("toComp", "thisLayer.toComp.bind(thisLayer)"),
@@ -1998,6 +2011,33 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 Ok::<_, rquickjs::Error>(found.map(|m| m.path.to_string()))
             },
         )?,
+    )?;
+
+    // sampleImage: args are [x, y, radius x, radius y, post effect (0/1), t]. A
+    // sample that is not read back yet is transparent black (see `samples`).
+    h.set(
+        "sampleImage",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32, l: i32, a: Vec<f64>| {
+            let comp = comp_or_throw(&ctx, c)?;
+            let li = layer_or_throw(&ctx, &comp, l)?;
+            note_dependency(c as usize, li);
+            let arg = |i: usize, d: f64| a.get(i).copied().filter(|v| v.is_finite()).unwrap_or(d);
+            let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
+            let t = Time::from_seconds((arg(5, 0.0) / tick).round() * tick);
+            let key = crate::SampleKey::new(
+                comp.path.clone(),
+                comp.layers[li].path.clone(),
+                t,
+                [arg(0, 0.0), arg(1, 0.0)],
+                [arg(2, 0.5), arg(3, 0.5)],
+                arg(4, 1.0) != 0.0,
+            );
+            note_read(|| ExprRead::prim(key.layer.clone(), ReadKind::Subtree, Some(key.time)));
+            let rgba = scope_samples()
+                .and_then(|s| s.get(&key))
+                .unwrap_or_default();
+            Ok::<_, rquickjs::Error>(rgba.map(f64::from).to_vec())
+        })?,
     )?;
 
     h.set(
