@@ -1722,12 +1722,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
             s.layer_clipboard = bae_motion::copy_layers(stage, &layers);
             s.clipboard = None;
+            s.expression_clipboard = None;
         }
         ids::COPY => {
             let Some(first) = keys.first() else {
                 return false;
             };
             s.layer_clipboard.clear();
+            s.expression_clipboard = None;
             let same: Vec<&KeyRef> = keys
                 .iter()
                 .filter(|k| k.path == first.path && k.attr == first.attr)
@@ -1814,6 +1816,20 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     "attr.bake_expression",
                     json!({"path": path, "attr": attr, "keys": keys}),
                 );
+            }
+        }
+        // An expression copied with Copy Expression Only: onto the selected
+        // properties (AE).
+        ids::PASTE if s.expression_clipboard.is_some() && !s.selected_props.is_empty() => {
+            let source = s.expression_clipboard.clone();
+            let items: Vec<_> = s
+                .selected_props
+                .iter()
+                .filter(|(p, _)| query::locked_layer_of(stage, p).is_none())
+                .map(|(p, a)| json!({"path": p, "attr": a, "source": source}))
+                .collect();
+            if !items.is_empty() {
+                cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
         }
         ids::PASTE if !s.layer_clipboard.is_empty() => {

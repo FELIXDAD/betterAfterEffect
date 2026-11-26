@@ -8,7 +8,7 @@ use bae_motion::{
     query,
     tracker::{self, Frame, Sample},
 };
-use bae_render::{AnimEvaluator, OutputAlpha, RenderPurpose, RenderRequest};
+use bae_render::{AnimEvaluator, OutputAlpha, OutputTarget, RenderPurpose, RenderRequest};
 use bae_ui::PanelContext;
 use std::sync::{
     Arc,
@@ -92,6 +92,7 @@ pub(super) fn launch(
             let result = (|| {
                 let stage = snapshot().map_err(|e| e.to_string())?;
                 let mut renderer = gpu.renderer.lock().map_err(|e| e.to_string())?;
+                let renderer = Ready::renderer(&gpu.gpu, &mut renderer);
                 if let Some(src) = sources {
                     for e in src.0.snapshot().iter() {
                         renderer.providers_mut().register(e.item().clone());
@@ -106,6 +107,9 @@ pub(super) fn launch(
                 let duration = info.frame_duration().0;
                 let fields =
                     tracker::setting(&stage, &tracker, "track_fields") == Some(Value::Bool(true));
+                // The frames' 8-bit targets: one no image holds any more is
+                // rendered into again instead of allocating a whole layer.
+                let mut targets: Vec<Arc<OutputTarget>> = Vec::new();
                 let mut picture = |time: Time| -> Result<Image, String> {
                     let phase = time.0.rem_euclid(duration);
                     let field = if fields {
@@ -120,31 +124,48 @@ pub(super) fn launch(
                     let (one, min) = crate::layer_panel::alone(&comp, &source, 0)
                         .ok_or("Missing motion source")?;
                     let rc = anim.convert(&stage, &one, 0).map_err(|e| e.to_string())?;
-                    let frame = loop {
+                    let (frame, target) = loop {
                         if stop.load(Ordering::Relaxed) {
                             return Err("Tracking stopped".into());
                         }
-                        let frame = renderer
-                            .render_frame(&rc, &RenderRequest::full())
+                        let free = targets
+                            .iter()
+                            .position(|t| Arc::strong_count(t) == 1)
+                            .and_then(|i| Arc::try_unwrap(targets.swap_remove(i)).ok());
+                        // The frame and its conversion in one submission.
+                        let (frame, target) = renderer
+                            .render_frame_output(
+                                &rc,
+                                &RenderRequest::full(),
+                                None,
+                                OutputAlpha::Straight,
+                                free,
+                            )
                             .map_err(|e| e.to_string())?;
                         if let Some(warning) = frame.warnings.first() {
                             return Err(warning.clone());
                         }
+                        let target = Arc::new(target);
+                        targets.push(target.clone());
                         if !frame.incomplete {
-                            break frame;
+                            break (frame, target);
                         }
+                        drop(target);
                         std::thread::sleep(std::time::Duration::from_millis(16));
                     };
+                    // Keep a few spare targets at most.
+                    while targets.len() > MAX_TARGETS
+                        && let Some(i) = targets.iter().position(|t| Arc::strong_count(t) == 1)
+                    {
+                        targets.swap_remove(i);
+                    }
                     let origin = min
                         + DVec2::new(
                             f64::from(frame.image.rect.x0),
                             f64::from(frame.image.rect.y0),
                         );
-                    let output = renderer
-                        .output_texture(&frame, OutputAlpha::Straight, None)
-                        .map_err(|e| e.to_string())?;
                     Ok(Image {
-                        texture: output.view().texture().clone(),
+                        target,
                         origin,
                         field,
                     })
@@ -189,11 +210,20 @@ pub(super) fn launch(
         .map_err(|e| e.to_string())?;
     Ok(job)
 }
+/// Output targets the analysis keeps beyond those its images hold.
+const MAX_TARGETS: usize = 4;
+
 #[derive(Clone)]
 struct Image {
-    texture: wgpu::Texture,
+    target: Arc<OutputTarget>,
     origin: DVec2,
     field: u32,
+}
+
+impl Image {
+    fn texture(&self) -> &wgpu::Texture {
+        self.target.view().texture()
+    }
 }
 struct Point {
     path: PrimPath,
@@ -294,8 +324,8 @@ impl Analysis<'_> {
                                 .clamp(
                                     DVec2::splat(2.),
                                     DVec2::new(
-                                        f64::from(image.texture.width().max(2)),
-                                        f64::from(image.texture.height().max(2)),
+                                        f64::from(image.texture().width().max(2)),
+                                        f64::from(image.texture().height().max(2)),
                                     ),
                                 )
                                 .as_uvec2()
@@ -303,7 +333,7 @@ impl Analysis<'_> {
                         })
                     };
                     regions.push(Region {
-                        reference: &reference.texture,
+                        reference: reference.texture(),
                         field: reference.field,
                         center: grid(center - reference.origin),
                         search_center: grid(
@@ -316,7 +346,7 @@ impl Analysis<'_> {
             }
             let matches = self.gpu.matcher.analyze(
                 &self.gpu.gpu,
-                &image.texture,
+                image.texture(),
                 &regions,
                 super::gpu::Options {
                     channel,

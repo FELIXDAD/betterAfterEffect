@@ -5,8 +5,27 @@ use std::sync::{Arc, Mutex};
 pub(super) struct Ready {
     pub gpu: Arc<GpuContext>,
     pub matcher: Matcher,
-    pub renderer: Mutex<Renderer>,
+    /// Renders the tracked layer. Built by the first analysis on its own
+    /// thread (it shares the compositor pipelines the app's warm-up compiled),
+    /// not during the warm-up.
+    pub renderer: Mutex<Option<Renderer>>,
 }
+
+impl Ready {
+    /// The tracker's renderer (built on first use).
+    pub fn renderer<'a>(gpu: &Arc<GpuContext>, slot: &'a mut Option<Renderer>) -> &'a mut Renderer {
+        slot.get_or_insert_with(|| {
+            Renderer::with_config(
+                gpu.clone(),
+                RendererConfig {
+                    frame_cache_bytes: 0,
+                    pool_idle_bytes: 32 << 20,
+                },
+            )
+        })
+    }
+}
+
 #[derive(Default)]
 pub(super) struct TrackingGpu(Mutex<Option<Arc<Ready>>>);
 impl TrackingGpu {
@@ -26,17 +45,12 @@ impl WarmUp for TrackingGpu {
     fn priority(&self) -> u8 {
         15
     }
+    /// Compiles the matching pipelines (the renderer waits for an analysis).
     fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
         let ready = Ready {
             gpu: gpu.clone(),
             matcher: Matcher::new(gpu.device()),
-            renderer: Mutex::new(Renderer::with_config(
-                gpu.clone(),
-                RendererConfig {
-                    frame_cache_bytes: 0,
-                    pool_idle_bytes: 32 << 20,
-                },
-            )),
+            renderer: Mutex::new(None),
         };
         *self.0.lock().map_err(|e| e.to_string())? = Some(Arc::new(ready));
         Ok(())
@@ -45,32 +59,38 @@ impl WarmUp for TrackingGpu {
 pub(super) struct Matcher {
     scores: wgpu::ComputePipeline,
     peak: wgpu::ComputePipeline,
-    windows: Mutex<Vec<Window>>,
-    staging: wgpu::Buffer,
+    scores_layout: wgpu::BindGroupLayout,
+    peak_layout: wgpu::BindGroupLayout,
+    /// Buffers and bindings reused from frame to frame (one analysis runs
+    /// at a time).
+    state: Mutex<State>,
 }
-struct Window {
+
+#[derive(Default)]
+struct State {
+    /// One per region of a frame.
+    slots: Vec<Slot>,
+    /// The peaks read back (16 bytes per region).
+    staging: Option<wgpu::Buffer>,
+}
+
+/// A region's buffers, grown to the largest search grid so far.
+struct Slot {
     params: wgpu::Buffer,
     scores: wgpu::Buffer,
     peak: wgpu::Buffer,
+    /// The peak pass's bindings (params, scores, peak).
+    peak_group: wgpu::BindGroup,
+    /// Correlation bindings by (reference, current) texture: the analysed
+    /// frames come from a few reused textures.
+    groups: Vec<(wgpu::Texture, wgpu::Texture, wgpu::BindGroup)>,
 }
-fn buffer(d: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
-    d.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size,
-        usage,
-        mapped_at_creation: false,
-    })
-}
-impl Window {
-    fn new(d: &wgpu::Device, bytes: u64) -> Self {
-        use wgpu::BufferUsages as U;
-        Self {
-            params: buffer(d, "tracking window", 64, U::UNIFORM | U::COPY_DST),
-            scores: buffer(d, "tracking scores", bytes, U::STORAGE),
-            peak: buffer(d, "tracking peak", 16, U::STORAGE | U::COPY_SRC),
-        }
-    }
-}
+
+/// Regions analysed in one submission at most.
+const MAX_REGIONS: usize = 8;
+/// Correlation bindings kept per region.
+const MAX_GROUPS: usize = 4;
+
 pub(super) struct Region<'a> {
     pub reference: &'a wgpu::Texture,
     pub field: u32,
@@ -104,19 +124,79 @@ impl Matcher {
                 cache: None,
             })
         };
+        let (scores, peak) = (build("correlate"), build("peak"));
         Self {
-            scores: build("correlate"),
-            peak: build("peak"),
-            windows: Mutex::new((0..8).map(|_| Window::new(device, 4 * 65 * 65)).collect()),
-            staging: buffer(
-                device,
-                "tracking samples",
-                16 * 8,
-                wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            ),
+            scores_layout: scores.get_bind_group_layout(0),
+            peak_layout: peak.get_bind_group_layout(0),
+            scores,
+            peak,
+            state: Mutex::default(),
         }
     }
-    /// Runs on the analysis thread. One readback and one submission for all active points.
+
+    /// Slot `n` with a scores buffer of at least `bytes`.
+    fn slot<'s>(
+        &self,
+        d: &wgpu::Device,
+        slots: &'s mut Vec<Slot>,
+        n: usize,
+        bytes: u64,
+    ) -> &'s mut Slot {
+        if slots.get(n).is_none_or(|s| s.scores.size() < bytes) {
+            let buf = |label, size, usage| {
+                d.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size,
+                    usage,
+                    mapped_at_creation: false,
+                })
+            };
+            let params = buf(
+                "tracking window",
+                64,
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            );
+            let scores = buf("tracking scores", bytes, wgpu::BufferUsages::STORAGE);
+            let peak = buf(
+                "tracking peak",
+                16,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            );
+            let peak_group = d.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tracking peak"),
+                layout: &self.peak_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: scores.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: peak.as_entire_binding(),
+                    },
+                ],
+            });
+            let slot = Slot {
+                params,
+                scores,
+                peak,
+                peak_group,
+                groups: Vec::new(),
+            };
+            if n < slots.len() {
+                slots[n] = slot;
+            } else {
+                slots.push(slot);
+            }
+        }
+        &mut slots[n]
+    }
+    /// Runs on the analysis thread. One readback and one submission for all
+    /// active points; the buffers and bindings are reused across frames.
     pub fn analyze(
         &self,
         gpu: &GpuContext,
@@ -124,13 +204,22 @@ impl Matcher {
         regions: &[Region<'_>],
         opts: Options,
     ) -> Result<Vec<[f32; 3]>, String> {
-        if regions.is_empty() || regions.len() > 8 {
+        if regions.is_empty() || regions.len() > MAX_REGIONS {
             return Err("invalid track point count".into());
         }
         let d = gpu.device();
-        let mut windows = self.windows.lock().map_err(|e| e.to_string())?;
-        let staging = &self.staging;
-        let cur = current.create_view(&Default::default());
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        let State { slots, staging } = &mut *state;
+        // Taken while mapped: an analysis failing midway leaves no mapped
+        // buffer behind.
+        let staging = staging.take().unwrap_or_else(|| {
+            d.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("tracking samples"),
+                size: 16 * MAX_REGIONS as u64,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
         let mut enc = d.create_command_encoder(&Default::default());
         for (n, r) in regions.iter().enumerate() {
             let f = r.feature.map(|n| n.max(2));
@@ -167,59 +256,62 @@ impl Matcher {
                 0,
             ];
             let data: Vec<u8> = words.into_iter().flat_map(u32::to_le_bytes).collect();
-            let window = &mut windows[n];
-            if window.scores.size() < bytes {
-                window.scores = buffer(d, "tracking scores", bytes, wgpu::BufferUsages::STORAGE);
-            }
-            let Window {
-                params,
-                scores,
-                peak,
-            } = window;
-            gpu.queue().write_buffer(params, 0, &data);
-            let reference = r.reference.create_view(&Default::default());
-            let entries = [
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&reference),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&cur),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: scores.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: peak.as_entire_binding(),
-                },
-            ];
-            for (pipeline, bindings, x, y) in [
+            let slot = self.slot(d, slots, n, bytes);
+            gpu.queue().write_buffer(&slot.params, 0, &data);
+            let cached = slot
+                .groups
+                .iter()
+                .position(|(a, b, _)| a == r.reference && b == current);
+            let at = match cached {
+                Some(at) => at,
+                None => {
+                    let reference = r.reference.create_view(&Default::default());
+                    let cur = current.create_view(&Default::default());
+                    let group = d.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("tracking"),
+                        layout: &self.scores_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&reference),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&cur),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: slot.params.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: slot.scores.as_entire_binding(),
+                            },
+                        ],
+                    });
+                    if slot.groups.len() >= MAX_GROUPS {
+                        slot.groups.remove(0);
+                    }
+                    slot.groups
+                        .push((r.reference.clone(), current.clone(), group));
+                    slot.groups.len() - 1
+                }
+            };
+            for (pipeline, group, x, y) in [
                 (
                     &self.scores,
-                    &entries[..4],
+                    &slot.groups[at].2,
                     grid[0].div_ceil(8),
                     grid[1].div_ceil(8),
                 ),
-                (&self.peak, &entries[2..], 1, 1),
+                (&self.peak, &slot.peak_group, 1, 1),
             ] {
-                let group = d.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("tracking"),
-                    layout: &pipeline.get_bind_group_layout(0),
-                    entries: bindings,
-                });
                 let mut pass = enc.begin_compute_pass(&Default::default());
                 pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, &group, &[]);
+                pass.set_bind_group(0, group, &[]);
                 pass.dispatch_workgroups(x, y, 1);
             }
-            enc.copy_buffer_to_buffer(peak, 0, staging, 16 * n as u64, 16);
+            enc.copy_buffer_to_buffer(&slot.peak, 0, &staging, 16 * n as u64, 16);
         }
         let submission = gpu.queue().submit([enc.finish()]);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -234,8 +326,10 @@ impl Matcher {
         rx.recv()
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
-        let data = staging.get_mapped_range(..).map_err(|e| e.to_string())?;
-        let hits = data
+        let data = staging
+            .get_mapped_range(..16 * regions.len() as u64)
+            .map_err(|e| e.to_string())?;
+        let peaks = data
             .as_chunks::<16>()
             .0
             .iter()
@@ -244,10 +338,10 @@ impl Matcher {
                     f32::from_le_bytes(chunk[4 * i..4 * i + 4].try_into().expect("four bytes"))
                 })
             })
-            .take(regions.len())
             .collect();
         drop(data);
         staging.unmap();
-        Ok(hits)
+        state.staging = Some(staging);
+        Ok(peaks)
     }
 }
