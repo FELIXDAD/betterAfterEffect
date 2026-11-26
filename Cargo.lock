@@ -820,6 +820,7 @@ dependencies = [
  "bae-app",
  "clap",
  "directories",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
