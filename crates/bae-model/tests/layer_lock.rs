@@ -165,6 +165,34 @@ fn every_edit_of_a_locked_layer_is_refused() {
 fn the_lock_switch_other_layers_and_the_comp_stay_editable() {
     let reg = CommandRegistry::with_builtins();
     let mut stage = locked_stage(&reg);
+    for attr in ["enabled", "solo", "audio_enabled", "shy", "motion_blur"] {
+        for value in [false, true] {
+            ok(
+                &reg,
+                &mut stage,
+                "attr.set",
+                json!({"path": LAYER, "attr": attr, "value": {"type":"bool", "value":value}}),
+            );
+            assert!(stage.is_layer_locked(&p(LAYER)));
+            assert_eq!(
+                stage
+                    .prim(&p(LAYER))
+                    .unwrap()
+                    .value(attr)
+                    .and_then(bae_model::Value::as_bool),
+                Some(value)
+            );
+        }
+    }
+    assert_locked(
+        run(
+            &reg,
+            &mut stage,
+            "attr.set",
+            json!({"path": "/comps/main/layers/title/effects/blur", "attr":"enabled", "value":{"type":"bool","value":false}}),
+        ),
+        "child effect's switch",
+    );
     let float = json!({"type": "float", "value": 50.0});
     ok(
         &reg,
