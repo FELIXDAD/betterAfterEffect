@@ -45,6 +45,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "补偿场景引用的配置文件",
     ),
     ("Sample Rate:", "采样率:"),
+    ("Expressions", "表达式"),
     ("Expressions Engine:", "表达式引擎:"),
     ("Legacy ExtendScript", "旧版 ExtendScript"),
     (
