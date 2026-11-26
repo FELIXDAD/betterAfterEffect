@@ -529,7 +529,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "SetProxyFile", "Ctrl+Alt+P", "motion.file.set_proxy_file", "", E, Later, 0),
     k("CSwitchboard", "SetSamplingQualityBicubic", "Alt+Shift+B", "motion.layer.sampling", r#"{"sampling":"bicubic"}"#, B, Todo, 0),
     k("CSwitchboard", "SetSamplingQualityBilinear", "Alt+B", "motion.layer.sampling", r#"{"sampling":"bilinear"}"#, B, Todo, 0),
-    k("CSwitchboard", "ShowCompTree", "Ctrl+Shift+F11", "motion.comp.composition_flowchart", "", E, Later, 0),
+    k("CSwitchboard", "ShowCompTree", "Ctrl+Shift+F11", "motion.comp.composition_flowchart", "", E, Done, 0),
     k("CSwitchboard", "ShowFrameFileName", "Ctrl+Alt+E", "motion.file.reveal_frame_source", "", E, Later, 0),
     k("CSwitchboard", "ShowHideAudio", "Ctrl+4", "window.panel", r#"{"id":"audio","toggle":true}"#, E, Done, 0),
     k("CSwitchboard", "ShowHideBrushPal", "Ctrl+9", "window.panel", r#"{"id":"brushes","toggle":true}"#, E, Later, 0),

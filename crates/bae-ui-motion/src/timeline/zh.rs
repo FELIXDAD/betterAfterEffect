@@ -16,6 +16,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Exponential Scale", "指数比例"),
+    ("Composition Flowchart", "合成流程图"),
+    ("Reveal Composition in Project", "在项目中显示合成"),
     ("Sequence Layers...", "序列图层..."),
     ("Set Expressions", "设置多个表达式"),
     (
