@@ -243,13 +243,25 @@ impl Panel for PaintPanel {
                     ui.add(egui::DragValue::new(&mut p.clone_offset[0]).speed(1.0));
                     ui.add(egui::DragValue::new(&mut p.clone_offset[1]).speed(1.0));
                 });
-                row(ui, "Source Time Shift:", |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut p.clone_time_shift)
-                            .speed(0.04)
-                            .suffix(" s"),
-                    );
-                });
+                // AE: Source Time when locked, else Source Time Shift.
+                if p.lock_source_time {
+                    row(ui, "Source Time:", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut p.clone_source_time)
+                                .speed(0.04)
+                                .range(0.0..=f64::MAX)
+                                .suffix(" s"),
+                        );
+                    });
+                } else {
+                    row(ui, "Source Time Shift:", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut p.clone_time_shift)
+                                .speed(0.04)
+                                .suffix(" s"),
+                        );
+                    });
+                }
             }
         });
     }
@@ -353,6 +365,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Lock Source Time", "锁定源时间"),
     ("Offset:", "偏移:"),
     ("Source Time Shift:", "源时间转移:"),
+    ("Source Time:", "源时间:"),
     ("Set background color", "设定背景颜色"),
     ("Set foreground color", "设置前景颜色"),
     (

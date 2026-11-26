@@ -550,6 +550,8 @@ impl LayerPanel {
                 "clone_source": p.clone_source,
                 "clone_offset": [offset.x, offset.y],
                 "clone_time_shift": flicks(p.clone_time_shift),
+                "clone_lock_time": p.lock_source_time,
+                "clone_time": flicks(p.clone_source_time),
             });
             cx.invoke_with("paint.add_stroke", params);
             // AE shows the Paint effect once there is paint.

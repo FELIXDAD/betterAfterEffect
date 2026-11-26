@@ -94,6 +94,11 @@ pub struct AddStrokeParams {
     /// Clone Stamp: source time offset.
     #[serde(default)]
     pub clone_time_shift: Time,
+    /// Clone Stamp: Lock Source Time, reading the source at `clone_time`.
+    #[serde(default)]
+    pub clone_lock_time: bool,
+    #[serde(default)]
+    pub clone_time: Time,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -199,6 +204,10 @@ impl Command for AddStroke {
             )?;
             if let Some(source) = &p.clone_source {
                 set(tx, &stroke, "clone:source", Value::PrimRef(source.clone()))?;
+            }
+            if p.clone_lock_time {
+                set(tx, &stroke, "clone:lock_time", Value::Bool(true))?;
+                set(tx, &stroke, "clone:time", Value::Time(p.clone_time))?;
             }
         }
         if p.duration == StrokeDuration::WriteOn {
