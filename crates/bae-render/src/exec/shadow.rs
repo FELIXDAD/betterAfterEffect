@@ -23,11 +23,16 @@ const ROW: u32 = 4096;
 /// Largest atlas side; casters that do not fit cast no shadow.
 const LIMIT: u32 = 8192;
 
-/// The image casters of `c`, each once.
-pub(crate) fn casters(c: &CompositeNode) -> Vec<NodeId> {
+/// The image casters of `c`, each once (`skipped`: shadow maps not drawn;
+/// layers with a drawn map read their casters there).
+pub(crate) fn casters(c: &CompositeNode, skipped: impl Fn(NodeId) -> bool) -> Vec<NodeId> {
     let mut ids = Vec::new();
     for op in &c.ops {
-        let Some(lighting) = &op.lighting else {
+        let Some(lighting) = op
+            .lighting
+            .as_ref()
+            .filter(|l| l.shadow_map.is_none_or(&skipped))
+        else {
             continue;
         };
         for caster in lighting.casters.iter() {

@@ -56,9 +56,12 @@ pub use catalog::{EffectInfo, Form, category_zh};
 pub use categories::color::ocio::embed_color_file;
 pub use categories::simulation::{particle_scene_projection, particle_world_projection};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
-pub use effects::color::lumetri::LumetriCurve;
+pub use effects::color::lumetri::{LumetriCurve, lumetri_key_edits};
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
+
+/// Slider settings used by the Lumetri white balance selector.
+pub use effects::color::lumetri::lumetri_white_balance_settings;
 
 /// Plugin id of the built-in effects (`bae.effects/<id>`).
 pub const PLUGIN_ID: &str = "bae.effects";

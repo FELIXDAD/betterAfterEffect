@@ -389,7 +389,18 @@ impl Workspace {
             title: &title,
             dirty: false,
         };
-        (!self.workbench.handle(&inv, &cx)).then_some(inv)
+        if self.workbench.handle(&inv, &cx) {
+            return None;
+        }
+        let mut inv = inv;
+        if matches!(inv.id.as_str(), "attr.set_at" | "attr.set_many")
+            && resources
+                .get::<bae_ui_motion::SharedSession>()
+                .is_some_and(|s| s.lock().auto_key)
+        {
+            inv.params["auto_key"] = true.into();
+        }
+        Some(inv)
     }
 
     /// The menus modules contributed (`Registry<MenuItemSpec>`), for the active

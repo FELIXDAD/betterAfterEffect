@@ -30,6 +30,7 @@ struct SceneKey {
     revision: u64,
     path: PrimPath,
     resolution: u32,
+    scope_source: bool,
     sources: Option<u64>,
     effects: Option<u64>,
 }
@@ -46,6 +47,7 @@ impl SceneKey {
     fn same_view(&self, other: &Self) -> bool {
         self.path == other.path
             && self.resolution == other.resolution
+            && self.scope_source == other.scope_source
             && self.sources == other.sources
             && self.effects == other.effects
     }
@@ -66,6 +68,7 @@ struct Slot {
     time: Time,
     errors: Vec<AttrError>,
     bytes: u64,
+    source: Option<bae_render::GpuImage>,
     /// The published texture (the Info panel and snapshots read it).
     texture: wgpu::Texture,
     /// Its target, handed to [`Spares`] when the frame is dropped.
@@ -322,6 +325,7 @@ impl PlaybackPreview {
             revision: stage.revision(),
             path: path.clone(),
             resolution,
+            scope_source: crate::scopes::needs_working_frame(repaint),
             sources: sources.map(|s| s.0.generation()),
             effects: effects.map(|e| e.0.generation()),
         };
@@ -433,6 +437,10 @@ impl PlaybackPreview {
         }
         let shown = self.shown.as_ref()?;
         Some((shown.image()?, shown.time, &shown.errors))
+    }
+
+    pub(super) fn scope_source(&self) -> Option<bae_render::GpuImage> {
+        self.shown.as_ref()?.source.clone()
     }
 
     /// The texture and rect of the frame [`Self::poll`] returned last.
@@ -808,15 +816,17 @@ fn render_worker(
         };
         let result = rendered
             .map_err(|e| e.to_string())
-            .and_then(|(target, rect, temporal)| {
+            .and_then(|(target, source, temporal)| {
                 let mut spares_now = spares.lock().unwrap();
                 spares_now.size = Some(target.size());
                 // Not an interactive thread: it waits for the warm-up instead.
-                let Some(rect) = rect else {
+                let Some(source) = source else {
                     spares_now.give(target);
                     return Err("incomplete frame".to_owned());
                 };
                 drop(spares_now);
+                let rect = source.rect;
+                let source = job.scene.key.scope_source.then_some(source);
                 let texture = target.view().texture().clone();
                 let channels = engine.channels.clone();
                 let pick_bytes = channels
@@ -830,7 +840,9 @@ fn render_worker(
                     time: job.time,
                     errors: job.errors,
                     bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
-                        + pick_bytes,
+                        + pick_bytes
+                        + source.as_ref().map_or(0, bae_render::GpuImage::byte_size),
+                    source,
                     texture,
                     target: Some(target),
                     spares: spares.clone(),
