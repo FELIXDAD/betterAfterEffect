@@ -14,6 +14,7 @@ mod light_settings;
 mod mask_value;
 pub mod memory;
 mod precompose;
+pub(crate) mod project_fonts;
 mod project_settings;
 mod render_output;
 mod solid_settings;
@@ -77,6 +78,7 @@ pub enum Dialog {
         title: String,
         message: String,
     },
+    MissingFonts(String),
     /// View ▸ View Options (Cmd/Ctrl+Alt+U).
     ViewOptions(Box<crate::viewer::view_options::LayerControls>),
     /// View ▸ Panel Background Color ▸ Select Custom Background Color…
@@ -93,6 +95,8 @@ pub enum Dialog {
 #[derive(Debug, Default)]
 pub struct Dialogs {
     pub open: Option<Dialog>,
+    pending_fonts: Vec<String>,
+    recent_fonts: Vec<String>,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
@@ -254,7 +258,9 @@ fn alert_ui(ctx: &egui::Context, title: &str, message: &str) -> bool {
     let id = egui::Id::new("bae-ui-motion.alert");
     let shown = dialog::window(ctx, id, title, |ui| {
         ui.set_max_width(420.0);
-        ui.label(message);
+        egui::ScrollArea::vertical()
+            .max_height((ctx.content_rect().height() - 120.0).clamp(70.0, 400.0))
+            .show(ui, |ui| ui.label(message));
         ui.add_space(8.0);
         let mut ok = false;
         ui.allocate_ui_with_layout(
@@ -462,9 +468,16 @@ impl bae_ui::DialogHost for MotionDialogs {
     }
 
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
+        crate::ae_panels::character::font_menu::upload(ctx);
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
-        let Some(mut open) = dialogs.lock().open.take() else {
+        let next = {
+            let mut d = dialogs.lock();
+            d.open
+                .take()
+                .or_else(|| project_fonts::warning(&mut d.pending_fonts))
+        };
+        let Some(mut open) = next else {
             return;
         };
         let session = crate::common::session(cx.resources);
@@ -486,6 +499,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
+            Dialog::MissingFonts(message) => alert_ui(ctx, bae_ui::tr("Resolve Fonts"), message),
             Dialog::ViewOptions(v) => crate::viewer::view_options::view_options_ui(ctx, cx, v),
             Dialog::BackgroundColor(c) => {
                 crate::viewer::view_options::background_color_ui(ctx, cx, *c)

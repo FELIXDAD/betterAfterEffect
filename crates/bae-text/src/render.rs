@@ -24,6 +24,34 @@ use vello::{FontEmbolden, Glyph, NormalizedCoord};
 use crate::fonts::FontSystem;
 use crate::layout::{GlyphRun, PositionedGlyph, TextLayout, TextPaint, layout_text};
 
+/// Rasterize a family sample for the Character menu during background warm-up.
+pub fn font_menu_sample(fonts: &mut FontSystem, family: &str, width: u16, height: u16) -> Vec<u8> {
+    let doc = TextDocument::new("Aa", family, 32.0);
+    let layout = layout_text(fonts, &doc);
+    let mut ctx = vello_cpu::RenderContext::new(width, height);
+    if let Some(bounds) = layout.bounds(false) {
+        let w = f64::from(width);
+        let h = f64::from(height);
+        let scale = ((w - 2.0) / bounds.width().max(1.0))
+            .min((h - 2.0) / bounds.height().max(1.0))
+            .min(1.0);
+        let center = bounds.center();
+        let transform = Affine::translate((w * 0.5 - center.x * scale, h * 0.5 - center.y * scale))
+            * Affine::scale(scale);
+        draw_cpu(&mut ctx, &layout, transform);
+    }
+    ctx.flush();
+    let mut pixmap = vello_cpu::Pixmap::new(width, height);
+    ctx.render(&mut pixmap, &mut vello_cpu::Resources::new());
+    pixmap
+        .data_as_u8_slice()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| pixel[3])
+        .collect()
+}
+
 /// Appends `text` to `scene` with `transform` (layer space → target pixels).
 pub fn encode(scene: &mut vello::Scene, text: &TextLayout, transform: Affine) {
     encode_clipped(scene, text, transform, None);

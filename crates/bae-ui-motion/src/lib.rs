@@ -146,6 +146,10 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(ae_shells::ZH);
         // The Character panel's font list, scanned before it is first opened.
         ae_panels::character::prewarm();
+        let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
+            "bae.text/font-menu",
+            std::sync::Arc::new(ae_panels::character::font_menu::WarmUp),
+        );
         effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
