@@ -850,6 +850,11 @@ impl Panel for CompositionViewer {
         }
         let scrub = session.lock().scrub.clone();
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        // A mask or shape path being edited shows in the picture, not only as
+        // its outline (#593).
+        if let Some((prim, path)) = self.select.path_preview().or(self.pen.path_preview()) {
+            overlay::apply_path_preview(&mut comp, &prim, &path);
+        }
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
         if camera_tool.is_camera() || self.camera_drag.is_some() {
