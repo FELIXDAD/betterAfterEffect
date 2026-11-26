@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F。分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；传输出错时的处理（2.4）在 `collab/hub-reliability`。分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -66,6 +66,13 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 **丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发。断线重连时调用 `SyncSession::reset()`。
 
+**传输出错**：`pump` 返回错误，表示链路断了，要重连（换传输，再 `reset()`）。
+
+- 先导入，再报错：出错之前这一轮已经收到的数据照样导入，然后才返回错误。对方认为这些数据已经送到，重连之前不会重发。不导入的话，客户端发完最后几条修改马上断开时，Hub 就丢了这些修改。
+- 这一轮的结果不丢：出错之前做过的事（`events`、`unknown_docs`、`errors`、收发计数、`presence_changed`）留在会话里，下一次 `pump` 的结果里一起报告。想马上拿到（比如重连之前先让渲染缓存失效），调用 `take_interrupted()`。每一轮只报告一次；`reset()` 不会清掉它。
+- 出错那一轮收到的在线状态不交给 `Relay` 转发：Relay 会断开这个连接，并替它向其他人发"离开"。
+- `PumpOutcome::errors` 只放单个文档的问题，链路还能用：导入失败的数据（数据损坏、模型错误）、导出失败（回复快照或发送增量时）。未知类型的消息由传输层直接跳过，不会出现在这里。
+
 ### 2.5 别人新建的工程层
 
 工程层的层叠顺序在 `project.json` 里，不在 CRDT 里，所以协作者新建的工程层不会自动出现在本地层叠中。会话收到本地没有的文档时只报告（`unknown_docs`），由应用决定插到层叠的什么位置。应用把它加进 Stage 后（`Stage::insert_sublayer`），会话下一次 `pump` 会因为"出现新文档"发 `Hello`，远端随即把内容补过来。
@@ -81,7 +88,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - `Relay` 持有一份 `MemDocs`（每个文档一个 Loro 文档，收到未知文档时自动创建），每个连接一个 `SyncSession`。一个客户端发来的增量导入后，其他客户端的会话在下一轮 `pump` 时发现本地版本变了，就把对方缺的部分发过去。
 - `Relay::pump` 在同一次调用里最多循环 4 轮，让一个客户端的修改在一次调用内转发给其他人。
 - Hub 用 `MemDocs::load` 恢复持久化的快照，用 `docs().export_snapshot` 保存。Hub 重启丢了数据也没关系：客户端重连后对方 `Hello` 里版本变小，客户端会把缺的重新上传。
-- 传输出错的连接会被断开（`RelayOutcome::disconnected`）。
+- 传输出错的连接会被断开（`RelayOutcome::disconnected`）。它出错之前发来的数据已经导入（见 2.4），同一次 `pump` 里就转发给其他人。
 
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 
@@ -257,4 +264,4 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
 - **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。
-- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。
+- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`pump` 出错时这一轮已导入的事件用 `take_interrupted()` 取（或等下一次 `pump` 报告，见 2.4）；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。

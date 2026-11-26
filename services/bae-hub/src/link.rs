@@ -11,19 +11,13 @@ use crate::config::Access;
 /// - read-only connections may say hello, ask for snapshots and publish presence;
 ///   their `Updates` and `Snapshot`s are dropped;
 /// - a connection that sent nothing for `timeout` is closed (clients say `Hello`
-///   every few seconds; silence means a dead link that TCP has not noticed);
-/// - a link error is reported one `recv` late: `SyncSession::pump` returns on a
-///   transport error without importing what it already received in that pump,
-///   so a client that sends its last edits and closes at once would lose them.
-///   Answering `None` first lets the session import them; the next pump sees
-///   the error and the relay drops the connection.
+///   every few seconds; silence means a dead link that TCP has not noticed).
 pub(crate) struct PeerLink {
     inner: HubTransport,
     access: Access,
     timeout: Duration,
     last_heard: Instant,
     dropped_writes: u64,
-    failed: Option<SyncError>,
 }
 
 impl PeerLink {
@@ -34,7 +28,6 @@ impl PeerLink {
             timeout,
             last_heard: Instant::now(),
             dropped_writes: 0,
-            failed: None,
         }
     }
 }
@@ -50,18 +43,8 @@ impl Transport for PeerLink {
     }
 
     fn recv(&mut self) -> Result<Option<Message>, SyncError> {
-        if let Some(e) = self.failed.take() {
-            return Err(e);
-        }
         loop {
-            let received = match self.inner.recv() {
-                Ok(m) => m,
-                Err(e) => {
-                    self.failed = Some(e);
-                    return Ok(None);
-                }
-            };
-            match received {
+            match self.inner.recv()? {
                 Some(msg) => {
                     self.last_heard = Instant::now();
                     if self.access == Access::Read && is_write(&msg) {

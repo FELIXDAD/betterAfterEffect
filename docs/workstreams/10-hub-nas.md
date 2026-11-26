@@ -84,6 +84,10 @@
   - 写缓冲上限
   - 按连接设置 `SessionConfig`
 
+### 2026-11-26
+
+- 09 修好了请求 1（分支 `collab/hub-reliability`）：会话遇到传输错误时先导入本轮已收到的数据。`PeerLink` 里"出错晚一次报告"的绕行已经去掉；`idle_projects_are_unloaded_and_reloaded` 不靠它也能通过。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 09 collab/sync（2026-11-20）

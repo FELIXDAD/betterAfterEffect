@@ -19,6 +19,7 @@ type Incoming = BTreeMap<DocKey, Vec<(VersionVector, Vec<u8>)>>;
 /// Settings of a [`SyncSession`].
 #[derive(Clone, Debug)]
 pub struct SessionConfig {
+    /// Our client ID, sent in `Hello`s and presence.
     pub client: ClientId,
     /// Re-announce our versions this often so the remote can resend anything that
     /// got lost. `None`: only on connect and when a new document appears (enough
@@ -52,21 +53,31 @@ impl SessionConfig {
 }
 
 /// What one [`SyncSession::pump`] did.
+///
+/// A pump that fails on a transport error keeps what it did up to the error; the
+/// next pump's outcome includes it, unless it is taken earlier with
+/// [`SyncSession::take_interrupted`].
 #[derive(Debug, Default)]
 pub struct PumpOutcome {
     /// Events of remote imports into the stage, in order.
     pub events: Vec<StageEvent>,
+    /// Messages received.
     pub received: usize,
+    /// Messages sent.
     pub sent: usize,
     /// Documents the remote has that the local set does not (e.g. a sublayer a
     /// collaborator created). Once the document exists locally the session asks
     /// the remote for its contents.
     pub unknown_docs: Vec<DocKey>,
-    /// Messages that were skipped (corrupt payloads, unknown message types).
+    /// Problems with single documents that were skipped while the link stayed
+    /// usable: received data that could not be imported (corrupt payload, model
+    /// error) or a document that could not be exported (for a reply or for
+    /// sending). Messages of unknown types never get here: transports skip them.
     pub errors: Vec<SyncError>,
     /// Someone came online, went offline or changed their presence.
     pub presence_changed: bool,
-    /// Presence messages received, for the relay to forward.
+    /// Presence messages received, for the relay to forward. Empty in the outcome
+    /// of a failed pump (the relay drops that link and announces its client left).
     pub(crate) presence_received: Vec<Message>,
 }
 
@@ -110,6 +121,9 @@ pub struct SyncSession {
     presence_seq: u64,
     last_presence: Option<Instant>,
     peers: PresenceTable,
+    /// What a pump that failed did before the error, until it is reported (by the
+    /// next pump or [`SyncSession::take_interrupted`]).
+    interrupted: Option<PumpOutcome>,
 }
 
 impl SyncSession {
@@ -129,6 +143,7 @@ impl SyncSession {
             presence_seq: initial_seq(),
             last_presence: None,
             peers: PresenceTable::default(),
+            interrupted: None,
         }
     }
 
@@ -165,8 +180,6 @@ impl SyncSession {
         &self.stats
     }
 
-    /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
-    /// says hello again and nothing is sent until the remote answers.
     /// Publish our presence (sent on the next pump, then as a heartbeat).
     pub fn set_presence(&mut self, state: PresenceState) {
         if self.presence.as_ref() != Some(&state) {
@@ -203,6 +216,11 @@ impl SyncSession {
             .collect()
     }
 
+    /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
+    /// says hello again and nothing is sent until the remote answers.
+    ///
+    /// The outcome of a failed pump is kept: the next pump still reports it (see
+    /// [`take_interrupted`](Self::take_interrupted)).
     pub fn reset(&mut self) {
         self.remote = None;
         self.remote_client = None;
@@ -231,13 +249,29 @@ impl SyncSession {
             .collect()
     }
 
+    /// What the last pump did before it failed, if it failed and that has not been
+    /// reported yet. Otherwise the next pump includes it in its own outcome; take
+    /// it to act on the imported remote changes at once (e.g. invalidate render
+    /// caches) before reconnecting. Each outcome is reported only once.
+    pub fn take_interrupted(&mut self) -> Option<PumpOutcome> {
+        self.interrupted.take()
+    }
+
     /// Exchange messages without blocking: say hello when due, import what
     /// arrived, send what the remote lacks. Call it after local edits and whenever
     /// the transport signals incoming data (or on a timer).
     ///
+    /// The outcome also reports what an earlier, failed pump did, unless that was
+    /// taken with [`take_interrupted`](Self::take_interrupted).
+    ///
+    /// # Errors
+    ///
     /// Errors are transport failures; the link must be re-established (then call
-    /// [`reset`](Self::reset)). Problems with single messages are in
-    /// [`PumpOutcome::errors`].
+    /// [`reset`](Self::reset)). What arrived before the failure is still imported
+    /// (the remote considers it delivered), and what the pump did up to the error
+    /// (events, unknown documents, skipped messages, counts) is kept for the next
+    /// pump or [`take_interrupted`](Self::take_interrupted). Problems with single
+    /// documents do not fail the pump; they are in [`PumpOutcome::errors`].
     pub fn pump(
         &mut self,
         docs: &mut dyn DocSet,
@@ -253,31 +287,54 @@ impl SyncSession {
         transport: &mut dyn Transport,
         now: Instant,
     ) -> Result<PumpOutcome, SyncError> {
-        let mut out = PumpOutcome::default();
-        self.maybe_hello(docs, transport, now, &mut out)?;
+        let mut out = self.interrupted.take().unwrap_or_default();
         let mut incoming = Incoming::new();
+        match self.exchange(docs, transport, now, &mut incoming, &mut out) {
+            Ok(()) => Ok(out),
+            Err(e) => {
+                // The remote considers what it sent delivered and will not send
+                // it again before a reconnect: import it before reporting the
+                // error. Empty if the error came after the import.
+                self.import(docs, incoming, &mut out);
+                out.presence_received.clear();
+                self.interrupted = Some(out);
+                Err(e)
+            }
+        }
+    }
+
+    /// The steps of one pump. Leaves `incoming` empty once it was imported.
+    fn exchange(
+        &mut self,
+        docs: &mut dyn DocSet,
+        transport: &mut dyn Transport,
+        now: Instant,
+        incoming: &mut Incoming,
+        out: &mut PumpOutcome,
+    ) -> Result<(), SyncError> {
+        self.maybe_hello(docs, transport, now, out)?;
         for _ in 0..self.config.max_messages_per_pump {
             let Some(msg) = transport.recv()? else {
                 break;
             };
             out.received += 1;
             self.stats.messages_received += 1;
-            self.handle(docs, transport, msg, &mut incoming, now, &mut out)?;
+            self.handle(docs, transport, msg, incoming, now, out)?;
         }
-        self.import(docs, incoming, &mut out);
+        self.import(docs, std::mem::take(incoming), out);
         out.presence_changed |= self.peers.expire(now);
-        self.maybe_presence(transport, now, &mut out)?;
+        self.maybe_presence(transport, now, out)?;
         // A document that appeared since the last hello (created locally, or the
         // app added a sublayer the remote told us about): announce it so the
         // remote sends its contents.
-        self.maybe_hello(docs, transport, now, &mut out)?;
+        self.maybe_hello(docs, transport, now, out)?;
         let send_due = self
             .last_send
             .is_none_or(|t| now.saturating_duration_since(t) >= self.config.min_send_interval);
-        if send_due && self.flush(docs, transport, &mut out)? {
+        if send_due && self.flush(docs, transport, out)? {
             self.last_send = Some(now);
         }
-        Ok(out)
+        Ok(())
     }
 
     fn maybe_hello(

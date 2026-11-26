@@ -124,12 +124,12 @@ Authorization: Bearer <令牌>
 |---|---|
 | `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept(stream, None)` 完成握手，然后挂到工程的 Relay 上。 |
 | `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。 |
-| `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开；链路出错时晚一次再报告（见下）。 |
+| `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
 | `src/auth.rs` | 令牌只保存 BLAKE3 哈希，比较用常数时间。 |
 | `src/config.rs` | `hub.toml`、环境变量。 |
 
-**链路出错时晚一次报告。** 如果 `SyncSession::pump` 在一轮里先收到了几条修改，接着传输层报错，它会直接返回错误，这一轮收到的修改就没有导入。客户端如果发完最后的修改马上断开，Hub 会丢掉这些修改，而客户端以为已经同步了。所以 `PeerLink` 遇到错误时先返回"没有消息"，让会话把收到的导入，下一轮再报告错误。这个问题已经报给 09（见 09 任务书"请求"一节）。
+**链路出错。** 客户端发完最后的修改马上断开时，`SyncSession::pump` 先导入这一轮已经收到的修改，再报告错误（`docs/spec/sync.md` 2.4），Relay 随即把它们转发给其他连接和工程目录。所以 `PeerLink` 出错时直接报告，不需要绕行。
 
 ## 测试
 

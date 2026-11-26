@@ -31,11 +31,14 @@ struct Peer {
 /// What one [`Relay::pump`] did.
 #[derive(Debug, Default)]
 pub struct RelayOutcome {
+    /// Messages received from all peers.
     pub received: usize,
+    /// Messages sent to all peers.
     pub sent: usize,
-    /// Peers whose transport failed; they were disconnected.
+    /// Peers whose transport failed; they were disconnected. What they sent
+    /// before the error was imported and is forwarded to the others.
     pub disconnected: Vec<(PeerHandle, SyncError)>,
-    /// Problems with single messages (skipped).
+    /// Problems with single documents (skipped; see [`crate::PumpOutcome::errors`]).
     pub errors: Vec<(PeerHandle, SyncError)>,
 }
 
@@ -134,6 +137,7 @@ impl Relay {
             .collect()
     }
 
+    /// [`pump_at`](Self::pump_at) with the current time.
     pub fn pump(&mut self) -> RelayOutcome {
         self.pump_at(Instant::now())
     }
@@ -148,19 +152,23 @@ impl Relay {
             let mut failed = Vec::new();
             let mut presence: Vec<(PeerHandle, Message)> = Vec::new();
             for peer in &mut self.peers {
-                match peer
+                let o = match peer
                     .session
                     .pump_at(&mut self.docs, &mut peer.transport, now)
                 {
-                    Ok(o) => {
-                        received += o.received;
-                        out.sent += o.sent;
-                        out.errors
-                            .extend(o.errors.into_iter().map(|e| (peer.handle, e)));
-                        presence.extend(o.presence_received.into_iter().map(|m| (peer.handle, m)));
+                    Ok(o) => o,
+                    Err(e) => {
+                        failed.push((peer.handle, e));
+                        // What it sent before the error was imported: count it,
+                        // so another round forwards it to the others.
+                        peer.session.take_interrupted().unwrap_or_default()
                     }
-                    Err(e) => failed.push((peer.handle, e)),
-                }
+                };
+                received += o.received;
+                out.sent += o.sent;
+                out.errors
+                    .extend(o.errors.into_iter().map(|e| (peer.handle, e)));
+                presence.extend(o.presence_received.into_iter().map(|m| (peer.handle, m)));
                 if !peer.greeted {
                     peer.greeted = true;
                     for (_, msg) in self.presence.raw() {

@@ -55,6 +55,12 @@
 - PR A 已合并（#14）。给 02 的请求见 02 任务书"请求"一节：导入性能（增量镜像或批量导入）、记录提交时间、`TreeID` → 路径。02 在 PR E（#17，已合并）里实现了，`Stage` 的 `DocSet::import_batch` 已改用 `Stage::import_updates_batch`（同一轮同一层只重建一次镜像）。
 - PR B（共享目录，#22）、PR C（版本，#27）已合并。PR D（在线状态，#34）、PR E（Hub WebSocket 客户端，#37）、PR F（回滚）已提交。还没做：两台机器经 NAS 实测（需要第二台机器）；清理离开的客户端的日志（心跳文件已有，规则见 spec 4.7，待实现）。
 
+### 2026-11-26
+
+- 10 的请求 1 已完成（分支 `collab/hub-reliability`）：
+  - `pump` 遇到传输错误时先导入本轮已收到的数据，再返回错误；这一轮的事件和计数留到下一次 `pump`，或用 `take_interrupted()` 取。Relay 把出错连接最后发来的数据在同一次 `pump` 里转发出去。
+  - 测试：`tests/transport_errors.rs`（出错前收到的数据被导入，结果只报告一次；旧代码上第一条测试失败）。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 10 hub-nas（2026-11-20）
@@ -71,7 +77,8 @@ bae-hub 已经直接建立在 `Relay` + `HubTransport::accept` 上（PR #47）�
 
 请求（按重要程度）：
 
-1. **`SyncSession::pump_at` 在传输出错时丢掉本轮已收到的数据（会丢修改）。**
+1. **`SyncSession::pump_at` 在传输出错时丢掉本轮已收到的数据（会丢修改）。**（已完成，collab/hub-reliability）
+   - 做法：出错时先导入本轮已收到的，再返回错误；这一轮的结果留到下一次 `pump`，或用 `take_interrupted()` 取。见 spec 2.4。
    - 现象：`transport.recv()?` 直接返回错误，本轮已经放进 `incoming` 的 `Updates` 没有导入。客户端发完最后几条修改马上断开时，Hub 收到了修改和关闭帧，但修改没有导入；而客户端的会话已经认为 Hub 有了这些修改。只有这个客户端以后重连，才会补发。
    - 复现：`services/bae-hub/tests/hub.rs` 的 `idle_projects_are_unloaded_and_reloaded`，去掉 `src/link.rs` 里的绕行就会超时。
    - 建议：遇到传输错误时先 `import` 已经收到的，再返回错误。Hub 现在在 `PeerLink` 里绕开了：出错时先返回 `Ok(None)`，下一次再报错。客户端一侧同样受影响，只是影响较小（重连后会补齐）。
