@@ -376,16 +376,18 @@ impl GpuPreview {
             }
         }
         // sampleImage: the layers expressions sampled are drawn and read back
-        // without waiting. A frame evaluated before its samples arrived is not
-        // shown: the previous image stays up and the viewer evaluates again.
-        if self.samples.has_requests()
+        // without waiting (during a value drag on the live renderer's thread).
+        // A frame evaluated before its samples arrived is not shown: the
+        // previous image stays up and the viewer evaluates again.
+        if live.is_none()
+            && self.samples.has_requests()
             && let Err(e) = self.engine.read_samples(stage, &rc, &self.samples)
         {
             tracing_warn(&format!("preview: sampleImage: {e}"));
         }
         let arrived = self.engine.renderer.poll_samples(&self.samples);
         self.waiting = arrived || self.samples.is_waiting();
-        if self.waiting && self.rect.is_some() {
+        if self.waiting && live.is_none() && self.rect.is_some() {
             return Some(PreviewImage {
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
@@ -550,6 +552,34 @@ impl GpuPreview {
 
     /// Show Snapshot: publish snapshot `slot` instead of the frame (the next
     /// [`GpuPreview::frame`] shows the frame again).
+    /// The project version live frames render with (kept for the drag).
+    fn live_scene(
+        &mut self,
+        resources: &Resources,
+        stage: &Stage,
+    ) -> Arc<crate::live_preview::LiveScene> {
+        let sources = resources.get::<PreviewSources>();
+        let effects = resources.get::<PreviewEffects>();
+        let scene_key = (
+            stage.revision(),
+            sources.map(|s| s.0.generation()),
+            effects.map(|e| e.0.generation()),
+        );
+        match &self.live_scene {
+            Some(scene) if scene.key == scene_key => scene.clone(),
+            _ => {
+                let scene = Arc::new(crate::live_preview::LiveScene {
+                    key: scene_key,
+                    snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
+                    sources: sources.cloned(),
+                    effects: effects.cloned(),
+                });
+                self.live_scene = Some(scene.clone());
+                scene
+            }
+        }
+    }
+
     /// [`GpuPreview::frame`] during a value drag: submits the newest value to
     /// the background renderer (replacing a request that has not started)
     /// and shows the newest finished frame, never waiting for one.
@@ -564,30 +594,34 @@ impl GpuPreview {
         measure_layer_times: bool,
         overrides: Vec<bae_anim::AttrOverride>,
     ) -> Option<PreviewImage> {
-        use crate::live_preview::{LiveJob, LiveScene};
+        use crate::live_preview::LiveJob;
         // The frame is rendered again here once the drag ends.
         self.last = None;
+        // Samples this value needs are read on the live thread first; the
+        // frame itself goes once they are all in (the viewer evaluates again).
+        let reading = self.samples.has_requests();
+        if reading || self.waiting {
+            if reading {
+                let scene = self.live_scene(resources, stage);
+                self.live.submit(LiveJob {
+                    scene,
+                    rc,
+                    overrides,
+                    resolution,
+                    display: self.display,
+                    roi: self.roi,
+                    measure: false,
+                    samples: Some(self.samples.clone()),
+                    render: false,
+                });
+            }
+            return Some(PreviewImage {
+                handle: self.registry.display_handle(self.id)?,
+                rect: self.rect?,
+            });
+        }
         if self.live_sent != Some(sent) {
-            let sources = resources.get::<PreviewSources>();
-            let effects = resources.get::<PreviewEffects>();
-            let scene_key = (
-                stage.revision(),
-                sources.map(|s| s.0.generation()),
-                effects.map(|e| e.0.generation()),
-            );
-            let scene = match &self.live_scene {
-                Some(scene) if scene.key == scene_key => scene.clone(),
-                _ => {
-                    let scene = Arc::new(LiveScene {
-                        key: scene_key,
-                        snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
-                        sources: sources.cloned(),
-                        effects: effects.cloned(),
-                    });
-                    self.live_scene = Some(scene.clone());
-                    scene
-                }
-            };
+            let scene = self.live_scene(resources, stage);
             self.live.submit(LiveJob {
                 scene,
                 rc,
@@ -596,6 +630,8 @@ impl GpuPreview {
                 display: self.display,
                 roi: self.roi,
                 measure: measure_layer_times,
+                samples: Some(self.samples.clone()),
+                render: true,
             });
             self.live_sent = Some(sent);
         }

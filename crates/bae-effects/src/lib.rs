@@ -231,6 +231,7 @@ fn registry() -> &'static Registry {
         let mut r = Registry::default();
         categories::blur_sharpen::register(&mut r);
         categories::channel::register(&mut r);
+        categories::channel_3d::register(&mut r);
         categories::color::register(&mut r);
         categories::audio::register(&mut r);
         categories::controls::register(&mut r);
@@ -239,6 +240,7 @@ fn registry() -> &'static Registry {
         categories::immersive::register(&mut r);
         categories::keying::register(&mut r);
         categories::matte::register(&mut r);
+        categories::layer_styles::register(&mut r);
         categories::noise_grain::register(&mut r);
         categories::perspective::register(&mut r);
         categories::simulation::register(&mut r);

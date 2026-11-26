@@ -35,6 +35,13 @@ pub(crate) struct LiveJob {
     pub display: bae_render::Display,
     pub roi: Option<IRect>,
     pub measure: bool,
+    /// The viewer's `sampleImage` cache: requests waiting in it are read back
+    /// here (this thread may wait for the GPU), and other frames this job
+    /// evaluates sample through it too.
+    pub samples: Option<Arc<bae_anim::ImageSamples>>,
+    /// Render the frame; `false` only reads the samples it needs (the viewer
+    /// evaluates again with them and sends the frame then).
+    pub render: bool,
 }
 
 /// A finished live frame.
@@ -143,6 +150,21 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
         }
         let stage = scene.as_ref().unwrap().1.clone();
         engine.anim.set_overrides(job.overrides);
+        bae_render::CompEvaluator::set_image_samples(&mut engine.anim, job.samples.clone());
+        if let Some(samples) = &job.samples
+            && samples.has_requests()
+        {
+            let read = engine
+                .read_samples(&stage, &job.rc, samples)
+                .and_then(|()| engine.renderer.wait_samples(samples));
+            if let Err(e) = read {
+                tracing::warn!("live preview: sampleImage: {e}");
+            }
+            bae_gpu::warm_up::request_redraw();
+        }
+        if !job.render {
+            continue;
+        }
         engine.renderer.set_layer_times(job.measure);
         let rendered = engine.render(
             &stage,

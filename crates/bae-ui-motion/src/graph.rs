@@ -1702,7 +1702,9 @@ impl GraphEditor {
         if resp.hovered() {
             let trackpad = cfg!(target_os = "macos") && ui.input(|i| i.events.iter().any(|event| matches!(event, egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, .. } if delta.y != 0.0)));
             let dy = if trackpad {
-                crate::viewer::wheel(ui).pan.y
+                crate::viewer::wheel(ui, crate::viewer::Magnification::default())
+                    .pan
+                    .y
             } else {
                 ui.input(|i| i.smooth_scroll_delta.y)
             };
@@ -2956,15 +2958,18 @@ impl GraphEditor {
         } else {
             expr.source.clone()
         };
-        let (font, text, bg) = crate::common::expression_style(cx.resources);
-        let r = ui
-            .put(
-                strip.shrink2(vec2(4.0, 1.0)),
-                egui::TextEdit::singleline(&mut buf)
-                    .font(font)
-                    .text_color(text)
-                    .background_color(bg),
-            )
+        let field_id = ui.make_persistent_id(("graph expression", &path, &attr));
+        let shown = crate::expr_menu::assist::show(
+            ui,
+            cx.resources,
+            strip.shrink2(vec2(4.0, 1.0)),
+            field_id,
+            &mut buf,
+            None,
+        );
+        let r = shown
+            .response
+            .response
             .labeled(egui::WidgetType::TextEdit, tr("Expression"));
         if r.changed() || r.has_focus() {
             self.expr_buf = Some((path.clone(), attr.clone(), buf.clone()));
