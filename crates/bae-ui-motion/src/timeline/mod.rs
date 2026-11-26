@@ -59,7 +59,7 @@ pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, select_children,
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
