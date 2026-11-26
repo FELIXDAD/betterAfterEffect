@@ -263,3 +263,44 @@ pub fn strokes_of(stage: &bae_model::Stage, effect: &PrimPath) -> Vec<PrimPath> 
         })
         .collect()
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ExtendStrokeParams {
+    /// The stroke to continue.
+    pub stroke: PrimPath,
+    /// More points, in the stroke's (layer) space.
+    pub points: Vec<[f64; 2]>,
+}
+
+/// Shift-drag in the Layer panel (AE): the new drag continues the previous
+/// stroke, its path running on from the last point (one undo step).
+pub struct ExtendStroke;
+
+impl Command for ExtendStroke {
+    type Params = ExtendStrokeParams;
+    type Output = ();
+    const ID: &'static str = "paint.extend_stroke";
+    const TITLE: &'static str = "Paint Stroke";
+    const DESCRIPTION: &'static str = "Continue a paint stroke with more points (AE: Shift-drag \
+        with a paint tool continues the previous stroke).";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: ExtendStrokeParams) -> Result<(), CommandError> {
+        let view = tx
+            .stage()
+            .prim(&p.stroke)
+            .filter(|v| v.is_a(&PrimType::PAINT_STROKE))
+            .ok_or_else(|| fail(format!("{} is not a paint stroke", p.stroke)))?;
+        if let Some(layer) = query::owning_layer(tx.stage(), &p.stroke) {
+            ensure_unlocked(tx.stage(), std::slice::from_ref(&layer))?;
+        }
+        let Some(Value::Bezier(mut path)) = query::static_value(&view, "path") else {
+            return Err(fail("the stroke has no path"));
+        };
+        for q in p.points {
+            path.vertices.push(q);
+            path.in_tangents.push([0.0, 0.0]);
+            path.out_tangents.push([0.0, 0.0]);
+        }
+        set(tx, &p.stroke, "path", Value::Bezier(path))
+    }
+}

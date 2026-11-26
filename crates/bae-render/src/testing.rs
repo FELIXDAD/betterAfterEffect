@@ -68,6 +68,7 @@ pub fn with_encode_context<R>(
             encoder: &mut encoder,
             format: FORMAT,
             allocator: &mut alloc,
+            intermediates: None,
             effect_inputs: &[],
             effect_masks: &[],
         };

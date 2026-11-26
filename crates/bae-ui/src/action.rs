@@ -191,6 +191,7 @@ pub mod ids {
     /// Save the current layout as a new workspace; params `{"title": "..."}`
     /// (without params: open Edit Workspaces).
     pub const NEW_WORKSPACE: &str = "workspace.new";
+    pub const ASSIGN_WORKSPACE_SHORTCUT: &str = "workspace.assign_shortcut";
     /// Open the Edit Workspaces dialog (reorder, hide, delete).
     pub const EDIT_WORKSPACES: &str = "workspace.edit";
     /// Open (or focus) a panel; params `{"id": "<panel id>"}`.
@@ -228,6 +229,10 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::RESET_WORKSPACE, "Reset to Saved Layout"),
     (ids::SAVE_WORKSPACE, "Save Changes to this Workspace"),
     (ids::NEW_WORKSPACE, "Save as New Workspace..."),
+    (
+        ids::ASSIGN_WORKSPACE_SHORTCUT,
+        "Assign Shortcut to Workspace",
+    ),
     (ids::EDIT_WORKSPACES, "Edit Workspaces..."),
     (ids::OPEN_PANEL, "Open Panel"),
     (ids::CLOSE_PANEL, "Close Panel"),
