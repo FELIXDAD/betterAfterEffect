@@ -52,7 +52,7 @@ impl PathMode {
         let store = resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>();
         let prefs = store.map_or_else(
             || std::sync::Arc::new(bae_prefs::Preferences::default()),
-            |s| s.current(),
+            |s| s.display(),
         );
         match prefs.str(bae_prefs::keys::MOTION_PATH_MODE) {
             "no_motion_path" => PathMode::None,
@@ -92,6 +92,8 @@ pub(crate) struct MotionPathState {
     /// is still down: the gesture is the motion path's from the press on (the
     /// Selection tool reacts at mouse-down).
     pressed: Option<(KeyRef, Option<bool>, Pos2)>,
+    /// Last frame's keyframe squares on screen (the right-click menu).
+    on_screen: Vec<(KeyRef, Pos2)>,
     /// Last frame's geometry, for tests.
     #[cfg(test)]
     pub(crate) last: Drawn,
@@ -328,6 +330,17 @@ fn drag_edit(drag: &PathDrag, paths: &[LayerPath], view: &View, pointer: Pos2) -
     Some(e)
 }
 
+impl MotionPathState {
+    /// The keyframe whose square is at `pos` (last frame's), if any.
+    pub(crate) fn key_at(&self, pos: Pos2) -> Option<KeyRef> {
+        self.on_screen
+            .iter()
+            .filter(|(_, p)| p.distance(pos) <= PICK.max(4.0))
+            .min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
+            .map(|(k, _)| k.clone())
+    }
+}
+
 /// Convert Vertex on a keyframe square: handles retract (linear), or a linear
 /// keyframe becomes Auto Bezier.
 fn convert_edit(key: &KeyRef, paths: &[LayerPath]) -> Option<KeyEdit> {
@@ -374,10 +387,11 @@ pub(crate) fn frame(
         cursor: None,
     };
     // View Options: Motion Paths, Keyframes, Motion Path Tangents.
-    let shown = session.lock().layer_controls;
+    let shown = super::view_options::shown_controls(&session.lock());
     if mode == PathMode::None || !shown.motion_paths {
         state.drag = None;
         state.pressed = None;
+        state.on_screen.clear();
         return out;
     }
     let now = session.lock().time(&info.path);
@@ -402,6 +416,10 @@ pub(crate) fn frame(
             d.keys.clear();
         }
     }
+    state.on_screen = drawn
+        .iter()
+        .flat_map(|(_, d)| d.keys.iter().cloned())
+        .collect();
     let selected = session.lock().selected_keys.clone();
 
     // Paint: dots, handles and their lines, squares (filled when selected).

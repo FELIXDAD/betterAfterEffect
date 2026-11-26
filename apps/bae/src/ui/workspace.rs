@@ -193,6 +193,7 @@ pub struct Workspace {
     /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
     prefs: Arc<bae_prefs::PrefsStore>,
     settings: bae_ui::settings::SettingsDialog,
+    audio_page_visible: bool,
 }
 
 impl Workspace {
@@ -201,6 +202,23 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        bae_ui_motion::tools::configure_camera_keys(app, &prefs);
+        if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
+            let apply = move |p: &bae_prefs::Preferences| {
+                session.configure_output(
+                    p.str("audio.audio_default_output"),
+                    p.str("audio.audio_latency_ms")
+                        .parse()
+                        .expect("validated latency"),
+                );
+                session.lock().set_audio_mapping(
+                    p.str("audio.audio_map_left") == "channel_2",
+                    p.str("audio.audio_map_right") == "channel_1",
+                );
+            };
+            apply(&prefs.current());
+            prefs.subscribe(apply);
+        }
         let mut workbench = Workbench::new(app, state);
         // Keyboard Shortcuts presets are files in the config folder (AE: aeks/).
         workbench.set_shortcut_presets_dir(
@@ -210,6 +228,7 @@ impl Workspace {
         Self {
             workbench,
             show_about: false,
+            audio_page_visible: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
                 .with_installed_ram(bae_platform::memory::total_bytes())
@@ -228,8 +247,8 @@ impl Workspace {
         self.settings.open(page, &current);
     }
 
-    /// The Preferences window (acceptance tests, macOS run).
-    #[cfg(all(test, target_os = "macos"))]
+    /// The Preferences window for application acceptance tests.
+    #[cfg(test)]
     pub fn settings_dialog(&mut self) -> &mut bae_ui::settings::SettingsDialog {
         &mut self.settings
     }
@@ -313,10 +332,46 @@ impl Workspace {
         doc: &Document,
         resources: &Resources,
     ) -> Vec<Invocation> {
+        // egui uses these timings for hover tips on both enabled and disabled controls.
+        let show_tips = self.prefs.current().bool("appearance.show_tool_tips");
+        let interaction = &ui.ctx().global_style().interaction;
+        if show_tips == interaction.tooltip_delay.is_infinite() {
+            let defaults = egui::style::Interaction::default();
+            ui.ctx().global_style_mut(|style| {
+                style.interaction.tooltip_delay = if show_tips {
+                    defaults.tooltip_delay
+                } else {
+                    f32::INFINITY
+                };
+                style.interaction.tooltip_grace_time = if show_tips {
+                    defaults.tooltip_grace_time
+                } else {
+                    0.0
+                };
+            });
+        }
         if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
+            let audio_page = self.settings.is_open() && self.settings.page() == "audio";
+            if audio_page && !self.audio_page_visible {
+                session.refresh_output_devices();
+            }
+            self.audio_page_visible = audio_page;
             let mut s = session.lock();
             s.sync_playback(doc.stage());
             s.tick(std::time::Instant::now());
+            if audio_page {
+                let devices = s.output_devices();
+                self.settings.set_audio_output(
+                    s.audio_output_info(),
+                    s.audio_buffer_ms(),
+                    &devices.default_name,
+                    devices.outputs.clone(),
+                );
+                if s.audio_device_pending() {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(50));
+                }
+            }
         }
         let title = doc.title();
         let cx = WorkbenchContext {
@@ -328,10 +383,24 @@ impl Workspace {
         };
         self.workbench.set_external_modal(self.settings.is_open());
         let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
-        if let bae_ui::settings::Outcome::Ok(prefs) = self.settings.show(ui.ctx())
-            && let Err(error) = self.prefs.set(prefs)
-        {
-            tracing::warn!("could not save preferences: {error}");
+        if self.settings.is_open() {
+            let outcome = self.settings.show(ui.ctx());
+            if outcome == bae_ui::settings::Outcome::None {
+                if let Some(draft) = self.settings.take_display_preview() {
+                    self.prefs.preview_display(Some(draft));
+                    bae_ui::settings::apply(draft);
+                    ui.ctx().request_repaint();
+                }
+            } else {
+                self.prefs.preview_display(None);
+                if let bae_ui::settings::Outcome::Ok(prefs) = outcome
+                    && let Err(error) = self.prefs.set(prefs)
+                {
+                    tracing::warn!("could not save preferences: {error}");
+                }
+                bae_ui::settings::apply(&self.prefs.current());
+                ui.ctx().request_repaint();
+            }
         }
         if self.show_about {
             let mut open = true;
@@ -366,7 +435,18 @@ impl Workspace {
             title: &title,
             dirty: false,
         };
-        (!self.workbench.handle(&inv, &cx)).then_some(inv)
+        if self.workbench.handle(&inv, &cx) {
+            return None;
+        }
+        let mut inv = inv;
+        if matches!(inv.id.as_str(), "attr.set_at" | "attr.set_many")
+            && resources
+                .get::<bae_ui_motion::SharedSession>()
+                .is_some_and(|s| s.lock().auto_key)
+        {
+            inv.params["auto_key"] = true.into();
+        }
+        Some(inv)
     }
 
     /// The menus modules contributed (`Registry<MenuItemSpec>`), for the active
@@ -419,6 +499,22 @@ impl Workspace {
     /// The effective keymap of the active workspace (menu shortcuts).
     pub fn keymap(&self) -> &bae_ui::Keymap {
         self.workbench.keymap()
+    }
+
+    /// Remember the workspace independently of project edits and undo.
+    pub fn remember_project_workspace(&self, doc: &mut Document) {
+        doc.set_manifest_field("workspace", Some(self.active_workspace().into()));
+    }
+
+    pub fn restore_project_workspace(&mut self, doc: &Document) {
+        if !self
+            .prefs
+            .current()
+            .bool("project.preserve_current_workspace_on_open")
+            && let Some(id) = doc.manifest_field("workspace").and_then(|v| v.as_str())
+        {
+            self.workbench.switch_workspace(id);
+        }
     }
 
     /// Id of the active workspace.

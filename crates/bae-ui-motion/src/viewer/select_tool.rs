@@ -24,6 +24,7 @@ use serde_json::json;
 
 use super::free_transform::FreeTransform;
 use super::gizmo3d::{self, Gizmo, Style};
+use super::group_edit;
 use super::overlay::{self, EditablePath};
 use super::path_edit::{self, PathDrag, VertexSelection};
 use super::transform::{self, Kind, TransformDrag};
@@ -38,6 +39,9 @@ enum Press {
     Free,
     Path(path_edit::Hit),
     Handle(PrimPath, transform::Handle),
+    /// Inside the selected shape group's box, or on one of its handles.
+    Group,
+    GroupHandle(usize),
     /// A 3D layer's axis arrow or rotation ring (0 X, 1 Y, 2 Z).
     Axis(PrimPath, usize),
     Anchor(PrimPath),
@@ -61,6 +65,9 @@ pub(crate) struct SelectState {
     path_drag: Option<PathDrag>,
     /// Free Transform Points box.
     pub(crate) free: Option<FreeTransform>,
+    /// The shape group selected by a double-click, and its drag.
+    pub(crate) group: Option<PrimPath>,
+    pub(super) group_drag: Option<group_edit::GroupDrag>,
 }
 
 impl SelectState {
@@ -82,6 +89,7 @@ impl SelectState {
             || self.marquee.is_some()
             || self.path_drag.is_some()
             || self.free.as_ref().is_some_and(|f| f.dragging())
+            || self.group_drag.is_some()
     }
 }
 
@@ -93,6 +101,33 @@ pub(super) fn hit_layer(
     pos: Pos2,
 ) -> Option<PrimPath> {
     layers_at(stage, comp, view, pos).next()
+}
+
+/// The edges of the layers not in `moving`, extended across the comp: the
+/// left and right of their bounds as vertical lines, top and bottom as
+/// horizontal ones (comp space).
+fn extended_edges(comp: &EvaluatedComp, moving: &[PrimPath]) -> Vec<(bool, f64)> {
+    let mut out = Vec::new();
+    for l in comp.layers.iter().filter(|l| {
+        l.visible
+            && !moving.contains(&l.path)
+            && !matches!(
+                l.kind,
+                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+            )
+    }) {
+        let Some((a, b)) = render::layer_bounds(l) else {
+            continue;
+        };
+        let m = Affine::new(l.world_matrix);
+        let corners = [a, DVec2::new(b.x, a.y), b, DVec2::new(a.x, b.y)].map(|p| m.apply(p));
+        let (lo, hi) = corners.iter().fold(
+            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+            |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+        );
+        out.extend([(true, lo.x), (true, hi.x), (false, lo.y), (false, hi.y)]);
+    }
+    out
 }
 
 /// The unlocked layers under `pos`, topmost first.
@@ -200,6 +235,7 @@ pub(super) fn frame(
     view: &View,
     tool: Tool,
     painter: &Painter,
+    eval: &mut crate::common::EvalCache,
 ) -> Option<CursorIcon> {
     if !matches!(tool, Tool::Selection | Tool::Rotation | Tool::PanBehind) {
         state.press = None;
@@ -318,6 +354,28 @@ pub(super) fn frame(
                 Some(bae_model::LayerKind::Text) => {
                     tools.lock().edit_text_request = Some(layer.clone());
                 }
+                Some(bae_model::LayerKind::Shape)
+                    if comp
+                        .layer(layer)
+                        .and_then(|l| group_edit::group_at(l, view, pos))
+                        .is_some_and(|g| {
+                            !overlay::editable_paths(
+                                stage,
+                                comp,
+                                std::slice::from_ref(layer),
+                                Some(prefs),
+                            )
+                            .iter()
+                            .any(|p| p.prim.as_str().starts_with(g.as_str()))
+                        }) =>
+                {
+                    // A parametric shape (rectangle, ellipse, polystar): AE
+                    // selects its group and shows the group's box.
+                    session.lock().selected_layers = vec![layer.clone()];
+                    state.group = comp
+                        .layer(layer)
+                        .and_then(|l| group_edit::group_at(l, view, pos));
+                }
                 Some(bae_model::LayerKind::Shape) => {
                     let own = overlay::editable_paths(
                         stage,
@@ -337,15 +395,55 @@ pub(super) fn frame(
                         state.path_drag = None;
                     }
                 }
-                Some(_) => crate::layer_panel::open(cx, session, layer),
+                Some(_) => {
+                    crate::layer_panel::open_clicked(
+                        cx,
+                        session,
+                        layer,
+                        ui.input(|i| i.modifiers.alt),
+                        tool,
+                        eval,
+                    );
+                }
                 None => {}
             }
         }
     }
 
+    // The selected shape group: only while its layer stays selected.
+    if state
+        .group
+        .as_ref()
+        .is_some_and(|g| !selected.iter().any(|l| g.as_str().starts_with(l.as_str())))
+    {
+        state.group = None;
+    }
+    let group_quad = |state: &SelectState| -> Option<(PrimPath, [Pos2; 4])> {
+        let g = state.group.as_ref()?;
+        let l = comp
+            .layers
+            .iter()
+            .find(|l| g.as_str().starts_with(l.path.as_str()))?;
+        let f = group_edit::group(l, g)?;
+        Some((l.path.clone(), group_edit::quad(l, &f, view)?))
+    };
     // What is under the pointer.
     let style = gizmo_style(tool, options.gizmo);
     let target = |pos: Pos2, state: &SelectState| -> Press {
+        if matches!(tool, Tool::Selection | Tool::Rotation)
+            && let Some((_, q)) = group_quad(state)
+        {
+            if tool == Tool::Selection
+                && let Some(h) = group_edit::handles(&q)
+                    .iter()
+                    .position(|p| p.distance(pos) <= transform::HANDLE_PICK)
+            {
+                return Press::GroupHandle(h);
+            }
+            if render::quad_contains(&q, pos) {
+                return Press::Group;
+            }
+        }
         if tool == Tool::Selection
             && let Some(h) = path_edit::hit(&paths, &state.vertices, view, pos)
         {
@@ -414,6 +512,9 @@ pub(super) fn frame(
             _ if !shift => state.vertices.clear(),
             _ => {}
         }
+        if !matches!(t, Press::Group | Press::GroupHandle(_)) {
+            state.group = None;
+        }
         state.press = Some((t, pos));
     }
 
@@ -449,6 +550,22 @@ pub(super) fn frame(
         let at = view.to_comp(origin);
         session.lock().stop();
         match press {
+            Press::Group | Press::GroupHandle(_) => {
+                let kind = match press {
+                    Press::GroupHandle(h) => group_edit::Kind::Scale(h),
+                    _ if tool == Tool::Rotation => group_edit::Kind::Rotate,
+                    _ => group_edit::Kind::Move,
+                };
+                if let Some(g) = state.group.clone()
+                    && let Some(l) = comp
+                        .layers
+                        .iter()
+                        .find(|l| g.as_str().starts_with(l.path.as_str()))
+                    && let Some(f) = group_edit::group(l, &g)
+                {
+                    state.group_drag = group_edit::GroupDrag::new(l, &f, kind, at);
+                }
+            }
             Press::Free => {}
             Press::Path(h) => {
                 let pi = match h {
@@ -538,7 +655,7 @@ pub(super) fn frame(
                         compensate: true,
                     },
                 );
-                state.drag = Some(drag.with_snapping(comp, &layer, anchor));
+                state.drag = Some(drag.with_snapping(comp, &layer, anchor, options.snap_features));
             }
             Press::Layer(layer) => {
                 let layers = {
@@ -594,15 +711,20 @@ pub(super) fn frame(
                         })
                     });
                 let drag = TransformDrag::new(stage, comp, &layers, kind).with_plane(plane);
-                let lines = super::guides::snap_lines(
+                let mut lines = super::guides::snap_lines(
                     stage,
                     info,
                     &session.lock().view_options,
                     &bae_ui::settings::GridGuides::current(cx.resources),
                 );
+                // Snap to edges extended beyond layer bounds: the other
+                // layers' edges as lines across the comp.
+                if options.snap_edges {
+                    lines.extend(extended_edges(comp, &layers));
+                }
                 let reach = f64::from(transform::SNAP_DISTANCE / view.scale.max(1e-6));
                 let drag = drag
-                    .with_snapping(comp, &layer, at)
+                    .with_snapping(comp, &layer, at, options.snap_features)
                     .with_lines(lines, reach);
                 state.drag = Some(primary_first(drag, &layer));
             }
@@ -631,6 +753,11 @@ pub(super) fn frame(
             session.lock().info.moved =
                 Some((e.path.clone(), [p.x, p.y], [p.x - p0.x, p.y - p0.y]));
         }
+    }
+    if let Some(d) = state.group_drag.as_mut()
+        && let Some(pos) = pointer
+    {
+        d.update(view.to_comp(pos), shift);
     }
     if let Some(d) = state.path_drag.as_mut()
         && let Some(pos) = pointer
@@ -684,6 +811,11 @@ pub(super) fn frame(
         {
             d.commit(cx, session, info);
         }
+        if let Some(d) = state.group_drag.take()
+            && d.changed()
+        {
+            cx.invoke_with("attr.set_many", json!({ "edits": d.commit(stage, time) }));
+        }
         if let Some(f) = state.free.as_mut() {
             f.release(cx, session, info);
         }
@@ -713,6 +845,9 @@ pub(super) fn frame(
         ));
     }
     path_edit::paint(painter, view, &shown, &state.vertices);
+    if let Some((layer, q)) = group_quad(state) {
+        group_edit::paint(painter, &q, view, label_color(stage, &layer));
+    }
     if let Some(d) = &state.drag {
         d.paint_guides(painter, view, info);
     }
