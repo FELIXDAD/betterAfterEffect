@@ -41,6 +41,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    tracks: crate::tracker::overlay::Overlay,
     eval: EvalCache,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
@@ -165,9 +166,15 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
-        let Ok(comp) = crate::viewer::live_evaluator(&mut self.eval, cx, &session)
-            .evaluate_comp(cx.stage, &info.path, time)
-        else {
+        let eval = crate::viewer::live_evaluator(&mut self.eval, cx, &session);
+        if let Some(g) = &self.gpu
+            && !eval
+                .image_samples()
+                .is_some_and(|s| std::sync::Arc::ptr_eq(s, g.samples()))
+        {
+            eval.set_image_samples(Some(g.samples().clone()));
+        }
+        let Ok(comp) = eval.evaluate_comp(cx.stage, &info.path, time) else {
             return;
         };
         let Some(evaluated) = comp.layer(&layer) else {
@@ -256,7 +263,15 @@ impl LayerPanel {
         if let Some(pointer) = resp.hover_pos() {
             let w = crate::viewer::wheel(ui);
             let around = if w.alt { area.center() } else { pointer };
-            if w.pinch != 1.0 {
+            if cfg!(target_os = "macos") && crate::viewer::smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = egui::Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, size, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), pointer, area, size, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, pointer, area, size, ppp);
             } else if w.notches != 0.0 {
                 let step = if w.notches > 0.0 {
@@ -296,7 +311,7 @@ impl LayerPanel {
     fn picture(
         &mut self,
         ui: &Ui,
-        cx: &PanelContext<'_>,
+        cx: &mut PanelContext<'_>,
         area: Rect,
         one: &EvaluatedComp,
         min: DVec2,
@@ -314,6 +329,13 @@ impl LayerPanel {
             .gpu
             .as_mut()
             .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None, false));
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(GpuPreview::waiting_for_samples)
+        {
+            ui.ctx().request_repaint();
+        }
         if let Some(img) = image {
             let r = img.rect;
             let at = |x: i32, y: i32| view.to_screen(DVec2::new(f64::from(x), f64::from(y)));
@@ -343,6 +365,47 @@ impl LayerPanel {
             0.0,
             Stroke::new(1.0, Color32::from_gray(90)),
             egui::StrokeKind::Outside,
+        );
+        self.tracks.draw(
+            ui,
+            cx,
+            area,
+            &view,
+            min,
+            &layer.path,
+            |painter, lens, source, scale| {
+                let to_screen = |v: DVec2| {
+                    lens.center()
+                        + egui::vec2((v.x - source.x) as f32, (v.y - source.y) as f32) * scale
+                };
+                painter.rect_filled(lens, 0., Color32::from_gray(35));
+                if let Some(img) = image {
+                    let r = img.rect;
+                    let rect = Rect::from_min_max(
+                        to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
+                        to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
+                    );
+                    painter.image(
+                        egui::TextureId::User(img.handle),
+                        rect,
+                        Rect::from_min_max(pos2(0., 0.), pos2(1., 1.)),
+                        Color32::WHITE,
+                    );
+                } else {
+                    let mut shapes = Vec::new();
+                    render::paint_comp(
+                        one,
+                        painter,
+                        &to_screen,
+                        Affine::new(DMat4::IDENTITY),
+                        1.0,
+                        f64::from(scale),
+                        &|s| egui::FontId::proportional(s),
+                        &mut shapes,
+                    );
+                    painter.extend(shapes);
+                }
+            },
         );
         if self.show == Show::Masks {
             let to_panel = DMat4::from_translation((-min).extend(0.0));

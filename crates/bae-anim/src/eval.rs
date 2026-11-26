@@ -498,6 +498,7 @@ pub(crate) struct CompiledLayer {
     pub(crate) transform: CompiledTransform,
     pub(crate) masks: Vec<CompiledMask>,
     pub(crate) effects: Vec<CompiledEffect>,
+    layer_styles: Option<CompiledEffect>,
     /// Layer markers, by layer time (expressions' `thisLayer.marker`).
     pub(crate) markers: Vec<CompiledMarker>,
     pub(crate) contents: Vec<CompiledPrim>,
@@ -851,48 +852,51 @@ fn compile_layer(
             })
         })
         .collect();
+    let compile_effect = |ep: PrimPath| {
+        let ev = stage.prim(&ep)?;
+        if !ev.is_a(&PrimType::EFFECT) {
+            return None;
+        }
+        let et = &PrimType::EFFECT;
+        let mut names: Vec<String> = ev.attr_names().into_iter().map(str::to_owned).collect();
+        for n in override_names(&ep) {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        let params = names
+            .iter()
+            .filter_map(|name| {
+                let id = name.strip_prefix(fx::PARAM_PREFIX)?;
+                let spec = spec_of(&ev, name)?;
+                Some((id.to_owned(), Prop::from_spec(&spec, Some(et), &ep, name)?))
+            })
+            .collect();
+        Some(CompiledEffect {
+            name: ev
+                .value(fx::NAME)
+                .and_then(Value::as_str)
+                .unwrap_or(ev.name())
+                .to_owned(),
+            match_name: setting_str(&ev, et, fx::MATCH_NAME).unwrap_or_default(),
+            enabled: setting(&ev, et, fx::ENABLED)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            params,
+            children: stage
+                .children(&ep)
+                .into_iter()
+                .filter_map(|cp| compile_generic(stage, &cp, 0))
+                .collect(),
+            path: ep,
+        })
+    };
     let effects = child_prims(l::EFFECTS)
         .into_iter()
-        .filter_map(|ep| {
-            let ev = stage.prim(&ep)?;
-            if !ev.is_a(&PrimType::EFFECT) {
-                return None;
-            }
-            let et = &PrimType::EFFECT;
-            let mut names: Vec<String> = ev.attr_names().into_iter().map(str::to_owned).collect();
-            for n in override_names(&ep) {
-                if !names.contains(&n) {
-                    names.push(n);
-                }
-            }
-            let params = names
-                .iter()
-                .filter_map(|name| {
-                    let id = name.strip_prefix(fx::PARAM_PREFIX)?;
-                    let spec = spec_of(&ev, name)?;
-                    Some((id.to_owned(), Prop::from_spec(&spec, Some(et), &ep, name)?))
-                })
-                .collect();
-            Some(CompiledEffect {
-                name: ev
-                    .value(fx::NAME)
-                    .and_then(Value::as_str)
-                    .unwrap_or(ev.name())
-                    .to_owned(),
-                match_name: setting_str(&ev, et, fx::MATCH_NAME).unwrap_or_default(),
-                enabled: setting(&ev, et, fx::ENABLED)
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
-                params,
-                children: stage
-                    .children(&ep)
-                    .into_iter()
-                    .filter_map(|cp| compile_generic(stage, &cp, 0))
-                    .collect(),
-                path: ep,
-            })
-        })
+        .filter_map(&compile_effect)
         .collect();
+    let layer_styles =
+        bae_model::layer_styles::effective_styles(stage, v.path()).and_then(compile_effect);
     let contents: Vec<CompiledPrim> = child_prims(l::CONTENTS)
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
@@ -947,6 +951,7 @@ fn compile_layer(
         transform,
         masks,
         effects,
+        layer_styles,
         markers: compile_markers(stage, v.path()),
         fixed_contents: fixed_list(&contents),
         contents,
@@ -1180,8 +1185,12 @@ impl CompiledComp {
                     effects: layer
                         .effects
                         .iter()
-                        .map(|e| sample_effect(e, &cx))
+                        .map(|e| sample_effect(e, &cx, &layer.timing))
                         .collect(),
+                    layer_styles: layer
+                        .layer_styles
+                        .as_ref()
+                        .map(|e| sample_effect(e, &cx, &layer.timing)),
                     contents: sample_prims(&layer.contents, layer.fixed_contents.as_ref(), &cx),
                     text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
                         Value::TextDocument(doc) => Some(doc),
@@ -1548,16 +1557,30 @@ fn sample_mask(m: &CompiledMask, cx: &Cx<'_, '_>) -> EvaluatedMask {
     }
 }
 
-fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
+fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>, timing: &LayerTiming) -> EvaluatedEffect {
+    let mut params: BTreeMap<_, _> = e
+        .params
+        .iter()
+        .map(|(id, p)| (id.clone(), p.sample(cx)))
+        .collect();
+    if e.enabled
+        && e.match_name == "CC Ripple Pulse"
+        && let Some((_, level)) = e
+            .params
+            .iter()
+            .find(|(id, p)| id == "0002" && !matches!(p, Prop::Static(_)))
+    {
+        let span = params.get("0003").and_then(Value::as_f64).unwrap_or(1.0);
+        let profile = crate::effect_history::ripple_profile(cx.lt, span, |t| {
+            level.f64(&cx.at_layer_time(t, timing))
+        });
+        params.insert(crate::effect_history::HISTORY_PARAM.to_string(), profile);
+    }
     EvaluatedEffect {
         path: e.path.clone(),
         match_name: e.match_name.clone(),
         enabled: e.enabled,
-        params: e
-            .params
-            .iter()
-            .map(|(id, p)| (id.clone(), p.sample(cx)))
-            .collect(),
+        params,
         children: e.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }
@@ -1602,6 +1625,8 @@ pub struct Evaluator {
     /// Every comp of the stage (expressions can reach any comp); rebuilt after
     /// structural changes.
     comp_list: Option<Vec<PrimPath>>,
+    /// Layer pixels for `sampleImage`, filled by the renderer that shares it.
+    samples: Option<Arc<crate::ImageSamples>>,
     /// Values shown before they are committed ([`Evaluator::set_overrides`]).
     overrides: Arc<[AttrOverride]>,
 }
@@ -1609,6 +1634,17 @@ pub struct Evaluator {
 impl Evaluator {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Serves `sampleImage` from `samples` (without one it reads transparent
+    /// black). The evaluator clears it whenever the project changes.
+    pub fn set_image_samples(&mut self, samples: Option<Arc<crate::ImageSamples>>) {
+        self.samples = samples;
+    }
+
+    /// The cache set by [`Evaluator::set_image_samples`].
+    pub fn image_samples(&self) -> Option<&Arc<crate::ImageSamples>> {
+        self.samples.as_ref()
     }
 
     /// Evaluates as if these attributes had these specs, without changing the
@@ -1719,7 +1755,10 @@ impl Evaluator {
             .project
             .get_or_insert_with(|| Arc::new(project_info(stage)))
             .clone();
-        (expr::Scope::new(comps).with_project(project), id)
+        let scope = expr::Scope::new(comps)
+            .with_project(project)
+            .with_samples(self.samples.clone());
+        (scope, id)
     }
 
     fn evaluate_with_expressions(
@@ -1902,6 +1941,9 @@ impl Evaluator {
             self.comp_list = None;
         }
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 
     /// Drop every compiled comp.
@@ -1909,6 +1951,9 @@ impl Evaluator {
         self.comps.clear();
         self.comp_list = None;
         self.project = None;
+        if let Some(s) = &self.samples {
+            s.clear();
+        }
     }
 }
 
@@ -2042,7 +2087,12 @@ impl CompiledLayer {
                 _ => None,
             };
         }
-        if let Some(e) = self.effects.iter().find(|e| e.path.as_str() == prim) {
+        if let Some(e) = self
+            .effects
+            .iter()
+            .chain(&self.layer_styles)
+            .find(|e| e.path.as_str() == prim)
+        {
             let id = attr.strip_prefix(fx::PARAM_PREFIX)?;
             return e.params.iter().find(|(i, _)| i == id).map(|(_, p)| p);
         }
@@ -2075,7 +2125,7 @@ impl CompiledLayer {
         for m in &self.masks {
             all.extend([&m.shape, &m.feather, &m.opacity, &m.expansion]);
         }
-        for e in &self.effects {
+        for e in self.effects.iter().chain(&self.layer_styles) {
             all.extend(e.params.iter().map(|(_, p)| p));
         }
         fn walk<'a>(p: &'a CompiledPrim, out: &mut Vec<&'a Prop>) {
@@ -2142,6 +2192,7 @@ impl CompiledLayer {
             || self
                 .effects
                 .iter()
+                .chain(&self.layer_styles)
                 .any(|e| e.params.iter().any(|(_, p)| p.has_expression()))
             || self.contents.iter().any(CompiledPrim::has_expressions)
             || self

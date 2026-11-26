@@ -11,7 +11,7 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
-mod audio;
+pub(crate) mod audio;
 
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
@@ -375,6 +375,19 @@ const PREVIEW_MIN_H: f32 = 56.0;
 const PREVIEW_OPTIONS_H: f32 = 240.0;
 
 impl Panel for PreviewPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let session = common::session(cx.resources);
+        if ui
+            .checkbox(
+                &mut session.lock().preview.favor_active_camera,
+                tr("Previews Favor Active Camera"),
+            )
+            .clicked()
+        {
+            ui.close();
+        }
+    }
+
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         // The transport row and the timecode line below it, never cut off.
         TabInfo::new(tr("Preview")).min_size(egui::vec2(PREVIEW_MIN_W, PREVIEW_MIN_H))
@@ -389,10 +402,9 @@ impl Panel for PreviewPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let info = common::active_comp(cx.stage, &session);
-        if let Some(info) = &info
-            && session.lock().update_preview(cx, info)
-        {
-            ui.ctx().request_repaint();
+        // The shell ticks the clock; this keeps the audio mix current.
+        if let Some(info) = &info {
+            session.lock().update_preview(cx, info);
         }
         let playing = session.lock().is_playing();
         ui.add_space(4.0);
@@ -565,6 +577,11 @@ fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::Co
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Previews Favor Active Camera", "预览支持活动摄像机"),
+    ("Audio Options", "音频选项"),
+    ("Decibels (dB)", "分贝 (dB)"),
+    ("Slider Minimum", "滑块最小值"),
+    ("Percentage", "百分比"),
     // Preview panel (AE 26's Time_Palette strings).
     ("Spacebar", "空格键"),
     ("Include:", "包含:"),
@@ -664,7 +681,9 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "audio",
-        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+        bae_ui::PanelKind::new("Audio", |spawn| {
+            Box::new(audio::AudioPanel::from_state(spawn.state))
+        }),
     );
     crate::register_panel(
         app,

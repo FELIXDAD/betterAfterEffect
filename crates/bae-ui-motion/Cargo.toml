@@ -24,6 +24,7 @@ bae-ui.workspace = true
 # Decompresses the embedded menu tables (catalog.bin); already in the app (zip, png).
 flate2.workspace = true
 bae-gpu.workspace = true
+bae-color.workspace = true
 bae-platform.workspace = true
 # The app enables `media`; the viewer itself does not need it.
 bae-render = { workspace = true, default-features = false }
