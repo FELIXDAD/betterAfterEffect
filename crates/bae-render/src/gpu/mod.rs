@@ -113,6 +113,8 @@ pub(crate) mod flags {
     pub const MOTION: u32 = 512;
     /// Lit by the comp's lights: lighting record at vec4 `extra.w`.
     pub const LIT: u32 = 1024;
+    /// Motion blur: a lighting record per sample.
+    pub const LIT_SAMPLES: u32 = 2048;
 }
 
 /// Which fragment entry point a composite pipeline uses: plain draws never pay

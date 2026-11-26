@@ -144,13 +144,7 @@ impl AnimEvaluator {
             shutter: [ec.motion_blur.shutter_angle, ec.motion_blur.shutter_phase],
             layers: Vec::with_capacity(ec.layers.len()),
             camera: active_camera(ec),
-            lights: ec
-                .layers
-                .iter()
-                .enumerate()
-                .filter(|(_, l)| l.switches.enabled && l.active)
-                .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
-                .collect(),
+            lights: comp_lights(ec).to_vec(),
             motion_blur: None,
         };
         let mut samples = match self.motion_samples(stage, ec)? {
@@ -214,6 +208,7 @@ impl AnimEvaluator {
         };
         let mut layers: Vec<Vec<LayerSample>> = vec![Vec::new(); ec.layers.len()];
         let mut cameras = Vec::with_capacity(times.len());
+        let mut lights = Vec::with_capacity(times.len());
         for &t in &times {
             // Transform-only sampling would be cheaper; 03 evaluates whole comps.
             let at = self
@@ -228,6 +223,7 @@ impl AnimEvaluator {
                 return Ok(None);
             }
             cameras.push(active_camera(&at));
+            lights.push(comp_lights(&at));
             for (i, l) in ec.layers.iter().enumerate() {
                 if blurred(l) {
                     let s = &at.layers[i];
@@ -242,6 +238,7 @@ impl AnimEvaluator {
             CompMotionBlur {
                 times,
                 cameras,
+                lights,
                 adaptive_limit: ec.motion_blur.adaptive_limit,
             },
             layers,
@@ -578,6 +575,16 @@ fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
         iris: c.iris,
         projection: crate::camera::Projection::Perspective,
     })
+}
+
+/// The lights of `ec` that light its layers.
+fn comp_lights(ec: &EvaluatedComp) -> Arc<[Light]> {
+    ec.layers
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.switches.enabled && l.active)
+        .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
+        .collect()
 }
 
 fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {

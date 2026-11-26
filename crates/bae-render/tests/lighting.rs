@@ -244,6 +244,7 @@ fn lit_layers_can_be_motion_blurred() {
         })
         .collect();
     comp.motion_blur = Some(Arc::new(CompMotionBlur {
+        lights: Vec::new(),
         times: (0..8).map(Time::from_flicks).collect(),
         cameras: vec![None; 8],
         adaptive_limit: 128,
@@ -255,6 +256,28 @@ fn lit_layers_can_be_motion_blurred() {
     assert!(edge > 0 && edge < 255, "{edge}");
     assert_ne!(img.px(100, 100), [204, 153, 102, 255]);
     assert_eq!(img.px(100, 100)[3], 255);
+    // A light that moves during the shutter lights every sample where it is
+    // then, not where it is at the frame time.
+    let frame_lit = img.px(100, 100);
+    let mut moving = comp.clone();
+    let mb = moving.motion_blur.as_ref().unwrap();
+    let sampled: Vec<Arc<[_]>> = (0..8)
+        .map(|k| {
+            let mut ls = comp.lights.clone();
+            for l in &mut ls {
+                let shift = DVec3::new(-40.0 * f64::from(k), 0.0, 0.0);
+                l.world = DMat4::from_translation(shift) * l.world;
+                l.point_of_interest += shift;
+            }
+            ls.into()
+        })
+        .collect();
+    moving.motion_blur = Some(Arc::new(CompMotionBlur {
+        lights: sampled,
+        ..(**mb).clone()
+    }));
+    let sample_lit = render(&mut r, &moving).px(100, 100);
+    assert_ne!(sample_lit, frame_lit, "lights sampled per motion sample");
 }
 
 #[test]

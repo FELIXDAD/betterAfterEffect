@@ -153,6 +153,12 @@ impl RenderComp {
                 for c in &mb.cameras {
                     hash_camera(c, h);
                 }
+                for lights in &mb.lights {
+                    lights.len().hash(h);
+                    for l in lights.iter() {
+                        hash_light(l, h);
+                    }
+                }
             }
         }
         if any_blur && let Some(mb) = &self.motion_blur {

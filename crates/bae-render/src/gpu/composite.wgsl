@@ -115,6 +115,8 @@ const FLAG_MASK: u32 = 128u;
 const FLAG_PROJECTIVE: u32 = 256u;
 const FLAG_MOTION: u32 = 512u;
 const FLAG_LIT: u32 = 1024u;
+// Motion blur: a lighting record per sample, back to back from extra.w.
+const FLAG_LIT_SAMPLES: u32 = 2048u;
 
 @group(0) @binding(0) var<storage, read> draws: array<Draw>;
 @group(0) @binding(1) var<storage, read> samples: array<Sample>;
@@ -432,7 +434,7 @@ fn shade(o: u32, u: vec2<f32>, c: vec3<f32>) -> Shaded {
 // `d` is draw `di`, loaded once by the caller (motion blur calls this per
 // sample); `k_affine` are the edge scales of an affine placement; `lit` turns
 // on lighting (a constant at each call site, so plain draws compile without).
-fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, projective: bool, k_affine: vec2<f32>, lit: bool) -> Px {
+fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, projective: bool, k_affine: vec2<f32>, lit: bool, rec: u32) -> Px {
     let flags = d.mode.y;
     let hp = vec3<f32>(p, 1.0);
     var out: Px;
@@ -507,8 +509,8 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
         src = vec4<f32>(d.color.rgb * d.color.a, d.color.a);
     }
     if lit && src.a > 0.0 {
-        let shaded = shade(d.extra.w, u, src.rgb / src.a);
-        if lighting[d.extra.w + 6u].w > 0.5 {
+        let shaded = shade(rec, u, src.rgb / src.a);
+        if lighting[rec + 6u].w > 0.5 {
             // Accepts Shadows: Only: just the darkness of the shadows on it.
             src = vec4<f32>(0.0, 0.0, 0.0, src.a * shaded.shadow);
             light = vec3<f32>(0.0);
@@ -545,7 +547,7 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d = draws[in.draw];
-    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw, false);
+    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw, false, 0u);
     return finish(d, in.pos.xy, px.src, px.light, px.k);
 }
 
@@ -553,7 +555,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let d = draws[in.draw];
-    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw, true);
+    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw, true, d.extra.w);
     return finish(d, in.pos.xy, px.src, px.light, px.k);
 }
 
@@ -569,9 +571,15 @@ fn fs_motion(in: VsOut) -> @location(0) vec4<f32> {
     let n = max(d.extra.z, 1u);
     let projective = (d.mode.y & FLAG_PROJECTIVE) != 0u;
     let lit = (d.mode.y & FLAG_LIT) != 0u;
+    // Lit per sample: records of 7 + 5 per light + 8 per caster vec4s.
+    var stride = 0u;
+    if lit && (d.mode.y & FLAG_LIT_SAMPLES) != 0u {
+        let o = d.extra.w;
+        stride = 7u + 5u * u32(lighting[o + 3u].w) + 8u * u32(lighting[o + 6u].y);
+    }
     for (var i = 0u; i < n; i++) {
         let s = samples[d.extra.y + i];
-        let px = layer_px(d, in.draw, p, s.inv_x, s.inv_y, s.inv_w, projective, s.inv_w.xy, lit);
+        let px = layer_px(d, in.draw, p, s.inv_x, s.inv_y, s.inv_w, projective, s.inv_w.xy, lit, d.extra.w + i * stride);
         acc += px.src * px.k;
         acc_light += px.light * px.k;
     }

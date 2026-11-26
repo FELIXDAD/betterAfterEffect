@@ -1379,6 +1379,28 @@ impl Builder<'_, '_> {
                     .collect();
                 (!lights.is_empty()).then(|| {
                     let camera = comp.view_camera();
+                    // Motion blur: the layer, its lights and the eye at every
+                    // sample.
+                    let samples: Arc<[_]> = match &comp.motion_blur {
+                        Some(mb) if mb.lights.len() == layer.motion_samples.len() => layer
+                            .motion_samples
+                            .iter()
+                            .zip(&mb.lights)
+                            .enumerate()
+                            .filter_map(|(k, (s, sample_lights))| {
+                                Some(crate::light::LightingSample {
+                                    matrix: s.matrix_3d?,
+                                    lights: sample_lights
+                                        .iter()
+                                        .filter(|l| l.scope_below.is_none_or(|light| index > light))
+                                        .copied()
+                                        .collect(),
+                                    eye: comp.sample_camera(k).eye(),
+                                })
+                            })
+                            .collect(),
+                        _ => Arc::new([]),
+                    };
                     Arc::new(Lighting {
                         matrix,
                         material: layer.material,
@@ -1386,6 +1408,7 @@ impl Builder<'_, '_> {
                         eye: camera.eye(),
                         world_per_pixel: camera.world_per_pixel(),
                         casters: Arc::new([]),
+                        samples,
                     })
                 })
             });

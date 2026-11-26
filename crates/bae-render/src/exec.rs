@@ -1094,7 +1094,26 @@ fn plan_op(
             let img = outputs[id.index()].as_ref()?;
             Some(shadow::uv_map(img, *slots.get(&id)?, image.texture_size()))
         };
-        data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
+        let per_sample = op.motion.as_ref().is_some_and(|m| {
+            m.len() == l.samples.len() && l.samples.iter().all(|s| s.lights.len() == l.lights.len())
+        });
+        if per_sample {
+            // Motion blur: the layer lit at every sample, records back to back.
+            data.extra[3] = lighting.len() as u32;
+            for s in l.samples.iter() {
+                let at = crate::light::Lighting {
+                    matrix: s.matrix,
+                    lights: s.lights.clone(),
+                    eye: s.eye,
+                    samples: std::sync::Arc::new([]),
+                    ..(**l).clone()
+                };
+                at.pack(&from_texel, node.pixel_scale, &map, lighting);
+            }
+            data.mode[1] |= flags::LIT_SAMPLES;
+        } else {
+            data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
+        }
         data.mode[1] |= flags::LIT;
     }
     if !op.clips.is_empty() {
