@@ -4,6 +4,7 @@ use bae_model::{PrimPath, Time, Value};
 use bae_motion::KeyRef;
 
 pub(crate) mod mask_interpolation;
+pub(crate) mod motion_sketch;
 pub(crate) mod smoother;
 pub(crate) mod wiggler;
 
@@ -50,6 +51,19 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Please select at least 2 consecutive mask path keyframes to interpolate between.",
         "请选择至少 2 个连续蒙版路径关键帧以在其间插值。",
     ),
+    ("Motion Sketch", "动态草图"),
+    ("Capture speed at:", "捕捉速度为:"),
+    ("Smoothing:", "平滑:"),
+    ("Show:", "显示:"),
+    ("Wireframe", "线框"),
+    ("Background", "背景"),
+    ("Click to start capture", "单击开始捕捉"),
+    ("Start Capture", "开始捕捉"),
+    (
+        "Can't motion sketch a 3D layer.",
+        "无法对 3D 图层绘制动态草图。",
+    ),
+    ("Select a layer to sketch.", "请选择要绘制动态草图的图层。"),
 ];
 
 /// Registers the assistants' Chinese strings and panels (`MotionUiModule::build`).
@@ -71,6 +85,13 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
         app,
         "smoother",
         bae_ui::PanelKind::new("Smoother", |_| Box::new(smoother::SmootherPanel::default())),
+    );
+    crate::register_panel(
+        app,
+        "motion_sketch",
+        bae_ui::PanelKind::new("Motion Sketch", |_| {
+            Box::new(motion_sketch::MotionSketchPanel::default())
+        }),
     );
 }
 

@@ -40,7 +40,7 @@ use crate::request::RenderPurpose;
 #[derive(Debug)]
 pub struct AnimEvaluator {
     inner: Evaluator,
-    scalar_tracks: rustc_hash::FxHashMap<(PrimPath, String), Arc<crate::effect::ScalarTrack>>,
+    scalar_tracks: crate::parameter_track::TrackCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
@@ -160,6 +160,19 @@ impl AnimEvaluator {
             }
             rc.layers.push(out);
         }
+        // Layers that cannot show in this frame (outside their in/out points,
+        // hidden, not a parent or an active layer's matte): the frame does not
+        // depend on their content (cache invalidation, `RenderLayer::inert`).
+        let parents: Vec<usize> = ec.layers.iter().filter_map(|l| l.parent).collect();
+        let mattes: Vec<usize> = rc
+            .layers
+            .iter()
+            .filter(|l| l.active)
+            .filter_map(|l| l.track_matte.map(|m| m.layer))
+            .collect();
+        for (i, l) in rc.layers.iter_mut().enumerate() {
+            l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
+        }
         if depth == 0 {
             self.customs.retain(|_, (_, used)| std::mem::take(used));
         }
@@ -238,6 +251,8 @@ impl AnimEvaluator {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         out.time = l.layer_time;
+        out.start_time = l.timing.start_time;
+        out.time_scale = l.timing.stretch_percent() / 100.;
         out.in_point = l.timing.in_point.min(l.timing.out_point);
         out.active = l.active && guide_ok;
         out.visible = l.visible;
@@ -280,15 +295,23 @@ impl AnimEvaluator {
                 .effects
                 .iter()
                 .filter(|_| l.switches.effects)
-                .map(|e| RenderEffect {
-                    path: e.path.clone(),
-                    effect: e.match_name.clone(),
-                    enabled: e.enabled,
-                    params: e
+                .map(|e| {
+                    let mut params: Vec<(u32, bae_model::Value)> = e
                         .params
                         .iter()
                         .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
-                        .collect(),
+                        .collect();
+                    // The Paint effect's strokes visible at this frame.
+                    if e.match_name == crate::paint::PAINT_EFFECT {
+                        let strokes = crate::paint::strokes(&e.children, l.layer_time);
+                        params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
+                    }
+                    RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: e.enabled,
+                        params,
+                    }
                 })
                 .collect();
         }
@@ -429,10 +452,7 @@ impl CompEvaluator for AnimEvaluator {
         frame: &crate::graph::EffectFrame,
         attr: &bae_model::AttrSpec,
     ) -> Option<Arc<crate::effect::ScalarTrack>> {
-        let slot = self
-            .scalar_tracks
-            .entry((path.clone(), name.to_owned()))
-            .or_default();
+        let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
         crate::parameter_track::prepare(slot, attr, frame, |t| {
             self.inner
                 .evaluate_attribute(stage, path, name, t)
@@ -442,7 +462,6 @@ impl CompEvaluator for AnimEvaluator {
     }
 
     fn invalidate(&mut self, event: &StageEvent) {
-        self.scalar_tracks.clear();
         self.inner.invalidate(event);
     }
 

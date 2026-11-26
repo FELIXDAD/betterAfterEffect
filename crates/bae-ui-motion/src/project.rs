@@ -81,6 +81,8 @@ impl ItemDrag {
 pub struct ProjectPanel {
     collapsed: HashSet<PrimPath>,
     search: String,
+    /// Edit ▸ Find: focus the search field next frame.
+    focus_search: bool,
     rename: Option<(PrimPath, String)>,
 }
 
@@ -264,11 +266,14 @@ impl Panel for ProjectPanel {
 
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            widgets::search_field(
+            let field = widgets::search_field(
                 ui,
                 &mut self.search,
                 (ui.available_width() - 12.0).max(60.0),
             );
+            if std::mem::take(&mut self.focus_search) {
+                field.request_focus();
+            }
         });
         ui.add_space(4.0);
 
@@ -591,6 +596,11 @@ impl Panel for ProjectPanel {
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
+        // Edit ▸ Find (Ctrl+F): the search field.
+        if action.id == "motion.file.find" {
+            self.focus_search = true;
+            return true;
+        }
         if action.id == crate::actions::ids::DELETE {
             let items = session.lock().selected_items.clone();
             if !items.is_empty() {
@@ -639,7 +649,6 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
     // Footer: the project color depth button opens Project Settings.
-    ("Project Settings", "项目设置"),
     // Project panel
     ("Name", "名称"),
     ("Type", "类型"),

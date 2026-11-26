@@ -176,6 +176,7 @@ impl TargetEffect for Grain {
                 },
             ],
             [0, 0],
+            |_, _| {},
         )
     }
 }

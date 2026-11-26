@@ -20,6 +20,7 @@ mod menus;
 mod modes;
 pub(crate) mod navigation;
 mod rows;
+mod search;
 mod switches;
 #[cfg(test)]
 mod tests;
@@ -62,6 +63,9 @@ pub(crate) use menus::{
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
+
+// Registration contract of the footage optical-flow backend.
+const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
 
 /// Row height and switch cell width: AE 26's (17 and about 15 points).
 const ROW_H: f32 = 17.0;
@@ -192,6 +196,10 @@ pub struct TimelinePanel {
     drag: Option<Drag>,
     switch_drag: Option<switches::SwitchDrag>,
     rename: Option<(PrimPath, String)>,
+    /// The search field's text: filters the outline (search.rs).
+    pub(crate) search: String,
+    /// Edit ▸ Find: focus the search field next frame.
+    focus_search: bool,
     comment_edit: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
@@ -439,8 +447,21 @@ impl TimelinePanel {
     fn rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
         let hide_shy = bool_attr(stage, &layers.comp, "hide_shy_layers");
+        let needle = self.search.trim().to_lowercase();
         for (layer_index, layer) in layers.paths.iter().enumerate() {
             if hide_shy && bool_attr(stage, layer, "shy") {
+                continue;
+            }
+            // Searching: matching layers, and the matching properties opened.
+            let found = (!needle.is_empty()).then(|| {
+                let name = query::display_name_of(stage, layer).to_lowercase();
+                let props = search::matching(&props::layer_tree(stage, layer), &needle);
+                (name.contains(&needle), props)
+            });
+            if found
+                .as_ref()
+                .is_some_and(|(name, props)| !name && props.is_empty())
+            {
                 continue;
             }
             out.push(Row {
@@ -448,6 +469,12 @@ impl TimelinePanel {
                 layer_index,
                 depth: 0,
             });
+            if let Some((_, nodes)) = found.filter(|(_, props)| !props.is_empty()) {
+                let mut open = HashSet::new();
+                search::group_ids(&nodes, &mut open);
+                flatten_tree(&nodes, layer_index, 1, &open, stage, &mut out);
+                continue;
+            }
             if let Some(r) = s.reveal.get(layer) {
                 // E: the Effects group, open, its effects as twirled (AE shows
                 // them above the revealed transform properties).
@@ -627,6 +654,11 @@ impl Panel for TimelinePanel {
                 self.columns.toggle(Column::Parent);
                 true
             }
+            // Edit ▸ Find (Ctrl+F): the search field.
+            "motion.file.find" => {
+                self.focus_search = true;
+                true
+            }
             _ => actions::handle(action, cx, &session),
         }
     }
@@ -743,8 +775,12 @@ impl TimelinePanel {
                     Sense::click_and_drag(),
                 )
                 .labeled(egui::WidgetType::Other, tr("Time Graph"));
+            // From where the button went down, not where the drag was recognised
+            // (a few points later), or a tight marquee misses keys there (#551).
             if bg.drag_started_by(egui::PointerButton::Primary)
-                && let Some(p) = bg.interact_pointer_pos()
+                && let Some(p) = ui
+                    .input(|i| i.pointer.press_origin())
+                    .or_else(|| bg.interact_pointer_pos())
             {
                 self.drag = Some(Drag::Marquee {
                     origin: p,
@@ -780,7 +816,11 @@ impl TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
-        let switch_input = ui.input(switches::SwitchInput::read);
+        let pixel_motion = cx
+            .resources
+            .get::<crate::gpu_preview::PreviewEffects>()
+            .is_some_and(|effects| effects.0.contains(FRAME_INTERPOLATOR_ID));
+        let switch_input = ui.input(|input| switches::SwitchInput::read(input, pixel_motion));
         let scrolled = egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
