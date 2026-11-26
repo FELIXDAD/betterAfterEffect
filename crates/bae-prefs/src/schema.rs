@@ -290,6 +290,11 @@ pub struct Page {
 
 /// Preferences AE 26 keeps without a control in the dialog.
 pub static HIDDEN: &[Pref] = &[
+    b(
+        crate::keys::CACHE_FRAMES_WHEN_IDLE,
+        "Cache Frames When Idle",
+        true,
+    ),
     // AE 26 removed Levels of Undo from the dialog; AE's own default is 99. BAE
     // keeps its deep undo stack by default (bae_model::DEFAULT_UNDO_LIMIT).
     int("general.levels_of_undo", "Levels of Undo", 1000, 1, 100_000)

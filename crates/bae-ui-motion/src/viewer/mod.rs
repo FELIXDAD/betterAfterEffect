@@ -297,16 +297,10 @@ pub struct CompositionViewer {
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
     /// The current time and since when it has not changed (idle prefetch).
-    idle: Option<(Time, std::time::Instant)>,
+    idle: Option<(PrimPath, Time, u64, std::time::Instant)>,
     /// A camera tool drag.
     camera_drag: Option<camera_tool::CameraDrag>,
 }
-
-/// How long the current time stays put before the frames playback would
-/// start with are prepared.
-const IDLE_PREFETCH: std::time::Duration = std::time::Duration::from_millis(300);
-/// Frames prepared from where playback would start.
-const PREFETCH_FRAMES: i64 = 6;
 
 impl CompositionViewer {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
@@ -926,6 +920,7 @@ impl Panel for CompositionViewer {
         let mut completed = None;
         if let Some(gpu) = self.gpu.as_mut() {
             if editing {
+                self.idle = None;
                 gpu.playback.stop();
             } else {
                 let range = playback.as_ref().map_or(
@@ -959,31 +954,43 @@ impl Panel for CompositionViewer {
                         }
                     }
                 }
-                // Idle (the current time still for a moment): prepare the first
-                // frames playback would show, so pressing play shows them at
-                // once while the pipeline fills.
-                if playback.is_none() {
+                let prefs = crate::prefs::current(cx.resources);
+                let source_focused = cx
+                    .focused_panel
+                    .is_some_and(|id| matches!(id.kind(), "footage" | "layer"));
+                if playback.is_none()
+                    && !source_focused
+                    && prefs.bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
+                {
                     let now = std::time::Instant::now();
-                    match self.idle {
-                        Some((at, since)) if at == time => {
-                            if now.duration_since(since) >= IDLE_PREFETCH {
-                                let (from, range) = session.lock().play_start(&info);
-                                let rate = info.frame_rate;
-                                let first = rate.time_to_frame(from);
-                                let times = (0..PREFETCH_FRAMES)
-                                    .map(|k| rate.frame_to_time(first + k))
-                                    .filter(|t| *t != time && range.contains(*t))
-                                    .collect();
-                                gpu.playback.prefetch(times);
-                            } else {
-                                ui.ctx().request_repaint_after(IDLE_PREFETCH);
-                            }
+                    let revision = cx.stage.revision();
+                    let active = ui.input(|i| !i.raw.events.is_empty());
+                    let since = match &self.idle {
+                        Some((comp, t, rev, since))
+                            if !active && comp == &info.path && *t == time && *rev == revision =>
+                        {
+                            *since
                         }
                         _ => {
-                            self.idle = Some((time, now));
-                            ui.ctx().request_repaint_after(IDLE_PREFETCH);
+                            self.idle = Some((info.path.clone(), time, revision, now));
+                            now
                         }
-                    }
+                    };
+                    let delay = std::time::Duration::from_secs(
+                        prefs.int("previews.idle_delay_before_caching") as u64,
+                    );
+                    let elapsed = now.duration_since(since);
+                    let plan = if !active && elapsed >= delay {
+                        crate::playback::idle::Plan::from_prefs(&prefs, &info, time)
+                    } else {
+                        ui.ctx()
+                            .request_repaint_after(delay.saturating_sub(elapsed));
+                        None
+                    };
+                    gpu.playback.prefetch(plan);
+                } else {
+                    self.idle = None;
+                    gpu.playback.prefetch(None);
                 }
                 gpu.playback.publish_ranges(&session, info.frame_rate);
             }

@@ -22,6 +22,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+pub(crate) mod idle;
+
 const DEPTH: usize = 3;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -146,9 +148,11 @@ impl Spares {
 struct Demand {
     scene: Arc<Scene>,
     times: Vec<Time>,
-    /// Frames to render into the cache once `times` are done (the first frames
-    /// playback would show, prepared while the viewer is idle).
-    prefetch: Vec<Time>,
+    /// Background range and ordering, used after visible frames are ready.
+    idle: Option<idle::Plan>,
+    idle_index: i64,
+    /// A visible viewer renews this allowance on repaint. Hidden tabs stop requesting work.
+    idle_allowance: usize,
     range: TimeRange,
     looping: bool,
     rate: FrameRate,
@@ -211,6 +215,65 @@ struct Mailbox {
     shutdown: bool,
 }
 
+enum Work {
+    Render(Arc<Scene>, Time),
+    CheckMore,
+    Wait,
+}
+
+impl Mailbox {
+    fn next_frame(&mut self) -> Work {
+        let Some(d) = self.demand.as_mut() else {
+            return Work::Wait;
+        };
+        if self.queued.len() >= DEPTH {
+            return Work::Wait;
+        }
+        let needed = |t: Time| {
+            !self.cache.frames.contains(&d.scene.key.frame(t))
+                && !self.ready.iter().any(|s| s.time == t)
+                && !self.queued.contains(&t)
+                && !self.failed.contains(&t)
+        };
+        if let Some(&time) = d.times.iter().find(|&&t| needed(t)) {
+            return Work::Render(d.scene.clone(), time);
+        }
+        let Some(plan) = d.idle else {
+            return Work::Wait;
+        };
+        if d.idle_allowance == 0 {
+            return Work::Wait;
+        }
+        let stats = self.cache.frames.stats();
+        let bytes = self
+            .ready
+            .back()
+            .map(|s| s.bytes)
+            .or_else(|| stats.bytes.checked_div(stats.entries as u64));
+        let Some(bytes) = bytes.filter(|b| *b > 0) else {
+            return Work::Wait;
+        };
+        let capacity = stats.budget / bytes;
+        // Check long runs of already-cached frames in batches. The UI shares
+        // this lock to post immediate requests, which always take precedence.
+        for _ in 0..64 {
+            if d.idle_index as u64 >= capacity {
+                return Work::Wait;
+            }
+            let Some(frame) = plan.frame(d.idle_index) else {
+                return Work::Wait;
+            };
+            d.idle_index += 1;
+            let time = d.rate.frame_to_time(frame);
+            if needed(time) {
+                d.idle_allowance -= 1;
+                return Work::Render(d.scene.clone(), time);
+            }
+        }
+        Work::CheckMore
+    }
+}
+
 #[derive(Default)]
 struct Shared {
     state: Mutex<Mailbox>,
@@ -265,15 +328,20 @@ impl PlaybackPreview {
         session.lock().cached_preview = Some((scene.path.clone(), scene.revision, spans));
     }
 
-    /// Renders `times` into the cache after the demanded frames (the frames
-    /// playback would start with, while the viewer is idle).
-    pub(super) fn prefetch(&self, times: Vec<Time>) {
+    /// Changes the idle range and order, or pauses speculative rendering.
+    pub(super) fn prefetch(&self, plan: Option<idle::Plan>) {
         let mut state = self.shared.state.lock().unwrap();
-        if let Some(d) = state.demand.as_mut()
-            && d.prefetch != times
-        {
-            d.prefetch = times;
-            self.shared.changed.notify_all();
+        if let Some(d) = state.demand.as_mut() {
+            let changed = d.idle != plan;
+            if changed {
+                d.idle = plan;
+                d.idle_index = 0;
+            }
+            let resume = plan.is_some() && d.idle_allowance == 0;
+            d.idle_allowance = if plan.is_some() { DEPTH } else { 0 };
+            if changed || resume {
+                self.shared.changed.notify_all();
+            }
         }
     }
 
@@ -347,7 +415,9 @@ impl PlaybackPreview {
                     effects: effects.cloned(),
                 }),
                 times: Vec::with_capacity(DEPTH),
-                prefetch: Vec::new(),
+                idle: None,
+                idle_index: 0,
+                idle_allowance: 0,
                 range,
                 looping,
                 rate,
@@ -384,7 +454,8 @@ impl PlaybackPreview {
             if discontinuity {
                 // Jobs already encoded can finish, but cannot publish into the
                 // new epoch. Completed frames inside the new horizon are reusable.
-                d.prefetch.clear();
+                d.idle = None;
+                d.idle_index = 0;
                 state.epoch += 1;
                 state.queued.clear();
                 state.ready.retain(|slot| times.contains(&slot.time));
@@ -592,18 +663,18 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
                 if state.shutdown || gpu.is_lost() {
                     return;
                 }
-                if let Some(d) = &state.demand
-                    && state.queued.len() < DEPTH
-                    && let Some(&time) = d.times.iter().chain(&d.prefetch).find(|t| {
-                        !state.cache.frames.contains(&d.scene.key.frame(**t))
-                            && !state.ready.iter().any(|s| s.time == **t)
-                            && !state.queued.contains(t)
-                            && !state.failed.contains(t)
-                    })
-                {
-                    let scene = d.scene.clone();
-                    state.queued.push(time);
-                    break (state.epoch, scene, time);
+                match state.next_frame() {
+                    Work::Render(scene, time) => {
+                        state.queued.push(time);
+                        break (state.epoch, scene, time);
+                    }
+                    Work::CheckMore => {
+                        drop(state);
+                        std::thread::yield_now();
+                        state = shared.state.lock().unwrap();
+                        continue;
+                    }
+                    Work::Wait => {}
                 }
                 // Frames finishing on the GPU or a new demand wake us.
                 state = shared.changed.wait(state).unwrap();

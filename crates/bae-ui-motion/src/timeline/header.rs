@@ -478,19 +478,16 @@ impl TimelinePanel {
             }
             f += step;
         }
-        if let Some((path, revision, spans)) = &session.lock().cached_preview
-            && path == &info.path
-            && *revision == cx.stage.revision()
+        // Green segments under the work area bar, one per cached run (AE-UI-064).
+        for span in session
+            .lock()
+            .cached_frames(&info.path, cx.stage.revision())
         {
-            // AE: green segments directly under the work area bar, above the
-            // ruler ticks, one per cached run of frames (AE-UI-064).
-            for span in spans {
-                p.hline(
-                    axis.x(span.start)..=axis.x(span.end),
-                    wa_top + 8.0 + 2.0,
-                    Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
-                );
-            }
+            p.hline(
+                axis.x(span.start)..=axis.x(span.end),
+                wa_top + 8.0 + 2.0,
+                Stroke::new(2.0, egui::Color32::from_rgb(72, 196, 95)),
+            );
         }
         // CTI handle.
         let x = axis.x(now);
