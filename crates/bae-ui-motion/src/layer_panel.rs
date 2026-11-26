@@ -55,6 +55,14 @@ pub struct LayerPanel {
     puppet: crate::viewer::puppet_tool::PuppetState,
     /// Clone Stamp: the source point (Alt/Option-click), layer pixels.
     clone_point: Option<DVec2>,
+    /// The stroke being painted continues the previous one (Shift-drag).
+    continuing: bool,
+    /// Ctrl/Cmd-drag sizing the brush: where it started (screen) and whether
+    /// it still sets the diameter (else the hardness, once Ctrl is let go).
+    sizing: Option<(egui::Pos2, bool)>,
+    /// The picture drawn this frame: its texture and screen rect (the Clone
+    /// Source Overlay draws it again).
+    picture_drawn: Option<(egui::TextureId, Rect)>,
     /// Liquify: the mesh being brushed, the pointer's last position (layer
     /// pixels).
     liquify: Option<(bae_effects::effects::liquify::Mesh, DVec2)>,
@@ -67,6 +75,31 @@ pub struct LayerPanel {
     wheel_rest: f32,
     /// The picture's offset from centred, in points.
     pan: egui::Vec2,
+}
+
+/// The newest stroke of `layer`'s Paint effect if it was made with `tool`
+/// (`brush`, `clone`, `eraser`).
+fn last_stroke(
+    stage: &bae_model::Stage,
+    layer: &PrimPath,
+    tool: &serde_json::Value,
+) -> Option<PrimPath> {
+    let effect = bae_motion::effect::effects_of(stage, layer)
+        .into_iter()
+        .find(|e| {
+            stage
+                .prim(e)
+                .and_then(|v| query::static_value(&v, "match_name"))
+                .and_then(|m| m.as_str().map(str::to_owned))
+                .as_deref()
+                == Some(bae_motion::paint::PAINT)
+        })?;
+    let last = bae_motion::paint::strokes_of(stage, &effect).pop()?;
+    let made = stage
+        .prim(&last)
+        .and_then(|v| query::static_value(&v, "tool"))
+        .and_then(|t| t.as_str().map(str::to_owned));
+    (made.as_deref() == tool.as_str()).then_some(last)
 }
 
 /// Resolve a timeline or Composition viewer double-click with AE's Composition preferences.
@@ -424,15 +457,18 @@ impl LayerPanel {
         {
             ui.ctx().request_repaint();
         }
+        self.picture_drawn = None;
         if let Some(img) = image {
             let r = img.rect;
             let at = |x: i32, y: i32| view.to_screen(DVec2::new(f64::from(x), f64::from(y)));
+            let rect = Rect::from_min_max(at(r.x0, r.y0), at(r.x1, r.y1));
             painter.image(
                 egui::TextureId::User(img.handle),
-                Rect::from_min_max(at(r.x0, r.y0), at(r.x1, r.y1)),
+                rect,
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
+            self.picture_drawn = Some((egui::TextureId::User(img.handle), rect));
         } else {
             let mut shapes = Vec::new();
             let to_screen = |p: DVec2| view.to_screen(p);
@@ -584,10 +620,52 @@ impl LayerPanel {
             self.clone_point = Some(to_layer(pos));
             return true;
         }
+        let (command, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
         if resp.drag_started_by(egui::PointerButton::Primary)
             && let Some(pos) = ui.input(|i| i.pointer.press_origin())
         {
-            self.stroke = Some((vec![to_layer(pos)], std::time::Instant::now()));
+            if command {
+                self.sizing = Some((pos, true));
+            } else {
+                self.stroke = Some((vec![to_layer(pos)], std::time::Instant::now()));
+                self.continuing = shift;
+            }
+        }
+        // Ctrl/Cmd-drag (AE): the brush's diameter; let go of Ctrl and keep
+        // dragging for its hardness. Only the settings change.
+        if let Some((centre, diameter)) = &mut self.sizing {
+            let painter = ui.painter_at(area);
+            let scale = f64::from(view.scale).max(1e-6);
+            let (d, h) = {
+                let mut t = shared.lock();
+                let o = &mut t.options.paint;
+                if let Some(pos) = resp.interact_pointer_pos() {
+                    let dist = f64::from(pos.distance(*centre));
+                    if *diameter && command {
+                        o.diameter = (2.0 * dist / scale).clamp(1.0, 2500.0);
+                    } else {
+                        *diameter = false;
+                        let r = (o.diameter / 2.0 * scale).max(1.0);
+                        o.hardness = (100.0 * dist / r).clamp(0.0, 100.0);
+                    }
+                }
+                (o.diameter, o.hardness)
+            };
+            let r = (d / 2.0 * scale) as f32;
+            painter.circle_stroke(
+                *centre,
+                r.max(1.0),
+                Stroke::new(1.0, Color32::from_gray(220)),
+            );
+            painter.circle_stroke(
+                *centre,
+                (r * (h / 100.0) as f32).max(1.0),
+                Stroke::new(1.0, Color32::from_gray(140)),
+            );
+            if !ui.input(|i| i.pointer.primary_down()) {
+                self.sizing = None;
+            }
+            return true;
         }
         if let Some((points, _)) = &mut self.stroke
             && let Some(pos) = resp.interact_pointer_pos()
@@ -600,6 +678,25 @@ impl LayerPanel {
         // The brush outline at the pointer, the stroke so far.
         let painter = ui.painter_at(area);
         let radius = (p.diameter / 2.0) as f32 * view.scale;
+        // Clone Source Overlay: the source over the layer, lined up with the
+        // pointer (AE).
+        if tool == Tool::CloneStamp
+            && p.clone_overlay
+            && let (Some((texture, rect)), Some(pos)) = (self.picture_drawn, resp.hover_pos())
+        {
+            let offset = match self.clone_point {
+                Some(c) => c - to_layer(pos),
+                None => DVec2::from_array(p.clone_offset),
+            };
+            let shift = -vec2(offset.x as f32, offset.y as f32) * view.scale;
+            let alpha = (p.overlay_opacity / 100.0).clamp(0.0, 1.0) as f32;
+            painter.image(
+                texture,
+                rect.translate(shift),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE.gamma_multiply(alpha),
+            );
+        }
         if let Some(pos) = resp.hover_pos() {
             painter.circle_stroke(
                 pos,
@@ -674,7 +771,19 @@ impl LayerPanel {
                 "clone_offset": [offset.x, offset.y],
                 "clone_time_shift": flicks(p.clone_time_shift),
             });
-            cx.invoke_with("paint.add_stroke", params);
+            // Shift-drag continues the previous stroke of the same tool.
+            match self
+                .continuing
+                .then(|| last_stroke(cx.stage, &layer.path, &params["tool"]))
+                .flatten()
+            {
+                Some(last) => cx.invoke_with(
+                    "paint.extend_stroke",
+                    serde_json::json!({ "stroke": last, "points": params["points"] }),
+                ),
+                None => cx.invoke_with("paint.add_stroke", params),
+            }
+            self.continuing = false;
             // AE shows the Paint effect once there is paint.
             let paint = layer
                 .effects
