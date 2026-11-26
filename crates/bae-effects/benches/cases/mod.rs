@@ -29,5 +29,11 @@ pub(super) fn all() -> Vec<Case> {
     color::shadow_highlight(&mut cases);
     distort::register(&mut cases);
     time::register(&mut cases);
+    cases.push(Case {
+        name: "CC Particle World 50k 1080p".to_owned(),
+        match_name: "CC Particle World",
+        params: vec![(4, bae_model::Value::Float(50.))],
+        size: HD,
+    });
     cases
 }

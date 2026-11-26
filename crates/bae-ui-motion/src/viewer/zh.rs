@@ -2,6 +2,7 @@
 //! see `bae_ui::i18n`; AE's Simplified Chinese UI terms).
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // The layer menu's Select ▸ (the layers under the pointer).
     // Viewer
     ("Magnification", "放大率"),
     ("Fit", "适合"),
@@ -23,6 +24,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Active Camera", "活动摄像机"),
     ("3D View Popup", "3D 视图弹出式菜单"),
+    ("Select View Layout", "选择视图布局"),
     ("Switch to 3D View", "切换到三维视图"),
     ("Switch to 3D View A", "切换到三维视图 A"),
     ("Switch to 3D View B", "切换到三维视图 B"),

@@ -10,6 +10,271 @@ authors = ["BAE"]
 license = "Apache-2.0"
 
 [[effect]]
+id = "iris-wipe"
+name = "Iris Wipe"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["ADBE IRIS_WIPE"]
+shader = "shaders/iris_wipe.wgsl"
+
+[[effect.param]]
+id = 1
+key = "iris_center"
+type = "point"
+name = "Iris Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 2
+key = "iris_points"
+type = "float"
+name = "Iris Points"
+default = 6
+range = [6, 32]
+
+[[effect.param]]
+id = 3
+key = "outer_radius"
+type = "float"
+name = "Outer Radius"
+default = 0
+range = [0, 2000]
+
+[[effect.param]]
+id = 4
+key = "use_inner_radius"
+type = "checkbox"
+name = "Use Inner Radius"
+default = false
+
+[[effect.param]]
+id = 5
+key = "inner_radius"
+type = "float"
+name = "Inner Radius"
+default = 0
+range = [0, 2000]
+
+[[effect.param]]
+id = 6
+key = "rotation"
+type = "angle"
+name = "Rotation"
+default = 0
+
+[[effect.param]]
+id = 7
+key = "feather"
+type = "float"
+name = "Feather"
+default = 0
+range = [0, 1000]
+
+[[effect]]
+id = "cc-grid-wipe"
+name = "CC Grid Wipe"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["CC Grid Wipe"]
+shader = "shaders/cc_grid_wipe.wgsl"
+
+[[effect.param]]
+id = 1
+key = "completion"
+type = "float"
+name = "Completion"
+default = 0
+range = [0, 1]
+
+[[effect.param]]
+id = 2
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 3
+key = "rotation"
+type = "angle"
+name = "Rotation"
+default = 45
+
+[[effect.param]]
+id = 4
+key = "border"
+type = "float"
+name = "Border"
+default = 75
+range = [30, 200]
+
+[[effect.param]]
+id = 5
+key = "tiles"
+type = "float"
+name = "Tiles"
+default = 10
+range = [1, 25]
+
+[[effect.param]]
+id = 6
+key = "shape"
+type = "popup"
+name = "Shape"
+default = 2
+choices = ["Doors", "Radial", "Rectangular"]
+
+[[effect.param]]
+id = 7
+key = "reverse_transition"
+type = "checkbox"
+name = "Reverse Transition"
+default = false
+
+[[effect]]
+id = "cc-light-wipe"
+name = "CC Light Wipe"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["CC Light Wipe"]
+shader = "shaders/cc_light_wipe.wgsl"
+
+[[effect.param]]
+id = 1
+key = "completion"
+type = "float"
+name = "Completion"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 3
+key = "intensity"
+type = "float"
+name = "Intensity"
+default = 100
+range = [0, 400]
+
+[[effect.param]]
+id = 4
+key = "shape"
+type = "popup"
+name = "Shape"
+default = 2
+choices = ["Doors", "Round", "Square"]
+
+[[effect.param]]
+id = 5
+key = "direction"
+type = "angle"
+name = "Direction"
+default = 0
+
+[[effect.param]]
+id = 6
+key = "color_from_source"
+type = "checkbox"
+name = "Color from Source"
+default = false
+
+[[effect.param]]
+id = 7
+key = "color"
+type = "color"
+name = "Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 8
+key = "reverse_transition"
+type = "checkbox"
+name = "Reverse Transition"
+default = false
+
+[[effect]]
+id = "cc-radial-scalewipe"
+name = "CC Radial ScaleWipe"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["CC Radial ScaleWipe"]
+shader = "shaders/cc_radial_scalewipe.wgsl"
+
+[effect.roi]
+read = "32768"
+
+[[effect.pass]]
+entry = "cc_radial_scalewipe"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "completion"
+type = "float"
+name = "Completion"
+default = 0
+range = [0, 1]
+
+[[effect.param]]
+id = 2
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 3
+key = "reverse_transition"
+type = "checkbox"
+name = "Reverse Transition"
+default = false
+
+[[effect]]
+id = "cc-scale-wipe"
+name = "CC Scale Wipe"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["CC Scale Wipe"]
+shader = "shaders/cc_scale_wipe.wgsl"
+
+[effect.roi]
+read = "32768"
+
+[[effect.pass]]
+entry = "cc_scale_wipe"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "stretch"
+type = "float"
+name = "Stretch"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 2
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 3
+key = "direction"
+type = "angle"
+name = "Direction"
+default = 50
+
+[[effect]]
 id = "cc-jaws"
 name = "CC Jaws"
 category = "Transition"
