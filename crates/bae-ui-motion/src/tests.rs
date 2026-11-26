@@ -532,6 +532,7 @@ fn gpu_preview_renders_a_value_drag_in_the_background() {
     preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
     let own = shown(&registry, &preview);
     h.session().lock().scrub = Some(crate::session::Scrub {
+        auto_key: false,
         path: solid.clone(),
         attr: "transform:opacity".into(),
         value: Value::Float(0.0),

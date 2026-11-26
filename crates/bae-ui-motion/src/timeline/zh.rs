@@ -8,6 +8,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Live Update", "实时更新"),
     ("Use Keyframe Icons", "使用关键帧图标"),
     ("Use Keyframe Indices", "使用关键帧索引"),
+    ("Close Other Timeline Panels", "关闭其他时间轴面板"),
+    ("Close Timeline Panels to the Left", "关闭左侧的时间轴面板"),
+    ("Close Timeline Panels to the Right", "关闭右侧的时间轴面板"),
     // Accessibility labels (timeline switches, keyframes, pick whip, ruler)
     ("Parent Pick Whip", "父级关联器"),
     ("Keyframe", "关键帧"),
