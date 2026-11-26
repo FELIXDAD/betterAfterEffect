@@ -34,8 +34,8 @@ fn configure(h: &Ui, index: usize, format: ExportFormat, output: &Path, start: i
     let mut q = queue.lock();
     let id = q.items()[index].id;
     let item = q.item_mut(id).unwrap();
-    item.set_format(format);
-    item.output = output.to_string_lossy().into_owned();
+    item.outputs[0].set_format(format);
+    item.outputs[0].output = output.to_string_lossy().into_owned();
     item.start = start;
     item.end = end;
 }
@@ -95,12 +95,13 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(items(&h).len(), 1);
     let first = &items(&h)[0];
+    let out = &first.outputs[0];
     if cfg!(target_os = "macos") {
-        assert_eq!(first.format, ExportFormat::H264);
-        assert!(first.output.ends_with("Comp 1.mp4"));
+        assert_eq!(out.format, ExportFormat::H264);
+        assert!(out.output.ends_with("Comp 1.mp4"), "{}", out.output);
     } else {
-        assert_eq!(first.format, ExportFormat::Png);
-        assert!(first.output.ends_with("Comp 1_[####].png"));
+        assert_eq!(out.format, ExportFormat::Png);
+        assert!(out.output.ends_with("Comp 1_[####].png"), "{}", out.output);
     }
     assert_eq!(
         (first.start, first.end),
@@ -261,6 +262,14 @@ fn invalid_output_paths_fail_with_a_message() {
         wait_done(&mut h, Duration::from_secs(120));
         let status = items(&h)[i].status.clone();
         report.push(format!("{label}: {status:?}"));
+        if i == 0 {
+            // Items with their output modules are taller than the short
+            // Timeline frame the queue shares (AE): maximize it (`).
+            to_front(&mut h, "render_queue");
+            h.state_mut()
+                .dispatch(Invocation::new(bae_ui::action::ids::MAXIMIZE_FRAME));
+            settle(&mut h);
+        }
         match status {
             ItemStatus::Failed(message) => {
                 assert!(!message.is_empty(), "{label}: empty message");
@@ -565,8 +574,8 @@ fn queue_one(h: &mut Ui, format: ExportFormat, output: &Path, start: i64, end: i
     let mut q = queue.lock();
     let id = q.items()[i].id;
     let item = q.item_mut(id).unwrap();
-    item.format = format;
-    item.output = output.to_string_lossy().into_owned();
+    item.outputs[0].format = format;
+    item.outputs[0].output = output.to_string_lossy().into_owned();
     item.start = start;
     item.end = end;
     i
@@ -792,8 +801,8 @@ fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
         let mut q = queue.lock();
         let id = q.items()[i].id;
         let item = q.item_mut(id).unwrap();
-        item.set_format(f);
-        item.output.clone()
+        item.outputs[0].set_format(f);
+        item.outputs[0].output.clone()
     };
     for (f, ext) in [
         (ExportFormat::Tiff, "tif"),
@@ -972,7 +981,7 @@ fn set_channels(h: &Ui, index: usize, channels: bae_ui_motion::render_queue::Cha
     let queue = h.state().render_queue();
     let mut q = queue.lock();
     let id = q.items()[index].id;
-    q.item_mut(id).unwrap().channels = channels;
+    q.item_mut(id).unwrap().outputs[0].channels = channels;
 }
 
 #[test]
@@ -1215,7 +1224,7 @@ fn a_new_png_item_is_rgb_as_in_ae() {
     comp_with(&mut h, &["shape:rect"]);
     key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     assert_eq!(
-        items(&h)[0].channels,
+        items(&h)[0].outputs[0].channels,
         bae_ui_motion::render_queue::Channels::Rgb
     );
     configure(
