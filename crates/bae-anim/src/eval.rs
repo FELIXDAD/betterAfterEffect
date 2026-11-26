@@ -632,7 +632,11 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
                 None => i.checked_sub(1),
             };
         }
-        if let CompiledSource::Comp { path, .. } = &layer.source {
+        // Source items too: their settings (solid color, size, footage
+        // interpretation) are compiled into the layer.
+        if let CompiledSource::Comp { path, .. } | CompiledSource::Asset(path, _) = &layer.source
+            && !deps.contains(path)
+        {
             deps.push(path.clone());
         }
         layers.push(layer);

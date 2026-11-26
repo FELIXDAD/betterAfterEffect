@@ -18,7 +18,22 @@ fn panel_gui() -> Ui {
 }
 
 fn click_button(h: &mut Ui, title: &str) {
-    let center = h.get_by_label(bae_ui::tr(title)).rect().center();
+    let center = h
+        .query_by(|n| {
+            matches!(
+                n.author_id(),
+                Some("panel:create_nulls_from_paths" | "panel:vr_comp_editor")
+            )
+        })
+        .expect("script panel is open")
+        .query_by(|n| {
+            n.role() == egui::accesskit::Role::Button
+                && n.toggled().is_none()
+                && n.label().as_deref() == Some(bae_ui::tr(title))
+        })
+        .unwrap_or_else(|| panic!("button {title} missing"))
+        .rect()
+        .center();
     click_at(h, center);
     settle(h);
 }
@@ -157,4 +172,124 @@ fn path_null_buttons_bind_evaluated_vertices_and_undo_in_one_step() {
     );
     settle(&mut h);
     assert!(h.query_by_label(bae_ui::tr("Trace Path")).is_none());
+}
+
+fn open_vr(h: &mut Ui) {
+    assert!(h.state_mut().menu("menu.window.vr_comp_editor_jsx"));
+    settle(h);
+}
+fn vr_role(h: &Ui, role: &str) -> Vec<PrimPath> {
+    query::comps(h.state().stage())
+        .into_iter()
+        .filter(|p| {
+            query::static_value(&h.state().stage().prim(p).unwrap(), "vr:role")
+                .is_some_and(|v| v.as_str() == Some(role))
+        })
+        .collect()
+}
+
+#[test]
+fn vr_editor_creates_edits_outputs_and_six_cubemap_views() {
+    let mut h = panel_gui();
+    h.state_mut().dispatch(Invocation::with_params(
+        "comp.create",
+        json!({"name":"Panorama","width":2048,"height":1024}),
+    ));
+    let master = query::comps(h.state().stage())[0].clone();
+    h.state().session().lock().close_comp(&master);
+    open_vr(&mut h);
+    click_button(&mut h, "Add 2D Edit");
+    click_button(&mut h, "Add 2D Edit");
+    assert_eq!(vr_role(&h, "edit2d").len(), 1, "{:?}", h.state().outcomes);
+    let edit = vr_role(&h, "edit2d")[0].clone();
+    let output = vr_role(&h, "output")[0].clone();
+    assert_eq!(h.state().active_comp(), Some(edit.clone()));
+    assert_eq!(query::comp_layers(h.state().stage(), &output).len(), 2);
+    click_button(&mut h, "Properties");
+    click_button(&mut h, "Save");
+    click_button(&mut h, "Open Output/Render");
+    assert_eq!(h.state().active_comp(), Some(output.clone()));
+    click_button(&mut h, "Output Settings");
+    click_button(&mut h, "Save");
+    click_button(&mut h, "Extract Cubemap");
+    click_button(&mut h, "Extract Cubemap");
+    let faces = vr_role(&h, "face");
+    assert_eq!(faces.len(), 6, "{:?}", h.state().outcomes);
+    for face in faces {
+        let name = query::static_value(&h.state().stage().prim(&face).unwrap(), "vr:face").unwrap();
+        click_button(&mut h, &format!("{} View", name.as_str().unwrap()));
+        assert_eq!(h.state().active_comp(), Some(face.clone()));
+        let view = bae_anim::Evaluator::new()
+            .evaluate_comp(h.state().stage(), &face, Time::ZERO)
+            .unwrap();
+        assert!(view.errors.is_empty(), "{face}: {:?}", view.errors);
+        assert!(view.camera.is_some());
+    }
+    h.state_mut().dispatch(Invocation::new(ids::UNDO));
+    settle(&mut h);
+    assert!(vr_role(&h, "face").is_empty());
+    assert!(h.state().stage().has_prim(&output));
+    h.state().session().lock().open_comp(&edit);
+    settle(&mut h);
+    click_button(&mut h, "Properties");
+    click_button(&mut h, "Delete");
+    assert!(
+        !h.state().stage().has_prim(&edit),
+        "{:?}",
+        h.state().outcomes
+    );
+    h.state_mut().dispatch(Invocation::new(ids::UNDO));
+    assert!(h.state().stage().has_prim(&edit));
+    open_vr(&mut h);
+    assert!(h.query_by_label(bae_ui::tr("Add 2D Edit")).is_none());
+    open_vr(&mut h);
+    assert!(h.query_by_label(bae_ui::tr("Add 2D Edit")).is_some());
+}
+
+#[test]
+fn vr_master_and_3d_edit_refresh_the_six_camera_scenes() {
+    let mut h = panel_gui();
+    open_vr(&mut h);
+    click_button(&mut h, "Create VR Master");
+    click_button(&mut h, "Create VR Master");
+    let master = vr_role(&h, "master3d");
+    assert_eq!(master.len(), 1, "{:?}", h.state().outcomes);
+    assert_eq!(h.state().active_comp(), Some(master[0].clone()));
+    click_button(&mut h, "Add 3D Edit");
+    click_button(&mut h, "Add 3D Edit");
+    let edits = vr_role(&h, "edit3d");
+    assert_eq!(edits.len(), 1, "{:?}", h.state().outcomes);
+    assert_eq!(h.state().active_comp(), Some(edits[0].clone()));
+    h.state_mut().dispatch(Invocation::with_params(
+        "layer.create",
+        json!({"comp":edits[0],"kind":"solid","name":"Title"}),
+    ));
+    click_button(&mut h, "Open Output/Render");
+    let copies: Vec<_> = vr_role(&h, "face")
+        .into_iter()
+        .filter(|p| {
+            query::comp_layers(h.state().stage(), p)
+                .iter()
+                .any(|l| h.state().name(l) == "Title")
+        })
+        .collect();
+    assert_eq!(copies.len(), 6, "{:?}", h.state().outcomes);
+    let mut directions = Vec::new();
+    for face in copies {
+        let view = bae_anim::Evaluator::new()
+            .evaluate_comp(h.state().stage(), &face, Time::ZERO)
+            .unwrap();
+        assert!(view.errors.is_empty(), "{face}: {:?}", view.errors);
+        let camera = view.layers[view.camera.unwrap()].camera.as_ref().unwrap();
+        let forward = camera
+            .world_matrix
+            .transform_vector3(bae_anim::glam::DVec3::Z)
+            .round()
+            .as_ivec3();
+        assert!(
+            !directions.contains(&forward),
+            "{face}: repeated camera direction {forward:?}"
+        );
+        directions.push(forward);
+    }
 }
