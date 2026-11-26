@@ -1,6 +1,6 @@
 use super::*;
 use gpu::{Binding, Kernel, KernelKey, KernelSource};
-pub(super) const BYTES: u32 = 256;
+pub(super) const BYTES: u32 = 272 + 100 * 16;
 
 pub(super) fn pipeline(
     rt: &gpu::Runtime,
