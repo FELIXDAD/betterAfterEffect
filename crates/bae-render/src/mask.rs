@@ -62,6 +62,167 @@ pub struct MaskEdge {
     pub p1: [f32; 2],
     /// Part of the expansion outline (G channel) rather than the path (R).
     pub stroke: bool,
+    /// Winding contribution: 1, or `1 / FEATHER_STEPS` for a variable-width
+    /// feather contour.
+    pub weight: f32,
+}
+
+/// Nested contours between the inner and outer variable-width feather
+/// boundaries (AE-CMP-043): each adds `1 / FEATHER_STEPS` of winding, so the
+/// coverage ramps across the band; the blur smooths the steps.
+pub const FEATHER_STEPS: usize = 16;
+
+/// Samples per path segment for the feather contours.
+const FEATHER_SAMPLES: usize = 24;
+
+/// A feather point as (path parameter, signed radius: outward positive).
+fn signed(f: &bae_model::FeatherPoint) -> (f64, f64) {
+    let r = f.radius.abs();
+    (
+        f64::from(f.segment) + f.t,
+        if f.inner || f.radius < 0.0 { -r } else { r },
+    )
+}
+
+/// Widest outward and inward variable-width feather radii (pixels).
+fn feather_reach(m: &RenderMask) -> (f64, f64) {
+    m.shape.feather.iter().fold((0.0, 0.0), |(o, i), f| {
+        let r = signed(f).1;
+        (o.max(r), i.max(-r))
+    })
+}
+
+/// Radius at path parameter `u` from feather points `(u, r)` (sorted), linear
+/// around the closed path; one point gives a constant radius.
+fn feather_radius(points: &[(f64, f64)], u: f64, period: f64) -> f64 {
+    match points {
+        [] => 0.0,
+        [(_, r)] => *r,
+        _ => {
+            let next = points.iter().position(|(pu, _)| *pu > u).unwrap_or(0);
+            let prev = (next + points.len() - 1) % points.len();
+            let ((u0, r0), (mut u1, r1)) = (points[prev], points[next]);
+            let mut u = u;
+            if u1 <= u0 {
+                u1 += period;
+                if u < u0 {
+                    u += period;
+                }
+            }
+            let f = ((u - u0) / (u1 - u0)).clamp(0.0, 1.0);
+            r0 + (r1 - r0) * f
+        }
+    }
+}
+
+/// Samples of a closed path (point, unit outward normal, path parameter); empty
+/// for an open or degenerate path.
+fn path_samples(path: &BezierPath) -> Vec<([f64; 2], [f64; 2], f64)> {
+    let n = path.vertices.len();
+    if !path.closed || n < 2 {
+        return Vec::new();
+    }
+    let tangent = |list: &[[f64; 2]], i: usize| list.get(i).copied().unwrap_or([0.0, 0.0]);
+    let mut samples: Vec<([f64; 2], [f64; 2], f64)> = Vec::with_capacity(n * FEATHER_SAMPLES);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let p0 = path.vertices[i];
+        let o = tangent(&path.out_tangents, i);
+        let t = tangent(&path.in_tangents, j);
+        let p3 = path.vertices[j];
+        let p1 = [p0[0] + o[0], p0[1] + o[1]];
+        let p2 = [p3[0] + t[0], p3[1] + t[1]];
+        for k in 0..FEATHER_SAMPLES {
+            let s = k as f64 / FEATHER_SAMPLES as f64;
+            let c = 1.0 - s;
+            let at = |d: usize| {
+                c * c * c * p0[d]
+                    + 3.0 * c * c * s * p1[d]
+                    + 3.0 * c * s * s * p2[d]
+                    + s * s * s * p3[d]
+            };
+            let der = |d: usize| {
+                3.0 * c * c * (p1[d] - p0[d])
+                    + 6.0 * c * s * (p2[d] - p1[d])
+                    + 3.0 * s * s * (p3[d] - p2[d])
+            };
+            let mut dv = [der(0), der(1)];
+            if dv[0].hypot(dv[1]) < 1e-9 {
+                dv = [p3[0] - p0[0], p3[1] - p0[1]];
+            }
+            samples.push(([at(0), at(1)], dv, i as f64 + s));
+        }
+    }
+    // Outward normals: the right-hand normal of a positively oriented path.
+    let area: f64 = (0..samples.len())
+        .map(|i| {
+            let (a, b) = (samples[i].0, samples[(i + 1) % samples.len()].0);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    let side = if area >= 0.0 { 1.0 } else { -1.0 };
+    for s in &mut samples {
+        let len = s.1[0].hypot(s.1[1]).max(1e-9);
+        s.1 = [side * s.1[1] / len, -side * s.1[0] / len];
+    }
+    samples
+}
+
+/// Point and outward unit normal of a closed path at parameter `u` (segment
+/// index + t), from the nearest sample.
+pub fn path_frame(path: &BezierPath, u: f64) -> Option<([f64; 2], [f64; 2])> {
+    let samples = path_samples(path);
+    let n = path.vertices.len() as f64;
+    let u = u.rem_euclid(n.max(1.0));
+    samples
+        .iter()
+        .min_by(|a, b| (a.2 - u).abs().total_cmp(&(b.2 - u).abs()))
+        .map(|s| (s.0, s.1))
+}
+
+/// Offsets of a closed path between its inner (`f` = 0) and outer (`f` = 1)
+/// variable-width feather boundaries (its `feather` points), one polyline per
+/// fraction, layer pixels.
+pub fn feather_offsets(path: &BezierPath, fractions: &[f64]) -> Vec<Vec<Point>> {
+    let samples = path_samples(path);
+    if samples.is_empty() || path.feather.is_empty() {
+        return Vec::new();
+    }
+    let n = path.vertices.len() as f64;
+    let mut outer: Vec<(f64, f64)> = Vec::new();
+    let mut inner: Vec<(f64, f64)> = Vec::new();
+    for f in &path.feather {
+        let (u, r) = signed(f);
+        let u = u.rem_euclid(n);
+        if r > 0.0 {
+            outer.push((u, r));
+        } else if r < 0.0 {
+            inner.push((u, -r));
+        }
+    }
+    outer.sort_by(|a, b| a.0.total_cmp(&b.0));
+    inner.sort_by(|a, b| a.0.total_cmp(&b.0));
+    fractions
+        .iter()
+        .map(|f| {
+            samples
+                .iter()
+                .map(|(p, normal, u)| {
+                    let (ro, ri) = (feather_radius(&outer, *u, n), feather_radius(&inner, *u, n));
+                    let off = -ri + f * (ri + ro);
+                    Point::new(p[0] + normal[0] * off, p[1] + normal[1] * off)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The feather contours of a closed mask path, in layer pixels.
+pub fn feather_contours(m: &RenderMask) -> Vec<Vec<Point>> {
+    let fractions: Vec<f64> = (1..=FEATHER_STEPS)
+        .map(|k| (k as f64 - 0.5) / FEATHER_STEPS as f64)
+        .collect();
+    feather_offsets(&m.shape, &fractions)
 }
 
 /// How a mask's expansion outline modifies its coverage.
@@ -245,7 +406,11 @@ fn mask_value(m: &RenderMask) -> [f32; 2] {
 
 /// Feather sigmas in layer pixels.
 fn sigma_px(m: &RenderMask) -> [f64; 2] {
-    m.feather.map(|f| f64::from(f).max(0.0) * FEATHER_TO_SIGMA)
+    // Variable-width feather: at least enough blur to smooth its contour steps.
+    let (out, inn) = feather_reach(m);
+    let steps = 0.5 * (out + inn) / FEATHER_STEPS as f64;
+    m.feather
+        .map(|f| (f64::from(f).max(0.0) * FEATHER_TO_SIGMA).max(steps))
 }
 
 /// Bounds where one mask's value can be non-zero (`None`: anywhere).
@@ -264,7 +429,7 @@ fn mask_support(m: &RenderMask) -> Option<Rect> {
 fn geometry_support(m: &RenderMask) -> Option<Rect> {
     let b = path_bounds(&m.shape)?;
     let s = sigma_px(m);
-    let grow = f64::from(m.expansion).max(0.0) + 1.0;
+    let grow = f64::from(m.expansion).max(0.0) + feather_reach(m).0 + 1.0;
     Some(Rect::new(
         b.x0 - grow - 3.0 * s[0],
         b.y0 - grow - 3.0 * s[1],
@@ -407,6 +572,11 @@ fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Re
 
     let mut edges = Vec::new();
     let mut xmax = f32::NEG_INFINITY;
+    let contours = if empty {
+        Vec::new()
+    } else {
+        feather_contours(m)
+    };
     if !empty {
         let path = to_bez_path(&m.shape);
         // Flatten to within 1/20 texel of the raster.
@@ -426,7 +596,16 @@ fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Re
                 if yhi <= 0.0 || ylo >= th as f32 || p0[0].min(p1[0]) >= tw as f32 {
                     return;
                 }
-                edges.push(MaskEdge { p0, p1, stroke });
+                edges.push(MaskEdge {
+                    p0,
+                    p1,
+                    stroke,
+                    weight: if stroke || contours.is_empty() {
+                        1.0
+                    } else {
+                        1.0 / FEATHER_STEPS as f32
+                    },
+                });
             };
             kurbo::flatten(el_path.iter(), tolerance, |el| match el {
                 PathEl::MoveTo(p) => {
@@ -454,7 +633,19 @@ fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Re
                 edge(last, start);
             }
         };
-        push(&path, false);
+        if contours.is_empty() {
+            push(&path, false);
+        } else {
+            for c in &contours {
+                let mut bez = BezPath::new();
+                bez.move_to(c[0]);
+                for p in &c[1..] {
+                    bez.line_to(*p);
+                }
+                bez.close_path();
+                push(&bez, false);
+            }
+        }
         let e = f64::from(m.expansion);
         if e.abs() > 1e-6 {
             let outline = kurbo::stroke(
@@ -547,6 +738,37 @@ mod tests {
             feather: [0.0, 0.0],
             expansion: 0.0,
         }
+    }
+
+    #[test]
+    fn feather_points_make_nested_contours_out_to_their_radius() {
+        let mut m = mask(MaskMode::Add, rect_path(0.0, 0.0, 100.0, 100.0));
+        m.shape.feather = vec![bae_model::FeatherPoint {
+            segment: 0,
+            t: 0.5,
+            radius: 20.0,
+            ..Default::default()
+        }];
+        let contours = feather_contours(&m);
+        assert_eq!(contours.len(), FEATHER_STEPS);
+        // One outward point: a constant radius; the outermost contour sits just
+        // inside it, the innermost just outside the path.
+        let reach = |c: &[Point]| {
+            c.iter()
+                .map(|p| (-p.y).max(p.x - 100.0))
+                .fold(f64::MIN, f64::max)
+        };
+        let step = 20.0 / FEATHER_STEPS as f64;
+        assert!((reach(&contours[FEATHER_STEPS - 1]) - (20.0 - step / 2.0)).abs() < 0.5);
+        assert!((reach(&contours[0]) - step / 2.0).abs() < 0.5);
+        // The raster draws them at 1/N winding each.
+        let r = plan_raster(&m, IRect::new(-40, -40, 140, 140), 1.0, None);
+        assert!(
+            r.edges
+                .iter()
+                .all(|e| (e.weight - 1.0 / FEATHER_STEPS as f32).abs() < 1e-6)
+        );
+        assert!(r.sigma[0] > 0.0);
     }
 
     #[test]
