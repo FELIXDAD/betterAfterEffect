@@ -942,6 +942,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 })
                 .collect();
             if !items.is_empty() {
+                if !remove && let Some((p, a)) = props.iter().find(|(p, a)| !has(p, a)) {
+                    session.lock().focus_expression =
+                        Some((p.clone(), a.clone(), std::time::Instant::now()));
+                }
                 cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
             return true;
