@@ -405,8 +405,11 @@ fn selected_footage(cx: &PanelContext<'_>, session: &SharedSession) -> Vec<PrimP
 }
 
 fn apply_reload(cx: &mut PanelContext<'_>, item: PrimPath, file: ImportFile) {
-    auto_reload::invalidate(cx.resources);
-    cx.invoke_with("item.replace_file", json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }));
+    auto_reload::invalidate(cx.resources, &file.path);
+    cx.invoke_with(
+        "item.replace_file",
+        json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }),
+    );
 }
 
 /// File > Reload Footage (Cmd/Ctrl+Alt+L): the selected items read their
@@ -453,7 +456,7 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
     let mut probed = probe(&[path], &defaults);
     if let Some(file) = probed.files.pop() {
-        auto_reload::invalidate(cx.resources);
+        auto_reload::invalidate(cx.resources, &file.path);
         let keep = crate::prefs::current(cx.resources)
             .str("import.footage_interpretation_on_replace")
             == "remember";

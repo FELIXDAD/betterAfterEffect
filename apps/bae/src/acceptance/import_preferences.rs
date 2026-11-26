@@ -161,9 +161,12 @@ fn returning_to_the_app_reloads_only_the_selected_footage_types() {
         prefs.set("import.auto_reload_mode", mode);
         h.state().prefs.set(prefs).unwrap();
         for p in [&still, &first] {
-            h.state_mut().app.insert_resource(SharedFilePicker::new(SequencePicker(p.clone())));
+            h.state_mut()
+                .app
+                .insert_resource(SharedFilePicker::new(SequencePicker(p.clone())));
             h.state_mut().workspace.focus_panel("project");
-            h.state_mut().dispatch(Invocation::new("motion.file.import_file"));
+            h.state_mut()
+                .dispatch(Invocation::new("motion.file.import_file"));
             settle(&mut h);
         }
         let focus = |h: &mut Ui, active| {
@@ -171,15 +174,27 @@ fn returning_to_the_app_reloads_only_the_selected_footage_types() {
             send(h, Event::WindowFocused(active));
         };
         let append = |p: &Path| {
-            std::fs::OpenOptions::new().append(true).open(p).unwrap().write_all(&[0]).unwrap();
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(p)
+                .unwrap()
+                .write_all(&[0])
+                .unwrap();
         };
         let size = |h: &Ui, path: &Path| {
-            h.state().stage().traverse().into_iter().filter_map(|item| {
-                let view = h.state().stage().prim(&item)?;
-                bae_model::AssetFile::from_prim(&view)
-            }).find(|f| Path::new(&f.original).file_name() == path.file_name()).unwrap().size
+            h.state()
+                .stage()
+                .traverse()
+                .into_iter()
+                .filter_map(|item| {
+                    let view = h.state().stage().prim(&item)?;
+                    bae_model::AssetFile::from_prim(&view)
+                })
+                .find(|f| Path::new(&f.original).file_name() == path.file_name())
+                .unwrap()
+                .size
         };
-        let wait_for = |h: &mut Ui, check: &dyn Fn(&Ui)->bool| {
+        let wait_for = |h: &mut Ui, check: &dyn Fn(&Ui) -> bool| {
             let deadline = Instant::now() + Duration::from_secs(6);
             while !check(h) {
                 assert!(Instant::now() < deadline, "focus scan for {mode}");
@@ -201,7 +216,12 @@ fn returning_to_the_app_reloads_only_the_selected_footage_types() {
             focus(&mut h, false);
             append(&next);
             focus(&mut h, true);
-            wait_for(&mut h, &|h| h.state().dispatched.iter().any(|i| i.id == "item.replace_file"));
+            wait_for(&mut h, &|h| {
+                h.state()
+                    .dispatched
+                    .iter()
+                    .any(|i| i.id == "item.replace_file")
+            });
         } else {
             settle(&mut h);
             assert_eq!(size(&h, &first), original);

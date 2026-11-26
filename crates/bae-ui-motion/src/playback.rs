@@ -44,7 +44,8 @@ impl SceneKey {
     }
 
     fn same_view(&self, other: &Self) -> bool {
-        self.footage_generation == other.footage_generation && self.path == other.path
+        self.footage_generation == other.footage_generation
+            && self.path == other.path
             && self.resolution == other.resolution
             && self.sources == other.sources
             && self.effects == other.effects

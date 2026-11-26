@@ -131,10 +131,15 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
                 state = shared.wake.wait(state).unwrap();
             }
         };
-        if scene.as_ref().is_some_and(|(s, _)| s.footage_generation != job.scene.footage_generation) {
+        if scene
+            .as_ref()
+            .is_some_and(|(s, _)| s.footage_generation != job.scene.footage_generation)
+        {
             engine.renderer.reload_footage();
         }
-        if scene.as_ref().is_none_or(|(s, _)| s.key != job.scene.key || s.footage_generation != job.scene.footage_generation) {
+        if scene.as_ref().is_none_or(|(s, _)| {
+            s.key != job.scene.key || s.footage_generation != job.scene.footage_generation
+        }) {
             let Ok(stage) = job.scene.snapshot.restore() else {
                 continue;
             };
