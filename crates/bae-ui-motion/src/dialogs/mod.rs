@@ -14,6 +14,7 @@ mod layer_time;
 mod light_settings;
 mod mask_value;
 pub mod memory;
+pub(crate) mod photoshop;
 mod precompose;
 pub(crate) mod project_fonts;
 mod project_settings;
@@ -41,6 +42,7 @@ use crate::session::SharedSession;
 /// The dialog that is open.
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    Photoshop(Box<photoshop::PhotoshopDialog>),
     /// Analysis of the composition work area for the Keyframe Assistant.
     AudioAnalysis(crate::audio_analysis::Analysis),
     /// Display units and slider floor of the Audio panel.
@@ -100,6 +102,7 @@ pub struct Dialogs {
     pub open: Option<Dialog>,
     pending_fonts: Vec<String>,
     recent_fonts: Vec<String>,
+    pub(crate) photoshop_queue: std::collections::VecDeque<photoshop::PhotoshopDialog>,
     pub(crate) frame_checks: crate::import::FrameChecks,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
@@ -139,7 +142,8 @@ impl SharedDialogs {
 
     /// Whether a motion dialog is open.
     pub fn is_open(&self) -> bool {
-        self.lock().open.is_some()
+        let d = self.lock();
+        d.open.is_some() || !d.photoshop_queue.is_empty()
     }
 }
 
@@ -495,10 +499,16 @@ impl bae_ui::DialogHost for MotionDialogs {
                 .take()
                 .or_else(|| d.frame_checks.next_notice())
                 .or_else(|| project_fonts::warning(&mut d.pending_fonts))
+                .or_else(|| {
+                    d.photoshop_queue
+                        .pop_front()
+                        .map(|job| Dialog::Photoshop(Box::new(job)))
+                })
         };
         let Some(mut open) = open else { return };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
+            Dialog::Photoshop(d) => d.ui(ctx, cx),
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
             Dialog::AudioOptions(d) => d.ui(ctx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
@@ -539,4 +549,5 @@ pub(crate) use zh::ZH;
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(photoshop::ZH);
 }
