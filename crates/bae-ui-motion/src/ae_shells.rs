@@ -442,6 +442,7 @@ mod tests {
                     | "align"
                     | "tracker"
                     | "create_nulls_from_paths"
+                    | "vr_comp_editor"
                     | "paragraph"
                     | "properties"
                     | "effects"

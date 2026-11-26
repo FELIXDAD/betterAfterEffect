@@ -260,7 +260,8 @@ pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
 }
 
 /// Route external drops on the Composition and Timeline panels through the same
-/// import command as the Project panel, including folders and image sequences.
+/// import command as the Project panel, including folders and image sequences;
+/// the files also become layers of the open comp (AE), in the same undo step.
 pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
     if ui.rect_contains_pointer(ui.available_rect_before_wrap()) {
         let paths = ui.input(|i| {
@@ -270,13 +271,29 @@ pub(crate) fn drop_on_panel(ui: &egui::Ui, cx: &mut PanelContext<'_>) {
                 .map(|f| f.path().to_owned())
                 .collect::<Vec<_>>()
         });
-        import_paths(cx, &paths, None);
+        if paths.is_empty() {
+            return;
+        }
+        let comp = cx
+            .resources
+            .get::<crate::SharedSession>()
+            .and_then(|s| s.lock().active_comp.clone());
+        import_into(cx, &paths, None, comp);
     }
 }
 
 /// Import `paths` into `parent` (default the assets folder): one
 /// `item.import`; unreadable files are reported in an alert.
 pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent: Option<PrimPath>) {
+    import_into(cx, paths, parent, None);
+}
+
+fn import_into(
+    cx: &mut PanelContext<'_>,
+    paths: &[PathBuf],
+    parent: Option<PrimPath>,
+    comp: Option<PrimPath>,
+) {
     if paths.is_empty() {
         return;
     }
@@ -286,6 +303,9 @@ pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent:
         let mut params = json!({ "files": probed.files });
         if let Some(p) = parent {
             params["parent"] = json!(p);
+        }
+        if let Some(c) = comp {
+            params["comp"] = json!(c);
         }
         cx.invoke_with("item.import", params);
     }

@@ -1,6 +1,8 @@
 //! Auxiliary footage effects in source-layer coordinates.
 mod depth;
+mod ids;
 mod kernel;
+pub mod settings;
 
 use crate::{
     Builtin, EffectTarget, Registry, TargetEffect,
@@ -28,6 +30,10 @@ enum Method {
     Focus,
     Matte,
     Fog,
+    IdMatte,
+    Crypto,
+    Routing,
+    Identifier,
 }
 
 struct ChannelEffect {
@@ -37,6 +43,7 @@ struct ChannelEffect {
 
 pub(crate) fn register(r: &mut Registry) {
     r.effects.extend(depth::entries());
+    r.effects.extend(ids::entries());
     r.prewarm.push(prewarm);
 }
 
@@ -141,6 +148,7 @@ impl TargetEffect for ChannelEffect {
                 u.f32(at, params.f(id) as f32);
             }
         }
+        ids::uniforms(self.method, channels, params, &mut u);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &kernel,
@@ -164,17 +172,22 @@ impl TargetEffect for ChannelEffect {
     }
 }
 
-/// A channel's plane for the shader: FLOAT slices as is, UINT slices below
-/// -1, HALF slices from `HALF` (channels.wgsl); -1 = none.
 fn plane(channels: &FootageChannels, names: &[&str]) -> i32 {
+    channels
+        .info
+        .find(names)
+        .map_or(-1, |i| plane_id(channels, i))
+}
+
+/// Channel `index`'s plane for the shader: FLOAT slices as is, UINT slices
+/// below -1, HALF slices from `HALF` (channels.wgsl).
+fn plane_id(channels: &FootageChannels, index: usize) -> i32 {
     const HALF: i32 = 1 << 16;
-    channels.find(names).map_or(-1, |i| {
-        let c = &channels.channels[i];
-        let slice = c.slice as i32;
-        match c.kind {
-            ChannelKind::Float => slice,
-            ChannelKind::Uint => -slice - 2,
-            ChannelKind::Half => HALF + slice,
-        }
-    })
+    let c = &channels.info.channels[index];
+    let slice = c.slice as i32;
+    match c.kind {
+        ChannelKind::Float => slice,
+        ChannelKind::Uint => -slice - 2,
+        ChannelKind::Half => HALF + slice,
+    }
 }
