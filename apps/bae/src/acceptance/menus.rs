@@ -96,6 +96,8 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
 /// BAE-only items (no AE counterpart): the History and Agent panels, the Agent
 /// workspace.
 const BAE_ONLY: &[&str] = &[
+    #[cfg(target_os = "macos")]
+    "shell.app.settings",
     "shell.window.history",
     "shell.window.agent_activity",
     "shell.window.agent_proposals",

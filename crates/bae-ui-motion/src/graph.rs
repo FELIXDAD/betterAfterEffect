@@ -1689,7 +1689,15 @@ impl GraphEditor {
         // Wheel: Alt = time zoom; with Auto-Zoom off, plain = vertical pan and
         // Cmd/Ctrl = vertical zoom.
         if resp.hovered() {
-            let dy = ui.input(|i| i.smooth_scroll_delta.y);
+            let trackpad = cfg!(target_os = "macos") && ui.input(|i| i.events.iter().any(|event| matches!(event, egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, .. } if delta.y != 0.0)));
+            let dy = if trackpad {
+                crate::viewer::wheel(ui).pan.y
+            } else {
+                ui.input(|i| i.smooth_scroll_delta.y)
+            };
+            if trackpad && dy != 0.0 && !mods.alt {
+                self.settings.auto_zoom = false;
+            }
             if dy != 0.0 {
                 if mods.alt {
                     out.zoom_by = dy * 0.002;

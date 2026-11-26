@@ -120,7 +120,7 @@ pub fn extra_items() -> Vec<(&'static str, MenuItemSpec)> {
         #[cfg(target_os = "macos")]
         (
             "shell.app.settings",
-            MenuItemSpec::new(&[APP_MENU], "Settings…", bae_ui::settings::ACTION)
+            MenuItemSpec::new(&[APP_MENU], "Settings...", bae_ui::settings::ACTION)
                 .group(1)
                 .order(-1),
         ),

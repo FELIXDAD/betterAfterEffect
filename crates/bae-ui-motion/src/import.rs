@@ -203,8 +203,9 @@ fn probe_dir(
         .into_iter()
         .flatten()
         .flatten()
+        .filter(|e| e.file_type().is_ok_and(|ty| ty.is_dir()))
         .map(|e| e.path())
-        .filter(|p| p.is_dir() && !file_name(p).starts_with('.'))
+        .filter(|p| !file_name(p).starts_with('.'))
         .collect();
     subdirs.sort();
     for sub in subdirs {

@@ -31,7 +31,8 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("Workspace", "工作区"),
     ("Minimize", "最小化"),
-    ("Settings…", "设置…"),
+    ("Settings...", "设置..."),
+    ("App", "应用"),
     ("Full Screen", "全屏"),
     ("frame {ms} ms", "帧 {ms} 毫秒"),
     // About window
