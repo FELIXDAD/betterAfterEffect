@@ -51,6 +51,24 @@ pub fn group_prim(id: &str) -> Option<PrimPath> {
         .flatten()
 }
 
+/// The top-level shape groups of the shape layer `layer`.
+pub(crate) fn shape_groups(stage: &Stage, layer: &PrimPath) -> Vec<PrimPath> {
+    layer.child(query::CONTENTS).map_or_else(
+        |_| Vec::new(),
+        |contents| {
+            stage
+                .children(&contents)
+                .into_iter()
+                .filter(|g| {
+                    stage
+                        .prim(g)
+                        .is_some_and(|v| v.is_a(&bae_model::PrimType::SHAPE_GROUP))
+                })
+                .collect()
+        },
+    )
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
@@ -197,6 +215,18 @@ impl Scrub {
     }
 }
 
+/// The properties a keyframe drag changes, as they will be when it ends.
+#[derive(Clone, Debug)]
+pub struct KeyPreview {
+    /// The panel mode dragging ("graph", "bars"): only it clears an
+    /// unfinished preview.
+    pub owner: &'static str,
+    pub specs: Vec<bae_anim::AttrOverride>,
+    /// The drag ended and its command was sent (stage revision then): shown
+    /// until it has run, like [`Scrub::committed`].
+    pub committed: Option<(u64, Instant)>,
+}
+
 /// Copied keyframes (one attribute at a time, like AE's paste target).
 #[derive(Clone, Debug)]
 pub struct KeyClipboard {
@@ -227,6 +257,15 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Select the shape group a command adds to a shape layer (AE: a shape
+    /// tool's new group is selected, its box shown): the first of `layer`'s
+    /// groups not in `before`.
+    NewGroup {
+        /// The shape layer.
+        layer: PrimPath,
+        /// Its groups before the command.
+        before: Vec<PrimPath>,
+    },
     /// Keep these keys selected although they do not exist yet: the selection
     /// already names where a queued command (a keyframe drag) puts them, and
     /// panels drawn before it runs must not drop them (#551).
@@ -247,6 +286,10 @@ pub struct Session {
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    /// The Composition Navigator's path: the active comp and the comps it was
+    /// opened through (double-clicking pre-comp layers), the containing comp
+    /// first.
+    pub(crate) comp_flow: Vec<PrimPath>,
     pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
@@ -317,6 +360,10 @@ pub struct Session {
     pub reveal: HashMap<PrimPath, Reveal>,
     pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
+    /// A keyframe drag in progress (Graph Editor, layer bars): the dragged
+    /// properties as the release will leave them, evaluated live like a value
+    /// drag (#593).
+    pub key_preview: Option<KeyPreview>,
     pub clipboard: Option<KeyClipboard>,
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
     /// copy wins over [`Session::clipboard`].
@@ -556,6 +603,24 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    /// What panels evaluate in place of the stage while something is dragged:
+    /// the value drag ([`Scrub`]) and the keyframe drag ([`KeyPreview`]).
+    pub fn live_overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        let mut out: Vec<bae_anim::AttrOverride> = self
+            .key_preview
+            .iter()
+            .flat_map(|k| k.specs.iter().cloned())
+            .filter(|o| stage.has_prim(&o.prim))
+            .collect();
+        if let Some(s) = &self.scrub {
+            for o in s.overrides(stage) {
+                out.retain(|x| !(x.prim == o.prim && x.attr == o.attr));
+                out.push(o);
+            }
+        }
+        out
+    }
+
     /// The latest background enumeration for the audio preferences.
     pub fn output_devices(&self) -> &bae_media::playback::OutputDevices {
         &self.output_devices
@@ -656,7 +721,22 @@ impl Session {
         if !self.open_comps.contains(comp) {
             self.open_comps.push(comp.clone());
         }
+        // A comp on the navigator's path keeps the path; any other starts one.
+        if !self.comp_flow.contains(comp) {
+            self.comp_flow = vec![comp.clone()];
+        }
         self.active_comp = Some(comp.clone());
+    }
+
+    /// Open `comp` from a pre-comp layer in `parent`: the navigator's path runs
+    /// through `parent` to `comp`.
+    pub fn open_from(&mut self, parent: &PrimPath, comp: &PrimPath) {
+        match self.comp_flow.iter().position(|c| c == parent) {
+            Some(i) => self.comp_flow.truncate(i + 1),
+            None => self.comp_flow = vec![parent.clone()],
+        }
+        self.comp_flow.push(comp.clone());
+        self.open_comp(comp);
     }
 
     /// Close a timeline tab.
@@ -693,6 +773,11 @@ impl Session {
     /// Drop references to prims that no longer exist and resolve pending items.
     /// Called once per frame by the panels (cheap).
     pub fn sync(&mut self, stage: &Stage) {
+        if let Some((revision, at)) = self.key_preview.as_ref().and_then(|k| k.committed)
+            && (stage.revision() != revision || at.elapsed() > Duration::from_millis(500))
+        {
+            self.key_preview = None;
+        }
         if let Some((revision, at)) = self.scrub.as_ref().and_then(|s| s.committed)
             && (stage.revision() != revision
                 || at.elapsed() > std::time::Duration::from_millis(500))
@@ -724,6 +809,17 @@ impl Session {
                 }
                 continue;
             }
+            if let Pending::NewGroup { layer, before } = &what {
+                match shape_groups(stage, layer)
+                    .into_iter()
+                    .find(|g| !before.contains(g))
+                {
+                    Some(g) => self.selected_groups = vec![format!("{layer}#{g}")],
+                    None if age < PENDING_FRAMES => self.pending.push((what, age + 1)),
+                    None => {}
+                }
+                continue;
+            }
             if let Pending::NewLayers { comp, before } = &what {
                 let added: Vec<PrimPath> = query::comp_layers(stage, comp)
                     .into_iter()
@@ -739,7 +835,10 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {
+                Pending::NewLayers { .. }
+                | Pending::NewEffects { .. }
+                | Pending::NewGroup { .. }
+                | Pending::Keys(_) => {
                     unreachable!("handled above")
                 }
             };
@@ -753,7 +852,10 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {}
+                    Pending::NewLayers { .. }
+                    | Pending::NewEffects { .. }
+                    | Pending::NewGroup { .. }
+                    | Pending::Keys(_) => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -765,7 +867,10 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => None,
+                Pending::NewLayers { .. }
+                | Pending::NewEffects { .. }
+                | Pending::NewGroup { .. }
+                | Pending::Keys(_) => None,
             })
             .collect();
         self.reserved

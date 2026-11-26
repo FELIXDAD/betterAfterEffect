@@ -48,6 +48,12 @@ pub mod ids {
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
     pub const MINI_FLOW: &str = "motion.comp.composition_mini_flowchart";
+    /// Composition ▸ Composition Flowchart (Ctrl+Shift+F11): the Flowchart
+    /// panel for the active comp.
+    pub const COMP_FLOWCHART: &str = "motion.comp.composition_flowchart";
+    /// Layer ▸ Reveal ▸ Reveal Composition in Project (and the Timeline's
+    /// empty-space menu): the comp selected in the Project panel.
+    pub const REVEAL_COMP_IN_PROJECT: &str = "motion.layer.reveal_composition_in_project";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
@@ -346,6 +352,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::MINI_FLOW, "Composition Mini-Flowchart"),
+    (ids::COMP_FLOWCHART, "Composition Flowchart"),
+    (ids::REVEAL_COMP_IN_PROJECT, "Reveal Composition in Project"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
@@ -1587,6 +1595,11 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
+        ids::COMP_FLOWCHART => cx.open_panel("flowchart"),
+        ids::REVEAL_COMP_IN_PROJECT => {
+            s.selected_items = vec![info.path.clone()];
+            cx.open_panel("project");
+        }
         ids::MINI_FLOW => {
             s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
                 stage, &info.path,
@@ -1664,18 +1677,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
         ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
-            let queue = crate::render_queue::shared(cx.resources);
-            let dir = crate::render_queue::default_output_dir();
-            let mut queue = queue.lock();
-            if id == ids::SAVE_FRAME_AS {
-                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
-            } else {
-                queue.add(&info, &dir);
-            }
-            queue.assign_output(
-                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
-            );
-            drop(queue);
+            let frame = (id == ids::SAVE_FRAME_AS).then(|| info.frame_rate.time_to_frame(now));
+            crate::render_queue::add_to_queue(cx, &info, frame);
             cx.open_panel("render_queue");
         }
         ids::SELECT_NEXT_LAYER | ids::SELECT_PREV_LAYER => {

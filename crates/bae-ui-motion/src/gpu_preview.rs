@@ -392,11 +392,11 @@ impl GpuPreview {
         }
         self.sync_sources(resources);
         self.sync_effects(resources);
-        // A value drag in a panel: motion blur samples and effects reading other
-        // frames evaluate the uncommitted value too (#593).
+        // A value or keyframe drag in a panel: motion blur samples and effects
+        // reading other frames evaluate the uncommitted values too (#593).
         let overrides = resources
             .get::<crate::session::SharedSession>()
-            .and_then(|s| s.lock().scrub.as_ref().map(|s| s.overrides(stage)))
+            .map(|s| s.lock().live_overrides(stage))
             .unwrap_or_default();
         let live = (!overrides.is_empty()).then(|| overrides.clone());
         self.engine.anim.set_nested_switches(

@@ -207,7 +207,11 @@ pub(super) fn frame(
     }
     let options = tools.lock().options.clone();
     let prefs = super::prefs::ViewerPrefs::current(cx.resources);
-    let paths = overlay::editable_paths(stage, comp, &selected, Some(prefs));
+    let paths = if session.lock().view_options.paths {
+        overlay::editable_paths(stage, comp, &selected, Some(prefs))
+    } else {
+        Vec::new()
+    };
     let (alt, shift, space, primary_down, pressed) = ui.input(|i| {
         (
             i.modifiers.alt,
@@ -544,11 +548,29 @@ fn commit(
             let [x, y] = bae_motion::path::drawing_center(&path);
             let position = d.to_comp.transform_point3(DVec3::new(x, y, 0.0));
             let time = query::to_key_time(cx.stage, prim, session.lock().time(&info.path));
-            cx.invoke_with("attr.set_many", json!({"edits": [
-                {"path": prim, "attr": bae_motion::path::PATH_ATTR, "time": time, "value": Value::Bezier(path)},
-                {"path": layer, "attr": "transform:anchor_point", "time": time, "value": Value::Vec3([x, y, 0.0])},
-                {"path": layer, "attr": "transform:position", "time": time, "value": Value::Vec3(position.to_array())}
-            ]}));
+            let mut edits = vec![
+                json!({"path": prim, "attr": bae_motion::path::PATH_ATTR, "time": time, "value": Value::Bezier(path)}),
+                json!({"path": layer, "attr": "transform:anchor_point", "time": time, "value": Value::Vec3([x, y, 0.0])}),
+            ];
+            // Separate Dimensions: the layer evaluates X / Y (/ Z) Position,
+            // so those move (the combined value would leave the shape jumping).
+            if bae_motion::dimensions::is_separated(cx.stage, &layer) {
+                let axes = if crate::common::is_3d(cx.stage, &layer) {
+                    3
+                } else {
+                    2
+                };
+                for (attr, v) in bae_motion::dimensions::COMPONENTS
+                    .iter()
+                    .zip(position.to_array())
+                    .take(axes)
+                {
+                    edits.push(json!({"path": layer, "attr": attr, "time": time, "value": Value::Float(v)}));
+                }
+            } else {
+                edits.push(json!({"path": layer, "attr": "transform:position", "time": time, "value": Value::Vec3(position.to_array())}));
+            }
+            cx.invoke_with("attr.set_many", json!({ "edits": edits }));
             return;
         }
         set_vertices(cx, session, info, prim, &path);

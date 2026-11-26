@@ -190,6 +190,7 @@ pub(crate) fn hardware_information(
 pub struct Workspace {
     workbench: Workbench,
     show_about: bool,
+    home: bool,
     /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
     prefs: Arc<bae_prefs::PrefsStore>,
     settings: bae_ui::settings::SettingsDialog,
@@ -228,12 +229,15 @@ impl Workspace {
         Self {
             workbench,
             show_about: false,
+            home: false,
             audio_page_visible: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
                 .with_installed_ram(bae_platform::memory::total_bytes())
                 .with_host_buttons(&[
+                    "appearance.reset_coachmarks",
                     REVEAL_PREFERENCES,
+                    "startup_repair.start_in_safe_mode",
                     MEMORY_DETAILS,
                     GPU_INFORMATION,
                     "choose",
@@ -256,7 +260,15 @@ impl Workspace {
     /// Buttons of the Preferences window the shell runs ([`REVEAL_PREFERENCES`],
     /// `choose:<key>`).
     pub fn take_settings_requests(&mut self) -> Vec<String> {
-        self.settings.take_requests()
+        let mut requests = self.settings.take_requests();
+        requests.retain(|id| {
+            if id == "appearance.reset_coachmarks" {
+                self.workbench.reset_coachmarks();
+                return false;
+            }
+            true
+        });
+        requests
     }
 
     /// Answers a Choose Folder… button.
@@ -269,7 +281,21 @@ impl Workspace {
     /// such as Composition Settings) is open: it owns the keyboard and the menu
     /// commands wait.
     pub fn modal_open(&self, resources: &Resources) -> bool {
-        self.workbench.modal_open(resources) || self.settings.is_open()
+        self.home || self.workbench.modal_open(resources) || self.settings.is_open()
+    }
+
+    pub fn start_without_project(&mut self, first_run: bool) {
+        if self
+            .prefs
+            .current()
+            .bool("startup_repair.enable_home_screen")
+        {
+            if first_run {
+                self.show_role_picker();
+            } else {
+                self.home = true;
+            }
+        }
     }
 
     pub fn show_role_picker(&mut self) {
@@ -381,8 +407,28 @@ impl Workspace {
             title: &title,
             dirty: doc.is_dirty(),
         };
-        self.workbench.set_external_modal(self.settings.is_open());
-        let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
+        self.workbench
+            .set_external_modal(self.settings.is_open() || self.home);
+        let mut out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
+        if self.home {
+            let modal = egui::Modal::new(egui::Id::new("bae-home")).show(ui.ctx(), |ui| {
+                ui.heading(tr("Welcome to BAE"));
+                ui.horizontal(|ui| {
+                    for (label, id) in [
+                        ("New Project", bae_ui::action::ids::NEW_PROJECT),
+                        ("Open Project", bae_ui::action::ids::OPEN_PROJECT),
+                    ] {
+                        if ui.button(tr(label)).clicked() {
+                            out.push(Invocation::new(id));
+                            self.home = false;
+                        }
+                    }
+                });
+            });
+            if modal.should_close() {
+                self.home = false;
+            }
+        }
         if self.settings.is_open() {
             let outcome = self.settings.show(ui.ctx());
             if outcome == bae_ui::settings::Outcome::None {
