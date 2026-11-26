@@ -2,7 +2,7 @@
 //!
 //! - `size`:  release build of the app, size report and budget check
 //!   (`tools/size-budget/budget.toml`, ARCHITECTURE §11).
-//! - `dist`:  release build and packaging (`BAE.app` + zip on macOS, zip on Windows).
+//! - `dist`:  release build and packaging (`BAE.app` + DMG on macOS, zip on Windows).
 //! - `bench`: workspace benchmarks (entry point for workstream 04).
 //! - `icons`: render the application icon into `assets/icons/app/`.
 //!
