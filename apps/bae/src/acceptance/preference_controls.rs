@@ -67,3 +67,47 @@ fn reset_all_requires_confirmation_then_dialog_commit() {
         assert_eq!(h.state().prefs.current().bool(anchor), !commit);
     }
 }
+
+#[test]
+fn transmit_stays_disabled_even_with_a_saved_enabled_value() {
+    let mut h = gui();
+    let mut prefs = (*h.state().prefs.current()).clone();
+    prefs.set("video.enable_mercury_transmit", true);
+    h.state().prefs.set(prefs).unwrap();
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page": "video"}),
+    ));
+    settle(&mut h);
+    for label in [
+        "Enable Mercury Transmit",
+        "Disable Video Output When in the Background",
+    ] {
+        assert!(h.get_by_label(label).accesskit_node().is_disabled());
+    }
+    assert_eq!(
+        h.get_by_label("Enable Mercury Transmit")
+            .accesskit_node()
+            .toggled(),
+        Some(egui::accesskit::Toggled::False)
+    );
+    assert!(
+        !h.get_by_label(
+            "Enable Extended Display Range / High Dynamic Range Previews (When Available)"
+        )
+        .accesskit_node()
+        .is_disabled()
+    );
+    h.get_by_label("Cancel").click();
+    settle(&mut h);
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page": "export"}),
+    ));
+    settle(&mut h);
+    assert!(
+        h.get_by_label("Preview Output During Render Queue Output")
+            .accesskit_node()
+            .is_disabled()
+    );
+}

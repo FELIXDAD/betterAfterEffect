@@ -538,15 +538,17 @@ impl SettingsDialog {
             }
             Item::Group(title, list) => {
                 ui.add_space(4.0);
-                ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
-                egui::Frame::new()
-                    .stroke(egui::Stroke::new(1.0, color::DIVIDER))
-                    .corner_radius(3)
-                    .inner_margin(8)
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width() - 4.0);
-                        self.items(ui, list);
-                    });
+                ui.add_enabled_ui(*title != "Mercury Transmit", |ui| {
+                    ui.label(RichText::new(tr(title)).color(color::TEXT_STRONG));
+                    egui::Frame::new()
+                        .stroke(egui::Stroke::new(1.0, color::DIVIDER))
+                        .corner_radius(3)
+                        .inner_margin(8)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width() - 4.0);
+                            self.items(ui, list);
+                        });
+                });
                 ui.add_space(4.0);
             }
             Item::Button(id, label) => {
@@ -615,7 +617,10 @@ impl SettingsDialog {
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
-        let enabled = self.draft.enabled(p);
+        let enabled = !matches!(
+            p.key,
+            "project.dynamic_link_highest_number" | "export.preview_output_during_render_queue"
+        ) && self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 if p.indent {
@@ -633,7 +638,7 @@ impl SettingsDialog {
         let draft = &self.draft;
         match p.kind {
             Kind::Bool => {
-                let mut v = draft.bool(p.key);
+                let mut v = p.key != "video.enable_mercury_transmit" && draft.bool(p.key);
                 if widgets::checkbox(ui, &mut v, label).changed() {
                     self.set(p.key, v);
                 }
