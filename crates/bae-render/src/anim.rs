@@ -345,6 +345,20 @@ impl AnimEvaluator {
                     expansion: m.expansion as f32,
                 })
                 .collect();
+            out.layer_styles =
+                l.layer_styles
+                    .as_ref()
+                    .filter(|e| e.enabled)
+                    .map(|e| RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: true,
+                        params: e
+                            .params
+                            .iter()
+                            .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
+                            .collect(),
+                    });
             // The fx switch turns the whole effect stack off.
             out.effects = l
                 .effects

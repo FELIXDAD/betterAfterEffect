@@ -41,6 +41,7 @@ mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
+mod layer_styles;
 mod live_preview;
 mod masks;
 mod media_browser;
@@ -150,6 +151,7 @@ impl AppModule for MotionUiModule {
         // The Character panel's font list, scanned before it is first opened.
         ae_panels::character::prewarm();
         effects::register_i18n();
+        layer_styles::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }
@@ -223,6 +225,10 @@ impl AppModule for MotionUiModule {
         // panel has focus.
         let handler: std::sync::Arc<dyn ActionHandler> = std::sync::Arc::new(menus::MotionActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion", handler);
+        let _ = app.register_arc::<dyn ActionHandler>(
+            "bae-ui-motion.layer-styles",
+            std::sync::Arc::new(layer_styles::Actions),
+        );
         let effect_actions: std::sync::Arc<dyn ActionHandler> =
             std::sync::Arc::new(effects::EffectActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.effects", effect_actions);
