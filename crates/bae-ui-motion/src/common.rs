@@ -516,7 +516,9 @@ pub(crate) fn apply_edit(
         Edit::Live(value) => {
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value,
@@ -535,7 +537,9 @@ pub(crate) fn apply_edit(
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
             // Shown as committed until the command has run.
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value: value.clone(),
