@@ -35,17 +35,13 @@ pub(super) fn bottom_bar(
 
     // Magnification.
     let mut labels: Vec<String> = vec![tr("Fit").to_owned()];
-    labels.extend(
-        MAGNIFICATIONS
-            .iter()
-            .map(|m| format!("{:.1}%", m * 100.0).replace(".0%", "%")),
-    );
+    labels.extend(MAGNIFICATIONS.iter().map(|(_, label)| (*label).to_owned()));
     let items: Vec<&str> = labels.iter().map(String::as_str).collect();
     let current = match v.zoom {
         None => 0,
         Some(z) => MAGNIFICATIONS
             .iter()
-            .position(|m| (m - z).abs() < 1e-3)
+            .position(|(m, _)| (m - z).abs() < 1e-3)
             .map_or(usize::MAX, |i| i + 1),
     };
     let mut sel = current;
@@ -62,7 +58,7 @@ pub(super) fn bottom_bar(
         v.zoom = if sel == 0 {
             None
         } else {
-            Some(MAGNIFICATIONS[sel - 1])
+            Some(MAGNIFICATIONS[sel - 1].0)
         };
     }
     if !shown.is_empty() {

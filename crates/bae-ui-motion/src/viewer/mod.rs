@@ -50,7 +50,96 @@ pub(crate) mod view3d;
 pub(crate) use overlay::{mask_color, path_shapes};
 pub(crate) use transform::nudge_layers;
 
-const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
+/// The magnification popup (AE 26): `(magnification, label)`.
+pub(crate) const MAGNIFICATIONS: [(f32, &str); 14] = [
+    (0.015625, "1.5%"),
+    (0.03125, "3.1%"),
+    (0.0625, "6.25%"),
+    (0.125, "12.5%"),
+    (0.25, "25%"),
+    (0.333, "33.3%"),
+    (0.5, "50%"),
+    (1.0, "100%"),
+    (2.0, "200%"),
+    (4.0, "400%"),
+    (8.0, "800%"),
+    (16.0, "1600%"),
+    (32.0, "3200%"),
+    (64.0, "6400%"),
+];
+/// Zoom In / Zoom Out (. and ,) and Zoom tool clicks step by powers of two
+/// (AE: 100 % → 50 % → 25 %, no 33.3 %).
+const ZOOM_STEPS: [f32; 13] = [
+    0.015625, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0,
+];
+
+/// Zoom to 100 % (/ in the Composition panel).
+pub(crate) const ZOOM_100: &str = "motion.viewer.zoom_100";
+
+/// The next zoom step above (`up`) or below `mag`.
+fn next_step(mag: f32, up: bool) -> Option<f32> {
+    if up {
+        ZOOM_STEPS.iter().copied().find(|m| *m > mag * 1.01)
+    } else {
+        ZOOM_STEPS.iter().rev().copied().find(|m| *m < mag * 0.99)
+    }
+}
+
+/// What the mouse wheel and trackpad did this frame over a picture (the
+/// viewer and the Layer panel share it).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Wheel {
+    /// Pinch or Cmd/Ctrl+scroll (egui's zoom factor; 1 = none).
+    pub pinch: f32,
+    /// Wheel notches up (> 0) or down: zoom by AE's ×9/8 per notch.
+    pub notches: f32,
+    /// Scrolling to pan (macOS trackpads, Shift+wheel), points.
+    pub pan: Vec2,
+    /// Alt/Option: zoom around the centre instead of the pointer.
+    pub alt: bool,
+}
+
+/// Points of pixel-precise scrolling that make one wheel notch (Windows and
+/// Linux high-resolution wheels report pixels).
+const POINTS_PER_NOTCH: f32 = 50.0;
+
+/// Read this frame's wheel input. A mouse wheel zooms; Shift+wheel scrolls
+/// sideways; pixel-precise scrolling pans on macOS (AE 25.3+ trackpads) and
+/// zooms elsewhere, where it comes from high-resolution wheels (#571).
+pub(crate) fn wheel(ui: &Ui) -> Wheel {
+    ui.input(|i| {
+        let mut w = Wheel {
+            pinch: i.zoom_delta(),
+            alt: i.modifiers.alt,
+            ..Wheel::default()
+        };
+        for e in &i.events {
+            if let egui::Event::MouseWheel {
+                unit,
+                delta,
+                modifiers,
+                ..
+            } = e
+            {
+                match unit {
+                    _ if modifiers.shift => {
+                        let lines = if *unit == egui::MouseWheelUnit::Point {
+                            1.0
+                        } else {
+                            40.0
+                        };
+                        w.pan.x += (delta.x + delta.y) * lines;
+                    }
+                    egui::MouseWheelUnit::Point if cfg!(target_os = "macos") => w.pan += *delta,
+                    egui::MouseWheelUnit::Point => w.notches += delta.y / POINTS_PER_NOTCH,
+                    egui::MouseWheelUnit::Line => w.notches += delta.y,
+                    egui::MouseWheelUnit::Page => w.notches += delta.y * 4.0,
+                }
+            }
+        }
+        w
+    })
+}
 /// Magnification change per mouse-wheel notch, in and out (AE 26 Smooth Zoom:
 /// ×9/8 and ×7/8, R1).
 const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
@@ -75,6 +164,8 @@ pub struct CompositionViewer {
     locked: bool,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
+    /// View ▸ Zoom to 100 % (/) waits for the frame's area.
+    pending_100: bool,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
     /// GPU previews of the other views of the layout (by view index).
@@ -207,16 +298,7 @@ impl CompositionViewer {
 
     fn step_zoom(&mut self, up: bool, area: Rect, info: &CompInfo, ppp: f32) {
         let (_, mag) = self.view(area, info, ppp);
-        let next = if up {
-            MAGNIFICATIONS.iter().copied().find(|m| *m > mag * 1.01)
-        } else {
-            MAGNIFICATIONS
-                .iter()
-                .rev()
-                .copied()
-                .find(|m| *m < mag * 0.99)
-        };
-        if let Some(m) = next {
+        if let Some(m) = next_step(mag, up) {
             self.zoom_by(m / mag, None, area, info, ppp);
         }
     }
@@ -268,16 +350,7 @@ impl CompositionViewer {
     /// Zoom tool click: the next magnification step, keeping `at` in place.
     fn step_zoom_at(&mut self, up: bool, at: Pos2, area: Rect, info: &CompInfo, ppp: f32) {
         let (_, mag) = self.view(area, info, ppp);
-        let next = if up {
-            MAGNIFICATIONS.iter().copied().find(|m| *m > mag * 1.01)
-        } else {
-            MAGNIFICATIONS
-                .iter()
-                .rev()
-                .copied()
-                .find(|m| *m < mag * 0.99)
-        };
-        if let Some(m) = next {
+        if let Some(m) = next_step(mag, up) {
             self.zoom_by(m / mag, Some(at), area, info, ppp);
         }
     }
@@ -458,6 +531,10 @@ impl Panel for CompositionViewer {
                 self.pan = Vec2::ZERO;
                 true
             }
+            ZOOM_100 => {
+                self.pending_100 = true;
+                true
+            }
             _ => crate::actions::handle(action, cx, &session),
         }
     }
@@ -514,6 +591,11 @@ impl Panel for CompositionViewer {
             });
         }
 
+        // Zoom to 100 % around the middle of the view (#569).
+        if std::mem::take(&mut self.pending_100) {
+            let (_, mag) = self.view(area, &info, ppp);
+            self.zoom_by(1.0 / mag, None, area, &info, ppp);
+        }
         if let Some(up) = self.pending_zoom.take() {
             self.step_zoom(up, area, &info, ppp);
         }
@@ -534,41 +616,20 @@ impl Panel for CompositionViewer {
         // around the view's center; Shift: scrolls sideways); trackpad scrolling
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
-            let (zoom, wheel) = ui.input(|i| {
-                let mut notches = 0.0f32;
-                let mut pan = Vec2::ZERO;
-                for e in &i.events {
-                    if let egui::Event::MouseWheel {
-                        unit,
-                        delta,
-                        modifiers,
-                        ..
-                    } = e
-                    {
-                        match unit {
-                            egui::MouseWheelUnit::Point => pan += *delta,
-                            _ if modifiers.shift => pan.x += (delta.x + delta.y) * 40.0,
-                            egui::MouseWheelUnit::Line => notches += delta.y,
-                            egui::MouseWheelUnit::Page => notches += delta.y * 4.0,
-                        }
-                    }
-                }
-                (i.zoom_delta(), (notches, pan, i.modifiers.alt))
-            });
-            let (notches, pan, alt) = wheel;
-            if zoom != 1.0 {
-                self.zoom_by(zoom, resp.hover_pos(), area, &info, ppp);
+            let w = wheel(ui);
+            if w.pinch != 1.0 {
+                self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
-                if notches != 0.0 {
-                    let around = if alt { None } else { resp.hover_pos() };
-                    let step = if notches > 0.0 {
+                if w.notches != 0.0 {
+                    let around = if w.alt { None } else { resp.hover_pos() };
+                    let step = if w.notches > 0.0 {
                         WHEEL_ZOOM_IN
                     } else {
                         WHEEL_ZOOM_OUT
                     };
-                    self.zoom_by(step.powf(notches.abs()), around, area, &info, ppp);
+                    self.zoom_by(step.powf(w.notches.abs()), around, area, &info, ppp);
                 }
-                self.pan += pan;
+                self.pan += w.pan;
             }
         }
         // With a camera tool these drags pan and dolly the camera.
