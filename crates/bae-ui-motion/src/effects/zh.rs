@@ -17,6 +17,23 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Effect", "效果"),
     ("Effects & Presets", "效果和预设"),
     ("Search", "搜索"),
+    (
+        "Show Effects for All Color Depths",
+        "显示所有颜色深度的效果",
+    ),
+    ("Show GPU Capable Effects Only", "仅显示 GPU 能够实现的效果"),
+    ("Categories", "类别"),
+    ("Alphabetical", "按字母顺序"),
+    ("Explorer Folders", "资源管理器文件夹"),
+    ("Finder Folders", "查找程序文件夹"),
+    ("Category", "类别"),
+    ("Version", "版本"),
+    ("Effect Manager", "效果管理器"),
+    (
+        "Changes take effect when BAE restarts.",
+        "更改将在重新启动 BAE 后生效。",
+    ),
+    ("Built-in Effects", "内置效果"),
     // Effect commands (bae-motion `effect.*`).
     ("Apply Effect", "应用效果"),
     ("Paint Stroke", "绘画描边"),

@@ -428,7 +428,7 @@
 | Effect Controls | 458753 | `window.panel` | `{"id":"effect_controls","toggle":true}` | F3 / Ctrl+Shift+T | F3 / Cmd+Shift+T | B | ✅ |
 | Last Effect | 458754 | `motion.effect.last_effect` |  | Ctrl+Alt+Shift+E | Cmd+Opt+Shift+E | B | ✅ |
 | Remove All | 458755 | `motion.effect.remove_all` |  | Ctrl+Shift+E | Cmd+Shift+E | B | ✅ |
-| Manage Effects... | 458757 | `motion.effect.manage_effects` |  |  |  | E | ⏸ |
+| Manage Effects... | 458757 | `motion.effect.manage_effects` |  |  |  | E | ✅ |
 | 效果分类（3D Channel、Audio、Blur & Sharpen、Boris FX Mocha、Channel、Cinema 4D、Color Correction、Distort、Expression Controls、Generate、Immersive Video、Keying、Matte、Noise & Grain、Obsolete、Perspective、Simulation、Stylize、Text、Time、Transition、Utility） ▸ 各效果 | | `motion.effect.apply` | `{"match_name":"…"}` | | | B | ☐ |
 
 ### Animation
@@ -439,7 +439,7 @@
 | Save Animation Preset... | 851970 | `motion.anim.save_animation_preset` |  |  |  | E | ✅ |
 | Apply Animation Preset... | 851971 | `motion.anim.apply_animation_preset` |  |  |  | E | ✅ |
 | Recent Animation Presets ▸ (recent presets) | 11599873 | `motion.anim.recent_animation_preset` |  | Ctrl+Alt+Shift+F | Cmd+Opt+Shift+F | E | ⋯ |
-| Browse Presets... | 851973 | `motion.anim.browse_presets` |  |  |  | E | ⏸ |
+| Browse Presets... | 851973 | `motion.anim.browse_presets` |  |  |  | E | ◐ |
 | Set Keyframe | 851975 | `motion.anim.set_keyframe` |  |  |  | B | ☐ |
 | Toggle Hold Keyframe | 851976 | `motion.toggle_hold` |  | Ctrl+Alt+H | Control+Cmd+Opt+H | B | ✅ |
 | Keyframe Interpolation... | 851977 | `motion.anim.keyframe_interpolation` |  | Ctrl+Alt+K | Cmd+Opt+K | C | ✅ |
