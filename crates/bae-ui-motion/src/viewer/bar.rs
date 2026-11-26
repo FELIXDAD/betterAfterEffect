@@ -97,10 +97,11 @@ pub(super) fn bottom_bar(
         }
     }
 
+    let mut opts = session.lock().view_options;
     for (on, icon, tip) in [
         (&mut v.checker, Icon::TransparencyGrid, "Transparency Grid"),
-        (&mut v.safe, Icon::RegionOfInterest, "Title/Action Safe"),
-        (&mut v.grid, Icon::Guides, "Grid"),
+        (&mut opts.safe, Icon::RegionOfInterest, "Title/Action Safe"),
+        (&mut opts.grid, Icon::Guides, "Grid"),
     ] {
         if icons::button(ui, icon, 20.0, *on)
             .labeled_toggle(egui::WidgetType::Checkbox, tr(tip), *on)
@@ -110,6 +111,7 @@ pub(super) fn bottom_bar(
             *on = !*on;
         }
     }
+    session.lock().view_options = opts;
     // 3D View popup.
     let views = super::view3d::View3d::ALL;
     let labels: Vec<&str> = views.iter().map(|v| tr(v.title())).collect();
@@ -128,6 +130,31 @@ pub(super) fn bottom_bar(
             .entry(info.path.clone())
             .or_default()
             .switch(views[i]);
+    }
+    // Select View Layout (AE hides bar controls that do not fit).
+    if ui.available_width() > 170.0 {
+        let layouts = [tr("1 View"), tr("2 Views"), tr("4 Views")];
+        let n = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .map_or(1, super::view3d::Views::layout);
+        let mut k = match n {
+            2 => 1,
+            4 => 2,
+            _ => 0,
+        };
+        if widgets::dropdown(ui, "layout", &mut k, &layouts, 70.0)
+            .on_hover_text(tr("Select View Layout"))
+            .changed()
+        {
+            session
+                .lock()
+                .views3d
+                .entry(info.path.clone())
+                .or_default()
+                .set_layout([1, 2, 4][k]);
+        }
     }
     ui.label(
         egui::RichText::new(common::timecode(info, time))

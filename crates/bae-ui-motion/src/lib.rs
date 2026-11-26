@@ -24,6 +24,7 @@
 pub mod actions;
 pub mod ae_panels;
 mod ae_shells;
+mod assist;
 pub mod catalog;
 mod common;
 mod context_menu;
@@ -32,6 +33,7 @@ pub mod dialogs;
 pub mod effects;
 mod expr;
 mod expr_menu;
+pub mod footage_panel;
 mod gpu_preview;
 mod graph;
 mod i18n;
@@ -40,7 +42,10 @@ mod layer_panel;
 pub mod menus;
 mod paint_panels;
 mod panels;
+mod playback;
 mod prefs;
+mod preview_snapshot;
+pub mod progress_metadata;
 mod project;
 mod props;
 mod render;
@@ -79,7 +84,10 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     render_queue::register,
     layer_panel::register,
     ae_panels::register,
+    footage_panel::register,
+    progress_metadata::register,
     paint_panels::register,
+    assist::register,
     // Chinese strings only.
     actions::register,
     context_menu::register,
