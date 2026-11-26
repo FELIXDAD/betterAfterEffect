@@ -561,3 +561,44 @@ fn linked_channel_average_and_neutralizer_preserve_alpha() {
     );
     assert_close(&a, &image, r, 0.0001, "neutral controls");
 }
+
+#[test]
+fn color_stabilizer_restores_the_pivot_frame_levels() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(64, 36);
+    let reference = Pixels::new(rect, |x, _| {
+        let l = (x as f32 + 0.5) / 64.;
+        [l, l * 0.8, l * 0.6, 1.]
+    });
+    let current = reference.map(|c| {
+        [
+            c[0] * 0.75 + 0.07,
+            c[1] * 0.8 + 0.08,
+            c[2] * 0.85 + 0.09,
+            c[3],
+        ]
+    });
+    let fx = builtin("ADBE Deflicker");
+    let inst = instance(&fx.info.match_name, vec![]);
+    let mut p = bae_render::EffectParams::new(&inst);
+    p.layer_bounds = rect;
+    p.comp_time = p.time_step;
+    p.time = p.comp_time;
+    let dep = fx.effect().layer_dependencies(&p).remove(0);
+    assert_eq!(dep.time, bae_model::Time::ZERO);
+    let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+    target.set_effect_inputs(vec![(dep, reference.upload(&gpu, F32))], vec![]);
+    let out = fx
+        .render(&mut target, &p, &current.upload(&gpu, F32), rect)
+        .unwrap();
+    target.finish().unwrap();
+    assert_close(
+        &Pixels::download(&gpu, &out),
+        &reference,
+        rect,
+        0.002,
+        "pivot levels",
+    );
+}

@@ -481,6 +481,16 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         }),
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
+            let title = item.title;
+            let spec = match panel.as_str() {
+                // AE: "Composition: Comp 1", "Timeline: Comp 1" ("（无）" without).
+                "composition" | "timeline" | "layer" | "footage" | "flowchart"
+                | "effect_controls" => {
+                    let which = panel.clone();
+                    spec.label_when(move |cx| Some(panel_label(cx, title, &which)))
+                }
+                _ => spec,
+            };
             spec.checked_when(move |cx| cx.panel_open(&panel))
         }
         bae_ui::action::ids::SWITCH_WORKSPACE => {
@@ -489,6 +499,26 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
         }
         _ => spec,
     }
+}
+
+/// The Window menu title of a viewer-like panel: "<panel>: <what it shows>".
+fn panel_label(cx: &MenuContext<'_>, title: &str, panel: &str) -> String {
+    let session = common::session(cx.resources);
+    let shown = match panel {
+        "composition" | "timeline" => common::active_comp(cx.stage, &session).map(|c| c.name),
+        "effect_controls" | "layer" => session
+            .lock()
+            .selected_layers
+            .first()
+            .map(|l| bae_motion::query::display_name_of(cx.stage, l)),
+        _ => None,
+    };
+    let none = bae_ui::tr("(none)");
+    format!(
+        "{}: {}",
+        bae_ui::tr(title),
+        shown.as_deref().unwrap_or(none)
+    )
 }
 
 /// A string parameter of a catalog entry's parameter text.

@@ -629,8 +629,8 @@
 | Render Queue | 524327 | `window.panel` | `{"id":"render_queue","toggle":true}` | Ctrl+Alt+0 | Cmd+Opt+0 | B | ✅ |
 | Footage | 524328 | `window.panel` | `{"id":"footage","toggle":true}` |  |  | E | ⏸ |
 | Project | 524329 | `window.panel` | `{"id":"project","toggle":true}` | Ctrl+0 | Cmd+0 | B | ✅ |
-| (script panel) | 524331 | `motion.window.script_panel` |  |  |  | B | ⋯ |
-| (script panel) | 524338 | `motion.window.script_panel` |  |  |  | B | ⋯ |
+| Create Nulls From Paths.jsx（仅 Windows） | 524331 | `motion.window.script_panel` | `{"script":"Create Nulls From Paths.jsx"}` |  |  | B | ⏸ |
+| VR Comp Editor.jsx（仅 Windows） | 524338 | `motion.window.script_panel` | `{"script":"VR Comp Editor.jsx"}` |  |  | B | ⏸ |
 
 ### Help
 
@@ -821,7 +821,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ☐ |
 | `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ☐ |
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ✅ |
-| `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ☐ |
+| `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ✅ |
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  |  | C | ⏸ |
 | `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Control+\` |  | C | ☐ |
 | `TwirlPreserveSolo` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":true}` | Shift+\` | Shift+\` |  | C | ☐ |
@@ -1141,7 +1141,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `SwitchTo3DViewC` | `motion.view.switch_3d_view_shortcut` | `{"slot":"c"}` | F12 | F12 |  | A | ⏸ |
 | `SwitchTo3DViewFirst`（同一快捷键 AE 先给了别的命令） | `motion.view.switch_3d_view_shortcut` | `{"slot":"first"}` | F10 | F10 |  | A | ⏸ |
 | `ToggleCastsShadows` | `motion.layer.casts_shadows` |  | Alt+Shift+C | Opt+Shift+C |  | B | ⏸ |
-| `ToggleSwitchesModes` | `motion.timeline.toggle_switches_modes` |  | F4 | F4 |  | C | ☐ |
+| `ToggleSwitchesModes` | `motion.timeline.toggle_switches_modes` |  | F4 | F4 |  | C | ✅ |
 | `WireframeQualityRecurse` | `motion.layer.quality` | `{"quality":"wireframe","nested":true}` |  | Control+Cmd+Opt+Shift+U |  | B | ⏸ |
 
 ### `CSwitchboardModal`
