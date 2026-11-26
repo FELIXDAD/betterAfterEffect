@@ -273,7 +273,7 @@ impl Panel for FootagePanel {
                     .clamp(0.01, 1.0);
                 let r = Rect::from_center_size(view.center(), vec2(w, h) * scale);
                 if self.display.grid {
-                    crate::viewer::checkerboard(&p, r.intersect(view));
+                    crate::viewer::checkerboard(&p, r.intersect(view), cx.resources);
                 }
                 p.image(
                     egui::TextureId::User(handle),

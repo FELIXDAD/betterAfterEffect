@@ -49,7 +49,6 @@ mod project_preferences;
 mod release_001;
 #[cfg(target_os = "macos")]
 mod render_queue;
-#[cfg(target_os = "macos")]
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;
