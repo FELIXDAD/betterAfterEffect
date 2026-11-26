@@ -3296,3 +3296,58 @@ fn new_folder_and_open_layer() {
     h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
     assert_eq!(h.session().lock().layer_panel, Some(solid));
 }
+
+/// Camera Options, Light Options (by light type) and a 3D layer's Material
+/// Options sit after Transform, as in AE's timeline.
+#[test]
+fn camera_light_and_material_options_groups() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let layer = |h: &mut Harness, kind: &str| {
+        PrimPath::new(
+            h.run("layer.create", json!({"comp": comp, "kind": kind}))["path"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let camera = layer(&mut h, "camera");
+    let light = layer(&mut h, "light");
+    let groups = |h: &Harness, l: &PrimPath| {
+        crate::props::layer_tree(&h.stage, l)
+            .into_iter()
+            .filter_map(|n| match n {
+                crate::props::Node::Group {
+                    label, children, ..
+                } => Some((label, children.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cam = groups(&h, &camera);
+    assert_eq!(
+        cam.last(),
+        Some(&("Camera Options".to_owned(), 13)),
+        "{cam:?}"
+    );
+    let lit = groups(&h, &light);
+    assert_eq!(lit.last().map(|g| g.0.as_str()), Some("Light Options"));
+    assert_eq!(lit.last().map(|g| g.1), Some(10), "a spot light: {lit:?}");
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("ambient".into())}),
+    );
+    assert_eq!(groups(&h, &light).last().map(|g| g.1), Some(2), "ambient");
+    assert!(
+        groups(&h, &solid).iter().all(|g| g.0 != "Material Options"),
+        "2D layers have none"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "three_d", "value": Value::Bool(true)}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 9))
+    );
+}

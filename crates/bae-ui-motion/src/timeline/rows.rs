@@ -914,7 +914,24 @@ impl TimelinePanel {
                 _ => &[],
             };
             let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
-            let edit = if let bae_model::Value::Bool(on) = value {
+            let edit = if let Some(choices) = common::int_choices(attr) {
+                // AE's dropdowns stored as numbers (Off / On / Only, Iris
+                // Shape); older projects stored the shadow switches as booleans.
+                let cur = match &value {
+                    bae_model::Value::Bool(on) => i64::from(*on),
+                    v => v.as_f64().map_or(0, |n| n.round() as i64),
+                };
+                let names: Vec<&str> = choices.iter().map(|(_, n)| tr(n)).collect();
+                let mut sel = choices.iter().position(|(v, _)| *v == cur).unwrap_or(0);
+                let before = sel;
+                widgets::dropdown(&mut child, id.with("int_choice"), &mut sel, &names, 160.0)
+                    .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
+                if sel != before {
+                    common::Edit::Commit(bae_model::Value::Int(choices[sel].0))
+                } else {
+                    common::Edit::None
+                }
+            } else if let bae_model::Value::Bool(on) = value {
                 // AE's timeline switches On/Off with hot text, not a checkbox.
                 let text = tr(if on { "On" } else { "Off" });
                 if widgets::link(&mut child, text)
@@ -1264,7 +1281,7 @@ fn insert_expression(
 /// these words read differently elsewhere in AE's Chinese UI (a text selector's
 /// Intersect is 相交, a mask's 交集; its Add is 相加, the shape tools' 添加).
 fn option_label(token: &str) -> &'static str {
-    const NAMES: [(&str, &str, &str); 18] = [
+    const NAMES: [(&str, &str, &str); 20] = [
         ("percentage", "Percentage", "百分比"),
         ("index", "Index", "索引"),
         ("characters", "Characters", "字符"),
@@ -1287,6 +1304,12 @@ fn option_label(token: &str) -> &'static str {
         ("triangle", "Triangle", "三角形"),
         ("round", "Round", "圆形"),
         ("smooth", "Smooth", "平滑"),
+        ("none", "None", "无"),
+        (
+            "inverse_square_clamped",
+            "Inverse Square Clamped",
+            "反向平方限制",
+        ),
     ];
     let zh = bae_ui::i18n::lang() == bae_ui::i18n::Lang::Zh;
     NAMES

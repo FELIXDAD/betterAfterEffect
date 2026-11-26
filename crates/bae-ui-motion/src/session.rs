@@ -71,7 +71,12 @@ pub struct Playback {
     /// The current time before playing (kept on stop when Move Time To
     /// Preview Time is off).
     before: Time,
+    /// When playback was asked for: the pre-roll waits a little at most.
+    requested: Instant,
 }
+
+/// Longest the clock waits for playback's first frame (a cold start).
+const PREROLL_MAX: Duration = Duration::from_millis(250);
 
 impl Playback {
     fn ordinal_at(&self, now: Instant) -> u64 {
@@ -497,6 +502,23 @@ impl Session {
     }
 
     /// Restart the frame clock at `t`: playback continues from there.
+    /// Pre-roll: while playback has not left its first frame and the viewer
+    /// cannot show that frame yet (a cold start right after a seek), the
+    /// clock waits for it ([`PREROLL_MAX`] at most) instead of skipping it.
+    /// Sound drives its own clock and is not held.
+    pub(crate) fn hold_first_frame(&mut self, ready: bool) {
+        if self.audio_clock {
+            return;
+        }
+        if let Some(pb) = &mut self.playback
+            && !ready
+            && pb.ordinal == 0
+            && pb.requested.elapsed() < PREROLL_MAX
+        {
+            pb.started = Instant::now();
+        }
+    }
+
     fn restart_clock(&mut self, t: Time) {
         if let Some(pb) = &mut self.playback {
             pb.frame = pb.rate.time_to_frame(t);
@@ -767,6 +789,7 @@ impl Session {
             revision: None,
             range,
             before: now,
+            requested: started,
         });
         self.playback_stats = PlaybackStats {
             sample: Some(started),
