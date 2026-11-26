@@ -233,6 +233,7 @@ impl Workspace {
             settings: bae_ui::settings::SettingsDialog::default()
                 .with_installed_ram(bae_platform::memory::total_bytes())
                 .with_host_buttons(&[
+                    "appearance.reset_coachmarks",
                     REVEAL_PREFERENCES,
                     MEMORY_DETAILS,
                     GPU_INFORMATION,
@@ -256,7 +257,15 @@ impl Workspace {
     /// Buttons of the Preferences window the shell runs ([`REVEAL_PREFERENCES`],
     /// `choose:<key>`).
     pub fn take_settings_requests(&mut self) -> Vec<String> {
-        self.settings.take_requests()
+        let mut requests = self.settings.take_requests();
+        requests.retain(|id| {
+            if id == "appearance.reset_coachmarks" {
+                self.workbench.reset_coachmarks();
+                return false;
+            }
+            true
+        });
+        requests
     }
 
     /// Answers a Choose Folder… button.
@@ -524,11 +533,15 @@ impl Workspace {
 
     /// English title of the active workspace.
     pub fn active_workspace_title(&self) -> &str {
-        let active = self.workbench.active_workspace();
+        self.workspace_title(self.workbench.active_workspace())
+            .unwrap_or("")
+    }
+
+    pub fn workspace_title(&self, workspace: &str) -> Option<&str> {
         self.workbench
             .workspaces()
-            .find(|(id, _)| *id == active)
-            .map_or("", |(_, p)| p.title.as_str())
+            .find(|(id, _)| *id == workspace)
+            .map(|(_, p)| p.title.as_str())
     }
 
     /// Workspace ids and English titles in bar order (Window menu).
