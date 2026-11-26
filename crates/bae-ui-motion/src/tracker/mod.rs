@@ -136,7 +136,7 @@ pub(crate) fn create(cx: &mut PanelContext<'_>, layer: &PrimPath, stabilize: boo
         "tracker.create",
         json!({"layer":layer,"center":((min+max)*0.5).to_array(),"stabilize":stabilize}),
     );
-    let folder = layer.child("trackers").expect("folder");
+    let folder = layer.child(model::FOLDER).expect("folder");
     let pending = (1..).find_map(|i| {
         let p = folder.child(&format!("tracker_{i}")).ok()?;
         (!cx.stage.has_prim(&p)).then_some(p)

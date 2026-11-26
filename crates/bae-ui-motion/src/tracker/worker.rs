@@ -101,8 +101,10 @@ pub(super) fn start(
                         let frame = renderer
                             .render_frame(&rc, &RenderRequest::full())
                             .map_err(|e| e.to_string())?;
-                        if let Some(warning) = frame.warnings.first() {
-                            return Err(warning.clone());
+                        // A warning (a missing effect or footage) still leaves a
+                        // frame to track, as in AE; only errors stop the analysis.
+                        for warning in &frame.warnings {
+                            tracing::debug!("tracking: {warning}");
                         }
                         if !frame.incomplete {
                             break frame;
