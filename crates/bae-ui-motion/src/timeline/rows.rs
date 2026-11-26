@@ -753,7 +753,7 @@ impl TimelinePanel {
                             json!({"keys": [KeyRef::new(path.clone(), attr, key_now)]}),
                         );
                     } else if let Some(v) =
-                        common::current_value(self.eval.get(cx.resources), stage, path, attr, now)
+                        common::current_value(self.eval.get(cx.stage), stage, path, attr, now)
                     {
                         cx.invoke_with(
                             "attr.set_at",
@@ -897,7 +897,7 @@ impl TimelinePanel {
             .as_ref()
             .and_then(|s| s.value_for(path, attr))
             .cloned()
-            .or_else(|| common::current_value(self.eval.get(cx.resources), stage, path, attr, now));
+            .or_else(|| common::current_value(self.eval.get(cx.stage), stage, path, attr, now));
         if attr == "text:path" {
             // Path Options > Path: a popup of the layer's masks, even when unset.
             let vr = Rect::from_min_max(
