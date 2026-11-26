@@ -17,6 +17,7 @@ use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::common;
+use crate::panel_columns::{Column, Columns};
 use crate::session::SharedSession;
 
 /// Drag payload: a project item dragged into a comp.
@@ -81,6 +82,8 @@ impl ItemDrag {
 pub struct ProjectPanel {
     collapsed: HashSet<PrimPath>,
     search: String,
+    columns: Columns,
+    thumbnail_grid: bool,
     /// Edit ▸ Find: focus the search field next frame.
     focus_search: bool,
     rename: Option<(PrimPath, String)>,
@@ -185,7 +188,11 @@ impl ProjectPanel {
         };
         let stage = cx.stage;
         let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
-        p.rect_filled(thumb, 1.0, color::FIELD);
+        if self.thumbnail_grid {
+            crate::viewer::checkerboard(p, thumb);
+        } else {
+            p.rect_filled(thumb, 1.0, color::FIELD);
+        }
         let icon = match item_kind(stage, path) {
             Some(ItemKind::Comp) => Icon::Composition,
             Some(ItemKind::Folder) => Icon::Folder,
@@ -230,16 +237,107 @@ impl ProjectPanel {
     }
 }
 
-fn columns(width: f32) -> [f32; 5] {
-    // label, name, type, size, duration (x offsets).
-    let name_w = (width - 16.0 - 90.0 - 80.0 - 90.0).max(90.0);
-    [
-        6.0,
-        22.0,
-        22.0 + name_w,
-        22.0 + name_w + 90.0,
-        22.0 + name_w + 170.0,
-    ]
+pub(crate) const COLUMNS: &[Column] = &[
+    Column::new("Name", 150.0, true, true),
+    Column::new("Label", 18.0, true, false),
+    Column::new("Type", 80.0, true, false),
+    Column::new("Size", 90.0, true, false),
+    Column::new("Frame Rate", 75.0, true, false),
+    Column::new("Media Start", 90.0, false, false),
+    Column::new("Media End", 90.0, false, false),
+    Column::new("Media Duration", 96.0, false, false),
+    Column::new("In Point", 90.0, true, false),
+    Column::new("Out Point", 90.0, true, false),
+    Column::new("Duration", 90.0, false, false),
+    Column::new("Tape Name", 90.0, true, false),
+    Column::new("Comment", 110.0, true, false),
+    Column::new("File Path", 200.0, true, false),
+    Column::new("Date", 100.0, false, false),
+    Column::new("Video Info", 130.0, true, false),
+];
+
+fn column_value(stage: &Stage, row: &Row, title: &str) -> String {
+    let Some(v) = stage.prim(&row.path) else {
+        return String::new();
+    };
+    let value = |key: &str| query::static_value(&v, key);
+    let time = |key: &str| match value(key) {
+        Some(Value::Time(t)) => Some(t),
+        _ => None,
+    };
+    let comp = query::comp_info(stage, &row.path);
+    let rate = comp
+        .as_ref()
+        .map(|c| c.frame_rate)
+        .or_else(|| match value("frame_rate") {
+            Some(Value::FrameRate(rate)) => Some(rate),
+            Some(n) => n
+                .as_f64()
+                .filter(|fps| *fps > 0.0)
+                .map(bae_model::FrameRate::from_fps),
+            None => None,
+        });
+    let duration = comp
+        .as_ref()
+        .map(|c| c.duration)
+        .or_else(|| time("duration"));
+    let start = comp
+        .as_ref()
+        .map(|c| c.display_start)
+        .or_else(|| time("media_start"))
+        .unwrap_or(Time::ZERO);
+    let end = duration
+        .zip(rate)
+        .map(|(d, r)| start + (d - r.frame_to_time(1)).max(Time::ZERO));
+    let text = |key: &str| {
+        value(key)
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default()
+    };
+    match title {
+        "Type" => describe(stage, &row.path, row.kind).0,
+        "Size" => describe(stage, &row.path, row.kind).1,
+        "Frame Rate" => rate
+            .map(|r| format!("{:.2}", r.as_f64()))
+            .unwrap_or_default(),
+        "File Path" => bae_model::asset::AssetFile::from_prim(&v)
+            .map(|f| f.original)
+            .unwrap_or_default(),
+        "Tape Name" => text("tape_name"),
+        "Comment" => text("comment"),
+        "Date" => bae_model::asset::AssetFile::from_prim(&v)
+            .and_then(|f| f.mtime_ms)
+            .and_then(|ms| {
+                let duration = std::time::Duration::from_millis(ms.unsigned_abs());
+                if ms < 0 {
+                    std::time::UNIX_EPOCH.checked_sub(duration)
+                } else {
+                    std::time::UNIX_EPOCH.checked_add(duration)
+                }
+            })
+            .map(bae_platform::utc_label)
+            .unwrap_or_default(),
+        "Video Info" => {
+            let size = describe(stage, &row.path, row.kind).1;
+            match (size.is_empty(), rate) {
+                (false, Some(r)) => format!("{size} ({:.2} fps)", r.as_f64()),
+                _ => size,
+            }
+        }
+        _ => {
+            let t = match title {
+                "Media Start" => duration.map(|_| start),
+                "In Point" => time("in_point").or(duration.map(|_| start)),
+                "Media End" => end,
+                "Out Point" => time("out_point").or(end),
+                "Duration" | "Media Duration" => duration,
+                _ => None,
+            };
+            t.zip(rate)
+                .map(|(t, r)| widgets::timecode(r.time_to_frame(t), r.as_f64()))
+                .unwrap_or_default()
+        }
+    }
 }
 
 /// The project's color depth in bits per channel (Project Settings).
@@ -268,6 +366,24 @@ impl ProjectPanel {
 }
 
 impl Panel for ProjectPanel {
+    fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        self.columns.menu(ui, COLUMNS);
+        if ui.button(tr("Project Settings...")).clicked() {
+            cx.invoke(crate::actions::ids::PROJECT_SETTINGS);
+            ui.close();
+        }
+        if ui
+            .checkbox(&mut self.thumbnail_grid, tr("Thumbnail Transparency Grid"))
+            .changed()
+        {
+            ui.close();
+        }
+    }
+
+    fn save_state(&self) -> Option<serde_json::Value> {
+        Some(json!({"columns": self.columns, "thumbnail_grid": self.thumbnail_grid}))
+    }
+
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let panel_rect = ui.max_rect();
         let session = common::session(cx.resources);
@@ -295,44 +411,15 @@ impl Panel for ProjectPanel {
         });
         ui.add_space(4.0);
 
-        // Column headers.
         let width = ui.available_width();
-        let cols = columns(width);
-        let (head, head_resp) = ui.allocate_exact_size(vec2(width, 18.0), Sense::click());
-        common::context_menu(&head_resp, &mut |ui| {
-            crate::context_menu::show(ui, cx, crate::context_menu::PROJECT_HEADER);
-        });
-        {
-            let p = ui.painter();
-            p.rect_filled(head, 0.0, color::PANEL);
-            p.hline(
-                head.x_range(),
-                head.bottom() - 0.5,
-                egui::Stroke::new(1.0, color::SEPARATOR),
-            );
-            icons::paint(
-                p,
-                Rect::from_center_size(
-                    pos2(head.left() + cols[0] + 6.0, head.center().y),
-                    vec2(12.0, 12.0),
-                ),
-                Icon::Tag,
-                color::ICON_DIM,
-            );
-            for (i, title) in [(1, "Name"), (2, "Type"), (3, "Size"), (4, "Duration")] {
-                p.text(
-                    pos2(head.left() + cols[i] + 4.0, head.center().y),
-                    Align2::LEFT_CENTER,
-                    tr(title),
-                    theme::small(),
-                    color::TEXT,
-                );
-            }
-        }
-
         let rows = self.rows(stage);
         let footer_h = 28.0;
-        let list_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(20.0);
+        let list_h = (ui.available_height()
+            - footer_h
+            - 18.0
+            - ui.spacing().scroll.bar_width
+            - 3.0 * ui.spacing().item_spacing.y)
+            .max(20.0);
         let mut open_comp: Option<PrimPath> = None;
         let mut open_footage: Option<PrimPath> = None;
         // The Enter that commits a rename must not start a new one.
@@ -342,6 +429,31 @@ impl Panel for ProjectPanel {
         let mut delete: Vec<PrimPath> = Vec::new();
         // Folder rows, for files dropped from Finder / Explorer.
         let mut folder_rows: Vec<(Rect, PrimPath)> = Vec::new();
+        egui::ScrollArea::horizontal().id_salt("project_columns").auto_shrink([false, true]).show(ui, |ui| {
+        // The label chip precedes the name in the list, as in AE.
+        let mut x = 2.0;
+        let mut cells = Vec::new();
+        for col in [&COLUMNS[1], &COLUMNS[0]].into_iter().chain(&COLUMNS[2..]) {
+            if self.columns.visible(col) {
+                cells.push((col, x));
+                x += col.width;
+            }
+        }
+        let width = width.max(x);
+        let (head, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
+        ui.painter().hline(head.x_range(), head.bottom() - 0.5, egui::Stroke::new(1.0, color::SEPARATOR));
+        for &(col, x) in &cells {
+            let r = Rect::from_min_size(pos2(head.left()+x, head.top()), vec2(col.width, head.height()));
+            if col.title == "Label" {
+                icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(12.0,12.0)), Icon::Tag, color::ICON_DIM);
+            } else {
+                ui.painter().text(r.left_center()+vec2(4.0,0.0), Align2::LEFT_CENTER, tr(col.title), theme::small(), color::TEXT);
+            }
+            let resp = ui.interact(r, ui.id().with(col.title), Sense::click());
+            common::context_menu(&resp, &mut |ui| self.columns.header_menu(ui, COLUMNS, col));
+        }
+        let name_left = cells.iter().find(|(col,_)| col.title == "Name").unwrap().1;
+        let name_right = name_left + COLUMNS[0].width;
         egui::ScrollArea::vertical()
             .max_height(list_h)
             .auto_shrink([false, false])
@@ -369,9 +481,11 @@ impl Panel for ProjectPanel {
                         .and_then(|v| query::static_value(&v, "label"))
                         .and_then(|v| v.as_f64())
                         .map_or(0, |v| v as usize);
-                    icons::swatch(p, pos2(rect.left() + cols[0] + 6.0, rect.center().y), 9.0, theme::label_color(label));
+                    if self.columns.visible(&COLUMNS[1]) {
+                        icons::swatch(p, pos2(rect.left() + 10.0, rect.center().y), 9.0, theme::label_color(label));
+                    }
                     // Name with icon and twirl.
-                    let indent = cols[1] + row.depth as f32 * 14.0;
+                    let indent = name_left + row.depth as f32 * 14.0;
                     let mut x = rect.left() + indent;
                     if row.kind == ItemKind::Folder {
                         let open = !self.collapsed.contains(&row.path);
@@ -399,7 +513,7 @@ impl Panel for ProjectPanel {
                     let name = query::display_name_of(stage, &row.path);
                     let renaming = self.rename.as_ref().is_some_and(|(r, _)| r == &row.path);
                     if renaming {
-                        let field = Rect::from_min_max(pos2(x, rect.top() + 1.0), pos2(rect.left() + cols[2] - 4.0, rect.bottom() - 1.0));
+                        let field = Rect::from_min_max(pos2(x, rect.top() + 1.0), pos2(rect.left() + name_right - 4.0, rect.bottom() - 1.0));
                         let mut done = None;
                         if let Some((_, buf)) = &mut self.rename {
                             let id = ui.id().with(("rename", row.path.as_str()));
@@ -416,13 +530,14 @@ impl Panel for ProjectPanel {
                             self.rename = None;
                         }
                     } else {
-                        widgets::clipped_text(p, pos2(x, rect.center().y), &name, theme::body(), color::TEXT_STRONG, rect.left() + cols[2] - x - 4.0);
+                        widgets::clipped_text(p, pos2(x, rect.center().y), &name, theme::body(), color::TEXT_STRONG, rect.left() + name_right - x - 4.0);
                     }
-                    // Type, size, duration.
-                    let (ty, size, dur) = describe(stage, &row.path, row.kind);
-                    let p = ui.painter();
-                    for (i, text) in [(2, ty), (3, size), (4, dur)] {
-                        widgets::clipped_text(p, pos2(rect.left() + cols[i] + 4.0, rect.center().y), &text, theme::small(), color::TEXT, 86.0);
+                    for &(col, x) in &cells {
+                        if col.title == "Name" || col.title == "Label" { continue; }
+                        let r = Rect::from_min_size(pos2(rect.left()+x, rect.top()), vec2(col.width, rect.height()));
+                        if ui.is_rect_visible(r) {
+                            widgets::clipped_text(ui.painter(), r.left_center()+vec2(4.0,0.0), &column_value(stage, row, col.title), theme::small(), color::TEXT, col.width-8.0);
+                        }
                     }
 
                     // Interaction.
@@ -483,6 +598,8 @@ impl Panel for ProjectPanel {
                     });
                 }
             });
+
+        });
 
         // Footer: item count and buttons (AE: interpret, new folder, new comp, delete).
         let (foot, _) = ui.allocate_exact_size(vec2(width, footer_h), Sense::hover());
@@ -712,6 +829,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Replace with Precomp", "替换为预合成"),
     ("Reveal in Composition", "在合成中显示"),
     ("Solids Folder", "纯色文件夹"),
+    ("Thumbnail Transparency Grid", "缩览图透明网格"),
     ("Hide This", "隐藏此项"),
     ("Rename This...", "重命名此项..."),
     ("Columns", "列数"),
@@ -723,6 +841,13 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     crate::register_panel(
         app,
         "project",
-        bae_ui::PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
+        bae_ui::PanelKind::new("Project", |spawn| {
+            let mut panel = ProjectPanel::default();
+            if let Some(s) = spawn.state {
+                panel.columns = serde_json::from_value(s["columns"].clone()).unwrap_or_default();
+                panel.thumbnail_grid = s["thumbnail_grid"].as_bool().unwrap_or_default();
+            }
+            Box::new(panel)
+        }),
     );
 }
