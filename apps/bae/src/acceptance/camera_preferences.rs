@@ -75,17 +75,33 @@ fn wheel_and_drag_preferences_move_the_camera_in_the_chosen_direction() {
         pref(&mut h, "3d.mouse_wheel_behavior", mode);
         send(&mut h, Event::PointerMoved(center));
         let before = position(&h);
-        send(
-            &mut h,
-            Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Line,
-                delta: egui::vec2(0.0, 1.0),
-                phase: egui::TouchPhase::Move,
-                modifiers: Modifiers::NONE,
-            },
-        );
+        // Three notches in a row: one gesture, committed once the wheel rests.
+        for _ in 0..3 {
+            send(
+                &mut h,
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, 1.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                },
+            );
+        }
+        let rest = std::time::Instant::now() + std::time::Duration::from_millis(600);
+        while std::time::Instant::now() < rest {
+            frame(&mut h);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         settle(&mut h);
         let delta = position(&h) - before;
+        if expected != 0.0 {
+            // #683: the notches are one undo step.
+            key(&mut h, Modifiers::COMMAND, Key::Z);
+            settle(&mut h);
+            assert_eq!(position(&h), before, "{mode}: one undo step");
+            key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+            settle(&mut h);
+        }
         assert!(
             if expected == 0.0 {
                 delta == 0.0

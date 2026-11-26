@@ -180,6 +180,7 @@ impl ImageAllocator for PoolAllocator<'_> {
 /// Share whole-surface effect outputs between ROI requests in the renderer's
 /// existing byte-limited frame cache. Entries are published after submission.
 pub(crate) struct TileCache<'a> {
+    pub whole_surfaces: bool,
     pub feedback: bool,
     pub frames: &'a mut crate::cache::FrameCache<GpuImage>,
     pub request: u64,
@@ -218,6 +219,8 @@ pub(crate) fn execute(
         .as_deref_mut()
         .is_some_and(|t| t.begin(graph.nodes.len()));
     let mut surfaces = Vec::new();
+    let mut intermediates =
+        crate::FrameCache::new(tiles.as_ref().map_or(0, |c| c.frames.stats().budget));
     let device = gpu.device();
     let total_draws: usize = graph
         .nodes
@@ -301,7 +304,8 @@ pub(crate) fn execute(
         }
         let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
             NodeKind::Effect(fx)
-                if fx.feedback.is_some() || (!cache.feedback && fx.effect.full_surface()) =>
+                if fx.feedback.is_some()
+                    || (cache.whole_surfaces && !cache.feedback && fx.effect.full_surface()) =>
             {
                 Some(crate::cache::FrameKey {
                     comp: fx.instance.path.clone(),
@@ -322,7 +326,7 @@ pub(crate) fn execute(
                     .then(|| frames.get(key).cloned())
                     .flatten()
             });
-        let image = match (&node.kind, cached) {
+        let mut image = match (&node.kind, cached) {
             (_, Some(image)) => {
                 surface_key = None;
                 image
@@ -370,6 +374,7 @@ pub(crate) fn execute(
                     format,
                     allocator: &mut alloc,
                     effect_inputs: &[],
+                    intermediates: None,
                     effect_masks: &[],
                 };
                 match src.source.render(&mut ectx, &src.request) {
@@ -424,12 +429,27 @@ pub(crate) fn execute(
                     params.history = &samples.history;
                 }
                 let mut alloc = PoolAllocator { pool, device };
+                let image_cache = tiles
+                    .as_mut()
+                    .filter(|c| {
+                        !c.feedback
+                            && c.frames.stats().budget > 0
+                            && !graph.incomplete
+                            && !incomplete
+                            && !ctx.incomplete
+                    })
+                    .map(|c| crate::cache::IntermediateImages {
+                        submitted: c.frames,
+                        pending: &mut intermediates,
+                        request: c.request,
+                    });
                 let mut ectx = EncodeContext {
                     gpu,
                     encoder: &mut encoder,
                     format,
                     allocator: &mut alloc,
                     effect_inputs: &effect_inputs,
+                    intermediates: image_cache,
                     effect_masks: &effect_masks,
                 };
                 match fx.effect.render(&mut ectx, &params, &input, node.rect) {
@@ -622,6 +642,18 @@ pub(crate) fn execute(
         if let Some(key) = surface_key {
             surfaces.push((key, node.key, image.clone()));
         }
+        if graph.time_dependent && intermediates.stats().budget > 0 {
+            use std::hash::{Hash, Hasher};
+            let mut identity = rustc_hash::FxHasher::default();
+            node.key.hash(&mut identity);
+            node.kind.for_each_input(|id| {
+                outputs[id.index()]
+                    .as_ref()
+                    .and_then(GpuImage::content_key)
+                    .hash(&mut identity);
+            });
+            image.content_key = Some(identity.finish());
+        }
         outputs[index] = Some(image);
         if let Some(started) = started {
             node_times.push(started.elapsed());
@@ -669,6 +701,7 @@ pub(crate) fn execute(
                 cache.feedback,
             );
         }
+        intermediates.publish(cache.frames, cache.comp);
     }
     Ok(Executed {
         image,
