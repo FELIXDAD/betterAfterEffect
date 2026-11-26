@@ -341,3 +341,56 @@ fn blobbylize_requests_scene_data_only_for_comp_lights() {
         );
     }
 }
+
+/// CC Ripple Pulse asks for the Pulse Level at 64 delays over Time Span and
+/// ripples from that history; a static level has none and leaves the image.
+#[test]
+fn ripple_pulse_reads_the_level_history_it_asks_for() {
+    use bae_model::Time;
+    use bae_render::effect::ParameterSample;
+    let Some(gpu) = context() else { return };
+    let fx = builtin("CC Ripple Pulse");
+    let rect = IRect::from_size(64, 64);
+    let input = test_image(rect);
+    let inst = instance(
+        "CC Ripple Pulse",
+        vec![
+            (1, Value::Vec2([32., 32.])),
+            (3, Value::Float(1.)),
+            (4, Value::Float(800.)),
+        ],
+    );
+    let base = EffectParams {
+        time: Time::from_seconds(2.),
+        ..EffectParams::new(&inst)
+    };
+    let times = fx.effect().parameter_times(&base);
+    assert_eq!(times.len(), 64);
+    assert_eq!(
+        (times[0], times[63]),
+        (Time::from_seconds(2.), Time::from_seconds(1.))
+    );
+    assert_eq!(fx.effect().parameter_ids(), &[2]);
+    let render = |samples: &[ParameterSample]| {
+        let p = EffectParams {
+            parameter_samples: samples,
+            ..base
+        };
+        let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+        let image = input.upload(&gpu, F32);
+        let out = fx.render(&mut target, &p, &image, rect).unwrap();
+        target.finish().unwrap();
+        Pixels::download(&gpu, &out)
+    };
+    // A pulse that rose over the last second.
+    let history: Vec<_> = times
+        .iter()
+        .enumerate()
+        .map(|(i, &time)| ParameterSample {
+            time,
+            values: vec![(2, Value::Float(100. * (63 - i) as f64 / 63.))],
+        })
+        .collect();
+    assert_ne!(render(&history).data, input.data, "the history ripples");
+    assert_eq!(render(&[]).data, input.data, "a static level does not");
+}

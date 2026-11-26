@@ -1959,14 +1959,13 @@ impl Builder<'_, '_> {
         comp: &RenderComp,
         layer: &RenderLayer,
         effect: Arc<dyn Effect>,
-        mut instance: RenderEffect,
+        instance: RenderEffect,
         frame: EffectFrame,
         input: NodeId,
         rect: IRect,
         scale: f64,
         depth: usize,
     ) -> Result<NodeId, RenderError> {
-        effect.prepare_scene(&mut instance, comp, layer);
         let mut h = FxHasher::default();
         "effect".hash(&mut h);
         self.nodes[input.index()].key.hash(&mut h);
@@ -2008,18 +2007,24 @@ impl Builder<'_, '_> {
                 position.map(f64::to_bits).hash(&mut h);
                 color.map(f32::to_bits).hash(&mut h);
             }
-            let layer_light = comp
-                .lights
-                .iter()
-                .find(|light| {
-                    light.scope_below.is_none_or(|index| {
-                        comp.layers
-                            .iter()
-                            .skip(index + 1)
-                            .any(|l| l.path == layer.path)
-                    })
+            let in_scope = |light: &&crate::light::Light| {
+                light.scope_below.is_none_or(|index| {
+                    comp.layers
+                        .iter()
+                        .skip(index + 1)
+                        .any(|l| l.path == layer.path)
                 })
-                .copied();
+            };
+            let layer_light = comp.lights.iter().find(in_scope).copied();
+            let lights: Vec<_> = if effect.scene_lights(&params) {
+                comp.lights.iter().filter(in_scope).copied().collect()
+            } else {
+                Vec::new()
+            };
+            for light in &lights {
+                crate::input::hash_light(light, &mut h);
+            }
+            world.to_cols_array().map(f64::to_bits).hash(&mut h);
             [comp.width, comp.height].hash(&mut h);
             for v in layer.transform.to_cols_array() {
                 v.to_bits().hash(&mut h);
@@ -2035,6 +2040,8 @@ impl Builder<'_, '_> {
                 size: [comp.width, comp.height],
                 placement: layer.transform,
                 layer_light,
+                world,
+                lights,
             })
         });
         let mut tracks = Vec::new();

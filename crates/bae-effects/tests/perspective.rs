@@ -20,6 +20,8 @@ fn environment(
         size: [64, 32],
         placement: glam::DAffine2::IDENTITY,
         layer_light: None,
+        world: glam::DMat4::IDENTITY,
+        lights: Vec::new(),
     });
     let inst = instance("CC Environment", params);
     let p = EffectParams {

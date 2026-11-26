@@ -54,6 +54,7 @@ pub(crate) fn builtin() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &MATTE,
                 mode: 0,

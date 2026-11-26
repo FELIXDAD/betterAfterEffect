@@ -7,8 +7,6 @@
 //! equivalent of AE SmartFX pre-render), then encodes GPU work. Effects whose
 //! definition says `thread_safe: false` are called one at a time.
 
-pub use bae_anim::effect_history::{HISTORY_PARAM, PROFILE_SAMPLES};
-
 use std::fmt;
 use std::sync::Arc;
 
@@ -44,7 +42,7 @@ impl<'a> EffectValues<'a> {
 }
 
 /// Composition projection and lighting for effects with an internal 3D scene.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EffectScene {
     /// Layer plane to composition pixels (homogeneous coordinates).
     pub projection: glam::DMat3,
@@ -58,6 +56,11 @@ pub struct EffectScene {
     pub placement: glam::DAffine2,
     /// First enabled light whose scope includes this layer, in composition space.
     pub layer_light: Option<crate::light::Light>,
+    /// The layer's plane in composition space (layer pixels to comp pixels).
+    pub world: glam::DMat4,
+    /// For an effect that shades with the comp's lights ([`Effect::scene_lights`]):
+    /// the lights whose scope includes this layer, in composition space.
+    pub lights: Vec<crate::light::Light>,
 }
 
 /// Nonnegative animated scalar in layer seconds. Each knot carries the integral
@@ -393,15 +396,6 @@ pub trait Effect: Send + Sync {
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
 
-    /// Attach derived scene inputs before the render node computes its cache key.
-    fn prepare_scene(
-        &self,
-        _instance: &mut RenderEffect,
-        _comp: &crate::RenderComp,
-        _layer: &crate::RenderLayer,
-    ) {
-    }
-
     /// Whether this effect contributes a render node. Parameter-only controls
     /// are registered so their definitions are available without encoding GPU work.
     fn renders_pixels(&self) -> bool {
@@ -433,6 +427,12 @@ pub trait Effect: Send + Sync {
 
     /// Requests the composition camera and first light for its internal scene.
     fn uses_scene(&self, _params: &EffectParams<'_>) -> bool {
+        false
+    }
+
+    /// Shades with the comp's lights (AE Lights): its scene carries them
+    /// ([`EffectScene::lights`]); only asked when [`Self::uses_scene`].
+    fn scene_lights(&self, _params: &EffectParams<'_>) -> bool {
         false
     }
 

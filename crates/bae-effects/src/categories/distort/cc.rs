@@ -10,10 +10,9 @@ use crate::{
     params::Params,
 };
 use bae_gpu::wgpu;
-use bae_model::{EffectDef, ParamKind, Value};
+use bae_model::{EffectDef, ParamKind, Time, Value};
 use bae_render::{
-    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderComp, RenderEffect, RenderError,
-    RenderLayer, effect::LayerDependency,
+    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError, effect::LayerDependency,
 };
 use std::sync::Arc;
 
@@ -28,8 +27,8 @@ impl Effect for Blobbylize {
     fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
         self.0.uses_scene(p)
     }
-    fn prepare_scene(&self, instance: &mut RenderEffect, comp: &RenderComp, layer: &RenderLayer) {
-        self.0.prepare_scene(instance, comp, layer);
+    fn scene_lights(&self, p: &EffectParams<'_>) -> bool {
+        self.0.scene_lights(p)
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         self.0.input_roi(p, roi)
@@ -74,6 +73,94 @@ impl TargetEffect for Blobbylize {
             .transpose()?;
         s.shader
             .dispatch(target, v, roi, input, [blob.as_ref()], [s.mode, 0])
+    }
+}
+
+/// CC Ripple Pulse: the Pulse Level over the last Time Span, asked for at 64
+/// delays (newest first) through `parameter_times`, fills the uniform slots
+/// the shader reads the ripple from.
+struct RipplePulse(Sampled);
+
+/// The slots of the pulse history (the shader's `value(169u + i)`).
+const PULSE_SLOTS: std::ops::Range<usize> = 169..233;
+
+impl RipplePulse {
+    fn delays(&self, p: &EffectParams<'_>) -> impl Iterator<Item = Time> {
+        let span = Params::new(&self.0.def, p).f(3).max(0.);
+        let (now, n) = (p.time, PULSE_SLOTS.len() - 1);
+        (0..=n).map(move |i| now - Time::from_seconds(span * i as f64 / n as f64))
+    }
+}
+
+impl Effect for RipplePulse {
+    fn def(&self) -> &EffectDef {
+        self.0.def()
+    }
+    fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
+        self.0.input_roi(p, roi)
+    }
+    fn output_bounds(&self, p: &EffectParams<'_>, input: IRect) -> IRect {
+        self.0.output_bounds(p, input)
+    }
+    fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<LayerDependency> {
+        self.0.layer_dependencies(p)
+    }
+    fn parameter_ids(&self) -> &'static [u32] {
+        &[2]
+    }
+    fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<Time> {
+        self.delays(p).collect()
+    }
+    fn render(
+        &self,
+        ctx: &mut EncodeContext<'_>,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        self.encode(ctx, p, input, roi)
+    }
+}
+
+impl TargetEffect for RipplePulse {
+    fn encode(
+        &self,
+        target: &mut dyn EffectTarget,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        if roi.is_empty() {
+            return Ok(input.clone());
+        }
+        let s = &self.0;
+        let v = Params::new(&s.def, p);
+        let level = v.f(2);
+        s.shader.dispatch_at(
+            "main",
+            target,
+            v,
+            roi,
+            input,
+            [],
+            [s.mode, 0],
+            |u, header| {
+                // A static level has no history: no ripple (zeros).
+                if p.parameter_samples.is_empty() {
+                    return;
+                }
+                for (slot, t) in PULSE_SLOTS.zip(self.delays(p)) {
+                    let at = p
+                        .parameter_samples
+                        .iter()
+                        .find(|sample| sample.time == t)
+                        .and_then(|sample| sample.values.iter().find(|(id, _)| *id == 2))
+                        .and_then(|(_, value)| value.as_f64())
+                        .unwrap_or(level);
+                    u.f32(header + slot * 16, at as f32);
+                }
+            },
+        )
     }
 }
 
@@ -147,6 +234,7 @@ fn cc_bender() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 0,
@@ -301,6 +389,7 @@ fn cc_blobbylize() -> Builtin {
     rust_builtin(
         (
             Arc::new(Blobbylize(Sampled {
+                lights: Some(22),
                 def,
                 shader: &SHADER,
                 mode: 1,
@@ -375,6 +464,7 @@ fn cc_flo_motion() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 2,
@@ -433,14 +523,15 @@ fn cc_ripple_pulse() -> Builtin {
     let (def, labels) = b.reference_points().build();
     rust_builtin(
         (
-            Arc::new(Sampled {
+            Arc::new(RipplePulse(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 3,
                 inputs: &[],
                 read: layer,
                 bounds: unchanged,
-            }),
+            })),
             labels,
         ),
         "cc-ripple-pulse",
@@ -491,6 +582,7 @@ fn cc_slant() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 4,
@@ -553,6 +645,7 @@ fn cc_smear() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 5,
@@ -598,6 +691,7 @@ fn cc_split() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 6,
@@ -653,6 +747,7 @@ fn cc_split_2() -> Builtin {
     rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 def,
                 shader: &SHADER,
                 mode: 7,

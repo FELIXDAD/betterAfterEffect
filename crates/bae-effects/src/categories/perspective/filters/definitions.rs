@@ -135,6 +135,7 @@ fn cc_sphere() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 mode: 0,
                 def,
                 shader: &CC_SPHERE,
@@ -304,6 +305,7 @@ fn cc_cylinder() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 mode: 0,
                 def,
                 shader: &CC_CYLINDER,
@@ -415,6 +417,7 @@ fn cc_spotlight() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                lights: None,
                 mode: 0,
                 def,
                 shader: &CC_SPOTLIGHT,
