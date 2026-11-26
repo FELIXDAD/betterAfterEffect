@@ -99,6 +99,87 @@ impl Fx {
     }
 }
 
+#[test]
+fn source_styles_convert_with_keyframes_and_remove_per_instance() {
+    use bae_model::layer_styles::{self as styles, effective_styles};
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let asset = fx
+        .value(&a, "source")
+        .unwrap()
+        .as_prim_ref()
+        .unwrap()
+        .clone();
+    let b = fx.layer(&comp, "solid", json!({"source":asset}));
+    let source = asset.child(styles::PRIM).unwrap();
+    fx.run("prim.create", json!({"path":source,"prim_type":"Effect"}));
+    let attr = bae_model::effect::param_attr(styles::group("solidFill").unwrap().enabled);
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":"match_name","value":Value::String(styles::RENDER_ID.into())}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":attr,"value":Value::Bool(true)}),
+    );
+    let opacity = "param:0703";
+    fx.run(
+        "attr.set",
+        json!({"path":source,"attr":opacity,"value":Value::Float(10.)}),
+    );
+    fx.run(
+        "attr.set_animated",
+        json!({"path":source,"attr":opacity,"animated":true,"time":0}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path":source,"attr":opacity,"time":SEC,"value":Value::Float(90.)}),
+    );
+    fx.run("layer.styles", json!({"layers":[a],"operation":"convert"}));
+    let local = a.child(styles::PRIM).unwrap();
+    assert_eq!(effective_styles(&fx.stage, &a), Some(local.clone()));
+    assert_eq!(effective_styles(&fx.stage, &b), Some(source.clone()));
+    assert_eq!(fx.keys(&local, opacity), vec![0, SEC]);
+    let sample = bae_anim::evaluate_comp(&fx.stage, &comp, Time::from_flicks(SEC)).unwrap();
+    for layer in &sample.layers {
+        assert_eq!(
+            layer.layer_styles.as_ref().unwrap().param(703),
+            Some(&Value::Float(90.))
+        );
+    }
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"remove_all"}),
+    );
+    assert_eq!(effective_styles(&fx.stage, &a), None);
+    assert_eq!(effective_styles(&fx.stage, &b), Some(source));
+}
+
+#[test]
+fn showing_all_styles_preserves_values_and_leaves_new_styles_disabled() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let local = a.child(bae_model::layer_styles::PRIM).unwrap();
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"add","style":"dropShadow"}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path":local,"attr":"param:0103","value":Value::Float(27.)}),
+    );
+    fx.run("layer.styles", json!({"layers":[a],"operation":"show_all"}));
+    assert_eq!(fx.value(&local, "param:0103"), Some(Value::Float(27.)));
+    assert_eq!(fx.value(&local, "param:0900"), Some(Value::Bool(false)));
+    fx.run(
+        "layer.styles",
+        json!({"layers":[a],"operation":"add","style":"frameFX"}),
+    );
+    assert_eq!(fx.value(&local, "param:0900"), Some(Value::Bool(true)));
+}
+
 fn key(path: &PrimPath, attr: &str, t: i64) -> Json {
     json!({"path": path, "attr": attr, "time": t})
 }
