@@ -777,6 +777,8 @@ pub struct PaintOptions {
     pub clone_offset: [f64; 2],
     /// Clone Stamp: source time shift in seconds.
     pub clone_time_shift: f64,
+    /// Clone Stamp, Lock Source Time: the source time in seconds.
+    pub clone_source_time: f64,
     /// Brush tip (Brushes panel): pixels, degrees, percents.
     pub diameter: f64,
     pub angle: f64,
@@ -858,6 +860,7 @@ impl Default for PaintOptions {
             lock_source_time: false,
             clone_offset: [0.0, 0.0],
             clone_time_shift: 0.0,
+            clone_source_time: 0.0,
             diameter: 21.0,
             angle: 0.0,
             roundness: 100.0,

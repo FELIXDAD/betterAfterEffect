@@ -3,13 +3,15 @@
 //! visible at the frame (`bae_render::paint`); each is a row of brush dabs
 //! along its path, composited with the shared dab compositor, newest on top.
 
+use bae_model::Time;
 use bae_model::Value;
-use bae_render::paint::{self, Erase, Stroke, Tool};
+use bae_render::effect::LayerDependency;
+use bae_render::paint::{self, CloneTime, Erase, Stroke, Tool};
 use bae_render::{EffectParams, GpuImage, IRect, RenderError};
 use glam::DVec2;
 
 use super::Generator;
-use super::paint::{CLONE, Mark, Paint, RESTORE};
+use super::paint::{CLONE, CLONE_FROM, Mark, Paint, RESTORE};
 use crate::{Builtin, EffectTarget, catalog::DefBuilder};
 
 /// The compositor's styles: paint over the layer, paint only, erase.
@@ -66,11 +68,7 @@ pub(super) fn render(
     input: &GpuImage,
     roi: IRect,
 ) -> Result<GpuImage, RenderError> {
-    let strokes = p
-        .effect
-        .param(paint::STROKES_PARAM)
-        .map(paint::unpack)
-        .unwrap_or_default();
+    let strokes = paint::strokes_of(p.effect);
     let mut image = input.clone();
     if on_transparent {
         image = Paint::new(ONLY, MAX, 0.0).render(ctx, p, &image, roi)?;
@@ -89,7 +87,17 @@ pub(super) fn render(
             // (from this layer; another source layer and Source Time Shift
             // are not drawn yet).
             (Tool::Clone, _) => {
-                let mut paint = Paint::new(CLONE, MAX, s.opacity);
+                // Another layer or time: its image from the renderer.
+                let source = clone_dependency(p, s).and_then(|d| ctx.effect_layer(&d).cloned());
+                let mut paint = match source {
+                    Some(image) => {
+                        let mut paint = Paint::new(CLONE_FROM, MAX, s.opacity);
+                        paint.restore = Some(image);
+                        paint
+                    }
+                    None if s.clones_elsewhere() => continue,
+                    None => Paint::new(CLONE, MAX, s.opacity),
+                };
                 paint.offset = s.clone_offset;
                 paint
             }
@@ -112,6 +120,31 @@ pub(super) fn render(
         image = paint.render(ctx, p, &image, roi)?;
     }
     Ok(image)
+}
+
+/// What a Clone Stamp stroke reading another layer or time needs rendered:
+/// the source layer (or this one, before the Paint effect) at the Source
+/// Time Shift or the locked Source Time. `None` when it reads the image being
+/// painted.
+pub(super) fn clone_dependency(p: &EffectParams<'_>, s: &Stroke) -> Option<LayerDependency> {
+    if !s.clones_elsewhere() {
+        return None;
+    }
+    // Layer time → comp time of the layer painted on.
+    let offset = p.comp_time - p.time;
+    let time = match s.clone_time {
+        CloneTime::Now => p.comp_time,
+        CloneTime::Shift(d) => p.comp_time + d,
+        CloneTime::Locked(t) => t + offset,
+    };
+    let time = time.max(Time::ZERO);
+    Some(match &s.clone_source {
+        Some(layer) => LayerDependency::source(layer.clone(), time),
+        None => {
+            let own = p.effect.path.parent()?.parent()?;
+            LayerDependency::before_effect(own, time, p.effect.path.clone())
+        }
+    })
 }
 
 /// Paint on Transparent.
