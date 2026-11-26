@@ -506,6 +506,37 @@ fn long_dependency_chains_in_both_directions() {
 }
 
 #[test]
+fn camera_space_and_world_space_round_trip_property_values() {
+    let s = stage(|b| {
+        let cam = b.layer(MAIN, "Camera", "camera");
+        b.set(&cam, "three_d", true)
+            .set(&cam, "transform:position", [960.0, 540.0, -1500.0])
+            .set(&cam, "transform:rotation", 35.0);
+        let l = b.layer(MAIN, "Card", "null");
+        b.set(&l, "three_d", true)
+            .set(&l, "transform:position", [800.0, 400.0, 300.0])
+            .set(&l, "transform:anchor_point", [20.0, 10.0, 0.0]);
+        let t = b.layer(MAIN, "Read", "text");
+        b.expr(
+            &t,
+            "text:source",
+            doc(""),
+            r#"var s=thisComp.layer("Card"), p=s.anchorPoint;
+           var cp=s.toComp(p), wp=s.toWorld(p), cv=s.toCompVec([1,0,0]), wv=s.toWorldVec([1,0,0]);
+           [length(s.fromComp(cp),p)<0.00001,length(s.fromWorld(wp),p)<0.00001,
+            length(s.fromCompVec(cv),[1,0,0])<0.00001,length(s.fromWorldVec(wv),[1,0,0])<0.00001,
+            length(wv,cv)>0.01,s.toWorld([0,0]).length,s.fromCompToSurface(cp).length].join("|")"#,
+        );
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[2].text.as_ref().unwrap().text,
+        "true|true|true|true|true|3|2"
+    );
+}
+
+#[test]
 fn to_comp_projects_3d_layers_through_the_default_camera() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");

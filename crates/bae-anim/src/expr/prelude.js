@@ -781,11 +781,7 @@ Layer.prototype = {
     };
   },
   __xf: function (kind, point, t) {
-    if (t === undefined) t = __now;
-    var p = point.slice(0);
-    while (p.length < 3) p.push(0);
-    var r = __h.xform(this.__c, this.__l, t, kind, p);
-    return point.length === 2 ? [r[0], r[1]] : r;
+    return __h.xform(this.__c, this.__l, t === undefined ? __now : __val(t), kind, __val(point));
   },
   toComp: function (p, t) { return this.__xf(0, p, t); },
   fromComp: function (p, t) { return this.__xf(1, p, t); },
