@@ -3,7 +3,7 @@
 //! title/action-safe guides and a grid. Pixels come from [`crate::render`] until the
 //! GPU compositor (04) publishes viewport textures.
 
-use bae_anim::glam::{DMat4, DVec2, DVec3};
+use bae_anim::glam::{DMat4, DVec2};
 use bae_anim::{EvaluatedComp, Transform};
 use bae_model::{LayerKind, PrimPath, Time, Value};
 use bae_motion::query::{self, CompInfo};
@@ -18,7 +18,7 @@ use crate::common::{self, EvalCache};
 use crate::gpu_preview::GpuPreview;
 use crate::project::{DropPlacement, ItemDrag};
 use crate::render::{self, Affine, View};
-use crate::session::{Scrub, SharedSession};
+use crate::session::SharedSession;
 use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
@@ -350,8 +350,7 @@ impl CompositionViewer {
         info: &CompInfo,
     ) -> Option<EvaluatedComp> {
         let time = session.lock().time(&info.path);
-        self.eval
-            .get(cx.resources)
+        live_evaluator(&mut self.eval, cx, session)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
     }
@@ -420,49 +419,34 @@ impl CompositionViewer {
     }
 }
 
-/// Apply live edits (timeline scrubs, viewer drags) to an evaluated comp and
-/// recompute world matrices.
-fn apply_overrides(
-    comp: &mut EvaluatedComp,
-    scrub: Option<&Scrub>,
-    drag: Option<&transform::TransformDrag>,
-) {
+/// The panel's evaluator showing the value drag in progress (timeline, Effect
+/// Controls, Properties …): its targets evaluated as the commit will leave
+/// them, so children, expressions, masks and effects follow live (#593).
+pub(crate) fn live_evaluator<'a>(
+    eval: &'a mut crate::common::EvalCache,
+    cx: &PanelContext<'_>,
+    session: &SharedSession,
+) -> &'a mut bae_anim::Evaluator {
+    let overrides = session
+        .lock()
+        .scrub
+        .as_ref()
+        .map(|s| s.overrides(cx.stage))
+        .unwrap_or_default();
+    let eval = eval.get(cx.resources);
+    eval.set_overrides(overrides);
+    eval
+}
+
+/// Apply the viewer's own transform drag to an evaluated comp and recompute
+/// world matrices (value drags in panels are evaluated as overrides instead:
+/// [`live_evaluator`]).
+fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformDrag>) {
     let mut changed = false;
     for layer in &mut comp.layers {
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
-        let attr = scrub.map_or("", |s| s.attr.as_str());
-        for (path, value) in scrub.into_iter().flat_map(Scrub::targets) {
-            // A scrubbed effect parameter of this layer (Effect Controls, timeline).
-            if attr.starts_with("param:")
-                && crate::effects::layer_of(path).as_ref() == Some(&layer.path)
-                && let Some(e) = layer.effects.iter_mut().find(|e| e.path == *path)
-            {
-                e.params
-                    .insert(attr.trim_start_matches("param:").to_owned(), value.clone());
-            }
-            if *path != layer.path {
-                continue;
-            }
-            touched = true;
-            let v3 = |v: &Value| match v {
-                Value::Vec3(a) => Some(DVec3::from_array(*a)),
-                Value::Vec2(a) => Some(DVec3::new(a[0], a[1], 0.0)),
-                _ => None,
-            };
-            match (attr, value) {
-                ("transform:position", v) => t.position = v3(v).unwrap_or(t.position),
-                ("transform:anchor_point", v) => t.anchor_point = v3(v).unwrap_or(t.anchor_point),
-                ("transform:scale", v) => t.scale = v3(v).unwrap_or(t.scale),
-                ("transform:rotation", Value::Float(r)) => t.rotation.z = *r,
-                ("transform:opacity", Value::Float(o)) => {
-                    t.opacity = *o;
-                    layer.opacity = (o / 100.0).clamp(0.0, 1.0);
-                }
-                _ => touched = false,
-            }
-        }
         if let Some(e) = drag.and_then(|d| d.edits.iter().find(|e| e.path == layer.path)) {
             touched = true;
             t.position = e.now.position;
@@ -821,8 +805,8 @@ impl Panel for CompositionViewer {
             session.lock().stop();
         }
 
-        // Evaluate.
-        let eval = self.eval.get(cx.resources);
+        // Evaluate, with the value a panel drag has reached (live, uncommitted).
+        let eval = live_evaluator(&mut self.eval, cx, &session);
         let mut comp = match eval.evaluate_comp(cx.stage, &info.path, time) {
             Ok(c) => c,
             Err(e) => {
@@ -844,12 +828,14 @@ impl Panel for CompositionViewer {
             }
         }
         // A value drag that ended without a commit (e.g. cancelled) must not leave
-        // its preview behind.
+        // its preview behind (a committed one stays until its command has run).
         if !ui.input(|i| i.pointer.any_down()) {
-            session.lock().scrub = None;
+            let mut s = session.lock();
+            if s.scrub.as_ref().is_some_and(|s| s.committed.is_none()) {
+                s.scrub = None;
+            }
         }
-        let scrub = session.lock().scrub.clone();
-        apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        apply_overrides(&mut comp, self.select.drag.as_ref());
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
         if camera_tool.is_camera() || self.camera_drag.is_some() {

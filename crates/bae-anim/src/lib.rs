@@ -36,7 +36,7 @@ pub use bae_model::{Stage, Time, Value};
 pub use bounds::{SourceBounds, SourceRect, set_source_bounds};
 pub use curve::{Curve, CurveKind};
 pub use error::EvalError;
-pub use eval::{Evaluator, layer_timing};
+pub use eval::{AttrOverride, Evaluator, layer_timing};
 pub use evaluated::{
     AssetInfo, AttrError, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer,
     EvaluatedMask, EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff,
