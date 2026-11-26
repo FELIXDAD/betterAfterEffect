@@ -110,11 +110,14 @@ impl Parade {
 mod settings;
 use settings::{PRESETS, Signal, Space};
 
-/// The playback cache retains working textures only while a visible scope needs them.
+// Keep the playback cache across brief gaps between scope paints. When the panel
+// stays hidden, stop retaining the additional GPU textures.
+const WORKING_FRAME_GRACE: u64 = 8;
+
 pub(super) fn needs_working_frame(ctx: &egui::Context) -> bool {
     let now = ctx.cumulative_frame_nr();
     ctx.data(|data| data.get_temp::<u64>(egui::Id::new("lumetri_working_frame")))
-        .is_some_and(|last| now.saturating_sub(last) <= 1)
+        .is_some_and(|last| now.saturating_sub(last) <= WORKING_FRAME_GRACE)
 }
 
 /// Brightness of the traces (AE: Bright, Normal, Dimmed).
@@ -892,6 +895,48 @@ mod tests {
         let saved = ScopesPanel::from_state(panel.save_state().as_ref());
         assert_eq!(saved.state.signal, Signal::Float);
         assert!(!saved.state.clamp);
+    }
+
+    #[test]
+    fn precise_scope_demand_survives_skipped_paints_and_expires_when_hidden() {
+        let ctx = bae_ui::testing::ctx_with_fonts();
+        let id = bae_ui::PanelId::new("lumetri_scopes");
+        let author = bae_model::AuthorId::new("user:test").unwrap();
+        let stage = bae_model::Stage::new();
+        let resources = bae_app::Resources::new();
+        let mut requests = bae_ui::PanelRequests::default();
+        let mut cx = PanelContext::new(
+            &id,
+            "Lumetri Scopes",
+            &stage,
+            &author,
+            &resources,
+            &mut requests,
+        );
+        let mut panel = ScopesPanel::default();
+        let mut paint = |signal| {
+            let mut out = ctx.run_ui(Default::default(), |ui| {
+                if let Some(signal) = signal {
+                    panel.state.signal = signal;
+                    panel.ui(ui, &mut cx);
+                }
+            });
+            out.textures_delta.clear();
+        };
+        paint(Some(Signal::Byte));
+        assert!(!needs_working_frame(&ctx));
+        paint(Some(Signal::Float));
+        for _ in 0..3 {
+            paint(None);
+            assert!(needs_working_frame(&ctx));
+        }
+        paint(Some(Signal::Hdr));
+        for _ in 0..WORKING_FRAME_GRACE {
+            paint(None);
+        }
+        assert!(!needs_working_frame(&ctx));
+        paint(Some(Signal::Float));
+        assert!(needs_working_frame(&ctx));
     }
 
     #[test]
