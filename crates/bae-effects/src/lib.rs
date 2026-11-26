@@ -55,6 +55,7 @@ pub use catalog::{EffectInfo, Form, category_zh};
 pub use categories::color::ocio::embed_color_file;
 pub use categories::simulation::{particle_scene_projection, particle_world_projection};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
+pub use effects::color::lumetri::LumetriCurve;
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
 
@@ -238,6 +239,7 @@ fn registry() -> &'static Registry {
         categories::immersive::register(&mut r);
         categories::keying::register(&mut r);
         categories::matte::register(&mut r);
+        categories::layer_styles::register(&mut r);
         categories::noise_grain::register(&mut r);
         categories::perspective::register(&mut r);
         categories::simulation::register(&mut r);

@@ -31,6 +31,14 @@ struct Drag {
     index: usize,
 }
 
+impl FeatherState {
+    /// The mask and its path while a feather point is dragged: the picture
+    /// shows the new feather live (#593).
+    pub(super) fn path_preview(&self) -> Option<(PrimPath, BezierPath)> {
+        self.drag.as_ref().map(|d| (d.mask.clone(), d.path.clone()))
+    }
+}
+
 /// Where a feather point's handle is on screen.
 fn handle(path: &BezierPath, to_comp: &DMat4, f: &FeatherPoint, view: &View) -> Option<Pos2> {
     let (at, n) = bae_render::mask::path_frame(path, f64::from(f.segment) + f.t)?;
