@@ -506,6 +506,54 @@ fn demo_project_builds_and_renders() {
     h.frame("composition", &mut viewer, Vec::new());
 }
 
+/// A value drag renders in the background (#593): the viewer shows the
+/// newest finished live frame without rendering it on its own thread, and
+/// its own target shows again once the drag ends.
+#[test]
+fn gpu_preview_renders_a_value_drag_in_the_background() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    let shown = |registry: &ViewportTextureRegistry, preview: &crate::gpu_preview::GpuPreview| {
+        registry
+            .get(preview.viewport())
+            .expect("published")
+            .view
+            .texture()
+            .clone()
+    };
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    let own = shown(&registry, &preview);
+    h.session().lock().scrub = Some(crate::session::Scrub {
+        path: solid.clone(),
+        attr: "transform:opacity".into(),
+        value: Value::Float(0.0),
+        peers: Vec::new(),
+        time: Time::ZERO,
+        committed: None,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while shown(&registry, &preview) == own {
+        assert!(std::time::Instant::now() < deadline, "no live frame");
+        let image = preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+        assert!(
+            image.is_some(),
+            "the last frame stays while the live one renders"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.session().lock().scrub = None;
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    assert_eq!(shown(&registry, &preview), own);
+}
+
 /// The viewer's GPU path: 04's renderer draws the comp, the 8-bit texture is
 /// published, and the viewer gets the egui handle the shell set.
 #[test]
