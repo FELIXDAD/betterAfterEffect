@@ -52,6 +52,8 @@ use bae_plugin::manifest::{ParamType, ShaderStyle};
 use bae_render::{Effect, EffectLibrary, EffectParams, GpuImage, IRect, RenderError};
 
 pub use catalog::{EffectInfo, Form, category_zh};
+pub use categories::color::ocio::embed_color_file;
+pub use categories::simulation::{particle_scene_projection, particle_world_projection};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
@@ -155,6 +157,23 @@ impl Effect for Forward {
         self.0.input_roi(params, output_roi)
     }
 
+    fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        self.0.uses_scene(p)
+    }
+
+    fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_times(p)
+    }
+    fn parameter_ids(&self) -> &'static [u32] {
+        self.0.parameter_ids()
+    }
+    fn integrated_parameters(&self) -> &'static [u32] {
+        self.0.integrated_parameters()
+    }
+    fn full_surface(&self) -> bool {
+        self.0.full_surface()
+    }
+
     fn layer_dependencies(
         &self,
         params: &EffectParams<'_>,
@@ -203,6 +222,7 @@ fn registry() -> &'static Registry {
         categories::blur_sharpen::register(&mut r);
         categories::channel::register(&mut r);
         categories::color::register(&mut r);
+        categories::audio::register(&mut r);
         categories::controls::register(&mut r);
         categories::distort::register(&mut r);
         categories::generate::register(&mut r);
@@ -210,6 +230,7 @@ fn registry() -> &'static Registry {
         categories::matte::register(&mut r);
         categories::noise_grain::register(&mut r);
         categories::perspective::register(&mut r);
+        categories::simulation::register(&mut r);
         categories::stylize::register(&mut r);
         categories::text::register(&mut r);
         categories::time::register(&mut r);
@@ -337,6 +358,11 @@ fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
                 .or_else(|| effects::spatial::options_zh(m, p.id))
                 .or_else(|| effects::distort::options_zh(m, p.id))
                 .or_else(|| categories::generate::strokes::options_zh(m, p.id))
+                .or_else(|| {
+                    (m == effects::liquify::MATCH_NAME)
+                        .then(|| effects::liquify::options_zh(p.id))
+                        .flatten()
+                })
                 .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
             Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
         })

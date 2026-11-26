@@ -6,6 +6,8 @@ struct Params {
     stretch: u32,
     reserved: u32,
     threshold: f32,
+    pad: u32,
+    samples: vec2u,
 }
 
 @group(0) @binding(0) var<uniform> u: Params;
@@ -15,8 +17,8 @@ struct Params {
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3u) {
     let dims = vec2u(u.rect.zw - u.rect.xy);
-    if any(id.xy >= dims) { return; }
-    let pixel = vec2f(id.xy) + 0.5;
+    if any(id.xy >= u.samples) { return; }
+    let pixel = (vec2f(id.xy) + 0.5)*vec2f(dims)/vec2f(u.samples);
     let size = vec2f(u.input.size) / u.input.scale;
     let offset = (size - vec2f(dims)) * 0.5;
     let p = u.input.origin + select(pixel + offset, pixel * size / vec2f(dims), u.stretch != 0u);

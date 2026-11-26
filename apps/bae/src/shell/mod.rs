@@ -23,6 +23,9 @@ mod numpad;
 mod open_documents;
 #[cfg(any(windows, test))]
 mod save_guard;
+mod script_bindings;
+#[cfg(any(windows, test))]
+mod win_keys;
 #[cfg(windows)]
 mod win_save;
 mod window_state;
@@ -69,6 +72,7 @@ impl AppModule for ShellModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_gpu::GpuModule);
         app.add_module(bae_ui::UiModule);
+        script_bindings::install(app);
         // Agent panels: tool-call log and proposals (bae-agent, workstream 17).
         let audit = Arc::new(bae_agent::AuditLog::new());
         let feed: Arc<dyn bae_ui::agent::AgentFeed> =
@@ -167,7 +171,13 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => None,
     };
 
-    let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows as _;
+        builder.with_msg_hook(win_keys::hook);
+    }
+    let event_loop = match builder.build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             tracing::error!("cannot create the event loop: {error}");
@@ -1149,23 +1159,7 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
 
 /// Shows `path` in Finder / Explorer (Reveal Preferences).
 fn reveal(path: &std::path::Path) {
-    let result = if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(path)
-            .spawn()
-    } else if cfg!(windows) {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .spawn()
-    } else {
-        std::process::Command::new("xdg-open")
-            .arg(path.parent().unwrap_or(path))
-            .spawn()
-    };
-    if let Err(error) = result {
-        tracing::warn!("could not reveal {}: {error}", path.display());
-    }
+    bae_platform::reveal(path);
 }
 
 /// Draws `shapes` (this frame's UI, textures already uploaded) offscreen and
@@ -1307,7 +1301,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             && let Some(pad) = numpad::key(code, &key.logical_key)
         {
             // egui-winit sends no event for numpad `*`: the modifiers held now.
-            let modifiers = view.egui_ctx.input(|i| i.modifiers);
+            let modifiers = numpad::current_modifiers(
+                &view.egui_state.egui_input().events,
+                view.egui_ctx.input(|i| i.modifiers),
+            );
             numpad::rewrite(
                 &mut view.egui_state.egui_input_mut().events,
                 before,

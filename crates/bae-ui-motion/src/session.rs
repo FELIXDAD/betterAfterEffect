@@ -26,23 +26,56 @@ pub enum Reveal {
     Props(Vec<(PrimPath, String)>),
 }
 
+/// Window > Motion Sketch, armed by Start Capture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchArm {
+    pub layer: PrimPath,
+    /// Capture speed, percent of real time.
+    pub speed: f64,
+    /// Smoothing: how far (pixels) the recorded path may stray from the kept
+    /// keyframes.
+    pub smoothing: f64,
+}
+
+/// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
+/// it stands for one (not Contents, Transform …).
+pub fn group_prim(id: &str) -> Option<PrimPath> {
+    for suffix in ["#animator", "#selector"] {
+        if let Some(p) = id.strip_suffix(suffix) {
+            return PrimPath::new(p).ok();
+        }
+    }
+    let (_, rest) = id.split_once('#')?;
+    (rest.starts_with('/') && !rest.contains('#'))
+        .then(|| PrimPath::new(rest).ok())
+        .flatten()
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
     pub comp: PrimPath,
     started: Instant,
+    /// The frame shown and the frame this run started from (comp frames).
     frame: i64,
+    start: i64,
     rate: FrameRate,
+    /// Frames per second of the clock: Preview ▸ Frame Rate (the comp's on Auto).
+    fps: f64,
     ordinal: u64,
+    /// The work area this run was started for: editing it restarts playback.
+    work_area: TimeRange,
     revision: Option<u64>,
-    /// Range played (the work area); playback loops or stops at its end.
+    /// Range played (Preview panel ▸ Range); playback loops or stops at its end.
     pub range: TimeRange,
+    /// The current time before playing (kept on stop when Move Time To
+    /// Preview Time is off).
+    before: Time,
 }
 
 impl Playback {
     fn ordinal_at(&self, now: Instant) -> u64 {
-        let nanos = now.saturating_duration_since(self.started).as_nanos();
-        (nanos * u128::from(self.rate.num) / (1_000_000_000 * u128::from(self.rate.den))) as u64
+        (now.saturating_duration_since(self.started).as_secs_f64() * self.fps) as u64
     }
 
     fn frame_range(&self) -> (i64, i64) {
@@ -55,9 +88,7 @@ impl Playback {
     }
 
     fn deadline(&self) -> Instant {
-        let nanos = ((u128::from(self.ordinal) + 1) * 1_000_000_000 * u128::from(self.rate.den))
-            .div_ceil(u128::from(self.rate.num));
-        self.started + Duration::from_nanos(nanos as u64)
+        self.started + Duration::from_secs_f64((self.ordinal + 1) as f64 / self.fps)
     }
 }
 
@@ -71,12 +102,69 @@ pub(crate) struct PlaybackStats {
     frames: u32,
 }
 
+/// Preview panel ▸ Range (AE's choices for the Spacebar shortcut).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PreviewRange {
+    WorkArea,
+    #[default]
+    WorkAreaExtended,
+    EntireDuration,
+}
+
+/// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewOptions {
+    pub range: PreviewRange,
+    /// Play From: the current time (else the start of the range).
+    pub from_current: bool,
+    /// Frame Rate: `None` = Auto (the comp's).
+    pub fps: Option<f64>,
+    /// Frames skipped between the frames played.
+    pub skip: u32,
+    /// Resolution while playing: `None` = Auto (the viewer's), else 1 (Full),
+    /// 2 (Half), 3 (Third), 4 (Quarter).
+    pub resolution: Option<u32>,
+    /// On stop, the current time moves to the last frame played.
+    pub move_time: bool,
+}
+
+impl Default for PreviewOptions {
+    fn default() -> Self {
+        PreviewOptions {
+            range: PreviewRange::default(),
+            from_current: true,
+            fps: None,
+            skip: 0,
+            resolution: None,
+            move_time: true,
+        }
+    }
+}
+
 /// A value being dragged in a panel, previewed by the viewer before the command runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scrub {
     pub path: PrimPath,
     pub attr: String,
     pub value: Value,
+    /// The same property on the other selected layers (or selected across
+    /// layers), changing with it: path and its value.
+    pub peers: Vec<(PrimPath, Value)>,
+}
+
+impl Scrub {
+    /// Every prim the drag changes, with its value.
+    pub fn targets(&self) -> impl Iterator<Item = (&PrimPath, &Value)> {
+        std::iter::once((&self.path, &self.value)).chain(self.peers.iter().map(|(p, v)| (p, v)))
+    }
+
+    /// The previewed value of `attr` of `path`, if the drag changes it.
+    pub fn value_for(&self, path: &PrimPath, attr: &str) -> Option<&Value> {
+        if self.attr != attr {
+            return None;
+        }
+        self.targets().find(|(p, _)| *p == path).map(|(_, v)| v)
+    }
 }
 
 /// Copied keyframes (one attribute at a time, like AE's paste target).
@@ -109,19 +197,30 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Keep these keys selected although they do not exist yet: the selection
+    /// already names where a queued command (a keyframe drag) puts them, and
+    /// panels drawn before it runs must not drop them (#551).
+    Keys(Vec<KeyRef>),
 }
 
 #[derive(Debug, Default)]
 pub struct Session {
+    /// Last UI frame in which a visible timeline requested per-layer CPU timings.
+    pub(crate) timing_column_frame: Option<u64>,
+    pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
     /// Comp shown in the viewer and timeline.
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
     pub open_comps: Vec<PrimPath>,
+    pub(crate) mini_flow: Option<crate::timeline::navigation::MiniFlow>,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
+    /// mask, effect or text animator; [`group_prim`] gives the prim).
+    pub selected_groups: Vec<String>,
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
@@ -134,20 +233,25 @@ pub struct Session {
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
+    pub(crate) playback_stats: PlaybackStats,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
     last_scrub: Option<Time>,
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
-    pub(crate) playback_stats: PlaybackStats,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
+    /// Preview panel options (range, play from, frame rate, skip …).
+    pub preview: PreviewOptions,
     /// The viewer's resolution is on Auto: it follows the magnification. The
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// View ▸ rulers, guides, grid and safe areas (the viewer's options).
+    pub(crate) view_options: crate::viewer::guides::ViewOptions,
     /// Each comp's 3D views (View ▸ Switch 3D View).
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
@@ -160,14 +264,24 @@ pub struct Session {
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
     /// copy wins over [`Session::clipboard`].
     pub layer_clipboard: Vec<bae_motion::CopiedLayer>,
+    /// Layer contents on the clipboard (Copy with groups selected); the last copy
+    /// wins over the other clipboards.
+    pub content_clipboard: Vec<bae_motion::CopiedContent>,
     pending: Vec<(Pending, u32)>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// When L was last pressed to reveal the audio waveform on a second press.
+    pub(crate) last_l: Option<Instant>,
+    /// Motion Sketch armed (Start Capture): the next drag in the Composition
+    /// panel records this layer's position.
+    pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The footage item the Footage panel shows.
+    pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
@@ -198,6 +312,7 @@ impl SharedSession {
         s.opening_audio = false;
         match device {
             Ok(output) => {
+                output.set_gain(10.0_f32.powf(s.master_db / 20.0));
                 let previous = s.output.replace(output);
                 s.mix_revision = None;
                 s.retry_audio_after = None;
@@ -212,25 +327,23 @@ impl SharedSession {
         }
     }
 
-    /// A user can connect a device after starting the application.
-    pub(crate) fn retry_audio(&self) {
-        let mut s = self.lock();
-        let needed = s.retry_audio_after.map_or_else(
-            || {
-                s.output
+    /// Opens the output device on its own thread (OS negotiation may block). It
+    /// needs no GPU. Does nothing while a device is open or opening.
+    pub(crate) fn start_audio(&self) {
+        {
+            let mut s = self.lock();
+            if s.opening_audio
+                || s.output
                     .as_ref()
-                    .is_some_and(bae_media::playback::AudioOutput::device_lost)
-            },
-            |at| Instant::now() >= at,
-        );
-        if !needed || s.opening_audio {
-            return;
+                    .is_some_and(|output| !output.device_lost())
+            {
+                return;
+            }
+            s.opening_audio = true;
         }
-        s.opening_audio = true;
-        drop(s);
         let session = self.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("bae-audio-reopen".into())
+            .name("bae-audio-device".into())
             .spawn(move || {
                 if let Err(error) = session.open_audio() {
                     tracing::warn!(%error, "Audio output unavailable");
@@ -240,6 +353,42 @@ impl SharedSession {
             self.lock().opening_audio = false;
             tracing::warn!(%error, "Could not start the audio device worker");
         }
+    }
+
+    /// A user can connect a device after starting the application.
+    pub(crate) fn retry_audio(&self) {
+        let needed = {
+            let s = self.lock();
+            match s.retry_audio_after {
+                Some(at) => Instant::now() >= at,
+                // Never opened or lost: open it now rather than wait for a failure.
+                None => s
+                    .output
+                    .as_ref()
+                    .is_none_or(bae_media::playback::AudioOutput::device_lost),
+            }
+        };
+        if needed {
+            self.start_audio();
+        }
+    }
+}
+
+/// Module setup already started the device. As the first warm-up task this
+/// only reopens a failed or lost one, on its own thread, so it never holds up
+/// the GPU tasks.
+impl bae_gpu::WarmUp for SharedSession {
+    fn name(&self) -> &str {
+        "audio output"
+    }
+
+    fn priority(&self) -> u8 {
+        0
+    }
+
+    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        self.start_audio();
+        Ok(())
     }
 }
 
@@ -261,21 +410,17 @@ impl Session {
 
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
-        let last = info.duration - info.frame_duration();
-        let t = info
-            .frame_rate
-            .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
-        self.times.insert(info.path.clone(), t);
+        let at = self.update_time(info, t);
         let playing = self
             .playback
             .as_ref()
             .filter(|pb| pb.comp == info.path)
             .map(|pb| pb.range);
         match playing {
-            Some(range) if range.contains(t) => {
-                self.restart_clock(t);
+            Some(range) if range.contains(at) => {
+                self.restart_clock(at);
                 if self.audio_clock {
-                    self.audio_clock = self.sound(t, range, self.loop_playback);
+                    self.audio_clock = self.sound(at, range, self.loop_playback);
                 }
             }
             Some(_) => self.stop(),
@@ -287,6 +432,7 @@ impl Session {
     fn restart_clock(&mut self, t: Time) {
         if let Some(pb) = &mut self.playback {
             pb.frame = pb.rate.time_to_frame(t);
+            pb.start = pb.frame;
             pb.started = Instant::now();
             pb.ordinal = 0;
             self.playback_stats = PlaybackStats {
@@ -296,9 +442,16 @@ impl Session {
         }
     }
 
+    fn update_time(&mut self, info: &CompInfo, t: Time) -> Time {
+        let at = info.playhead_time(t);
+        self.times.insert(info.path.clone(), at);
+        at
+    }
+
     /// Make `comp` the active comp (opening a timeline tab for it).
     pub fn open_comp(&mut self, comp: &PrimPath) {
         if self.active_comp.as_ref() != Some(comp) {
+            self.mini_flow = None;
             self.selected_layers.clear();
             self.selected_keys.clear();
             self.selected_props.clear();
@@ -314,6 +467,7 @@ impl Session {
     pub fn close_comp(&mut self, comp: &PrimPath) {
         self.open_comps.retain(|c| c != comp);
         if self.active_comp.as_ref() == Some(comp) {
+            self.mini_flow = None;
             self.active_comp = self.open_comps.last().cloned();
             self.selected_layers.clear();
             self.selected_keys.clear();
@@ -345,6 +499,16 @@ impl Session {
     pub fn sync(&mut self, stage: &Stage) {
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::Keys(keys) = &what {
+                let landed = keys.iter().all(|k| {
+                    query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+                });
+                if !landed && age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewEffects { layers, before } = &what {
                 let added: Vec<PrimPath> = layers
                     .iter()
@@ -373,7 +537,7 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {
                     unreachable!("handled above")
                 }
             };
@@ -387,7 +551,7 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
+                    Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -399,7 +563,7 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => None,
             })
             .collect();
         self.reserved
@@ -418,10 +582,24 @@ impl Session {
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));
-        self.selected_keys.retain(|k| {
-            query::attr_spec(stage, &k.path, &k.attr)
-                .is_some_and(|s| s.keyframes.contains_key(&k.time))
-        });
+        let expected: Vec<&KeyRef> = self
+            .pending
+            .iter()
+            .filter_map(|(w, _)| match w {
+                Pending::Keys(keys) => Some(keys.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let selected = std::mem::take(&mut self.selected_keys);
+        self.selected_keys = selected
+            .into_iter()
+            .filter(|k| {
+                expected.contains(&k)
+                    || query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+            })
+            .collect();
         self.reveal.retain(|l, _| stage.has_prim(l));
         self.selected_props
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
@@ -429,36 +607,84 @@ impl Session {
         self.selected_effects.retain(|e| stage.has_prim(e));
     }
 
+    /// Keep the meters moving through the last audible scrub sample.
+    pub(crate) fn monitoring_audio(&self) -> bool {
+        (self.audio_clock || self.last_scrub.is_some())
+            && self
+                .output
+                .as_ref()
+                .is_some_and(|output| !output.finished())
+    }
+
     pub fn is_playing(&self) -> bool {
         self.playback.is_some()
     }
 
-    /// Start playing the active comp from the current time through the work area
-    /// (from the work area start when the current time is outside it).
+    /// The range Preview ▸ Range plays for the current time `now`.
+    pub fn preview_range(&self, info: &CompInfo, now: Time) -> TimeRange {
+        let wa = info.work_area;
+        match self.preview.range {
+            PreviewRange::WorkArea => wa,
+            // The work area, grown to take in the current time (AE).
+            PreviewRange::WorkAreaExtended => {
+                let end = (info.duration).max(info.frame_duration());
+                let start = wa.start.min(now);
+                let stop = if now >= wa.end {
+                    (now + info.frame_duration()).min(end)
+                } else {
+                    wa.end
+                };
+                TimeRange::new(start, stop)
+            }
+            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
+        }
+    }
+
+    /// Start playing the active comp (Preview panel options): from the current
+    /// time or the start of the range, through the range.
     pub fn play(&mut self, info: &CompInfo) {
-        let range = info.work_area;
         let now = self.time(&info.path);
-        let from = if range.contains(now) && now + info.frame_duration() < range.end {
+        let range = self.preview_range(info, now);
+        let from = if self.preview.from_current
+            && range.contains(now)
+            && now + info.frame_duration() < range.end
+        {
             now
         } else {
             range.start
         };
         let started = Instant::now();
-        self.times
-            .insert(info.path.clone(), info.frame_rate.snap(from));
+        self.times.insert(info.path.clone(), from);
+        let frame = info.frame_rate.time_to_frame(from);
         self.playback = Some(Playback {
             comp: info.path.clone(),
             started,
-            frame: info.frame_rate.time_to_frame(from),
+            frame,
+            start: frame,
             rate: info.frame_rate,
+            fps: self
+                .preview
+                .fps
+                .unwrap_or_else(|| info.frame_rate.as_f64())
+                .max(1e-3),
             ordinal: 0,
+            work_area: info.work_area,
             revision: None,
             range,
+            before: now,
         });
         self.playback_stats = PlaybackStats {
             sample: Some(started),
             ..Default::default()
         };
+    }
+
+    /// Another preview frame rate plays at another speed: the sound does not
+    /// drive the clock then (AE plays it only at the comp's rate).
+    fn sound_clocks(&self, info: &CompInfo) -> bool {
+        self.preview
+            .fps
+            .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3)
     }
 
     /// Refresh the producer's snapshot once per composition edit. Timeline seeks
@@ -500,7 +726,7 @@ impl Session {
         self.play(info);
         let pb = self.playback.as_ref().unwrap();
         let at = pb.rate.frame_to_time(pb.frame);
-        self.audio_clock = self.sound(at, pb.range, self.loop_playback);
+        self.audio_clock = self.sound_clocks(info) && self.sound(at, pb.range, self.loop_playback);
     }
 
     pub(crate) fn scrub_to(
@@ -544,7 +770,19 @@ impl Session {
         {
             let (from, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
             self.restart_clock(from);
-            self.audio_clock = self.sound(from, range, self.loop_playback);
+            self.audio_clock =
+                self.sound_clocks(info) && self.sound(from, range, self.loop_playback);
+        }
+    }
+
+    /// Stop playing (Spacebar): the current time stays on the last frame shown,
+    /// or goes back when Move Time To Preview Time is off.
+    pub fn stop_preview(&mut self, info: &CompInfo) {
+        if let Some(pb) = self.playback.take()
+            && !self.preview.move_time
+            && pb.comp == info.path
+        {
+            self.set_time(info, pb.before);
         }
     }
 
@@ -562,7 +800,7 @@ impl Session {
             self.stop();
             return;
         };
-        if pb.range != info.work_area || pb.rate != info.frame_rate {
+        if pb.work_area != info.work_area || pb.rate != info.frame_rate {
             self.play(&info);
             if let Some(pb) = self.playback.as_mut() {
                 pb.revision = Some(stage.revision());
@@ -599,7 +837,7 @@ impl Session {
         if ordinal == pb.ordinal && !finished {
             return;
         }
-        let (start, last) = pb.frame_range();
+        let (first, last) = pb.frame_range();
         let delta = ordinal - pb.ordinal;
         let until_end = (last - pb.frame + 1) as u64;
         let previous_ordinal = pb.ordinal;
@@ -609,10 +847,13 @@ impl Session {
         pb.frame = if ended {
             last
         } else {
-            start + (pb.frame - start + delta as i64).rem_euclid(last - start + 1)
+            first + (pb.frame - first + delta as i64).rem_euclid(last - first + 1)
         };
+        // Skip: only every (skip + 1)th frame is shown.
+        let step = i64::from(self.preview.skip) + 1;
+        let shown = pb.frame - (pb.frame - pb.start).rem_euclid(step);
         self.times
-            .insert(pb.comp.clone(), pb.rate.frame_to_time(pb.frame));
+            .insert(pb.comp.clone(), pb.rate.frame_to_time(shown.max(first)));
         if ended {
             stats.dropped += (previous_ordinal + until_end).saturating_sub(stats.next_source);
             self.stop();
@@ -671,6 +912,36 @@ mod tests {
     }
 
     #[test]
+    fn preview_range_play_from_and_stop_follow_the_preview_panel() {
+        let mut info = info();
+        info.work_area = TimeRange::new(Time::from_seconds(0.5), Time::from_seconds(1.0));
+        let mut s = Session::default();
+        let now = Time::from_seconds(1.5);
+        // AE's default: the work area grown to the current time.
+        let r = s.preview_range(&info, now);
+        assert_eq!(r.start, Time::from_seconds(0.5));
+        assert!(r.end > now);
+        s.preview.range = PreviewRange::WorkArea;
+        assert_eq!(s.preview_range(&info, now), info.work_area);
+        s.preview.range = PreviewRange::EntireDuration;
+        assert_eq!(s.preview_range(&info, now).end, info.duration);
+        // Play From: Start of Range.
+        s.preview.range = PreviewRange::WorkArea;
+        s.preview.from_current = false;
+        s.set_time(&info, Time::from_seconds(0.7));
+        s.play(&info);
+        assert_eq!(s.time(&info.path), Time::from_seconds(0.5));
+        // Move time to preview time off: Spacebar goes back to where it was.
+        s.preview.move_time = false;
+        s.stop_preview(&info);
+        assert!(!s.is_playing());
+        assert_eq!(
+            s.time(&info.path),
+            info.frame_rate.snap(Time::from_seconds(0.7))
+        );
+    }
+
+    #[test]
     fn time_is_snapped_and_clamped() {
         let mut s = Session::default();
         let i = info();
@@ -680,6 +951,22 @@ mod tests {
         assert_eq!(s.time(&i.path), FrameRate::FPS_30.frame_to_time(59));
         s.set_time(&i, Time(-5));
         assert_eq!(s.time(&i.path), Time::ZERO);
+    }
+
+    #[test]
+    fn playback_starts_in_work_area() {
+        let mut s = Session::default();
+        let mut i = info();
+        i.work_area = TimeRange::new(Time::from_seconds(1.0), Time::from_seconds(2.0));
+        s.preview.range = PreviewRange::WorkArea;
+        s.play(&i);
+        assert!(s.is_playing());
+        assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
+        let seek = i.frame_rate.frame_to_time(42);
+        s.set_time(&i, seek);
+        assert_eq!(s.playback.as_ref().unwrap().frame, 42);
+        s.set_time(&i, Time::ZERO);
+        assert!(!s.is_playing());
     }
 
     #[test]

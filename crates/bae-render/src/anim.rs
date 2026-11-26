@@ -40,6 +40,7 @@ use crate::request::RenderPurpose;
 #[derive(Debug)]
 pub struct AnimEvaluator {
     inner: Evaluator,
+    scalar_tracks: crate::parameter_track::TrackCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
@@ -56,6 +57,7 @@ impl AnimEvaluator {
     pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
             inner: Evaluator::new(),
+            scalar_tracks: Default::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
@@ -236,6 +238,8 @@ impl AnimEvaluator {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         out.time = l.layer_time;
+        out.start_time = l.timing.start_time;
+        out.time_scale = l.timing.stretch_percent() / 100.;
         out.in_point = l.timing.in_point.min(l.timing.out_point);
         out.active = l.active && guide_ok;
         out.visible = l.visible;
@@ -278,15 +282,23 @@ impl AnimEvaluator {
                 .effects
                 .iter()
                 .filter(|_| l.switches.effects)
-                .map(|e| RenderEffect {
-                    path: e.path.clone(),
-                    effect: e.match_name.clone(),
-                    enabled: e.enabled,
-                    params: e
+                .map(|e| {
+                    let mut params: Vec<(u32, bae_model::Value)> = e
                         .params
                         .iter()
                         .filter_map(|(id, v)| Some((id.parse().ok()?, v.clone())))
-                        .collect(),
+                        .collect();
+                    // The Paint effect's strokes visible at this frame.
+                    if e.match_name == crate::paint::PAINT_EFFECT {
+                        let strokes = crate::paint::strokes(&e.children, l.layer_time);
+                        params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
+                    }
+                    RenderEffect {
+                        path: e.path.clone(),
+                        effect: e.match_name.clone(),
+                        enabled: e.enabled,
+                        params,
+                    }
                 })
                 .collect();
         }
@@ -409,6 +421,33 @@ impl CompEvaluator for AnimEvaluator {
         self.eval(stage, comp, time, 0)
     }
 
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<bae_model::Value> {
+        self.inner.evaluate_attribute(stage, path, name, time).ok()
+    }
+
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &bae_model::AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let slot = self.scalar_tracks.get(stage, path, name, attr, frame);
+        crate::parameter_track::prepare(slot, attr, frame, |t| {
+            self.inner
+                .evaluate_attribute(stage, path, name, t)
+                .ok()?
+                .as_f64()
+        })
+    }
+
     fn invalidate(&mut self, event: &StageEvent) {
         self.inner.invalidate(event);
     }
@@ -476,7 +515,7 @@ fn hash_prims(prims: &[EvaluatedPrim], h: &mut FxHasher) {
         p.path.hash(h);
         p.prim_type.hash(h);
         p.attrs.len().hash(h);
-        for (name, value) in &p.attrs {
+        for (name, value) in p.attrs.iter() {
             name.hash(h);
             hash_value(value, h);
         }
