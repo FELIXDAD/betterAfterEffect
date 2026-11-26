@@ -799,3 +799,81 @@ fn planes_intersect_models() {
     assert!(red(behind.px(5, 5)), "around the cube");
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// A 3D model with Casts Shadows on throws its shadow on a lit layer behind
+/// it (drawn into the layer's shadow map): the wall darkens where the cube
+/// blocks the light, and only there.
+#[test]
+fn models_cast_shadows_on_layers() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-model-shadow-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cube.obj");
+    let mut obj = String::new();
+    for z in [-1.0, 1.0] {
+        for y in [-1.0, 1.0] {
+            for x in [-1.0, 1.0] {
+                obj += &format!("v {x} {y} {z}\n");
+            }
+        }
+    }
+    for f in [
+        "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+    ] {
+        obj += &format!("f {f}\n");
+    }
+    std::fs::write(&file, obj).unwrap();
+    let mut r = Renderer::new(gpu);
+    use bae_render::light::{Falloff, Light, LightKind, ShadowMode};
+    let scene = |casts: ShadowMode| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        let mut model = RenderLayer::new(
+            p("/comps/main/layers/model"),
+            LayerContent::Model(bae_render::ModelRef {
+                asset: p("/assets/cube"),
+                file: Some(file.clone()),
+            }),
+        );
+        model.matrix_3d = Some(DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0)));
+        model.material.casts_shadows = casts;
+        let wall = solid_3d(
+            "wall",
+            [1.0; 4],
+            [600, 600],
+            DVec3::new(100.0, 100.0, 150.0),
+            DVec3::ZERO,
+        );
+        comp.layers = vec![model, wall];
+        comp.lights = vec![Light {
+            kind: LightKind::Point,
+            world: DMat4::from_translation(DVec3::new(0.0, 100.0, -300.0)),
+            point_of_interest: DVec3::new(100.0, 100.0, 0.0),
+            color: [1.0, 1.0, 1.0],
+            intensity: 100.0,
+            cone_angle: 90.0,
+            cone_feather: 50.0,
+            falloff: Falloff::None,
+            radius: 500.0,
+            falloff_distance: 500.0,
+            casts_shadows: true,
+            shadow_darkness: 100.0,
+            shadow_diffusion: 0.0,
+            scope_below: None,
+            environment: None,
+        }];
+        comp
+    };
+    let lit = render(&mut r, &scene(ShadowMode::Off));
+    let shadowed = render(&mut r, &scene(ShadowMode::On));
+    let luma =
+        |img: &Image, x, y| -> i32 { img.px(x, y).iter().take(3).map(|&c| i32::from(c)).sum() };
+    // Right of the cube the wall is in its shadow; left of it, lit.
+    assert!(
+        luma(&shadowed, 180, 100) + 150 < luma(&lit, 180, 100),
+        "shadow: {:?} vs {:?}",
+        shadowed.px(180, 100),
+        lit.px(180, 100)
+    );
+    assert_eq!(luma(&shadowed, 20, 100), luma(&lit, 20, 100), "no shadow");
+    std::fs::remove_dir_all(dir).ok();
+}
