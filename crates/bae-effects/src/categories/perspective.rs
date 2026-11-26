@@ -1,3 +1,4 @@
+mod basic_3d;
 mod cc;
 mod filters;
 use super::packages;
@@ -6,6 +7,7 @@ use crate::effects::spatial;
 
 pub(crate) fn register(registry: &mut Registry) {
     cc::register(registry);
+    basic_3d::register(registry);
     registry.effects.extend(filters::entries());
     registry.prewarm.push(filters::prewarm);
     packages(

@@ -898,7 +898,7 @@ impl Panel for CompositionViewer {
         self.render_factor = resolution;
         // Paint.
         let painter = ui.painter_at(area);
-        let controls = session.lock().layer_controls;
+        let controls = view_options::shown_controls(&session.lock());
         let pasteboard = session.lock().panel_background.color();
         painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
@@ -912,11 +912,7 @@ impl Panel for CompositionViewer {
             None => comp_rect,
         };
         if self.checker {
-            checkerboard(
-                &painter,
-                comp_rect.intersect(area),
-                cx.resources,
-            );
+            checkerboard(&painter, comp_rect.intersect(area), cx.resources);
         } else {
             let c = info.bg_color;
             painter.rect_filled(
@@ -934,8 +930,9 @@ impl Panel for CompositionViewer {
             session.lock().stop();
         }
         // A value drag that ended without a commit (e.g. cancelled) must not leave
-        // its preview behind (a committed one stays until its command has run).
-        if !ui.input(|i| i.pointer.any_down()) {
+        // its preview behind (a committed one stays until its command has run;
+        // text being typed stays while its field has focus).
+        if !ui.input(|i| i.pointer.any_down()) && ui.memory(|m| m.focused().is_none()) {
             let mut s = session.lock();
             if s.scrub.as_ref().is_some_and(|s| s.committed.is_none()) {
                 s.scrub = None;
