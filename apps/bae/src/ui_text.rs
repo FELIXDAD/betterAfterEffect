@@ -122,6 +122,8 @@ pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     // AE: 显示/隐藏 Alpha 通道, RGB 直接.
     "Alpha",
     "RGB",
+    // AE: 3D 位置 Gizmo, 三维旋转 Gizmo …
+    "Gizmo",
 ];
 
 #[test]

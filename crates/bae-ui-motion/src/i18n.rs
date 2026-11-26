@@ -89,6 +89,7 @@ pub(crate) fn all() -> Vec<(&'static str, &'static str)> {
         crate::graph::ZH,
         crate::dialogs::ZH,
         crate::import::ZH,
+        crate::assist::ZH,
     ]
     .concat()
 }

@@ -74,7 +74,7 @@
 | Add Fonts from Adobe... | 131089 | `motion.file.add_fonts_from_adobe` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ New Premiere Sequence... | 12845057 | `motion.file.new_premiere_sequence` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
-| Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ☐ |
+| Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ✅ |
 | Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ☐ |
 | New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ☐ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
@@ -740,8 +740,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTimeZoomIn` | `timeline.zoom_in` |  | = | = |  | C | ✅ |
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - |  | C | ✅ |
 | `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; |  | C | ☐ |
-| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ☐ |
-| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ☐ |
+| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ✅ |
+| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ✅ |
 | `CompToggleMaskFeathers` | `motion.reveal` | `{"what":"mask_feather","add":false}` | F | F |  | B | ☐ |
 | `CompToggleMaskFeathersAddState` | `motion.reveal` | `{"what":"mask_feather","add":true}` | Shift+F | Shift+F |  | B | ☐ |
 | `CompToggleMaskFeathersAddStateNewKF` | `motion.toggle_key` | `{"attr":"mask_feather"}` | Alt+Shift+F | Opt+Shift+F |  | B | ☐ |
