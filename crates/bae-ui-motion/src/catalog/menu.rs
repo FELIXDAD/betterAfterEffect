@@ -1176,7 +1176,7 @@ const WINDOW: &[Node] = &[
     s(it(524329, "Project", "window.panel", r#"{"id":"project","toggle":true}"#, B, Done)),
     SEP,
     win(it(524331, "Create Nulls From Paths.jsx", "window.panel", r#"{"id":"create_nulls_from_paths","toggle":true}"#, B, Done)),
-    win(it(524338, "VR Comp Editor.jsx", "motion.window.script_panel", r#"{"script":"VR Comp Editor.jsx"}"#, B, Later)),
+    win(it(524338, "VR Comp Editor.jsx", "window.panel", r#"{"id":"vr_comp_editor","toggle":true}"#, B, Done)),
 ];
 
 /// Help.

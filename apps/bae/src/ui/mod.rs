@@ -9,6 +9,7 @@ pub use renderer::{UiOutput, UiRenderer};
 pub use workspace::ShortcutRow;
 #[cfg(test)]
 pub(crate) use workspace::gpu_kind as workspace_gpu_kind;
+pub(crate) use workspace::hardware_information;
 #[cfg(test)]
 pub(crate) use workspace::plugin_notice_template;
 pub use workspace::{

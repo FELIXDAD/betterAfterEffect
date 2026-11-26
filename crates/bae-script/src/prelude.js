@@ -719,6 +719,9 @@
     get fileName() { return ""; },
   };
   g.bae = {
+    copyLayersToComp: function (layers, comp) {
+      return H("copyLayersToComp", {layers: layers, comp: comp});
+    },
     pathProperty: function (path) {
       var info = H("pathInfo", { path: path });
       info.layer = mkLayer(info.layer);
