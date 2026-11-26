@@ -257,6 +257,9 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Open the comps a command creates (those not in `before`; New Comp
+    /// from Selection) and, with `queue`, add them to the Render Queue.
+    NewComps { before: Vec<PrimPath>, queue: bool },
     /// Select the shape group a command adds to a shape layer (AE: a shape
     /// tool's new group is selected, its box shown): the first of `layer`'s
     /// groups not in `before`.
@@ -378,6 +381,8 @@ pub struct Session {
     /// properties (AE).
     pub(crate) expression_clipboard: Option<String>,
     pending: Vec<(Pending, u32)>,
+    /// New comps to add to the Render Queue (the dialogs host takes them).
+    pub(crate) queue_comps: Vec<PrimPath>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
     reserved: Vec<(PrimPath, String)>,
@@ -789,6 +794,21 @@ impl Session {
         }
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewComps { before, queue } = &what {
+                let added: Vec<PrimPath> = query::comps(stage)
+                    .into_iter()
+                    .filter(|c| !before.contains(c))
+                    .collect();
+                if let Some(first) = added.first() {
+                    self.open_comp(first);
+                    if *queue {
+                        self.queue_comps.extend(added);
+                    }
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::Keys(keys) = &what {
                 let landed = keys.iter().all(|k| {
                     query::attr_spec(stage, &k.path, &k.attr)
@@ -841,7 +861,8 @@ impl Session {
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
                 | Pending::NewGroup { .. }
-                | Pending::Keys(_) => {
+                | Pending::Keys(_)
+                | Pending::NewComps { .. } => {
                     unreachable!("handled above")
                 }
             };
@@ -858,7 +879,8 @@ impl Session {
                     Pending::NewLayers { .. }
                     | Pending::NewEffects { .. }
                     | Pending::NewGroup { .. }
-                    | Pending::Keys(_) => {}
+                    | Pending::Keys(_)
+                    | Pending::NewComps { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -873,7 +895,8 @@ impl Session {
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
                 | Pending::NewGroup { .. }
-                | Pending::Keys(_) => None,
+                | Pending::Keys(_)
+                | Pending::NewComps { .. } => None,
             })
             .collect();
         self.reserved
