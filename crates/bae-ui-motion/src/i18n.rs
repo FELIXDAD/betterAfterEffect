@@ -24,6 +24,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "合成中没有开启声音的图层。",
     ),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
+    ("Set Frame", "设置帧"),
     ("Track Motion", "跟踪运动"),
     ("Warp Stabilizer VFX", "变形稳定器 VFX"),
     ("Analyze Stabilization", "分析稳定运动"),

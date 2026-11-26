@@ -25,7 +25,7 @@ mod audio_input;
 mod encode;
 mod trim;
 
-pub use encode::{AvWriterEncoder, AvWriterFormat, default_movie_path};
+pub use encode::{AvWriterEncoder, AvWriterFormat, EncoderWarmUp, default_movie_path};
 pub use trim::AvTrimmer;
 
 use std::path::Path;

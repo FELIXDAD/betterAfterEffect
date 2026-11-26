@@ -16,6 +16,7 @@
 //!
 //! See `docs/spec/app-shell.md`.
 
+pub(crate) mod builtin_scripts;
 mod dialogs;
 mod menu;
 mod numpad;
@@ -82,6 +83,7 @@ impl AppModule for ShellModule {
     }
 
     fn finish(&self, app: &mut AppBuilder) {
+        builtin_scripts::register(app);
         ui::register_panels(app);
         // BAE's own menu entries (History and Agent panels, Agent workspace),
         // registered next to the AE menus the motion workspace contributes.
@@ -728,7 +730,17 @@ impl Shell {
     /// Buttons of the Preferences window that need the system.
     fn run_settings_requests(&mut self) {
         for request in self.workspace.take_settings_requests() {
-            if request == crate::ui::REVEAL_PREFERENCES {
+            if let Some((title, body)) =
+                crate::ui::hardware_information(&request, self.app.resources())
+            {
+                let mut dialog = rfd::MessageDialog::new()
+                    .set_title(title)
+                    .set_description(body);
+                if let Some(view) = &self.view {
+                    dialog = dialog.set_parent(&*view.window);
+                }
+                dialog.show();
+            } else if request == crate::ui::REVEAL_PREFERENCES {
                 if let Some(dirs) = self.app.resource::<AppDirs>() {
                     reveal(&dirs.config_file(bae_prefs::FILE_NAME));
                 }
@@ -935,6 +947,14 @@ impl Shell {
         let Some(view) = self.view.as_mut() else {
             return;
         };
+        #[cfg(target_os = "macos")]
+        {
+            // A backing-scale notification can precede the physical resize event.
+            let size = view.window.inner_size();
+            if view.surface.size() != (size.width, size.height) {
+                view.surface.resize(size.width, size.height);
+            }
+        }
         let frame_start = Instant::now();
         tracing::trace!(frame = view.status.frames, "redraw");
 
