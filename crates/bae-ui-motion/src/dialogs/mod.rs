@@ -96,6 +96,7 @@ pub enum Dialog {
 #[derive(Debug, Default)]
 pub struct Dialogs {
     pub open: Option<Dialog>,
+    pub(crate) frame_checks: crate::import::FrameChecks,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
@@ -480,9 +481,12 @@ impl bae_ui::DialogHost for MotionDialogs {
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
-        let Some(mut open) = dialogs.lock().open.take() else {
-            return;
+        let open = {
+            let mut d = dialogs.lock();
+            d.frame_checks.repaint_while_running(ctx);
+            d.open.take().or_else(|| d.frame_checks.next_notice())
         };
+        let Some(mut open) = open else { return };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
