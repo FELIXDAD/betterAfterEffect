@@ -882,8 +882,7 @@ pub(crate) fn related_tab(
     }
     let label = crate::actions::label_of(cx.stage, path);
     if (1..=16).contains(&label) {
-        let [r, g, b] = prefs.label_color(label as usize);
-        tab.label(egui::Color32::from_rgb(r, g, b))
+        tab.label(bae_ui::settings::label_color(&prefs, label as usize))
     } else {
         tab
     }
