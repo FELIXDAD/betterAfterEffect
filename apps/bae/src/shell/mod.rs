@@ -627,6 +627,11 @@ impl Shell {
                     file.set(self.document.location().map(std::path::Path::to_owned));
                 }
             }
+            ids::MINIMIZE => {
+                if let Some(view) = &self.view {
+                    view.window.set_minimized(true);
+                }
+            }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
                 Outcome::Changed => self.set_notice(String::new()),
