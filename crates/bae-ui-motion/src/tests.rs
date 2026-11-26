@@ -3384,7 +3384,10 @@ fn add_footage_separate_dimensions_and_layer_controls() {
     assert_eq!(r.invocations[0].id, "transform.separate_dimensions");
     assert_eq!(r.invocations[0].params["separated"], true);
     h.apply(r);
-    assert!(crate::actions::all_separated(&h.stage, &[solid.clone()]));
+    assert!(crate::actions::all_separated(
+        &h.stage,
+        std::slice::from_ref(&solid)
+    ));
     let r = h.action(&mut viewer, Invocation::new(ids::SEPARATE_DIMENSIONS));
     assert_eq!(r.invocations[0].params["separated"], false, "a toggle");
 
