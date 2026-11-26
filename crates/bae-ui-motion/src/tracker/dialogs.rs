@@ -129,11 +129,10 @@ impl Target {
             .unwrap_or_default();
         let source = query::owning_layer(stage, track);
         if self.layer.is_none() {
-            self.layer = layers
-                .iter()
-                .find(|p| Some(*p) != source.as_ref())
-                .or(layers.first())
-                .cloned();
+            // AE's default: the layer just above the source (never the source).
+            self.layer = source
+                .as_ref()
+                .and_then(|s| bae_motion::tracker::layer_above(stage, s));
         }
         ui.label(tr("Apply Motion To:"));
         ui.radio_value(&mut self.effect, false, tr("Layer"));
