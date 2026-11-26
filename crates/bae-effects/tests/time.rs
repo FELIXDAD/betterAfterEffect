@@ -1,5 +1,5 @@
 use bae_model::{Time, Value};
-use bae_render::{LayerContent, RenderComp, RenderLayer};
+use bae_render::{LayerContent, RenderComp, RenderEffect, RenderLayer};
 use std::sync::Arc;
 #[path = "ae/categories/mod.rs"]
 mod categories;
@@ -174,4 +174,59 @@ fn wide_time_averages_frames_and_time_difference_compares_them() {
         "{:?}",
         &difference[..4]
     );
+}
+
+/// A white 8 × 8 square on black moving 8 px right per frame (x = 4 at
+/// frame 0), inside a pre-comp layer carrying `effect`.
+fn moving_square(effect: RenderEffect) -> impl Fn(Time) -> RenderComp {
+    move |time: Time| {
+        let frame = (time.as_seconds() * 30.).round();
+        let mut inner = RenderComp::new(path("/comps/inner"), 48, 8);
+        inner.time = time;
+        let mut square = solid("/comps/inner/layers/square", 8, [1.; 4]);
+        square.transform = glam::DAffine2::from_translation(glam::DVec2::new(4. + 8. * frame, 0.));
+        inner.layers = vec![
+            square,
+            solid("/comps/inner/layers/bg", 48, [0., 0., 0., 1.]),
+        ];
+        let mut comp = RenderComp::new(path("/comps/main"), 48, 8);
+        comp.time = time;
+        let mut layer = RenderLayer::new(path(CLIP), LayerContent::Comp(Arc::new(inner)));
+        layer.time = time;
+        layer.effects.push(effect.clone());
+        comp.layers.push(layer);
+        comp
+    }
+}
+
+#[test]
+fn pixel_motion_tweens_and_blurs_along_the_optical_flow() {
+    let Some(mut r) = renderer() else { return };
+    let red = |image: &[u8], x: usize| image[(4 * 48 + x) * 4];
+    // Timewarp at 50 % shows source frame 0.5 at comp frame 1: Pixel Motion
+    // puts the square half way ([8, 16)); Frame Mix leaves two half images.
+    let tween = |method: i64| {
+        effect(
+            "warp",
+            "ADBE Timewarp",
+            vec![(1, Value::Int(method)), (6, Value::Float(100.))],
+        )
+    };
+    let motion = pixels(&mut r, moving_square(tween(3)), 1. / 30.);
+    assert!(red(&motion, 14) > 200 && red(&motion, 6) < 55, "{motion:?}");
+    let mix = pixels(&mut r, moving_square(tween(2)), 1. / 30.);
+    assert!(red(&mix, 14).abs_diff(128) < 10, "{mix:?}");
+    // Pixel Motion Blur at 180°: ±2 px of the 8 px motion, smeared outwards
+    // past the square's edges; its middle and the far background stay.
+    let blur = pixels(
+        &mut r,
+        moving_square(effect(
+            "blur",
+            "ADBE OFMotionBlur",
+            vec![(4, Value::Float(100.))],
+        )),
+        1. / 30.,
+    );
+    assert!((20..235).contains(&red(&blur, 11)), "{blur:?}");
+    assert!(red(&blur, 16) > 240 && red(&blur, 2) < 15, "{blur:?}");
 }

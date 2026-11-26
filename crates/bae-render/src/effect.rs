@@ -63,7 +63,6 @@ pub struct EffectScene {
 #[derive(Debug, Clone, Default)]
 pub struct ScalarTrack {
     knots: Vec<ScalarKnot>,
-    fingerprint: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -73,6 +72,7 @@ struct ScalarKnot {
     incoming: f64,
     area: f64,
     peak: f64,
+    fingerprint: u64,
 }
 
 impl ScalarTrack {
@@ -87,26 +87,32 @@ impl ScalarTrack {
             .knots
             .last()
             .map_or(value, |p| p.peak.max(value).max(incoming));
+        let mut h = rustc_hash::FxHasher::default();
+        (
+            self.fingerprint(),
+            time.to_bits(),
+            value.to_bits(),
+            incoming.to_bits(),
+        )
+            .hash(&mut h);
         self.knots.push(ScalarKnot {
             time,
             value,
             incoming,
             area,
             peak,
+            fingerprint: h.finish(),
         });
-        let mut h = rustc_hash::FxHasher::default();
-        (
-            self.fingerprint,
-            time.to_bits(),
-            value.to_bits(),
-            incoming.to_bits(),
-        )
-            .hash(&mut h);
-        self.fingerprint = h.finish();
     }
 
     pub(crate) fn fingerprint(&self) -> u64 {
-        self.fingerprint
+        self.knots.last().map_or(0, |last| last.fingerprint)
+    }
+    pub(crate) fn truncate_from(&mut self, time: Time) {
+        // The expression VM rounds property reads to its subframe grid. When
+        // the edited segment starts between samples, resample its left neighbor.
+        let through = self.knots.partition_point(|k| k.time <= time.as_seconds());
+        self.knots.truncate(through.saturating_sub(1));
     }
     pub(crate) fn len(&self) -> usize {
         self.knots.len()
@@ -492,6 +498,10 @@ pub fn registry_id(match_name: &str) -> std::borrow::Cow<'_, str> {
 #[derive(Default)]
 pub struct EffectLibrary {
     effects: FxHashMap<String, Arc<dyn Effect>>,
+    /// Frame interpolation for Pixel Motion frame blending (not a listed
+    /// effect): params 1 = phase 0–1, 2 = the next frame's comp time (flicks,
+    /// read through [`LayerDependency::source`] of the layer).
+    interpolator: Option<Arc<dyn Effect>>,
     /// Generation of the app registry last synced from ([`Self::sync`]).
     synced: Option<u64>,
 }
@@ -513,6 +523,16 @@ impl EffectLibrary {
     }
 
     /// The implementation of `match_name`.
+    /// Sets the frame interpolator (see the field); kept across [`Self::sync`].
+    pub fn set_frame_interpolator(&mut self, effect: Arc<dyn Effect>) {
+        self.interpolator = Some(effect);
+    }
+
+    /// The frame interpolator, when one is registered.
+    pub fn frame_interpolator(&self) -> Option<&Arc<dyn Effect>> {
+        self.interpolator.as_ref()
+    }
+
     pub fn get(&self, match_name: &str) -> Option<&Arc<dyn Effect>> {
         self.effects.get(match_name)
     }

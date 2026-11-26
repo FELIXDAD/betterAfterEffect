@@ -8,9 +8,11 @@
 mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
+mod go_to_time;
 mod light_settings;
 pub mod memory;
 mod precompose;
+mod project_settings;
 mod render_output;
 mod solid_settings;
 mod transform_value;
@@ -34,6 +36,8 @@ use crate::session::SharedSession;
 /// The dialog that is open.
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    /// Analysis of the composition work area for the Keyframe Assistant.
+    AudioAnalysis(crate::audio_analysis::Analysis),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
@@ -45,6 +49,10 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// View > Go to Time (Alt+Shift+J).
+    GoToTime(Box<go_to_time::GoToTime>),
+    /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
+    ProjectSettings(Box<project_settings::ProjectSettings>),
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
     TransformValue(Box<TransformValue>),
@@ -243,6 +251,28 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Go to Time for the active comp.
+pub(crate) fn go_to_time(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(g) = go_to_time::GoToTime::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::GoToTime(Box::new(g)));
+    }
+}
+
+/// Open Project Settings.
+pub(crate) fn project_settings(cx: &PanelContext<'_>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::ProjectSettings(Box::new(
+            project_settings::ProjectSettings::new(cx.stage),
+        )));
+    }
+}
+
 /// Open Render Settings for render queue item `item`.
 pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
     let queue = crate::render_queue::shared(cx.resources);
@@ -326,6 +356,8 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        go_to_time::STRINGS,
+        project_settings::STRINGS,
         transform_value::STRINGS,
         render_output::STRINGS,
     ]
@@ -349,11 +381,14 @@ impl bae_ui::DialogHost for MotionDialogs {
         };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
+            Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
+            Dialog::ProjectSettings(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),

@@ -466,6 +466,7 @@ impl CompSettings {
         // Width / height with the aspect lock.
         let (mut w, mut h) = (f64::from(v.width), f64::from(v.height));
         let ratio = frame_aspect_text(v.width, v.height, 1.0);
+        let mut lock_rect = None;
         dialog::row(ui, LW, tr("Width:"), |ui| {
             if fields::number(ui, &mut w, 1.0..=30000.0, 0, tr("px"), tr("Width")).changed() {
                 v.width = w as u32;
@@ -474,12 +475,11 @@ impl CompSettings {
                 }
             }
             ui.add_space(24.0);
-            let mut lock = self.lock_aspect;
-            let label = tr("Lock Aspect Ratio to {ratio}").replace("{ratio}", &ratio);
-            if bae_ui::widgets::checkbox(ui, &mut lock, &label).changed() {
-                self.lock_aspect = lock;
-                self.aspect = f64::from(v.width) / f64::from(v.height);
-            }
+            // The lock is drawn after Height (below) so Tab goes from Width
+            // to Height, as in AE.
+            let (r, _) = ui
+                .allocate_exact_size(egui::vec2(ui.available_width(), 18.0), egui::Sense::hover());
+            lock_rect = Some(r);
         });
         dialog::row(ui, LW, tr("Height:"), |ui| {
             if fields::number(ui, &mut h, 1.0..=30000.0, 0, tr("px"), tr("Height")).changed() {
@@ -489,6 +489,19 @@ impl CompSettings {
                 }
             }
         });
+        if let Some(r) = lock_rect {
+            let mut row = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(r)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            let mut lock = self.lock_aspect;
+            let label = tr("Lock Aspect Ratio to {ratio}").replace("{ratio}", &ratio);
+            if bae_ui::widgets::checkbox(&mut row, &mut lock, &label).changed() {
+                self.lock_aspect = lock;
+                self.aspect = f64::from(v.width) / f64::from(v.height);
+            }
+        }
         ui.add_space(4.0);
         dialog::row(ui, LW, tr("Pixel Aspect Ratio:"), |ui| {
             let current = PIXEL_ASPECTS
