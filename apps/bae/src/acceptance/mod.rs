@@ -51,6 +51,7 @@ mod memory_preferences;
 mod menus;
 mod panel_parity;
 mod preference_controls;
+mod preview_preferences;
 mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;

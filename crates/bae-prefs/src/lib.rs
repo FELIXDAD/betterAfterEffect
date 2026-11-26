@@ -288,6 +288,7 @@ impl Preferences {
 
 /// Keys features read (the schema has them all).
 pub mod keys {
+    pub const CACHE_FRAMES_WHEN_IDLE: &str = "previews.cache_frames_when_idle";
     pub const TRANSPARENCY_PRESET: &str = "grids_guides.transparency_grid_colors_preset";
     pub const TRANSPARENCY_FIRST: &str = "grids_guides.transparency_grid_color_1";
     pub const TRANSPARENCY_SECOND: &str = "grids_guides.transparency_grid_color_2";
