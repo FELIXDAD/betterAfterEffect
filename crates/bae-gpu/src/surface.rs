@@ -12,11 +12,9 @@ use crate::context::{GpuContext, GpuError};
 #[serde(rename_all = "kebab-case")]
 pub enum PresentModePreference {
     /// VSync without tearing; lowest power (`FifoRelaxed` if available, else `Fifo`).
-    /// The default: the shell redraws only on events, so frame rate is not the goal.
     #[default]
     Vsync,
-    /// VSync with the lowest latency the platform offers (`Mailbox` if available,
-    /// else `FifoRelaxed`, else `Fifo`). Good for playback and scrubbing.
+    /// Prefer tear-free mailbox presentation; use FIFO if mailbox is unavailable.
     LowLatency,
     /// Uncapped (`Immediate`, else `Mailbox`, else `Fifo`). For benchmarks.
     NoVsync,
@@ -28,7 +26,7 @@ impl PresentModePreference {
         use wgpu::PresentMode as P;
         let order: &[P] = match self {
             Self::Vsync => &[P::FifoRelaxed, P::Fifo],
-            Self::LowLatency => &[P::Mailbox, P::FifoRelaxed, P::Fifo],
+            Self::LowLatency => &[P::Mailbox, P::Fifo],
             Self::NoVsync => &[P::Immediate, P::Mailbox, P::Fifo],
         };
         order
@@ -195,7 +193,6 @@ pub struct WindowSurface {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     options: SurfaceOptions,
-    supported_present_modes: Vec<wgpu::PresentMode>,
     color: SurfaceColorInfo,
     /// `false` while the window has zero area (minimized).
     configured: bool,
@@ -269,7 +266,6 @@ impl WindowSurface {
             surface,
             config,
             options,
-            supported_present_modes: caps.present_modes,
             color,
             configured: false,
             live_resize: false,
@@ -337,13 +333,6 @@ impl WindowSurface {
         self.config.width = width.min(max);
         self.config.height = height.min(max);
         self.reconfigure();
-    }
-
-    /// Changes frame pacing.
-    pub fn set_present_mode(&mut self, preference: PresentModePreference) {
-        self.options.present_mode = preference;
-        self.config.present_mode = preference.pick(&self.supported_present_modes);
-        self.reconfigure_if_active();
     }
 
     /// Changes the number of frames the CPU may run ahead (1..=3).
@@ -573,6 +562,10 @@ mod tests {
         let metal = [P::Fifo, P::Immediate];
         assert_eq!(PresentModePreference::Vsync.pick(&metal), P::Fifo);
         assert_eq!(PresentModePreference::LowLatency.pick(&metal), P::Fifo);
+        assert_eq!(
+            PresentModePreference::LowLatency.pick(&[P::FifoRelaxed, P::Fifo]),
+            P::Fifo
+        );
         assert_eq!(PresentModePreference::NoVsync.pick(&metal), P::Immediate);
         let dx12 = [P::Fifo, P::FifoRelaxed, P::Mailbox, P::Immediate];
         assert_eq!(PresentModePreference::Vsync.pick(&dx12), P::FifoRelaxed);

@@ -53,6 +53,9 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
         Kind::Ball => reference!("CC Ball Action", "CC Ball Action", "CC Ball Action"),
         Kind::Mercury => reference!("CC Mr. Mercury", "CC Mr. Mercury", "CC Mr. Mercury"),
         Kind::Hair => reference!("CC Hair", "CC Hair", "CC Hair"),
+        Kind::Wave => reference!("APC Wave World", "Wave World", "波形环境"),
+        Kind::Caustics => reference!("APC Caustics", "Caustics", "焦散"),
+        Kind::Foam => reference!("APC Foam", "Foam", "泡沫"),
         Kind::Rain => reference!("CSRainfall", "CC Rainfall", "CC Rainfall"),
         Kind::Snow => reference!("CSSnowfall", "CC Snowfall", "CC Snowfall"),
         Kind::Bubbles => reference!("CC Bubbles", "CC Bubbles", "CC Bubbles"),
@@ -96,7 +99,12 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
         };
         let layer = matches!(kind, ParamKind::Layer);
         builder.push(c.id, c.en, c.zh, kind, value);
-        if layer && matches!(id, "ADBE Playgnd" | "CC Hair") {
+        if layer
+            && matches!(
+                id,
+                "ADBE Playgnd" | "CC Hair" | "APC Foam" | "APC Wave World" | "APC Caustics"
+            )
+        {
             builder = builder.layer_stage(c.id);
         }
     }
@@ -109,6 +117,14 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
     {
         param.flags.cannot_animate = !control.varies;
         param.flags.cannot_time_vary = !control.varies;
+    }
+    if kind == Kind::Caustics
+        && let Some(stage) = def
+            .params
+            .iter_mut()
+            .find(|p| p.id == crate::catalog::layer_stage_id(10))
+    {
+        stage.default = Some(Value::Int(3));
     }
     let slug = name.to_ascii_lowercase().replace('.', "").replace(' ', "-");
     let mut result = rust_builtin(

@@ -352,3 +352,35 @@ fn e_reveals_the_effects_group_with_its_effects() {
     };
     assert!(bound("E") && bound("Shift+E"));
 }
+
+/// #599: Rename on the Timeline's empty space renames the comp in the Project
+/// panel (AE 26).
+#[test]
+fn timeline_blank_rename_asks_the_project_panel() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("timeline");
+    let session = h.session();
+    {
+        let mut cx = PanelContext::new(
+            &id,
+            "timeline",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        super::super::rename_comp(&mut cx, &session, &comp);
+    }
+    assert!(
+        requests.open.iter().any(|p| p.kind() == "project"),
+        "{:?}",
+        requests.open
+    );
+    let s = session.lock();
+    assert_eq!(s.selected_items, vec![comp.clone()]);
+    assert_eq!(s.rename_item.as_ref(), Some(&comp));
+    drop(s);
+    let _ = &mut h;
+}
