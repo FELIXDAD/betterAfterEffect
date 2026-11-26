@@ -364,10 +364,24 @@ impl Workspace {
         };
         self.workbench.set_external_modal(self.settings.is_open());
         let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
-        if let bae_ui::settings::Outcome::Ok(prefs) = self.settings.show(ui.ctx())
-            && let Err(error) = self.prefs.set(prefs)
-        {
-            tracing::warn!("could not save preferences: {error}");
+        if self.settings.is_open() {
+            let outcome = self.settings.show(ui.ctx());
+            if outcome == bae_ui::settings::Outcome::None {
+                if let Some(draft) = self.settings.take_display_preview() {
+                    self.prefs.preview_display(Some(draft));
+                    bae_ui::settings::apply(draft);
+                    ui.ctx().request_repaint();
+                }
+            } else {
+                self.prefs.preview_display(None);
+                if let bae_ui::settings::Outcome::Ok(prefs) = outcome
+                    && let Err(error) = self.prefs.set(prefs)
+                {
+                    tracing::warn!("could not save preferences: {error}");
+                }
+                bae_ui::settings::apply(&self.prefs.current());
+                ui.ctx().request_repaint();
+            }
         }
         if self.show_about {
             let mut open = true;
