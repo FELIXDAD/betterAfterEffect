@@ -16,6 +16,7 @@
 //!
 //! See `docs/spec/app-shell.md`.
 
+pub(crate) mod builtin_scripts;
 mod dialogs;
 mod menu;
 mod numpad;
@@ -82,6 +83,7 @@ impl AppModule for ShellModule {
     }
 
     fn finish(&self, app: &mut AppBuilder) {
+        builtin_scripts::register(app);
         ui::register_panels(app);
         // BAE's own menu entries (History and Agent panels, Agent workspace),
         // registered next to the AE menus the motion workspace contributes.
