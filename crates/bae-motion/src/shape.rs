@@ -407,6 +407,165 @@ impl Command for AddShape {
 
 // ---------------------------------------------------------------------------
 
+/// The items of AE's shape Add menu: `(id, English base name, prim type,
+/// operator)`; the base name is numbered ("Trim Paths 1").
+const ADD_ITEMS: &[(&str, &str, &str, Option<&str>)] = &[
+    ("group", "Group", "ShapeGroup", None),
+    ("rect", "Rectangle Path", "Rect", None),
+    ("ellipse", "Ellipse Path", "Ellipse", None),
+    ("polystar", "Polystar Path", "Star", None),
+    ("path", "Path", "Path", None),
+    ("fill", "Fill", "Fill", None),
+    ("stroke", "Stroke", "Stroke", None),
+    ("gradient_fill", "Gradient Fill", "GradientFill", None),
+    ("gradient_stroke", "Gradient Stroke", "GradientStroke", None),
+    ("merge", "Merge Paths", "ShapeOperator", Some("merge")),
+    ("offset", "Offset Paths", "ShapeOperator", Some("offset")),
+    (
+        "pucker_bloat",
+        "Pucker & Bloat",
+        "ShapeOperator",
+        Some("pucker_bloat"),
+    ),
+    ("repeater", "Repeater", "ShapeOperator", Some("repeater")),
+    (
+        "round_corners",
+        "Round Corners",
+        "ShapeOperator",
+        Some("round_corners"),
+    ),
+    ("trim", "Trim Paths", "ShapeOperator", Some("trim")),
+    ("twist", "Twist", "ShapeOperator", Some("twist")),
+    (
+        "wiggle_paths",
+        "Wiggle Paths",
+        "ShapeOperator",
+        Some("wiggle_paths"),
+    ),
+    (
+        "wiggle_transform",
+        "Wiggle Transform",
+        "ShapeOperator",
+        Some("wiggle_transform"),
+    ),
+    ("zig_zag", "Zig Zag", "ShapeOperator", Some("zig_zag")),
+];
+
+/// The ids [`AddShapeItem`] takes, in AE's Add menu order.
+pub fn add_item_ids() -> impl Iterator<Item = &'static str> {
+    ADD_ITEMS.iter().map(|(id, ..)| *id)
+}
+
+pub struct AddShapeItem;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AddShapeItemParams {
+    /// Where to add: a shape layer (at the end of its contents), a shape group
+    /// (at the end of its contents) or a shape item (right after it, AE: below
+    /// the selected item). One item is added per target.
+    pub targets: Vec<PrimPath>,
+    /// group, rect, ellipse, polystar, path, fill, stroke, gradient_fill,
+    /// gradient_stroke, merge, offset, pucker_bloat, repeater, round_corners,
+    /// trim, twist, wiggle_paths, wiggle_transform, zig_zag.
+    pub item: String,
+    /// Fill and Stroke: straight RGBA 0–1 (default the schema's).
+    #[serde(default)]
+    pub color: Option<[f64; 4]>,
+    /// Stroke: width in pixels.
+    #[serde(default)]
+    pub width: Option<f64>,
+}
+
+/// Output of `shape.add_item`: the new items, one per target.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AddShapeItemOutput {
+    pub items: Vec<PrimPath>,
+}
+
+/// The folder an item goes into for `target`, and its index there (`None`:
+/// at the end).
+fn add_place(
+    stage: &bae_model::Stage,
+    target: &PrimPath,
+) -> Result<(PrimPath, Option<usize>), CommandError> {
+    if query::layer_kind(stage, target).as_deref() == Some("shape") {
+        return Ok((child(target, query::CONTENTS)?, None));
+    }
+    let view = stage
+        .prim(target)
+        .ok_or_else(|| fail(format!("{target} does not exist")))?;
+    if view.is_a(&PrimType::SHAPE_GROUP) {
+        return Ok((child(target, query::CONTENTS)?, None));
+    }
+    let folder = target
+        .parent()
+        .ok_or_else(|| fail(format!("{target} is not in a shape layer")))?;
+    let index = stage
+        .children(&folder)
+        .iter()
+        .position(|c| c == target)
+        .map(|i| i + 1);
+    Ok((folder, index))
+}
+
+impl Command for AddShapeItem {
+    type Params = AddShapeItemParams;
+    type Output = AddShapeItemOutput;
+    const ID: &'static str = "shape.add_item";
+    const TITLE: &'static str = "Add Shape Item";
+    const DESCRIPTION: &'static str = "AE's shape Add menu: add a group, path, fill, stroke or path operator (Trim Paths, Repeater …) to shape layers or groups, or right after a shape item.";
+
+    fn run(
+        &self,
+        tx: &mut bae_model::Transaction<'_>,
+        p: Self::Params,
+    ) -> Result<AddShapeItemOutput, CommandError> {
+        let &(_, base_en, ty, operator) = ADD_ITEMS
+            .iter()
+            .find(|(id, ..)| *id == p.item)
+            .ok_or_else(|| fail(format!("unknown shape item {:?}", p.item)))?;
+        if p.targets.is_empty() {
+            return Err(fail("give at least one target"));
+        }
+        let mut items = Vec::new();
+        for target in &p.targets {
+            let layer = query::owning_layer(tx.stage(), target)
+                .ok_or_else(|| fail(format!("{target} is not in a shape layer")))?;
+            ensure_unlocked(tx.stage(), [&layer])?;
+            let (folder, index) = add_place(tx.stage(), target)?;
+            if !tx.stage().has_prim(&folder) {
+                create(tx, &folder, PrimType::FOLDER, None)?;
+            }
+            let base = crate::names::localized(base_en);
+            let name = query::next_numbered_name(tx.stage(), &folder, base);
+            let path = child(
+                &folder,
+                &query::unique_child_name(tx.stage(), &folder, &name),
+            )?;
+            create(tx, &path, PrimType::new(ty), index)?;
+            set(tx, &path, "name", Value::String(name))?;
+            if let Some(op) = operator {
+                set(tx, &path, "operator", Value::Enum(op.into()))?;
+            }
+            if ty == "ShapeGroup" {
+                create(tx, &child(&path, query::CONTENTS)?, PrimType::FOLDER, None)?;
+            }
+            if matches!(ty, "Fill" | "Stroke")
+                && let Some(c) = p.color
+            {
+                set(tx, &path, "color", Value::Color(c))?;
+            }
+            if ty == "Stroke"
+                && let Some(w) = p.width
+            {
+                set(tx, &path, "width", Value::Float(w))?;
+            }
+            items.push(path);
+        }
+        Ok(AddShapeItemOutput { items })
+    }
+}
+
 /// AE 26's default label colors in label order (1 Red … 16 Dark Green).
 const LABEL_RGB: [[u8; 3]; 16] = [
     [0xb5, 0x38, 0x38],
