@@ -1175,9 +1175,7 @@ const WINDOW: &[Node] = &[
     s(it(524328, "Footage", "window.panel", r#"{"id":"footage","toggle":true}"#, E, Later)),
     s(it(524329, "Project", "window.panel", r#"{"id":"project","toggle":true}"#, B, Done)),
     SEP,
-    // AE's two bundled ScriptUI panels on Windows (greyed until scripts run,
-    // #456 #457); AE 26 on the Mac lists none.
-    win(it(524331, "Create Nulls From Paths.jsx", "motion.window.script_panel", r#"{"script":"Create Nulls From Paths.jsx"}"#, B, Later)),
+    win(it(524331, "Create Nulls From Paths.jsx", "window.panel", r#"{"id":"create_nulls_from_paths","toggle":true}"#, B, Done)),
     win(it(524338, "VR Comp Editor.jsx", "motion.window.script_panel", r#"{"script":"VR Comp Editor.jsx"}"#, B, Later)),
 ];
 
