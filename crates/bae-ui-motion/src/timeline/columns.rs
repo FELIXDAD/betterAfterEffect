@@ -118,6 +118,16 @@ impl Columns {
             self.shown[c as usize] = !self.visible(c);
         }
     }
+    /// A pane of the bottom-left buttons: all of `cols` shown, or all hidden
+    /// when any of them is.
+    pub(super) fn toggle_pane(&mut self, cols: &[Column]) {
+        let show = !cols.iter().any(|c| self.visible(*c));
+        for c in cols {
+            if *c != Column::Name {
+                self.shown[*c as usize] = show;
+            }
+        }
+    }
     pub(super) fn toggle_switches_modes(&mut self) {
         let switches = self.visible(Column::Switches);
         let modes = self.visible(Column::Modes);

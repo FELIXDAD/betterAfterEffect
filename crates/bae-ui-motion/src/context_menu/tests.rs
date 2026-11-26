@@ -94,6 +94,9 @@ fn lines(entries: &'static [Entry]) -> Vec<Line> {
                 out.push(item(title));
             }
             Own(title) | Off(title) => out.push(item(title)),
+            Only(_, entry) => out.extend(lines(std::slice::from_ref(entry))),
+            // AE's macOS title (the reference is the Mac menu).
+            RevealProject => out.push(item("Reveal Project in Finder")),
         }
     }
     out
@@ -209,4 +212,41 @@ fn every_title_has_chinese() {
     missing.sort();
     missing.dedup();
     assert!(missing.is_empty(), "no Chinese for {missing:?}");
+}
+
+/// #600: the Project item menu greys by item kind as AE does — the comp-only
+/// and not-for-comps entries match `project.item.comp` and `.folder`.
+#[test]
+fn project_item_menu_greys_by_kind() {
+    let json: Value = serde_json::from_str(AE).unwrap();
+    for (name, kind) in [("comp", COMP), ("folder", FOLDER)] {
+        let ae = json["menus"][format!("project.item.{name}")]
+            .as_array()
+            .unwrap()
+            .clone();
+        let mut i = 0;
+        for e in PROJECT_ITEM {
+            let titles = lines(std::slice::from_ref(e));
+            let Some(Line::Item(title, _)) = titles.first() else {
+                continue;
+            };
+            while ae[i]["title"]
+                .as_str()
+                .is_some_and(|t| !same_title(t, title))
+            {
+                i += 1;
+            }
+            if let Only(kinds, _) = e {
+                let ours = kinds & kind != 0;
+                let theirs = ae[i]["enabled"].as_bool().unwrap_or(true);
+                // AE's capture greys file items on a footage-less project:
+                // only check what the comp / folder rows show enabled or not
+                // for comp-only and not-for-comp entries.
+                if *kinds == COMP || *kinds == FOOTAGE | FOLDER | SOLID {
+                    assert_eq!(ours, theirs, "{name}: {title}");
+                }
+            }
+            i += 1;
+        }
+    }
 }

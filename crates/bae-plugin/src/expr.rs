@@ -27,6 +27,7 @@ enum Node {
     Num(f64),
     /// Index into the scalar parameter keys given to [`Expr::parse`].
     Param(usize),
+    InputAspect,
     DownsampleX,
     DownsampleY,
     Neg(usize),
@@ -71,6 +72,8 @@ enum Func2 {
 pub trait ExprEnv {
     /// Value of the `index`-th scalar parameter key (as passed to [`Expr::parse`]).
     fn param(&self, index: usize) -> f64;
+    /// Width divided by height of the input image.
+    fn input_aspect(&self) -> f64;
     /// `frame.downsample_x` / `frame.downsample_y` (1 at full resolution).
     fn downsample(&self) -> [f64; 2];
 }
@@ -136,6 +139,7 @@ impl Expr {
         match self.nodes[i] {
             Node::Num(x) => x,
             Node::Param(k) => env.param(k),
+            Node::InputAspect => env.input_aspect(),
             Node::DownsampleX => env.downsample()[0],
             Node::DownsampleY => env.downsample()[1],
             Node::Neg(a) => -self.node(a, env),
@@ -361,6 +365,7 @@ impl Parser<'_> {
             };
         }
         match word {
+            "frame.input_aspect" => return self.push(Node::InputAspect),
             "frame.downsample_x" => return self.push(Node::DownsampleX),
             "frame.downsample_y" => return self.push(Node::DownsampleY),
             "true" => return self.push(Node::Num(1.0)),
@@ -410,6 +415,9 @@ mod tests {
     impl ExprEnv for Env {
         fn param(&self, i: usize) -> f64 {
             self.0[i]
+        }
+        fn input_aspect(&self) -> f64 {
+            2.0
         }
         fn downsample(&self) -> [f64; 2] {
             self.1

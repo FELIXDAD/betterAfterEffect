@@ -86,6 +86,7 @@ pub(super) fn batches(kind: Kind, scene: &Scene<'_>) -> Vec<Batch> {
         // The cannon keeps every particle (no lifetime). One slot per child of
         // Explode Particles: children are born within one birth of their parent.
         Kind::Playground => (103, 0, scene.playground_children()),
+        Kind::Foam => (14, 20, 18.),
         _ => {
             return vec![Batch {
                 count: scene.count(kind),

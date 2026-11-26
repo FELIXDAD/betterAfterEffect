@@ -93,6 +93,8 @@ impl Command for CreateText {
                 camera: None,
                 light: None,
                 label: None,
+                position_3d: None,
+                point_of_interest: None,
             },
         )?;
         let mut doc =
