@@ -254,6 +254,39 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             });
         }
     }
+    let trackers = bae_motion::tracker::trackers(stage, layer);
+    if !trackers.is_empty() {
+        let children = trackers
+            .into_iter()
+            .map(|tracker| {
+                let children = bae_motion::tracker::points(stage, &tracker)
+                    .into_iter()
+                    .map(|point| Node::Group {
+                        id: point.to_string(),
+                        label: group_label(stage, &point),
+                        children: bae_motion::tracker::PROPERTIES
+                            .iter()
+                            .map(|(key, name)| Node::Prop {
+                                path: point.clone(),
+                                attr: (*key).into(),
+                                label: tr(name).into(),
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                Node::Group {
+                    id: tracker.to_string(),
+                    label: group_label(stage, &tracker),
+                    children,
+                }
+            })
+            .collect();
+        out.push(Node::Group {
+            id: format!("{layer}#trackers"),
+            label: tr("Motion Trackers").into(),
+            children,
+        });
+    }
     let effects = effect_nodes(stage, layer);
     if !effects.is_empty() {
         out.push(Node::Group {

@@ -108,6 +108,7 @@ pub mod ids {
     /// animator on each selected text layer.
     pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
     /// Animation > Add Text Selector > Range: to the last animator.
+    pub const TRACK_MOTION: &str = "motion.anim.track_motion";
     pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
     pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
     /// Numbered comp marker N at the current time (AE Shift+0–9 on the main
@@ -315,6 +316,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
     (ids::ANIMATE_TEXT, "Animate Text"),
+    (ids::TRACK_MOTION, "Track Motion"),
     (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
     (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
@@ -842,6 +844,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let id = inv.id.as_str();
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
+    }
+    if id == ids::TRACK_MOTION {
+        let layer = session.lock().selected_layers.first().cloned();
+        if let Some(layer) = layer
+            && !query::is_locked(stage, &layer)
+        {
+            crate::tracker::create(cx, &layer, false);
+        }
+        return true;
     }
     if id == ids::CUT {
         // AE: Cut = Copy + Clear (one undo step: the Clear).
@@ -1703,12 +1714,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
             s.layer_clipboard = bae_motion::copy_layers(stage, &layers);
             s.clipboard = None;
+            s.expression_clipboard = None;
         }
         ids::COPY => {
             let Some(first) = keys.first() else {
                 return false;
             };
             s.layer_clipboard.clear();
+            s.expression_clipboard = None;
             let same: Vec<&KeyRef> = keys
                 .iter()
                 .filter(|k| k.path == first.path && k.attr == first.attr)
@@ -1795,6 +1808,20 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     "attr.bake_expression",
                     json!({"path": path, "attr": attr, "keys": keys}),
                 );
+            }
+        }
+        // An expression copied with Copy Expression Only: onto the selected
+        // properties (AE).
+        ids::PASTE if s.expression_clipboard.is_some() && !s.selected_props.is_empty() => {
+            let source = s.expression_clipboard.clone();
+            let items: Vec<_> = s
+                .selected_props
+                .iter()
+                .filter(|(p, _)| query::locked_layer_of(stage, p).is_none())
+                .map(|(p, a)| json!({"path": p, "attr": a, "source": source}))
+                .collect();
+            if !items.is_empty() {
+                cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
         }
         ids::PASTE if !s.layer_clipboard.is_empty() => {

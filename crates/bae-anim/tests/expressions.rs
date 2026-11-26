@@ -1103,6 +1103,40 @@ fn traced_attribute_reports_its_reads() {
     assert_eq!(plain, vec![attr(&c, "transform:scale", 2.0)]);
 }
 
+/// sampleImage reads layer pixels through the shared sample cache: a miss is
+/// transparent black and asks for the sample; once the renderer fills it in,
+/// the next evaluation reads it.
+#[test]
+fn sample_image_through_the_sample_cache() {
+    let s = stage(|b| {
+        b.layer(MAIN, "Plate", "solid");
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var c = thisComp.layer("Plate").sampleImage([10, 20], [2, 1], false, 1);
+               c.map(function (v) { return Math.round(v * 100) / 100; }).join(",")"#,
+        );
+    });
+    let samples = std::sync::Arc::new(bae_anim::ImageSamples::new());
+    let mut ev = bae_anim::Evaluator::new();
+    ev.set_image_samples(Some(samples.clone()));
+    let ec = ev.evaluate_comp(&s, &p(MAIN), secs(0.0)).unwrap();
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[1].text.as_ref().unwrap().text, "0,0,0,0");
+    let taken = samples.take_requests();
+    assert_eq!(taken.keys.len(), 1);
+    let key = &taken.keys[0];
+    assert_eq!(key.layer, p(&format!("{MAIN}/layers/Plate")));
+    assert_eq!((key.time, key.post_effect), (secs(1.0), false));
+    assert_eq!(key.area(), [8.0, 19.0, 12.0, 21.0]);
+    samples.fulfil(taken.generation, key.clone(), [1.0, 0.5, 0.25, 0.75]);
+    let ec = ev.evaluate_comp(&s, &p(MAIN), secs(0.0)).unwrap();
+    assert_eq!(ec.layers[1].text.as_ref().unwrap().text, "1,0.5,0.25,0.75");
+    assert!(!samples.is_waiting());
+}
+
 /// A live drag's values (overrides) reach everything that depends on them —
 /// children through parenting, expressions reading them — without changing the
 /// stage; clearing them shows the committed values again.

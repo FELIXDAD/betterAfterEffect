@@ -759,6 +759,11 @@ Layer.prototype = {
     }
     return __prop(this.__c, this.__l, "", "audio:levels");
   },
+  sampleImage: function (point, radius, postEffect, t) {
+    var p = __val(point), r = radius === undefined ? [0.5, 0.5] : __val(radius);
+    return __h.sampleImage(this.__c, this.__l, [p[0], p[1], r[0], r[1],
+      postEffect === undefined || postEffect ? 1 : 0, t === undefined ? __now : t]);
+  },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;

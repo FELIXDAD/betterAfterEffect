@@ -22,6 +22,9 @@ pub(crate) fn register(registry: &mut Registry) {
             Kind::Ball,
             Kind::Mercury,
             Kind::Hair,
+            Kind::Foam,
+            Kind::Wave,
+            Kind::Caustics,
         ]
         .map(builtin),
     );
