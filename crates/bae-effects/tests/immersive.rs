@@ -7,7 +7,9 @@ use common::*;
 fn rotation_wraps_each_eye_independently() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(64, 32);
-    let input = Pixels::new(rect, |x, y| [x as f32 / 64., f32::from(u8::from(y >= 16)), 0., 1.]);
+    let input = Pixels::new(rect, |x, y| {
+        [x as f32 / 64., f32::from(u8::from(y >= 16)), 0., 1.]
+    });
     let output = run(
         &gpu,
         F32,
@@ -76,3 +78,6 @@ fn plane_projection_and_viewer_share_the_forward_direction() {
     assert!((view.get(128, 64)[0] - 0.7).abs() < 0.001);
     assert_eq!(view.get(0, 64)[3], 0.);
 }
+
+#[path = "immersive/filters.rs"]
+mod filters;

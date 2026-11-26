@@ -392,3 +392,285 @@ type = "checkbox"
 name = "Invert Rotation"
 group = "rotate_projection"
 default = false
+
+[[effect]]
+id = "vr-blur"
+name = "VR Blur"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Blur"]
+shader = "shaders/vr_blur.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+identity_when = "params.blurriness == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_blur"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 4
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 3
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 5
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 6
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "blurriness"
+type = "float"
+name = "Blurriness"
+default = 0
+range = [0, 400]
+
+[[effect]]
+id = "vr-de-noise"
+name = "VR De-Noise"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Denoise"]
+shader = "shaders/vr_de_noise.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+identity_when = "params.noise_level == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_de_noise"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 5
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 4
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 6
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 7
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "noise_type"
+type = "popup"
+name = "Noise Type"
+default = 1
+choices = ["Random Value", "Salt and Pepper"]
+
+[[effect.param]]
+id = 3
+key = "noise_level"
+type = "float"
+name = "Noise Level"
+default = 0.2
+range = [0, 1]
+
+[[effect]]
+id = "vr-glow"
+name = "VR Glow"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Glow"]
+shader = "shaders/vr_glow.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+identity_when = "params.glow_brightness == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_glow"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 9
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 8
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 10
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 11
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "luma_threshold"
+type = "float"
+name = "Luma Threshold"
+default = 0.9
+range = [0, 1]
+
+[[effect.param]]
+id = 3
+key = "glow_radius"
+type = "float"
+name = "Glow Radius"
+default = 100
+range = [0, 400]
+
+[[effect.param]]
+id = 4
+key = "glow_brightness"
+type = "float"
+name = "Glow Brightness"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 5
+key = "glow_saturation"
+type = "float"
+name = "Glow Saturation"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 6
+key = "use_tint_color"
+type = "checkbox"
+name = "Use Tint Color"
+default = false
+
+[[effect.param]]
+id = 7
+key = "tint_color"
+type = "color"
+name = "Tint Color"
+default = [1, 1, 1, 1]
+
+[[effect]]
+id = "vr-sharpen"
+name = "VR Sharpen"
+category = "Immersive Video"
+implementation = "wgsl"
+ae_match_names = ["Mettle SkyBox Sharpen"]
+shader = "shaders/vr_sharpen.wgsl"
+includes = ["shaders/sphere.wgsl", "shaders/stereo.wgsl", "shaders/neighborhood.wgsl"]
+identity_when = "params.sharpen_amount == 0"
+
+[effect.roi]
+whole_input = true
+
+[[effect.pass]]
+entry = "vr_sharpen"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 4
+key = "auto_vr_properties"
+type = "checkbox"
+name = "Auto VR Properties"
+default = false
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 3
+key = "frame_layout"
+type = "popup"
+name = "Frame Layout"
+default = 1
+choices = ["Monoscopic", "Stereoscopic - Over/Under", "Stereoscopic - Side by Side"]
+flags = ["not-animatable", "cannot-time-vary"]
+
+[[effect.param]]
+id = 5
+key = "horizontal_field_of_view"
+type = "float"
+name = "Horizontal Field of View"
+default = 360
+range = [60, 360]
+
+[[effect.param]]
+id = 6
+key = "vertical_field_of_view"
+type = "float"
+name = "Vertical Field of View"
+default = 180
+range = [60, 180]
+
+[[effect.param]]
+id = 2
+key = "sharpen_amount"
+type = "float"
+name = "Sharpen Amount"
+default = 0
+range = [0, 100]
