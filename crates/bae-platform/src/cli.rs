@@ -251,6 +251,8 @@ pub fn implement(
 pub struct GlobalOptions {
     /// `--headless`: no window.
     pub headless: bool,
+    /// Skip installed plugins for this run.
+    pub safe_mode: bool,
     /// `--smoke-test <FRAMES>`: render that many frames, then exit.
     pub smoke_test: Option<u32>,
     /// `--log <FILTER>`.
@@ -300,6 +302,12 @@ pub fn command<'a>(subcommands: impl IntoIterator<Item = &'a CliSubcommand>) -> 
                 .help("Run without opening a window"),
         )
         .arg(
+            Arg::new("safe-mode")
+                .long("safe-mode")
+                .action(ArgAction::SetTrue)
+                .help("Start without installed plugins"),
+        )
+        .arg(
             Arg::new("smoke-test")
                 .long("smoke-test")
                 .value_name("FRAMES")
@@ -337,6 +345,7 @@ where
     let log = matches.get_one::<String>("log").cloned();
     let mut global = GlobalOptions {
         headless: matches.get_flag("headless"),
+        safe_mode: matches.get_flag("safe-mode"),
         smoke_test: matches.get_one::<u32>("smoke-test").copied(),
         log,
         open: matches

@@ -101,6 +101,13 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
 }
 
 impl EffectControlsPanel {
+    fn layer(&self, stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
+        self.locked
+            .as_ref()
+            .filter(|p| stage.has_prim(p))
+            .cloned()
+            .or_else(|| selected_layer(stage, session))
+    }
     /// AE's line under the tab: the lock, the layer's label color and
     /// "<comp> • <layer>".
     fn layer_header(&mut self, ui: &mut Ui, stage: &Stage, layer: &PrimPath) {
@@ -126,7 +133,8 @@ impl EffectControlsPanel {
                 .map(|c| query::display_name_of(stage, &c))
                 .unwrap_or_default();
             ui.label(
-                egui::RichText::new(format!("{comp} • {}", self.title)).color(color::TEXT_DIM),
+                egui::RichText::new(format!("{comp} • {}", query::display_name_of(stage, layer)))
+                    .color(color::TEXT_DIM),
             );
         });
         ui.separator();
@@ -392,7 +400,6 @@ fn collect_props(nodes: &[Node], out: &mut Vec<(PrimPath, String, String)>) {
 #[derive(Default)]
 pub struct EffectControlsPanel {
     eval: EvalCache,
-    title: String,
     controls: crate::effects::controls::ControlsState,
     /// The layer the panel is locked to (its lock button, AE): it stays on it
     /// whatever is selected.
@@ -401,17 +408,12 @@ pub struct EffectControlsPanel {
 
 impl Panel for EffectControlsPanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
-        let layer = self
-            .locked
-            .clone()
-            .filter(|l| cx.stage.has_prim(l))
-            .or_else(|| selected_layer(cx.stage, &common::session(cx.resources)));
-        match layer {
-            Some(l) => common::related_tab(
+        match self.layer(cx.stage, &common::session(cx.resources)) {
+            Some(layer) => common::related_tab(
                 cx,
                 "Effect Controls",
-                &l,
-                &query::display_name_of(cx.stage, &l),
+                &layer,
+                &query::display_name_of(cx.stage, &layer),
             ),
             None => TabInfo::new(tr("Effect Controls")),
         }
@@ -419,6 +421,24 @@ impl Panel for EffectControlsPanel {
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
+        if action.id == ids::DUPLICATE
+            && let Some(layer) = self.layer(cx.stage, &session)
+        {
+            let before = bae_motion::effect::effects_of(cx.stage, &layer);
+            let mut s = session.lock();
+            let selected: Vec<_> = before
+                .iter()
+                .filter(|p| s.selected_effects.contains(p))
+                .collect();
+            if !selected.is_empty() {
+                cx.invoke_with("effect.duplicate", json!({"effects":selected}));
+                s.expect(crate::session::Pending::NewEffects {
+                    layers: vec![layer],
+                    before,
+                });
+                return true;
+            }
+        }
         actions::handle(action, cx, &session)
     }
 
@@ -445,16 +465,14 @@ impl Panel for EffectControlsPanel {
         if self.locked.as_ref().is_some_and(|l| !stage.has_prim(l)) {
             self.locked = None;
         }
-        // Nothing selected: AE's panel is empty ("Effect Controls (none)").
-        let Some(layer) = self
-            .locked
-            .clone()
-            .or_else(|| selected_layer(stage, &session))
-        else {
-            self.title.clear();
+        let Some(layer) = self.layer(stage, &session) else {
+            common::empty_hint(
+                ui,
+                tr("No layer selected"),
+                tr("Select a layer to see its effects."),
+            );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
         self.layer_header(ui, stage, &layer);
         let now = session.lock().active_time();
         let effects = props::effect_nodes(stage, &layer);
@@ -810,8 +828,41 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Right Align Text", "右对齐文本"),
     ("Zoom", "缩放"),
     ("Intensity", "强度"),
+    ("Camera Options", "摄像机选项"),
+    ("Light Options", "灯光选项"),
+    ("Material Options", "材质选项"),
+    ("Depth of Field", "景深"),
+    ("Iris Shape", "光圈形状"),
+    ("Iris Rotation", "光圈旋转"),
+    ("Iris Roundness", "光圈圆度"),
+    ("Iris Aspect Ratio", "光圈长宽比"),
+    ("Iris Diffraction Fringe", "光圈衍射条纹"),
+    ("Highlight Gain", "高亮增益"),
+    ("Highlight Threshold", "高光阈值"),
+    ("Highlight Saturation", "高光饱和度"),
+    ("Light Transmission", "透光率"),
+    ("Accepts Shadows", "接受阴影"),
+    ("Accepts Lights", "接受灯光"),
+    ("Diffuse", "漫射"),
+    ("Specular Intensity", "镜面强度"),
+    ("Specular Shininess", "镜面反光度"),
+    ("Metal", "金属质感"),
+    ("Only", "仅限"),
+    ("Fast Rectangle", "快矩形"),
+    ("Triangle", "三角形"),
+    ("Square", "正方形"),
+    ("Pentagon", "五边形"),
+    ("Hexagon", "六边形"),
+    ("Heptagon", "七边形"),
+    ("Octagon", "八边形"),
+    ("Nonagon", "九边形"),
+    ("Decagon", "十边形"),
     ("No layer selected", "未选择图层"),
     ("No effects applied", "未应用效果"),
+    (
+        "Select a layer to see its effects.",
+        "选择一个图层以查看其效果。",
+    ),
     (
         "Select a layer to see its properties.",
         "选择一个图层以查看其属性。",

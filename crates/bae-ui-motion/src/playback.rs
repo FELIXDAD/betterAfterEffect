@@ -29,6 +29,7 @@ struct SceneKey {
     revision: u64,
     path: PrimPath,
     resolution: u32,
+    nested_switches: bool,
     scope_source: bool,
     sources: Option<u64>,
     effects: Option<u64>,
@@ -39,13 +40,14 @@ impl SceneKey {
         FrameKey {
             comp: self.path.clone(),
             time,
-            request: u64::from(self.resolution),
+            request: u64::from(self.resolution) | (u64::from(self.nested_switches) << 32),
         }
     }
 
     fn same_view(&self, other: &Self) -> bool {
         self.path == other.path
             && self.resolution == other.resolution
+            && self.nested_switches == other.nested_switches
             && self.scope_source == other.scope_source
             && self.sources == other.sources
             && self.effects == other.effects
@@ -379,6 +381,8 @@ impl PlaybackPreview {
             revision: stage.revision(),
             path: path.clone(),
             resolution,
+            nested_switches: crate::prefs::current(resources)
+                .bool("composition.switches_affect_nested_comps"),
             scope_source: crate::scopes::needs_working_frame(repaint),
             sources: sources.map(|s| s.0.generation()),
             effects: effects.map(|e| e.0.generation()),
@@ -576,11 +580,13 @@ impl Evaluate {
         let samples = Arc::new(bae_anim::ImageSamples::new());
         let mut eval = Evaluator::new();
         eval.set_image_samples(Some(samples.clone()));
+        let mut anim = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+        anim.set_nested_switches(scene.key.nested_switches);
         Ok(Self {
             dynamic,
             stage: Arc::new(stage),
             eval,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            anim,
             gpu,
             samples,
             sampler: None,
@@ -639,6 +645,7 @@ impl Evaluate {
 
 /// Registers `scene`'s layer sources and effects with `engine`.
 fn sync_engine(engine: &mut RenderEngine, scene: &Scene) {
+    engine.anim.set_nested_switches(scene.key.nested_switches);
     if let Some(sources) = &scene.sources {
         for entry in sources.0.snapshot().iter() {
             engine

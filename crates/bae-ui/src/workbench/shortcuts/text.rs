@@ -142,6 +142,9 @@ pub fn chords_text<'a>(chords: impl IntoIterator<Item = &'a Chord>) -> String {
 /// AE's name of a key in the dialog (tree, Key table, key caps), in the UI
 /// language (AE's zh_CN dictionary: `$$$/dvaui/ksv/*Key`).
 pub fn key_name(key: Key) -> String {
+    if let Some((_, _, label)) = crate::keymap::NUMPAD.iter().find(|(_, k, _)| *k == key) {
+        return crate::i18n::tr(label).to_owned();
+    }
     let zh = lang() == Lang::Zh;
     let named = |en: &'static str, zh_name: &'static str| if zh { zh_name } else { en };
     let s: &str = match key {
