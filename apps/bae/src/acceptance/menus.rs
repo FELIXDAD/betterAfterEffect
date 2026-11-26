@@ -371,7 +371,7 @@ fn english_ui_has_no_chinese() {
 /// Clicks an empty part of the panel whose tab or header shows `anchor`.
 fn focus_panel(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
     let at =
-        find_text(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
+        find_anchor(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
     click_at(h, at.center() + offset);
 }
 
@@ -382,7 +382,7 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
     let targets: [(&str, egui::Vec2); 5] = [
         ("Name", egui::vec2(0.0, 420.0)), // Project panel, below the rows
         ("Source Name", egui::vec2(700.0, 120.0)), // Timeline graph
-        ("Fit", egui::vec2(300.0, -250.0)), // Composition viewer
+        (FITTED, egui::vec2(300.0, -250.0)), // Composition viewer
         ("Effects & Presets", egui::vec2(0.0, 40.0)), // Effects & Presets panel
         ("Render", egui::vec2(200.0, 0.0)), // Render Queue
     ];
@@ -392,7 +392,7 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
             key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         }
         assert!(
-            find_text(&h, anchor).is_some(),
+            find_anchor(&h, anchor).is_some(),
             "panel anchor {anchor:?} not visible"
         );
         focus_panel(&mut h, anchor, offset);
