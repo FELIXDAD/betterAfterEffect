@@ -75,30 +75,19 @@ impl RenderEngine {
         }
     }
 
-    fn request(resolution: u32) -> RenderRequest {
-        RenderRequest {
-            resolution: match resolution {
-                0 | 1 => Resolution::Full,
-                2 => Resolution::Half,
-                3 => Resolution::Third,
-                4 => Resolution::Quarter,
-                n => Resolution::Custom(n),
-            },
-            purpose: RenderPurpose::Preview,
-            ..RenderRequest::full()
-        }
-    }
-
     /// Draws the layers `samples` asks for (`sampleImage`) and starts reading
     /// them back without waiting ([`Renderer::poll_samples`] stores them).
+    /// Samples are read at full resolution, whatever the preview's.
     pub(super) fn read_samples(
         &mut self,
         stage: &Stage,
         rc: &bae_render::RenderComp,
-        resolution: u32,
         samples: &bae_anim::ImageSamples,
     ) -> Result<(), bae_render::RenderError> {
-        let request = Self::request(resolution);
+        let request = RenderRequest {
+            purpose: RenderPurpose::Preview,
+            ..RenderRequest::full()
+        };
         let mut frames = bae_render::eval::EvaluatorFrames {
             stage,
             evaluator: &mut self.anim,
@@ -114,19 +103,45 @@ impl RenderEngine {
         stage: &Stage,
         rc: &bae_render::RenderComp,
         resolution: u32,
+        display: bae_render::Display,
+        roi: Option<IRect>,
     ) -> Result<Option<(wgpu::Texture, IRect)>, bae_render::RenderError> {
-        let request = Self::request(resolution);
+        let request = RenderRequest {
+            resolution: match resolution {
+                0 | 1 => Resolution::Full,
+                2 => Resolution::Half,
+                3 => Resolution::Third,
+                4 => Resolution::Quarter,
+                n => Resolution::Custom(n),
+            },
+            purpose: RenderPurpose::Preview,
+            roi,
+            ..RenderRequest::full()
+        };
         let mut frames = bae_render::eval::EvaluatorFrames {
             stage,
             evaluator: &mut self.anim,
         };
-        // The frame and its 8-bit conversion in one GPU submission.
-        let (frame, texture) = self.renderer.render_frame_output(
-            rc,
-            &request,
-            Some(&mut frames),
-            OutputAlpha::Premultiplied,
-        )?;
+        let (frame, texture) = if display == bae_render::Display::default() {
+            // The frame and its 8-bit conversion in one GPU submission.
+            self.renderer.render_frame_output(
+                rc,
+                &request,
+                Some(&mut frames),
+                OutputAlpha::Premultiplied,
+            )?
+        } else {
+            // Show Channel / Exposure: the conversion applies them.
+            let frame = self
+                .renderer
+                .render_frame_with(rc, &request, Some(&mut frames))?;
+            let texture = self.renderer.output_texture_display(
+                &frame,
+                OutputAlpha::Premultiplied,
+                display,
+            )?;
+            (frame, texture)
+        };
         self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
         if frame.incomplete {
             return Ok(None);
@@ -152,6 +167,14 @@ pub(crate) struct GpuPreview {
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// How the viewer shows the frame (Show Channel, Exposure).
+    pub display: bae_render::Display,
+    /// Region of interest (comp pixels): only it is rendered.
+    pub roi: Option<IRect>,
+    /// The display and region of the published frame.
+    last_view: Option<(bae_render::Display, Option<IRect>)>,
+    /// Snapshots 1–4 (AE's Take Snapshot): a published frame.
+    snapshots: [Option<(wgpu::Texture, IRect)>; 4],
     /// The newest frame was incomplete (something still warming up): the
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
@@ -191,6 +214,10 @@ impl GpuPreview {
             texture: None,
             sampled: None,
             has_text: false,
+            display: bae_render::Display::default(),
+            roi: None,
+            last_view: None,
+            snapshots: Default::default(),
             preparing: false,
             samples,
             waiting: false,
@@ -280,9 +307,7 @@ impl GpuPreview {
         // without waiting. A frame evaluated before its samples arrived is not
         // shown: the previous image stays up and the viewer evaluates again.
         if self.samples.has_requests()
-            && let Err(e) = self
-                .engine
-                .read_samples(stage, &rc, resolution, &self.samples)
+            && let Err(e) = self.engine.read_samples(stage, &rc, &self.samples)
         {
             tracing_warn(&format!("preview: sampleImage: {e}"));
         }
@@ -295,9 +320,14 @@ impl GpuPreview {
             });
         }
         let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
-        if self.last != Some(key) {
+        let view = (self.display, self.roi);
+        if self.last != Some(key) || self.last_view != Some(view) {
+            self.last_view = Some(view);
             self.engine.renderer.set_layer_times(measure_layer_times);
-            let rendered = match self.engine.render(stage, &rc, resolution) {
+            let rendered = match self
+                .engine
+                .render(stage, &rc, resolution, self.display, self.roi)
+            {
                 Ok(rendered) => rendered,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
@@ -340,6 +370,37 @@ impl GpuPreview {
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,
+        })
+    }
+
+    /// Take Snapshot: keep the frame shown now in `slot` (0–3).
+    pub fn take_snapshot(&mut self, slot: usize) -> bool {
+        let (Some(t), Some(r)) = (self.texture.clone(), self.rect) else {
+            return false;
+        };
+        if let Some(s) = self.snapshots.get_mut(slot) {
+            *s = Some((t, r));
+        }
+        true
+    }
+
+    pub fn purge_snapshot(&mut self, slot: usize) {
+        if let Some(s) = self.snapshots.get_mut(slot) {
+            *s = None;
+        }
+    }
+
+    /// Show Snapshot: publish snapshot `slot` instead of the frame (the next
+    /// [`GpuPreview::frame`] publishes the frame again).
+    pub fn show_snapshot(&mut self, slot: usize) -> Option<PreviewImage> {
+        let (t, rect) = self.snapshots.get(slot)?.clone()?;
+        self.registry
+            .publish(self.id, &t, wgpu::FilterMode::Linear)
+            .ok()?;
+        self.last = None;
+        Some(PreviewImage {
+            handle: self.registry.display_handle(self.id)?,
+            rect,
         })
     }
 

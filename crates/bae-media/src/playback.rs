@@ -10,7 +10,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use rtrb::{Consumer, RingBuffer};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 
 const BLOCK_FRAMES: usize = 512;
@@ -37,6 +37,8 @@ struct Monitor {
     ended_epoch: AtomicU64,
     ended_at: AtomicU64,
     clock: clock::Clock,
+    gain: AtomicU32,
+    peaks: AtomicU64,
 }
 
 struct Sink {
@@ -55,6 +57,8 @@ impl Sink {
             self.offset = 0;
             self.consumed = 0;
         }
+        let gain = f32::from_bits(self.monitor.gain.load(Ordering::Relaxed));
+        let mut peaks = [0.0_f32; 2];
         let first = self.consumed;
         let mut output = data.chunks_exact_mut(channels);
         while output.len() > 0 {
@@ -80,6 +84,10 @@ impl Sink {
                 .iter()
                 .zip(output.by_ref())
             {
+                let frame = frame.map(|v| v * gain);
+                for (peak, sample) in peaks.iter_mut().zip(frame) {
+                    *peak = peak.max(sample.abs());
+                }
                 if channels == 1 {
                     out[0] = T::from_sample(((frame[0] + frame[1]) * 0.5).clamp(-1.0, 1.0));
                 } else {
@@ -94,6 +102,11 @@ impl Sink {
                 self.offset = 0;
             }
         }
+        let bits = peaks.map(f32::to_bits);
+        self.monitor.peaks.store(
+            u64::from(bits[0]) | (u64::from(bits[1]) << 32),
+            Ordering::Relaxed,
+        );
         if self.consumed != first {
             self.monitor
                 .clock
@@ -126,7 +139,10 @@ impl AudioOutput {
         let config = device.default_output_config().map_err(|e| e.to_string())?;
         let rate = config.sample_rate();
         let (writer, reader) = RingBuffer::new(8);
-        let monitor = Arc::new(Monitor::default());
+        let monitor = Arc::new(Monitor {
+            gain: AtomicU32::new(1.0_f32.to_bits()),
+            ..Monitor::default()
+        });
         let sink = Sink {
             ring: reader,
             monitor: monitor.clone(),
@@ -189,6 +205,10 @@ impl AudioOutput {
     pub fn elapsed(&self) -> Time {
         sample_to_time(self.heard() as i64, self.rate)
     }
+    /// The negotiated device sample rate, in Hz.
+    pub fn sample_rate(&self) -> u32 {
+        self.rate
+    }
     /// The operating system invalidated the audio stream.
     pub fn device_lost(&self) -> bool {
         self.monitor.failed.load(Ordering::Relaxed)
@@ -205,6 +225,20 @@ impl AudioOutput {
     pub fn set_loop(&self, repeat: bool) {
         self.monitor.repeat.store(repeat, Ordering::Relaxed);
     }
+    /// Change the monitor gain in linear amplitude.
+    pub fn set_gain(&self, gain: f32) {
+        self.monitor.gain.store(gain.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Stereo peaks after monitor gain and before device clipping.
+    pub fn peaks(&self) -> [f32; 2] {
+        let bits = self.monitor.peaks.load(Ordering::Relaxed);
+        [
+            f32::from_bits(bits as u32),
+            f32::from_bits((bits >> 32) as u32),
+        ]
+    }
+
     /// Silence queued audio while retaining the device and the prepared sources.
     pub fn stop(&self) {
         self.monitor.epoch.fetch_add(1, Ordering::AcqRel);
@@ -244,7 +278,10 @@ mod tests {
     #[test]
     fn seek_discards_queued_audio_and_underruns_hold_the_dac_clock() {
         let (mut writer, ring) = RingBuffer::new(4);
-        let monitor = Arc::new(Monitor::default());
+        let monitor = Arc::new(Monitor {
+            gain: AtomicU32::new(1.0_f32.to_bits()),
+            ..Monitor::default()
+        });
         let mut sink = Sink {
             ring,
             monitor: monitor.clone(),
@@ -272,5 +309,20 @@ mod tests {
         assert_eq!(monitor.clock.heard(2, 2_500_000, 1000), 0);
         assert_eq!(monitor.clock.heard(2, 4_000_000, 1000), 1);
         assert_eq!(monitor.clock.heard(2, 8_000_000, 1000), 3);
+
+        // The master fader changes the actual samples. Meters see each peak before clipping.
+        monitor.gain.store(2.0_f32.to_bits(), Ordering::Relaxed);
+        let mut chunk = writer.write_chunk(1).unwrap();
+        let block = &mut chunk.as_mut_slices().0[0];
+        block.epoch = 2;
+        block.len = 1;
+        block.samples[0] = [-0.75, 0.25];
+        chunk.commit_all();
+        let mut stereo = [0.0; 2];
+        sink.pull(&mut stereo, 2, 9_000_000);
+        assert_eq!(stereo, [-1.0, 0.5]);
+        let bits = monitor.peaks.load(Ordering::Relaxed);
+        assert_eq!(f32::from_bits(bits as u32), 1.5);
+        assert_eq!(f32::from_bits((bits >> 32) as u32), 0.5);
     }
 }

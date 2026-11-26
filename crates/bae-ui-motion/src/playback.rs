@@ -318,7 +318,7 @@ impl Evaluate {
                 }
             };
             sampler
-                .read_samples(&self.stage, &rc, self.scene.key.resolution, &self.samples)
+                .read_samples(&self.stage, &rc, &self.samples)
                 .and_then(|()| sampler.renderer.wait_samples(&self.samples))
                 .map_err(|e| e.to_string())?;
             (comp, rc) = self.evaluate(time)?;
@@ -457,7 +457,13 @@ fn render_worker(
             synced = Some(generations);
         }
         let result = engine
-            .render(&job.stage, &job.rc, job.scene.key.resolution)
+            .render(
+                &job.stage,
+                &job.rc,
+                job.scene.key.resolution,
+                bae_render::Display::default(),
+                None,
+            )
             .map_err(|e| e.to_string())
             // Not an interactive thread: it waits for the warm-up instead.
             .and_then(|r| r.ok_or_else(|| "incomplete frame".to_owned()))
