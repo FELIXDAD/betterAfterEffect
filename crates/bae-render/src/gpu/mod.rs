@@ -5,6 +5,9 @@
 use bae_gpu::wgpu;
 use bytemuck::{Pod, Zeroable};
 use glam::{DAffine2, DMat3, DVec2};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 
 use crate::three_d::Homography;
@@ -409,14 +412,216 @@ pub(crate) struct Pipelines {
     output_pipeline_layout: wgpu::PipelineLayout,
     /// Output conversions into other formats (export), created on first use.
     outputs: FxHashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
-    /// Mask passes, created on first use.
-    masks: Option<MaskPipelines>,
-    /// Adjustment layer mix pass, created on first use.
-    pub adjust: Option<crate::exec::adjust::MixPipelines>,
+    /// Texture bind groups by the views they bind, with the frame they were
+    /// last used in: layer images that persist across frames (remembered
+    /// vector sources, cached pre-comps) rebind without a new bind group every
+    /// frame. Dropped two frames after their last use ([`Self::end_frame`]).
+    bind_groups: FxHashMap<TextureKey, (wgpu::BindGroup, u64)>,
+    frame: u64,
+    /// The device's shared compiled state (`None` only in the shared base).
+    shared: Option<Arc<Shared>>,
 }
 
+type CompositeKey = (wgpu::TextureFormat, BlendKind, Variant);
+
+/// Compositor state compiled once per device and shared by every renderer on
+/// it (the preview, the render queue, …): the shader modules, layouts and
+/// pipelines. The app's warm-up compiles the common pipelines in advance
+/// ([`CompositorWarmUp`]); a pipeline the UI thread needs before that is
+/// compiled in the background and the frame is incomplete meanwhile.
+pub(crate) struct Shared {
+    device: wgpu::Device,
+    base: Pipelines,
+    /// `None`: being compiled in the background.
+    composite: Mutex<FxHashMap<CompositeKey, Option<wgpu::RenderPipeline>>>,
+    pub masks: Arc<Mutex<Option<MaskPipelines>>>,
+    pub mix: Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>>,
+}
+
+static SHARED: Mutex<Vec<(std::sync::Weak<bae_gpu::GpuContext>, Arc<Shared>)>> =
+    Mutex::new(Vec::new());
+
+impl Shared {
+    /// The shared state of `gpu` (built on first use).
+    pub fn get(gpu: &Arc<bae_gpu::GpuContext>) -> Arc<Shared> {
+        let mut all = SHARED.lock();
+        all.retain(|(g, _)| g.strong_count() > 0);
+        if let Some((_, s)) = all
+            .iter()
+            .find(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)))
+        {
+            return s.clone();
+        }
+        let shared = Arc::new(Shared {
+            device: gpu.device().clone(),
+            base: Pipelines::build(gpu.device()),
+            composite: Mutex::new(FxHashMap::default()),
+            masks: Arc::new(Mutex::new(None)),
+            mix: Arc::new(Mutex::new(None)),
+        });
+        all.push((Arc::downgrade(gpu), shared.clone()));
+        shared
+    }
+
+    /// A renderer's view of the shared state.
+    fn fork(self: &Arc<Self>) -> Pipelines {
+        let b = &self.base;
+        Pipelines {
+            module: b.module.clone(),
+            layout: b.layout.clone(),
+            draws_layout: b.draws_layout.clone(),
+            textures_layout: b.textures_layout.clone(),
+            composite: FxHashMap::default(),
+            sampler: b.sampler.clone(),
+            dummy: b.dummy.clone(),
+            empty_textures: b.empty_textures.clone(),
+            output_layout: b.output_layout.clone(),
+            output: b.output.clone(),
+            output_module: b.output_module.clone(),
+            output_pipeline_layout: b.output_pipeline_layout.clone(),
+            outputs: FxHashMap::default(),
+            bind_groups: FxHashMap::default(),
+            frame: 0,
+            shared: Some(self.clone()),
+        }
+    }
+
+    /// The composite pipeline for `key`; on an interactive thread `None`
+    /// while it compiles in the background (a redraw is requested when done).
+    fn composite(self: &Arc<Self>, key: CompositeKey) -> Option<wgpu::RenderPipeline> {
+        let interactive = crate::is_interactive_thread();
+        match self.composite.lock().get(&key) {
+            Some(Some(p)) => return Some(p.clone()),
+            Some(None) if interactive => return None,
+            _ => {}
+        }
+        if interactive {
+            self.composite.lock().insert(key, None);
+            let shared = self.clone();
+            let spawned = std::thread::Builder::new()
+                .name("bae-render-compile".into())
+                .spawn(move || {
+                    let p = shared.create(key);
+                    shared.composite.lock().insert(key, Some(p));
+                    bae_gpu::warm_up::request_redraw();
+                });
+            if spawned.is_ok() {
+                return None;
+            }
+        }
+        let p = self.create(key);
+        self.composite.lock().insert(key, Some(p.clone()));
+        Some(p)
+    }
+
+    fn create(&self, key: CompositeKey) -> wgpu::RenderPipeline {
+        composite_pipeline(&self.device, &self.base.module, &self.base.layout, key)
+    }
+
+    /// Compiles the composite pipeline `key` unless it exists.
+    fn warm_one(&self, key: CompositeKey) {
+        if matches!(self.composite.lock().get(&key), Some(Some(_))) {
+            return;
+        }
+        let p = self.create(key);
+        self.composite.lock().insert(key, Some(p));
+    }
+
+    /// Compiles the composite pipelines of `formats` (with whether the format
+    /// blends in fixed function), the mask passes and the adjustment mixes.
+    pub fn warm(&self, formats: &[(wgpu::TextureFormat, bool)]) {
+        for &(format, blendable) in formats {
+            let kinds: &[BlendKind] = if blendable {
+                &[
+                    BlendKind::Normal,
+                    BlendKind::Add,
+                    BlendKind::Screen,
+                    BlendKind::Replace,
+                ]
+            } else {
+                &[BlendKind::Replace]
+            };
+            for &kind in kinds {
+                for variant in [Variant::Plain, Variant::Lit, Variant::Motion] {
+                    self.warm_one((format, kind, variant));
+                }
+            }
+        }
+        // Built outside the locks, kept unless a renderer made one meanwhile.
+        if self.masks.lock().is_none() {
+            let mut masks = MaskPipelines::new(&self.device);
+            masks.warm(&self.device);
+            self.masks.lock().get_or_insert(masks);
+        }
+        if self.mix.lock().is_none() {
+            let mut mix = crate::exec::adjust::MixPipelines::new(&self.device);
+            for &(format, _) in formats {
+                mix.warm(&self.device, format);
+            }
+            self.mix.lock().get_or_insert(mix);
+        }
+    }
+}
+
+/// Compiles the compositor's pipelines during the app's warm-up: first only
+/// what plain text and shape layers need ([`CompositorWarmUp::Basic`], right
+/// after the vector renderer, so a layer created early shows at once), the
+/// other formats, blend kinds, variants, mask passes and mixes later
+/// ([`CompositorWarmUp::Full`], before the effects).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompositorWarmUp {
+    /// RGBA16F, normal blending, no lighting or motion blur.
+    Basic,
+    /// Everything else.
+    Full,
+}
+
+impl bae_gpu::WarmUp for CompositorWarmUp {
+    fn name(&self) -> &str {
+        match self {
+            CompositorWarmUp::Basic => "compositor (text and shapes)",
+            CompositorWarmUp::Full => "compositor",
+        }
+    }
+
+    fn priority(&self) -> u8 {
+        match self {
+            CompositorWarmUp::Basic => 2,
+            CompositorWarmUp::Full => 10,
+        }
+    }
+
+    fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        let shared = Shared::get(gpu);
+        if *self == CompositorWarmUp::Basic {
+            shared.warm_one((
+                wgpu::TextureFormat::Rgba16Float,
+                BlendKind::Normal,
+                Variant::Plain,
+            ));
+            return Ok(());
+        }
+        let float32 = wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE;
+        let mut formats = vec![(wgpu::TextureFormat::Rgba16Float, true)];
+        if gpu.features().contains(float32) {
+            formats.push((wgpu::TextureFormat::Rgba32Float, true));
+        }
+        shared.warm(&formats);
+        Ok(())
+    }
+}
+
+/// The views of a texture bind group (src, matte, dst, mask, shadow).
+type TextureKey = [Option<wgpu::TextureView>; 5];
+
 impl Pipelines {
-    pub fn new(device: &wgpu::Device) -> Self {
+    /// The renderer's pipelines: a view of the device's shared state.
+    pub fn new(gpu: &Arc<bae_gpu::GpuContext>) -> Self {
+        Shared::get(gpu).fork()
+    }
+
+    /// The shared base: shader modules, layouts and the RGBA8 output.
+    fn build(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.composite"),
             source: wgpu::ShaderSource::Wgsl(wgsl!("composite.wgsl").into()),
@@ -578,9 +783,34 @@ impl Pipelines {
             output_module,
             output_pipeline_layout,
             outputs: FxHashMap::default(),
-            masks: None,
-            adjust: None,
+            bind_groups: FxHashMap::default(),
+            frame: 0,
+            shared: None,
         }
+    }
+
+    /// Ends a frame: forgets bind groups unused in the last two frames (they
+    /// hold their textures).
+    pub fn end_frame(&mut self) {
+        self.frame += 1;
+        let frame = self.frame;
+        self.bind_groups.retain(|_, (_, used)| frame - *used <= 2);
+    }
+
+    /// The shared mask pipelines (created on first use).
+    pub fn masks(&self) -> Arc<Mutex<Option<MaskPipelines>>> {
+        self.shared
+            .as_ref()
+            .map(|s| s.masks.clone())
+            .unwrap_or_default()
+    }
+
+    /// The shared adjustment-layer mix pipelines (created on first use).
+    pub fn mix(&self) -> Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>> {
+        self.shared
+            .as_ref()
+            .map(|s| s.mix.clone())
+            .unwrap_or_default()
     }
 
     /// The output conversion pipeline rendering into `format`.
@@ -599,53 +829,49 @@ impl Pipelines {
     }
 
     /// The composite pipeline for a target format, blend kind and fragment
-    /// variant (compiled on first use).
+    /// variant, from the device's shared pipelines. `None` on an interactive
+    /// thread while it is still being compiled (the frame is incomplete).
     pub fn composite(
         &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         kind: BlendKind,
         variant: Variant,
-    ) -> &wgpu::RenderPipeline {
-        let (module, layout) = (&self.module, &self.layout);
-        self.composite
-            .entry((format, kind, variant))
-            .or_insert_with(|| {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("bae-render.composite"),
-                    layout: Some(layout),
-                    vertex: wgpu::VertexState {
-                        module,
-                        entry_point: Some("vs_main"),
-                        compilation_options: Default::default(),
-                        buffers: &[],
-                    },
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module,
-                        entry_point: Some(match variant {
-                            Variant::Plain => "fs_main",
-                            Variant::Lit => "fs_lit",
-                            Variant::Motion => "fs_motion",
-                        }),
-                        compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format,
-                            blend: kind.state(),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    multiview_mask: None,
-                    cache: None,
-                })
-            })
+    ) -> Option<&wgpu::RenderPipeline> {
+        let key = (format, kind, variant);
+        if !self.composite.contains_key(&key) {
+            let pipeline = match &self.shared {
+                Some(shared) => shared.composite(key)?,
+                None => composite_pipeline(device, &self.module, &self.layout, key),
+            };
+            self.composite.insert(key, pipeline);
+        }
+        self.composite.get(&key)
     }
 
     /// A texture bind group (unused slots get the dummy texture; `shadow` is
     /// the shadow atlas of lit layers).
     pub fn textures(
+        &mut self,
+        device: &wgpu::Device,
+        src: Option<&wgpu::TextureView>,
+        matte: Option<&wgpu::TextureView>,
+        dst: Option<&wgpu::TextureView>,
+        mask: Option<&wgpu::TextureView>,
+        shadow: Option<&wgpu::TextureView>,
+    ) -> wgpu::BindGroup {
+        let key: TextureKey = [src, matte, dst, mask, shadow].map(|v| v.cloned());
+        let frame = self.frame;
+        if let Some((group, used)) = self.bind_groups.get_mut(&key) {
+            *used = frame;
+            return group.clone();
+        }
+        let group = self.create_textures(device, src, matte, dst, mask, shadow);
+        self.bind_groups.insert(key, (group.clone(), frame));
+        group
+    }
+
+    fn create_textures(
         &self,
         device: &wgpu::Device,
         src: Option<&wgpu::TextureView>,
@@ -684,11 +910,6 @@ impl Pipelines {
                 },
             ],
         })
-    }
-
-    /// The mask pipelines (compiled on first use).
-    pub fn masks(&mut self, device: &wgpu::Device) -> &mut MaskPipelines {
-        self.masks.get_or_insert_with(|| MaskPipelines::new(device))
     }
 }
 
@@ -738,6 +959,9 @@ pub(crate) struct EdgeData {
     pub xmax: f32,
     pub chan: u32,
     pub size: [f32; 2],
+    /// Winding contribution (1; 1/N for variable-width feather contours).
+    pub weight: f32,
+    pub _pad: f32,
 }
 
 /// One full-screen mask pass, laid out like `struct Pass` in `mask.wgsl`.
@@ -764,7 +988,7 @@ pub(crate) struct MaskPipelines {
 }
 
 impl MaskPipelines {
-    fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.mask"),
             source: wgpu::ShaderSource::Wgsl(wgsl!("mask.wgsl").into()),
@@ -838,6 +1062,22 @@ impl MaskPipelines {
             sampler,
             edges,
             passes: FxHashMap::default(),
+        }
+    }
+
+    /// Compiles every pass (the warm-up).
+    fn warm(&mut self, device: &wgpu::Device) {
+        use crate::blend::MaskMode;
+        for blend in [
+            MaskBlend::Replace,
+            MaskBlend::Mode(MaskMode::Add),
+            MaskBlend::Mode(MaskMode::Subtract),
+            MaskBlend::Mode(MaskMode::Intersect),
+            MaskBlend::Mode(MaskMode::Lighten),
+            MaskBlend::Mode(MaskMode::Darken),
+            MaskBlend::Mode(MaskMode::Difference),
+        ] {
+            self.pass(device, blend);
         }
     }
 
@@ -926,6 +1166,45 @@ fn output_pipeline(
     })
 }
 
+/// A composite pipeline (`composite.wgsl`) for a target format, blend kind and
+/// fragment variant.
+fn composite_pipeline(
+    device: &wgpu::Device,
+    module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    (format, kind, variant): CompositeKey,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("bae-render.composite"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(match variant {
+                Variant::Plain => "fs_main",
+                Variant::Lit => "fs_lit",
+                Variant::Motion => "fs_motion",
+            }),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: kind.state(),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use glam::DVec2;
@@ -937,7 +1216,7 @@ mod tests {
         // 21 vec4s: the WGSL struct stride.
         assert_eq!(std::mem::size_of::<DrawData>(), 336);
         assert_eq!(std::mem::size_of::<SampleData>(), 48);
-        assert_eq!(std::mem::size_of::<EdgeData>(), 32);
+        assert_eq!(std::mem::size_of::<EdgeData>(), 40);
         assert_eq!(std::mem::size_of::<MaskPassData>(), 112);
     }
 

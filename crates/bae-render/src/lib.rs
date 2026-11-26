@@ -47,16 +47,20 @@ pub mod footage;
 mod frame_blend;
 pub mod geom;
 mod gpu;
+mod gpu_timer;
 pub mod graph;
 pub mod input;
 pub mod light;
 pub mod mask;
 mod module;
 pub mod motion;
+pub mod paint;
+mod parameter_track;
 pub mod png_out;
 pub mod pool;
 mod renderer;
 pub mod request;
+mod sample;
 pub mod source;
 pub mod testing;
 pub mod three_d;
@@ -75,6 +79,7 @@ pub use export::{
     frame_file, has_frame_run,
 };
 pub use geom::{IRect, Rect};
+pub use gpu::CompositorWarmUp;
 pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{
@@ -85,7 +90,9 @@ pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;
 pub use motion::{CompMotionBlur, LayerSample};
 pub use pool::PoolStats;
-pub use renderer::{FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
+pub use renderer::{
+    Display, FrameStats, OutputAlpha, OutputTarget, RenderedFrame, Renderer, RendererConfig,
+};
 pub use request::{
     BitDepth, BlendSpace, ColorContext, RenderPurpose, RenderRequest, Resolution, WorkFormat,
 };
@@ -93,3 +100,26 @@ pub use source::{
     EncodeContext, GpuImage, ImageAlpha, LayerSource, SourceProvider, SourceProviders,
     SourceRequest,
 };
+
+thread_local! {
+    static INTERACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks the calling thread as interactive (the UI thread) or not. On an
+/// interactive thread, first-use work that is not ready yet (the warm-up,
+/// `bae_gpu::warm_up`, is still preparing it) is not waited for: the frame is
+/// drawn without it and marked incomplete ([`RenderedFrame::incomplete`]),
+/// and the app redraws when it is ready.
+pub fn set_interactive_thread(on: bool) {
+    INTERACTIVE.with(|c| c.set(on));
+}
+
+/// Whether the calling thread is interactive ([`set_interactive_thread`]).
+pub fn is_interactive_thread() -> bool {
+    INTERACTIVE.with(|c| c.get())
+}
+
+/// The error for `what` still being prepared by the warm-up.
+pub fn warming_up(what: &str) -> RenderError {
+    RenderError::WarmingUp(what.to_owned())
+}

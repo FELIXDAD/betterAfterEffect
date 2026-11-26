@@ -26,6 +26,7 @@ bae-package.workspace = true
 bae-platform.workspace = true
 bae-prefs = { workspace = true, features = ["file"] }
 bae-plugin.workspace = true
+bae-script.workspace = true
 bae-ui.workspace = true
 bae-render = { workspace = true, features = ["media"] }
 bae-vector = { workspace = true, features = ["render"] }
@@ -43,6 +44,9 @@ winit.workspace = true
 
 # Native file dialogs (File > Open / Save As, unsaved-changes prompt). Other
 # platforms get no dialogs (`shell::dialogs::Headless`).
+# Startup warm-up of the expression engine (already linked through bae-render).
+bae-anim.workspace = true
+
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 rfd.workspace = true
 
@@ -66,8 +70,6 @@ skrifa.workspace = true
 tempfile.workspace = true
 # Acceptance tests drive the real workbench through accesskit (labels, not coordinates).
 egui_kittest.workspace = true
-# Acceptance: world transforms of layers (locked child keeps its place, #124).
-bae-anim.workspace = true
 
 [lints]
 workspace = true

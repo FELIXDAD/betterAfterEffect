@@ -11,6 +11,8 @@ use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 
+mod audio;
+
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
 use crate::props::{self, Node};
@@ -57,8 +59,8 @@ fn prop_line(
             .lock()
             .scrub
             .as_ref()
-            .filter(|s| s.path == *path && s.attr == attr)
-            .map(|s| s.value.clone())
+            .and_then(|s| s.value_for(path, attr))
+            .cloned()
             .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
@@ -103,15 +105,19 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
 #[derive(Default)]
 pub struct PropertiesPanel {
     eval: EvalCache,
-    title: String,
 }
 
 impl Panel for PropertiesPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        if self.title.is_empty() {
-            TabInfo::new(tr("Properties"))
-        } else {
-            TabInfo::new(format!("{}: {}", tr("Properties"), self.title))
+    /// "Properties: <layer>" for the layer selected now, even while the panel
+    /// is not drawn (a collapsed or background tab, #465).
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        match selected_layer(cx.stage, &common::session(cx.resources)) {
+            Some(layer) => TabInfo::new(format!(
+                "{}: {}",
+                tr("Properties"),
+                query::display_name_of(cx.stage, &layer)
+            )),
+            None => TabInfo::new(tr("Properties")),
         }
     }
 
@@ -125,7 +131,6 @@ impl Panel for PropertiesPanel {
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let Some(layer) = selected_layer(stage, &session) else {
-            self.title.clear();
             common::empty_hint(
                 ui,
                 tr("No layer selected"),
@@ -133,7 +138,6 @@ impl Panel for PropertiesPanel {
             );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
         let now = session.lock().active_time();
         let dims = if common::is_3d(stage, &layer) { 3 } else { 2 };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -192,6 +196,24 @@ impl Panel for PropertiesPanel {
                             commit = true;
                         }
                     });
+                    // Paragraph alignment.
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(tr("Paragraph")).color(color::TEXT));
+                        for (icon, value, name) in [
+                            (Icon::TextAlignLeft, "left", "Left Align Text"),
+                            (Icon::TextAlignCenter, "center", "Center Text"),
+                            (Icon::TextAlignRight, "right", "Right Align Text"),
+                        ] {
+                            let on = d2.justification == value;
+                            let r = icons::button(ui, icon, 20.0, on)
+                                .labeled_toggle(egui::WidgetType::Button, tr(name), on)
+                                .on_hover_text(tr(name));
+                            if r.clicked() && !on {
+                                d2.justification = value.to_owned();
+                                commit = true;
+                            }
+                        }
+                    });
                     if commit {
                         let key_now = query::to_key_time(stage, &layer, now);
                         cx.invoke_with(
@@ -210,6 +232,22 @@ impl Panel for PropertiesPanel {
                 for (path, attr, label) in flat.into_iter().filter(|(_, a, _)| a == "color" || a == "size" || a == "width") {
                     let owner = query::display_name_of(stage, &path);
                     prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &format!("{owner} · {label}"), now, 2);
+                }
+            }
+            // Effects: each effect's controls, in stacking order (AE).
+            let effects = props::effect_nodes(stage, &layer);
+            if !effects.is_empty() {
+                section(ui, tr("Effects"));
+                for effect in &effects {
+                    let Node::Group { label, children, .. } = effect else {
+                        continue;
+                    };
+                    ui.label(egui::RichText::new(label).color(color::TEXT_STRONG));
+                    let mut flat = Vec::new();
+                    collect_props(children, &mut flat);
+                    for (path, attr, label) in flat {
+                        prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &label, now, dims);
+                    }
                 }
             }
         });
@@ -333,6 +371,8 @@ pub struct PreviewPanel;
 /// Content size the Preview panel needs (transport row with Loop, timecode).
 const PREVIEW_MIN_W: f32 = 210.0;
 const PREVIEW_MIN_H: f32 = 56.0;
+/// Height the Preview options need under the transport row.
+const PREVIEW_OPTIONS_H: f32 = 240.0;
 
 impl Panel for PreviewPanel {
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
@@ -350,7 +390,7 @@ impl Panel for PreviewPanel {
         session.lock().sync(cx.stage);
         let info = common::active_comp(cx.stage, &session);
         if let Some(info) = &info
-            && session.lock().tick(info)
+            && session.lock().update_preview(cx, info)
         {
             ui.ctx().request_repaint();
         }
@@ -396,29 +436,153 @@ impl Panel for PreviewPanel {
                 session.lock().loop_playback = l;
             }
         });
-        if let Some(info) = info {
-            let now = session.lock().time(&info.path);
-            ui.horizontal(|ui| {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(common::timecode(&info, now)).color(color::ACCENT));
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} {:.2}",
-                        tr("Frame Rate (Auto)"),
-                        info.frame_rate.as_f64()
-                    ))
-                    .font(theme::small())
-                    .color(color::TEXT_DIM),
-                );
-            });
+        // The options below the transport row show when the panel has room for
+        // them (AE's Default workspace shows the transport row only).
+        if ui.available_height() >= PREVIEW_OPTIONS_H {
+            preview_options(ui, &session, info.as_ref());
         }
         let _ = Rect::NOTHING;
+    }
+}
+
+/// AE's Preview panel options under the transport row: Shortcut, Include,
+/// Cache Before Playback, Range, Play From, Frame Rate, Skip, Resolution,
+/// Full Screen and what Spacebar does on stop. Range, Play From, Frame Rate,
+/// Skip, Resolution and Move Time To Preview Time drive playback; the others
+/// show AE's values, greyed.
+fn preview_options(ui: &mut Ui, session: &SharedSession, info: Option<&query::CompInfo>) {
+    use crate::session::PreviewRange;
+    const RATES: [f64; 12] = [
+        8.0, 10.0, 12.0, 15.0, 23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0,
+    ];
+    let mut o = session.lock().preview.clone();
+    let before = o.clone();
+    let lw = 82.0;
+    ui.add_space(4.0);
+    ui.add_enabled_ui(false, |ui| {
+        bae_ui::dialog::row(ui, lw, tr("Shortcut"), |ui| {
+            let mut i = 0;
+            widgets::dropdown(ui, "preview-shortcut", &mut i, &[tr("Spacebar")], 120.0);
+        });
+        bae_ui::dialog::row(ui, lw, tr("Include:"), |ui| {
+            for (icon, tip) in [
+                (Icon::Eye, "Include Video"),
+                (Icon::Speaker, "Include Audio"),
+            ] {
+                icons::button(ui, icon, 18.0, true).on_hover_text(tr(tip));
+            }
+        });
+        let mut cache = false;
+        widgets::checkbox(ui, &mut cache, tr("Cache Before Playback"));
+    });
+    bae_ui::dialog::row(ui, lw, tr("Range"), |ui| {
+        let names = [
+            tr("Work Area"),
+            tr("Work Area Extended By Current Time"),
+            tr("Entire Duration"),
+        ];
+        let ranges = [
+            PreviewRange::WorkArea,
+            PreviewRange::WorkAreaExtended,
+            PreviewRange::EntireDuration,
+        ];
+        let mut i = ranges.iter().position(|r| *r == o.range).unwrap_or(1);
+        if widgets::dropdown(ui, "preview-range", &mut i, &names, 180.0).changed() {
+            o.range = ranges[i];
+        }
+    });
+    bae_ui::dialog::row(ui, lw, tr("Play From"), |ui| {
+        let names = [tr("Start of Range"), tr("Current Time")];
+        let mut i = usize::from(o.from_current);
+        if widgets::dropdown(ui, "preview-from", &mut i, &names, 180.0).changed() {
+            o.from_current = i == 1;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.vertical(|ui| {
+            ui.label(tr("Frame Rate"));
+            let auto = info.map_or(30.0, |i| i.frame_rate.as_f64());
+            let mut names = vec![format!("({auto:.2})")];
+            names.extend(RATES.iter().map(|r| format!("{r}")));
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let mut i = o
+                .fps
+                .and_then(|f| RATES.iter().position(|r| (r - f).abs() < 1e-3))
+                .map_or(0, |p| p + 1);
+            if widgets::dropdown(ui, "preview-fps", &mut i, &refs, 70.0).changed() {
+                o.fps = (i > 0).then(|| RATES[i - 1]);
+            }
+        });
+        ui.vertical(|ui| {
+            ui.label(tr("Skip"));
+            let mut skip = f64::from(o.skip);
+            if ui
+                .add(
+                    widgets::HotNumber::new(&mut skip)
+                        .label(tr("Skip"))
+                        .range(0.0..=99.0)
+                        .decimals(0),
+                )
+                .changed()
+            {
+                o.skip = skip as u32;
+            }
+        });
+        ui.vertical(|ui| {
+            ui.label(tr("Resolution"));
+            let names = [
+                tr("Auto"),
+                tr("Full"),
+                tr("Half"),
+                tr("Third"),
+                tr("Quarter"),
+            ];
+            let mut i = o.resolution.map_or(0, |r| r as usize);
+            if widgets::dropdown(ui, "preview-res", &mut i, &names, 90.0).changed() {
+                o.resolution = (i > 0).then_some(i as u32);
+            }
+        });
+    });
+    ui.add_enabled_ui(false, |ui| {
+        let mut full = false;
+        widgets::checkbox(ui, &mut full, tr("Full Screen"));
+    });
+    ui.add_space(2.0);
+    ui.label(tr("On (Spacebar) Stop:"));
+    ui.indent("preview-stop", |ui| {
+        ui.add_enabled_ui(false, |ui| {
+            let mut cached = true;
+            widgets::checkbox(ui, &mut cached, tr("If caching, play cached frames"));
+        });
+        widgets::checkbox(ui, &mut o.move_time, tr("Move time to preview time"));
+    });
+    if o != before {
+        session.lock().preview = o;
     }
 }
 
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Preview panel (AE 26's Time_Palette strings).
+    ("Spacebar", "空格键"),
+    ("Include:", "包含:"),
+    ("Include Video", "在预览中播放视频"),
+    ("Include Audio", "在预览中播放音频"),
+    ("Cache Before Playback", "在回放前缓存"),
+    (
+        "Work Area Extended By Current Time",
+        "工作区域按当前时间延伸",
+    ),
+    ("Entire Duration", "整个持续时间"),
+    ("Play From", "播放自"),
+    ("Start of Range", "范围开头"),
+    ("Skip", "跳过"),
+    ("Full Screen", "全屏"),
+    ("On (Spacebar) Stop:", "点击 (空格键) 停止："),
+    ("If caching, play cached frames", "如果缓存，则播放缓存的帧"),
+    ("Move time to preview time", "将时间移到预览时间"),
     // Properties
     ("Transform", "变换"),
     ("Layer Transform", "图层变换"),
@@ -465,6 +629,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Expression", "表达式"),
     ("Font Size", "字体大小"),
     ("Fill Color", "填充颜色"),
+    ("Left Align Text", "左对齐文本"),
+    ("Center Text", "居中对齐文本"),
+    ("Right Align Text", "右对齐文本"),
     ("Zoom", "缩放"),
     ("Intensity", "强度"),
     ("No layer selected", "未选择图层"),
@@ -473,6 +640,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Select a layer to see its properties.",
         "选择一个图层以查看其属性。",
     ),
+    ("Master Volume", "主音量"),
+    ("Left output level", "左输出电平"),
+    ("Right output level", "右输出电平"),
     // Preview panel
     ("First Frame", "第一帧"),
     ("Previous Frame", "上一帧"),
@@ -491,6 +661,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers this module's Chinese strings and panels (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "audio",
+        bae_ui::PanelKind::new("Audio", |_| Box::new(audio::AudioPanel::default())),
+    );
     crate::register_panel(
         app,
         "properties",

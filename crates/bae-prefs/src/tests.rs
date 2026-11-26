@@ -33,8 +33,8 @@ fn keys_unique_and_defaults_valid() {
     let defaults = Preferences::default();
     // 214 controls in R1's data: 205 stored values (label entries hold a color and
     // a name; buttons, notes, the device table and the preview hold none) + 1 hidden,
-    // and BAE's Appearance > Language.
-    assert_eq!(schema::all().len(), 207);
+    // BAE's Appearance > Language and Memory & CPU > GPU Preview Cache.
+    assert_eq!(schema::all().len(), 208);
     for p in schema::all() {
         assert!(seen.insert(p.key), "duplicate key {}", p.key);
         let v = defaults.get(p.key).unwrap();
