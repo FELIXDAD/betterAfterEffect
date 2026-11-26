@@ -349,7 +349,12 @@ impl AnimEvaluator {
     ) -> Result<RenderLayer, RenderError> {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
-        out.quality = inherited.quality.min(l.switches.quality);
+        // The render queue renders at Best Settings (every layer, nested
+        // ones too, at Best); the Quality switches only change previews.
+        out.quality = match self.purpose {
+            RenderPurpose::Final => bae_anim::LayerQuality::Best,
+            _ => inherited.quality.min(l.switches.quality),
+        };
         out.time = l.layer_time;
         out.start_time = l.timing.start_time;
         out.time_scale = l.timing.stretch_percent() / 100.;
