@@ -56,6 +56,15 @@ pub(super) fn bar_targets(
 }
 
 impl TimelinePanel {
+    /// The comp-time span a trim may reach: the untrimmed source of a
+    /// time-based layer, unlimited once Time Remap is on (AE).
+    fn trim_bounds(stage: &Stage, layer: &PrimPath) -> (Time, Time) {
+        match source_bar(stage, layer) {
+            Some((s, e)) => (s, e),
+            None => (Time::MIN, Time::MAX),
+        }
+    }
+
     /// The bar drag's offset this frame (computed once, before the rows draw).
     pub(super) fn plan_bar_drag(
         &self,
@@ -139,13 +148,17 @@ impl TimelinePanel {
             Drag::TrimIn { layer, .. } => {
                 let t = query::layer_timing(stage, layer);
                 let (a, b) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
-                let to = (a + d).min(b - frame);
+                let to = (a + d)
+                    .min(b - frame)
+                    .max(Self::trim_bounds(stage, layer).0);
                 cx.invoke_with("layer.trim", json!({"layers": [layer], "in_point": to}));
             }
             Drag::TrimOut { layer, .. } => {
                 let t = query::layer_timing(stage, layer);
                 let (a, b) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
-                let to = (b + d).max(a + frame);
+                let to = (b + d)
+                    .max(a + frame)
+                    .min(Self::trim_bounds(stage, layer).1);
                 cx.invoke_with("layer.trim", json!({"layers": [layer], "out_point": to}));
             }
             Drag::Slip { layer, .. } => {
@@ -185,7 +198,8 @@ impl TimelinePanel {
             timing.in_point.min(timing.out_point),
             timing.in_point.max(timing.out_point),
         );
-        let mut source = query::source_span(stage, layer);
+        let mut source = source_bar(stage, layer);
+        let bounds = Self::trim_bounds(stage, layer);
         // Live preview of a bar drag.
         let frame = info.frame_duration();
         if let Some(plan) = self.bar_plan {
@@ -196,8 +210,12 @@ impl TimelinePanel {
                     b += d;
                     source = source.map(|(s, e)| (s + d, e + d));
                 }
-                Some(Drag::TrimIn { layer: l, .. }) if l == layer => a = (a + d).min(b - frame),
-                Some(Drag::TrimOut { layer: l, .. }) if l == layer => b = (b + d).max(a + frame),
+                Some(Drag::TrimIn { layer: l, .. }) if l == layer => {
+                    a = (a + d).min(b - frame).max(bounds.0)
+                }
+                Some(Drag::TrimOut { layer: l, .. }) if l == layer => {
+                    b = (b + d).max(a + frame).min(bounds.1)
+                }
                 Some(Drag::Slip { layer: l, .. }) if l == layer => {
                     source = source.map(|(s, e)| (s + d, e + d));
                 }
@@ -349,4 +367,13 @@ impl TimelinePanel {
             });
         }
     }
+}
+
+/// The pale slip-edit bar of a time-based layer (its untrimmed source in comp
+/// time); none once Time Remap is on, when the layer can run past its source.
+fn source_bar(stage: &Stage, layer: &PrimPath) -> Option<(Time, Time)> {
+    if bool_attr(stage, layer, "time_remap_enabled") {
+        return None;
+    }
+    query::source_span(stage, layer)
 }

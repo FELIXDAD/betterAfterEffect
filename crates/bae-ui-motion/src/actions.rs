@@ -311,6 +311,19 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LABEL, "Label"),
     (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
     (ids::TRANSFORM_DIALOG, "Transform"),
+    (crate::masks::ids::NEW_MASK, "New Mask"),
+    (crate::masks::ids::MASK_SHAPE, "Mask Shape..."),
+    (crate::masks::ids::MASK_FEATHER, "Mask Feather..."),
+    (crate::masks::ids::MASK_OPACITY, "Mask Opacity..."),
+    (crate::masks::ids::MASK_EXPANSION, "Mask Expansion..."),
+    (crate::masks::ids::RESET_MASK, "Reset Mask"),
+    (crate::masks::ids::REMOVE_MASK, "Remove Mask"),
+    (crate::masks::ids::REMOVE_ALL_MASKS, "Remove All Masks"),
+    (crate::masks::ids::MASK_MODE, "Mask Mode"),
+    (crate::masks::ids::MASK_INVERTED, "Inverted"),
+    (crate::masks::ids::MASK_LOCKED, "Mask Locked"),
+    (crate::masks::ids::UNLOCK_ALL_MASKS, "Unlock All Masks"),
+    (crate::masks::ids::LOCK_OTHER_MASKS, "Lock Other Masks"),
     (ids::RESET_TRANSFORM, "Reset"),
     (ids::TIME_REMAP, "Enable Time Remapping"),
     (ids::TIME_REVERSE, "Time-Reverse Layer"),
@@ -1118,6 +1131,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     let Some(info) = common::active_comp(stage, session) else {
         return true;
     };
+    // Layer ▸ Mask (they read the selection themselves).
+    if crate::masks::is_mask_action(id) {
+        let (now, layers) = {
+            let s = session.lock();
+            (s.time(&info.path), target_layers(stage, &s))
+        };
+        crate::masks::handle(id, &inv.params, cx, session, &info.path, &layers, now);
+        return true;
+    }
     if id == "motion.anim.convert_audio_to_keyframes" {
         crate::audio_analysis::convert(cx, &info);
         return true;

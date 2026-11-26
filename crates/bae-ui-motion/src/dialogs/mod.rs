@@ -11,6 +11,7 @@ pub(crate) mod fields;
 mod go_to_time;
 mod layer_time;
 mod light_settings;
+mod mask_value;
 pub mod memory;
 mod precompose;
 mod project_settings;
@@ -28,6 +29,7 @@ use bae_ui::PanelContext;
 pub use camera_settings::{CameraSettings, CameraSettingsMemory, CameraValues, FilmUnits};
 pub use comp_settings::{CompSettings, CompSettingsMemory};
 pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
+pub use mask_value::{Kind as MaskKind, MaskValue};
 pub use precompose::{PrecomposeDialog, PrecomposeMemory};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
 pub use transform_value::{Kind as TransformKind, TransformValue};
@@ -63,6 +65,8 @@ pub enum Dialog {
     /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
     /// keyframe's Edit Value….
     TransformValue(Box<TransformValue>),
+    /// Layer ▸ Mask ▸ Mask Shape… / Feather… / Opacity… / Expansion….
+    MaskValue(Box<MaskValue>),
     /// A Render Queue item's Render Settings.
     RenderSettings(Box<render_output::RenderSettings>),
     /// A Render Queue item's Output Module Settings.
@@ -398,6 +402,24 @@ pub(crate) fn transform_value(
     }
 }
 
+/// Open the mask value dialog of `kind` for `masks` at comp time `now`.
+pub(crate) fn mask_value(
+    cx: &PanelContext<'_>,
+    comp: &PrimPath,
+    masks: &[PrimPath],
+    now: bae_model::Time,
+    kind: MaskKind,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = MaskValue::new(cx.stage, comp, masks, now, kind) {
+        d.open = Some(Dialog::MaskValue(Box::new(v)));
+    }
+}
+
 /// AE's initial New Solid color (tests).
 #[cfg(test)]
 pub(crate) fn solid_settings_default_color() -> [f64; 4] {
@@ -417,6 +439,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         go_to_time::STRINGS,
         project_settings::STRINGS,
         transform_value::STRINGS,
+        mask_value::STRINGS,
         render_output::STRINGS,
     ]
     .concat()
@@ -451,6 +474,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),
+            Dialog::MaskValue(d) => d.ui(ctx, cx),
             Dialog::RenderSettings(d) => d.ui(ctx, cx),
             Dialog::OutputModule(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
