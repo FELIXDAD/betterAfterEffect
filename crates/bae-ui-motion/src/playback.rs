@@ -60,6 +60,7 @@ struct Scene {
 }
 
 struct Slot {
+    channels: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
     rect: IRect,
@@ -497,6 +498,10 @@ impl PlaybackPreview {
     }
 
     /// The texture and rect of the frame [`Self::poll`] returned last.
+    pub(super) fn shown_channels(&self) -> Option<Arc<crate::gpu_preview::ChannelFrame>> {
+        self.shown.as_ref()?.channels.clone()
+    }
+
     pub(super) fn shown_texture(&self) -> Option<(wgpu::Texture, IRect)> {
         let shown = self.shown.as_ref()?;
         Some((shown.texture.clone(), shown.rect))
@@ -797,13 +802,19 @@ fn render_worker(
                 };
                 drop(spares_now);
                 let texture = target.view().texture().clone();
+                let channels = engine.channels.clone();
+                let pick_bytes = channels
+                    .as_ref()
+                    .map_or(0, |c| c.layers.values().map(|l| l.pick_bytes()).sum());
                 let slot = Arc::new(Slot {
+                    channels,
                     registry: registry.clone(),
                     id: registry.create("playback frame"),
                     rect,
                     time: job.time,
                     errors: job.errors,
-                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4,
+                    bytes: u64::from(texture.width()) * u64::from(texture.height()) * 4
+                        + pick_bytes,
                     texture,
                     target: Some(target),
                     spares: spares.clone(),

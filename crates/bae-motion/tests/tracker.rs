@@ -1,6 +1,39 @@
 use bae_model::{AuthorId, CommandRegistry, PrimPath, Stage, Time, Value};
 use serde_json::{Value as Json, json};
 
+/// AE: the motion target defaults to the layer just above the source; the top
+/// layer gets none (the source itself would move twice).
+#[test]
+fn the_default_motion_target_is_the_layer_above() {
+    let mut registry = CommandRegistry::with_builtins();
+    bae_motion::register_commands(&mut registry);
+    let author = AuthorId::new("user:tracker").unwrap();
+    let mut stage = Stage::new();
+    let run = |s: &mut Stage, id, p| registry.execute(s, &author, id, p).unwrap().output;
+    let comp = run(
+        &mut stage,
+        "comp.create",
+        json!({"width":128,"height":128,"fps":30}),
+    )["path"]
+        .clone();
+    let solid = |s: &mut Stage| {
+        let path = run(s, "layer.create", json!({"comp":comp,"kind":"solid"}))["path"].clone();
+        PrimPath::new(path.as_str().unwrap()).unwrap()
+    };
+    let source = solid(&mut stage);
+    let above = solid(&mut stage);
+    let target = |s: &mut Stage, layer: &PrimPath| {
+        let tracker = run(s, "tracker.create", json!({"layer":layer,"center":[12,12]}));
+        let tracker = PrimPath::new(tracker.as_str().unwrap()).unwrap();
+        bae_motion::tracker::setting(s, &tracker, "target")
+    };
+    assert_eq!(
+        target(&mut stage, &source),
+        Some(Value::PrimRef(above.clone()))
+    );
+    assert_eq!(target(&mut stage, &above), None);
+}
+
 #[test]
 fn corner_pin_keeps_the_layer_of_the_chosen_effect_point() {
     let mut registry = CommandRegistry::with_builtins();
