@@ -201,6 +201,10 @@ fn module_registers_panels_shortcuts_and_commands() {
     b.add_module(bae_ui::UiModule)
         .add_module(crate::MotionUiModule);
     let mut app = b.build();
+    assert!(
+        app.registry::<dyn bae_gpu::WarmUp>()
+            .contains("bae.media/audio-output")
+    );
     let kinds = app.registry::<PanelKind>();
     for id in [
         "project",
@@ -209,6 +213,7 @@ fn module_registers_panels_shortcuts_and_commands() {
         "properties",
         "effect_controls",
         "preview",
+        "audio",
     ] {
         let entry = kinds.snapshot();
         let e = entry.entry(id).unwrap_or_else(|| panic!("{id}"));
@@ -1818,6 +1823,55 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
         "{block:?}"
     );
     assert_eq!(block[1], [0.0; 2]);
+    let mut builder = AppBuilder::new();
+    builder.add_module(bae_effects::EffectsModule);
+    let defs = builder
+        .build()
+        .get_registry::<bae_model::EffectDef>()
+        .unwrap();
+    for name in [
+        "ADBE Aud Stereo Mixer",
+        "ADBE Aud Reverse",
+        "ADBE Aud HiLo",
+        "ADBE Param EQ",
+        "ADBE Aud BT",
+        "ADBE Aud Delay",
+        "ADBE Aud Reverb",
+    ] {
+        assert!(
+            defs.snapshot()
+                .iter()
+                .any(|entry| entry.item().match_name == name),
+            "{name}"
+        );
+    }
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    let effect = h.run(
+        "effect.apply",
+        json!({"layers":[tracks[0]],"match_name":"ADBE Aud Stereo Mixer"}),
+    )["effects"][0]
+        .clone();
+    h.run(
+        "attr.set",
+        json!({"path":effect,"attr":"param:0004","value":{"type":"float","value":-100.0}}),
+    );
+    let read = |h: &Harness| {
+        let mut sample = [[0.0; 2]];
+        bae_media::mix::AudioMix::from_stage(&h.stage, &comp)
+            .render(0, 8000, &mut sample)
+            .unwrap();
+        sample[0]
+    };
+    let pan = read(&h);
+    assert!(
+        (pan[0] - 1.5).abs() < 1e-5 && (pan[1] - 0.25).abs() < 1e-5,
+        "{pan:?}"
+    );
+    h.run(
+        "attr.set",
+        json!({"path":effect,"attr":"enabled","value":{"type":"bool","value":false}}),
+    );
+    assert_eq!(read(&h), block[0]);
 
     // Distinguish the two enabled sources, then toggle the switches independently.
     h.run(
@@ -1843,6 +1897,82 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
     switch(0, "enabled", false, 0.5); // eye does not mute sound
     switch(0, "audio_enabled", false, 0.25); // last audible solo muted
     switch(0, "audio_enabled", true, 0.5);
+}
+
+#[test]
+fn audio_assistant_creates_three_frame_sampled_sliders_in_one_undo() {
+    let mut h = Harness::new();
+    let mut builder = AppBuilder::new();
+    builder.add_module(bae_effects::EffectsModule);
+    let defs = builder
+        .build()
+        .get_registry::<bae_model::EffectDef>()
+        .unwrap();
+    bae_motion::effect::register_effect_commands(&mut h.reg, defs);
+    let comp: PrimPath = serde_json::from_value(
+        h.run(
+            "comp.create",
+            json!({"width":32,"height":32,"duration":Time::ONE_SECOND}),
+        )["path"]
+            .clone(),
+    )
+    .unwrap();
+    h.session().lock().open_comp(&comp);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("amplitude.wav");
+    // Match the analysis rate so that even the first frame has an exact RMS.
+    let rate = 48_000_u32;
+    let byte_rate = 4 * rate;
+    let mut bytes = Vec::from(*b"RIFF");
+    bytes.extend((36 + byte_rate).to_le_bytes());
+    bytes.extend(b"WAVEfmt \x10\0\0\0\x01\0\x02\0");
+    bytes.extend(rate.to_le_bytes());
+    bytes.extend(byte_rate.to_le_bytes());
+    bytes.extend(b"\x04\0\x10\0data");
+    bytes.extend(byte_rate.to_le_bytes());
+    for _ in 0..rate {
+        bytes.extend(8192i16.to_le_bytes());
+        bytes.extend((-16384i16).to_le_bytes());
+    }
+    std::fs::write(&file, bytes).unwrap();
+    h.run("item.import",json!({"files":[{"path":file,"name":"amplitude.wav","attrs":{"has_audio":{"type":"bool","value":true}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())[0]
+        .clone();
+    h.run(
+        "layer.create",
+        json!({"comp":comp,"source":asset,"kind":"audio"}),
+    );
+    let mut timeline = TimelinePanel::default();
+    h.action(
+        &mut timeline,
+        Invocation::new("motion.anim.convert_audio_to_keyframes"),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let result = loop {
+        let req = h.dialog_frame(vec![]);
+        if let Some(inv) = req.invocations.into_iter().next() {
+            break inv;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "analysis did not finish"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(3));
+    };
+    let path: PrimPath =
+        serde_json::from_value(h.run(&result.id, result.params)["path"].clone()).unwrap();
+    let sliders = bae_motion::effect::effects_of(&h.stage, &path);
+    assert_eq!(sliders.len(), 3);
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    for (effect, expected) in sliders.iter().zip([25.0, 50.0, 37.5]) {
+        let attr = query::attr_spec(&h.stage, effect, &bae_model::effect::param_attr(1)).unwrap();
+        assert_eq!(attr.keyframes.len(), info.frame_count() as usize);
+        assert_eq!(attr.keyframes[&Time::ZERO].value, Value::Float(expected));
+    }
+    h.stage.undo(&h.author).unwrap();
+    assert!(h.stage.prim(&path).is_none());
 }
 
 #[test]
@@ -2515,6 +2645,60 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     );
     h.frame("composition", &mut viewer, Vec::new());
     assert!(h.session().lock().expr_errors.is_empty());
+}
+
+/// File ▸ Replace Footage ▸ File… and Reload Footage: the item takes the new
+/// file (and its name, unless it is reloaded); its layers stay.
+#[test]
+fn replace_footage_keeps_the_item_and_its_layers() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = import_fixture("replace");
+    let logo = dir.join("logo.png");
+    let other = dir.join("plates").join("shot_0001.png");
+    h.run(
+        "item.import",
+        json!({"files":[{"path":logo,"name":"logo.png"}]}),
+    );
+    let item = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "logo.png")
+        .unwrap();
+    let layer = h.run(
+        "layer.create",
+        json!({"kind":"footage","comp":comp,"source":item}),
+    )["path"]
+        .clone();
+    let original = |h: &Harness| {
+        bae_model::asset::AssetFile::from_prim(&h.stage.prim(&item).unwrap())
+            .unwrap()
+            .original
+    };
+    h.run(
+        "item.replace_file",
+        json!({"item":item,"file":{"path":other,"name":"shot_0001.png","attrs":{"width":{"type":"int","value":2}}}}),
+    );
+    assert_eq!(query::display_name_of(&h.stage, &item), "shot_0001.png");
+    assert!(original(&h).ends_with("shot_0001.png"));
+    let width = query::static_value(&h.stage.prim(&item).unwrap(), "width");
+    assert_eq!(width, Some(Value::Int(2)));
+    assert!(
+        h.stage
+            .has_prim(&PrimPath::new(layer.as_str().unwrap()).unwrap())
+    );
+    // Reload keeps the (renamed) item's name.
+    h.run(
+        "attr.set",
+        json!({"path":item,"attr":"name","value":{"type":"string","value":"Plate"}}),
+    );
+    h.run(
+        "item.replace_file",
+        json!({"item":item,"file":{"path":other,"name":"shot_0001.png"},"keep_name":true}),
+    );
+    assert_eq!(query::display_name_of(&h.stage, &item), "Plate");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Layer ▸ Transform ▸ Opacity… / Rotation…: the value dialog shows the first

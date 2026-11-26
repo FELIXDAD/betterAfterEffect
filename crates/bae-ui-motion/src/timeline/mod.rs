@@ -64,6 +64,9 @@ pub(crate) use menus::{
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
 
+// Registration contract of the footage optical-flow backend.
+const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
+
 /// Row height and switch cell width: AE 26's (17 and about 15 points).
 const ROW_H: f32 = 17.0;
 const TABS_H: f32 = 22.0;
@@ -772,8 +775,12 @@ impl TimelinePanel {
                     Sense::click_and_drag(),
                 )
                 .labeled(egui::WidgetType::Other, tr("Time Graph"));
+            // From where the button went down, not where the drag was recognised
+            // (a few points later), or a tight marquee misses keys there (#551).
             if bg.drag_started_by(egui::PointerButton::Primary)
-                && let Some(p) = bg.interact_pointer_pos()
+                && let Some(p) = ui
+                    .input(|i| i.pointer.press_origin())
+                    .or_else(|| bg.interact_pointer_pos())
             {
                 self.drag = Some(Drag::Marquee {
                     origin: p,
@@ -809,7 +816,11 @@ impl TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
-        let switch_input = ui.input(switches::SwitchInput::read);
+        let pixel_motion = cx
+            .resources
+            .get::<crate::gpu_preview::PreviewEffects>()
+            .is_some_and(|effects| effects.0.contains(FRAME_INTERPOLATOR_ID));
+        let switch_input = ui.input(|input| switches::SwitchInput::read(input, pixel_motion));
         let scrolled = egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])

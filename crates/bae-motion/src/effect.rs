@@ -495,6 +495,81 @@ fn base_name(name: &str) -> &str {
 
 // ---------------------------------------------------------------------------
 
+/// Writes one undoable null layer and its three AE Slider Control effects.
+pub struct AudioAmplitude {
+    defs: Arc<Registry<EffectDef>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AudioAmplitudeParams {
+    pub comp: PrimPath,
+    pub first: i64,
+    pub amplitudes: Vec<[f64; 2]>,
+    pub layer_name: String,
+    pub channel_names: [String; 3],
+}
+
+impl bae_model::Command for AudioAmplitude {
+    type Params = AudioAmplitudeParams;
+    type Output = crate::LayerOutput;
+    const ID: &'static str = "audio.create_amplitude_layer";
+    const TITLE: &'static str = "Convert Audio to Keyframes";
+    const DESCRIPTION: &'static str = "Create an Audio Amplitude null with frame-sampled left, right and combined Slider Control keyframes.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<Self::Output, CommandError> {
+        let info =
+            query::comp_info(tx.stage(), &p.comp).ok_or_else(|| fail("composition missing"))?;
+        if p.first < 0
+            || p.first.saturating_add(p.amplitudes.len() as i64) > info.frame_count()
+            || p.amplitudes.is_empty()
+            || p.amplitudes
+                .iter()
+                .flatten()
+                .any(|v| !v.is_finite() || *v < 0.0)
+        {
+            return Err(fail("invalid audio amplitudes"));
+        }
+        let def = find_def(&self.defs, "ADBE Slider Control")
+            .ok_or_else(|| fail("Slider Control missing"))?;
+        let params = crate::layer::CreateLayerParams {
+            comp: p.comp,
+            kind: bae_model::LayerKind::Null,
+            name: Some(p.layer_name),
+            source: None,
+            index: None,
+            color: None,
+            size: None,
+            pixel_aspect: None,
+            text: None,
+            font_size: None,
+            shape: None,
+            position: None,
+            start: Some(Time::ZERO),
+            camera: None,
+            light: None,
+            label: None,
+        };
+        let layer = crate::CreateLayer.run(tx, params)?;
+        for (ch, name) in p.channel_names.into_iter().enumerate() {
+            let effect = add_instance(tx, &layer.path, &def, None)?;
+            set(tx, &effect, "name", Value::String(name))?;
+            let mut spec = AttrSpec::default();
+            for (i, &[left, right]) in p.amplitudes.iter().enumerate() {
+                let value = match ch {
+                    0 => left,
+                    1 => right,
+                    _ => (left + right) * 0.5,
+                };
+                let t = info.frame_rate.frame_to_time(p.first + i as i64);
+                spec.keyframes
+                    .insert(t, Keyframe::linear(Value::Float(value)));
+            }
+            write_attr(tx, &effect, &param_attr(1), spec)?;
+        }
+        Ok(layer)
+    }
+}
+
 /// The effect commands, reading definitions from `defs` (the app's
 /// `Registry<EffectDef>`).
 pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand>> {
@@ -508,10 +583,12 @@ pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand
 pub fn register_effect_commands(r: &mut CommandRegistry, defs: Arc<Registry<EffectDef>>) {
     let results = [
         r.register(ApplyEffect::new(defs.clone())),
+        r.register(crate::tracker::ApplyTrack(defs.clone())),
         r.register(RemoveEffects),
         r.register(RemoveAllEffects),
         r.register(ReorderEffects),
         r.register(SetEffectsEnabled),
+        r.register(AudioAmplitude { defs: defs.clone() }),
         r.register(ResetEffects::new(defs)),
         r.register(DuplicateEffects),
     ];

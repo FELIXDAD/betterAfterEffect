@@ -420,3 +420,86 @@ fn rove_across_time_needs_inner_spatial_keyframes() {
     );
     assert!(!crate::timeline::rove_state(st, &[]).0);
 }
+
+/// #551: marquee two keys, drag one, F9: the ease applies to both moved keys
+/// as its own undo step (timeline and Graph Editor), whatever panels draw
+/// between the drag and the move.
+#[test]
+fn easy_ease_after_dragging_marquee_selected_keys() {
+    for graph in [false, true] {
+        let mut h = H::new();
+        let (t0, t1) = (62.0 / 30.0, 242.0 / 30.0);
+        h.keys(POS, &[(t0, vec3(960.0, 540.0)), (t1, vec3(1500.0, 540.0))]);
+        let mut tl = if graph { h.graph() } else { h.bars() };
+        let keys = vec![h.key(POS, t0), h.key(POS, t1)];
+        let (a, b) = if graph {
+            (key_pos(&mut tl, &keys[0], 0), key_pos(&mut tl, &keys[1], 0))
+        } else {
+            (bar_key(&tl, &keys[0]), bar_key(&tl, &keys[1]))
+        };
+        // Marquee from empty space around both keys.
+        let from = pos2(a.x - 20.0, a.y.min(b.y) - 8.0);
+        let to = pos2(b.x + 20.0, a.y.max(b.y) + 8.0);
+        let r = h.drag(&mut tl, from, to, Modifiers::NONE);
+        h.apply(&r);
+        let mut sel = h.session().lock().selected_keys.clone();
+        sel.sort_by_key(|k| k.time);
+        assert_eq!(sel, keys, "graph {graph}: marquee selects both");
+        // Drag the first key about a second to the right.
+        let from = if graph {
+            key_pos(&mut tl, &keys[0], 0)
+        } else {
+            bar_key(&tl, &keys[0])
+        };
+        let to = pos2(x_of(&tl, t0 + 1.0), from.y);
+        let r = h.drag(&mut tl, from, to, Modifiers::NONE);
+        // A panel drawn after the Timeline in the same frame syncs the session
+        // before the queued move has run: the selection must survive it.
+        h.session().lock().sync(&h.stage);
+        assert_eq!(
+            h.session().lock().selected_keys.len(),
+            2,
+            "graph {graph}: kept"
+        );
+        h.apply(&r);
+        let times = h.times(POS);
+        assert!(
+            times[0] > (t0 * SEC as f64) as i64,
+            "graph {graph}: moved {times:?}"
+        );
+        let sel = h.session().lock().selected_keys.clone();
+        for k in &sel {
+            assert!(
+                h.spec(POS).keyframes.contains_key(&k.time),
+                "graph {graph}: selection points at a key: {k:?} in {times:?}"
+            );
+        }
+        assert_eq!(sel.len(), 2, "graph {graph}: both stay selected");
+        h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+        // F9.
+        let r = h.action(
+            &mut tl,
+            Invocation::with_params(crate::actions::ids::EASE, json!({"mode": "easy_ease"})),
+        );
+        assert_eq!(r.invocations.len(), 1, "graph {graph}: {:?}", r.invocations);
+        assert_eq!(r.invocations[0].id, "key.ease");
+        h.apply(&r);
+        assert!(
+            h.spec(POS)
+                .keyframes
+                .values()
+                .all(|k| k.interp_in == Interpolation::Bezier
+                    && k.interp_out == Interpolation::Bezier),
+            "graph {graph}: eased"
+        );
+        h.undo();
+        assert!(
+            h.spec(POS)
+                .keyframes
+                .values()
+                .all(|k| k.interp_out == Interpolation::Linear),
+            "graph {graph}: undo takes the ease back, not the drag"
+        );
+        assert_eq!(h.times(POS), times, "graph {graph}: the drag stays");
+    }
+}
