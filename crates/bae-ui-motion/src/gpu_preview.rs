@@ -130,7 +130,7 @@ impl RenderEngine {
     }
 
     /// The frame converted to an 8-bit target (`reuse` when it has the
-    /// frame's size) and the frame's rect, `None` when the frame is incomplete
+    /// frame's size) and its floating-point image, `None` when the frame is incomplete
     /// (something still warming up: not shown, and `reuse` comes back
     /// untouched).
     pub(super) fn render(
@@ -141,7 +141,7 @@ impl RenderEngine {
         display: bae_render::Display,
         roi: Option<IRect>,
         reuse: Option<OutputTarget>,
-    ) -> Result<(OutputTarget, Option<IRect>, bool), bae_render::RenderError> {
+    ) -> Result<(OutputTarget, Option<bae_render::GpuImage>, bool), bae_render::RenderError> {
         let request = RenderRequest {
             resolution: match resolution {
                 0 | 1 => Resolution::Full,
@@ -185,8 +185,8 @@ impl RenderEngine {
         };
         self.layer_times = (!frame.from_cache).then(|| (frame.comp.clone(), frame.layer_times));
         self.channels = ChannelFrame::from_comp(&self.renderer, rc);
-        let rect = (!frame.incomplete).then_some(frame.image.rect);
-        Ok((target, rect, frames.sampled))
+        let source = (!frame.incomplete).then_some(frame.image);
+        Ok((target, source, frames.sampled))
     }
 }
 
@@ -222,6 +222,7 @@ pub(crate) struct GpuPreview {
     /// The published frame (the Info panel reads pixels from it) and the last
     /// pixel read: (texel, value).
     target: Option<OutputTarget>,
+    direct_source: Option<bae_render::GpuImage>,
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// How the viewer shows the frame (Show Channel, Exposure).
     pub display: bae_render::Display,
@@ -284,6 +285,7 @@ impl GpuPreview {
             last: None,
             rect: None,
             target: None,
+            direct_source: None,
             sampled: None,
             display: bae_render::Display::default(),
             roi: None,
@@ -455,9 +457,9 @@ impl GpuPreview {
             // renderer still warming up) is never shown: the last complete
             // frame stays, and the frame is rendered again on the redraw the
             // warm-up requests when it is ready.
-            let (target, rect, _) = rendered;
-            self.preparing = rect.is_none();
-            let Some(rect) = rect else {
+            let (target, source, _) = rendered;
+            self.preparing = source.is_none();
+            let Some(source) = source else {
                 // The published target (if any) still shows the last complete
                 // frame; a new one holds the incomplete frame and is dropped.
                 if old_size.is_some() {
@@ -487,7 +489,8 @@ impl GpuPreview {
                 session.lock().channel_frame = self.engine.channels.clone();
             }
             self.last = Some(key);
-            self.rect = Some(rect);
+            self.rect = Some(source.rect);
+            self.direct_source = Some(source);
             self.target = Some(target);
             self.target_shown = true;
             self.live_texture = None;
@@ -531,11 +534,25 @@ impl GpuPreview {
         Some((self.target.as_ref()?.view().texture().clone(), key))
     }
 
+    /// Keep the pool lease alive while Lumetri samples the working buffer.
+    pub(super) fn scope_source(&self) -> Option<bae_render::GpuImage> {
+        if self.cached.is_some() {
+            self.playback.scope_source()
+        } else {
+            self.direct_source.clone()
+        }
+    }
+
+    pub(super) fn snapshot_texture(&self, slot: usize) -> Option<wgpu::Texture> {
+        self.snapshots.get(slot)?.as_ref().map(|s| s.0.clone())
+    }
+
     /// The viewer shows `texture` (a frame of the background renderer or
     /// its cache): the Info panel and snapshots read it until the next
     /// [`Self::frame`].
     pub fn show_cached(&mut self, texture: wgpu::Texture, rect: IRect) {
         if self.cached.as_ref().map(|c| &c.0) != Some(&texture) {
+            self.direct_source = None;
             self.cached = Some((texture, rect));
             self.sampled = None;
         }

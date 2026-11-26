@@ -108,7 +108,14 @@ impl Parade {
 }
 
 mod settings;
-use settings::{PRESETS, Space};
+use settings::{PRESETS, Signal, Space};
+
+/// The playback cache retains working textures only while a visible scope needs them.
+pub(super) fn needs_working_frame(ctx: &egui::Context) -> bool {
+    let now = ctx.cumulative_frame_nr();
+    ctx.data(|data| data.get_temp::<u64>(egui::Id::new("lumetri_working_frame")))
+        .is_some_and(|last| now.saturating_sub(last) <= 1)
+}
 
 /// Brightness of the traces (AE: Bright, Normal, Dimmed).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +153,10 @@ struct State {
     parade: Parade,
     brightness: Brightness,
     space: Space,
+    signal: Signal,
+    clamp: bool,
+    #[serde(skip)]
+    source_space: Space,
 }
 
 impl Default for State {
@@ -156,6 +167,9 @@ impl Default for State {
             parade: Parade::default(),
             brightness: Brightness::default(),
             space: Space::Automatic,
+            source_space: Space::Automatic,
+            signal: Signal::Byte,
+            clamp: true,
         }
     }
 }
@@ -163,7 +177,10 @@ impl Default for State {
 impl State {
     /// What the scope image depends on besides the frame.
     fn key(&self) -> u64 {
-        (self.space as u64) << 24
+        (self.source_space as u64) << 40
+            | (self.signal as u64) << 33
+            | (self.clamp as u64) << 32
+            | (self.space as u64) << 24
             | (self.parade as u64) << 16
             | (self.wave as u64) << 8
             | self.brightness as u64
@@ -277,7 +294,9 @@ impl Gpu {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let id = registry.create("lumetri scopes");
@@ -298,10 +317,16 @@ impl Gpu {
 
     /// Recomputes the scopes of `frame` when it changed; the published image's
     /// egui handle (none until the shell registered it).
-    fn update(&mut self, frame: &wgpu::Texture, key: u64, state: &State) -> Option<u64> {
+    fn update(
+        &mut self,
+        frame: &wgpu::Texture,
+        size: [u32; 2],
+        key: u64,
+        state: &State,
+    ) -> Option<u64> {
         let key = (key, state.key());
         if self.shown != Some(key) {
-            self.compute(frame, state);
+            self.compute(frame, size, state);
             if self
                 .registry
                 .publish(self.id, &self.image, wgpu::FilterMode::Linear)
@@ -313,8 +338,7 @@ impl Gpu {
         self.registry.display_handle(self.id)
     }
 
-    fn compute(&self, frame: &wgpu::Texture, state: &State) {
-        let (w, h) = (frame.width().max(1), frame.height().max(1));
+    fn compute(&self, frame: &wgpu::Texture, [w, h]: [u32; 2], state: &State) {
         let step = w.div_ceil(SAMPLES[0]).max(h.div_ceil(SAMPLES[1])).max(1);
         let (sx, sy) = (w.div_ceil(step), h.div_ceil(step));
         let unit = (sx * sy) as f32 / 65536.0 / state.brightness.gain();
@@ -332,6 +356,10 @@ impl Gpu {
         params[16..20].copy_from_slice(&wave.to_le_bytes());
         params[20..24].copy_from_slice(&(state.parade as u32).to_le_bytes());
         params[24..28].copy_from_slice(&(state.space as u32).to_le_bytes());
+        let signal = state.signal as u32
+            | (u32::from(state.clamp) << 2)
+            | ((state.source_space as u32) << 3);
+        params[28..32].copy_from_slice(&signal.to_le_bytes());
         let queue = self.gpu.queue();
         queue.write_buffer(&self.params, 0, &params);
         let device = self.gpu.device();
@@ -443,7 +471,10 @@ impl ScopesPanel {
 impl Panel for ScopesPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
-        let frame = session.lock().scope_frame.clone();
+        let (frame, source) = {
+            let s = session.lock();
+            (s.scope_frame.clone(), s.scope_source.clone())
+        };
         let area = ui.max_rect();
         let strip = Rect::from_min_max(
             pos2(area.left(), (area.bottom() - 24.0).max(area.top())),
@@ -475,6 +506,42 @@ impl Panel for ScopesPanel {
             pen,
         ));
         egui::Popup::menu(&wrench).show(|ui| self.menu_items(ui));
+        let controls = strip.with_min_x(button.right() + 2.0);
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(controls)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                if bae_ui::widgets::checkbox(ui, &mut self.state.clamp, tr("Clamp Signal"))
+                    .changed()
+                {
+                    self.custom = None;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    bae_ui::widgets::menu_button(ui, self.state.signal.title(), |ui| {
+                        for (mode, title) in Signal::ALL {
+                            if ui
+                                .radio_value(&mut self.state.signal, mode, title)
+                                .clicked()
+                            {
+                                self.custom = None;
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+            },
+        );
+        let precise = self.state.signal != Signal::Byte || !self.state.clamp;
+        let needs_working_frame_on_entry = needs_working_frame(ui.ctx());
+        if precise && !self.state.shown.is_empty() {
+            let now = ui.ctx().cumulative_frame_nr();
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(egui::Id::new("lumetri_working_frame"), now));
+            if !needs_working_frame_on_entry {
+                ui.ctx().request_repaint();
+            }
+        }
         let resp = ui.allocate_rect(full, Sense::click());
         resp.context_menu(|ui| self.menu_items(ui));
         let p = ui.painter_at(full);
@@ -489,7 +556,12 @@ impl Panel for ScopesPanel {
                 .filter(|g| Arc::ptr_eq(&g.gpu, context) && !context.is_lost())?;
             let mut state = self.state.clone();
             state.space = space;
-            gpu.update(&texture, key, &state)
+            state.source_space = Space::Automatic.resolve(cx.stage);
+            if let Some(image) = source.as_ref().filter(|_| precise) {
+                gpu.update(&image.texture, image.texel_size(), key ^ (1 << 63), &state)
+            } else {
+                gpu.update(&texture, [texture.width(), texture.height()], key, &state)
+            }
         });
         let shown = self.state.shown.clone();
         if shown.is_empty() {
@@ -502,7 +574,7 @@ impl Panel for ScopesPanel {
         for (i, scope) in shown.iter().enumerate() {
             let min = full.min + vec2((i % cols) as f32 * cell.x, (i / cols) as f32 * cell.y);
             let r = Rect::from_min_size(min, cell).shrink(10.0);
-            draw_scope(&p, *scope, r, handle, self.state.parade, space);
+            draw_scope(&p, *scope, r, handle, &self.state, space);
         }
     }
 
@@ -607,7 +679,7 @@ fn draw_scope(
     scope: Scope,
     area: Rect,
     handle: Option<u64>,
-    parade: Parade,
+    state: &State,
     space: Space,
 ) {
     let r = match scope {
@@ -615,7 +687,7 @@ fn draw_scope(
             let s = area.width().min(area.height());
             Rect::from_center_size(area.center(), vec2(s, s))
         }
-        _ => Rect::from_min_max(area.min + vec2(28.0, 0.0), area.max),
+        _ => Rect::from_min_max(area.min + vec2(28.0, 0.0), area.max - vec2(32.0, 0.0)),
     };
     if r.width() < 8.0 || r.height() < 8.0 {
         return;
@@ -670,19 +742,26 @@ fn draw_scope(
             }
         }
         _ => {
-            for (i, v) in [100, 75, 50, 25, 0].into_iter().enumerate() {
-                let y = r.top() + r.height() * i as f32 / 4.0;
+            for (position, left, right) in state.signal.scale(state.clamp) {
+                let y = r.bottom() - r.height() * position;
                 p.line_segment([pos2(r.left(), y), pos2(r.right(), y)], line);
                 p.text(
                     pos2(r.left() - 4.0, y),
                     Align2::RIGHT_CENTER,
-                    v.to_string(),
+                    left,
+                    font.clone(),
+                    label,
+                );
+                p.text(
+                    pos2(r.right() + 3.0, y),
+                    Align2::LEFT_CENTER,
+                    right,
                     font.clone(),
                     label,
                 );
             }
             if scope == Scope::Parade {
-                let channels = match parade {
+                let channels = match state.parade {
                     Parade::Rgb | Parade::RgbWhite => ["R", "G", "B"],
                     Parade::Yuv | Parade::YuvWhite => ["Y", "U", "V"],
                 };
@@ -713,6 +792,7 @@ fn cb_cr(rgb: [f32; 3], space: Space) -> [f32; 2] {
 
 /// Chinese for the panel (AE 26's zh_CN dictionary).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Clamp Signal", "固定信号"),
     ("Vectorscope YUV", "矢量示波器 YUV"),
     ("Histogram", "直方图"),
     ("Parade (RGB)", "分量 (RGB)"),
@@ -796,32 +876,73 @@ mod tests {
     }
 
     #[test]
+    fn footer_uses_the_measured_labels_and_persists_the_checked_mode() {
+        bae_ui::i18n::register(ZH);
+        let mut panel = ScopesPanel::default();
+        assert_eq!(
+            Signal::ALL.map(|(mode, name)| (name, mode == panel.state.signal)),
+            [("8 Bit", true), ("float", false), ("HDR", false)]
+        );
+        assert_eq!(bae_ui::i18n::translation("Clamp Signal"), Some("固定信号"));
+        let float = PRESETS
+            .iter()
+            .find(|preset| preset.title.starts_with("Premiere 4"))
+            .unwrap();
+        float.apply(&mut panel.state);
+        let saved = ScopesPanel::from_state(panel.save_state().as_ref());
+        assert_eq!(saved.state.signal, Signal::Float);
+        assert!(!saved.state.clamp);
+    }
+
+    #[test]
     fn scopes_compute_on_the_gpu() {
         let Some(gpu) = bae_gpu::testing::shared_context() else {
             return;
         };
+        use bae_gpu::transfer::{TextureRegion, read_texture, upload_texture};
         let device = gpu.device();
         let frame = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("test frame"),
+            label: Some("scope signal and padding"),
             size: wgpu::Extent3d {
-                width: 1920,
-                height: 1080,
+                width: 1,
+                height: 2,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let samples = [1.1_f32, 1.1, 1.1, 1.0, 0.0, 0.0, 0.0, 1.0]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>();
+        upload_texture(&gpu, &frame, TextureRegion::full(&frame), &samples).unwrap();
         let registry = Arc::new(ViewportTextureRegistry::new());
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let mut scopes = Gpu::new(gpu.clone(), registry);
-        scopes.update(&frame, 1, &State::default());
+        let pq_white = bae_color::TransferFunction::Pq.encode(1.0);
+        for (signal, clamp, expected) in [
+            (Signal::Byte, true, 255),
+            (Signal::Float, false, 237),
+            (Signal::Hdr, true, (255.0 * pq_white).round() as u32),
+        ] {
+            let state = State {
+                signal,
+                clamp,
+                source_space: Space::Rec709,
+                space: Space::Rec709,
+                ..State::default()
+            };
+            scopes.update(&frame, [1, 1], 1, &state);
+            let image = read_texture(&gpu, &scopes.image).unwrap();
+            let lit: Vec<_> = (0..256).filter(|y| image.pixel(768, *y)[0] != 0).collect();
+            assert_eq!(lit, [255 - expected], "{signal:?}");
+        }
         let error = pollster_block(scope.pop());
         assert!(error.is_none(), "{error:?}");
-        assert_eq!(scopes.shown, Some((1, State::default().key())));
     }
 
     fn pollster_block<F: std::future::Future>(f: F) -> F::Output {
