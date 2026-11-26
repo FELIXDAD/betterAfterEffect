@@ -751,6 +751,10 @@ impl TimelinePanel {
                 } else {
                     Some(crate::expr::default_expression(stage, path, attr))
                 };
+                if source.is_some() {
+                    session.lock().focus_expression =
+                        Some((path.clone(), attr.to_owned(), std::time::Instant::now()));
+                }
                 cx.invoke_with(
                     "attr.set_expression",
                     json!({"path": path, "attr": attr, "source": source}),
@@ -1090,9 +1094,33 @@ impl TimelinePanel {
             pos2(rect.right() - 4.0, rect.bottom() - 1.0),
         );
         let mut buf = match &self.expr_edit {
-            Some((p, a, b)) if p == path && a == attr => b.clone(),
+            Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
             _ => expr.source.clone(),
         };
+        // Just added: the field takes the focus with the whole text selected.
+        let focus = {
+            let mut s = session.lock();
+            match &s.focus_expression {
+                Some((p, a, _)) if p == path && a == attr => s.focus_expression.take().is_some(),
+                Some((.., at)) if at.elapsed() > std::time::Duration::from_secs(1) => {
+                    s.focus_expression = None;
+                    false
+                }
+                _ => false,
+            }
+        };
+        if focus {
+            let mut state =
+                egui::text_edit::TextEditState::load(ui.ctx(), field_id).unwrap_or_default();
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(buf.chars().count()),
+                )));
+            state.store(ui.ctx(), field_id);
+            ui.memory_mut(|m| m.request_focus(field_id));
+        }
         // Keypad Enter ends editing (Return adds a line).
         let keypad = ui.memory(|m| m.has_focus(field_id))
             && bae_ui::keypad_enter()
@@ -1125,7 +1153,12 @@ impl TimelinePanel {
                     a.min(b)..a.max(b),
                 ));
             }
-            self.expr_edit = Some((path.clone(), attr.to_owned(), buf.clone()));
+            self.expr_edit = Some((
+                path.clone(),
+                attr.to_owned(),
+                buf.clone(),
+                expr.source.clone(),
+            ));
         }
         if keypad {
             r.surrender_focus();
