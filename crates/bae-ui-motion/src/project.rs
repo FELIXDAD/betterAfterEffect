@@ -189,7 +189,7 @@ impl ProjectPanel {
         let stage = cx.stage;
         let thumb = Rect::from_min_size(rect.min + vec2(8.0, 6.0), vec2(64.0, 44.0));
         if self.thumbnail_grid {
-            crate::viewer::checkerboard(p, thumb);
+            crate::viewer::checkerboard(p, thumb, cx.resources);
         } else {
             p.rect_filled(thumb, 1.0, color::FIELD);
         }
@@ -679,11 +679,7 @@ impl Panel for ProjectPanel {
             cx.open_panel("composition");
         }
         if menu_new_folder {
-            let mut params = json!({"name": common::numbered(stage, &session, target_folder.as_ref().unwrap_or(&PrimPath::root()), "Untitled")});
-            if let Some(f) = &target_folder {
-                params["parent"] = json!(f);
-            }
-            cx.invoke_with("folder.create", params);
+            crate::actions::new_folder(cx, &session);
         }
         if !delete.is_empty() {
             cx.invoke_with("item.delete", json!({"paths": delete}));
