@@ -100,6 +100,8 @@ pub struct EvaluatedLayer {
     pub track_matte_layer: Option<usize>,
     pub masks: Vec<EvaluatedMask>,
     pub effects: Vec<EvaluatedEffect>,
+    /// The animated Photoshop styles on the transformed layer.
+    pub layer_styles: Option<EvaluatedEffect>,
     /// Shape layer contents (groups, paths, fills, operators …), in order.
     pub contents: Arc<[EvaluatedPrim]>,
     /// Text layers: the source text at this time (`text:source`).

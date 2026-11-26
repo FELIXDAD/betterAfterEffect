@@ -59,7 +59,7 @@ pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, select_children,
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
@@ -639,6 +639,27 @@ impl TimelinePanel {
     }
 }
 
+#[derive(Clone, Copy)]
+enum OtherTimelines {
+    All,
+    Left,
+    Right,
+}
+impl OtherTimelines {
+    fn matches(self, index: usize, active: usize) -> bool {
+        match self {
+            Self::All => index != active,
+            Self::Left => index < active,
+            Self::Right => index > active,
+        }
+    }
+}
+const OTHER_TIMELINES: [(OtherTimelines, &str); 3] = [
+    (OtherTimelines::All, "Close Other Timeline Panels"),
+    (OtherTimelines::Right, "Close Timeline Panels to the Right"),
+    (OtherTimelines::Left, "Close Timeline Panels to the Left"),
+];
+
 impl Panel for TimelinePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
@@ -646,6 +667,38 @@ impl Panel for TimelinePanel {
             Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
             None => TabInfo::new(tr("Timeline")),
         }
+        .close_submenu()
+    }
+
+    fn related_tabs_menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) -> bool {
+        let session = common::session(cx.resources);
+        let mut session = session.lock();
+        let active = session
+            .active_comp
+            .as_ref()
+            .and_then(|c| session.open_comps.iter().position(|p| p == c));
+        for (action, label) in OTHER_TIMELINES {
+            if matches!(action, OtherTimelines::Right) {
+                ui.separator();
+            }
+            let targets: Vec<_> = session
+                .open_comps
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| active.is_some_and(|at| action.matches(*i, at)))
+                .map(|(_, c)| c.clone())
+                .collect();
+            if ui
+                .add_enabled(!targets.is_empty(), egui::Button::new(tr(label)))
+                .clicked()
+            {
+                for target in targets {
+                    session.close_comp(&target);
+                }
+                ui.close();
+            }
+        }
+        true
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
@@ -686,6 +739,7 @@ impl Panel for TimelinePanel {
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let full = ui.available_rect_before_wrap();
+        crate::import::drop_on_panel(ui, cx);
         let cols = self.columns.layout(ui, full);
         self.contents(ui, cx, &cols);
     }
@@ -718,7 +772,41 @@ impl TimelinePanel {
         self.graph_mode = session.lock().graph_editor;
         let graph_left = full.left() + cols.viewport + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
-        let axis = self.axis(&info, graph_left, graph_w);
+        let mut axis = self.axis(&info, graph_left, graph_w);
+        if cfg!(target_os = "macos")
+            && ui.rect_contains_pointer(Rect::from_min_max(
+                pos2(graph_left, tabs.bottom()),
+                full.max,
+            ))
+            && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
+        {
+            let smart = crate::viewer::smart_zoom(ui.ctx());
+            let factor = ui.input(|i| i.zoom_delta());
+            if smart || factor != 1.0 {
+                let time = axis.t(pointer.x);
+                let full_span = info.duration.0 as f64;
+                let min_span = (info.frame_duration().0 * 10).min(info.duration.0) as f64;
+                let span = if smart {
+                    if self.zoom > 0.0 {
+                        full_span
+                    } else {
+                        full_span / 2.0
+                    }
+                } else {
+                    axis.span.0 as f64 / f64::from(factor)
+                };
+                if full_span > min_span {
+                    self.zoom = 1.0
+                        - ((span - min_span) / (full_span - min_span))
+                            .clamp(0.0, 1.0)
+                            .cbrt() as f32;
+                    let new_axis = self.axis(&info, graph_left, graph_w);
+                    self.scroll = time - (new_axis.t(pointer.x) - new_axis.start);
+                    axis = self.axis(&info, graph_left, graph_w);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
         #[cfg(test)]
         {
             self.last_axis = Some(axis);
@@ -1170,4 +1258,25 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
             Box::new(TimelinePanel::from_state(spawn.state))
         }),
     );
+}
+
+#[cfg(test)]
+mod close_menu_tests {
+    use super::*;
+    #[test]
+    fn close_other_timeline_choices_keep_the_active_comp() {
+        let zh = [
+            "关闭其他时间轴面板",
+            "关闭右侧的时间轴面板",
+            "关闭左侧的时间轴面板",
+        ];
+        for ((which, name), label) in OTHER_TIMELINES.into_iter().zip(zh) {
+            assert!(ZH.contains(&(name, label)));
+            assert!(!which.matches(0, 0));
+        }
+        assert!(!OtherTimelines::Left.matches(1, 0));
+        assert!(!OtherTimelines::Right.matches(0, 1));
+        assert!(OtherTimelines::Left.matches(0, 1));
+        assert!(OtherTimelines::Right.matches(1, 0));
+    }
 }

@@ -19,6 +19,7 @@ pub mod effect;
 mod error;
 mod event;
 mod ids;
+pub mod layer_styles;
 mod op;
 mod path;
 mod prim;

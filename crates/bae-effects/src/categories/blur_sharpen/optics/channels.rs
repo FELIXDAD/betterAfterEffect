@@ -1,0 +1,201 @@
+//! Filter premultiplied colour and its matching coverage with a different Gaussian per channel.
+//! A channel uses its own pyramid level, but all four horizontal lines share one dispatch,
+//! as do the vertical lines. Two RGBA scratch surfaces hold the four colour/coverage pairs.
+use std::sync::Arc;
+
+use super::BLURRINESS_TO_SIGMA;
+use crate::{
+    EffectTarget, blur,
+    effects::image_grid,
+    gpu::{self, Binding, Kernel, KernelKey, KernelSource, Resource, Runtime, UniformWriter},
+    params::Params,
+};
+use bae_gpu::wgpu;
+use bae_render::{GpuImage, IRect, RenderError};
+
+const WEIGHTS: usize = 19; // The Gaussian planner keeps level sigma below six texels.
+const BYTES: u32 = (272 + WEIGHTS * 16) as u32;
+const SOURCE: &str = include_str!("channels.wgsl");
+
+fn pipeline(
+    rt: &Runtime,
+    format: wgpu::TextureFormat,
+    entry: &'static str,
+) -> Result<Arc<Kernel>, RenderError> {
+    let key = KernelKey {
+        owner: "bae.effects.channel-blur".into(),
+        entry: entry.into(),
+        variant: gpu::format_key(format),
+    };
+    rt.kernel(&key, || {
+        let mut bindings = vec![(0, Binding::Uniform(BYTES))];
+        let inputs = match entry {
+            "horizontal" => 4,
+            "vertical" | "vertical_native" => 2,
+            _ => 3,
+        };
+        bindings.extend((1..=inputs).map(|i| (i, Binding::Texture)));
+        bindings.push((5, Binding::Storage(format)));
+        if matches!(entry, "horizontal" | "vertical") {
+            bindings.push((6, Binding::Storage(format)));
+        }
+        Ok(KernelSource {
+            label: "bae.effects.channel-blur",
+            wgsl: SOURCE.replace("WORKING_FORMAT", blur::format_name(format)?),
+            entry,
+            bindings,
+            workgroup: [8, 8, 1],
+        })
+    })
+}
+
+pub(super) fn prewarm(rt: &Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    for entry in ["horizontal", "vertical", "vertical_native", "resolve"] {
+        pipeline(rt, format, entry)?;
+    }
+    Ok(())
+}
+
+fn dispatch(
+    target: &mut dyn EffectTarget,
+    entry: &'static str,
+    offset: u32,
+    inputs: &[&GpuImage],
+    outputs: &[&GpuImage],
+) -> Result<(), RenderError> {
+    let rt = gpu::runtime(target.gpu());
+    let kernel = pipeline(&rt, target.format(), entry)?;
+    let resources: Vec<_> = std::iter::once(Resource::Uniform)
+        .chain(
+            inputs
+                .iter()
+                .chain(outputs)
+                .map(|im| Resource::View(&im.view)),
+        )
+        .collect();
+    let group = rt.bind_group(&kernel, &resources);
+    let mut pass = target
+        .encoder()
+        .begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(entry),
+            timestamp_writes: None,
+        });
+    gpu::dispatch(
+        &mut pass,
+        &kernel,
+        &group,
+        &[offset],
+        outputs[0].texel_size(),
+    );
+    Ok(())
+}
+
+pub(super) fn render(
+    target: &mut dyn EffectTarget,
+    v: Params<'_>,
+    input: &GpuImage,
+    roi: IRect,
+) -> Result<GpuImage, RenderError> {
+    let grid = image_grid::grid_scale(v.p, input);
+    let native = grid / input.pixel_scale;
+    let sigma = [1, 2, 3, 4].map(|id| v.f(id) * v.p.scale * native * BLURRINESS_TO_SIGMA);
+    if roi.is_empty() || sigma.iter().all(|&s| blur::radius(s) == 0) {
+        return Ok(input.clone());
+    }
+    let axes = [v.popup(6) != 3, v.popup(6) != 2];
+    let repeat = v.b(5);
+    let factors = sigma.map(blur::level_factor);
+    let mut source = input.clone();
+    // Keep the phase of a reduced footage texture even when its world origin
+    // falls between two native-grid coordinates.
+    let origin = [input.rect.x0, input.rect.y0].map(|x| f64::from(x) / input.pixel_scale);
+    let shift = origin.map(|x| x.round() - x);
+    let [x, y] = origin.map(|x| x.round() as i32);
+    let [width, height] = input.texel_size();
+    source.rect = IRect::new(x, y, x + width as i32, y + height as i32);
+    source.pixel_scale = 1.;
+    let mut levels = vec![source];
+    while (1 << (levels.len() - 1)) < *factors.iter().max().unwrap() {
+        let next = blur::reduce_level(
+            target,
+            levels.last().unwrap(),
+            axes.map(|active| if active { 2 } else { 1 }),
+            repeat,
+        )?;
+        levels.push(next);
+    }
+    let textures = factors.map(|f| &levels[f.ilog2() as usize]);
+    let mut uniforms = UniformWriter::with_size(BYTES as usize);
+    let mut weights = [[0.; 4]; WEIGHTS];
+    let mut largest_radius = 0;
+    let mut vsize = [1; 2];
+    for (c, &factor) in factors.iter().enumerate() {
+        let xy = axes.map(|axis| if axis { factor } else { 1 });
+        let s = blur::level_sigma(sigma[c], factor);
+        let r = blur::radius(s);
+        let tile = |start: i32, end: i32, f: i32, shift: f64| {
+            let k = native / f64::from(f);
+            let offset = shift / f64::from(f);
+            if k == 1. && offset == 0. {
+                (start, end)
+            } else {
+                (
+                    ((f64::from(start) + 0.5) * k + offset - 0.5).floor() as i32,
+                    ((f64::from(end) - 0.5) * k + offset - 0.5).floor() as i32 + 2,
+                )
+            }
+        };
+        let (x0, x1) = tile(roi.x0, roi.x1, xy[0], shift[0]);
+        let (y0, y1) = tile(roi.y0, roi.y1, xy[1], shift[1]);
+        let rect = IRect::new(x0, y0, x1, y1);
+        let at = c * 48;
+        uniforms
+            .i32s(at, &image_grid::rect4(textures[c].rect))
+            .i32s(at + 16, &image_grid::rect4(rect))
+            .i32s(at + 32, &[xy[0], xy[1], r, 0]);
+        if r == 0 {
+            weights[0][c] = 1.;
+            continue;
+        }
+        largest_radius = largest_radius.max(r);
+        let [w, h] = rect.size();
+        vsize = [vsize[0].max(w), vsize[1].max(h)];
+        for (row, w) in weights.iter_mut().zip(blur::gaussian_weights(s, r)) {
+            row[c] = w;
+        }
+    }
+    let halo = if axes[1] { largest_radius } else { 0 };
+    let same_level = factors.iter().all(|f| *f == factors[0]);
+    uniforms
+        .i32s(192, &image_grid::rect4(roi))
+        .i32s(208, &image_grid::rect4(levels[0].rect))
+        .u32(224, u32::from(axes[0]))
+        .u32(228, u32::from(axes[1]))
+        .u32(232, u32::from(repeat))
+        .u32(236, u32::from(v.p.float))
+        .f32(240, native as f32)
+        .u32(244, u32::from(same_level))
+        .i32(248, halo)
+        .i32(252, if axes[0] { largest_radius } else { 0 })
+        .f32s(256, &shift.map(|x| x as f32));
+    for (i, w) in weights.iter().enumerate() {
+        uniforms.f32s(272 + i * 16, w);
+    }
+    let offset = gpu::push_uniform(&gpu::runtime(target.gpu()), &uniforms);
+    let pair =
+        |target: &mut dyn EffectTarget, [w, h]: [u32; 2]| -> Result<[GpuImage; 2], RenderError> {
+            let rect = IRect::from_size(w, h);
+            Ok([target.allocate(rect, 1.)?, target.allocate(rect, 1.)?])
+        };
+    let [hc, ha] = pair(target, [vsize[0], vsize[1] + 2 * halo as u32])?;
+    dispatch(target, "horizontal", offset, &textures, &[&hc, &ha])?;
+    let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
+    if same_level && factors[0] == 1 && native == 1. && shift == [0., 0.] {
+        dispatch(target, "vertical_native", offset, &[&hc, &ha], &[&out])?;
+        return Ok(out);
+    }
+    let [vc, va] = pair(target, vsize)?;
+    dispatch(target, "vertical", offset, &[&hc, &ha], &[&vc, &va])?;
+    dispatch(target, "resolve", offset, &[&vc, &va, &levels[0]], &[&out])?;
+    Ok(out)
+}
