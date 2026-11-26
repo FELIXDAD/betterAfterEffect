@@ -65,6 +65,7 @@ mod timeline;
 pub mod tools;
 mod tracker;
 mod viewer;
+mod vr_editor;
 mod workspaces;
 
 use bae_app::{AppBuilder, AppModule};
@@ -103,6 +104,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     progress_metadata::register,
     paint_panels::register,
     path_nulls::register,
+    vr_editor::register,
     assist::register,
     // Chinese strings only.
     actions::register,
@@ -144,6 +146,8 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(catalog::menu_zh());
         bae_ui::i18n::register(ae_panels::ZH);
         bae_ui::i18n::register(ae_shells::ZH);
+        // The Character panel's font list, scanned before it is first opened.
+        ae_panels::character::prewarm();
         effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
