@@ -328,6 +328,30 @@ fn comp_by_name_and_source() {
 }
 
 #[test]
+fn time_conversions_follow_the_display_settings_and_rounding_mode() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT).set(
+            "/project",
+            "time_display",
+            Value::Enum("frames".into()),
+        );
+        b.set(MAIN, "display_start_time", Value::Time(secs(2.0)))
+            .set(MAIN, "drop_frame", true);
+        let l = b.layer(MAIN, "Clock", "text");
+        b.expr(&l, "text:source", doc(""), r#"posterizeTime(0);
+            [time, timeToFrames(undefined,24), framesToTime(6,24), timeToFrames(0.01,24,true),
+             timeToTimecode(-0.01,24), timeToFeetAndFrames(-0.11,24,16,true), timeToNTSCTimecode(60.06,true),
+             timeToCurrentFormat(0.11,24,true),thisComp.ntscDropFrame].join("|")"#);
+    });
+    let comp = eval(&s, 0.5);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert_eq!(
+        comp.layers[0].text.as_ref().unwrap().text,
+        "0|48|0.25|1|-00:00:00:01|0000+-3|00;01;00;02|3|true"
+    );
+}
+
+#[test]
 fn posterize_time_and_frames() {
     let s = stage(|b| {
         let l = b.layer(MAIN, "a", "null");

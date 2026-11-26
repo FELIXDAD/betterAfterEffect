@@ -80,7 +80,7 @@ const ZOOM_STEPS: [f32; 13] = [
 pub(crate) const ZOOM_100: &str = "motion.viewer.zoom_100";
 
 /// The next zoom step above (`up`) or below `mag`.
-fn next_step(mag: f32, up: bool) -> Option<f32> {
+pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
     if up {
         ZOOM_STEPS.iter().copied().find(|m| *m > mag * 1.01)
     } else {
@@ -145,8 +145,8 @@ pub(crate) fn wheel(ui: &Ui) -> Wheel {
 }
 /// Magnification change per mouse-wheel notch, in and out (AE 26 Smooth Zoom:
 /// ×9/8 and ×7/8, R1).
-const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
-const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
+pub(crate) const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
+pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 
 #[derive(Default)]
 pub struct CompositionViewer {

@@ -157,6 +157,7 @@ pub(crate) struct ProjectInfo {
     pub(crate) path: Option<PrimPath>,
     pub(crate) bit_depth: u32,
     pub(crate) linear_blending: bool,
+    pub(crate) display_frames: bool,
     /// Display name, path, facts.
     pub(crate) assets: Vec<(String, PrimPath, crate::AssetInfo)>,
 }
@@ -799,7 +800,7 @@ pub(crate) fn wrapper_source(source: &str) -> Result<String, String> {
     }
     if r.idents.contains("posterizeTime") && !r.declared.contains("posterizeTime") {
         prologue.push_str(
-            "function posterizeTime(f){if(f>0){time=Math.floor(time*f+1e-9)/f;__now=time;__reseed();",
+            "function posterizeTime(f){if(f>=0){time=f===0?0:Math.floor(time*f+1e-9)/f;__now=time;__reseed();",
         );
         if r.idents.contains("value") && !r.declared.contains("value") {
             prologue.push_str("value=thisProperty.__pre(time);");
@@ -1867,13 +1868,8 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             )?;
             o.set("pixelAspect", comp.pixel_aspect)?;
             o.set("numLayers", comp.layers.len() as i32)?;
-            // No drop-frame setting yet: AE's default for 29.97 and 59.94 fps.
-            let fps = comp.frame_rate.as_f64();
-            o.set(
-                "ntscDropFrame",
-                (fps - 29.97).abs() < 0.01 || (fps - 59.94).abs() < 0.01,
-            )?;
-            o.set("displayStartTime", 0.0)?;
+            o.set("ntscDropFrame", comp.drop_frame)?;
+            o.set("displayStartTime", comp.display_start.as_seconds())?;
             o.set("bgColor", comp.bg_color.to_vec())?;
             o.set("shutterAngle", comp.motion_blur.shutter_angle)?;
             o.set("shutterPhase", comp.motion_blur.shutter_phase)?;
@@ -2132,6 +2128,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 if p.bit_depth == 0 { 8 } else { p.bit_depth },
             )?;
             o.set("linearBlending", p.linear_blending)?;
+            o.set("displayFrames", p.display_frames)?;
             // The project file is not part of the document (AE: "" until saved).
             o.set("fullPath", "")?;
             Ok::<_, rquickjs::Error>(o)
