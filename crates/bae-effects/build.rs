@@ -12,6 +12,8 @@ fn checkbox(effect: &str, id: u32) -> bool {
             | ("APC Shatter", 22 | 96 | 144)
             | ("APC CardDanceCam", 90)
             | ("CC Hair", 4)
+            | ("APC Foam", 12)
+            | ("APC Wave World", 92)
     )
 }
 
@@ -68,11 +70,12 @@ fn main() {
         println!("cargo:rerun-if-changed={path}");
         fs::read_to_string(path).unwrap()
     });
-    let english: HashMap<_, _> = names
-        .iter()
-        .flat_map(|s| s.lines())
-        .filter_map(|line| line.split_once('\t'))
-        .collect();
+    let [control_names, option_names] = names.each_ref().map(|table| {
+        table
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .collect::<HashMap<_, _>>()
+    });
     for effect in reference["effects"].as_array().unwrap() {
         let name = effect["matchName"].as_str().unwrap();
         if !matches!(
@@ -92,6 +95,9 @@ fn main() {
                 | "CC Ball Action"
                 | "CC Mr. Mercury"
                 | "CC Hair"
+                | "APC Foam"
+                | "APC Wave World"
+                | "APC Caustics"
         ) {
             continue;
         }
@@ -112,8 +118,8 @@ fn main() {
                 slot += 1;
             }
             let zh = p["name"].as_str().unwrap();
-            let en = english.get(zh).copied().unwrap_or(zh);
-            let kind = control(name, id, p, &english);
+            let en = control_names.get(zh).copied().unwrap_or(zh);
+            let kind = control(name, id, p, &option_names);
             let varies = p["canVaryOverTime"].as_bool().unwrap();
             writeln!(rows, "Control {{ id: {id}, en: {en:?}, zh: {zh:?}, kind: ControlKind::{kind}, varies: {varies} }},").unwrap();
         }

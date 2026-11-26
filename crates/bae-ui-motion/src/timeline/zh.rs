@@ -134,6 +134,31 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Alpha / Luma Matte", "Alpha/亮度遮罩"),
     ("Invert Matte", "反转遮罩"),
     ("Toggle Switches / Modes", "切换开关/模式"),
+    // A property name's right-click menu and the Graph Editor's (AE 26).
+    ("Edit Property...", "编辑属性..."),
+    ("Add Keyframe", "添加关键帧"),
+    ("Remove All Keyframes", "移除所有关键帧"),
+    ("Previous Keyframe", "上一关键帧"),
+    ("Next Keyframe", "下一关键帧"),
+    ("Edit Expression", "编辑表达式"),
+    ("Reveal in Effect Controls", "在效果控件中显示"),
+    ("Auto-Zoom Graph Height", "自动缩放高度以适合视图"),
+    (
+        "Expand or Collapse the Layer Switches pane",
+        "展开或折叠“图层切换”窗格",
+    ),
+    (
+        "Expand or Collapse the Transfer Controls pane",
+        "展开或折叠“转换控制”窗格",
+    ),
+    (
+        "Expand or Collapse the In/Out/Duration/Stretch panes",
+        "展开或折叠“入点”/“出点”/“持续时间”/“伸缩”窗格",
+    ),
+    (
+        "Expand or Collapse the Render Time pane",
+        "展开或折叠渲染时间窗格",
+    ),
     ("Toggle Switches / Modes Columns", "切换开关/模式列"),
     ("Show / Hide Parent Column", "显示/隐藏父级列"),
     ("Set Track Matte", "设置轨道遮罩"),

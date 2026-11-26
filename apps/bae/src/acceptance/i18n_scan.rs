@@ -220,7 +220,7 @@ fn chinese_ui_has_no_english_words() {
     );
     expand_all(&mut h);
     scan(&mut h, "comp with layers, expanded", &mut problems);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     scan(&mut h, "render queue", &mut problems);
     for title in ["Effect Controls", "Project"] {
         let tab = h
