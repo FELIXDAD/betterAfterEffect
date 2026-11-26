@@ -7,6 +7,8 @@
 //! equivalent of AE SmartFX pre-render), then encodes GPU work. Effects whose
 //! definition says `thread_safe: false` are called one at a time.
 
+pub use bae_anim::effect_history::{HISTORY_PARAM, PROFILE_SAMPLES};
+
 use std::fmt;
 use std::sync::Arc;
 
@@ -113,6 +115,10 @@ impl ScalarTrack {
         // the edited segment starts between samples, resample its left neighbor.
         let through = self.knots.partition_point(|k| k.time <= time.as_seconds());
         self.knots.truncate(through.saturating_sub(1));
+    }
+    /// Keeps the first `len` knots (samples recomputed after an edit).
+    pub(crate) fn truncate_to(&mut self, len: usize) {
+        self.knots.truncate(len);
     }
     pub(crate) fn len(&self) -> usize {
         self.knots.len()
