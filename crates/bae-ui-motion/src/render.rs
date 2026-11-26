@@ -357,15 +357,15 @@ pub(crate) fn layer_bounds(layer: &EvaluatedLayer) -> Option<(DVec2, DVec2)> {
             (min.x <= max.x).then_some((min, max))
         }
         LayerKind::Text => layer.text.as_ref().map(|t| {
-            let w = t.font_size * 0.55 * t.text.chars().count().max(1) as f64;
-            let x0 = match t.justification.as_str() {
+            let w = t.style.font_size * 0.55 * t.text.chars().count().max(1) as f64;
+            let x0 = match t.paragraph.justification.as_str() {
                 "center" => -w / 2.0,
                 "right" => -w,
                 _ => 0.0,
             };
             (
-                DVec2::new(x0, -t.font_size * 0.8),
-                DVec2::new(x0 + w, t.font_size * 0.25),
+                DVec2::new(x0, -t.style.font_size * 0.8),
+                DVec2::new(x0 + w, t.style.font_size * 0.25),
             )
         }),
         LayerKind::Null => Some((DVec2::ZERO, DVec2::splat(100.0))),
@@ -531,8 +531,8 @@ pub(crate) fn paint_comp(
             }
             LayerKind::Text => {
                 if let Some(t) = &layer.text {
-                    let size = (t.font_size * xf.scale() * view_scale) as f32;
-                    let color = color32(t.fill_color, alpha);
+                    let size = (t.style.font_size * xf.scale() * view_scale) as f32;
+                    let color = color32(t.style.fill_color, alpha);
                     if size >= 1.0 && color.a() > 0 {
                         shapes.push(text_shape(painter, t, size, color, xf, &screen, font));
                     }
@@ -558,7 +558,7 @@ fn text_shape(
         .first()
         .map_or(size * 0.8, |r| r.row.height() * 0.78);
     let w = galley.size().x;
-    let dx = match t.justification.as_str() {
+    let dx = match t.paragraph.justification.as_str() {
         "center" => -w / 2.0,
         "right" => -w,
         _ => 0.0,
