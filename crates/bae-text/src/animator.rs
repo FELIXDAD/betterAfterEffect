@@ -126,15 +126,16 @@ pub fn apply_animators(layout: &mut TextLayout, groups: &[EvaluatedPrim]) {
     }
     let mut order: Vec<_> = (0..layout.chars.len()).collect();
     order.sort_by_key(|&i| layout.chars[i].source.start);
-    let mut adjustments: Vec<_> = order
+    let mut adjustments: Vec<_> = layout
+        .chars
         .iter()
-        .map(|_| Adjustment {
+        .map(|c| Adjustment {
             position: Vec2::ZERO,
             scale: Vec2::new(1.0, 1.0),
             rotation: 0.0,
             tracking: 0.0,
             opacity: 1.0,
-            fill: layout.paint.fill,
+            fill: c.paint.fill,
         })
         .collect();
     for group in groups
@@ -191,7 +192,7 @@ pub fn apply_animators(layout: &mut TextLayout, groups: &[EvaluatedPrim]) {
             * Affine::rotate(adj.rotation)
             * Affine::scale_non_uniform(adj.scale.x, adj.scale.y)
             * Affine::translate(-pivot);
-        let mut paint = layout.paint;
+        let mut paint = c.paint;
         paint.fill = adj.fill;
         let opacity = adj.opacity.clamp(0.0, 1.0) as f32;
         layout.styles.push(CharacterStyle {

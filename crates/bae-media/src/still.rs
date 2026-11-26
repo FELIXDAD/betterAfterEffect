@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use half::f16;
 
+mod openexr;
+
 use crate::frame::{CpuFrame, FrameRequest, PixelFormat};
 use crate::meta::{
     AlphaMode, Chromaticities, ColorInfo, ColorPrimaries, MatrixCoefficients, MediaInfo, MediaKind,
@@ -76,7 +78,7 @@ impl MediaSource for StillSource {
             StillCodec::Jpeg => decode_jpeg(path)?,
             StillCodec::WebP => decode_webp(path)?,
             StillCodec::Tiff => decode_tiff(path)?,
-            StillCodec::Exr => decode_exr(path)?,
+            StillCodec::Exr => return openexr::decode(path, video, None).map(|(frame, _)| frame),
         };
         Ok(CpuFrame {
             width,
@@ -87,6 +89,21 @@ impl MediaSource for StillSource {
             color: video.color.clone(),
             pixel_aspect: video.pixel_aspect,
         })
+    }
+
+    fn decode_gpu(
+        &mut self,
+        request: &FrameRequest,
+        gpu: &crate::MediaGpu,
+    ) -> Result<crate::GpuFrame, MediaError> {
+        if matches!(self.codec, StillCodec::Exr) {
+            let (pixels, channels) = openexr::decode(&self.info.path, self.video(), Some(gpu))?;
+            let mut frame = gpu.upload(&pixels, request)?;
+            frame.channels = channels;
+            Ok(frame)
+        } else {
+            gpu.upload(&self.decode_cpu(request)?, request)
+        }
     }
 
     fn sync_frames(&mut self) -> Option<Vec<i64>> {
@@ -742,11 +759,24 @@ impl MediaFormat for ExrFormat {
     fn open(&self, path: &Path) -> Result<Box<dyn MediaSource>, MediaError> {
         let meta = exr::meta::MetaData::read_from_file(path, false)
             .map_err(|e| MediaError::decode(path, e))?;
-        let header = meta
+        let (header, alpha) = meta
             .headers
             .iter()
-            .find(|h| !h.deep && has_rgb(h))
-            .ok_or_else(|| MediaError::decode(path, "no RGB layer"))?;
+            .filter(|h| !h.deep)
+            .map(|h| {
+                let group = openexr::beauty_group(
+                    h.own_attributes.layer_name.as_ref(),
+                    h.channels.list.iter().map(|c| &c.name),
+                );
+                (
+                    group.map_or(4, |g| g.0),
+                    h,
+                    group.is_some_and(|g| g.1[3].is_some()),
+                )
+            })
+            .min_by_key(|g| g.0)
+            .map(|(_, header, alpha)| (header, alpha))
+            .ok_or_else(|| MediaError::decode(path, "no flat image layer"))?;
         let attrs = &header.shared_attributes;
         let display = attrs.display_window;
         let float = header
@@ -765,7 +795,10 @@ impl MediaFormat for ExrFormat {
             },
             &format!("exr/{}", format!("{:?}", header.compression).to_lowercase()),
         );
-        video.alpha = if header.channels.list.iter().any(|c| channel_is(c, "A")) {
+        video.alpha = if alpha
+            || header.own_attributes.layer_position != display.position
+            || header.layer_size != display.size
+        {
             AlphaMode::Premultiplied
         } else {
             AlphaMode::Opaque
@@ -791,68 +824,6 @@ impl MediaFormat for ExrFormat {
         });
         Ok(Box::new(source))
     }
-}
-
-fn channel_is(channel: &exr::meta::attribute::ChannelDescription, name: &str) -> bool {
-    channel.name.eq_case_insensitive(name)
-}
-
-fn has_rgb(header: &exr::meta::header::Header) -> bool {
-    ["R", "G", "B"]
-        .iter()
-        .all(|name| header.channels.list.iter().any(|c| channel_is(c, name)))
-}
-
-struct ExrPixels {
-    width: usize,
-    data: Vec<f16>,
-}
-
-fn decode_exr(path: &Path) -> Result<Decoded, MediaError> {
-    let image = exr::prelude::read_first_rgba_layer_from_file(
-        path,
-        |size, _channels| ExrPixels {
-            width: size.0,
-            data: vec![f16::ZERO; size.0 * size.1 * 4],
-        },
-        |pixels: &mut ExrPixels, pos, (r, g, b, a): (f16, f16, f16, f16)| {
-            let i = (pos.1 * pixels.width + pos.0) * 4;
-            pixels.data[i..i + 4].copy_from_slice(&[r, g, b, a]);
-        },
-    )
-    .map_err(|e| MediaError::decode(path, e))?;
-    let display = image.attributes.display_window;
-    let layer = &image.layer_data;
-    let data_pos = layer.attributes.layer_position;
-    let (data_w, data_h) = (layer.size.0, layer.size.1);
-    let pixels = &layer.channel_data.pixels.data;
-    let (width, height) = (display.size.0, display.size.1);
-    let out = if display.position == data_pos && (width, height) == (data_w, data_h) {
-        bytemuck::cast_slice::<f16, u8>(pixels).to_vec()
-    } else {
-        // Place the data window inside the display window; outside is transparent.
-        let mut out = vec![f16::ZERO; width * height * 4];
-        let dx = i64::from(data_pos.0) - i64::from(display.position.0);
-        let dy = i64::from(data_pos.1) - i64::from(display.position.1);
-        for y in 0..data_h {
-            let ty = y as i64 + dy;
-            if ty < 0 || ty >= height as i64 {
-                continue;
-            }
-            let x0 = dx.max(0);
-            let x1 = (dx + data_w as i64).min(width as i64);
-            if x0 >= x1 {
-                continue;
-            }
-            let src_x = (x0 - dx) as usize;
-            let len = (x1 - x0) as usize * 4;
-            let src = (y * data_w + src_x) * 4;
-            let dst = (ty as usize * width + x0 as usize) * 4;
-            out[dst..dst + len].copy_from_slice(&pixels[src..src + len]);
-        }
-        bytemuck::cast_slice::<f16, u8>(&out).to_vec()
-    };
-    Ok((width as u32, height as u32, PixelFormat::Rgba16Float, out))
 }
 
 /// The still-image formats of this module.

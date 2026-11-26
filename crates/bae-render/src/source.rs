@@ -44,6 +44,8 @@ pub enum ImageAlpha {
 /// bucketed); only those texels are defined.
 #[derive(Clone, Debug)]
 pub struct GpuImage {
+    /// Original channel planes of a decoded footage source.
+    pub channels: Option<Arc<bae_gpu::channels::FootageChannels>>,
     /// The texture (needs `TEXTURE_BINDING`).
     pub texture: wgpu::Texture,
     /// A view of the texture.
@@ -81,6 +83,7 @@ impl GpuImage {
             alpha,
             pixel_scale,
             lease: None,
+            channels: None,
         }
     }
 
