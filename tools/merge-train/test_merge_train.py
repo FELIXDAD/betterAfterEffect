@@ -667,10 +667,23 @@ class CrateRelationTest(Base):
         with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
                 mock.patch.object(mt, "fetch_pr_head"), \
                 mock.patch.object(mt, "changed_files", side_effect=lambda sha: files[sha]), \
-                mock.patch.object(mt, "do_merge", return_value=True) as merge:
+                mock.patch.object(mt, "do_merge", return_value=True) as merge, \
+                mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
             self.assertTrue(mt.skip_ahead(q, st))
         self.assertEqual(merge.call_args[0][0]["number"], 3)
         self.assertIn("fx 依赖 render", st["prs"]["2"]["detail"])
+
+    def test_without_relate_crates_only_files_block_skip_ahead(self):
+        q = [pr(number=1, headRefOid="h1"), pr(number=2, headRefOid="h2")]
+        files = {"h1": {"crates/render/src/layer.rs"}, "h2": {"crates/render/src/other.rs"}}
+        st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=40)).isoformat()}
+        with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "changed_files", side_effect=lambda sha: files[sha]), \
+                mock.patch.object(mt, "do_merge", return_value=True) as merge, \
+                mock.patch.dict(mt.CFG["merge"], {"relate_crates": False}):
+            self.assertTrue(mt.skip_ahead(q, st))
+        self.assertEqual(merge.call_args[0][0]["number"], 2)
 
 
 class DevCancelledTest(Base):

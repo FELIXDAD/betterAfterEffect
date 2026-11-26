@@ -519,6 +519,51 @@ pub(crate) struct EncoderThread {
     handle: Option<std::thread::JoinHandle<Result<EncoderOutput, RenderError>>>,
 }
 
+#[cfg(feature = "media")]
+struct MovieAudio {
+    mix: bae_media::mix::AudioMix,
+    times: Vec<Time>,
+    frame_duration: Time,
+    scratch: Vec<[f32; 2]>,
+}
+
+#[cfg(feature = "media")]
+impl MovieAudio {
+    fn new(job: &ExportJob<'_>) -> Option<Self> {
+        let mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
+        if mix.is_empty() {
+            return None;
+        }
+        Some(Self {
+            mix,
+            times: job.times.iter().map(|&(_, t)| t).collect(),
+            frame_duration: job.rate.frame_duration(),
+            scratch: Vec::new(),
+        })
+    }
+    fn push(
+        &mut self,
+        index: usize,
+        encoder: &mut dyn bae_media::Encoder,
+    ) -> Result<(), RenderError> {
+        use bae_media::audio::time_to_sample;
+        const RATE: u32 = 48_000;
+        let t = self.times[index];
+        let first = time_to_sample(t, RATE);
+        let count = time_to_sample(t + self.frame_duration, RATE) - first;
+        self.scratch.resize(count as usize, [0.0; 2]);
+        self.mix
+            .render(first, RATE, &mut self.scratch)
+            .map_err(media_error)?;
+        let block = bae_media::AudioBuffer {
+            sample_rate: RATE,
+            channels: 2,
+            samples: self.scratch.as_flattened().to_vec(),
+        };
+        encoder.push_audio(&block).map_err(media_error)
+    }
+}
+
 /// What the encoder thread did.
 #[cfg(feature = "media")]
 pub(crate) struct EncoderOutput {
@@ -535,17 +580,21 @@ impl EncoderThread {
     /// Frames that were written stay written when the export stops or fails
     /// (AE keeps the frames rendered before Stop): on an error the encoder is
     /// finished, not aborted, so complete files are kept.
-    pub(crate) fn spawn(mut encoder: Box<dyn bae_media::Encoder>) -> Self {
+    fn spawn(mut encoder: Box<dyn bae_media::Encoder>, mut audio: Option<MovieAudio>) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel::<MappedFrame>(Self::QUEUE);
         let handle = std::thread::Builder::new()
             .name("bae-render.encode".into())
             .spawn(move || {
                 let mut copy = Duration::ZERO;
-                for mapped in receiver.iter() {
+                for (index, mapped) in receiver.iter().enumerate() {
                     let pushed = mapped.into_frame().and_then(|frame| {
                         copy += frame.copy;
                         let frame = cpu_frame(frame, encoder.settings());
-                        encoder.push_frame_owned(frame).map_err(media_error)
+                        encoder.push_frame_owned(frame).map_err(media_error)?;
+                        if let Some(track) = &mut audio {
+                            track.push(index, &mut *encoder)?;
+                        }
+                        Ok(())
                     });
                     if let Err(error) = pushed {
                         // Wait for the frames before this one; keep them.
@@ -1091,7 +1140,16 @@ impl Sink {
             } else {
                 settings.path.clone()
             };
-            let encode = encode_settings(settings, float_project, &path, size, job.rate, first)?;
+            let mut encode =
+                encode_settings(settings, float_project, &path, size, job.rate, first)?;
+            let audio = if settings.format.is_image() {
+                None
+            } else {
+                MovieAudio::new(job)
+            };
+            if audio.is_some() {
+                encode.audio = Some(bae_media::export::AudioEncodeSettings::aac_stereo());
+            }
             let builtin;
             let encoders = match job.encoders {
                 Some(encoders) => encoders,
@@ -1109,7 +1167,7 @@ impl Sink {
                     .format
                     .is_image()
                     .then(|| bae_media::export::SequencePattern::parse(&path)),
-                thread: EncoderThread::spawn(encoder),
+                thread: EncoderThread::spawn(encoder, audio),
                 alpha: alpha_for(&encode),
                 settings: encode,
                 format,

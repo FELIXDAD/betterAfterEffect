@@ -413,7 +413,7 @@ fn synthetic_file_imports_as_shape_layers() {
     let kinds: Vec<(String, LayerKind)> = evaluated
         .layers
         .iter()
-        .map(|l| (l.name.clone(), l.kind))
+        .map(|l| (l.name.to_string(), l.kind))
         .collect();
     assert_eq!(
         kinds,

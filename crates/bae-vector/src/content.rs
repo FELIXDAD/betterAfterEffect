@@ -591,11 +591,13 @@ mod tests {
         EvaluatedPrim {
             path: PrimPath::new(path).unwrap(),
             prim_type: Some(ty),
-            attrs: attrs
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), v.clone()))
-                .collect::<BTreeMap<_, _>>(),
-            children: Vec::new(),
+            attrs: std::sync::Arc::new(
+                attrs
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                    .collect::<BTreeMap<_, _>>(),
+            ),
+            children: Vec::new().into(),
         }
     }
 
@@ -656,8 +658,9 @@ mod tests {
                 PrimType::SHAPE_OPERATOR,
                 &[("operator", Value::Enum("wiggle_paths".into()))],
             ),
-        ];
-        group.children = vec![folder];
+        ]
+        .into();
+        group.children = vec![folder].into();
         let mut warnings = Vec::new();
         let root = ShapeGroup::from_evaluated(&[group], &mut warnings);
         let ShapeItem::Group(g) = &root.items[0] else {

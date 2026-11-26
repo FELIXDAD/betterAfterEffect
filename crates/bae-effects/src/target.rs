@@ -37,7 +37,16 @@ pub trait EffectTarget {
 
     /// A working-format image covering `rect` (contents undefined), usable as a
     /// storage texture.
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError>;
+    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
+        self.allocate_format(rect, pixel_scale, self.format())
+    }
+    /// A pooled intermediate in a specific attachment format.
+    fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError>;
 }
 
 impl EffectTarget for EncodeContext<'_> {
@@ -65,8 +74,13 @@ impl EffectTarget for EncodeContext<'_> {
         EncodeContext::effect_mask(self, select)
     }
 
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
-        EncodeContext::allocate(self, rect, pixel_scale)
+    fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
+        EncodeContext::allocate_format(self, rect, pixel_scale, format)
     }
 }
 
@@ -226,9 +240,14 @@ impl EffectTarget for Standalone {
             .map(|(_, image)| image)
     }
 
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
+    fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
         self.allocations += 1;
-        alloc(&self.gpu, &mut self.pool, rect, pixel_scale, self.format)
+        alloc(&self.gpu, &mut self.pool, rect, pixel_scale, format)
     }
 }
 

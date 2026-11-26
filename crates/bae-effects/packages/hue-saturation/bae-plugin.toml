@@ -1,6 +1,5 @@
-# Hue/Saturation (ADBE HUE SATURATION): AE-FX-041. Disk id 1 is not exposed by
-# AE; id 3 (Channel Range, arbitrary data) is not declared (its project value
-# is preserved). Channel Control 2..7 restricts the Master values to one of
+# Hue/Saturation (ADBE HUE SATURATION): AE-FX-041. Channel Control 2..7
+# restricts the Master values to one of
 # the six default hue ranges (AE stores per-range values in the Channel Range
 # blob, which is not decoded yet).
 schema_version = 1
@@ -32,6 +31,13 @@ type = "popup"
 name = "Channel Control"
 default = 1
 choices = ["Master", "Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas"]
+
+[[effect.param]]
+id = 3
+key = "channel_range"
+type = "arbitrary"
+name = "Channel Range"
+flags = ["ui-only"]
 
 [[effect.param]]
 id = 4
