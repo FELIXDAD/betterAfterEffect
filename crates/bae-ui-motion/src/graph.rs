@@ -2956,15 +2956,18 @@ impl GraphEditor {
         } else {
             expr.source.clone()
         };
-        let (font, text, bg) = crate::common::expression_style(cx.resources);
-        let r = ui
-            .put(
-                strip.shrink2(vec2(4.0, 1.0)),
-                egui::TextEdit::singleline(&mut buf)
-                    .font(font)
-                    .text_color(text)
-                    .background_color(bg),
-            )
+        let field_id = ui.make_persistent_id(("graph expression", &path, &attr));
+        let shown = crate::expr_menu::assist::show(
+            ui,
+            cx.resources,
+            strip.shrink2(vec2(4.0, 1.0)),
+            field_id,
+            &mut buf,
+            None,
+        );
+        let r = shown
+            .response
+            .response
             .labeled(egui::WidgetType::TextEdit, tr("Expression"));
         if r.changed() || r.has_focus() {
             self.expr_buf = Some((path.clone(), attr.clone(), buf.clone()));
