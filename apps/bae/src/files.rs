@@ -97,7 +97,12 @@ pub enum FileOutcome {
 pub fn is_file_command(id: &str) -> bool {
     matches!(
         id,
-        ids::NEW_PROJECT | ids::OPEN_PROJECT | ids::CLOSE_PROJECT | ids::SAVE | ids::SAVE_AS
+        ids::NEW_PROJECT
+            | ids::OPEN_PROJECT
+            | ids::CLOSE_PROJECT
+            | ids::SAVE
+            | ids::SAVE_AS
+            | ids::SAVE_A_COPY
     )
 }
 
@@ -204,6 +209,7 @@ pub fn run(
         }
         ids::SAVE => save(doc, dialogs),
         ids::SAVE_AS => save_as(doc, dialogs),
+        ids::SAVE_A_COPY => save_a_copy(doc, dialogs),
         _ => return None,
     })
 }
@@ -313,6 +319,48 @@ pub fn save_as(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome
     match result {
         Ok(()) => {
             tracing::info!("saved {}", path.display());
+            FileOutcome::Saved
+        }
+        Err(error) => {
+            report_save_error(dialogs, &path, &error);
+            FileOutcome::Failed
+        }
+    }
+}
+
+/// Save a Copy: ask for a location and write the project there; the open
+/// project keeps its location and its unsaved state (AE).
+pub fn save_a_copy(doc: &Document, dialogs: &mut dyn FileDialogs) -> FileOutcome {
+    let location = doc.location().map(Path::to_owned);
+    let stem = location
+        .as_deref()
+        .and_then(Path::file_stem)
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| tr("Untitled Project").to_owned());
+    let name = format!("{stem} {}.bae", tr("copy"));
+    let dir = location.as_deref().and_then(Path::parent);
+    let Some(picked) = dialogs.pick_save_path(&name, dir) else {
+        return FileOutcome::Cancelled;
+    };
+    let path = save_target(&with_project_extension(picked));
+    if location
+        .as_deref()
+        .is_some_and(|l| crate::document::same_path(l, &path))
+        || is_bae_project_dir(&path)
+        || is_foreign_folder(&path)
+    {
+        // A copy never replaces a project (the open one or another).
+        dialogs.error(&format!(
+            "{}\n\n{}",
+            tr("Could not save the project."),
+            tr("“{file}” already exists. Choose another name.")
+                .replace("{file}", &path.display().to_string())
+        ));
+        return FileOutcome::Failed;
+    }
+    match doc.save_a_copy(&path) {
+        Ok(()) => {
+            tracing::info!("saved a copy at {}", path.display());
             FileOutcome::Saved
         }
         Err(error) => {
@@ -436,6 +484,37 @@ mod tests {
 
     fn cmd(doc: &mut Document, d: &mut Script, id: &str) -> FileOutcome {
         run(doc, d, &Invocation::new(id)).expect("file command")
+    }
+
+    /// Save a Copy writes the project elsewhere; the open one keeps its
+    /// location and stays unsaved (AE).
+    #[test]
+    fn save_a_copy_keeps_the_open_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(None);
+        let mut d = Script::default();
+        edit(&mut doc, "/Comp1");
+        d.save.push_back(Some(dir.path().join("Film")));
+        assert_eq!(cmd(&mut doc, &mut d, ids::SAVE), FileOutcome::Saved);
+        edit(&mut doc, "/Comp2");
+        d.save.push_back(Some(dir.path().join("Backup")));
+        assert_eq!(cmd(&mut doc, &mut d, ids::SAVE_A_COPY), FileOutcome::Saved);
+        assert_eq!(
+            d.suggested.last().map(String::as_str),
+            Some("Film copy.bae")
+        );
+        assert_eq!(doc.location(), Some(dir.path().join("Film.bae").as_path()));
+        assert!(doc.is_dirty(), "the copy does not save the open project");
+        let mut copy = Document::new(None);
+        d.open.push_back(Some(dir.path().join("Backup.bae")));
+        assert_eq!(
+            cmd(&mut copy, &mut d, ids::OPEN_PROJECT),
+            FileOutcome::Replaced
+        );
+        assert!(has(&copy, "/Comp1") && has(&copy, "/Comp2"));
+        // A copy never replaces a project.
+        d.save.push_back(Some(dir.path().join("Film.bae")));
+        assert_eq!(cmd(&mut doc, &mut d, ids::SAVE_A_COPY), FileOutcome::Failed);
     }
 
     #[test]

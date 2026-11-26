@@ -787,3 +787,25 @@ class AutoResumeTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecentDevFailureTest(unittest.TestCase):
+    def test_notifies_once_for_newest_finished_failure(self):
+        runs = [{"databaseId": 3, "headSha": "c" * 40, "conclusion": "cancelled", "url": "u3"},
+                {"databaseId": 2, "headSha": "b" * 40, "conclusion": "failure", "url": "u2"},
+                {"databaseId": 1, "headSha": "a" * 40, "conclusion": "success", "url": "u1"}]
+        st = {}
+        with mock.patch.object(mt, "sh", return_value=(0, mt.json.dumps(runs), "")), \
+                mock.patch.object(mt, "mutate", return_value=True), \
+                mock.patch.object(mt, "send") as send, \
+                mock.patch.dict(mt.LEADERS, {"pause_notify": ["lead"]}):
+            self.assertTrue(mt.notify_recent_dev_failure(st))
+            self.assertFalse(mt.notify_recent_dev_failure(st))
+        self.assertEqual(send.call_count, 1)
+
+    def test_green_newest_finished_run_is_quiet(self):
+        runs = [{"databaseId": 5, "headSha": "e" * 40, "conclusion": "success", "url": "u"}]
+        with mock.patch.object(mt, "sh", return_value=(0, mt.json.dumps(runs), "")), \
+                mock.patch.object(mt, "send") as send:
+            self.assertFalse(mt.notify_recent_dev_failure({}))
+        send.assert_not_called()

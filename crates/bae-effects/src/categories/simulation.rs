@@ -26,3 +26,5 @@ pub(crate) fn register(registry: &mut Registry) {
         .map(builtin),
     );
 }
+
+pub use particles::projection::{particle_scene_projection, particle_world_projection};
