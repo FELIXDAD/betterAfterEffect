@@ -1187,7 +1187,10 @@ impl CompiledComp {
                         .iter()
                         .map(|e| sample_effect(e, &cx, &layer.timing))
                         .collect(),
-                    layer_styles: layer.layer_styles.as_ref().map(|e| sample_effect(e, &cx)),
+                    layer_styles: layer
+                        .layer_styles
+                        .as_ref()
+                        .map(|e| sample_effect(e, &cx, &layer.timing)),
                     contents: sample_prims(&layer.contents, layer.fixed_contents.as_ref(), &cx),
                     text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
                         Value::TextDocument(doc) => Some(doc),
