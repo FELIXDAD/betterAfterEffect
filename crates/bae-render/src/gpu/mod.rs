@@ -444,6 +444,7 @@ pub(crate) struct Shared {
     pub mix: Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>>,
     pub dof: Arc<Mutex<Option<crate::exec::dof::DofPipelines>>>,
     pub mesh: Arc<Mutex<Option<crate::exec::mesh::MeshPipelines>>>,
+    pub shadow_map: Arc<Mutex<Option<crate::exec::shadowmap::ShadowMapPipeline>>>,
 }
 
 static SHARED: Mutex<Vec<(std::sync::Weak<bae_gpu::GpuContext>, Arc<Shared>)>> =
@@ -469,6 +470,7 @@ impl Shared {
             mix: Arc::new(Mutex::new(None)),
             dof: Arc::new(Mutex::new(None)),
             mesh: Arc::new(Mutex::new(None)),
+            shadow_map: Arc::new(Mutex::new(None)),
         });
         all.push((Arc::downgrade(gpu), shared.clone()));
         shared
@@ -589,6 +591,10 @@ impl Shared {
             }
             self.mesh.lock().get_or_insert(mesh);
         }
+        if self.shadow_map.lock().is_none() {
+            let pipeline = crate::exec::shadowmap::ShadowMapPipeline::new(&self.device);
+            self.shadow_map.lock().get_or_insert(pipeline);
+        }
     }
 }
 
@@ -667,9 +673,9 @@ impl Pipelines {
 
     /// The shared base: shader modules, layouts and the RGBA8 output.
     fn build(device: &wgpu::Device) -> Self {
-        let composite = wgsl!("composite.wgsl");
+        let composite = [wgsl!("composite.wgsl"), wgsl!("shadow.wgsl")].concat();
         #[cfg(target_os = "macos")]
-        let composite = [composite, wgsl!("metal_image.wgsl")].concat();
+        let composite = [composite.as_str(), wgsl!("metal_image.wgsl")].concat();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.composite"),
             source: wgpu::ShaderSource::Wgsl(composite.into()),
@@ -874,6 +880,14 @@ impl Pipelines {
         self.shared
             .as_ref()
             .map(|s| s.dof.clone())
+            .unwrap_or_default()
+    }
+
+    /// The shared shadow-map pipeline (created on first use).
+    pub fn shadow_map(&self) -> Arc<Mutex<Option<crate::exec::shadowmap::ShadowMapPipeline>>> {
+        self.shared
+            .as_ref()
+            .map(|s| s.shadow_map.clone())
             .unwrap_or_default()
     }
 

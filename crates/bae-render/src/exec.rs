@@ -34,6 +34,7 @@ pub(crate) mod env;
 mod masks;
 pub(crate) mod mesh;
 mod shadow;
+pub(crate) mod shadowmap;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
 
@@ -208,6 +209,7 @@ pub(crate) fn execute(
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
     mut tiles: Option<TileCache<'_>>,
+    shadow_maps: &mut shadowmap::ShadowMapCache,
     timing: Timing<'_>,
     output: Option<crate::renderer::DisplayOutput>,
 ) -> Result<Executed, RenderError> {
@@ -223,7 +225,7 @@ pub(crate) fn execute(
         .iter()
         .map(|n| match &n.kind {
             // Layer draws plus the shadow atlas copies.
-            NodeKind::Composite(c) => c.ops.len() + shadow::casters(c).len(),
+            NodeKind::Composite(c) => c.ops.len() + shadow::casters(c, |_| false).len(),
             NodeKind::Fill(_) => 1,
             _ => 0,
         })
@@ -287,6 +289,7 @@ pub(crate) fn execute(
         passes: 0,
         mask_outs: Vec::new(),
         incomplete: false,
+        skipped_maps: Default::default(),
     };
     // Every mask of the frame at once, in shared atlases (they have no inputs).
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
@@ -342,7 +345,7 @@ pub(crate) fn execute(
                     None
                 };
                 // Image layers casting shadows here, copied into one atlas.
-                let casters = shadow::casters(c);
+                let casters = shadow::casters(c, |map| ctx.skipped_maps.contains(&map));
                 let atlas = if casters.is_empty() {
                     None
                 } else {
@@ -512,6 +515,122 @@ pub(crate) fn execute(
                 ctx.passes += 1;
                 target
             }
+            (NodeKind::ShadowMap(map), None) => match shadow_maps.get(node.key) {
+                Some(image) => image,
+                // A new map (the layer, its lights or casters changed) on a
+                // layer covering fewer output pixels than a map slot has
+                // texels: this frame tests the casters per pixel, and the map
+                // is drawn once the same key comes again (animated shadows
+                // pay for maps only where they are cheaper, such as at 4K).
+                None if !shadow_maps.stable(&map.layer, node.key)
+                    && map.screen_texels <= {
+                        let (_, [w, h]) = map.lighting.shadow_map_size();
+                        u64::from(w) * u64::from(h)
+                    } =>
+                {
+                    ctx.skipped_maps.insert(NodeId(index as u32));
+                    pool.acquire_texels(
+                        device,
+                        shadowmap::FORMAT,
+                        IRect::from_size(1, 1),
+                        1.0,
+                        [1, 1],
+                    )?
+                }
+                None => {
+                    let l = &map.lighting;
+                    // Slots whose light did not change come from the cache.
+                    let reuse: Vec<Option<(GpuImage, u32)>> =
+                        map.slot_keys.iter().map(|k| shadow_maps.slot(*k)).collect();
+                    let draw: Vec<bool> = reuse.iter().map(Option::is_none).collect();
+                    let casters: Vec<NodeId> = l
+                        .casters
+                        .iter()
+                        .filter_map(|c| match c.pixels {
+                            crate::light::CasterPixels::Image(id) => Some(id),
+                            crate::light::CasterPixels::Solid(_) => None,
+                        })
+                        .collect();
+                    let atlas = if casters.is_empty() || !draw.contains(&true) {
+                        None
+                    } else {
+                        let (slots, size) = shadow::layout(&casters, &outputs);
+                        let atlas = pool.acquire(device, format, shadow::atlas_rect(size), 1.0)?;
+                        ctx.blit_atlas(&mut encoder, &atlas, &slots, &outputs)?;
+                        Some((atlas, slots))
+                    };
+                    let uv = |id: NodeId| {
+                        let (image, slots) = atlas.as_ref()?;
+                        let img = outputs[id.index()].as_ref()?;
+                        Some(shadow::uv_map(img, *slots.get(&id)?, image.texture_size()))
+                    };
+                    // Packed in layer pixels; the hardest edge a layer pixel or
+                    // a map texel wide (the map does not depend on the camera).
+                    let mut record = Vec::new();
+                    l.pack(&glam::DAffine2::IDENTITY, 1.0, &uv, false, &mut record);
+                    let (k, [w, h]) = l.shadow_map_size();
+                    let edge = k.max(1.0) * l.matrix.x_axis.truncate().length();
+                    record[4][3] = -(edge as f32);
+                    let slots = l.shadow_slots();
+                    let mut lights = [0u32; 8];
+                    for (slot, &li) in slots.iter().enumerate() {
+                        lights[slot] = li as u32;
+                    }
+                    let n = slots.len() as u32;
+                    let layout = shadowmap::MapLayout {
+                        rect: [l.rect.x0, l.rect.y0, l.rect.x1, l.rect.y1].map(|v| v as f32),
+                        slot: [w, h],
+                        lights,
+                        count: n,
+                    };
+                    let target = pool.acquire_texels(
+                        device,
+                        shadowmap::FORMAT,
+                        IRect::new(0, 0, (w * n) as i32, h as i32),
+                        1.0,
+                        [w * n, h],
+                    )?;
+                    let pipeline = ctx.pipelines.shadow_map();
+                    shadowmap::encode(
+                        &mut pipeline.lock(),
+                        device,
+                        gpu.queue(),
+                        &mut encoder,
+                        &target,
+                        &layout,
+                        &record,
+                        atlas.as_ref().map(|(a, _)| &a.view),
+                        &draw,
+                    );
+                    ctx.passes += 1;
+                    for (slot, cached) in reuse.iter().enumerate() {
+                        let Some((from, from_slot)) = cached else {
+                            continue;
+                        };
+                        let at = |texture, slot: u32| wgpu::TexelCopyTextureInfo {
+                            texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d {
+                                x: slot * w,
+                                y: 0,
+                                z: 0,
+                            },
+                            aspect: wgpu::TextureAspect::All,
+                        };
+                        encoder.copy_texture_to_texture(
+                            at(&from.texture, *from_slot),
+                            at(&target.texture, slot as u32),
+                            wgpu::Extent3d {
+                                width: w,
+                                height: h,
+                                depth_or_array_layers: 1,
+                            },
+                        );
+                    }
+                    shadow_maps.insert(node.key, target.clone(), &map.slot_keys);
+                    target
+                }
+            },
             (NodeKind::DepthBlur(blur), None) => {
                 let input = outputs[blur.input.index()]
                     .clone()
@@ -597,23 +716,30 @@ pub(crate) fn execute(
     })
 }
 
-/// The nodes the output needs. An environment light's picture whose maps
-/// are already built is not drawn again (nor what only it reads).
+/// The nodes to execute: all but an environment light's picture whose maps
+/// are already built (and what only it reads). Only those are left out, so
+/// nodes read in other ways than [`NodeKind::for_each_input`] still run.
 fn needed_nodes(
     graph: &RenderGraph,
     mesh: &parking_lot::Mutex<Option<mesh::MeshPipelines>>,
 ) -> Vec<bool> {
-    let mut needed = vec![false; graph.nodes.len()];
-    needed[graph.output.index()] = true;
+    let n = graph.nodes.len();
+    // Read on the way to the output; read only by built environment maps.
+    let mut reached = vec![false; n];
+    let mut env_only = vec![false; n];
+    reached[graph.output.index()] = true;
     let mut mesh = mesh.lock();
     if let Some(p) = mesh.as_mut() {
         p.begin_frame();
     }
-    for index in (0..graph.nodes.len()).rev() {
-        if !needed[index] {
+    for index in (0..n).rev() {
+        let node = &graph.nodes[index];
+        if !reached[index] {
+            if env_only[index] {
+                node.kind.for_each_input(|id| env_only[id.index()] = true);
+            }
             continue;
         }
-        let node = &graph.nodes[index];
         let environment = match &node.kind {
             NodeKind::Mesh(m) => m.environment.as_ref().map(|e| (e, m.linear)),
             NodeKind::Sky(s) => Some((&s.environment, s.linear)),
@@ -625,12 +751,13 @@ fn needed_nodes(
                 .as_mut()
                 .is_some_and(|p| p.has_env(key, e.width, linear))
             {
+                env_only[e.input.index()] = true;
                 continue;
             }
         }
-        node.kind.for_each_input(|id| needed[id.index()] = true);
+        node.kind.for_each_input(|id| reached[id.index()] = true);
     }
-    needed
+    (0..n).map(|i| reached[i] || !env_only[i]).collect()
 }
 
 struct ExecCtx<'a> {
@@ -652,6 +779,8 @@ struct ExecCtx<'a> {
     mask_outs: Vec<Option<masks::MaskOut>>,
     /// A pipeline was still compiling for the UI thread (incomplete frame).
     incomplete: bool,
+    /// Shadow maps not drawn this frame: their layers test the casters.
+    skipped_maps: rustc_hash::FxHashSet<NodeId>,
 }
 
 /// A planned draw of one op.
@@ -724,6 +853,7 @@ impl ExecCtx<'_> {
                 &mut samples,
                 &mut lighting,
                 atlas,
+                &self.skipped_maps,
             )?
             else {
                 continue;
@@ -769,10 +899,19 @@ impl ExecCtx<'_> {
             } else {
                 None
             };
-            // Lit layers with image shadow casters read the shadow atlas.
-            let shadow_view = atlas
-                .filter(|_| op.lighting.as_ref().is_some_and(|l| !l.casters.is_empty()))
-                .map(|(image, _)| &image.view);
+            // Lit layers with a shadow map read it; others with image shadow
+            // casters read the shadow atlas.
+            let shadow_view = match op
+                .lighting
+                .as_ref()
+                .and_then(|l| l.shadow_map)
+                .filter(|id| !self.skipped_maps.contains(id))
+            {
+                Some(id) => outputs[id.index()].as_ref().map(|i| &i.view),
+                None => atlas
+                    .filter(|_| op.lighting.as_ref().is_some_and(|l| !l.casters.is_empty()))
+                    .map(|(image, _)| &image.view),
+            };
             let textures = if src_view.is_none()
                 && matte_view.is_none()
                 && dst_view.is_none()
@@ -1142,6 +1281,7 @@ fn plan_op(
     samples: &mut Vec<SampleData>,
     lighting: &mut Vec<[f32; 4]>,
     atlas: Option<&ShadowAtlas>,
+    skipped_maps: &rustc_hash::FxHashSet<NodeId>,
 ) -> Result<Option<DrawData>, RenderError> {
     // Composite texel → … : target texel = comp px / scale − rect origin.
     let to_target = DAffine2::from_translation(DVec2::new(
@@ -1255,11 +1395,12 @@ fn plan_op(
                     samples: std::sync::Arc::new([]),
                     ..(**l).clone()
                 };
-                at.pack(&from_texel, node.pixel_scale, &map, lighting);
+                at.pack(&from_texel, node.pixel_scale, &map, false, lighting);
             }
             data.mode[1] |= flags::LIT_SAMPLES;
         } else {
-            data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, lighting);
+            let use_map = l.shadow_map.is_some_and(|id| !skipped_maps.contains(&id));
+            data.extra[3] = l.pack(&from_texel, node.pixel_scale, &map, use_map, lighting);
         }
         data.mode[1] |= flags::LIT;
     }
