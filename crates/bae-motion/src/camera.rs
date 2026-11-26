@@ -283,6 +283,7 @@ fn write_at(
         SetAt.run(
             tx,
             SetAtParams {
+                auto_key: false,
                 path: layer.clone(),
                 attr: attr.to_owned(),
                 time: key_time,
