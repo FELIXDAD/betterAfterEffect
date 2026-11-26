@@ -150,12 +150,37 @@ pub struct Scrub {
     /// The same property on the other selected layers (or selected across
     /// layers), changing with it: path and its value.
     pub peers: Vec<(PrimPath, Value)>,
+    /// Comp time of the drag (a keyframe there when the property is animated).
+    pub time: Time,
+    /// The drag ended and its command was sent: still shown until it runs
+    /// (the stage revision then changes), so the panels never flash the old
+    /// value. With the revision it was sent at.
+    pub committed: Option<(u64, Instant)>,
 }
 
 impl Scrub {
     /// Every prim the drag changes, with its value.
     pub fn targets(&self) -> impl Iterator<Item = (&PrimPath, &Value)> {
         std::iter::once((&self.path, &self.value)).chain(self.peers.iter().map(|(p, v)| (p, v)))
+    }
+
+    /// What the evaluators show while the drag lasts: each target's attribute
+    /// as the commit will leave it ([`bae_motion::keys::spec_with_value_at`]).
+    pub fn overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        self.targets()
+            .filter(|(p, _)| stage.has_prim(p))
+            .map(|(p, v)| bae_anim::AttrOverride {
+                prim: p.clone(),
+                attr: self.attr.clone(),
+                spec: bae_motion::keys::spec_with_value_at(
+                    stage,
+                    p,
+                    &self.attr,
+                    query::to_key_time(stage, p, self.time),
+                    v.clone(),
+                ),
+            })
+            .collect()
     }
 
     /// The previewed value of `attr` of `path`, if the drag changes it.
@@ -256,8 +281,16 @@ pub struct Session {
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
+    /// View ▸ View Options: the layer controls the viewers draw.
+    pub(crate) layer_controls: crate::viewer::view_options::LayerControls,
+    /// View ▸ Panel Background Color.
+    pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
+    /// An expression just added (Alt+click on the stopwatch, Animation ▸ Add
+    /// Expression): the Timeline focuses its field with the text selected, so
+    /// typing replaces it (AE). Dropped after a second if never shown.
+    pub(crate) focus_expression: Option<(PrimPath, String, Instant)>,
     /// Frames in the GPU preview cache (the timeline's green bar): comp,
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
@@ -283,6 +316,8 @@ pub struct Session {
     pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The frame the Composition viewer shows and its key (Lumetri Scopes).
+    pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
@@ -500,6 +535,12 @@ impl Session {
     /// Drop references to prims that no longer exist and resolve pending items.
     /// Called once per frame by the panels (cheap).
     pub fn sync(&mut self, stage: &Stage) {
+        if let Some((revision, at)) = self.scrub.as_ref().and_then(|s| s.committed)
+            && (stage.revision() != revision
+                || at.elapsed() > std::time::Duration::from_millis(500))
+        {
+            self.scrub = None;
+        }
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
             if let Pending::Keys(keys) = &what {

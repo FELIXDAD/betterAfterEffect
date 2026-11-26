@@ -90,6 +90,13 @@ impl AnimEvaluator {
         self.inner.clear();
     }
 
+    /// Evaluates with uncommitted values (a value drag in a panel):
+    /// [`bae_anim::Evaluator::set_overrides`]. Motion blur samples and effects
+    /// reading other frames see them too.
+    pub fn set_overrides(&mut self, overrides: Vec<bae_anim::AttrOverride>) {
+        self.inner.set_overrides(overrides);
+    }
+
     fn warn(&mut self, message: String) {
         if !self.warnings.contains(&message) {
             self.warnings.push(message);
@@ -463,6 +470,10 @@ impl CompEvaluator for AnimEvaluator {
 
     fn invalidate(&mut self, event: &StageEvent) {
         self.inner.invalidate(event);
+    }
+
+    fn set_image_samples(&mut self, samples: Option<Arc<bae_anim::ImageSamples>>) {
+        self.inner.set_image_samples(samples);
     }
 
     fn take_warnings(&mut self) -> Vec<String> {

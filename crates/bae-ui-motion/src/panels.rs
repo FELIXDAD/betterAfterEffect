@@ -105,15 +105,19 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
 #[derive(Default)]
 pub struct PropertiesPanel {
     eval: EvalCache,
-    title: String,
 }
 
 impl Panel for PropertiesPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        if self.title.is_empty() {
-            TabInfo::new(tr("Properties"))
-        } else {
-            TabInfo::new(format!("{}: {}", tr("Properties"), self.title))
+    /// "Properties: <layer>" for the layer selected now, even while the panel
+    /// is not drawn (a collapsed or background tab, #465).
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        match selected_layer(cx.stage, &common::session(cx.resources)) {
+            Some(layer) => TabInfo::new(format!(
+                "{}: {}",
+                tr("Properties"),
+                query::display_name_of(cx.stage, &layer)
+            )),
+            None => TabInfo::new(tr("Properties")),
         }
     }
 
@@ -127,7 +131,6 @@ impl Panel for PropertiesPanel {
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let Some(layer) = selected_layer(stage, &session) else {
-            self.title.clear();
             common::empty_hint(
                 ui,
                 tr("No layer selected"),
@@ -135,7 +138,6 @@ impl Panel for PropertiesPanel {
             );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
         let now = session.lock().active_time();
         let dims = if common::is_3d(stage, &layer) { 3 } else { 2 };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -194,6 +196,24 @@ impl Panel for PropertiesPanel {
                             commit = true;
                         }
                     });
+                    // Paragraph alignment.
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(tr("Paragraph")).color(color::TEXT));
+                        for (icon, value, name) in [
+                            (Icon::TextAlignLeft, "left", "Left Align Text"),
+                            (Icon::TextAlignCenter, "center", "Center Text"),
+                            (Icon::TextAlignRight, "right", "Right Align Text"),
+                        ] {
+                            let on = d2.justification == value;
+                            let r = icons::button(ui, icon, 20.0, on)
+                                .labeled_toggle(egui::WidgetType::Button, tr(name), on)
+                                .on_hover_text(tr(name));
+                            if r.clicked() && !on {
+                                d2.justification = value.to_owned();
+                                commit = true;
+                            }
+                        }
+                    });
                     if commit {
                         let key_now = query::to_key_time(stage, &layer, now);
                         cx.invoke_with(
@@ -212,6 +232,22 @@ impl Panel for PropertiesPanel {
                 for (path, attr, label) in flat.into_iter().filter(|(_, a, _)| a == "color" || a == "size" || a == "width") {
                     let owner = query::display_name_of(stage, &path);
                     prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &format!("{owner} · {label}"), now, 2);
+                }
+            }
+            // Effects: each effect's controls, in stacking order (AE).
+            let effects = props::effect_nodes(stage, &layer);
+            if !effects.is_empty() {
+                section(ui, tr("Effects"));
+                for effect in &effects {
+                    let Node::Group { label, children, .. } = effect else {
+                        continue;
+                    };
+                    ui.label(egui::RichText::new(label).color(color::TEXT_STRONG));
+                    let mut flat = Vec::new();
+                    collect_props(children, &mut flat);
+                    for (path, attr, label) in flat {
+                        prop_line(ui, cx, &session, &mut self.eval, &path, &attr, &label, now, dims);
+                    }
                 }
             }
         });
@@ -592,6 +628,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Expression", "表达式"),
     ("Font Size", "字体大小"),
     ("Fill Color", "填充颜色"),
+    ("Left Align Text", "左对齐文本"),
+    ("Center Text", "居中对齐文本"),
+    ("Right Align Text", "右对齐文本"),
     ("Zoom", "缩放"),
     ("Intensity", "强度"),
     ("No layer selected", "未选择图层"),
