@@ -300,11 +300,49 @@ pub struct CameraState {
     pub aperture: f64,
     /// Percent.
     pub blur_level: f64,
+    /// The lens's iris and highlights (the depth-of-field blur's shape).
+    pub iris: Iris,
     /// In the camera's parent space.
     pub point_of_interest: DVec3,
     /// Camera space → comp space. The camera looks along local +z, local +y is
     /// screen-down. The view matrix is its inverse.
     pub world_matrix: DMat4,
+}
+
+/// A camera's iris and highlight options (AE's Camera Options): the shape and
+/// brightness of the depth-of-field blur.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Iris {
+    /// 1 Fast Rectangle, 3–10 the polygon's blade count (AE's menu values).
+    pub shape: u32,
+    /// Degrees.
+    pub rotation: f64,
+    /// Percent: 0 the polygon, 100 a circle.
+    pub roundness: f64,
+    pub aspect_ratio: f64,
+    /// Percent: brighter rim of the blur's disc.
+    pub diffraction_fringe: f64,
+    /// 0–100.
+    pub highlight_gain: f64,
+    /// 0–1: brightness above which highlights are boosted.
+    pub highlight_threshold: f64,
+    /// 0–100.
+    pub highlight_saturation: f64,
+}
+
+impl Default for Iris {
+    fn default() -> Self {
+        Self {
+            shape: 1,
+            rotation: 0.0,
+            roundness: 0.0,
+            aspect_ratio: 1.0,
+            diffraction_fringe: 0.0,
+            highlight_gain: 0.0,
+            highlight_threshold: 1.0,
+            highlight_saturation: 0.0,
+        }
+    }
 }
 
 /// Light layer state.

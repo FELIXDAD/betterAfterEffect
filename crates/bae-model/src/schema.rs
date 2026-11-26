@@ -326,6 +326,22 @@ const LAYER: &[AttrDef] = &[
     float("camera:focus_distance", 1777.8).kinds(&["camera"]),
     float("camera:aperture", 25.3).kinds(&["camera"]),
     float("camera:blur_level", 100.0).kinds(&["camera"]),
+    int("camera:iris_shape", 1)
+        .kinds(&["camera"])
+        .doc("AE's Iris Shape: 1 Fast Rectangle, 3–10 the polygon's blade count."),
+    float("camera:iris_rotation", 0.0)
+        .kinds(&["camera"])
+        .doc("Degrees."),
+    float("camera:iris_roundness", 0.0)
+        .kinds(&["camera"])
+        .doc("Percent."),
+    float("camera:iris_aspect_ratio", 1.0).kinds(&["camera"]),
+    float("camera:iris_diffraction_fringe", 0.0).kinds(&["camera"]),
+    float("camera:highlight_gain", 0.0).kinds(&["camera"]),
+    float("camera:highlight_threshold", 1.0)
+        .kinds(&["camera"])
+        .doc("0–1."),
+    float("camera:highlight_saturation", 0.0).kinds(&["camera"]),
     choice(
         "light:type",
         "spot",

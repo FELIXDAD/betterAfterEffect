@@ -570,6 +570,7 @@ fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
         focus_distance: c.focus_distance,
         aperture: c.aperture,
         blur_level: c.blur_level,
+        iris: c.iris,
         projection: crate::camera::Projection::Perspective,
     })
 }

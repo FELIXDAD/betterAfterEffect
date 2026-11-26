@@ -29,6 +29,7 @@ use crate::graph::{CompositeNode, LayerOp, Node, NodeId, NodeKind, OpInput, Rend
 use rustc_hash::FxHashMap;
 
 pub(crate) mod adjust;
+pub(crate) mod dof;
 mod masks;
 mod shadow;
 use crate::pool::TexturePool;
@@ -431,6 +432,25 @@ pub(crate) fn execute(
                     [&images[0], &images[1], &images[2]],
                 );
                 ctx.passes += 1;
+                target
+            }
+            (NodeKind::DepthBlur(blur), None) => {
+                let input = outputs[blur.input.index()]
+                    .clone()
+                    .ok_or_else(|| RenderError::Other("depth of field input missing".into()))?;
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let dof = ctx.pipelines.dof();
+                ctx.passes += dof::encode(
+                    &mut dof.lock(),
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    pool,
+                    format,
+                    blur,
+                    &input,
+                    &target,
+                )?;
                 target
             }
             (NodeKind::Mask(_), None) => ctx.mask_outs[index]

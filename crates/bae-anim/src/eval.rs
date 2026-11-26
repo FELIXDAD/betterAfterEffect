@@ -459,6 +459,34 @@ pub(crate) struct CompiledCamera {
     pub(crate) focus_distance: Prop,
     pub(crate) aperture: Prop,
     pub(crate) blur_level: Prop,
+    pub(crate) iris_shape: Prop,
+    pub(crate) iris_rotation: Prop,
+    pub(crate) iris_roundness: Prop,
+    pub(crate) iris_aspect_ratio: Prop,
+    pub(crate) iris_diffraction_fringe: Prop,
+    pub(crate) highlight_gain: Prop,
+    pub(crate) highlight_threshold: Prop,
+    pub(crate) highlight_saturation: Prop,
+}
+
+impl CompiledCamera {
+    /// Every animatable option.
+    fn props(&self) -> [&Prop; 12] {
+        [
+            &self.zoom,
+            &self.focus_distance,
+            &self.aperture,
+            &self.blur_level,
+            &self.iris_shape,
+            &self.iris_rotation,
+            &self.iris_roundness,
+            &self.iris_aspect_ratio,
+            &self.iris_diffraction_fringe,
+            &self.highlight_gain,
+            &self.highlight_threshold,
+            &self.highlight_saturation,
+        ]
+    }
 }
 
 #[derive(Debug)]
@@ -760,6 +788,14 @@ fn compile_layer(
         focus_distance: p(cam::FOCUS_DISTANCE, Value::Float(1777.8)),
         aperture: p(cam::APERTURE, Value::Float(25.3)),
         blur_level: p(cam::BLUR_LEVEL, Value::Float(100.0)),
+        iris_shape: p(cam::IRIS_SHAPE, Value::Int(1)),
+        iris_rotation: p(cam::IRIS_ROTATION, Value::Float(0.0)),
+        iris_roundness: p(cam::IRIS_ROUNDNESS, Value::Float(0.0)),
+        iris_aspect_ratio: p(cam::IRIS_ASPECT_RATIO, Value::Float(1.0)),
+        iris_diffraction_fringe: p(cam::IRIS_DIFFRACTION_FRINGE, Value::Float(0.0)),
+        highlight_gain: p(cam::HIGHLIGHT_GAIN, Value::Float(0.0)),
+        highlight_threshold: p(cam::HIGHLIGHT_THRESHOLD, Value::Float(1.0)),
+        highlight_saturation: p(cam::HIGHLIGHT_SATURATION, Value::Float(0.0)),
     });
     let mut options: Vec<(&'static str, Prop)> = [
         ("material:casts_shadows", Value::Bool(false)),
@@ -1231,6 +1267,16 @@ impl CompiledComp {
                     focus_distance: cm.focus_distance.f64(&cx),
                     aperture: cm.aperture.f64(&cx),
                     blur_level: cm.blur_level.f64(&cx),
+                    iris: crate::evaluated::Iris {
+                        shape: cm.iris_shape.f64(&cx).round().clamp(1.0, 10.0) as u32,
+                        rotation: cm.iris_rotation.f64(&cx),
+                        roundness: cm.iris_roundness.f64(&cx),
+                        aspect_ratio: cm.iris_aspect_ratio.f64(&cx),
+                        diffraction_fringe: cm.iris_diffraction_fringe.f64(&cx),
+                        highlight_gain: cm.highlight_gain.f64(&cx),
+                        highlight_threshold: cm.highlight_threshold.f64(&cx),
+                        highlight_saturation: cm.highlight_saturation.f64(&cx),
+                    },
                     point_of_interest: poi,
                     world_matrix: wm,
                 });
@@ -2007,6 +2053,16 @@ impl CompiledLayer {
                 cam::FOCUS_DISTANCE => self.camera.as_ref().map(|c| &c.focus_distance),
                 cam::APERTURE => self.camera.as_ref().map(|c| &c.aperture),
                 cam::BLUR_LEVEL => self.camera.as_ref().map(|c| &c.blur_level),
+                cam::IRIS_SHAPE => self.camera.as_ref().map(|c| &c.iris_shape),
+                cam::IRIS_ROTATION => self.camera.as_ref().map(|c| &c.iris_rotation),
+                cam::IRIS_ROUNDNESS => self.camera.as_ref().map(|c| &c.iris_roundness),
+                cam::IRIS_ASPECT_RATIO => self.camera.as_ref().map(|c| &c.iris_aspect_ratio),
+                cam::IRIS_DIFFRACTION_FRINGE => {
+                    self.camera.as_ref().map(|c| &c.iris_diffraction_fringe)
+                }
+                cam::HIGHLIGHT_GAIN => self.camera.as_ref().map(|c| &c.highlight_gain),
+                cam::HIGHLIGHT_THRESHOLD => self.camera.as_ref().map(|c| &c.highlight_threshold),
+                cam::HIGHLIGHT_SATURATION => self.camera.as_ref().map(|c| &c.highlight_saturation),
                 li::INTENSITY => self.light.as_ref().map(|c| &c.intensity),
                 li::COLOR => self.light.as_ref().map(|c| &c.color),
                 li::CONE_ANGLE => self.light.as_ref().map(|c| &c.cone_angle),
@@ -2077,7 +2133,7 @@ impl CompiledLayer {
             walk(c, &mut all);
         }
         if let Some(c) = &self.camera {
-            all.extend([&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]);
+            all.extend(c.props());
         }
         if let Some(t) = &self.text_path {
             all.extend([&t.first_margin, &t.last_margin]);
@@ -2137,11 +2193,10 @@ impl CompiledLayer {
                 .text_animators
                 .iter()
                 .any(CompiledPrim::has_expressions)
-            || self.camera.as_ref().is_some_and(|c| {
-                [&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]
-                    .iter()
-                    .any(|p| p.has_expression())
-            })
+            || self
+                .camera
+                .as_ref()
+                .is_some_and(|c| c.props().iter().any(|p| p.has_expression()))
     }
 
     /// Source size (footage, solid or pre-comp), for `width` / `height` in expressions.
