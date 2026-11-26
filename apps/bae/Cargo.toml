@@ -44,6 +44,9 @@ winit.workspace = true
 
 # Native file dialogs (File > Open / Save As, unsaved-changes prompt). Other
 # platforms get no dialogs (`shell::dialogs::Headless`).
+# Startup warm-up of the expression engine (already linked through bae-render).
+bae-anim.workspace = true
+
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 rfd.workspace = true
 
@@ -58,7 +61,7 @@ windows-core = { workspace = true, features = ["std"] }
 # crates are already linked through winit / wgpu-hal / muda.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = ["NSArray", "NSLocale", "NSString", "NSURL"] }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSGeometry", "objc2-core-foundation", "NSLocale", "NSString", "NSURL"] }
 
 [dev-dependencies]
 # Glyph coverage test (ui_text.rs) reads font character maps; already linked through
@@ -67,8 +70,6 @@ skrifa.workspace = true
 tempfile.workspace = true
 # Acceptance tests drive the real workbench through accesskit (labels, not coordinates).
 egui_kittest.workspace = true
-# Acceptance: world transforms of layers (locked child keeps its place, #124).
-bae-anim.workspace = true
 
 [lints]
 workspace = true

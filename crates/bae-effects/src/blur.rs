@@ -200,8 +200,8 @@ fn box_weights(r: f64) -> (i32, Vec<f32>) {
 /// the dispatches. `read` is the region of the input it reads.
 #[derive(Clone, Debug)]
 pub struct Plan {
-    /// Intermediate images: rect and pixel-scale multiplier.
-    images: Vec<(IRect, f64)>,
+    /// Intermediate rectangles in each level's texels.
+    images: Vec<IRect>,
     steps: Vec<Step>,
     /// Output rect.
     pub output: IRect,
@@ -272,7 +272,6 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
         base[0] + level_down.x1 * fx,
         base[1] + level_down.y1 * fy,
     );
-    let fscale = f64::from(fx.max(fy));
     let mut images = Vec::new();
     let mut steps = Vec::new();
 
@@ -293,10 +292,8 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
         let n = regions[k + 1];
         regions[k] = IRect::new(n.x0 * sx, n.y0 * sy, n.x1 * sx, n.y1 * sy);
     }
-    let mut cum = [1, 1];
     for (k, &[sx, sy]) in stages.iter().enumerate() {
-        cum = [cum[0] * sx, cum[1] * sy];
-        images.push((regions[k], f64::from(cum[0].max(cum[1]))));
+        images.push(regions[k]);
         let dst = images.len() - 1;
         let mut s = if k == 0 {
             let mut s = Step::new("downsample", 0, Some(dst), input, regions[0]);
@@ -314,14 +311,14 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
     let mut cur_src = down;
     let mut cur_rect = level_down;
     if r[0] > 0 {
-        images.push((level_tmp, fscale));
+        images.push(level_tmp);
         let dst = Some(images.len() - 1);
         steps.push(Step::gauss(cur_src, dst, cur_rect, level_tmp, 0, lsigma[0]));
         cur_src = images.len();
         cur_rect = level_tmp;
     }
     if r[1] > 0 {
-        images.push((level_out, fscale));
+        images.push(level_out);
         let dst = Some(images.len() - 1);
         steps.push(Step::gauss(cur_src, dst, cur_rect, level_out, 1, lsigma[1]));
         cur_src = images.len();
@@ -339,27 +336,34 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
     }
 }
 
-/// A 2 × 2 area reduction aligned to the input texel grid.
-pub(crate) fn half_level(
+/// Box-average aligned source texels into the next Gaussian pyramid level.
+pub(crate) fn reduce_level(
     target: &mut dyn EffectTarget,
     input: &GpuImage,
+    factor: [i32; 2],
+    repeat: bool,
 ) -> Result<GpuImage, RenderError> {
     let r = input.rect;
+    let [x, y] = factor;
     let output = IRect::new(
-        r.x0.div_euclid(2),
-        r.y0.div_euclid(2),
-        (r.x1 + 1).div_euclid(2),
-        (r.y1 + 1).div_euclid(2),
+        r.x0.div_euclid(x),
+        r.y0.div_euclid(y),
+        (r.x1 + x - 1).div_euclid(x),
+        (r.y1 + y - 1).div_euclid(y),
     );
+    // Retain a fully extended edge texel beyond each partial box, so subsequent
+    // pyramid levels and convolutions repeat the true source edge.
+    let output = if repeat { output.inflate(1) } else { output };
     let mut step = Step::new("downsample", 0, None, r, output);
-    step.factor = [2, 2];
+    step.factor = factor;
+    step.clamp = repeat;
     Plan {
         images: Vec::new(),
         steps: vec![step],
         output,
         read: r,
     }
-    .encode_steps(target, input, true)
+    .encode_steps(target, input)
 }
 
 fn plan_direct(input: IRect, sigma: [f64; 2], clamp: bool, output: IRect) -> Plan {
@@ -373,7 +377,7 @@ fn plan_direct(input: IRect, sigma: [f64; 2], clamp: bool, output: IRect) -> Pla
             if clamp {
                 tmp = IRect::new(tmp.x0, tmp.y0.max(input.y0), tmp.x1, tmp.y1.min(input.y1));
             }
-            images.push((tmp, 1.0));
+            images.push(tmp);
             let mut h = Step::gauss(0, Some(0), input, tmp, 0, sigma[0]);
             h.clamp = clamp;
             let mut v = Step::gauss(1, None, tmp, output, 1, sigma[1]);
@@ -451,7 +455,7 @@ pub fn plan_box(input: IRect, r: [f64; 2], iterations: u32, edge: Edge, output: 
         let dst = if k == last {
             None
         } else {
-            images.push((regions[k], 1.0));
+            images.push(regions[k]);
             Some(images.len() - 1)
         };
         let (taps, weights) = box_weights(ra);
@@ -521,7 +525,7 @@ impl Plan {
         target: &mut dyn EffectTarget,
         input: &GpuImage,
     ) -> Result<GpuImage, RenderError> {
-        self.encode_steps(target, input, false)
+        self.encode_steps(target, input)
     }
 
     /// Encodes in the input texel grid and leaves the final bilinear upsample
@@ -534,13 +538,13 @@ impl Plan {
     ) -> Result<GpuImage, RenderError> {
         let last = self.steps.last().unwrap();
         if last.entry != "upsample" || last.factor[0] != last.factor[1] {
-            return self.encode_steps(target, input, true);
+            return self.encode_steps(target, input);
         }
         let step = self.steps.pop().unwrap();
         self.images.pop();
         self.output = step.src_rect;
         self.steps.last_mut().unwrap().dst = None;
-        let mut image = self.encode_steps(target, input, true)?;
+        let mut image = self.encode_steps(target, input)?;
         let [x, y] = step.base;
         let factor = step.factor[0];
         image.rect = IRect::new(
@@ -557,14 +561,16 @@ impl Plan {
         &self,
         target: &mut dyn EffectTarget,
         input: &GpuImage,
-        texel_grid: bool,
     ) -> Result<GpuImage, RenderError> {
         let rt = gpu::runtime(target.gpu());
         let format = target.format();
         let scale = input.pixel_scale;
+        // Intermediate rects are already in level texels: one texel each
+        // (a pixel scale of `k` would allocate 1/k of the texels and leave the
+        // rest of the level unwritten).
         let mut images = Vec::with_capacity(self.images.len());
-        for (rect, k) in &self.images {
-            images.push(target.allocate(*rect, if texel_grid { 1. } else { scale * k })?);
+        for rect in &self.images {
+            images.push(target.allocate(*rect, 1.0)?);
         }
         let output = target.allocate(self.output, scale)?;
         let mut prepared = Vec::with_capacity(self.steps.len());
@@ -697,7 +703,7 @@ mod tests {
         // Every step's destination lies inside its image.
         for s in &p.steps {
             let rect = match s.dst {
-                Some(d) => p.images[d].0,
+                Some(d) => p.images[d],
                 None => p.output,
             };
             assert!(rect.contains(&s.dst_rect), "{s:?}");

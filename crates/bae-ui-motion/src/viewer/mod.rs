@@ -3,7 +3,7 @@
 //! title/action-safe guides and a grid. Pixels come from [`crate::render`] until the
 //! GPU compositor (04) publishes viewport textures.
 
-use bae_anim::glam::{DMat4, DVec2, DVec3};
+use bae_anim::glam::{DMat4, DVec2};
 use bae_anim::{EvaluatedComp, Transform};
 use bae_model::{LayerKind, PrimPath, Time, Value};
 use bae_motion::query::{self, CompInfo};
@@ -18,7 +18,7 @@ use crate::common::{self, EvalCache};
 use crate::gpu_preview::GpuPreview;
 use crate::project::{DropPlacement, ItemDrag};
 use crate::render::{self, Affine, View};
-use crate::session::{Scrub, SharedSession};
+use crate::session::SharedSession;
 use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
@@ -27,6 +27,7 @@ mod camera_tool;
 pub(crate) mod display;
 mod effect_points;
 pub(crate) mod errors;
+mod feather_tool;
 mod free_transform;
 mod gizmo3d;
 pub(crate) mod guides;
@@ -48,6 +49,7 @@ mod tests;
 pub(crate) mod transform;
 mod type_tool;
 pub(crate) mod view3d;
+pub(crate) mod view_options;
 
 pub(crate) use overlay::{mask_color, path_shapes};
 pub(crate) use transform::nudge_layers;
@@ -79,12 +81,23 @@ const ZOOM_STEPS: [f32; 13] = [
 pub(crate) const ZOOM_100: &str = "motion.viewer.zoom_100";
 
 /// The next zoom step above (`up`) or below `mag`.
-fn next_step(mag: f32, up: bool) -> Option<f32> {
+pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
     if up {
         ZOOM_STEPS.iter().copied().find(|m| *m > mag * 1.01)
     } else {
         ZOOM_STEPS.iter().rev().copied().find(|m| *m < mag * 0.99)
     }
+}
+
+/// Associate the native smart-magnify event with the next input pass.
+pub fn request_smart_zoom(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("mac.smart_zoom"), pass));
+}
+
+pub(crate) fn smart_zoom(ctx: &egui::Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new("mac.smart_zoom"))) == Some(pass)
 }
 
 /// What the mouse wheel and trackpad did this frame over a picture (the
@@ -144,8 +157,8 @@ pub(crate) fn wheel(ui: &Ui) -> Wheel {
 }
 /// Magnification change per mouse-wheel notch, in and out (AE 26 Smooth Zoom:
 /// ×9/8 and ×7/8, R1).
-const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
-const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
+pub(crate) const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
+pub(crate) const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 
 #[derive(Default)]
 pub struct CompositionViewer {
@@ -192,6 +205,7 @@ pub struct CompositionViewer {
     shape: Option<shape_tool::ShapeDrag>,
     /// Pen tools: the open path being drawn, a Convert Vertex drag.
     pen: pen_tool::PenState,
+    feather: feather_tool::FeatherState,
     sketch: motion_sketch::SketchState,
     /// Selection, Rotation and Pan Behind tools: transform drags, marquee,
     /// selected mask vertices.
@@ -358,8 +372,7 @@ impl CompositionViewer {
         info: &CompInfo,
     ) -> Option<EvaluatedComp> {
         let time = session.lock().time(&info.path);
-        self.eval
-            .get(cx.resources)
+        live_evaluator(&mut self.eval, cx, session)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
     }
@@ -428,49 +441,34 @@ impl CompositionViewer {
     }
 }
 
-/// Apply live edits (timeline scrubs, viewer drags) to an evaluated comp and
-/// recompute world matrices.
-fn apply_overrides(
-    comp: &mut EvaluatedComp,
-    scrub: Option<&Scrub>,
-    drag: Option<&transform::TransformDrag>,
-) {
+/// The panel's evaluator showing the value drag in progress (timeline, Effect
+/// Controls, Properties …): its targets evaluated as the commit will leave
+/// them, so children, expressions, masks and effects follow live (#593).
+pub(crate) fn live_evaluator<'a>(
+    eval: &'a mut crate::common::EvalCache,
+    cx: &PanelContext<'_>,
+    session: &SharedSession,
+) -> &'a mut bae_anim::Evaluator {
+    let overrides = session
+        .lock()
+        .scrub
+        .as_ref()
+        .map(|s| s.overrides(cx.stage))
+        .unwrap_or_default();
+    let eval = eval.get(cx.resources);
+    eval.set_overrides(overrides);
+    eval
+}
+
+/// Apply the viewer's own transform drag to an evaluated comp and recompute
+/// world matrices (value drags in panels are evaluated as overrides instead:
+/// [`live_evaluator`]).
+fn apply_overrides(comp: &mut EvaluatedComp, drag: Option<&transform::TransformDrag>) {
     let mut changed = false;
     for layer in &mut comp.layers {
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
-        let attr = scrub.map_or("", |s| s.attr.as_str());
-        for (path, value) in scrub.into_iter().flat_map(Scrub::targets) {
-            // A scrubbed effect parameter of this layer (Effect Controls, timeline).
-            if attr.starts_with("param:")
-                && crate::effects::layer_of(path).as_ref() == Some(&layer.path)
-                && let Some(e) = layer.effects.iter_mut().find(|e| e.path == *path)
-            {
-                e.params
-                    .insert(attr.trim_start_matches("param:").to_owned(), value.clone());
-            }
-            if *path != layer.path {
-                continue;
-            }
-            touched = true;
-            let v3 = |v: &Value| match v {
-                Value::Vec3(a) => Some(DVec3::from_array(*a)),
-                Value::Vec2(a) => Some(DVec3::new(a[0], a[1], 0.0)),
-                _ => None,
-            };
-            match (attr, value) {
-                ("transform:position", v) => t.position = v3(v).unwrap_or(t.position),
-                ("transform:anchor_point", v) => t.anchor_point = v3(v).unwrap_or(t.anchor_point),
-                ("transform:scale", v) => t.scale = v3(v).unwrap_or(t.scale),
-                ("transform:rotation", Value::Float(r)) => t.rotation.z = *r,
-                ("transform:opacity", Value::Float(o)) => {
-                    t.opacity = *o;
-                    layer.opacity = (o / 100.0).clamp(0.0, 1.0);
-                }
-                _ => touched = false,
-            }
-        }
         if let Some(e) = drag.and_then(|d| d.edits.iter().find(|e| e.path == layer.path)) {
             touched = true;
             t.position = e.now.position;
@@ -644,13 +642,13 @@ impl Panel for CompositionViewer {
         let opts = session.lock().view_options;
         self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
+        crate::import::drop_on_panel(ui, cx);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().update_preview(cx, &info) {
-            ui.ctx().request_repaint();
-        }
+        // The shell ticks the clock; this keeps the audio mix current.
+        session.lock().update_preview(cx, &info);
         let time = session.lock().time(&info.path);
         let ppp = ui.ctx().pixels_per_point();
 
@@ -711,7 +709,15 @@ impl Panel for CompositionViewer {
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
             let w = wheel(ui);
-            if w.pinch != 1.0 {
+            if smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, &info, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), resp.hover_pos(), area, &info, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
                 if w.notches != 0.0 {
@@ -765,7 +771,9 @@ impl Panel for CompositionViewer {
         self.render_factor = resolution;
         // Paint.
         let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, Color32::from_gray(35));
+        let controls = session.lock().layer_controls;
+        let pasteboard = session.lock().panel_background.color();
+        painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
         // Region of interest: only it shows the comp.
         let comp_rect = match self.display.roi() {
@@ -794,8 +802,13 @@ impl Panel for CompositionViewer {
         if resp.dragged() || resp.clicked() {
             session.lock().stop();
         }
+        // A value drag that ended without a commit (e.g. cancelled) must not leave
+        // its preview behind (a committed one stays until its command has run).
         if !ui.input(|i| i.pointer.any_down()) {
-            session.lock().scrub = None;
+            let mut s = session.lock();
+            if s.scrub.as_ref().is_some_and(|s| s.committed.is_none()) {
+                s.scrub = None;
+            }
         }
         let scrub = session.lock().scrub.clone();
         let editing = scrub.is_some()
@@ -834,6 +847,9 @@ impl Panel for CompositionViewer {
                     completed = Some(image);
                     if actual == time || playback.is_some() {
                         let mut s = session.lock();
+                        if playback.is_some() {
+                            s.drew_preview(actual);
+                        }
                         if s.expr_errors != errors {
                             s.expr_errors = errors.to_vec();
                         }
@@ -874,13 +890,33 @@ impl Panel for CompositionViewer {
                 paint_image(&clip, &view, image);
             }
             Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
+            let (fps, dropped) = {
+                let s = session.lock();
+                (s.playback_stats.fps, s.playback_stats.dropped)
+            };
+            let label = format!("{fps:.1} fps   {} {dropped}", tr("Dropped frames"));
+            painter.text(
+                area.right_top() + vec2(-8., 8.),
+                Align2::RIGHT_TOP,
+                label,
+                theme::body(),
+                color::TEXT_STRONG,
+            );
             self.banner.ui(ui, cx, &session, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
             return;
         }
 
-        // Evaluate.
-        let eval = self.eval.get(cx.resources);
+        // Evaluate, with the value a panel drag has reached (live, uncommitted);
+        // sampleImage reads the pixels the GPU preview reads back.
+        let eval = live_evaluator(&mut self.eval, cx, &session);
+        if let Some(g) = &self.gpu
+            && !eval
+                .image_samples()
+                .is_some_and(|s| std::sync::Arc::ptr_eq(s, g.samples()))
+        {
+            eval.set_image_samples(Some(g.samples().clone()));
+        }
         let mut comp = match eval.evaluate_comp(cx.stage, &info.path, time) {
             Ok(c) => c,
             Err(e) => {
@@ -901,7 +937,7 @@ impl Panel for CompositionViewer {
                 s.expr_errors = comp.errors.clone();
             }
         }
-        apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        apply_overrides(&mut comp, self.select.drag.as_ref());
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
         if camera_tool.is_camera() || self.camera_drag.is_some() {
@@ -1004,6 +1040,19 @@ impl Panel for CompositionViewer {
             _ => image,
         };
         self.on_gpu = image.is_some();
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(GpuPreview::waiting_for_samples)
+        {
+            ui.ctx().request_repaint();
+        }
+        if let Some(frame) = self.gpu.as_ref().and_then(|g| g.output()) {
+            let mut s = session.lock();
+            if s.scope_frame.as_ref().map(|f| f.1) != Some(frame.1) {
+                s.scope_frame = Some(frame);
+            }
+        }
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
         if let Some(h) = resp.hover_pos() {
@@ -1087,7 +1136,7 @@ impl Panel for CompositionViewer {
             let c = self.prefs.handle_color(theme::label_color(label));
             if let Some(q) = render::bounds_quad(l, &view, &outer) {
                 painter.add(egui::Shape::closed_line(q.to_vec(), Stroke::new(1.0, c)));
-                for i in 0..4 {
+                for i in (0..4).filter(|_| controls.handles) {
                     let mid = q[i] + (q[(i + 1) % 4] - q[i]) / 2.0;
                     for p in [q[i], mid] {
                         painter.rect_stroke(
@@ -1114,7 +1163,9 @@ impl Panel for CompositionViewer {
             );
         }
 
-        overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        if controls.masks {
+            overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        }
         particle_guides::paint(&clip, cx.stage, eval, &comp, &view, &selected, view_camera);
         // Cameras and lights in the 3D views (not the camera looked through).
         let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
@@ -1201,6 +1252,18 @@ impl Panel for CompositionViewer {
         }
         let pen = pen_tool::frame(
             &mut self.pen,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &comp,
+            &view,
+            effective,
+            &painter,
+        );
+        feather_tool::frame(
+            &mut self.feather,
             ui,
             &resp,
             cx,
@@ -1402,13 +1465,25 @@ fn render_factor(stage: &bae_model::Stage, comp: &PrimPath, auto: bool, mag: f32
     }
 }
 
-/// Set the active comp's resolution (View > Resolution, the viewer's menu) and,
+/// The comp's resolution as pixel steps (horizontal, vertical).
+pub(crate) fn comp_steps(stage: &bae_model::Stage, comp: &PrimPath) -> [u32; 2] {
+    match stage
+        .prim(comp)
+        .and_then(|v| query::static_value(&v, "resolution"))
+    {
+        Some(Value::Vec2([h, v])) => [(h as u32).max(1), (v as u32).max(1)],
+        _ => [1, 1],
+    }
+}
+
+/// Set the active comp's resolution as pixel steps (View > Resolution, the
+/// viewer's menu, Custom Resolution) and,
 /// with `nested`, of the comps nested in it (AE's "… Recurse" shortcuts); turns
 /// Auto off. One `comp.set_settings` per comp, like Composition Settings.
 pub(crate) fn set_resolution(
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
-    factor: u32,
+    steps: [u32; 2],
     nested: bool,
 ) {
     let Some(comp) = session.lock().active_comp.clone() else {
@@ -1432,11 +1507,8 @@ pub(crate) fn set_resolution(
         i += 1;
     }
     for c in comps {
-        if comp_resolution(cx.stage, &c) != factor {
-            cx.invoke_with(
-                "comp.set_settings",
-                json!({"comp": c, "resolution": [factor, factor]}),
-            );
+        if comp_steps(cx.stage, &c) != steps {
+            cx.invoke_with("comp.set_settings", json!({"comp": c, "resolution": steps}));
         }
     }
 }
@@ -1466,6 +1538,7 @@ pub(crate) use zh::ZH;
 /// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(view_options::ZH);
     bae_ui::i18n::register(display::ZH);
     crate::register_panel(
         app,
