@@ -174,6 +174,20 @@ pub enum NodeKind {
     Mix(MixNode),
     /// A 3D layer drawn alone, blurred by the camera's depth of field.
     DepthBlur(DepthBlurNode),
+    /// A lit 3D layer's shadows in its own space.
+    ShadowMap(ShadowMapNode),
+}
+
+/// How much of each shadow-casting light reaches every point of a lit 3D
+/// layer past the layer's shadow casters, in the layer's own pixels (AE's
+/// shadow maps): drawn when the layer, its lights or casters change and kept
+/// across frames; the layer's draws sample it (`exec/shadowmap.rs`).
+#[derive(Debug)]
+pub struct ShadowMapNode {
+    /// The layer (diagnostics).
+    pub layer: PrimPath,
+    /// The layer's lighting with its casters.
+    pub lighting: Arc<crate::light::Lighting>,
 }
 
 /// Depth of field of one 3D layer (AE's camera Depth of Field): the layer
@@ -245,6 +259,13 @@ impl NodeKind {
                 f(m.coverage);
             }
             NodeKind::DepthBlur(d) => f(d.input),
+            NodeKind::ShadowMap(m) => {
+                for c in m.lighting.casters.iter() {
+                    if let crate::light::CasterPixels::Image(id) = c.pixels {
+                        f(id);
+                    }
+                }
+            }
             NodeKind::Fill(_) | NodeKind::Source(_) | NodeKind::Mask(_) => {}
         }
     }
@@ -259,6 +280,7 @@ impl NodeKind {
             NodeKind::Mask(_) => "mask",
             NodeKind::Mix(_) => "mix",
             NodeKind::DepthBlur(_) => "depth of field",
+            NodeKind::ShadowMap(_) => "shadow map",
         }
     }
 }
@@ -890,6 +912,9 @@ impl Builder<'_, '_> {
         planned.retain(|(index, _)| {
             comp.layers[*index].material.casts_shadows != crate::light::ShadowMode::Only
         });
+        for (index, op) in &mut planned {
+            self.shadow_map(comp, *index, op, depth);
+        }
         let drawn = Self::depth_order_3d(comp, planned);
         for (index, op) in drawn {
             let op = self.depth_of_field(comp, index, op, canvas, scale, depth);
@@ -956,6 +981,65 @@ impl Builder<'_, '_> {
             }
         }
         drawn
+    }
+
+    /// Gives a lit layer with shadow casters its receiver-space shadow map
+    /// ([`ShadowMapNode`]). Motion-blurred layers (lit per sample) and
+    /// textures whose pixels are turned relative to the layer keep testing
+    /// the casters per pixel.
+    fn shadow_map(&mut self, comp: &RenderComp, index: usize, op: &mut LayerOp, depth: usize) {
+        let Some(lighting) = &op.lighting else {
+            return;
+        };
+        if lighting.casters.is_empty()
+            || !lighting.samples.is_empty()
+            || lighting.shadow_slots().is_empty()
+        {
+            return;
+        }
+        let mut h = FxHasher::default();
+        "shadow map".hash(&mut h);
+        for v in lighting.matrix.to_cols_array() {
+            v.to_bits().hash(&mut h);
+        }
+        let r = lighting.rect;
+        [r.x0, r.y0, r.x1, r.y1].map(f64::to_bits).hash(&mut h);
+        for l in lighting.lights.iter() {
+            crate::input::hash_light(l, &mut h);
+        }
+        for c in lighting.casters.iter() {
+            for v in c.matrix.to_cols_array() {
+                v.to_bits().hash(&mut h);
+            }
+            [c.rect.x0, c.rect.y0, c.rect.x1, c.rect.y1]
+                .map(f64::to_bits)
+                .hash(&mut h);
+            c.opacity.to_bits().hash(&mut h);
+            c.transmission.to_bits().hash(&mut h);
+            match c.pixels {
+                crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
+                crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
+            }
+        }
+        let key = h.finish();
+        let (_, [w, ht]) = lighting.shadow_map_size();
+        let slots = lighting.shadow_slots().len() as i32;
+        let node = self.owned(comp, index, depth, |b| {
+            b.push(Node {
+                kind: NodeKind::ShadowMap(ShadowMapNode {
+                    layer: op.layer.clone(),
+                    lighting: lighting.clone(),
+                }),
+                rect: IRect::new(0, 0, w as i32 * slots, ht as i32),
+                pixel_scale: 1.0,
+                key,
+                cacheable: true,
+            })
+        });
+        op.lighting = Some(Arc::new(crate::light::Lighting {
+            shadow_map: Some(node),
+            ..(**lighting).clone()
+        }));
     }
 
     /// Depth of field (AE's camera Depth of Field): a 3D layer away from the
@@ -1410,6 +1494,7 @@ impl Builder<'_, '_> {
                         casters: Arc::new([]),
                         samples,
                         rect: content_rect,
+                        shadow_map: None,
                     })
                 })
             });

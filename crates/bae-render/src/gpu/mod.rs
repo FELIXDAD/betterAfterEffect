@@ -439,6 +439,7 @@ pub(crate) struct Shared {
     pub masks: Arc<Mutex<Option<MaskPipelines>>>,
     pub mix: Arc<Mutex<Option<crate::exec::adjust::MixPipelines>>>,
     pub dof: Arc<Mutex<Option<crate::exec::dof::DofPipelines>>>,
+    pub shadow_map: Arc<Mutex<Option<crate::exec::shadowmap::ShadowMapPipeline>>>,
 }
 
 static SHARED: Mutex<Vec<(std::sync::Weak<bae_gpu::GpuContext>, Arc<Shared>)>> =
@@ -462,6 +463,7 @@ impl Shared {
             masks: Arc::new(Mutex::new(None)),
             mix: Arc::new(Mutex::new(None)),
             dof: Arc::new(Mutex::new(None)),
+            shadow_map: Arc::new(Mutex::new(None)),
         });
         all.push((Arc::downgrade(gpu), shared.clone()));
         shared
@@ -571,6 +573,10 @@ impl Shared {
             }
             self.dof.lock().get_or_insert(dof);
         }
+        if self.shadow_map.lock().is_none() {
+            let pipeline = crate::exec::shadowmap::ShadowMapPipeline::new(&self.device);
+            self.shadow_map.lock().get_or_insert(pipeline);
+        }
     }
 }
 
@@ -635,7 +641,9 @@ impl Pipelines {
     fn build(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.composite"),
-            source: wgpu::ShaderSource::Wgsl(wgsl!("composite.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                format!("{}{}", wgsl!("composite.wgsl"), wgsl!("shadow.wgsl")).into(),
+            ),
         });
         let storage = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -829,6 +837,14 @@ impl Pipelines {
         self.shared
             .as_ref()
             .map(|s| s.dof.clone())
+            .unwrap_or_default()
+    }
+
+    /// The shared shadow-map pipeline (created on first use).
+    pub fn shadow_map(&self) -> Arc<Mutex<Option<crate::exec::shadowmap::ShadowMapPipeline>>> {
+        self.shared
+            .as_ref()
+            .map(|s| s.shadow_map.clone())
             .unwrap_or_default()
     }
 

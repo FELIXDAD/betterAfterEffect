@@ -232,6 +232,8 @@ pub struct Renderer {
     pool: TexturePool,
     draws: DrawBuffer,
     output_uniform: Option<([u8; OUTPUT_PARAMS_SIZE as usize], wgpu::Buffer)>,
+    /// Receiver-space shadow maps kept across frames.
+    shadow_maps: crate::exec::shadowmap::ShadowMapCache,
     readback_target: Option<OutputTarget>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
@@ -300,6 +302,7 @@ impl Renderer {
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
             output_uniform: None,
+            shadow_maps: Default::default(),
             readback_target: None,
             mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
@@ -524,6 +527,7 @@ impl Renderer {
             &graph,
             format,
             tiles,
+            &mut self.shadow_maps,
             crate::exec::Timing {
                 cpu: self.layer_times,
                 gpu: self.gpu_timer.as_mut(),
@@ -538,6 +542,7 @@ impl Renderer {
         }
         let encode = encode_start.elapsed();
         self.pool.end_frame();
+        self.shadow_maps.end_frame();
 
         let output = executed.output;
         let image = executed.image;
@@ -725,6 +730,7 @@ impl Renderer {
                 &graph,
                 format,
                 None,
+                &mut self.shadow_maps,
                 crate::exec::Timing {
                     cpu: false,
                     gpu: None,
