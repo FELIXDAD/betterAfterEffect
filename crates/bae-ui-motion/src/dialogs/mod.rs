@@ -12,6 +12,7 @@ mod go_to_time;
 mod layer_time;
 mod light_settings;
 pub mod memory;
+pub(crate) mod photoshop;
 mod precompose;
 mod project_settings;
 mod render_output;
@@ -37,6 +38,7 @@ use crate::session::SharedSession;
 /// The dialog that is open.
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    Photoshop(Box<photoshop::PhotoshopDialog>),
     /// Analysis of the composition work area for the Keyframe Assistant.
     AudioAnalysis(crate::audio_analysis::Analysis),
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
@@ -66,13 +68,17 @@ pub enum Dialog {
     /// A Render Queue item's Output Module Settings.
     OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
-    Alert { title: String, message: String },
+    Alert {
+        title: String,
+        message: String,
+    },
 }
 
 /// Open dialog and remembered values.
 #[derive(Debug, Default)]
 pub struct Dialogs {
     pub open: Option<Dialog>,
+    pub(crate) photoshop_queue: std::collections::VecDeque<photoshop::PhotoshopDialog>,
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
@@ -111,7 +117,8 @@ impl SharedDialogs {
 
     /// Whether a motion dialog is open.
     pub fn is_open(&self) -> bool {
-        self.lock().open.is_some()
+        let d = self.lock();
+        d.open.is_some() || !d.photoshop_queue.is_empty()
     }
 }
 
@@ -404,11 +411,20 @@ impl bae_ui::DialogHost for MotionDialogs {
     fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
         let dialogs = shared(cx.resources);
         // Draw without holding the lock (a dialog may read the memory).
-        let Some(mut open) = dialogs.lock().open.take() else {
+        let next = {
+            let mut d = dialogs.lock();
+            d.open.take().or_else(|| {
+                d.photoshop_queue
+                    .pop_front()
+                    .map(|job| Dialog::Photoshop(Box::new(job)))
+            })
+        };
+        let Some(mut open) = next else {
             return;
         };
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
+            Dialog::Photoshop(d) => d.ui(ctx, cx),
             Dialog::AudioAnalysis(d) => d.ui(ctx, cx),
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
@@ -437,4 +453,5 @@ pub(crate) use zh::ZH;
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    bae_ui::i18n::register(photoshop::ZH);
 }

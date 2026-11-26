@@ -8,6 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde.workspace = true
+schemars.workspace = true
+effectcraft-psd.workspace = true
 rust-motion-psd.workspace = true
 bae-model.workspace = true
 

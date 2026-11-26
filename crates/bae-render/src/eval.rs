@@ -344,6 +344,8 @@ impl<'a> MockPass<'a> {
                     out.effects = self.effects(layer, local);
                 }
                 out.masks = self.masks(layer, local);
+                out.resolve_photoshop_mask(self.stage);
+                out.resolve_photoshop_group(self.stage, self.assets);
             }
             if layer_has_expressions(layer) {
                 self.warn(format!(
@@ -463,6 +465,7 @@ impl<'a> MockPass<'a> {
                 };
                 Ok(LayerContent::Footage(FootageRef {
                     asset: source,
+                    file_revision: bae_model::asset::file_revision(&src),
                     psd_layer: bae_model::psd::LayerImage::from_asset(&src),
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),

@@ -55,6 +55,7 @@ needless_pass_by_ref_mut = "warn"
 
 [workspace.dependencies]
 bae-interop-psd = { path = "crates/bae-interop-psd" }
+effectcraft-psd = "0.9.2" # Photoshop Type Tool EngineData reader
 rust-motion-psd = { version = "1.1.0", default-features = false }
 # ---- internal crates (path deps; add one line per crate as it lands) ----
 bae-app = { path = "crates/bae-app" }

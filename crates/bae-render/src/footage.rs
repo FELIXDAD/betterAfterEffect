@@ -31,6 +31,8 @@ mod imp {
         pub fn get(
             &self,
             path: &Path,
+            _asset: &bae_model::PrimPath,
+            _revision: i64,
             _sequence: Option<bae_model::FrameRate>,
             _psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
@@ -179,6 +181,7 @@ mod imp {
     pub(crate) struct FootageCache {
         library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
+        revisions: FxHashMap<bae_model::PrimPath, i64>,
         sources: FxHashMap<SourceKey, Result<Arc<FootageSource>, String>>,
     }
 
@@ -191,6 +194,7 @@ mod imp {
             Self {
                 library: Arc::new(library),
                 gpu: Arc::new(MediaGpu::new(gpu)),
+                revisions: FxHashMap::default(),
                 sources: FxHashMap::default(),
             }
         }
@@ -206,9 +210,15 @@ mod imp {
         pub fn get(
             &mut self,
             path: &Path,
+            asset: &bae_model::PrimPath,
+            revision: i64,
             sequence: Option<FrameRate>,
             psd_layer: Option<bae_model::psd::LayerImage>,
         ) -> Result<Arc<dyn LayerSource>, String> {
+            if self.revisions.insert(asset.clone(), revision).unwrap_or(0) != revision {
+                self.sources.retain(|(file, _, _), _| file != path);
+                self.library.invalidate(path);
+            }
             let key = (path.to_path_buf(), sequence, psd_layer);
             if let Some(entry) = self.sources.get(&key) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);

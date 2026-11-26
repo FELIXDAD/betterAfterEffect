@@ -1,8 +1,10 @@
 //! PSD and PSB footage. Source channels stay at their original precision until upload.
-use bae_model::psd::{LayerImage, LayerKey};
+use bae_model::psd::{LayerImage, LayerKey, PixelMask};
 use format::{ColorMode, LayerRecord, MaskData, PsdError, PsdFile, Rect, Result};
 pub use rust_motion_psd as format;
 use std::borrow::Cow;
+pub mod import;
+mod styles;
 
 pub fn layer_key(layer: &LayerRecord, index: usize) -> LayerKey {
     layer
@@ -26,7 +28,18 @@ pub fn bounds(file: &PsdFile, selection: Option<LayerImage>) -> Result<Rect> {
     match selection {
         Some(sel) => {
             let layer = resolve(file, sel.key)?;
-            if sel.canvas {
+            if let PixelMask::Group { origin, size, .. } = sel.mask {
+                let end = |v: i32, n: u32| {
+                    i32::try_from(i64::from(v) + i64::from(n))
+                        .map_err(|_| PsdError::LimitExceeded("group mask bounds"))
+                };
+                Ok(Rect {
+                    left: origin[0],
+                    top: origin[1],
+                    right: end(origin[0], size[0])?,
+                    bottom: end(origin[1], size[1])?,
+                })
+            } else if sel.canvas {
                 Ok(canvas)
             } else {
                 let (w, h) = layer.rect.size()?;
@@ -85,7 +98,13 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
         .map_err(|_| PsdError::LimitExceeded("PSD output pixels"))?;
     rgba.resize(count, [0.; 4]);
     let layer = selection.map(|s| resolve(file, s.key)).transpose()?;
-    let src = layer.map_or(output, |l| l.rect);
+    let mask_setting = selection.map_or(PixelMask::AsSaved, |s| s.mask);
+    let only_mask = matches!(mask_setting, PixelMask::Group { .. });
+    let src = if only_mask {
+        output
+    } else {
+        layer.map_or(output, |l| l.rect)
+    };
     let (sw, sh) = src.size()?;
     let n = sw
         .checked_mul(sh)
@@ -96,7 +115,7 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
     let mut planes = Vec::new();
     let mut mask = None;
     if let Some(l) = layer {
-        if n != 0 && l.channel(0).is_some() {
+        if !only_mask && n != 0 && l.channel(0).is_some() {
             for channel in 0..colors {
                 planes.push(Cow::Owned(l.decode_channel(
                     channel as i16,
@@ -107,17 +126,22 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
             if l.channel(-1).is_some() {
                 planes.push(Cow::Owned(l.decode_channel(-1, depth, header.version)?));
             }
-            if let MaskData::Mask(m) = &l.mask
-                && m.flags & 2 == 0
-                && l.channel(-2).is_some()
-            {
-                let (mw, mh) = m.rect.size()?;
-                let data = l.decode_channel(-2, depth, header.version)?;
-                if data.len() != mw * mh * usize::from(depth / 8) {
-                    return Err(PsdError::Invalid("PSD mask size".into()));
-                }
-                mask = Some((m, mw, data));
+        }
+        if let MaskData::Mask(m) = &l.mask
+            && !matches!(mask_setting, PixelMask::Disabled)
+            && (m.flags & 2 == 0
+                || matches!(
+                    mask_setting,
+                    PixelMask::Channel { .. } | PixelMask::Group { .. }
+                ))
+            && l.channel(-2).is_some()
+        {
+            let (mw, mh) = m.rect.size()?;
+            let data = l.decode_channel(-2, depth, header.version)?;
+            if data.len() != mw * mh * usize::from(depth / 8) {
+                return Err(PsdError::Invalid("PSD mask size".into()));
             }
+            mask = Some((m, mw, data));
         }
     } else {
         if file.has_real_merged_data() == Some(false) {
@@ -131,8 +155,8 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
                 .map(Cow::Borrowed),
         );
     }
-    if !planes.is_empty() {
-        if planes.len() < colors || planes.iter().any(|p| p.len() != bytes) {
+    if only_mask || !planes.is_empty() {
+        if !only_mask && (planes.len() < colors || planes.iter().any(|p| p.len() != bytes)) {
             return Err(PsdError::Invalid("PSD channel size".into()));
         }
         let x0 = src.left.max(output.left);
@@ -161,14 +185,22 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
                         .as_ref()
                         .and_then(|p| p.user_density)
                         .unwrap_or(255);
-                    let value = if m.flags & 4 != 0 {
-                        1. - strength
-                    } else {
-                        strength
+                    let (inverted, density) = match mask_setting {
+                        PixelMask::Channel { inverted, density }
+                        | PixelMask::Group {
+                            inverted, density, ..
+                        } => (inverted, f32::from(density) / 65535.),
+                        _ => (m.flags & 4 != 0, f32::from(density) / 255.),
                     };
-                    a *= 1. - (1. - value) * f32::from(density) / 255.;
+                    let value = if inverted { 1. - strength } else { strength };
+                    a *= 1. - (1. - value) * density;
                 }
-                let [r, g, b] = match header.color_mode {
+                let dest = (y - output.top) as usize * ow + (x - output.left) as usize;
+                if only_mask {
+                    rgba[dest] = [1., 1., 1., a];
+                    continue;
+                }
+                let rgb = match header.color_mode {
                     ColorMode::Rgb => [v(0), v(1), v(2)],
                     ColorMode::Cmyk => [v(0) * v(3), v(1) * v(3), v(2) * v(3)],
                     ColorMode::Indexed => {
@@ -181,7 +213,18 @@ pub fn decode(file: &PsdFile, selection: Option<LayerImage>) -> Result<Pixels> {
                     }
                     _ => [v(0); 3],
                 };
-                rgba[(y - output.top) as usize * ow + (x - output.left) as usize] = [r, g, b, a];
+                // Photoshop stores its transparent 8-bit RGB composite matted against white.
+                let [r, g, b] = if layer.is_none()
+                    && depth == 8
+                    && header.color_mode == ColorMode::Rgb
+                    && a > 0.
+                    && a < 1.
+                {
+                    rgb.map(|v| ((v - (1. - a)) / a).clamp(0., 1.))
+                } else {
+                    rgb
+                };
+                rgba[dest] = [r, g, b, a];
             }
         }
     }

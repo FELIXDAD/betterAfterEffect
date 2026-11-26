@@ -11,25 +11,39 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::SystemTime;
 
-type DocumentCache = HashMap<(PathBuf, u64, SystemTime), Weak<PsdFile>>;
+#[derive(Default)]
+struct DocumentCache {
+    opened: HashMap<(PathBuf, u64, SystemTime), Weak<PsdFile>>,
+    /// Keep the last accepted import alive between the dialog and its first media consumer.
+    pending: Option<Arc<PsdFile>>,
+}
 static DOCUMENTS: LazyLock<Mutex<DocumentCache>> = LazyLock::new(Mutex::default);
 
-pub fn document(path: &Path) -> Result<Arc<PsdFile>, MediaError> {
+pub fn prepare(path: &Path, reload: bool) -> Result<Arc<PsdFile>, MediaError> {
     let metadata = path.metadata().map_err(|e| MediaError::io(path, e))?;
     let key = (
         path.to_owned(),
         metadata.len(),
         metadata.modified().map_err(|e| MediaError::io(path, e))?,
     );
-    if let Some(doc) = DOCUMENTS.lock().get(&key).and_then(Weak::upgrade) {
+    if !reload && let Some(doc) = DOCUMENTS.lock().opened.get(&key).and_then(Weak::upgrade) {
         return Ok(doc);
     }
     let bytes = std::fs::read(path).map_err(|e| MediaError::io(path, e))?;
     let doc = Arc::new(PsdFile::from_bytes(&bytes).map_err(|e| MediaError::decode(path, e))?);
     let mut cache = DOCUMENTS.lock();
-    cache.retain(|_, w| w.strong_count() > 0);
-    cache.insert(key, Arc::downgrade(&doc));
+    if !reload && let Some(existing) = cache.opened.get(&key).and_then(Weak::upgrade) {
+        return Ok(existing);
+    }
+    cache
+        .opened
+        .retain(|(p, _, _), w| p != path && w.strong_count() > 0);
+    cache.opened.insert(key, Arc::downgrade(&doc));
     Ok(doc)
+}
+
+pub fn keep_for_open(doc: Arc<PsdFile>) {
+    DOCUMENTS.lock().pending = Some(doc);
 }
 
 pub struct Photoshop;
@@ -52,7 +66,17 @@ impl MediaFormat for Photoshop {
 }
 
 pub fn open(path: &Path, layer: Option<LayerImage>) -> Result<Box<dyn MediaSource>, MediaError> {
-    let doc = document(path)?;
+    let doc = prepare(path, false)?;
+    {
+        let mut cache = DOCUMENTS.lock();
+        if cache
+            .pending
+            .as_ref()
+            .is_some_and(|pending| Arc::ptr_eq(pending, &doc))
+        {
+            cache.pending.take();
+        }
+    }
     let rect = bounds(&doc, layer).map_err(|e| MediaError::decode(path, e))?;
     let depth = doc.header.depth;
     let mut color = ColorInfo::srgb();
@@ -125,6 +149,7 @@ impl bae_gpu::WarmUp for Photoshop {
         let selection = LayerImage {
             key: bae_model::psd::LayerKey::Id(37),
             canvas: false,
+            mask: Default::default(),
         };
         decode(&file, Some(selection))
             .map(|_| ())
