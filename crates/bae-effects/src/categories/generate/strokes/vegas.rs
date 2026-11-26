@@ -1,13 +1,9 @@
 //! AE Vegas: dashes on a mask or on traced isocontours of a selected channel.
 use std::sync::Arc;
 
-use bae_gpu::{
-    transfer::{TextureReadback, TextureRegion},
-    wgpu,
-};
+use bae_gpu::wgpu;
 use bae_model::{ParamKind, Value};
 use bae_render::{GpuImage, IRect, RenderError};
-use glam::{DVec2, IVec2};
 
 use super::paint::{Mark, Paint};
 use super::{Generator, Path, color, percent, slider};
@@ -178,27 +174,22 @@ pub(super) fn options_zh(id: u32) -> Option<&'static [&'static str]> {
     }
 }
 
-pub(super) fn paint(
-    target: &mut dyn EffectTarget,
-    v: Params<'_>,
-    input: &GpuImage,
-) -> Result<Paint, RenderError> {
-    let style = match v.popup(8) {
+pub(super) fn style(v: Params<'_>) -> u32 {
+    match v.popup(8) {
         1 => 2,
         3 => 4,
         4 => 3,
         _ => 1,
-    };
-    let mut paint = Paint::new(style, 3, 1.);
+    }
+}
+
+pub(super) fn paint(v: Params<'_>) -> Paint {
+    let mut paint = Paint::new(style(v), 3, 1.);
     let length = v.f(24).clamp(0., 1.);
     if length == 0. {
-        return Ok(paint);
+        return paint;
     }
-    let image_mode = v.popup(52) == 1;
-    let origin_offset = if image_mode { 0. } else { 0.5 };
-    let paths = if image_mode {
-        contours(target, v, input)?
-    } else {
+    let paths: Vec<_> =
         v.p.mask_paths
             .iter()
             .map(|mask| {
@@ -213,10 +204,8 @@ pub(super) fn paint(
                 };
                 Path::from_elements(&elements[..count])
             })
-            .collect()
-    };
+            .collect();
     let segments = v.f(28).round().clamp(1., 250.);
-    let longest = paths.iter().map(Path::length).fold(0., f64::max);
     let angle = v.f(30) / 360.;
     let midpoint = v.f(40).clamp(0.001, 0.999);
     let first_alpha = v.f(36);
@@ -229,18 +218,11 @@ pub(super) fn paint(
         midpoint as f32,
     ];
     for (i, path) in paths.iter().enumerate() {
-        if image_mode && v.popup(44) == 2 && i + 1 != v.f(46) as usize {
-            continue;
-        }
         let len = path.length();
         if len == 0. {
             continue;
         }
-        let count = if image_mode && v.popup(48) == 2 {
-            (segments * len / longest).round().max(1.)
-        } else {
-            segments
-        };
+        let count = segments;
         let period = len / count;
         let active = period * length;
         let phase_shift = if v.b(32) {
@@ -263,8 +245,8 @@ pub(super) fn paint(
                 }
                 for (p, q, l, r) in path.segments(from, to) {
                     paint.marks.push(Mark {
-                        start: p + origin_offset,
-                        end: q + origin_offset,
+                        start: p + 0.5,
+                        end: q + 0.5,
                         radius: v.f(20).clamp(0.5, 100.),
                         rgb: color(v, 18),
                         hardness: v.f(22).clamp(0., 1.) as f32,
@@ -275,7 +257,7 @@ pub(super) fn paint(
             }
         }
     }
-    Ok(paint)
+    paint
 }
 
 pub(super) fn contour_kernel(rt: &gpu::Runtime) -> Result<Arc<Kernel>, RenderError> {
@@ -289,14 +271,15 @@ pub(super) fn contour_kernel(rt: &gpu::Runtime) -> Result<Arc<Kernel>, RenderErr
     )
 }
 
-fn contours(
+pub(super) fn render_contours(
     target: &mut dyn EffectTarget,
     v: Params<'_>,
     input: &GpuImage,
-) -> Result<Vec<Path>, RenderError> {
+    roi: IRect,
+) -> Result<GpuImage, RenderError> {
     let mut source = if let Some(dep) = layer_input::dependency(v.p, 2, false) {
         let Some(map) = target.effect_layer(&dep) else {
-            return Ok(Vec::new());
+            return Paint::new(style(v), 3, 1.).render(target, v.p, input, roi);
         };
         map.clone()
     } else {
@@ -308,9 +291,16 @@ fn contours(
     } else {
         image_grid::layer_rect(v.p)
     };
-    let [w, h] = rect.size();
-    if w < 2 || h < 2 {
-        return Ok(Vec::new());
+    let [w, h] = super::contour::grid_size(
+        rect.size(),
+        target
+            .gpu()
+            .device()
+            .limits()
+            .max_storage_buffer_binding_size,
+    );
+    if w < 2 || h < 2 || v.f(24) <= 0. {
+        return Paint::new(style(v), 3, 1.).render(target, v.p, input, roi);
     }
     let sigma = v.f(14).clamp(0., 50.) * 0.4 / source.pixel_scale;
     if blur::radius(sigma) != 0 {
@@ -330,7 +320,7 @@ fn contours(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: FORMAT,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
     let mut uniforms = UniformWriter::with_size(UNIFORM_SIZE as usize);
@@ -340,7 +330,9 @@ fn contours(
         .u32(48, v.popup(10) as u32)
         .u32(52, u32::from(v.b(4)))
         .u32(56, u32::from(v.popup(6) == 2))
-        .f32(64, (v.f(12).clamp(0., 255.) / 255.) as f32);
+        .f32(64, (v.f(12).clamp(0., 255.) / 255.) as f32)
+        .u32(72, w)
+        .u32(76, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let group = rt.bind_group(
         &pipe,
@@ -360,207 +352,5 @@ fn contours(
             });
         gpu::dispatch(&mut pass, &pipe, &group, &[offset], [w, h]);
     }
-    let gpu = target.gpu().clone();
-    let copy = TextureReadback::record(
-        &gpu,
-        target.encoder(),
-        &texture,
-        TextureRegion::full(&texture),
-    )?;
-    // The connected contours need a global traversal before they can be
-    // measured and dashed. Synchronize only the single-channel threshold field.
-    let encoder = std::mem::replace(
-        target.encoder(),
-        rt.device.create_command_encoder(&Default::default()),
-    );
-    rt.queue.submit([encoder.finish()]);
-    let data = copy.map().wait(&gpu)?;
-    let mut trace = Trace {
-        field: data
-            .data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|&x| f32::from_le_bytes(x))
-            .collect(),
-        visited: vec![0; ((w - 1) * (h - 1)) as usize],
-        size: IVec2::new(w as i32 - 1, h as i32 - 1),
-        rect,
-        grid,
-    };
-    Ok(trace.paths(v.f(16).clamp(0., 5.)))
-}
-
-struct Trace {
-    field: Vec<f32>,
-    visited: Vec<u8>,
-    size: IVec2,
-    rect: IRect,
-    grid: f64,
-}
-
-// Edges run clockwise, beginning at the top. A cell can contain two arcs.
-const CORNERS: [IVec2; 4] = [IVec2::ZERO, IVec2::X, IVec2::ONE, IVec2::Y];
-const NEIGHBORS: [IVec2; 4] = [IVec2::NEG_Y, IVec2::X, IVec2::Y, IVec2::NEG_X];
-
-impl Trace {
-    fn inside(&self, p: IVec2) -> bool {
-        p.cmpge(IVec2::ZERO).all() && p.cmplt(self.size).all()
-    }
-
-    fn values(&self, p: IVec2) -> [f32; 4] {
-        CORNERS.map(|corner| {
-            let q = p + corner;
-            self.field[(q.y * (self.size.x + 1) + q.x) as usize]
-        })
-    }
-
-    fn pair(v: [f32; 4], entering: usize) -> Option<usize> {
-        let above = v.map(|n| n >= 0.);
-        let crosses = |i: usize| above[i] != above[(i + 1) % 4];
-        if !crosses(entering) {
-            return None;
-        }
-        if crosses((entering + 2) % 4) && crosses((entering + 1) % 4) {
-            let center = v.iter().sum::<f32>() >= 0.;
-            Some(
-                (entering
-                    + if above[(entering + 1) % 4] == center {
-                        3
-                    } else {
-                        1
-                    })
-                    % 4,
-            )
-        } else {
-            (1..4).map(|i| (entering + i) % 4).find(|&i| crosses(i))
-        }
-    }
-
-    fn point(&self, p: IVec2, v: [f32; 4], edge: usize) -> DVec2 {
-        let end = (edge + 1) % 4;
-        let t = f64::from(v[edge] / (v[edge] - v[end]));
-        let xy = (p + CORNERS[edge])
-            .as_dvec2()
-            .lerp((p + CORNERS[end]).as_dvec2(), t);
-        (xy + DVec2::new(f64::from(self.rect.x0) + 0.5, f64::from(self.rect.y0) + 0.5)) * self.grid
-    }
-
-    fn follow(&mut self, mut p: IVec2, mut edge: usize) -> Vec<DVec2> {
-        let mut path = Vec::new();
-        while self.inside(p) {
-            let visit = (p.y * self.size.x + p.x) as usize;
-            if self.visited[visit] & (1 << edge) != 0 {
-                break;
-            }
-            let v = self.values(p);
-            let Some(next) = Self::pair(v, edge) else {
-                break;
-            };
-            self.visited[visit] |= (1 << edge) | (1 << next);
-            if path.is_empty() {
-                path.push(self.point(p, v, edge));
-            }
-            path.push(self.point(p, v, next));
-            p += NEIGHBORS[next];
-            edge = (next + 2) % 4;
-        }
-        path
-    }
-
-    fn paths(&mut self, tolerance: f64) -> Vec<Path> {
-        let mut paths = Vec::new();
-        // Start open paths at the frame edge so both halves of every interior
-        // connected component remain one contour.
-        for x in 0..self.size.x {
-            paths.push(self.follow(IVec2::new(x, 0), 0));
-            paths.push(self.follow(IVec2::new(x, self.size.y - 1), 2));
-        }
-        for y in 0..self.size.y {
-            paths.push(self.follow(IVec2::new(0, y), 3));
-            paths.push(self.follow(IVec2::new(self.size.x - 1, y), 1));
-        }
-        for y in 0..self.size.y {
-            for x in 0..self.size.x {
-                let p = IVec2::new(x, y);
-                let v = self.values(p);
-                if v.iter().all(|n| (*n >= 0.) == (v[0] >= 0.)) {
-                    continue;
-                }
-                for edge in 0..4 {
-                    let path = self.follow(p, edge);
-                    if !path.is_empty() {
-                        paths.push(path);
-                    }
-                }
-            }
-        }
-        let mut paths: Vec<_> = paths
-            .into_iter()
-            .filter(|p| p.len() >= 2)
-            .map(|mut points| {
-                if points[0].distance_squared(*points.last().unwrap()) < 1e-6 {
-                    points.pop();
-                    let top = points
-                        .iter()
-                        .enumerate()
-                        .min_by(|(_, a), (_, b)| {
-                            a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x))
-                        })
-                        .unwrap()
-                        .0;
-                    points.rotate_left(top);
-                    points.push(points[0]);
-                    if points.windows(2).map(|p| p[0].perp_dot(p[1])).sum::<f64>() < 0. {
-                        points.reverse();
-                    }
-                }
-                Path::new(simplify(points, tolerance))
-            })
-            .collect();
-        let top = |path: &Path| {
-            path.points
-                .iter()
-                .copied()
-                .min_by(|a, b| a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x)))
-                .unwrap()
-        };
-        paths.sort_by(|a, b| {
-            let (a, b) = (top(a), top(b));
-            a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x))
-        });
-        paths
-    }
-}
-
-// Ramer–Douglas–Peucker keeps the tolerance against the original samples.
-fn simplify(points: Vec<DVec2>, tolerance: f64) -> Vec<DVec2> {
-    let mut keep = vec![false; points.len()];
-    let mut spans = vec![(0, points.len() - 1)];
-    while let Some((first, last)) = spans.pop() {
-        keep[first] = true;
-        keep[last] = true;
-        let a = points[first];
-        let direction = points[last] - a;
-        let length_squared = direction.length_squared().max(f64::EPSILON);
-        let mut furthest = None;
-        let mut limit = tolerance * tolerance;
-        for (i, p) in points.iter().enumerate().take(last).skip(first + 1) {
-            let from = *p - a;
-            let t = (from.dot(direction) / length_squared).clamp(0., 1.);
-            let error = (from - t * direction).length_squared();
-            if error > limit {
-                limit = error;
-                furthest = Some(i);
-            }
-        }
-        if let Some(i) = furthest {
-            spans.extend([(first, i), (i, last)]);
-        }
-    }
-    points
-        .into_iter()
-        .zip(keep)
-        .filter_map(|(p, keep)| keep.then_some(p))
-        .collect()
+    super::contour::render(target, v, input, roi, rect, &texture)
 }

@@ -118,3 +118,16 @@ fn honeycomb_relief_and_flow_use_their_sample_coordinates() {
         assert!(after.get(20, 16)[3] > 0.9, "{name} lost the source alpha");
     }
 }
+
+#[test]
+fn plastic_requests_scene_data_only_for_comp_lights() {
+    let fx = builtin("CC Plastic");
+    for (using, expected) in [(1, false), (2, true)] {
+        let instance = instance("CC Plastic", vec![(26, Value::Int(using))]);
+        assert_eq!(
+            fx.effect()
+                .uses_scene(&bae_render::EffectParams::new(&instance)),
+            expected
+        );
+    }
+}

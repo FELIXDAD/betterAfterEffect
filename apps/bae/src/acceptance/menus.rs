@@ -34,13 +34,10 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
         "图层设置",
     ),
     ("motion.layer.pre_compose", Some("Cmd+Shift+C"), "预合成"),
-    // AE 26 shortens this item to “将合成裁剪到工作区”. BAE keeps the glossary
-    // terms (issue #109): Work Area = 工作区域 (工作区 is Workspace), Trim = 修剪
-    // (as in 将入点修剪到当前时间; 裁剪 is Crop).
     (
         "motion.composition.trim",
         Some("Cmd+Shift+X"),
-        "将合成修剪至工作区域",
+        "将合成裁剪到工作区",
     ),
     (
         "motion.composition.render_queue",
@@ -379,7 +376,7 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
     new_comp(&mut h);
     let targets: [(&str, egui::Vec2); 5] = [
         ("Name", egui::vec2(0.0, 420.0)), // Project panel, below the rows
-        ("Layer Name", egui::vec2(700.0, 120.0)), // Timeline graph
+        ("Source Name", egui::vec2(700.0, 120.0)), // Timeline graph
         ("Fit", egui::vec2(300.0, -250.0)), // Composition viewer
         ("Effects & Presets", egui::vec2(0.0, 40.0)), // Effects & Presets panel
         ("Render", egui::vec2(200.0, 0.0)), // Render Queue
@@ -469,7 +466,7 @@ fn text_fields_keep_delete_undo_and_select_all() {
     // Escape leaves the field; with the timeline focused, Delete deletes the
     // selected layer (AE).
     key(&mut h, Modifiers::NONE, Key::Escape);
-    let head = find_text(&h, "Layer Name").unwrap();
+    let head = timeline_header(&h).unwrap();
     click_at(&mut h, pos2(head.left() + 800.0, head.bottom() + 80.0));
     h.state().session().lock().selected_layers = vec![layer.clone()];
     key(&mut h, Modifiers::NONE, Key::Delete);
