@@ -3305,6 +3305,20 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
         bae_motion::paint::strokes_of(&h.stage, &effects[0]).len(),
         1
     );
+    // The Timeline shows Paint ▸ Brush 1 ▸ Path, Stroke Options, Transform.
+    let label = |n: &crate::props::Node| match n {
+        crate::props::Node::Group {
+            label, children, ..
+        } => (label.clone(), children.clone()),
+        crate::props::Node::Prop { label, .. } => (label.clone(), Vec::new()),
+    };
+    let fx = crate::props::effect_nodes(&h.stage, &solid);
+    let (_, rows) = label(&fx[0]);
+    let (brush, parts) = label(rows.last().unwrap());
+    assert_eq!(brush, "Brush 1");
+    let names: Vec<String> = parts.iter().map(|n| label(n).0).collect();
+    assert_eq!(names, ["Path", "Stroke Options", "Transform: Brush 1"]);
+    assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
 /// #599: the Project panel starts renaming the item another panel asks for.
@@ -3381,4 +3395,54 @@ fn new_folder_and_open_layer() {
     h.session().lock().selected_layers = vec![solid.clone()];
     h.action(&mut viewer, Invocation::new(ids::OPEN_LAYER_SOURCE));
     assert_eq!(h.session().lock().layer_panel, Some(solid));
+}
+
+/// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label
+/// ▸ Edit Label Colors… and View ▸ Show Layer Controls.
+#[test]
+fn add_footage_separate_dimensions_and_layer_controls() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    // The comp item itself can't nest; another comp becomes a pre-comp layer.
+    let other = PrimPath::new(
+        h.run("comp.create", json!({"name": "Other"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().open_comp(&comp);
+    h.session().lock().selected_items = vec![other.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::ADD_FOOTAGE_TO_COMP));
+    assert_eq!(r.invocations[0].id, "layer.create");
+    assert_eq!(r.invocations[0].params["source"], json!(other));
+
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::SEPARATE_DIMENSIONS));
+    assert_eq!(r.invocations[0].id, "transform.separate_dimensions");
+    assert_eq!(r.invocations[0].params["separated"], true);
+    h.apply(r);
+    assert!(crate::actions::all_separated(
+        &h.stage,
+        std::slice::from_ref(&solid)
+    ));
+    let r = h.action(&mut viewer, Invocation::new(ids::SEPARATE_DIMENSIONS));
+    assert_eq!(r.invocations[0].params["separated"], false, "a toggle");
+
+    let r = h.action(&mut viewer, Invocation::new(ids::EDIT_LABEL_COLORS));
+    assert_eq!(r.invocations[0].id, bae_ui::settings::ACTION);
+    assert_eq!(r.invocations[0].params["page"], "labels");
+
+    let shown =
+        |h: &Harness| crate::viewer::view_options::shown_controls(&h.session().lock()).handles;
+    assert!(shown(&h));
+    // View ▸ Show Layer Controls off (the tools handler flips the option).
+    h.session().lock().view_options.layer_controls = false;
+    assert!(!shown(&h));
+    assert!(!crate::viewer::guides::checked(
+        &h.resources,
+        "motion.view.show_layer_controls"
+    ));
 }

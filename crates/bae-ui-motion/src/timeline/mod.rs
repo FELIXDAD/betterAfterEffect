@@ -60,7 +60,7 @@ pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    catalog_node, catalog_nodes, invert_layer_selection, key_menu, select_children,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, layer_menu, select_children,
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
@@ -396,6 +396,31 @@ impl TimelinePanel {
             _ => {}
         }
     }
+
+    /// Ctrl+Alt+A: every keyframe and property shown in the Timeline.
+    fn select_visible_keys(&mut self, stage: &Stage, session: &SharedSession) {
+        let Some(info) = common::active_comp(stage, session) else {
+            return;
+        };
+        let layers = self.layer_list(stage, &info.path);
+        let mut s = session.lock();
+        let mut keys = Vec::new();
+        let mut props = Vec::new();
+        for row in self.rows(stage, &layers, &s) {
+            if let RowKind::Prop { path, attr, .. } = &row.kind {
+                props.push((path.clone(), attr.clone()));
+                if let Some(spec) = query::attr_spec(stage, path, attr) {
+                    keys.extend(
+                        spec.keyframes
+                            .keys()
+                            .map(|t| KeyRef::new(path.clone(), attr.clone(), *t)),
+                    );
+                }
+            }
+        }
+        s.selected_keys = keys;
+        s.selected_props = props;
+    }
 }
 
 impl TimelinePanel {
@@ -432,6 +457,24 @@ impl TimelinePanel {
             .into_iter()
             .filter_map(|r| match r.kind {
                 RowKind::Group { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The property rows shown (tests).
+    #[cfg(test)]
+    pub(crate) fn prop_rows(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        s: &Session,
+    ) -> Vec<(PrimPath, String)> {
+        let layers = self.layer_list(stage, comp);
+        self.rows(stage, &layers, s)
+            .into_iter()
+            .filter_map(|r| match r.kind {
+                RowKind::Prop { path, attr, .. } => Some((path, attr)),
                 _ => None,
             })
             .collect()
@@ -507,6 +550,55 @@ impl TimelinePanel {
                 continue;
             }
             if let Some(r) = s.reveal.get(layer) {
+                // M, F, MM: the Masks group and each mask, open, with the asked
+                // properties (above the effects and transform, AE's order).
+                if let Reveal::Attrs(v) = r
+                    && let wanted = props::revealed_mask_attrs(v)
+                    && !wanted.is_empty()
+                    && let Some(Node::Group {
+                        id,
+                        label,
+                        children,
+                    }) = props::layer_tree(stage, layer)
+                        .into_iter()
+                        .find(|n| matches!(n, Node::Group { id, .. } if id.ends_with("#masks")))
+                {
+                    out.push(Row {
+                        kind: RowKind::Group {
+                            id,
+                            label,
+                            open: true,
+                        },
+                        layer_index,
+                        depth: 1,
+                    });
+                    for mask in children {
+                        let Node::Group {
+                            id,
+                            label,
+                            children,
+                        } = mask
+                        else {
+                            continue;
+                        };
+                        out.push(Row {
+                            kind: RowKind::Group {
+                                id,
+                                label,
+                                open: true,
+                            },
+                            layer_index,
+                            depth: 2,
+                        });
+                        for p in children {
+                            if let Node::Prop { path, attr, label } = p
+                                && (wanted.contains(&"*") || wanted.contains(&attr.as_str()))
+                            {
+                                push_prop(&path, &attr, &label, layer_index, 3, stage, &mut out);
+                            }
+                        }
+                    }
+                }
                 // E: the Effects group, open, its effects as twirled (AE shows
                 // them above the revealed transform properties).
                 if let Reveal::Attrs(v) = r
@@ -693,7 +785,7 @@ impl Panel for TimelinePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
         match common::active_comp(cx.stage, &common::session(cx.resources)) {
-            Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
+            Some(info) => common::related_tab(cx, "Timeline", &info.path, &info.name),
             None => TabInfo::new(tr("Timeline")),
         }
         .close_submenu()
@@ -753,6 +845,10 @@ impl Panel for TimelinePanel {
                 self.toggle_columns(id);
                 true
             }
+            actions::ids::SELECT_VISIBLE_KEYS => {
+                self.select_visible_keys(cx.stage, &session);
+                true
+            }
             // Edit ▸ Find (Ctrl+F): the search field.
             "motion.file.find" => {
                 self.focus_search = true;
@@ -766,7 +862,11 @@ impl Panel for TimelinePanel {
         // F4 / Shift+F4 pressed with another panel in front.
         let toggles = std::mem::take(&mut common::session(cx.resources).lock().timeline_toggles);
         for id in toggles {
-            self.toggle_columns(id);
+            if id == actions::ids::SELECT_VISIBLE_KEYS {
+                self.select_visible_keys(cx.stage, &common::session(cx.resources));
+            } else {
+                self.toggle_columns(id);
+            }
         }
         let full = ui.available_rect_before_wrap();
         crate::import::drop_on_panel(ui, cx);
@@ -1079,7 +1179,9 @@ impl TimelinePanel {
             pos2(body.left() + cols.end - 8.0, body.bottom()),
         );
         if outline_bg.height() > 0.0 {
-            let bg = ui.interact(outline_bg, ui.id().with("outline_bg"), Sense::click());
+            let bg = ui
+                .interact(outline_bg, ui.id().with("outline_bg"), Sense::click())
+                .labeled(egui::WidgetType::Other, tr("Timeline Layer List"));
             if bg.clicked() {
                 let mut s = session.lock();
                 s.selected_keys.clear();

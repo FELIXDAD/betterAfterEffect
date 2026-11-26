@@ -24,6 +24,22 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Exponential Scale", "指数比例"),
     ("Composition Flowchart", "合成流程图"),
     ("Reveal Composition in Project", "在项目中显示合成"),
+    (
+        "Select All Visible Keyframes and Revealed Properties",
+        "选择全部可见的关键帧和显示的属性",
+    ),
+    (
+        "Deselect All Keyframes and Properties",
+        "取消选择全部关键帧和属性",
+    ),
+    (
+        "Go to Previous Keyframe on Selected Layers/Properties",
+        "转到“选定图层/属性”上的“上一个关键帧”",
+    ),
+    (
+        "Go to Next Keyframe on Selected Layers/Properties",
+        "转到“选定图层/属性”上的“下一个关键帧”",
+    ),
     ("Sequence Layers...", "序列图层..."),
     ("Set Expressions", "设置多个表达式"),
     (
@@ -213,6 +229,16 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Animator", "动画制作工具"),
     ("Based On", "依据"),
     ("Amount", "数量"),
+    // A Paint effect's strokes (`props::paint_strokes`, AE 26's words).
+    ("Brush", "画笔"),
+    ("Clone", "仿制"),
+    ("Eraser", "橡皮擦"),
+    ("Diameter", "直径"),
+    ("Angle", "角度"),
+    ("Hardness", "硬度"),
+    ("Spacing", "间距"),
+    ("Flow", "流量"),
+    ("Transform:", "变换:"),
     ("Smoothness", "平滑度"),
     ("Ease High", "缓和高"),
     ("Ease Low", "缓和低"),
@@ -281,6 +307,29 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Go to Next Keyframe", "转到下一个关键帧"),
     ("Reveal Animated Properties", "显示动画属性"),
+    (
+        "Add Animated Properties to Revealed Properties",
+        "同时显示动画属性",
+    ),
+    ("Reveal Mask Path", "显示蒙版路径"),
+    ("Add Mask Path to Revealed Properties", "同时显示蒙版路径"),
+    ("Reveal Mask Feather", "显示蒙版羽化"),
+    (
+        "Add Mask Feather to Revealed Properties",
+        "同时显示蒙版羽化",
+    ),
+    (
+        "Mask Path: Add or Remove Keyframe",
+        "蒙版路径：添加或移除关键帧",
+    ),
+    (
+        "Mask Feather: Add or Remove Keyframe",
+        "蒙版羽化：添加或移除关键帧",
+    ),
+    (
+        "Audio Levels: Add or Remove Keyframe",
+        "音频电平：添加或移除关键帧",
+    ),
     ("Reveal Modified Properties", "显示修改的属性"),
     // Timeline
     ("Layer Name", "图层名称"),
