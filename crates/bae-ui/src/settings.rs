@@ -819,10 +819,20 @@ impl SettingsDialog {
             Kind::Path => {
                 let path = draft.str(p.key);
                 let default;
-                let path = if path.is_empty() && matches!(p.key, "disk.media_cache_database_folder" | "disk.media_cache_folder") && let Some(root) = &self.media_cache_root {
+                let path = if path.is_empty()
+                    && matches!(
+                        p.key,
+                        "disk.media_cache_database_folder" | "disk.media_cache_folder"
+                    )
+                    && let Some(root) = &self.media_cache_root
+                {
                     default = root.to_string_lossy();
                     &default
-                } else if path.is_empty() { "—" } else { path };
+                } else if path.is_empty() {
+                    "—"
+                } else {
+                    path
+                };
                 ui.label(RichText::new(path).color(color::TEXT_DIM))
                     .on_hover_text(label);
             }

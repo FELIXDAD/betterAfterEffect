@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use super::*;
-use bae_media::{conform::ConformedAudio, Waveform, source_id_for};
+use bae_media::{Waveform, conform::ConformedAudio, source_id_for};
 use std::sync::Arc;
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(2);
@@ -28,7 +28,7 @@ fn check_file(path: &Path, previous: Option<u64>, cache: Option<&ConformedAudio>
     if previous == Some(id) {
         return PeakUpdate::Unchanged;
     }
-    let Ok(mut audio) = ConformedAudio::open_source(cache,path) else {
+    let Ok(mut audio) = ConformedAudio::open_source(cache, path) else {
         return PeakUpdate::Unavailable;
     };
     let Ok(wave) = Waveform::from_source(&mut audio, 128) else {

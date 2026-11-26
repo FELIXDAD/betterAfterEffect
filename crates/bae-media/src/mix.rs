@@ -2,11 +2,11 @@
 mod sinc;
 use sinc::Sinc;
 
+use crate::conform::ConformedAudio;
 use bae_anim::{Curve, CurveKind, LayerTiming};
 use bae_model::{PrimPath, Stage, Time, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::conform::ConformedAudio;
 
 use crate::audio::{layer_file, sample_to_time};
 use crate::{AudioSource, FileAudio, MediaError};
@@ -140,7 +140,13 @@ impl AudioMix {
 }
 
 impl Track {
-    fn add(&mut self, start: i64, rate: u32, out: &mut [[f32; 2]], cache: Option<&ConformedAudio>) -> Result<(), MediaError> {
+    fn add(
+        &mut self,
+        start: i64,
+        rate: u32,
+        out: &mut [[f32; 2]],
+        cache: Option<&ConformedAudio>,
+    ) -> Result<(), MediaError> {
         let first_at = |time: Time| {
             (i128::from(time.0) * i128::from(rate) + i128::from(Time::FLICKS_PER_SECOND) - 1)
                 .div_euclid(i128::from(Time::FLICKS_PER_SECOND)) as i64

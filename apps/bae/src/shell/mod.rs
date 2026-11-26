@@ -139,9 +139,21 @@ impl From<egui_winit::accesskit_winit::Event> for UserEvent {
     }
 }
 
-fn media_folders(p: &bae_prefs::Preferences, root: &std::path::Path) -> bae_media::conform::CacheFolders {
-    let folder = |key| if p.str(key).is_empty() { root.to_owned() } else { std::path::PathBuf::from(p.str(key)) };
-    bae_media::conform::CacheFolders::new(&folder("disk.media_cache_database_folder"), &folder("disk.media_cache_folder"))
+fn media_folders(
+    p: &bae_prefs::Preferences,
+    root: &std::path::Path,
+) -> bae_media::conform::CacheFolders {
+    let folder = |key| {
+        if p.str(key).is_empty() {
+            root.to_owned()
+        } else {
+            std::path::PathBuf::from(p.str(key))
+        }
+    };
+    bae_media::conform::CacheFolders::new(
+        &folder("disk.media_cache_database_folder"),
+        &folder("disk.media_cache_folder"),
+    )
 }
 
 /// A smoke test stops as failed if no frame completes for this long.
@@ -285,9 +297,16 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     app.insert_resource(prefs.clone());
     if let Some(dirs) = dirs.as_ref().filter(|_| global.smoke_test.is_none()) {
         let root = dirs.cache.clone();
-        let cache = Arc::new(bae_media::conform::ConformedAudio::new(media_folders(&prefs.current(), &root)));
+        let cache = Arc::new(bae_media::conform::ConformedAudio::new(media_folders(
+            &prefs.current(),
+            &root,
+        )));
         let weak = Arc::downgrade(&cache);
-        prefs.subscribe(move |p| if let Some(cache) = weak.upgrade() { cache.configure(media_folders(p, &root)); });
+        prefs.subscribe(move |p| {
+            if let Some(cache) = weak.upgrade() {
+                cache.configure(media_folders(p, &root));
+            }
+        });
         app.insert_resource(cache);
     }
     let project_file = bae_ui::files::ProjectFile::default();
@@ -489,7 +508,10 @@ impl Shell {
                 .get_registry::<dyn bae_gpu::WarmUp>()
                 .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
                 .unwrap_or_default();
-            if let Some(cache) = self.app.resource::<Arc<bae_media::conform::ConformedAudio>>() {
+            if let Some(cache) = self
+                .app
+                .resource::<Arc<bae_media::conform::ConformedAudio>>()
+            {
                 tasks.push(cache.clone());
             }
             // Frames drawn without something still warming up are incomplete
@@ -746,7 +768,11 @@ impl Shell {
     fn run_settings_requests(&mut self) {
         for request in self.workspace.take_settings_requests() {
             if request == "disk.clean_database_and_cache" {
-                if let (Some(cache),Some(dirs)) = (self.app.resource::<Arc<bae_media::conform::ConformedAudio>>(), self.app.resource::<AppDirs>()) {
+                if let (Some(cache), Some(dirs)) = (
+                    self.app
+                        .resource::<Arc<bae_media::conform::ConformedAudio>>(),
+                    self.app.resource::<AppDirs>(),
+                ) {
                     cache.clean(media_folders(self.workspace.settings_draft(), &dirs.cache));
                 }
                 continue;
@@ -770,9 +796,17 @@ impl Shell {
                 if let Some(view) = &self.view {
                     dialog = dialog.set_parent(&*view.window);
                 }
-                if matches!(key, "disk.media_cache_database_folder" | "disk.media_cache_folder") && let Some(dirs) = self.app.resource::<AppDirs>() {
+                if matches!(
+                    key,
+                    "disk.media_cache_database_folder" | "disk.media_cache_folder"
+                ) && let Some(dirs) = self.app.resource::<AppDirs>()
+                {
                     let chosen = self.workspace.settings_draft().str(key);
-                    dialog = dialog.set_directory(if chosen.is_empty() { dirs.cache.as_path() } else { std::path::Path::new(chosen) });
+                    dialog = dialog.set_directory(if chosen.is_empty() {
+                        dirs.cache.as_path()
+                    } else {
+                        std::path::Path::new(chosen)
+                    });
                 }
                 let picked = if key == "project.project_template" {
                     dialog.add_filter("BAE", &["bae", "baez"]).pick_file()

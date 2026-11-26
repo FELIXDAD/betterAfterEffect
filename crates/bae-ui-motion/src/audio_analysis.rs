@@ -14,7 +14,11 @@ pub struct Analysis {
 }
 
 pub(crate) fn convert(cx: &PanelContext<'_>, info: &CompInfo) {
-    let mix = AudioMix::from_stage(cx.stage, &info.path).with_cache(cx.resources.get::<Arc<bae_media::conform::ConformedAudio>>().cloned());
+    let mix = AudioMix::from_stage(cx.stage, &info.path).with_cache(
+        cx.resources
+            .get::<Arc<bae_media::conform::ConformedAudio>>()
+            .cloned(),
+    );
     if mix.is_empty() {
         super::dialogs::alert(
             cx,

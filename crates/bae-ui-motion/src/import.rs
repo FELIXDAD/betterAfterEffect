@@ -299,9 +299,17 @@ fn import_into(
     }
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
     let probed = probe(paths, &defaults);
-    if let Some(cache) = cx.resources.get::<Arc<bae_media::conform::ConformedAudio>>() {
+    if let Some(cache) = cx
+        .resources
+        .get::<Arc<bae_media::conform::ConformedAudio>>()
+    {
         for file in &probed.files {
-            if file.attrs.get("has_audio").and_then(bae_model::Value::as_bool) == Some(true) {
+            if file
+                .attrs
+                .get("has_audio")
+                .and_then(bae_model::Value::as_bool)
+                == Some(true)
+            {
                 cache.prepare(Path::new(&file.path));
             }
         }

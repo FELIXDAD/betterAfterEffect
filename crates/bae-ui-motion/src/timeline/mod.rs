@@ -756,7 +756,10 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        self.waveforms.cache = cx.resources.get::<std::sync::Arc<bae_media::conform::ConformedAudio>>().cloned();
+        self.waveforms.cache = cx
+            .resources
+            .get::<std::sync::Arc<bae_media::conform::ConformedAudio>>()
+            .cloned();
         // F4 / Shift+F4 pressed with another panel in front.
         let toggles = std::mem::take(&mut common::session(cx.resources).lock().timeline_toggles);
         for id in toggles {
