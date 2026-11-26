@@ -335,6 +335,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         prefs_generation: prefs.generation(),
         prefs,
         menu_lang: bae_ui::i18n::lang(),
+        menu_registry_generation: 0,
         autosave: crate::autosave::AutoSave::default(),
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
@@ -379,6 +380,7 @@ struct Shell {
     menu: Option<menu::AppMenu>,
     /// The UI language the menu bar was built in.
     menu_lang: bae_ui::Lang,
+    menu_registry_generation: u64,
     workspace: Workspace,
     workbench_file: Option<SettingsFile<WorkbenchSettings>>,
     document: Document,
@@ -714,7 +716,11 @@ impl Shell {
     /// menu bar is rebuilt in it and new items are named in it.
     fn sync_language(&mut self) {
         let lang = bae_ui::i18n::lang();
-        if lang == self.menu_lang {
+        let generation = self
+            .app
+            .get_registry::<bae_ui::MenuItemSpec>()
+            .map_or(0, |r| r.generation());
+        if lang == self.menu_lang && generation == self.menu_registry_generation {
             return;
         }
         self.menu_lang = lang;
@@ -734,6 +740,10 @@ impl Shell {
         if let Some(old) = self.menu.take() {
             old.detach(&view.window);
         }
+        self.menu_registry_generation = self
+            .app
+            .get_registry::<bae_ui::MenuItemSpec>()
+            .map_or(0, |r| r.generation());
         let contributed = self.workspace.contributed_menus(&self.app);
         let actions = self.workspace.handled_actions(&self.app);
         match menu::AppMenu::new(&contributed, actions) {
@@ -1016,7 +1026,7 @@ impl Shell {
             )
             .with_open_panels(&open);
             menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
-            menu.set_workspace_title(workspace.active_workspace_title());
+            menu.sync_workspace_titles(workspace);
         }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,

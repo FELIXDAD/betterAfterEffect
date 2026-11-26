@@ -174,7 +174,12 @@ const ZH: &[(&str, &str)] = &[
     ("Edit Workspaces...", "编辑工作区..."),
     ("Edit Workspaces", "编辑工作区"),
     ("Save as New Workspace...", "另存为新工作区..."),
-    ("New Workspace", "新建工作区"),
+    ("New Workspace", "新工作区"),
+    (
+        "Assign Shortcut to “{name}” Workspace",
+        "将快捷键分配给“{name}”工作区",
+    ),
+    ("{key} (replaces “{name}”)", "{key}（替换“{name}”）"),
     ("Show in Bar", "显示在工作区栏"),
     ("Delete", "删除"),
     ("Name", "名称"),
