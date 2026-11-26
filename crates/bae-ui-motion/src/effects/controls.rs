@@ -298,19 +298,13 @@ fn params(
                 .as_ref()
                 .map_or(48_000, |output| output.sample_rate());
             super::eq_response::show(ui, rate, |id| {
-                common::current_value(
-                    eval.get(cx.resources),
-                    cx.stage,
-                    effect,
-                    &param_attr(id),
-                    now,
-                )
-                .or_else(|| def.param(id)?.default.clone())
-                .and_then(|v| {
-                    v.as_f64()
-                        .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
-                })
-                .unwrap_or_default()
+                common::current_value(eval.get(cx.stage), cx.stage, effect, &param_attr(id), now)
+                    .or_else(|| def.param(id)?.default.clone())
+                    .and_then(|v| {
+                        v.as_f64()
+                            .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
+                    })
+                    .unwrap_or_default()
             });
             continue;
         }
@@ -347,7 +341,7 @@ fn param_row(
         .as_ref()
         .and_then(|s| s.value_for(effect, &attr))
         .cloned()
-        .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
+        .or_else(|| common::current_value(eval.get(cx.stage), stage, effect, &attr, now))
         .or_else(|| {
             let layer = super::layer_of(effect)?;
             bae_motion::effect::instance_default(stage, &layer, param)
@@ -400,7 +394,7 @@ fn param_row(
             if param.id==1 && matches!(param.kind,ParamKind::Button){
                 let is_cdl=def.match_name=="ADBE OCIO CDL Transform";
                 let data_id=if is_cdl{6}else{5};
-                let stored=common::current_value(eval.get(cx.resources),stage,effect,&param_attr(data_id),now);
+                let stored=common::current_value(eval.get(cx.stage),stage,effect,&param_attr(data_id),now);
                 let filename=stored.as_ref().and_then(|v|match v{Value::Bytes(data)=>data.split(|b|*b==0).next().and_then(|s|std::str::from_utf8(s).ok()),_=>None});
                 if ui.button(filename.unwrap_or(tr("Open..."))).clicked(){
                     cx.invoke_with("motion.effect.open_color_file",json!({"path":effect,"time":query::to_key_time(stage,effect,now),"cdl":is_cdl}));
@@ -422,8 +416,12 @@ fn param_row(
             ui.colored_label(color::TEXT_DISABLED, tr("Not available in BAE yet"));
         } else {
             ui.add_enabled_ui(!disabled, |ui| {
+                if let Some(channel_edit)=super::exr::control(ui,session,effect,&def.match_name,param.id,value.as_ref(),now) {
+                    edit=channel_edit;
+                    return;
+                }
                 if def.match_name=="ADBE MESH WARP" && param.id==4 {
-                    let mut number=|id:u32|common::current_value(eval.get(cx.resources),stage,effect,&param_attr(id),now)
+                    let mut number=|id:u32|common::current_value(eval.get(cx.stage),stage,effect,&param_attr(id),now)
                         .or_else(||def.param(id).and_then(|p|p.default.clone())).and_then(|v|v.as_f64()).unwrap_or(0.);
                     edit=super::warp_grid::edit(ui,value.as_ref(),[number(2) as usize,number(1) as usize]);
                     return;
@@ -446,7 +444,7 @@ fn param_row(
         && let Some(curve) = bae_effects::LumetriCurve::from_param(param.id)
     {
         let curve_attr = param_attr(curve.id());
-        let old = common::current_value(eval.get(cx.resources), stage, effect, &curve_attr, now);
+        let old = common::current_value(eval.get(stage), stage, effect, &curve_attr, now);
         let time = query::to_key_time(stage, effect, now);
         let points = curve.pick([*r, *g, *b], old.as_ref());
         cx.invoke_with(
@@ -461,7 +459,7 @@ fn param_row(
     }
     // An expression pick whip dragged from the Timeline.
     if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
-        crate::expr::link(cx, eval.get(cx.resources), &whip, effect, Some(&attr), now);
+        crate::expr::link(cx, eval.get(cx.stage), &whip, effect, Some(&attr), now);
     }
     if twirl && state.open_params.contains(&key) {
         ui.horizontal(|ui| {
@@ -471,6 +469,33 @@ fn param_row(
             }
         });
     }
+    if def.match_name == "ADBE Lumetri"
+        && let Edit::Commit(Value::Color(sample)) = &edit
+    {
+        let changes = match param.id {
+            70..=72 => Some(bae_effects::lumetri_key_edits(param.id, *sample, |id| {
+                common::current_value(eval.get(stage), stage, effect, &param_attr(id), now)
+            })),
+            94 => bae_effects::lumetri_white_balance_settings(*sample).map(|[temp, tint]| {
+                vec![
+                    (94, Value::Color(*sample)),
+                    (7, Value::Float(temp)),
+                    (8, Value::Float(tint)),
+                ]
+            }),
+            _ => None,
+        };
+        if let Some(changes) = changes {
+            session.lock().scrub = None;
+            if !changes.is_empty() {
+                let time = query::to_key_time(stage, effect, now);
+                let edits: Vec<_> = changes.into_iter().map(|(id, value)|
+                    json!({"path": effect, "attr": param_attr(id), "time": time, "value": value})).collect();
+                cx.invoke_with("attr.set_many", json!({"edits": edits}));
+            }
+            return;
+        }
+    }
     common::apply_edit(cx, session, effect, &attr, now, edit);
 }
 
@@ -478,7 +503,7 @@ fn param_row(
 #[allow(clippy::too_many_arguments)]
 fn value_control(
     ui: &mut Ui,
-    cx: &PanelContext<'_>,
+    cx: &mut PanelContext<'_>,
     effect: &PrimPath,
     def: &EffectDef,
     param: &EffectParamDef,
@@ -550,7 +575,18 @@ fn value_control(
         }
         ParamKind::Popup { .. } => {
             let options = super::option_labels(&def.match_name, param);
-            let raw = popup_index(value);
+            let lut = (def.match_name == "ADBE Lumetri")
+                .then(|| bae_effects::LumetriLut::from_menu(param.id))
+                .flatten();
+            let (mut raw, mut filename) = (popup_index(value), None);
+            if let Some(slot) = lut
+                && let Some(prim) = cx.stage.prim(effect)
+            {
+                let [first, second, file] = slot.parameters().map(param_attr);
+                let asset = prim.value(&file);
+                raw = slot.choice(prim.value(&first), prim.value(&second), asset);
+                filename = bae_effects::LumetriLut::filename(asset).map(str::to_owned);
+            }
             let current = if def.match_name.starts_with("ADBE OCIO ") && raw > options.len() as i64
             {
                 1
@@ -563,7 +599,11 @@ fn value_control(
                 .unwrap_or_default();
             let mut chosen = None;
             egui::ComboBox::from_id_salt(id)
-                .selected_text(shown)
+                .selected_text(if current == 2 {
+                    filename.as_deref().unwrap_or(&shown)
+                } else {
+                    &shown
+                })
                 .show_ui(ui, |ui| {
                     for (i, o) in options.iter().enumerate() {
                         let n = i as i64 + 1;
@@ -577,6 +617,20 @@ fn value_control(
                         }
                     }
                 });
+            if let Some(slot) = lut {
+                let needs_file = current > 4 || current == 2 && filename.is_none();
+                if needs_file {
+                    ui.label(tr("Load your own LUT"));
+                }
+                if chosen == Some(3) || needs_file && ui.button(tr("Browse...")).clicked() {
+                    cx.invoke_with(super::lut::BROWSE, json!({"path": effect, "menu":param.id}));
+                } else if let Some(n) = chosen
+                    && n != current
+                {
+                    super::lut::commit(cx, effect, slot, n, None);
+                }
+                return Edit::None;
+            }
             match chosen {
                 Some(n) if n != current => Edit::Commit(Value::Int(n)),
                 _ => Edit::None,

@@ -366,13 +366,24 @@ pub(super) fn menu(
     });
 }
 
-pub(crate) fn add(cx: &PanelContext<'_>, comp: &CompInfo) {
+/// Composition > Add to Render Queue (`frame` None) or Save Frame As: the
+/// new item's output follows Preferences > Output (default name and folder,
+/// else "Not yet specified"), then the default file name template.
+pub(crate) fn add(cx: &PanelContext<'_>, comp: &CompInfo, frame: Option<i64>) {
     let queue = shared(cx.resources);
     let mut q = queue.lock();
-    let id = q.add(comp, &default_output_dir());
+    let dir = default_output_dir();
+    let id = match frame {
+        Some(frame) => q.add_frame(comp, &dir, frame),
+        None => q.add(comp, &dir),
+    };
+    q.assign_output(
+        crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
+    );
     let pattern = cx.resources.get::<Arc<Store>>().and_then(|s| s.snapshot());
     if let Some(p) = pattern.as_ref().and_then(|l| l.default_name.as_ref())
         && let Some(item) = q.item_mut(id)
+        && !item.outputs[0].output.is_empty()
     {
         let project = cx
             .resources

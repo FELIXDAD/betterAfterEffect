@@ -147,6 +147,7 @@ impl Default for PreviewOptions {
 /// A value being dragged in a panel, previewed by the viewer before the command runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scrub {
+    pub auto_key: bool,
     pub path: PrimPath,
     pub attr: String,
     pub value: Value,
@@ -181,6 +182,7 @@ impl Scrub {
                     &self.attr,
                     query::to_key_time(stage, p, self.time),
                     v.clone(),
+                    self.auto_key,
                 ),
             })
             .collect()
@@ -233,6 +235,11 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) loading_lut: Option<crate::effects::lut::Load>,
+    /// Automatically key animatable UI value edits.
+    pub auto_key: bool,
+    pub(crate) held_viewer_time: Option<(PrimPath, Time)>,
+    pub(crate) channel_frame: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     /// Last UI frame in which a visible timeline requested per-layer CPU timings.
     pub(crate) timing_column_frame: Option<u64>,
     pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
@@ -253,6 +260,8 @@ pub struct Session {
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
+    /// Latest request to re-evaluate a generated source without editing project data.
+    pub(crate) solid_reload: Option<(u64, PrimPath)>,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
@@ -264,6 +273,7 @@ pub struct Session {
     pub playback: Option<Playback>,
     pub(crate) playback_stats: PlaybackStats,
     pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    audio_mapping: (bool, bool),
     pub(crate) master_db: f32,
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
@@ -302,6 +312,7 @@ pub struct Session {
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
@@ -321,16 +332,23 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// When L was last pressed to reveal the audio waveform on a second press.
     pub(crate) last_l: Option<Instant>,
+    /// When M was last pressed (MM: every mask property).
+    pub(crate) last_m: Option<Instant>,
+    /// When E was last pressed (EE: the expressions).
+    pub(crate) last_e: Option<Instant>,
     /// Motion Sketch armed (Start Capture): the next drag in the Composition
     /// panel records this layer's position.
     pub motion_sketch: Option<SketchArm>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
-    /// Timeline column toggles asked for while another panel had focus (F4
-    /// Switches / Modes, Shift+F4 Parent & Link): the Timeline applies them.
+    /// Timeline actions asked for while another panel had focus (F4 Switches /
+    /// Modes, Shift+F4 Parent & Link, Select All Visible Keyframes …): the
+    /// Timeline runs them on its next frame.
     pub timeline_toggles: Vec<&'static str>,
     /// The frame the Composition viewer shows and its key (Lumetri Scopes).
     pub scope_frame: Option<(bae_gpu::wgpu::Texture, u64)>,
+    /// Working pixels before the display conversion, when a scope requests them.
+    pub scope_source: Option<bae_render::GpuImage>,
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,
@@ -370,6 +388,7 @@ impl SharedSession {
         s.stop();
         let fresh = Session {
             output: s.output.take(),
+            audio_mapping: s.audio_mapping,
             retry_audio_after: s.retry_audio_after.take(),
             opening_audio: s.opening_audio,
             loop_playback: s.loop_playback,
@@ -385,6 +404,7 @@ impl SharedSession {
         s.opening_audio = false;
         match device {
             Ok(output) => {
+                output.set_channel_mapping(s.audio_mapping.0, s.audio_mapping.1);
                 output.set_gain(10.0_f32.powf(s.master_db / 20.0));
                 let previous = s.output.replace(output);
                 s.mix_revision = None;
@@ -469,6 +489,21 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    /// Apply the channel mapping to the active stream and any replacement device.
+    pub fn set_audio_mapping(&mut self, left_to_second: bool, right_to_first: bool) {
+        self.audio_mapping = (left_to_second, right_to_first);
+        if let Some(output) = &self.output {
+            output.set_channel_mapping(left_to_second, right_to_first);
+        }
+    }
+
+    /// The warmed device the preview is currently using.
+    pub fn audio_output_info(&self) -> Option<(&str, u16, u32)> {
+        let output = self.output.as_ref().filter(|o| !o.device_lost())?;
+        let (name, channels) = output.device_info();
+        Some((name, channels, output.sample_rate()))
+    }
+
     pub(crate) fn text_range(&self, layer: Option<&PrimPath>) -> Option<std::ops::Range<usize>> {
         let (owner, time, range) = self.text_selection.as_ref()?;
         (Some(owner) == layer

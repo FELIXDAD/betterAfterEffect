@@ -200,3 +200,41 @@ fn language_switches_without_restart() {
     settle(&mut h);
     assert_eq!(bae_ui::i18n::lang(), bae_ui::Lang::Zh);
 }
+
+#[test]
+fn transparency_settings_change_the_checkerboard_cells() {
+    let mut h = gui();
+    new_comp(&mut h);
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page":"grids_guides"}),
+    ));
+    settle(&mut h);
+    let dialog = h.state_mut().workspace.settings_dialog();
+    dialog.set("grids_guides.transparency_grid_size", "large");
+    dialog.set(keys::TRANSPARENCY_PRESET, "blue");
+    let second = dialog.draft().color(keys::TRANSPARENCY_SECOND);
+    dialog.set(keys::TRANSPARENCY_FIRST, "#125698");
+    assert_eq!(dialog.draft().str(keys::TRANSPARENCY_PRESET), "custom");
+    assert_eq!(dialog.draft().color(keys::TRANSPARENCY_SECOND), second);
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    h.get_by_label("Transparency Grid").click();
+    settle(&mut h);
+    let is_rect = |color, size: Option<f32>| {
+        h.output().shapes.iter().any(|shape| {
+            let egui::Shape::Rect(rect) = &shape.shape else {
+                return false;
+            };
+            rect.fill == color && size.is_none_or(|s| rect.rect.size() == egui::vec2(s, s))
+        })
+    };
+    assert!(is_rect(
+        egui::Color32::from_rgb(0x12, 0x56, 0x98),
+        Some(16.0)
+    ));
+    assert!(is_rect(
+        egui::Color32::from_rgb(second[0], second[1], second[2]),
+        None
+    ));
+}

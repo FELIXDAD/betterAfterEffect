@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+bae-interop-psd.workspace = true
 bae-effects.workspace = true
 bae-app.workspace = true
 bae-model.workspace = true

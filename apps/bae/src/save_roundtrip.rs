@@ -285,6 +285,7 @@ fn ctrl_s_right_after_the_second_keyframe_writes_it() {
             &mut doc,
             &mut NoQuestions,
             &Invocation::new(bae_ui::action::ids::SAVE),
+            None,
         );
         assert_eq!(saved, Some(FileOutcome::Saved), "{name}");
         assert!(!doc.is_dirty());
