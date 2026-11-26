@@ -398,6 +398,14 @@ impl Renderer {
         self.frames.clear();
     }
 
+    /// Original channel names and picker data for a frame already decoded by this renderer.
+    pub fn footage_channels(
+        &self,
+        footage: &FootageRef,
+    ) -> Option<Arc<bae_gpu::channels::ChannelInfo>> {
+        self.footage.channels(footage)
+    }
+
     /// Closes every open footage file so the next frame reopens them (after
     /// files changed on disk or assets were relinked).
     pub fn reload_footage(&mut self) {
