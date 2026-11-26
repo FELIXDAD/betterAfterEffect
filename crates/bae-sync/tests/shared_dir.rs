@@ -480,6 +480,75 @@ fn a_client_id_can_only_be_used_once_at_a_time() {
     DirTransport::open(&dir, id, fast()).unwrap();
 }
 
+/// Every file under `dir`.
+fn all_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in fs::read_dir(dir).unwrap().flatten() {
+        if e.metadata().unwrap().is_dir() {
+            all_files(&e.path(), out);
+        } else {
+            out.push(e.path());
+        }
+    }
+}
+
+/// A folder opened read-only (the user may not write `updates/`) is read like
+/// any other, this client's own log from an earlier session included, and
+/// nothing is written: no lock, no log, no presence file.
+#[test]
+fn a_folder_opened_read_only_is_read_but_never_written() {
+    let (_tmp, dir) = project_dir();
+    // An earlier, writable session of the same client left an edit behind.
+    let mut earlier = Client::open(&dir, "reader", fast(), 1);
+    earlier.pump();
+    set_opacity(&mut earlier, 4.0);
+    earlier.pump();
+    let expected = fingerprint(&earlier.stage);
+    drop(earlier);
+    let mut before = Vec::new();
+    all_files(&dir, &mut before);
+
+    let mut dir_t =
+        DirTransport::open_read_only(&dir, ClientId::new("reader").unwrap(), fast()).unwrap();
+    assert!(dir_t.is_read_only());
+    let mut stage = Project::open(&dir).unwrap().stage;
+    let mut config = SessionConfig::new(ClientId::new("reader").unwrap());
+    config.hello_interval = None;
+    config.read_only = true;
+    let mut session = SyncSession::new(config);
+    session.set_presence(bae_sync::PresenceState::default());
+    for _ in 0..3 {
+        session.pump(&mut stage, &mut dir_t).unwrap();
+    }
+    assert_eq!(fingerprint(&stage), expected);
+    // Local edits stay local.
+    stage.set_edit_target(&SublayerId::root()).unwrap();
+    stage
+        .transact(&author("user:reader"), "edit", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main/layers/title"),
+                attr: "opacity".into(),
+                value: Some(Value::Float(9.0)),
+            })
+        })
+        .unwrap();
+    for _ in 0..3 {
+        session.pump(&mut stage, &mut dir_t).unwrap();
+    }
+    assert!(!session.unsynced(&stage).is_empty());
+    let mut after = Vec::new();
+    all_files(&dir, &mut after);
+    assert_eq!(before, after, "nothing written");
+    let root = DocKey::sublayer(&SublayerId::root());
+    let edit = bae_sync::Message::Updates {
+        doc: root.clone(),
+        version: stage.version(&root).unwrap(),
+        data: stage.export_updates(&root, &Default::default()).unwrap(),
+    };
+    assert!(dir_t.send(edit).is_err());
+    // No lock is taken: a writable session of the same client can attach.
+    DirTransport::open(&dir, ClientId::new("reader").unwrap(), fast()).unwrap();
+}
+
 #[test]
 fn a_sublayer_added_later_is_redelivered() {
     let (_tmp, dir) = project_dir();

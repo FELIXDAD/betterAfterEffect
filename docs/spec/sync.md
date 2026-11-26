@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F。分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D；Hub 的 WebSocket 传输（3.1）PR E；回滚（5.4）PR F；第 7 节（连接管理）`collab/sync-connection`。分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -13,6 +13,7 @@
 | `DocSet` | 会话读写的一组文档。`Stage` 实现了它（各工程层）；`MemDocs` 是 Hub 用的纯 Loro 文档集合。 |
 | `SyncSession` | 把一个 `DocSet` 和一个远端保持同步。和传输方式无关。 |
 | `Relay` | Hub 端逻辑（不含网络）：每个连上的客户端一个会话，共用一份 `MemDocs`。10 hub-nas 用 WebSocket 包一层即可。 |
+| `Connection` | 应用和 Agent 用来分享或加入工程的连接管理（第 7 节）：后台连接、断线重连、读写权限、状态、关闭。 |
 | `ClientId` | 一个正在运行的客户端（应用实例、Agent 进程、Hub）。1–64 个 ASCII 字母、数字、`_`、`-`，可以直接当文件名。同时运行的会话必须用不同的 ID；应用建议每个安装固定一个（跨次启动继续写同一个日志），Agent 用自己的。 |
 
 远端导入一律走 `Stage::import_updates`：发出 `origin = remote` 的 `StageEvent`，不进任何撤销栈。
@@ -64,6 +65,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 在收到对方第一个 `Hello` 之前不发任何数据（不知道对方有什么，全量发送太浪费）。
 
+**只读**（`SessionConfig::read_only`）：对方不接受我们的修改（只读令牌、写不了的共享目录，见 7.5）时打开。会话不发任何文档数据（`Updates`、`Snapshot`，也不回答 `SnapshotRequest`，`flush` 什么都不发），`Hello` 和在线状态照发，照常接收。本地修改一直留在 `unsynced` 里。
+
 **丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发。断线重连时调用 `SyncSession::reset()`。
 
 **传输出错**：`pump` 收消息时遇到传输错误，先把本轮出错前已经收到的数据导入，再返回错误（导入不需要连接；对方已经认为这些数据送到了，不导入就会丢修改，例如客户端发完最后几条修改马上断开）。本轮开头的定期 `Hello` 发不出去时也一样：照样先收、先导入，再返回错误。导入的事件照常通过 `Stage::subscribe` 发出，只是 `PumpOutcome` 随错误一起丢掉。`Relay` 有连接出错时多转一轮，让这些数据在同一次 `pump` 里转给其他连接。
@@ -95,7 +98,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 
-- `HubTransport::connect(url, token, timeout)`：`url` 形如 `ws://nas.local:7341/projects/<工程>`，路径和查询参数怎么选工程由 Hub（10）决定；`token` 作为 `Authorization: Bearer <token>` 发送，Hub 拒绝时返回 `SyncError::Hub("... 401 ...")`。暂时只支持 `ws://`（局域网），`wss://` 报错。
+- `HubTransport::connect(url, token, timeout)`：`url` 形如 `ws://nas.local:7341/projects/<工程>`，路径和查询参数怎么选工程由 Hub（10）决定；`token` 作为 `Authorization: Bearer <token>` 发送。Hub 用 HTTP 错误拒绝握手时返回 `SyncError::HubRefused { status, message }`（`message` 是 Hub 返回的 `{"error": …}`，没随响应头一起收到时是状态码的标准说明），`Connection` 据此区分要用户处理的失败（7.4）。暂时只支持 `ws://`（局域网），`wss://` 报错。
+- **读写权限**：Hub 在握手响应里带 `x-bae-access: read|write`（`ACCESS_HEADER`）。服务端用 `HubTransport::accept_granting(stream, token, limits, access)` 发出，客户端用 `HubTransport::access()` 读出；没有这个头（旧 Hub、`accept` / `accept_with`）是 `Access::Unknown`。
 - 一条协议消息就是一个 WebSocket **二进制帧**；文本帧、ping/pong 忽略（pong 自动回复）；解码失败或未知类型的帧跳过；收到 close 帧或连接断开返回 `SyncError::Closed`。
 - 握手后套接字是非阻塞的，`send` 写不完的部分留在缓冲区，在之后的 `recv` 里继续发。`recv` 继续发时写失败（比如对方发完最后一条就断开，我们还在给它发东西，连接被重置），先把已经收到的消息读完，再报告错误：对方认为它们已经送到了。这只是尽力而为：Windows 收到重置时会丢掉还没读的数据，所以客户端结束时要调用 `close`（等对方确认关闭，见下）。应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。
 - **上限**（`HubLimits`，两端一致；`connect_with` / `accept_with` / `set_limits` 可改）：
@@ -104,7 +108,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - `close()`：把缓冲区里剩下的消息和 close 帧发完，然后一直读（读到的丢掉），直到对方回应 close：这时对方已经读完我们发的一切，本端也没有没读的数据，关掉套接字不会重置连接（重置可能丢掉对方还没读的数据）。`stall_timeout` 内一个字节都没发出去就放弃，返回错误。丢弃 `HubTransport` 时只做一次不阻塞的关闭，不保证送到。
 - 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去）。
 - `HubTransport::accept(tcp_stream, token)` 是服务端一侧，给测试和简单工具用：`tests/hub.rs` 里用 `Relay` + `accept` 写了一个几十行的阻塞式参考 Hub。
-- 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。对方读得慢（每 25 ms 读一条）时，一次发出的 10 条 3 MiB 消息全部送到，积压远超 `max_backlog` 也不断开；完全不读的对方在 `stall_timeout` 后被断开；对方发完最后一条就重置连接时（我们还在给它发 40 MiB），那一条照样读到；`ThreadedTransport(HubTransport)` 的 `close` 返回时，最后一条 20 MiB 的消息已经送到（`tests/hub.rs`）。
+- 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。对方读得慢（每 25 ms 读一条）时，一次发出的 10 条 3 MiB 消息全部送到，积压远超 `max_backlog` 也不断开；完全不读的对方在 `stall_timeout` 后被断开；对方发完最后一条就重置连接时（我们还在给它发 40 MiB），那一条照样读到；`ThreadedTransport(HubTransport)` 的 `close` 返回时，最后一条 20 MiB 的消息已经送到；握手响应里的权限 `read`、`write` 原样读出，不发时为 `Unknown`（`tests/hub.rs`）。
 
 ## 4. 共享目录模式（PR B）
 
@@ -162,7 +166,8 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 - 第一次扫描完后，传输层发一个 `Hello`（`client` 为 `shared-folder`），版本 = 目录里所有记录和基础快照版本的并集。会话据此把目录里还没有的本地修改（比如离线时的修改）写进自己的日志。
 - 会话发来的 `Hello`：如果某个文档目录里的版本没有被会话的版本包含，就从头重新交付这个文档的所有日志（用于 2.5 的场景），然后回一个自己的 `Hello`（会话 `reset()` 之后靠它恢复）。
-- 共享目录会话的推荐设置：`hello_interval = None`（目录不会丢数据），`min_send_interval` 几百毫秒；关闭前调用 `flush`（2.4）。
+- 共享目录会话的推荐设置：`hello_interval = None`（目录不会丢数据），`min_send_interval` 几百毫秒（`FOLDER_SEND_INTERVAL` = 300 ms，`Target::session_config`）；关闭前调用 `flush`（2.4）。
+- **只读打开**（`DirTransport::open_read_only`）：这个用户写不了 `updates/` 时用（`open` 建锁文件失败，错误是 `PermissionDenied` 或 `ReadOnlyFilesystem`，`Connection` 自动改用它，7.5）。照常读所有日志，自己以前写的日志也当作别人的读，不修复；什么都不写：不加锁、不写日志、不写在线状态文件；发来的 `Updates` / `Snapshot` 返回错误，在线状态忽略。会话要设 `read_only`。
 - 会话发来的 `Updates` → 追加到自己的日志；`Snapshot` → 压缩重写自己的日志。
 
 ### 4.6 验证（`crates/bae-sync/tests/shared_dir.rs`）
@@ -173,6 +178,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 一小时连续编辑（3600 次修改，大多是拖动同一个属性）：自己的日志最大 33 KB（压缩阈值 32 KB），压缩 29 次，`updates/` 总共 26 KB。
 - 3 个客户端频繁同时压缩，不丢数据，新客户端读到的结果一致。
 - 同一个 ClientId 不能同时开两个会话（文件锁）。
+- 只读打开：读到别人和自己以前的日志，本地修改之后目录里一个文件都没多（没有锁、日志、在线状态文件），发修改报错，同一个 ID 的可写会话照样能打开（`a_folder_opened_read_only_is_read_but_never_written`）。
 - 一次追加失败（日志暂时变成目录）、之后的写又能成功时，日志里不留空洞：会话还在，就回答快照请求、整个日志重写（快照也写失败就再要一次）；会话没回答就换了新会话（Hub 重新挂上存盘连接），目录只声称自己真有的，新会话把缺的补写进去。两种情况下另一个客户端读到的都和写的人一致（`a_failed_append_*`）。同一轮里其他文档的日志照样写进去，不留空洞（`a_failed_append_does_not_hold_back_other_documents`）。
 - **模拟 SMB 延迟**：每个客户端用自己的目录副本，后台线程把别人的日志延迟 1–3 秒复制过来，30% 的情况先给一个截断的前缀（模拟没传完的追加），覆盖写也不是原子的；客户端用 `ThreadedTransport`。默认测试把延迟缩小 10 倍（100–300 ms，停止编辑后 0.3 秒收敛）；`--ignored` 跑真实 1–3 秒（停止编辑后 3.0 秒收敛）。
 - `watch` feature：轮询间隔设成 1 小时，文件事件仍能在 0.4 秒内唤醒读取。
@@ -262,6 +268,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 - `SyncSession::set_presence(state)`：变化时下一次 `pump` 发出，之后每 `presence_heartbeat`（默认 5 秒）发一次心跳。`clear_presence()`：发"离开"。
 - 每条 `Presence` 带递增的 `seq`，接收方只保留每个客户端最新的一条，旧的、重放的、JSON 解析不了的都忽略。`seq` 从会话开始时的毫秒时间算起，所以重启后的客户端不会被旧记录压住。
 - **在线判断只用接收方自己的时钟**：超过发送方声明的 `ttl_ms`（默认 20 秒）没有收到新的 `seq` 就视为离线。不同机器的时钟不用对齐。
+- **重连**：`SyncSession::reset()` 也重置在线状态：清空别人的（由新链路重新报告），下一次 `pump` 立即重新发布自己的（新链路没见过）；序号至少跳过一个：Hub 在旧连接断开时替我们发的"离开"用的是"最后一个 + 1"，不跳过的话重连后的第一条会被当作旧消息丢掉，别人要等下一次心跳（默认 5 秒）才重新看到我们。
 - `SyncSession::presence()` 列出其他在线的人（不含自己）；`editing_by_others(path)` 列出声明正在改 `path`、它的祖先或后代的人（界面据此提示"Alice 正在改这个合成"）；`PumpOutcome::presence_changed` 表示有人上线、离线或状态变了。
 - **Hub**：`Relay` 把每条被接受的在线状态（包括只刷新存活的心跳）转发给其他所有连接；新连接一上来就收到当前所有人的状态；连接断开（`disconnect` 或传输出错）时替那个客户端向其他人发"离开"。
 - **共享目录**：每个客户端用临时文件 + 改名重写自己的 `presence/<client-id>.presence`（一条第 4.2 节格式的记录，内容是编码后的 `Presence` 消息），离开时写一条"离开"记录。读者随轮询读取变了的文件。文件修改时间早于两倍 TTL 的不予理会（崩溃的客户端留下的）；超过一天没动的文件任何人都可以删除。这一步要用文件修改时间对比本地时钟，所以 SMB 服务器和客户端的时钟差不要超过两倍 TTL（默认 40 秒）。
@@ -270,10 +277,117 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 - 经 Hub：选中、播放头、工作区、建议性锁都能传到其他人；自己看不到自己；状态不变时不重复报告变化；新加入的人立即看到所有人；心跳维持在线远超 TTL，停止心跳后按 TTL 离线；主动离开立即生效；连接断开时其他人立即收到离开。
 - 重放的旧心跳不能改写或复活别人；坏 JSON 被忽略。
+- 连接断开（Hub 替它发了"离开"）后重连并 `reset()`：下一轮 `pump` 别人就重新看到它，它也看到别人（`a_reconnected_client_is_seen_again_at_once`）。
 - 经共享目录：心跳文件、TTL 离线、主动离开、一小时前的残留文件被忽略（把修改时间改成现在后又能看到，证明是按时间过滤的）。
 
-## 7. 给其他工作流
+## 7. 连接管理（`Connection`）
+
+应用和 Agent 用 `Connection` 分享或加入一个工程，不用自己管线程、重连和关闭。代码：`crates/bae-sync/src/connection.rs`。
+
+### 7.1 用法
+
+```rust
+let mut config = ConnectionConfig::new(client_id, Arc::new(move || 请求重绘()));
+config.presence = Some(我的在线状态);
+let mut conn = Connection::start(
+    Target::Hub { url: "ws://nas.local:7341/projects/film".into(), token: Some(令牌) },
+    // 或 Target::Folder(工程目录)
+    config,
+);
+// 每帧（以及 wake 被调用之后），在持有 Stage 的线程上：
+let out = conn.pump(&mut ProjectDocs::new(&mut stage, &mut history));
+// out.unknown_docs：协作者新建的工程层（2.5），由应用插进层叠
+// out.status_changed、conn.status()：状态栏；conn.access()：只读时禁用编辑
+// 退出或停止分享：
+let mut closing = conn.close(&mut docs); // 立即返回
+closing.unsynced(); // 没能发出去的修改
+closing.wait(超时); // 退出时等关闭完成
+```
+
+- `Target::Folder(工程目录)`：`DirTransport` 放在 `ThreadedTransport` 里；会话用 4.5 的推荐设置（`hello_interval = None`、`min_send_interval = 300 ms`）。
+- `Target::Hub { url, token }`（feature `hub`）：`HubTransport` 放在 `ThreadedTransport` 里；会话用默认设置（每 5 秒 `Hello`；Hub 60 秒收不到消息会断开）。
+- `ConnectionConfig`：`client`；初始 `presence`；`wake`（在后台线程调用，接到"请求重绘"上，不能阻塞）；可选的 `session`（不给就用 `Target::session_config`，`client` 和 `read_only` 由连接管理决定）；`backoff`；`folder`（`DirConfig`）；`io_tick`（后台 I/O 线程查看新消息的间隔，默认 Hub 2 ms、共享目录 10 ms）；`hub_timeout`（连接、握手每一步的超时，默认 10 秒）；`hub_limits`。
+
+### 7.2 线程
+
+持有 Stage 的线程只调用 `pump`，从不等 I/O：
+
+- 打开共享目录（要扫描 NAS 上的所有日志）、Hub 的 TCP 连接和 WebSocket 握手放在连接线程里，做完后通过通道交给 `pump`，并调用 `wake`。
+- 链路断开后，旧传输在后台线程丢弃（丢弃 `ThreadedTransport` 要等它的 I/O 线程）。下一次连接先等它结束，免得共享目录的文件锁还没放开。
+- `close` 的 `Transport::close` 在后台线程（Hub 要等对方确认关闭）。
+- `wake` 的调用时机：收到消息；连接尝试结束；关闭结束；需要 `pump` 的时候到了：重试时间到、被 `min_send_interval` 推迟的修改、`Hello` 和在线状态心跳。应用空闲时也要按时 `pump`，否则 Hub 60 秒后断开。定时由每个 `Connection` 的一个闹钟线程负责。一次 `pump` 收满 `max_messages_per_pump` 条时也调用（可能还有没收的）。
+- 连接一个只接受 TCP、永远不握手的地址时，每次 `pump` 不到 0.1 ms（debug 构建）。
+
+### 7.3 状态
+
+`status()` 返回 `ConnectionStatus`：
+
+| 字段 | 说明 |
+|---|---|
+| `state` | `Connecting`：正在连接，或者已经连上、对方还没发 `Hello`。`Online { since }`。`Offline { retry_in, error }`。`Failed { failure, reason }`：要用户处理（7.4） |
+| `access` | `Read` / `Write` / `Unknown`（7.5）。离线时保留上一次的 |
+| `unsynced` | 有本地修改还不能确定对方有了（`SyncSession::unsynced` 非空）：离线、只读、被 `min_send_interval` 推迟，或者重连后对方还没发 `Hello` |
+| `peers` | 在线的其他人数，不在线时为 0 |
+| `generation` | 上面任何一项变化（`retry_in` 的倒计时除外），或者有人的在线状态变了，就加一。界面只在它变化时重画 |
+
+`pump` 返回 `ConnectionOutcome`：`events`（远端导入的事件，也已经通过 `Stage::subscribe` 发出，不进撤销栈）、`unknown_docs`（对方每次 `Hello` 都会重新报告，直到加进来）、`presence_changed`（上线、下线时也为真）、`status_changed`、`errors`。
+
+### 7.4 断线重连
+
+- 任何传输错误或连接失败：进入 `Offline`，带错误文字。本地文档不受影响，离线时照常编辑。会话保留对方已知的版本，所以 `unsynced` 仍然准确。
+- 重试间隔（`Backoff`）：从 0.5 秒起，每失败一次翻倍，最长 30 秒；每次随机减去最多 25%（`jitter`），免得同一个 Hub 的客户端同时涌回来。连接保持 10 秒（`stable_after`）以上再断开时，从 0.5 秒重新算。
+- 重连：新的传输 + `SyncSession::reset()`，双方交换 `Hello` 后各自补发对方缺的，离线时的修改就这样上传。自己的在线状态重连后立即重新发布（6.2）。
+- 不按计划重试的失败（`Failed`）：
+
+  | `Failure` | 原因 |
+  |---|---|
+  | `BadToken` | Hub 401：令牌不对，或没有令牌 |
+  | `NoAccess` | Hub 403：令牌不能打开这个工程 |
+  | `NoSuchProject` | Hub 404：工程不存在，令牌也不能新建（只读令牌） |
+  | `Refused(状态码)` | 其他 4xx（408、429 除外），例如 400：工程 ID 不合法 |
+  | `ClientIdInUse` | 共享目录里同一个 `ClientId` 已经有会话。可能是本进程刚丢弃或关闭的连接还没放开文件锁，所以持续 2 秒以上才算，之前照常重试 |
+  | `BadTarget` | URL 不能用（不是 `ws://`、没有主机）。启动时就判断，不尝试连接 |
+
+  之后只在调用 `retry()` 时，或者每隔 `Backoff::failed_retry`（默认 60 秒；`None` 表示不自动重试）再试一次。`Offline` 时也可以用 `retry()` 跳过等待。其他状态码（5xx、408、429）、连不上、连接被重置都按 `Offline` 处理。
+
+### 7.5 读写权限
+
+- Hub：握手响应里的 `x-bae-access`（3.1）。旧 Hub 不发，`access` 是 `Unknown`，照常发送修改，由 Hub 决定收不收。
+- 共享目录：连接线程上 `DirTransport::open` 在 `updates/` 里建锁文件，失败且错误是 `PermissionDenied` / `ReadOnlyFilesystem` 时改用 `DirTransport::open_read_only`（4.5），`access` 为 `Read`；否则为 `Write`。
+- `Read` 时会话设为 `read_only`（2.4）：不发任何修改，`Hello` 和在线状态照发（共享目录只读时在线状态不写），照常接收；本地修改留在 `unsynced` 里，状态栏如实显示。应用应在 `Read` 时禁用编辑。
+- 还没做：不发 `x-bae-access` 的旧 Hub 不会再用 `GET /v1/status` 查一次。
+
+### 7.6 在线状态
+
+`set_presence` / `clear_presence` / `local_presence` 直接交给会话，断线时保留，重连后立即重新发布。`presence()`、`editing_by_others(path)` 只在 `Online` 时有内容（离线时不知道谁在线）。
+
+### 7.7 关闭
+
+`close(self, docs)`：
+
+1. 在线时：`clear_presence`；最后 `pump` 一次（导入已经收到的，发出"离开"）；再 `flush`（不管 `min_send_interval`，立即把对方缺的发出去）。
+2. `Transport::close` 放在后台线程：Hub 等对方确认关闭（最多 `stall_timeout` 没有进展），共享目录等后台线程写完。持有 Stage 的线程立即返回。
+3. 返回 `Closing`。`unsynced()` 立即可用：有本地修改、但没交给链路的文档（离线、连接中、只读、对方还没发 `Hello`）。`try_result()` 不阻塞，`wait(超时)` 阻塞，退出时用；结果是错误时，最后几条可能没送到。关闭完成时调用 `wake`。
+
+退出时 `unsynced()` 不为空，或者结果是错误，就提示"还有修改没有同步"。
+
+不调用 `close` 直接丢弃 `Connection`：传输在后台线程丢弃，不 `flush`，也不等对方确认，被推迟的最后几次修改可能发不出去。
+
+### 7.8 验证
+
+`crates/bae-sync/tests/connection.rs`（共享目录，以及永不握手的 Hub 地址）和 `services/bae-hub/tests/connection.rs`（真实 Hub）：
+
+- 两个应用经共享目录、经 Hub 收敛，`unsynced` 清零，互相看到在线状态；什么都不变时 `generation` 不变。
+- Hub 停掉：两边 `Offline`，`peers` 为 0，`access` 保留；重试间隔 200、400、800 ms（测试设置）。离线继续编辑。新 Hub 在同一端口、同一数据目录启动后，两边自动重连、收敛，离线修改都在；对方的在线状态马上回来（心跳间隔设成 1 分钟，证明是重连时重新发布的；去掉 6.2 的修复就超时）。
+- 错误令牌、没有令牌（401）、令牌不能开这个工程（403）、只读令牌开不存在的工程（404）、工程 ID 不合法（400）：`Failed`，之后 300 ms 内不再尝试，`retry()` 只试一次。
+- 只读令牌：`access = Read`；收得到别人的修改；自己的修改不发出去（`bytes_sent = 0`），`unsynced` 为真；在线状态照常可见。共享目录 `updates/` 不可写时同样，什么文件都不写（Unix；root 不受权限限制时跳过，测试时用去掉 `CAP_DAC_OVERRIDE` 的 root 跑过）。
+- 关闭：最后一次修改被 `min_send_interval` 推迟时也能送到（共享目录、Hub），"离开"立即可见，`Closing` 成功；之后加入 Hub 的人也拿到。
+- 共享目录还不存在：按退避重试，出现后加入并写进去。同一个 `ClientId` 已经在用：先照常重试 2 秒，然后 `Failed`、不再自动重试，对方退出后 `retry()` 成功。丢弃或关闭后立即重新分享同一个目录（6 轮）不报冲突（不留 2 秒宽限时每次都报）。
+- 连接只接受 TCP、永不握手的地址：500 ms 里每次 `pump` 不到 0.1 ms（上限 250 ms），状态一直是 `Connecting`，`close` 也立即返回。
+- 收到第一条消息、连接尝试结束时调用 `wake`；只在被唤醒时 `pump` 也能连上。
+
+## 8. 给其他工作流
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
 - **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3，客户端的约定见 3.1。
-- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。
+- **11/12 界面**：分享、加入工程用 `Connection`（第 7 节），每帧在 `Shell::about_to_wait` 里 `pump`，`wake` 接到"请求重绘"；状态栏看 `status()` / `generation`；`access() == Read` 时禁用编辑；退出前 `close` 并在 `Closing` 报告没同步的修改时提示。`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。

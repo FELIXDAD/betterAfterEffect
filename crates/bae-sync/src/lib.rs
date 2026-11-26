@@ -15,6 +15,9 @@
 //!   ([`SyncSession::set_presence`], [`SyncSession::presence`]).
 //! - `HubTransport` (feature `hub`): WebSocket connection to the collaboration hub.
 //! - [`Relay`]: the hub side (fan-out between clients), used by `services/bae-hub`.
+//! - [`Connection`]: what the app and agents use to share or join a project
+//!   (shared folder or hub) from the stage thread: background connect,
+//!   reconnect with backoff, access level, status, presence, clean close.
 //! - [`History`]: named versions ([`Checkpoint`]), read-only views of any version
 //!   ([`history::view_at`]) and per-prim differences with authors
 //!   ([`history::diff`]). Sync it with the stage through [`ProjectDocs`].
@@ -23,6 +26,7 @@
 
 mod client;
 mod commands;
+mod connection;
 mod dir;
 mod docs;
 mod error;
@@ -38,6 +42,10 @@ mod transport;
 
 pub use client::ClientId;
 pub use commands::{RevertOutput, RevertParams, register_commands};
+pub use connection::{
+    Access, Backoff, Closing, Connection, ConnectionConfig, ConnectionOutcome, ConnectionState,
+    ConnectionStatus, FOLDER_SEND_INTERVAL, Failure, Target,
+};
 pub use dir::{DirConfig, DirStats, DirTransport, LOG_FORMAT, LOG_VERSION};
 pub use docs::{DocSet, Imported, MemDocs};
 pub use error::SyncError;
@@ -46,7 +54,7 @@ pub use history::{
     RevertScope, VersionJson, VersionView,
 };
 #[cfg(feature = "hub")]
-pub use hub::{HubLimits, HubTransport};
+pub use hub::{ACCESS_HEADER, HubLimits, HubTransport};
 pub use presence::{PeerPresence, Playhead, PresenceState};
 pub use protocol::{DocKey, Message, PROTOCOL_VERSION};
 pub use relay::{PeerHandle, Relay, RelayOutcome};

@@ -144,7 +144,8 @@ pub struct DirTransport {
     root: PathBuf,
     client: ClientId,
     config: DirConfig,
-    _lock: File,
+    /// Held while attached (one session per client ID). `None`: read-only.
+    lock: Option<File>,
     own: BTreeMap<DocKey, OwnLog>,
     sources: BTreeMap<PathBuf, Source>,
     /// Union of the versions of everything read from or written to the folder.
@@ -206,12 +207,35 @@ impl DirTransport {
             Ok(()) | Err(fs::TryLockError::Error(_)) => {}
             Err(fs::TryLockError::WouldBlock) => return Err(SyncError::ClientIdInUse(client)),
         }
+        Ok(Self::new(root, client, config, Some(lock)))
+    }
+
+    /// Attach to `project` without writing anything, for a folder whose
+    /// `updates/` this user cannot write ([`DirTransport::open`] fails with
+    /// [`SyncError::Io`] of kind `PermissionDenied` or `ReadOnlyFilesystem`).
+    /// Everyone's logs are read as usual, this client's own (from earlier
+    /// sessions) like the others'. Nothing is written: sending edits
+    /// (`Updates`, `Snapshot`) fails, our presence is not published, no lock is
+    /// taken. Run the session with [`crate::SessionConfig::read_only`].
+    pub fn open_read_only(
+        project: impl AsRef<Path>,
+        client: ClientId,
+        config: DirConfig,
+    ) -> Result<Self, SyncError> {
+        let root = project.as_ref().to_owned();
+        if !root.is_dir() {
+            return Err(SyncError::NotADirectory(root));
+        }
+        Ok(Self::new(root, client, config, None))
+    }
+
+    fn new(root: PathBuf, client: ClientId, config: DirConfig, lock: Option<File>) -> Self {
         #[allow(unused_mut)]
         let mut t = DirTransport {
             root,
             client,
             config,
-            _lock: lock,
+            lock,
             own: BTreeMap::new(),
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
@@ -231,11 +255,16 @@ impl DirTransport {
         if t.config.watch {
             t.start_watcher();
         }
-        Ok(t)
+        t
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Opened with [`open_read_only`](Self::open_read_only).
+    pub fn is_read_only(&self) -> bool {
+        self.lock.is_none()
     }
 
     pub fn client(&self) -> &ClientId {
@@ -324,7 +353,7 @@ impl DirTransport {
             let Ok(doc) = DocKey::parse(&dir_rel) else {
                 continue;
             };
-            if stem == self.client.as_str() {
+            if stem == self.client.as_str() && !self.is_read_only() {
                 if !self.own.contains_key(&doc) {
                     let r = self.adopt_own(&doc, &path);
                     self.note(r);
@@ -783,6 +812,18 @@ impl DirTransport {
 
 impl Transport for DirTransport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+        if self.is_read_only() {
+            return match &msg {
+                Message::Hello { versions, .. } => self.on_hello(versions.clone()),
+                Message::Updates { doc, .. } | Message::Snapshot { doc, .. } => {
+                    Err(SyncError::io(&self.log_path(doc))(io::Error::new(
+                        io::ErrorKind::ReadOnlyFilesystem,
+                        "the shared folder is open read-only",
+                    )))
+                }
+                Message::SnapshotRequest { .. } | Message::Presence { .. } => Ok(()),
+            };
+        }
         match &msg {
             Message::Hello { versions, .. } => self.on_hello(versions.clone()),
             Message::Updates { doc, version, .. } => {

@@ -10,13 +10,20 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 use tungstenite::client::IntoClientRequest;
+use tungstenite::handshake::client::Request as ClientRequest;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::{HeaderValue, StatusCode, header::AUTHORIZATION};
 use tungstenite::{Error as WsError, Message as WsMessage, WebSocket};
 
+use crate::connection::Access;
 use crate::error::SyncError;
 use crate::protocol::Message;
 use crate::transport::Transport;
+
+/// Header of the hub's handshake response that tells the client what it may
+/// do: `read` or `write` ([`HubTransport::access`]). Hubs that do not send it
+/// leave the client at [`Access::Unknown`].
+pub const ACCESS_HEADER: &str = "x-bae-access";
 
 /// Limits of a hub connection, the same in both directions.
 ///
@@ -90,6 +97,8 @@ impl Write for Counted {
 pub struct HubTransport {
     ws: WebSocket<Counted>,
     limits: HubLimits,
+    /// Client side: what the hub said we may do. Server side: what we said.
+    access: Access,
     /// About how many bytes wait in tungstenite's write buffer.
     unsent: u64,
     /// `Counted::written` when we last looked.
@@ -112,11 +121,66 @@ fn hub_err(e: impl std::fmt::Display) -> SyncError {
     SyncError::Hub(e.to_string())
 }
 
+/// The handshake request for `url`, and the host and port to connect to.
+/// Checks everything that does not need the network.
+fn client_request(
+    url: &str,
+    token: Option<&str>,
+) -> Result<(ClientRequest, String, u16), SyncError> {
+    let mut request = url.into_client_request().map_err(hub_err)?;
+    match request.uri().scheme_str() {
+        Some("ws") => {}
+        Some("wss") => {
+            return Err(SyncError::Hub(
+                "wss:// is not supported yet (LAN hub only)".into(),
+            ));
+        }
+        other => return Err(SyncError::Hub(format!("unsupported scheme {other:?}"))),
+    }
+    if let Some(token) = token {
+        let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(hub_err)?;
+        request.headers_mut().insert(AUTHORIZATION, value);
+    }
+    let host = request
+        .uri()
+        .host()
+        .ok_or_else(|| SyncError::Hub(format!("no host in {url}")))?
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_owned();
+    let port = request.uri().port_u16().unwrap_or(80);
+    Ok((request, host, port))
+}
+
+/// Whether `url` and `token` can be used for [`HubTransport::connect`] at all
+/// (scheme, host, header syntax), without touching the network.
+pub(crate) fn check_url(url: &str, token: Option<&str>) -> Result<(), SyncError> {
+    client_request(url, token).map(|_| ())
+}
+
+/// A refused handshake: the status, and the hub's `{"error": ...}` text if
+/// the body came with the response head.
+fn refused(resp: &tungstenite::http::Response<Option<Vec<u8>>>) -> SyncError {
+    let status = resp.status();
+    let message = resp
+        .body()
+        .as_deref()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+        .and_then(|v| v.get("error")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| status.canonical_reason().unwrap_or_default().to_owned());
+    SyncError::HubRefused {
+        status: status.as_u16(),
+        message,
+    }
+}
+
 impl HubTransport {
     /// Connect to a hub at `url` (`ws://host:port/path`; the path and query
     /// select the project, as defined by the hub). `token` is sent as
     /// `Authorization: Bearer <token>`. Blocks for at most about `timeout` per
-    /// step (connect, handshake).
+    /// step (connect, handshake). A hub that answers with an HTTP error gives
+    /// [`SyncError::HubRefused`]; what the hub allows is in
+    /// [`access`](Self::access).
     pub fn connect(url: &str, token: Option<&str>, timeout: Duration) -> Result<Self, SyncError> {
         Self::connect_with(url, token, timeout, HubLimits::default())
     }
@@ -128,28 +192,7 @@ impl HubTransport {
         timeout: Duration,
         limits: HubLimits,
     ) -> Result<Self, SyncError> {
-        let mut request = url.into_client_request().map_err(hub_err)?;
-        match request.uri().scheme_str() {
-            Some("ws") => {}
-            Some("wss") => {
-                return Err(SyncError::Hub(
-                    "wss:// is not supported yet (LAN hub only)".into(),
-                ));
-            }
-            other => return Err(SyncError::Hub(format!("unsupported scheme {other:?}"))),
-        }
-        if let Some(token) = token {
-            let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(hub_err)?;
-            request.headers_mut().insert(AUTHORIZATION, value);
-        }
-        let host = request
-            .uri()
-            .host()
-            .ok_or_else(|| SyncError::Hub(format!("no host in {url}")))?
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .to_owned();
-        let port = request.uri().port_u16().unwrap_or(80);
+        let (request, host, port) = client_request(url, token)?;
         let addr = (host.as_str(), port)
             .to_socket_addrs()
             .map_err(hub_err)?
@@ -159,14 +202,17 @@ impl HubTransport {
         stream.set_nodelay(true).map_err(hub_err)?;
         stream.set_read_timeout(Some(timeout)).map_err(hub_err)?;
         stream.set_write_timeout(Some(timeout)).map_err(hub_err)?;
-        let (ws, _) =
+        let (ws, response) =
             tungstenite::client::client(request, Counted::new(stream)).map_err(|e| match e {
-                tungstenite::HandshakeError::Failure(WsError::Http(resp)) => {
-                    SyncError::Hub(format!("hub refused the connection: {}", resp.status()))
-                }
+                tungstenite::HandshakeError::Failure(WsError::Http(resp)) => refused(&resp),
                 other => hub_err(other),
             })?;
-        Self::ready(ws, limits)
+        let access = response
+            .headers()
+            .get(ACCESS_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map_or(Access::Unknown, Access::parse);
+        Self::ready(ws, limits, access)
     }
 
     /// Server side of an accepted TCP connection (tests and simple tools; the
@@ -182,6 +228,19 @@ impl HubTransport {
         token: Option<&str>,
         limits: HubLimits,
     ) -> Result<Self, SyncError> {
+        Self::accept_granting(stream, token, limits, Access::Unknown)
+    }
+
+    /// [`accept_with`](Self::accept_with), telling the client what it may do
+    /// in the handshake response ([`ACCESS_HEADER`]; nothing for
+    /// [`Access::Unknown`]). The hub checks access itself: a read-only client
+    /// that sends edits anyway gets them dropped.
+    pub fn accept_granting(
+        stream: TcpStream,
+        token: Option<&str>,
+        limits: HubLimits,
+        access: Access,
+    ) -> Result<Self, SyncError> {
         stream.set_nonblocking(false).map_err(hub_err)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -190,7 +249,7 @@ impl HubTransport {
         let expected = token.map(|t| format!("Bearer {t}"));
         // The callback signature (and its large error type) is tungstenite's.
         #[allow(clippy::result_large_err)]
-        let check = |req: &Request, resp: Response| -> Result<Response, ErrorResponse> {
+        let check = |req: &Request, mut resp: Response| -> Result<Response, ErrorResponse> {
             let given = req
                 .headers()
                 .get(AUTHORIZATION)
@@ -201,14 +260,20 @@ impl HubTransport {
                     *err.status_mut() = StatusCode::UNAUTHORIZED;
                     Err(err)
                 }
-                _ => Ok(resp),
+                _ => {
+                    if access != Access::Unknown {
+                        resp.headers_mut()
+                            .insert(ACCESS_HEADER, HeaderValue::from_static(access.as_str()));
+                    }
+                    Ok(resp)
+                }
             }
         };
         let ws = tungstenite::accept_hdr(Counted::new(stream), check).map_err(hub_err)?;
-        Self::ready(ws, limits)
+        Self::ready(ws, limits, access)
     }
 
-    fn ready(ws: WebSocket<Counted>, limits: HubLimits) -> Result<Self, SyncError> {
+    fn ready(ws: WebSocket<Counted>, limits: HubLimits, access: Access) -> Result<Self, SyncError> {
         let s = &ws.get_ref().stream;
         s.set_read_timeout(None).map_err(hub_err)?;
         s.set_write_timeout(None).map_err(hub_err)?;
@@ -217,6 +282,7 @@ impl HubTransport {
         let mut transport = HubTransport {
             ws,
             limits,
+            access,
             unsent: 0,
             written,
             progress: Instant::now(),
@@ -242,6 +308,15 @@ impl HubTransport {
     /// The connection's limits.
     pub fn limits(&self) -> HubLimits {
         self.limits
+    }
+
+    /// Client side: what the hub said this connection may do
+    /// ([`ACCESS_HEADER`]); [`Access::Unknown`] if it did not say (older
+    /// hubs). A read-only connection's edits are dropped by the hub, so the
+    /// client should not send them ([`crate::SessionConfig::read_only`]).
+    /// Server side: what [`accept_granting`](Self::accept_granting) announced.
+    pub fn access(&self) -> Access {
+        self.access
     }
 
     /// Account for what left since the last call (`drained`: nothing waits any

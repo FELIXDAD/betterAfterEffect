@@ -37,6 +37,12 @@ pub struct SessionConfig {
     /// Others drop us after this long without a heartbeat (sent along with each
     /// update, so receivers do not need to agree on it).
     pub presence_ttl: Duration,
+    /// The remote does not take our edits (a read-only hub token, a folder we
+    /// cannot write): never send document data (`Updates`, `Snapshot`, also
+    /// not in answer to a `SnapshotRequest`). `Hello` and presence still go
+    /// out and everything is received as usual. Local edits stay in
+    /// [`SyncSession::unsynced`].
+    pub read_only: bool,
 }
 
 impl SessionConfig {
@@ -48,6 +54,7 @@ impl SessionConfig {
             min_send_interval: Duration::ZERO,
             presence_heartbeat: Duration::from_secs(5),
             presence_ttl: Duration::from_secs(20),
+            read_only: false,
         }
     }
 }
@@ -204,12 +211,21 @@ impl SyncSession {
 
     /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
     /// says hello again and nothing is sent until the remote answers.
+    ///
+    /// Presence starts over too: our own goes out again on the next pump (the
+    /// new link has not seen it), and who is online is whatever the new link
+    /// reports. The next sequence number skips the one a hub uses to announce
+    /// our departure when the old connection dropped (last seen + 1), so the
+    /// others see us again at once.
     pub fn reset(&mut self) {
         self.remote = None;
         self.remote_client = None;
         self.remote_protocol = None;
         self.last_hello = None;
         self.announced.clear();
+        self.presence_dirty = self.presence.is_some();
+        self.presence_seq = (self.presence_seq + 1).max(initial_seq());
+        self.peers = PresenceTable::default();
     }
 
     /// Documents with local ops the remote is not known to have yet ("unsynced
@@ -287,7 +303,7 @@ impl SyncSession {
     /// presence goes out. Call it after the last [`pump`](Self::pump) before
     /// closing a link whose sends may be held back, or the last edits never
     /// leave. Sends nothing before the remote's first `Hello` (we do not know
-    /// what it has).
+    /// what it has), and nothing when [`SessionConfig::read_only`].
     ///
     /// Only [`PumpOutcome::sent`] and [`PumpOutcome::errors`] are filled in.
     /// Errors are transport failures, as in [`pump`](Self::pump).
@@ -407,6 +423,9 @@ impl SyncSession {
                 }
             }
             Message::SnapshotRequest { doc } => {
+                if self.config.read_only {
+                    return Ok(());
+                }
                 let Some(version) = docs.version(&doc) else {
                     return Ok(());
                 };
@@ -503,6 +522,9 @@ impl SyncSession {
         transport: &mut dyn Transport,
         out: &mut PumpOutcome,
     ) -> Result<bool, SyncError> {
+        if self.config.read_only {
+            return Ok(false);
+        }
         let Some(remote) = &mut self.remote else {
             return Ok(false);
         };

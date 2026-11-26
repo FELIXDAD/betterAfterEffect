@@ -449,6 +449,57 @@ fn drain(end: &mut bae_sync::MemoryTransport, hello_from: &str) -> (usize, usize
 /// `Relay::connect_with`: one peer (a store, as the hub's project directory) gets
 /// its own send interval and no periodic hello; `flush` forces out what the
 /// interval held back. The relay's client ID wins over the one in the config.
+/// A read-only session (read-only hub token or folder) takes everything in
+/// and sends no document data, not even when asked for a snapshot; its own
+/// edits stay unsynced.
+#[test]
+fn a_read_only_session_receives_but_never_sends_edits() {
+    use bae_sync::{MemoryTransport, Message, Transport};
+    let base = base_snapshots();
+    let (mut la, mut lb) = MemoryTransport::pair();
+    let (mut sa, mut sb) = (client_stage(&base), client_stage(&base));
+    let mut a = SyncSession::new(SessionConfig::new(ClientId::new("writer").unwrap()));
+    let mut config = SessionConfig::new(ClientId::new("reader").unwrap());
+    config.read_only = true;
+    let mut b = SyncSession::new(config);
+    let (wa, wb) = (author("user:writer"), author("user:reader"));
+    let (mut ra, mut rb) = (Rng::new(1), Rng::new(2));
+    let (mut na, mut nb) = (0, 0);
+    for _ in 0..10 {
+        random_edit(&mut sa, &wa, &mut ra, "w", &mut na);
+        random_edit(&mut sb, &wb, &mut rb, "r", &mut nb);
+    }
+    for _ in 0..4 {
+        a.pump(&mut sa, &mut la).unwrap();
+        b.pump(&mut sb, &mut lb).unwrap();
+    }
+    let root = DocKey::sublayer(&SublayerId::root());
+    for key in sa.doc_keys() {
+        assert!(
+            sb.version(&key)
+                .unwrap()
+                .includes_vv(&sa.version(&key).unwrap())
+        );
+    }
+    assert!(
+        !b.unsynced(&sb).is_empty(),
+        "the reader's edits are not sent"
+    );
+    assert_eq!(b.stats().bytes_sent, 0);
+    assert!(a.unsynced(&sa).is_empty());
+    // Not even on request.
+    la.send(Message::SnapshotRequest { doc: root }).unwrap();
+    b.pump(&mut sb, &mut lb).unwrap();
+    b.flush(&sb, &mut lb).unwrap();
+    while let Some(msg) = la.recv().unwrap() {
+        assert!(
+            !matches!(msg, Message::Updates { .. } | Message::Snapshot { .. }),
+            "{msg:?}"
+        );
+    }
+    assert_eq!(b.stats().bytes_sent, 0);
+}
+
 #[test]
 fn a_peer_with_its_own_session_settings() {
     use bae_sync::{MemoryTransport, Message, Transport};

@@ -200,7 +200,9 @@ fn wrong_or_missing_token_is_refused() {
     let hub = TestHub::start(Some("team-secret"));
     for token in [None, Some("guess")] {
         match HubTransport::connect(&hub.url(), token, Duration::from_secs(5)) {
-            Err(SyncError::Hub(msg)) => assert!(msg.contains("401"), "{msg}"),
+            Err(e @ SyncError::HubRefused { status: 401, .. }) => {
+                assert!(e.to_string().contains("401"), "{e}")
+            }
             other => panic!("expected refusal, got {other:?}"),
         }
     }
@@ -274,6 +276,28 @@ fn raw_pair(server_limits: bae_sync::HubLimits) -> (HubTransport, HubTransport) 
     )
     .unwrap();
     (client, server.join().unwrap())
+}
+
+#[test]
+fn the_handshake_tells_the_client_its_access() {
+    use bae_sync::{Access, HubLimits};
+    for granted in [Access::Read, Access::Write, Access::Unknown] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            HubTransport::accept_granting(stream, None, HubLimits::default(), granted).unwrap()
+        });
+        let client = HubTransport::connect(
+            &format!("ws://{addr}/projects/film"),
+            None,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        // `Unknown` sends nothing: what a client of an older hub sees.
+        assert_eq!(client.access(), granted);
+        assert_eq!(server.join().unwrap().access(), granted);
+    }
 }
 
 #[test]

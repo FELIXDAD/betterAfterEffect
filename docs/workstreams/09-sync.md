@@ -47,6 +47,7 @@
 - [x] 在线状态与建议性锁（PR D）：`PresenceState`（用户、颜色、选中、播放头、工作区、`editing` 建议性锁）、心跳 + 接收方时钟判断离线、Hub 转发/新人同步/断线通知、共享目录心跳文件
 - [x] 版本（PR C）：命名版本（`History`，同步的 Loro 文档 + `history.loro`）、任意版本的只读视图、按 Prim 的差异（新增/删除/修改/移动，含作者和时间）
 - [x] 回滚（PR F）：`History::revert_to` / `history::revert`，以新的撤销单元恢复整个工程、一个工程层或一个 Prim 子树，不改写历史；命令 `version.revert`（`bae_sync::register_commands`）供 Agent 调用
+- [x] 连接管理（`collab/sync-connection`，epic #737 子任务 3 的引擎部分）：`Connection`（共享目录 / Hub 目标、后台连接、断线按退避重连、401/403/404/ClientId 被占用时停下等用户处理、读写权限、状态栏状态、在线状态、`unknown_docs`、不阻塞的关闭）；Hub 握手响应带 `x-bae-access`；`SessionConfig::read_only`；`DirTransport::open_read_only`；规格见 spec 第 7 节
 - [ ] 分支与合并
 - [x] 多客户端模拟测试：4 个客户端经 Hub、20% 丢包 + 10% 重复 + 乱序延迟，编辑 150 轮后全部收敛；两端直连；Hub 重启后补齐 + 新客户端加入；协作者新建的工程层
 
@@ -66,6 +67,11 @@
   - 发送时某个文档出错，同一轮的其他文档照样发。原来排在后面的文档已经算作发出却没交给传输层：共享目录里它们的日志会留下空洞（spec 2.4、4.3）。
   - `HubTransport::close` 等对方确认关闭；`ThreadedTransport::close` 会关闭内层传输（原来只等队列交出去，`HubTransport` 缓冲区里剩下的随丢弃一起丢掉，`close` 却返回成功）；`DirTransport::close` 在日志落后时报错（spec 2.6、3.1、4.3）。
   - 快照请求的退避：每次翻倍（原来重写失败时又翻一倍，实际每轮 4 倍），起点不超过 60 秒，每次 `recv` 都检查（原来只在轮询目录时检查，轮询间隔 1 小时就要等 1 小时）。
+- 连接管理（`collab/sync-connection`，叠在 `collab/sync-hub-requests` 上）：`bae_sync::Connection`，应用（11）和 Agent 在持有 Stage 的线程上每帧 `pump`，连接、握手、丢弃断开的链路、关闭都在后台线程（spec 第 7 节）。
+  - Hub 拒绝握手改为 `SyncError::HubRefused { status, message }`；握手响应带 `x-bae-access`（`HubTransport::accept_granting` / `access()`），10 的 Hub 已经发送。
+  - 只读：`SessionConfig::read_only`（不发任何文档数据）；`DirTransport::open_read_only`（`updates/` 不可写的共享目录，什么都不写）。
+  - 顺带修了一个老问题：重连后 `reset()` 没有重新发布自己的在线状态，而且 Hub 替断开的连接发"离开"用的序号正好是重连后的下一条，别人要等下一次心跳（5 秒）才重新看到我们。现在 `reset()` 立即重新发布、跳过那个序号、清空旧的在线列表（spec 6.2）。
+  - 还发现一个竞争：丢弃或关闭共享目录的连接后立即重新分享同一个目录，旧链路还没放开文件锁，新连接报 `ClientIdInUse`。现在这个错误持续 2 秒以上才算要用户处理的失败。
 
 ## 请求（其他工作流在这里留言）
 

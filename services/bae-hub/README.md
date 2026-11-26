@@ -68,7 +68,7 @@ projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*"
 |---|---|---|
 | `/healthz` | 否 | 返回 `ok` |
 | `/v1/info` | 否 | 返回 `{"service": "bae-hub", "version", "protocol": 同步协议版本, "sync_path": "/projects/<project>", "anonymous": null / "read" / "write"}`。客户端连接前用它确认对方是 Hub、协议是否兼容、要不要向用户要令牌 |
-| `/v1/status` | 是 | 运行时间、已加载的工程数、在线客户端数，以及**当前令牌的名字和权限**（`access`）。客户端用它判断是否只读 |
+| `/v1/status` | 是 | 运行时间、已加载的工程数、在线客户端数，以及**当前令牌的名字和权限**（`access`）。同步连接自己的权限在握手响应里（见下一节），不需要另外查 |
 | `/v1/projects` | 是 | 这个令牌能看到的工程。每个工程有：`id`、`loaded`、`docs`、`peers`（客户端 ID、令牌名、权限、地址、连接时间）、`disk_bytes`、`saving`、消息计数 |
 | `/projects/<工程 ID>` | 是 | WebSocket 同步，见下一节。不带 WebSocket 升级头时返回 426 |
 
@@ -90,12 +90,13 @@ ws://<主机>:7341/projects/<工程 ID>
 Authorization: Bearer <令牌>
 ```
 
-客户端就是 `bae_sync::HubTransport::connect(url, Some(令牌), 超时)`，外面套 `ThreadedTransport`（见 `docs/spec/sync.md` 3.1）。
+客户端就是 `bae_sync::HubTransport::connect(url, Some(令牌), 超时)`，外面套 `ThreadedTransport`（见 `docs/spec/sync.md` 3.1）。应用和 Agent 一般不直接用它，而是用 `bae_sync::Connection`（spec 第 7 节）：后台连接、断线后按退避重连、401/403/404 不反复重试、只读时不发修改、退出前把最后的修改送到。
 
 - **工程 ID**：1–64 个 ASCII 字母、数字、`_`、`-`，同时也是服务端的目录名。用可写令牌连接一个不存在的工程会新建它。
 - **帧**：每条同步协议消息是一个二进制帧，编码见 `docs/spec/sync.md` 第 2.3 节。
 - **Hub 侧会话**：每个连接一个会话，`hello_interval` 为 5 秒，收到修改立即转发。
 - **在线状态**（`Presence`）由 `Relay` 转发：新连接马上收到所有人的状态；连接断开时，Hub 替它向其他人发"离开"。
+- **权限**：握手成功的响应（101）带 `x-bae-access: read` 或 `x-bae-access: write`，是这个连接按令牌和工程得到的权限。客户端用 `HubTransport::access()` 读出，应用据此在只读时禁用编辑、不发修改。没有这个头的旧 Hub，客户端当作"未知"，照常发送。
 - **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。
 - **超时**：Hub 60 秒没有收到某个客户端的任何消息，就断开这个连接。正常客户端每 5 秒发一次 `Hello`，所以只有死掉的链路（比如合上盖子的笔记本）才会被断开。
 - **重连**：断线后重新 `connect`，再调用 `SyncSession::reset()`。双方交换 `Hello` 后各自补发对方缺的部分，什么都不会丢。
@@ -122,7 +123,7 @@ Authorization: Bearer <令牌>
 
 | 文件 | 内容 |
 |---|---|
-| `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept(stream, None)` 完成握手，然后挂到工程的 Relay 上。 |
+| `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept_granting(stream, None, 默认上限, 权限)` 完成握手（响应里带 `x-bae-access`），然后挂到工程的 Relay 上。 |
 | `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。目录这个对端单独设置（`Relay::connect_with`）：最多每 300 ms 写一次（`HubConfig::store_send_interval`），拖动时不会每秒追加几十次。最后一个客户端断开时立即 `Relay::flush()` 把还没写的写出去；关闭工程（卸载、退出）前再 `flush` 一次，然后 `Relay::close_peer` 等存盘线程写完，写盘失败记进日志。 |
 | `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
@@ -144,6 +145,7 @@ Authorization: Bearer <令牌>
   - `?token=` 可以代替请求头。
   - `/v1/projects` 只列出令牌能看到的工程。
 - **只读**：只读客户端收得到别人的修改，自己的修改不会传出去；状态接口里显示它是只读。
+- **应用的连接管理**（`tests/connection.rs`，客户端是 `bae_sync::Connection`）：两个应用经 Hub 收敛；Hub 停掉后两边离线、重试间隔翻倍，在同一端口重新启动后自动重连、收敛，离线时的修改都在，在线状态立即恢复；错误令牌、没有令牌、令牌不能开这个工程、只读令牌开不存在的工程、工程 ID 不合法时停下等用户处理，不反复重试；只读令牌拿到 `x-bae-access: read`，收得到修改、自己的修改不发；关闭时最后的修改和"离开"都送到。
 - **匿名只读**：打开匿名只读后，不带令牌也能连接，但不能新建工程。
 - **在线状态和建议性锁**：经 Hub 转发；只读客户端也能发布在线状态；断开连接后其他人立刻看到离开。
 - **空闲卸载**：空闲的工程被卸载，再次连接时从磁盘重新加载，内容一致。
