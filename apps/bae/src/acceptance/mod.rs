@@ -23,6 +23,7 @@
 
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
+mod camera_preferences;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
