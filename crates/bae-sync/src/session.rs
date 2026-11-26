@@ -251,8 +251,9 @@ impl SyncSession {
     /// Errors are transport failures; the link must be re-established (then call
     /// [`reset`](Self::reset)). Payloads received before the failure are still
     /// imported (their [`StageEvent`]s reach `Stage::subscribe` listeners; the
-    /// outcome itself is lost with the error). Problems with single messages are
-    /// in [`PumpOutcome::errors`].
+    /// outcome itself is lost with the error), and snapshot requests received
+    /// before it are still answered. Problems with single messages are in
+    /// [`PumpOutcome::errors`].
     pub fn pump(
         &mut self,
         docs: &mut dyn DocSet,
@@ -277,11 +278,19 @@ impl SyncSession {
         // delivered (a client that sends its last edits and closes at once must
         // not lose them), and the CRDT import does not need the link.
         self.import(docs, incoming.payloads, &mut out);
+        // Answer every request taken off the transport, even when the link
+        // failed or an earlier answer did: a request taken here is in no queue
+        // any more, and the remote may not ask again soon (the shared folder
+        // asks again for a compaction only once the log doubled). The first
+        // error is returned.
+        let mut answered = Ok(());
+        for doc in incoming.snapshot_requests {
+            let r = self.send_snapshot(docs, transport, doc, &mut out);
+            answered = answered.and(r);
+        }
         hello?;
         received?;
-        for doc in incoming.snapshot_requests {
-            self.send_snapshot(docs, transport, doc, &mut out)?;
-        }
+        answered?;
         out.presence_changed |= self.peers.expire(now);
         self.maybe_presence(transport, now, &mut out)?;
         // A document that appeared since the last hello (created locally, or the
@@ -332,7 +341,8 @@ impl SyncSession {
     /// Handle up to `max_messages_per_pump` received messages; payloads and
     /// snapshot requests are collected in `incoming` for after the loop
     /// ([`import`](Self::import), [`send_snapshot`](Self::send_snapshot)).
-    /// Stops at the first transport error, keeping what was collected before it.
+    /// Stops at the first transport error, keeping what was collected before it
+    /// (both are still handled).
     fn receive(
         &mut self,
         docs: &dyn DocSet,

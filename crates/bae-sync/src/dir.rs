@@ -34,8 +34,12 @@ pub const LOG_VERSION: u32 = 1;
 const UPDATES: &str = "updates";
 const PRESENCE: &str = "presence";
 const PRESENCE_EXT: &str = "presence";
-/// Presence files untouched this long are deleted by anyone (crashed clients).
+/// Presence files untouched this long (on the file server's clock) are deleted
+/// by anyone (crashed clients).
 const PRESENCE_GC: Duration = Duration::from_secs(24 * 3600);
+/// How long a reading of the file server's clock is reused (plus the time
+/// since) before the probe file is written again.
+const SERVER_CLOCK_REUSE: Duration = Duration::from_secs(60);
 const SUBLAYERS: &str = "sublayers";
 const LOG_EXT: &str = "log";
 const LOCK_EXT: &str = "lock";
@@ -43,9 +47,10 @@ const LOCK_EXT: &str = "lock";
 const TMP_MARK: &str = ".tmp-";
 const SNAPSHOT_EXT: &str = "loro";
 /// A cleanup pass holds a departed client's lock for a moment while it deletes
-/// that client's files, so `open` retries a held lock this often before it
-/// reports [`SyncError::ClientIdInUse`].
-const LOCK_ATTEMPTS: u32 = 5;
+/// one of that client's files (a few round trips to the file server, which may
+/// be far away over a VPN), so `open` retries a held lock for this long before
+/// it reports [`SyncError::ClientIdInUse`].
+const LOCK_WAIT: Duration = Duration::from_secs(2);
 const LOCK_RETRY: Duration = Duration::from_millis(50);
 /// `len: u32` + 8 checksum bytes.
 const RECORD_HEADER: usize = 12;
@@ -133,7 +138,11 @@ struct OwnLog {
     len: u64,
     /// Size right after the last compaction.
     compacted_len: u64,
-    snapshot_requested: bool,
+    /// Our length when we asked our session for a snapshot to compact with, until
+    /// one arrives. Asked again once the log doubled since: the answer may have
+    /// been lost (a session that failed or went away), and one lost answer must
+    /// not stop compaction for the rest of the session.
+    snapshot_requested: Option<u64>,
     /// Union of the versions of the records in this generation of the log, ours
     /// and those adopted from an earlier session: an upper bound of its ops. A
     /// snapshot replaces the log only if its version includes this.
@@ -216,7 +225,8 @@ struct LogSummary {
 
 /// Whether a cleanup may run while holding a departed client's lock.
 enum OwnerLock {
-    /// We hold it: the owner cannot be running, nor start until we drop this.
+    /// We hold it (shared): the owner cannot be running, nor start until we
+    /// drop this.
     Held(File),
     /// Held by someone: the owner is running.
     Busy,
@@ -255,6 +265,8 @@ pub struct DirTransport {
     /// Documents we asked our session to snapshot to take over a departed log,
     /// with the folder's version at the time: asked again only once it changed.
     absorbed: BTreeMap<DocKey, VersionVector>,
+    /// The last reading of the file server's clock (`server_now`), and when.
+    server_clock: Option<(Instant, SystemTime)>,
     #[cfg(feature = "watch")]
     _watcher: Option<notify::RecommendedWatcher>,
 }
@@ -310,6 +322,7 @@ impl DirTransport {
             last_cleanup: None,
             summaries: BTreeMap::new(),
             absorbed: BTreeMap::new(),
+            server_clock: None,
             #[cfg(feature = "watch")]
             _watcher: None,
         };
@@ -480,7 +493,7 @@ impl DirTransport {
             return;
         };
         let own = format!("{}.{PRESENCE_EXT}", self.client);
-        let now = SystemTime::now();
+        let now = local_now();
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name();
@@ -502,8 +515,18 @@ impl DirTransport {
                 .and_then(|m| now.duration_since(m).ok())
                 .unwrap_or_default();
             if age > PRESENCE_GC {
-                let _ = fs::remove_file(&path);
-                continue;
+                // Only by the file server's clock: one of ours that runs a day
+                // fast must not delete running clients' heartbeats, which the
+                // cleanup (§4.7) takes as their sign of life.
+                let old = self.server_now_cached().is_some_and(|server| {
+                    mtime
+                        .and_then(|m| server.duration_since(m).ok())
+                        .is_some_and(|age| age > PRESENCE_GC)
+                });
+                if old {
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
             }
             let Ok(bytes) = fs::read(&path) else {
                 continue;
@@ -662,7 +685,7 @@ impl DirTransport {
                 generation: header.generation,
                 len: good,
                 compacted_len: header_len + first_snapshot,
-                snapshot_requested: false,
+                snapshot_requested: None,
                 vmax,
             },
         );
@@ -700,8 +723,8 @@ impl DirTransport {
                             self.deliver(m);
                         }
                     }
-                    // Deleted underneath us (§4.7): the next append rewrites it
-                    // with a full snapshot.
+                    // Deleted underneath us (§4.7): the next append notices and
+                    // asks for a full snapshot to rewrite it with.
                     Err(SyncError::Io { source, .. })
                         if source.kind() == io::ErrorKind::NotFound => {}
                     Err(e) => self.note(Err(e)),
@@ -723,10 +746,17 @@ impl DirTransport {
         version: &VersionVector,
         msg: &Message,
     ) -> Result<(), SyncError> {
-        if self.put(doc, version, &encode_record(&msg.encode()))? {
-            // Our log vanished or was replaced: get the full state back in.
+        if !self.put(doc, version, &encode_record(&msg.encode()))? {
+            // Our log vanished or was replaced (§4.7 took us for gone): get the
+            // full state back in. The record alone is not written: it claims our
+            // whole version, and a log holding only it would claim ops it lacks,
+            // which nobody would send again and newcomers could not import. As
+            // after a failed write, nothing is appended until our session's
+            // snapshot rewrites the log, and the request is repeated (with
+            // backoff) until one does, so a lost answer costs nothing either.
             self.stats.repairs += 1;
-            self.request_snapshot(doc);
+            self.fell_behind(doc);
+            return Ok(());
         }
         self.stats.records_written += 1;
         self.folder.entry(doc.clone()).or_default().merge(version);
@@ -741,9 +771,10 @@ impl DirTransport {
         Ok(())
     }
 
-    /// A write to our log for `doc` failed. The session already counts those ops
-    /// as written (it cannot tell), so its next update for `doc` starts after
-    /// them. Appending that would leave a gap the folder never admits to: a
+    /// A write to our log for `doc` failed (or the log was deleted or replaced
+    /// underneath us, see [`DirTransport::append`]). The session already counts
+    /// those ops as written (it cannot tell), so its next update for `doc` starts
+    /// after them. Appending that would leave a gap the folder never admits to: a
     /// record's version covers everything before it, and our `Hello` reports the
     /// union, so no session would send the lost ops again. Instead nothing more
     /// is written for `doc` until a snapshot replaces the whole log; ask the
@@ -792,34 +823,41 @@ impl DirTransport {
         }
     }
 
+    /// Ask our session for a snapshot to compact our log of `doc` with, unless
+    /// we did and the log has not doubled since (see
+    /// [`OwnLog::snapshot_requested`]).
     fn request_snapshot(&mut self, doc: &DocKey) {
         if let Some(own) = self.own.get_mut(doc)
-            && !own.snapshot_requested
+            && own
+                .snapshot_requested
+                .is_none_or(|asked_at| own.len > asked_at.saturating_mul(2))
         {
-            own.snapshot_requested = true;
+            own.snapshot_requested = Some(own.len);
             self.inbox
                 .push_back(Message::SnapshotRequest { doc: doc.clone() });
         }
     }
 
     /// Append `record` (of `version`) to our log of `doc`, or start the log with
-    /// it. A log that vanished or was replaced underneath us is rewritten with
-    /// `record` alone: returns `true` then (a repair).
+    /// it if we have none. `Ok(false)`: our log vanished or was replaced
+    /// underneath us, and nothing was written.
     fn put(
         &mut self,
         doc: &DocKey,
         version: &VersionVector,
         record: &[u8],
     ) -> Result<bool, SyncError> {
-        if let Some(own) = self.own.get_mut(doc)
-            && append_checked(own, record)?
-        {
-            own.vmax.merge(version);
-            return Ok(false);
+        self.read_back_own(doc)?;
+        match self.own.get_mut(doc) {
+            Some(own) => {
+                let appended = append_checked(own, record)?;
+                if appended {
+                    own.vmax.merge(version);
+                }
+                Ok(appended)
+            }
+            None => self.write_fresh(doc, version, record).map(|()| true),
         }
-        let repaired = self.own.contains_key(doc);
-        self.write_fresh(doc, version, record)?;
-        Ok(repaired)
     }
 
     /// Compaction: replace our log with one snapshot record.
@@ -837,29 +875,35 @@ impl DirTransport {
         msg: &Message,
     ) -> Result<(), SyncError> {
         let record = encode_record(&msg.encode());
-        let covers = self
-            .own
-            .get(doc)
-            .is_none_or(|own| version.includes_vv(&own.vmax));
-        let written = if covers {
+        let written = self.read_back_own(doc).and_then(|()| {
+            // No own log (none on disk either): nothing to cover.
+            let covers = self
+                .own
+                .get(doc)
+                .is_none_or(|own| version.includes_vv(&own.vmax));
+            if covers {
+                return self.write_fresh(doc, version, &record).map(|()| true);
+            }
+            if self.put(doc, version, &record)? {
+                return Ok(false);
+            }
+            // The log was gone anyway: start it with the snapshot (which holds
+            // exactly what it claims).
             self.write_fresh(doc, version, &record).map(|()| true)
-        } else {
-            // `true`: the log was gone anyway and now starts with the snapshot.
-            self.put(doc, version, &record)
-        };
+        });
         let replaced = match written {
             Ok(replaced) => replaced,
             Err(e) => {
                 // Ask again once the log grows, not never again this session.
                 if let Some(own) = self.own.get_mut(doc) {
-                    own.snapshot_requested = false;
+                    own.snapshot_requested = None;
                 }
                 return Err(e);
             }
         };
         let own = self.own.get_mut(doc).expect("written");
         own.compacted_len = own.len;
-        own.snapshot_requested = false;
+        own.snapshot_requested = None;
         if replaced {
             self.stats.compactions += 1;
         } else {
@@ -868,6 +912,25 @@ impl DirTransport {
         self.stats.records_written += 1;
         self.folder.entry(doc.clone()).or_default().merge(version);
         Ok(())
+    }
+
+    /// Read back our log of `doc` left by an earlier session if we have not yet
+    /// ([`adopt_own`](Self::adopt_own)), before anything is written to it. The
+    /// first scan does that, but it may have missed the log (a listing that
+    /// failed on a network hiccup), and the log may hold edits nobody saved and,
+    /// since departed clients' logs are deleted in favour of it (§4.7), the only
+    /// copy of their ops: replacing it unread would lose them. `Err` if it cannot
+    /// be read; nothing is written then.
+    fn read_back_own(&mut self, doc: &DocKey) -> Result<(), SyncError> {
+        if self.own.contains_key(doc) {
+            return Ok(());
+        }
+        let path = self.log_path(doc);
+        match fs::symlink_metadata(&path) {
+            Ok(_) => self.adopt_own(doc, &path),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(SyncError::io(&path)(e)),
+        }
     }
 
     /// Write a new log (new generation) holding `record` (of `version`), via a
@@ -910,7 +973,7 @@ impl DirTransport {
                 generation,
                 len: bytes.len() as u64,
                 compacted_len: bytes.len() as u64,
-                snapshot_requested: false,
+                snapshot_requested: None,
                 vmax: version.clone(),
             },
         );
@@ -1154,13 +1217,6 @@ impl DirTransport {
         now: SystemTime,
         after: Duration,
     ) -> bool {
-        // Held until the log is gone: a running owner holds its lock all session,
-        // and a starting one waits for us (`lock_client`).
-        let guard = match self.lock_owner(owner) {
-            OwnerLock::Busy => return false,
-            OwnerLock::Held(f) => Some(f),
-            OwnerLock::Unknown => None,
-        };
         let log_idle = stamp
             .1
             .and_then(|t| now.duration_since(t).ok())
@@ -1172,6 +1228,16 @@ impl DirTransport {
         if !log_idle || file_age(&presence, now).is_some_and(|age| age <= after) {
             return false;
         }
+        // Held until the log is gone: a running owner holds its lock all session,
+        // and a starting one waits for us (`lock_client`), so only the last look
+        // and the unlink happen while we hold it. An owner that ran and quit
+        // since the checks above either wrote to the log (the last look sees it)
+        // or left it as it was (still held by its container).
+        let guard = match self.lock_owner(owner) {
+            OwnerLock::Busy => return false,
+            OwnerLock::Held(f) => Some(f),
+            OwnerLock::Unknown => None,
+        };
         // The last look at the log, right before unlinking it: through a new
         // handle, because opening revalidates cached attributes (NFS
         // close-to-open), where a bare stat may be answered from a cache.
@@ -1258,18 +1324,25 @@ impl DirTransport {
     }
 
     /// Best-effort check whether `owner` runs a session: try to take its lock.
-    fn lock_owner(&self, owner: &str) -> OwnerLock {
+    ///
+    /// A shared lock on a read-only handle: it conflicts with the owner's
+    /// exclusive lock both ways (`flock`, NFS's emulation of it with POSIX
+    /// locks, `LockFileEx`), so a running owner shows as busy and a starting one
+    /// waits for us, and it needs only read access to another user's lock file
+    /// (on NFS an exclusive lock needs a writable handle, a shared one a readable
+    /// one; lock files are typically not writable by other users).
+    fn lock_owner(&mut self, owner: &str) -> OwnerLock {
         let path = self.root.join(UPDATES).join(format!("{owner}.{LOCK_EXT}"));
-        // Opened for writing, as its owner does: on NFS, `flock` is emulated with
-        // POSIX locks, and an exclusive one on a file opened read-only fails
-        // (EBADF), which would read as "no locking here".
-        let file = match OpenOptions::new().read(true).write(true).open(&path) {
+        let file = match File::open(&path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return OwnerLock::Unknown,
-            // Cannot tell: assume it is running.
-            Err(_) => return OwnerLock::Busy,
+            // Cannot tell: assume it is running, and say why nothing is deleted.
+            Err(e) => {
+                self.note_cleanup_error(&path, e);
+                return OwnerLock::Busy;
+            }
         };
-        match file.try_lock() {
+        match file.try_lock_shared() {
             Ok(()) => OwnerLock::Held(file),
             Err(fs::TryLockError::WouldBlock) => OwnerLock::Busy,
             Err(fs::TryLockError::Error(_)) => OwnerLock::Unknown,
@@ -1295,12 +1368,29 @@ impl DirTransport {
         let now = probe();
         let _ = fs::remove_file(&path);
         match now {
-            Ok(t) => Some(t.min(SystemTime::now())),
+            Ok(t) => {
+                let t = t.min(local_now());
+                self.server_clock = Some((Instant::now(), t));
+                Some(t)
+            }
             Err(e) => {
                 self.note_cleanup_error(&path, e);
                 None
             }
         }
+    }
+
+    /// [`server_now`](Self::server_now), from a reading at most
+    /// `SERVER_CLOCK_REUSE` old (plus the time since; never later than our own
+    /// clock).
+    fn server_now_cached(&mut self) -> Option<SystemTime> {
+        if let Some((at, t)) = self.server_clock {
+            let since = at.elapsed();
+            if since < SERVER_CLOCK_REUSE {
+                return Some((t + since).min(local_now()));
+            }
+        }
+        self.server_now()
     }
 
     /// Delete a leftover temporary file of a crashed writer.
@@ -1371,13 +1461,14 @@ impl Transport for DirTransport {
     }
 
     /// Writes happen in `send`; what can still be missing is a log that fell
-    /// behind (a write failed) and was not rewritten yet: the edits since are
-    /// in no file. The next session on the folder writes them if the documents
-    /// still hold them (see [`DirTransport::fell_behind`]).
+    /// behind (a write failed, or the log was deleted underneath us) and was not
+    /// rewritten yet: the edits since are in no file. The next session on the
+    /// folder writes them if the documents still hold them (see
+    /// [`DirTransport::fell_behind`]).
     fn close(&mut self) -> Result<(), SyncError> {
         match self.behind.keys().next() {
             Some(doc) => Err(SyncError::io(&self.log_path(doc))(io::Error::other(
-                "a write failed and the log was not rewritten yet; the edits since are not in it",
+                "the log lacks edits (a write failed, or it was deleted underneath us) and was not rewritten yet",
             ))),
             None => Ok(()),
         }
@@ -1423,8 +1514,8 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
     // gone and deleted the log between the length check above and the write: on
     // POSIX the record then went to an unlinked file nobody will ever read, while
     // we would count it as written. So check that the path still has our bytes;
-    // if not, the caller rewrites the log and asks for a full snapshot, as for
-    // any repair. What remains is a cleaner that unlinks the log after this
+    // if not, the caller asks for a full snapshot to rewrite the log with, as
+    // for any repair. What remains is a cleaner that unlinks the log after this
     // check, with our open, write, close and check all inside its own window
     // between its last look at the log (through a new handle) and the unlink,
     // a few round trips. The cleaner only gets that far if for `inactive_after`
@@ -1447,7 +1538,8 @@ fn append_checked(own: &mut OwnLog, record: &[u8]) -> Result<bool, SyncError> {
 /// Take the advisory lock at `path` for `client`'s session. File systems without
 /// locking are accepted as they are.
 fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
-    for attempt in 1..=LOCK_ATTEMPTS {
+    let deadline = Instant::now() + LOCK_WAIT;
+    loop {
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -1463,13 +1555,13 @@ fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
             },
             Err(fs::TryLockError::Error(_)) => return Ok(lock),
             // Possibly a cleanup pass holding it for a moment.
-            Err(fs::TryLockError::WouldBlock) if attempt < LOCK_ATTEMPTS => {
-                std::thread::sleep(LOCK_RETRY);
-            }
             Err(fs::TryLockError::WouldBlock) => {}
         }
+        if Instant::now() >= deadline {
+            return Err(SyncError::ClientIdInUse(client.clone()));
+        }
+        std::thread::sleep(LOCK_RETRY);
     }
-    Err(SyncError::ClientIdInUse(client.clone()))
 }
 
 /// Every record of the log at `path`, decoded.
@@ -1532,6 +1624,14 @@ fn walk_files(dir: &Path, rel: String, depth: usize, out: &mut Vec<(String, Stri
             out.push((rel.clone(), name, path));
         }
     }
+}
+
+/// Our own clock. Tests can set it ahead (`seam::set_clock_ahead`).
+fn local_now() -> SystemTime {
+    let now = SystemTime::now();
+    #[cfg(test)]
+    let now = now + seam::clock_ahead();
+    now
 }
 
 /// How long ago `path` was modified; `None` if it does not exist. Unknown or
@@ -1762,8 +1862,9 @@ fn parse_header(payload: &[u8]) -> Option<LogHeader> {
 /// Test seams: unit tests act at the moments another process could interfere.
 #[cfg(test)]
 mod seam {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::path::Path;
+    use std::time::Duration;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(super) enum Point {
@@ -1778,6 +1879,16 @@ mod seam {
 
     thread_local! {
         static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static CLOCK_AHEAD: Cell<Duration> = const { Cell::new(Duration::ZERO) };
+    }
+
+    /// Our own clock (`local_now`) runs this far ahead on this thread.
+    pub(super) fn set_clock_ahead(by: Duration) {
+        CLOCK_AHEAD.with(|c| c.set(by));
+    }
+
+    pub(super) fn clock_ahead() -> Duration {
+        CLOCK_AHEAD.with(Cell::get)
     }
 
     /// Run `hook` at every seam this thread passes, until `clear`.
@@ -1789,9 +1900,13 @@ mod seam {
         HOOK.with(|h| *h.borrow_mut() = None);
     }
 
+    /// Seams passed while the hook runs (it may drive another transport) are
+    /// not hooked again.
     pub(super) fn hit(point: Point, path: &Path) {
         HOOK.with(|h| {
-            if let Some(hook) = h.borrow_mut().as_mut() {
+            if let Ok(mut hook) = h.try_borrow_mut()
+                && let Some(hook) = hook.as_mut()
+            {
                 hook(point, path);
             }
         });
@@ -2091,17 +2206,19 @@ mod tests {
             let sent = t.send(updates(&b.v2, &b.update));
             seam::clear();
             sent.unwrap();
-            // Noticed at once: the log is written anew with the record, and our
-            // session is asked for everything.
+            // Noticed at once: our session is asked for everything. The record
+            // alone is not written again (a log holding only it would claim
+            // more than it holds): no log readers can parse holds it.
             assert_eq!(t.stats().repairs, n as u64 + 1, "{what}");
-            let s = summary_of(&path);
-            assert!(s.complete && s.records == 1 && s.vmax == b.v2, "{what}");
+            let left = fs::read(&path).unwrap_or_default();
+            assert_eq!(summarize(&left, &root(), (0, None)).records, 0, "{what}");
             assert!(
                 matches!(t.recv().unwrap(), Some(Message::SnapshotRequest { .. })),
                 "{what}"
             );
             t.send(snapshot(&b.v2, &b.snap2)).unwrap();
-            assert_eq!(summary_of(&path).base, Some(b.v2.clone()), "{what}");
+            let s = summary_of(&path);
+            assert_eq!((s.records, s.base), (1, Some(b.v2.clone())), "{what}");
         }
     }
 
@@ -2217,5 +2334,196 @@ mod tests {
             .unwrap();
         let cut = read(Some(&same_generation));
         assert_eq!((cut.records, cut.end, cut.complete), (0, header_len, true));
+    }
+
+    fn requests(t: &mut DirTransport) -> usize {
+        drain(t)
+            .iter()
+            .filter(|m| matches!(m, Message::SnapshotRequest { .. }))
+            .count()
+    }
+
+    #[test]
+    fn a_repair_is_asked_for_until_a_snapshot_arrives() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let mut t = transport(tmp.path(), "a", quick());
+        drain(&mut t);
+        t.send(updates(&b.v1, &b.snap1)).unwrap();
+        let path = t.log_path(&root());
+        // Deleted underneath us: the next append notices and asks for
+        // everything. Its record alone is not written: it claims our whole
+        // version, and a log holding only it would claim ops it lacks.
+        fs::remove_file(&path).unwrap();
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        assert_eq!(t.stats().repairs, 1);
+        assert_eq!(requests(&mut t), 1);
+        assert!(!path.exists());
+        // That request is lost (our session failed before answering). Nothing
+        // is written meanwhile, closing says the log lacks edits, and the
+        // request comes again.
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        assert!(!path.exists());
+        assert!(t.close().is_err());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while requests(&mut t) == 0 {
+            assert!(Instant::now() < deadline, "never asked again");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        t.send(snapshot(&b.v2, &b.snap2)).unwrap();
+        let s = summary_of(&path);
+        assert_eq!((s.records, s.base), (1, Some(b.v2.clone())));
+        assert!(t.close().is_ok());
+    }
+
+    #[test]
+    fn a_lost_compaction_request_is_asked_again_once_the_log_doubled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let config = DirConfig {
+            compact_min_bytes: 1,
+            compact_ratio: 1,
+            ..quick()
+        };
+        let mut t = transport(tmp.path(), "a", config);
+        drain(&mut t);
+        let path = t.log_path(&root());
+        // Starts the log: nothing to compact yet. The next append asks.
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        assert_eq!(requests(&mut t), 0);
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        assert_eq!(requests(&mut t), 1);
+        // That request is lost: not asked again on every append, but once the
+        // log doubled since.
+        let asked_at = fs::metadata(&path).unwrap().len();
+        loop {
+            t.send(updates(&b.v2, &b.update)).unwrap();
+            let doubled = fs::metadata(&path).unwrap().len() > 2 * asked_at;
+            assert_eq!(requests(&mut t), usize::from(doubled));
+            if doubled {
+                break;
+            }
+        }
+        t.send(snapshot(&b.v2, &b.snap2)).unwrap();
+        assert_eq!(summary_of(&path).records, 1);
+        assert_eq!(t.stats().compactions, 1);
+    }
+
+    /// The first scan may miss our own log (a listing that failed on a network
+    /// hiccup). It may hold edits nobody saved, or the only copy of a departed
+    /// client's ops (§4.7): a write before the next poll reads it back first
+    /// instead of replacing it.
+    #[test]
+    fn an_own_log_the_first_scan_missed_is_read_back_before_writing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let mut t = transport(tmp.path(), "a", quick());
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        let path = t.log_path(&root());
+        drop(t);
+        let before = fs::read(&path).unwrap();
+        let doc_dir = path.parent().unwrap().to_owned();
+        let aside = tmp.path().join("aside");
+        fs::rename(&doc_dir, &aside).unwrap();
+        let config = DirConfig {
+            poll_interval: Duration::from_secs(3600),
+            ..quick()
+        };
+        let mut t = transport(tmp.path(), "a", config);
+        drain(&mut t);
+        fs::rename(&aside, &doc_dir).unwrap();
+        // Our session's snapshot lacks what the log holds: appended, and the
+        // log's records reach the session.
+        t.send(snapshot(&b.v1, &b.snap1)).unwrap();
+        let after = fs::read(&path).unwrap();
+        assert!(after.len() > before.len() && after.starts_with(&before));
+        assert_eq!(t.stats().snapshots_appended, 1);
+        assert_eq!(t.stats().compactions, 0);
+        let read_back = drain(&mut t);
+        assert!(
+            read_back
+                .iter()
+                .any(|m| matches!(m, Message::Updates { version, .. } if *version == b.v2)),
+            "{read_back:?}"
+        );
+        // An update is appended after it too.
+        t.send(updates(&b.v2, &b.update)).unwrap();
+        assert_eq!(summary_of(&path).records, 3);
+        assert_eq!(t.stats().repairs, 0);
+    }
+
+    /// Running clients rewrite their presence file every few seconds; the
+    /// cleanup takes it as a sign of life. A client whose own clock runs days
+    /// ahead must not take those files for a day old and delete them.
+    #[test]
+    fn presence_files_are_collected_by_the_file_servers_clock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut t = transport(tmp.path(), "a", quick());
+        drain(&mut t);
+        let heartbeat = tmp.path().join(PRESENCE).join("r.presence");
+        fs::write(&heartbeat, b"written just now").unwrap();
+        seam::set_clock_ahead(Duration::from_secs(2 * 24 * 3600));
+        drain(&mut t);
+        assert!(heartbeat.exists());
+        // One that is a day old on the server's clock too goes.
+        File::options()
+            .write(true)
+            .open(&heartbeat)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(25 * 3600))
+            .unwrap();
+        drain(&mut t);
+        seam::set_clock_ahead(Duration::ZERO);
+        assert!(!heartbeat.exists());
+    }
+
+    /// Two cleaners in one pass each, interleaved: b's whole pass runs while a
+    /// is about to check the container it chose, so both act on summaries taken
+    /// before either deleted anything. Of two departed logs holding exactly the
+    /// same, only the one with the smaller ID goes (rule 4).
+    #[test]
+    fn two_cleaners_at_once_remove_only_one_of_two_equal_logs() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let b = blobs();
+        let dir = tmp.path().join(UPDATES).join("root");
+        fs::create_dir_all(&dir).unwrap();
+        let same = [header("root"), record(snapshot(&b.v2, &b.snap2))].concat();
+        let (x, y) = (dir.join("x.log"), dir.join("y.log"));
+        for path in [&x, &y] {
+            fs::write(path, &same).unwrap();
+            File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(SystemTime::now() - Duration::from_secs(7200))
+                .unwrap();
+        }
+        let config = DirConfig {
+            inactive_after: Some(Duration::from_secs(3600)),
+            cleanup_interval: Duration::ZERO,
+            absorb_departed: false,
+            ..quick()
+        };
+        let mut a = transport(tmp.path(), "a", config.clone());
+        let other = Rc::new(RefCell::new(transport(tmp.path(), "b", config)));
+        let mut armed = true;
+        let hooked = other.clone();
+        seam::set(move |point, _| {
+            if point == seam::Point::ContainerCheck && std::mem::take(&mut armed) {
+                drain(&mut hooked.borrow_mut());
+            }
+        });
+        drain(&mut a);
+        drain(&mut a);
+        seam::clear();
+        let other = other.borrow();
+        assert!(!x.exists() && y.exists());
+        // b deleted x in the middle of a's pass; a, which had chosen x too,
+        // found it gone, and neither took y.
+        assert_eq!((a.stats().logs_removed, other.stats().logs_removed), (0, 1));
+        assert_eq!((a.last_error(), other.last_error()), (None, None));
     }
 }

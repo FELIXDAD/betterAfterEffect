@@ -263,6 +263,7 @@ fn a_failed_append_leaves_no_gap_for_the_next_session() {
         rng,
         n,
         tag,
+        collide,
     } = a;
     // Closing tells that the log still lacks edits.
     let mut old_dir = old_dir;
@@ -276,6 +277,7 @@ fn a_failed_append_leaves_no_gap_for_the_next_session() {
         rng,
         n,
         tag,
+        collide,
     };
     a.pump();
     a.pump();
@@ -350,6 +352,85 @@ fn a_failed_append_does_not_hold_back_other_documents() {
     b.pump();
     b.pump();
     assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
+/// Snapshot requests are answered after the pump's import. One whose answer
+/// fails (its log cannot be written) does not cost the others theirs: the
+/// folder asks once per compaction, so a dropped request would stop that log
+/// from being compacted.
+#[test]
+fn a_failed_snapshot_answer_does_not_hold_back_other_documents() {
+    let (_tmp, dir) = project_dir();
+    let anim = sl("anim/a");
+    let config = DirConfig {
+        compact_min_bytes: 1,
+        compact_ratio: 1,
+        ..fast()
+    };
+    let mut a = Client::open(&dir, "alice", config, 1);
+    a.pump();
+    // The first write starts each log, the second asks for a snapshot of each.
+    for i in 0..2 {
+        create_layer(&mut a, &anim, &format!("a{i}"));
+        set_opacity(&mut a, f64::from(i));
+        a.pump();
+    }
+    assert_eq!(a.dir.stats().compactions, 0);
+    // `anim/a` is asked first; its log cannot be written.
+    let log = a.dir.log_path(&DocKey::sublayer(&anim));
+    let aside = stall(&log);
+    assert!(a.session.pump(&mut a.stage, &mut a.dir).is_err());
+    assert_eq!(a.dir.stats().compactions, 1, "root was not compacted");
+    unstall(&log, &aside);
+    // The rest catches up: `anim/a` is asked again, everything is compacted.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while a.dir.stats().compactions < 3 {
+        assert!(Instant::now() < deadline, "{:?}", a.dir.stats());
+        std::thread::sleep(Duration::from_millis(10));
+        set_opacity(&mut a, 9.0);
+        a.pump();
+    }
+    assert!(a.dir.close().is_ok());
+    let mut b = Client::open(&dir, "bob", fast(), 2);
+    b.pump();
+    b.pump();
+    assert_eq!(fingerprint(&b.stage), fingerprint(&a.stage));
+}
+
+/// The first scan can miss our own log (a listing that failed on a network
+/// hiccup). An edit before the next poll must not replace it unread: it holds
+/// edits nobody saved.
+#[test]
+fn an_own_log_the_first_scan_missed_is_not_replaced() {
+    let (tmp, dir) = project_dir();
+    let root = SublayerId::root();
+    let mut a = Client::open(&dir, "alice", fast(), 1);
+    a.pump();
+    create_layer(&mut a, &root, "unsaved1");
+    a.pump();
+    drop(a);
+    // alice restarts from the saved project; her first scan misses the log.
+    let doc_dir = dir.join("updates/root");
+    let aside = tmp.path().join("aside");
+    fs::rename(&doc_dir, &aside).unwrap();
+    let slow = DirConfig {
+        poll_interval: Duration::from_secs(3600),
+        ..fast()
+    };
+    let mut a = Client::open(&dir, "alice", slow, 2);
+    a.pump();
+    fs::rename(&aside, &doc_dir).unwrap();
+    create_layer(&mut a, &root, "unsaved2");
+    a.pump();
+    a.pump();
+    drop(a);
+    let mut n = Client::open(&dir, "n", fast(), 3);
+    n.pump();
+    n.pump();
+    let layer = n.stage.sublayer(&root).unwrap();
+    for name in ["unsaved1", "unsaved2"] {
+        assert!(layer.has_spec(&p(&format!("{LAYERS}/{name}"))), "{name}");
+    }
 }
 
 #[test]
@@ -871,7 +952,9 @@ fn of_two_logs_holding_the_same_only_one_is_removed() {
     for id in ["w", "x", "y"] {
         age_client(&dir, id, true);
     }
-    // Two cleaners at once: whatever the interleaving, they pick the same one.
+    // Two cleaners, one after the other (whichever goes first removes them
+    // all; the unit test `two_cleaners_at_once_remove_only_one_of_two_equal_logs`
+    // in dir.rs interleaves two passes): they pick the same one.
     let mut cleaners = vec![
         Client::open(&dir, "a", cleaner(), 2),
         Client::open(&dir, "b", cleaner(), 3),
@@ -935,6 +1018,54 @@ fn a_running_client_repairs_its_log_deleted_underneath() {
     assert_eq!(has_logs(&dir, "x"), [true, true]);
     let expected = state(&clients[0].stage);
     drop(clients);
+    newcomer_sees(&dir, "n", &expected);
+}
+
+/// As above, but the session goes away before answering the request for a full
+/// snapshot (the hub drops its store after an error) and a new one attaches to
+/// the same documents. The record that noticed the deletion was not written on
+/// its own: a log holding only it would claim all of x's ops, so the new
+/// session would send none of the older ones and newcomers could not import it.
+#[test]
+fn a_repair_whose_snapshot_never_comes_claims_nothing() {
+    let (_tmp, dir) = project_dir();
+    let mut x = Client::open(&dir, "x", fast(), 1);
+    x.pump();
+    for _ in 0..10 {
+        x.edit();
+        x.pump();
+    }
+    for doc in DOCS {
+        fs::remove_file(log(&dir, doc, "x")).unwrap();
+    }
+    edit_each(&mut x);
+    x.pump();
+    assert_eq!(x.dir.stats().repairs, 2);
+    let Client {
+        stage,
+        session: _,
+        dir: old,
+        who,
+        rng,
+        n,
+        tag,
+        collide,
+    } = x;
+    drop(old);
+    let mut x = Client {
+        stage,
+        session: session("x"),
+        dir: DirTransport::open(&dir, ClientId::new("x").unwrap(), fast()).unwrap(),
+        who,
+        rng,
+        n,
+        tag,
+        collide,
+    };
+    x.pump();
+    x.pump();
+    let expected = state(&x.stage);
+    drop(x);
     newcomer_sees(&dir, "n", &expected);
 }
 
