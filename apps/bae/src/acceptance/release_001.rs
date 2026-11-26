@@ -674,7 +674,14 @@ fn new_ui_in_one_language(zh: bool) {
     let mut problems = Vec::new();
     let mut scan = |h: &mut Ui, step: &str| {
         settle(h);
-        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok) {
+        // AE's zh_CN Preferences uses these exact labels on these two pages
+        // (docs/reference/ae/ui/preferences-dialog.json).
+        let expected_zh_label = match step {
+            "settings project" => Some("New Project"),
+            "settings scripting_expressions" => Some("px"),
+            _ => None,
+        };
+        for p in super::i18n_retest::wrong_language(h, zh, &extra_ok, expected_zh_label) {
             problems.push(format!("{step}: {p}"));
         }
     };
@@ -847,7 +854,8 @@ fn new_layer_properties_survive_save_as_bae_and_baez() {
             continue;
         }
         settle(&mut h);
-        if dialog_open(&h) {
+        // A dialog, or Preferences (Edit ▸ Label ▸ Edit Label Colors…).
+        if dialog_open(&h) || h.state().workspace.modal_open(h.state().app.resources()) {
             key(&mut h, Modifiers::NONE, Key::Escape);
         }
         ran.push(format!("{} ▸ {}", item.path.join(" ▸ "), item.title));

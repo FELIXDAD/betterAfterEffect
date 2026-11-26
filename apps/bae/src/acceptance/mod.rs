@@ -21,6 +21,8 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_preferences;
+mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
 mod comp_navigation;
@@ -34,6 +36,8 @@ mod files_flow;
 mod i18n_retest;
 #[cfg(target_os = "macos")]
 mod i18n_scan;
+mod import_preferences;
+mod layer_creation_preferences;
 #[cfg(target_os = "macos")]
 mod layers;
 #[cfg(target_os = "macos")]
@@ -41,12 +45,14 @@ mod layout;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
+mod preference_controls;
+mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
 #[cfg(target_os = "macos")]
 mod render_queue;
-#[cfg(target_os = "macos")]
 mod settings;
+mod shape_anchor;
 mod shortcut_sweep;
 #[cfg(target_os = "macos")]
 mod shortcuts_dialog;
@@ -97,7 +103,7 @@ pub(crate) fn build_app() -> App {
     );
     let _ = builder.register_arc::<dyn bae_render::SourceProvider>(
         bae_text::TEXT_PROVIDER,
-        Arc::new(bae_text::render::TextProvider::new()),
+        bae_text::render::TextProvider::shared(),
     );
     builder.build()
 }
@@ -260,7 +266,12 @@ impl Gui {
         };
         match inv.id.as_str() {
             ids::QUIT => {
-                if crate::view_state::confirm_quit(&self.app, &mut self.doc, &mut self.dialogs) {
+                if crate::view_state::confirm_quit(
+                    &self.app,
+                    &mut self.doc,
+                    &self.workspace,
+                    &mut self.dialogs,
+                ) {
                     self.quit = true;
                 }
             }
@@ -273,6 +284,7 @@ impl Gui {
                 crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.doc,
+                    &mut self.workspace,
                     &mut self.dialogs,
                     &inv,
                 );

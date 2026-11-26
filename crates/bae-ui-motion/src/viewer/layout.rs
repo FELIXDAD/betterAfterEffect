@@ -91,6 +91,7 @@ impl CompositionViewer {
                 .clamp(0.01, 1.0 / ppp);
             let camera = views.camera_of(pane, size);
             let view = View {
+                aspect: 1.0,
                 origin: rect.center() - vec2(w, h) * scale / 2.0,
                 scale,
                 point: self.prefs.point_size,
@@ -104,7 +105,7 @@ impl CompositionViewer {
             let to = |v: f64| (v * 255.0) as u8;
             painter.rect_filled(frame, 0.0, Color32::from_rgb(to(c[0]), to(c[1]), to(c[2])));
             if self.gpu.is_some() && self.extra_gpu[i].is_none() {
-                self.extra_gpu[i] = GpuPreview::new(cx.resources);
+                self.extra_gpu[i] = GpuPreview::new(cx.resources, ui.ctx());
             }
             if let Some(img) = self.extra_gpu[i].as_mut().and_then(|g| {
                 g.frame(
