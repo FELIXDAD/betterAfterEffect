@@ -113,6 +113,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         case 1u: { result = paint + base * (1.0 - paint.a); }
         case 3u: { result = base * paint.a; }
         case 4u: { result = base + paint * (1.0 - base.a); }
+        // The Paint effect's Eraser.
+        case 5u: { result = base * (1.0 - paint.a); }
         default: { result = paint; }
     }
     if (u.flags & 0x80000000u) == 0u {
