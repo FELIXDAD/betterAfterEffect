@@ -89,6 +89,17 @@ pub(crate) fn next_step(mag: f32, up: bool) -> Option<f32> {
     }
 }
 
+/// Associate the native smart-magnify event with the next input pass.
+pub fn request_smart_zoom(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("mac.smart_zoom"), pass));
+}
+
+pub(crate) fn smart_zoom(ctx: &egui::Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new("mac.smart_zoom"))) == Some(pass)
+}
+
 /// What the mouse wheel and trackpad did this frame over a picture (the
 /// viewer and the Layer panel share it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -631,13 +642,13 @@ impl Panel for CompositionViewer {
         let opts = session.lock().view_options;
         self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
+        crate::import::drop_on_panel(ui, cx);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().update_preview(cx, &info) {
-            ui.ctx().request_repaint();
-        }
+        // The shell ticks the clock; this keeps the audio mix current.
+        session.lock().update_preview(cx, &info);
         let time = session.lock().time(&info.path);
         let ppp = ui.ctx().pixels_per_point();
 
@@ -698,7 +709,15 @@ impl Panel for CompositionViewer {
         // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
             let w = wheel(ui);
-            if w.pinch != 1.0 {
+            if smart_zoom(ui.ctx()) {
+                if self.zoom.is_some() {
+                    self.zoom = None;
+                    self.pan = Vec2::ZERO;
+                } else {
+                    let (_, mag) = self.view(area, &info, ppp);
+                    self.zoom_by((1.0 / mag).max(2.0), resp.hover_pos(), area, &info, ppp);
+                }
+            } else if w.pinch != 1.0 {
                 self.zoom_by(w.pinch, resp.hover_pos(), area, &info, ppp);
             } else {
                 if w.notches != 0.0 {
@@ -828,6 +847,9 @@ impl Panel for CompositionViewer {
                     completed = Some(image);
                     if actual == time || playback.is_some() {
                         let mut s = session.lock();
+                        if playback.is_some() {
+                            s.drew_preview(actual);
+                        }
                         if s.expr_errors != errors {
                             s.expr_errors = errors.to_vec();
                         }
@@ -868,6 +890,18 @@ impl Panel for CompositionViewer {
                 paint_image(&clip, &view, image);
             }
             Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
+            let (fps, dropped) = {
+                let s = session.lock();
+                (s.playback_stats.fps, s.playback_stats.dropped)
+            };
+            let label = format!("{fps:.1} fps   {} {dropped}", tr("Dropped frames"));
+            painter.text(
+                area.right_top() + vec2(-8., 8.),
+                Align2::RIGHT_TOP,
+                label,
+                theme::body(),
+                color::TEXT_STRONG,
+            );
             self.banner.ui(ui, cx, &session, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
             return;

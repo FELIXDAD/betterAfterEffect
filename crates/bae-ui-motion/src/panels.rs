@@ -404,10 +404,9 @@ impl Panel for PreviewPanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let info = common::active_comp(cx.stage, &session);
-        if let Some(info) = &info
-            && session.lock().update_preview(cx, info)
-        {
-            ui.ctx().request_repaint();
+        // The shell ticks the clock; this keeps the audio mix current.
+        if let Some(info) = &info {
+            session.lock().update_preview(cx, info);
         }
         let playing = session.lock().is_playing();
         ui.add_space(4.0);

@@ -1,9 +1,6 @@
 pub(crate) mod definitions;
 use crate::effects::{
-    blur::{BLURRINESS_TO_SIGMA, dimensions},
-    image_grid, layer_input,
-    sampled::Shader,
-    spatial::dispatch,
+    blur::BLURRINESS_TO_SIGMA, image_grid, layer_input, sampled::Shader, spatial::dispatch,
 };
 use crate::{Builtin, EffectTarget, TargetEffect, params::Params, rust_builtin};
 use crate::{blur, common};
@@ -39,6 +36,9 @@ macro_rules! shader {
         }
     };
 }
+mod aperture;
+mod channels;
+
 pub(crate) fn prewarm(
     rt: &crate::gpu::Runtime,
     format: bae_gpu::wgpu::TextureFormat,
@@ -46,13 +46,12 @@ pub(crate) fn prewarm(
     for shader in [
         shader!("lens"),
         shader!("bilateral"),
-        shader!("channels"),
         shader!("vector"),
         shader!("cross"),
     ] {
         shader.kernel(rt, format)?;
     }
-    Ok(())
+    channels::prewarm(rt, format)
 }
 
 pub(crate) fn builtins() -> [Builtin; 8] {
@@ -177,7 +176,16 @@ impl Effect for Optics {
             };
             return roi.inflate((dx.hypot(dy) * travel).ceil() as i32 + 1);
         }
-        roi.inflate(self.radius(Params::new(&self.def, p)).ceil() as i32 + 2)
+        let v = Params::new(&self.def, p);
+        // A half-resolution neighborhood also reads the downsample and reconstruction footprints.
+        let padding = if matches!(self.mode, Mode::Lens | Mode::Bilateral | Mode::Smart)
+            && v.f(1) * p.scale >= aperture::HALF_RADIUS
+        {
+            6
+        } else {
+            2
+        };
+        roi.inflate(self.radius(v).ceil() as i32 + padding)
     }
     fn output_bounds(&self, p: &EffectParams<'_>, input: IRect) -> IRect {
         let v = Params::new(&self.def, p);
@@ -218,24 +226,8 @@ impl TargetEffect for Optics {
             .cloned();
         let input = common::premultiplied(target, input)?;
         match self.mode {
-            Mode::Lens => {
-                if v.f(1) == 0. {
-                    return Ok(input);
-                }
-                shader!("lens").dispatch(target, v, roi, &input, [map.as_ref(), None, None], [0, 0])
-            }
-            Mode::Bilateral | Mode::Smart => {
-                if v.f(1) == 0. {
-                    return Ok(input);
-                }
-                shader!("bilateral").dispatch(
-                    target,
-                    v,
-                    roi,
-                    &input,
-                    [None; 3],
-                    [u32::from(self.mode == Mode::Smart), 0],
-                )
+            Mode::Lens | Mode::Bilateral | Mode::Smart => {
+                aperture::render(target, v, self.mode, &input, map.as_ref(), roi)
             }
             Mode::Vector => {
                 if v.f(2) == 0. {
@@ -255,38 +247,7 @@ impl TargetEffect for Optics {
                     [0, 0],
                 )
             }
-            Mode::Channel => {
-                let dimensions = dimensions(v.popup(6));
-                let edge = if v.b(5) {
-                    blur::Edge::Repeat
-                } else {
-                    blur::Edge::Transparent
-                };
-                let mut channels = Vec::with_capacity(4);
-                for id in 1..=4 {
-                    let r = v.f(id);
-                    if r == 0. {
-                        channels.push(input.clone());
-                        continue;
-                    }
-                    if let Some(i) = (1..id).find(|&other| v.f(other) == r) {
-                        channels.push(channels[i as usize - 1].clone());
-                        continue;
-                    }
-                    let sigma = dimensions.map(|k| k * r * BLURRINESS_TO_SIGMA * p.scale);
-                    channels.push(
-                        blur::plan_gaussian(input.rect, sigma, edge, roi).encode(target, &input)?,
-                    );
-                }
-                shader!("channels").dispatch(
-                    target,
-                    v,
-                    roi,
-                    &channels[0],
-                    [Some(&channels[1]), Some(&channels[2]), Some(&channels[3])],
-                    [0, 0],
-                )
-            }
+            Mode::Channel => channels::render(target, v, &input, roi),
             Mode::Cross => {
                 let mut axes = Vec::with_capacity(2);
                 for (id, axis) in [(1, [1., 0.]), (2, [0., 1.])] {

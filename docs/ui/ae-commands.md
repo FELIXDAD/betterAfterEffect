@@ -492,7 +492,7 @@
 | Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ☐ |
 | Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
 | Warp Stabilizer VFX | 851989 | `motion.anim.warp_stabilizer_vfx` |  |  |  | B | ⏸ |
-| Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ⏸ |
+| Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ✅ |
 | Track Mask | 851991 | `motion.anim.track_mask` |  |  |  | B | ⏸ |
 | Track this Property | 851992 | `motion.anim.track_this_property` |  |  |  | B | ⏸ |
 | Reveal Properties with Keyframes | 851994 | `motion.reveal` | `{"what":"animated","add":false}` | U | U | B | ✅ |

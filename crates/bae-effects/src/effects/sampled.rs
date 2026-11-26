@@ -124,6 +124,12 @@ impl Shader {
                 _ => {}
             }
         }
+        if let Some(Value::FloatList(profile)) = v.p.value(bae_render::effect::HISTORY_PARAM) {
+            let start = SLOTS - bae_render::effect::PROFILE_SAMPLES;
+            for (slot, &sample) in (start..SLOTS).zip(profile) {
+                u.f32(HEADER + slot * 16, sample as f32);
+            }
+        }
         lights::write(v.p.effect, &mut u, HEADER);
         extra(&mut u, HEADER);
         let offset = gpu::push_uniform(&rt, &u);
@@ -169,6 +175,17 @@ pub(crate) struct Sampled {
 impl Effect for Sampled {
     fn def(&self) -> &EffectDef {
         &self.def
+    }
+    fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        lights::uses_scene(&self.def, p.effect)
+    }
+    fn prepare_scene(
+        &self,
+        instance: &mut bae_render::RenderEffect,
+        comp: &bae_render::RenderComp,
+        layer: &bae_render::RenderLayer,
+    ) {
+        lights::collect(&self.def, instance, comp, layer);
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         if roi.is_empty() {

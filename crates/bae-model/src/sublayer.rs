@@ -100,6 +100,25 @@ impl Sublayer {
         }
     }
 
+    /// Pin a revision now and copy its tree on the caller's background thread.
+    pub(crate) fn snapshot_reader(&self) -> impl FnOnce() -> Result<Self> + Send + use<> {
+        let doc = self.doc.clone();
+        let version = doc.state_frontiers();
+        let id = self.id.clone();
+        move || {
+            let doc = doc.fork_at(&version)?;
+            let mut layer = Self {
+                tree: doc.get_tree(TREE),
+                doc,
+                id,
+                by_path: FxHashMap::default(),
+                nodes: FxHashMap::default(),
+            };
+            layer.rebuild();
+            Ok(layer)
+        }
+    }
+
     /// Load from a Loro snapshot (or any update blob).
     pub fn from_snapshot(id: SublayerId, bytes: &[u8]) -> Result<Self> {
         let mut layer = Sublayer::new(id);
