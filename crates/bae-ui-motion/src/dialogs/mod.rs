@@ -9,6 +9,7 @@ mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
 mod go_to_time;
+mod layer_time;
 mod light_settings;
 pub mod memory;
 mod placeholder;
@@ -50,6 +51,10 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// Layer > Time > Time Stretch.
+    TimeStretch(Box<layer_time::TimeStretch>),
+    /// Layer > Transform > Auto-Orient (Cmd/Ctrl+Alt+O).
+    AutoOrient(Box<layer_time::AutoOrient>),
     /// View > Go to Time (Alt+Shift+J).
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
@@ -275,6 +280,28 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Time Stretch for the selected layers.
+pub(crate) fn time_stretch(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(t) = layer_time::TimeStretch::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::TimeStretch(Box::new(t)));
+    }
+}
+
+/// Open Auto-Orient for the selected layers.
+pub(crate) fn auto_orient(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(a) = layer_time::AutoOrient::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::AutoOrient(Box::new(a)));
+    }
+}
+
 /// Open Go to Time for the active comp.
 pub(crate) fn go_to_time(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -381,6 +408,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         light_settings::STRINGS,
         precompose::STRINGS,
         placeholder::STRINGS,
+        layer_time::STRINGS,
         go_to_time::STRINGS,
         project_settings::STRINGS,
         transform_value::STRINGS,
@@ -413,6 +441,8 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::NewPlaceholder(d) => d.ui(ctx, cx),
+            Dialog::TimeStretch(d) => d.ui(ctx, cx),
+            Dialog::AutoOrient(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
             Dialog::TransformValue(d) => d.ui(ctx, cx),

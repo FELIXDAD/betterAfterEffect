@@ -4,6 +4,8 @@
 //! table (`<module>::ZH` / `<module>/zh.rs`); only common words stay here.
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Command title (`layer.auto_orient`).
+    ("Auto-Orient", "自动定向"),
     // Command title (`project.set_settings`).
     ("Project Settings", "项目设置"),
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
