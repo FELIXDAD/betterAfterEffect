@@ -503,7 +503,8 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
-                self.waveforms.draw(ui, stage, layer, axis, graph);
+                self.waveforms
+                    .draw(ui, stage, layer, axis, graph, color::TEXT);
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
@@ -852,6 +853,13 @@ impl TimelinePanel {
                 s.selected_keys = keys;
                 s.selected_layers = vec![layer.clone()];
             }
+        }
+        // Right-click: AE's property menu (Edit Value…, keyframes, Reset,
+        // expressions …).
+        if query::locked_layer_of(stage, path).is_none() {
+            crate::common::context_menu(&nresp, &mut |ui| {
+                menus::property_menu(ui, cx, session, path, attr, now);
+            });
         }
         // Value.
         let value = session

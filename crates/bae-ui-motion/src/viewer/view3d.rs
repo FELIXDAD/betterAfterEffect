@@ -27,6 +27,9 @@ pub(crate) mod ids {
     /// Esc.
     pub const LAST: &str = "motion.view.switch_to_last_3d_view";
     pub const RESET: &str = "motion.view.reset_3d_view";
+    /// View ▸ Create Camera from 3D View.
+    pub const CREATE_CAMERA: &str = "motion.view.create_camera_from_3d_view";
+
     /// `{"views": 1 | 2 | 4}`: View ▸ Switch View Layout.
     pub const LAYOUT: &str = "motion.view.view_layout";
 }
@@ -38,6 +41,7 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     (ids::ASSIGN, "Assign 3D View Shortcut"),
     (ids::LAST, "Switch to Last 3D View"),
     (ids::RESET, "Reset 3D View"),
+    (ids::CREATE_CAMERA, "Create Camera from 3D View"),
     (ids::LAYOUT, "Switch View Layout"),
 ];
 
@@ -150,6 +154,25 @@ impl ViewCamera {
                 target: centre,
                 zoom,
             },
+        }
+    }
+
+    /// A perspective camera that sees what this view sees: position, point of
+    /// interest and zoom. An orthographic view becomes a camera along its
+    /// viewing direction that shows the plane through its centre at the same
+    /// magnification.
+    pub fn lens(self, view: View3d, size: DVec2) -> (DVec3, DVec3, f64) {
+        match self {
+            ViewCamera::Perspective {
+                position,
+                target,
+                zoom,
+            } => (position, target, zoom),
+            ViewCamera::Ortho { centre, scale } => {
+                let zoom = bae_render::camera::default_zoom(size.x as u32);
+                let dir = self.camera(view).direction();
+                (centre - dir * zoom / scale.max(1e-6), centre, zoom)
+            }
         }
     }
 
@@ -354,6 +377,27 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
             let current = views.current;
             s.view_shortcuts.0[slot(inv)] = current;
         }
+        ids::CREATE_CAMERA if views.current != View3d::Active => {
+            let Some(info) = bae_motion::query::comp_info(cx.stage, &comp) else {
+                return true;
+            };
+            let size = DVec2::new(f64::from(info.width), f64::from(info.height));
+            let (eye, target, zoom) = views
+                .view_camera(views.current, size)
+                .lens(views.current, size);
+            drop(s);
+            common::new_layer(
+                cx,
+                &session,
+                bae_model::LayerKind::Camera,
+                serde_json::json!({
+                    "camera": { "zoom": zoom },
+                    "position_3d": eye.to_array(),
+                    "point_of_interest": target.to_array(),
+                }),
+            );
+        }
+
         ids::LAYOUT => {
             let n = inv
                 .params
@@ -365,6 +409,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         _ => {}
     }
     true
+}
+
+/// Whether View ▸ Create Camera from 3D View applies: the active comp shows a
+/// view other than Active Camera.
+pub(crate) fn can_create_camera(resources: &bae_app::Resources) -> bool {
+    common::session(resources).lock().active_comp.is_some() && current(resources) != View3d::Active
 }
 
 /// The active comp's view layout: 1, 2 or 4 views.
