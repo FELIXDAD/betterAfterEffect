@@ -16,6 +16,7 @@
 //! The crate has no UI, GPU or platform dependency (without `file`), so domain
 //! command crates can read preferences too.
 
+mod expr_themes;
 pub mod i18n;
 pub mod pages;
 pub mod schema;
@@ -116,6 +117,9 @@ impl Preferences {
     /// to its default. Returns the keys that were replaced.
     pub fn from_json(data: &Map<String, Value>) -> (Self, Vec<String>) {
         let mut prefs = Self::default();
+        if let Some(theme) = data.get(keys::EXPR_THEME) {
+            prefs.set(keys::EXPR_THEME, theme.clone());
+        }
         let mut fixed = Vec::new();
         for (key, value) in data {
             match schema::find(key) {
@@ -163,6 +167,10 @@ impl Preferences {
             return false;
         };
         if self.values.get(p.key) == Some(&v) {
+            if key == keys::EXPR_THEME && self.selected_expression_theme().is_some() {
+                self.update_expression_palette(key);
+                return true;
+            }
             return false;
         }
         self.values.insert(p.key, v);
@@ -172,7 +180,7 @@ impl Preferences {
                 self.values
                     .insert(keys::TRANSPARENCY_PRESET, Value::from("custom"));
             }
-            _ => {}
+            _ => self.update_expression_palette(key),
         }
         true
     }
@@ -280,6 +288,7 @@ impl Preferences {
 
 /// Keys features read (the schema has them all).
 pub mod keys {
+    pub const CACHE_FRAMES_WHEN_IDLE: &str = "previews.cache_frames_when_idle";
     pub const TRANSPARENCY_PRESET: &str = "grids_guides.transparency_grid_colors_preset";
     pub const TRANSPARENCY_FIRST: &str = "grids_guides.transparency_grid_color_1";
     pub const TRANSPARENCY_SECOND: &str = "grids_guides.transparency_grid_color_2";
