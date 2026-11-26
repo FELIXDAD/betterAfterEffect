@@ -92,6 +92,8 @@ pub enum Dialog {
         steps: [u32; 2],
         nested: bool,
     },
+    /// Tools ▸ Puppet ▸ Record Options…
+    PuppetRecordOptions(crate::tools::PuppetRecord),
 }
 
 /// Open dialog and remembered values.
@@ -533,6 +535,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CustomResolution { steps, nested } => {
                 crate::viewer::view_options::custom_resolution_ui(ctx, cx, steps, *nested)
             }
+            Dialog::PuppetRecordOptions(r) => crate::viewer::puppet_record_options_ui(ctx, cx, r),
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {

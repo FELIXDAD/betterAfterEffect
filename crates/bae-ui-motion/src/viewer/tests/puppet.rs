@@ -189,3 +189,45 @@ fn a_marquee_selects_puppet_pins() {
     h.release((360.0, 190.0), Modifiers::SHIFT);
     assert_eq!(deleted(&mut h), json!([pins[0], pins[1]]));
 }
+
+/// Cmd/Ctrl-dragging a pin records its motion (AE): the comp time runs on
+/// while the pointer moves it, and releasing writes its Position keyframes
+/// in one undo step.
+#[test]
+fn command_dragging_a_pin_records_its_motion() {
+    let mut h = H::new();
+    let solid = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.select(&[&solid]);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.tools().lock().set(Tool::PuppetPosition);
+    let r = h.click(320.0, 180.0, Modifiers::NONE);
+    h.apply(&r);
+    let effect = bae_motion::effect::effects_of(&h.stage, &solid)[0].clone();
+    let pin = bae_motion::puppet::pins_of(&h.stage, &effect)[0].clone();
+    let m = Modifiers::COMMAND;
+    let a = h.screen(320.0, 180.0);
+    h.move_to(a, m, Vec::new());
+    h.pointer_button(a, true, m);
+    for i in 1..=30 {
+        let b = h.screen(320.0 + f64::from(i) * 2.0, 180.0);
+        let r = h.move_to(b, m, Vec::new());
+        assert!(r.invocations.is_empty(), "nothing written while recording");
+    }
+    let comp = h.comp.clone();
+    let now = h.session().lock().time(&comp);
+    assert!(
+        now >= bae_model::Time::from_seconds(0.4),
+        "the comp time runs while recording: {now:?}"
+    );
+    let r = h.release((380.0, 180.0), m);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    h.apply(&r);
+    let spec = query::attr_spec(&h.stage, &pin, "position")
+        .unwrap()
+        .clone();
+    assert!(spec.keyframes.len() >= 2, "{:?}", spec.keyframes.keys());
+    let (_, last) = spec.keyframes.iter().next_back().unwrap();
+    // 60 px right of the solid's centre (layer pixels).
+    assert!(close(vec2v(Some(last.value.clone())), [160.0, 50.0]));
+}
