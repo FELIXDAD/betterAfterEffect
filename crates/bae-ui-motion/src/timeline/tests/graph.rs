@@ -752,3 +752,80 @@ fn reveal_comp_in_project_and_flowchart() {
         r.open
     );
 }
+
+/// AE's transform box modifiers on a corner: Alt moves that corner alone,
+/// Ctrl+Alt tapers the values, Ctrl+Alt+Shift moves that side up or down; the
+/// anchor point can be dragged and Ctrl scales about it.
+#[test]
+fn transform_box_corner_modifiers_and_anchor() {
+    let mut h = H::new();
+    // Top-left key (1 s, 90°) and bottom-right key (2 s, 0°).
+    h.keys(
+        ROT,
+        &[(0.0, float(45.0)), (1.0, float(90.0)), (2.0, float(0.0))],
+    );
+    let (k1, k2) = (h.key(ROT, 1.0), h.key(ROT, 2.0));
+    h.session().lock().selected_keys = vec![k1.clone(), k2.clone()];
+    let mut tl = h.graph();
+    let b = tl.graph_editor().last.selection_box.expect("box");
+    let corner = pos2(b.right() + 4.0, b.bottom() + 4.0);
+    let val = |h: &H, secs: f64| {
+        h.spec(ROT).keyframes[&Time::from_seconds(secs)]
+            .value
+            .as_f64()
+            .unwrap()
+    };
+    let with = |a: Modifiers, b: Modifiers| Modifiers {
+        alt: a.alt || b.alt,
+        shift: a.shift || b.shift,
+        command: a.command || b.command,
+        mac_cmd: a.mac_cmd || b.mac_cmd,
+        ctrl: a.ctrl || b.ctrl,
+    };
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::NONE
+    };
+    let run = |h: &mut H, tl: &mut TimelinePanel, from: Pos2, to: Pos2, m: Modifiers| {
+        let r = h.drag(tl, from, to, m);
+        h.apply(&r);
+        let out = (val(h, 1.0), val(h, 2.0));
+        h.undo();
+        h.frame(tl, Vec::new(), Modifiers::NONE);
+        out
+    };
+    // Alt: only the dragged (bottom-right) key moves.
+    let (v1, v2) = run(&mut h, &mut tl, corner, corner - vec2(0.0, 30.0), alt());
+    assert!((v1 - 90.0).abs() < 1e-3, "{v1}");
+    assert!(v2 > 1.0, "{v2}");
+    // Ctrl+Alt: taper — the right side's distance from the middle grows.
+    let (v1, v2) = run(
+        &mut h,
+        &mut tl,
+        corner,
+        corner + vec2(0.0, 30.0),
+        with(cmd(), alt()),
+    );
+    assert!((v1 - 90.0).abs() < 1e-3, "{v1}");
+    assert!(v2 < -1.0, "{v2}");
+    // Ctrl+Alt+Shift: the right side moves up.
+    let (v1, v2) = run(
+        &mut h,
+        &mut tl,
+        corner,
+        corner - vec2(0.0, 30.0),
+        with(with(cmd(), alt()), shift),
+    );
+    assert!((v1 - 90.0).abs() < 1e-3, "{v1}");
+    assert!(v2 > 1.0, "{v2}");
+    // The anchor point to the top-left key, then Ctrl-scale: that key stays.
+    let anchor = tl.graph_editor().last.box_anchor.expect("anchor");
+    let r = h.drag(&mut tl, anchor, b.left_top(), Modifiers::NONE);
+    assert!(r.invocations.is_empty(), "moving the anchor edits nothing");
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let moved = tl.graph_editor().last.box_anchor.unwrap();
+    assert!(moved.distance(b.left_top()) < 1.0, "{moved:?}");
+    let (v1, v2) = run(&mut h, &mut tl, corner, corner + vec2(0.0, 30.0), cmd());
+    assert!((v1 - 90.0).abs() < 1e-3, "{v1}");
+    assert!(v2 < -1.0, "{v2}");
+}
