@@ -87,6 +87,9 @@ impl crate::graph::CompFrames for EvaluatorFrames<'_> {
             let Some(attr) = view.attr(&name) else {
                 continue;
             };
+            if !attr.is_animated() && attr.expression.is_none() {
+                continue;
+            }
             let curve =
                 bae_anim::Curve::new(&attr.keyframes, bae_anim::schema::curve_kind(&name, attr));
             for sample in &mut samples {

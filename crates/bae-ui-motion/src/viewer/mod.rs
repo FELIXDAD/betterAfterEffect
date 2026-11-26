@@ -16,17 +16,21 @@ use serde_json::json;
 
 use crate::common::{self, EvalCache};
 use crate::gpu_preview::GpuPreview;
-use crate::project::ItemDrag;
+use crate::project::{DropPlacement, ItemDrag};
 use crate::render::{self, Affine, View};
 use crate::session::{Scrub, SharedSession};
 use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+mod camera_tool;
 mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
+mod gizmo3d;
 pub(crate) mod guides;
+mod layout;
+mod look_at;
 mod menu;
 mod motion_path;
 mod overlay;
@@ -72,6 +76,8 @@ pub struct CompositionViewer {
     pending_zoom: Option<bool>,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
+    /// GPU previews of the other views of the layout (by view index).
+    extra_gpu: Vec<Option<GpuPreview>>,
     /// The last frame came from the GPU compositor.
     on_gpu: bool,
     /// Space is held over the viewer (temporary Hand tool): whether the comp was
@@ -108,6 +114,8 @@ pub struct CompositionViewer {
     esc_taken: bool,
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
+    /// A camera tool drag.
+    camera_drag: Option<camera_tool::CameraDrag>,
 }
 
 impl CompositionViewer {
@@ -402,6 +410,18 @@ impl Panel for CompositionViewer {
         if view3d::handle(action, cx) {
             return true;
         }
+        // With a camera tool, F is Look at Selected Layers (AE's camera tool
+        // shortcut; elsewhere F reveals Mask Feather).
+        if action.id == "motion.reveal"
+            && action.params.get("what").and_then(|v| v.as_str()) == Some("mask_feather")
+            && matches!(
+                crate::tools::shared(cx.resources).lock().current().group(),
+                crate::tools::Group::Orbit | crate::tools::Group::Pan | crate::tools::Group::Dolly
+            )
+        {
+            let look = Invocation::new(look_at::ids::SELECTED);
+            return look_at::handle(&look, cx);
+        }
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
         if self.shape.is_some() || self.pen.busy() || self.select.busy() {
@@ -465,6 +485,16 @@ impl Panel for CompositionViewer {
         let bar_h = 28.0;
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
+        // View layout: the active view is the viewer, the others are drawn below.
+        let (panes, active) = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .map_or((vec![view3d::View3d::Active], 0), |v| {
+                (v.panes(), v.active())
+            });
+        let pane_rects = layout::rects(area, panes.len());
+        let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
         let (rulers, area) = guides::layout(area, opts.rulers);
         let resp = ui
@@ -539,8 +569,11 @@ impl Panel for CompositionViewer {
                 self.pan += pan;
             }
         }
-        if resp.dragged_by(egui::PointerButton::Middle)
-            || resp.dragged_by(egui::PointerButton::Secondary)
+        // With a camera tool these drags pan and dolly the camera.
+        let camera_tool = crate::tools::shared(cx.resources).lock().current();
+        if (resp.dragged_by(egui::PointerButton::Middle)
+            || resp.dragged_by(egui::PointerButton::Secondary))
+            && !camera_tool.is_camera()
         {
             self.pan += resp.drag_delta();
         }
@@ -661,11 +694,29 @@ impl Panel for CompositionViewer {
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
-        let view_camera = session
-            .lock()
-            .views3d
-            .get(&info.path)
-            .and_then(|v| v.camera(size));
+        if camera_tool.is_camera() || self.camera_drag.is_some() {
+            camera_tool::frame(
+                &mut self.camera_drag,
+                &resp,
+                ui,
+                cx,
+                &session,
+                &info.path,
+                &comp,
+                size,
+                &view,
+                camera_tool,
+                time,
+            );
+        }
+        let layer_camera = self.camera_drag.as_ref().and_then(|d| d.layer_camera());
+        let view_camera = layer_camera.or_else(|| {
+            session
+                .lock()
+                .views3d
+                .get(&info.path)
+                .and_then(|v| v.camera(size))
+        });
         let view = View {
             camera: Some((
                 view_camera.unwrap_or_else(|| view3d::active_camera(&comp, size)),
@@ -692,10 +743,21 @@ impl Panel for CompositionViewer {
             select_tool::center_anchors(cx, &session, &info, &comp);
         }
 
-        let image = self
-            .gpu
-            .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
+        let frame_nr = ui.ctx().cumulative_frame_nr();
+        let measure = session
+            .lock()
+            .timing_column_frame
+            .is_some_and(|shown| frame_nr.saturating_sub(shown) <= 1);
+        let image = self.gpu.as_mut().and_then(|g| {
+            g.frame(
+                cx.resources,
+                cx.stage,
+                &comp,
+                resolution,
+                view_camera,
+                measure,
+            )
+        });
         self.on_gpu = image.is_some();
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
@@ -996,7 +1058,11 @@ impl Panel for CompositionViewer {
 
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
-            add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
+            item.add_as_layer(
+                cx,
+                &session,
+                DropPlacement::Viewer(pointer.map(|p| view.to_comp(p))),
+            );
         }
         // An effect dropped on a layer (Effects & Presets) is applied to it.
         if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
@@ -1007,6 +1073,7 @@ impl Panel for CompositionViewer {
         }
 
         self.banner.ui(ui, cx, &session, area);
+        self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
         self.esc_taken = self.shape.is_some()
             || self.pen.busy()
@@ -1015,6 +1082,19 @@ impl Panel for CompositionViewer {
             || ui.ctx().text_edit_focused()
             || egui::Popup::is_any_open(ui.ctx());
     }
+}
+
+/// View ▸ Look at Selected / All Layers (see [`look_at`]).
+pub(crate) fn look_at(inv: &bae_ui::Invocation, cx: &mut PanelContext<'_>) -> bool {
+    look_at::handle(inv, cx)
+}
+
+pub(crate) fn look_at_actions() -> impl Iterator<Item = (&'static str, &'static str)> {
+    look_at::ACTIONS.iter().copied()
+}
+
+pub(crate) fn look_at_enabled(resources: &bae_app::Resources, all: bool) -> bool {
+    look_at::enabled(resources, all)
 }
 
 fn paint_image(clip: &egui::Painter, view: &View, img: crate::gpu_preview::PreviewImage) {
@@ -1090,45 +1170,6 @@ pub(crate) fn set_resolution(
             );
         }
     }
-}
-
-/// Add a project item to the active comp (drag and drop).
-pub(crate) fn add_item_as_layer(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    item: &PrimPath,
-    at: Option<DVec2>,
-) {
-    let stage = cx.stage;
-    let Some(active) = session.lock().active_comp.clone() else {
-        return;
-    };
-    let kind = if query::comp_info(stage, item).is_some() {
-        if item == &active {
-            return;
-        }
-        LayerKind::PreComp
-    } else {
-        match stage
-            .prim(item)
-            .and_then(|v| query::static_value(&v, "kind"))
-        {
-            Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
-            _ if stage.prim(item).is_some_and(|v| {
-                v.value("has_audio").and_then(Value::as_bool) == Some(true)
-                    && v.value("has_video").and_then(Value::as_bool) == Some(false)
-            }) =>
-            {
-                LayerKind::Audio
-            }
-            _ => LayerKind::Footage,
-        }
-    };
-    let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
-    if let Some(p) = at {
-        extra["position"] = json!([p.x, p.y]);
-    }
-    common::new_layer(cx, session, kind, extra);
 }
 
 fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {
