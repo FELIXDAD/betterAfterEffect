@@ -420,11 +420,12 @@ fn render_worker(
                 job.scene.key.resolution,
                 bae_render::Display::default(),
                 None,
+                None,
             )
             .map_err(|e| e.to_string())
             // Not an interactive thread: it waits for the warm-up instead.
-            .and_then(|r| r.ok_or_else(|| "incomplete frame".to_owned()))
-            .and_then(|(texture, rect)| {
+            .and_then(|(target, rect)| Ok((target, rect.ok_or("incomplete frame")?)))
+            .and_then(|(target, rect)| {
                 let slot = Arc::new(Slot {
                     registry: registry.clone(),
                     id: registry.create("playback frame"),
@@ -433,7 +434,7 @@ fn render_worker(
                     errors: job.errors,
                 });
                 registry
-                    .publish(slot.id, &texture, wgpu::FilterMode::Linear)
+                    .publish(slot.id, target.view().texture(), wgpu::FilterMode::Linear)
                     .map_err(|e| e.to_string())?;
                 Ok(slot)
             });
