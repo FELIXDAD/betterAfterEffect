@@ -411,3 +411,124 @@ fn edits_received_just_before_a_link_fails_are_kept() {
     );
     assert_eq!(fingerprint(&staying), fingerprint(&leaving));
 }
+
+/// Everything waiting on `end`: `(hellos, updates)`; checks every hello's client.
+fn drain(end: &mut bae_sync::MemoryTransport, hello_from: &str) -> (usize, usize) {
+    use bae_sync::{Message, Transport};
+    let (mut hellos, mut updates) = (0, 0);
+    while let Some(m) = end.recv().unwrap() {
+        match m {
+            Message::Hello { client, .. } => {
+                assert_eq!(client.as_str(), hello_from);
+                hellos += 1;
+            }
+            Message::Updates { .. } => updates += 1,
+            _ => {}
+        }
+    }
+    (hellos, updates)
+}
+
+/// `Relay::connect_with`: one peer (a store, as the hub's project directory) gets
+/// its own send interval and no periodic hello; `flush` forces out what the
+/// interval held back. The relay's client ID wins over the one in the config.
+#[test]
+fn a_peer_with_its_own_session_settings() {
+    use bae_sync::{MemoryTransport, Message, Transport};
+
+    let base = base_snapshots();
+    let mut relay = Relay::new(ClientId::new("hub").unwrap());
+    let defaults = relay.peer_config();
+    assert_eq!(defaults.client.as_str(), "hub");
+    assert_eq!(defaults.hello_interval, Some(Duration::from_secs(5)));
+    assert_eq!(defaults.min_send_interval, Duration::ZERO);
+
+    let mut config = relay.peer_config();
+    config.client = ClientId::new("not-the-hub").unwrap();
+    config.min_send_interval = Duration::from_secs(1);
+    config.hello_interval = None;
+    let (hub_end, mut store) = MemoryTransport::pair();
+    let store_handle = relay.connect_with(Box::new(hub_end), config);
+    let (hub_end, mut link) = MemoryTransport::pair();
+    relay.connect(Box::new(hub_end));
+    let mut editor = client_stage(&base);
+    let mut session = SyncSession::new(SessionConfig::new(ClientId::new("a").unwrap()));
+
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    // Before the store said hello the relay knows nothing to send it, flush
+    // included.
+    relay.pump_at(at(0));
+    assert_eq!(relay.flush_at(at(0)).sent, 0);
+    assert_eq!(drain(&mut store, "hub"), (1, 0));
+    store
+        .send(Message::hello(ClientId::new("disk").unwrap(), vec![]))
+        .unwrap();
+    // The editor uploads the base project; the store's first send is never held
+    // back (and the relay announces the two new documents with a hello).
+    for _ in 0..3 {
+        session.pump_at(&mut editor, &mut link, at(0)).unwrap();
+        relay.pump_at(at(0));
+    }
+    assert!(session.is_connected());
+    assert_eq!(drain(&mut store, "hub"), (1, 2));
+    assert!(
+        relay
+            .peers()
+            .iter()
+            .any(|(h, c)| *h == store_handle && c.as_ref().unwrap().as_str() == "disk")
+    );
+
+    let root = DocKey::sublayer(&SublayerId::root());
+    let drag = |editor: &mut Stage, value: f64| {
+        editor.set_edit_target(&SublayerId::root()).unwrap();
+        editor
+            .transact(&author("user:a"), "drag", |tx| {
+                tx.apply(Op::SetValue {
+                    path: p("/comps/main/layers/title"),
+                    attr: "opacity".into(),
+                    value: Some(bae_model::Value::Float(value)),
+                })
+            })
+            .unwrap();
+    };
+    // A drag inside the store's send interval: the relay has every step, the
+    // store gets nothing yet.
+    for (i, ms) in [10, 20, 30].into_iter().enumerate() {
+        drag(&mut editor, i as f64);
+        session.pump_at(&mut editor, &mut link, at(ms)).unwrap();
+        relay.pump_at(at(ms));
+    }
+    assert!(
+        relay
+            .docs()
+            .version(&root)
+            .unwrap()
+            .includes_vv(&editor.version(&root).unwrap())
+    );
+    assert_eq!(drain(&mut store, "hub"), (0, 0));
+
+    // `flush` sends it at once, as one update.
+    let out = relay.flush_at(at(40));
+    assert_eq!((out.sent, out.disconnected.len()), (1, 0));
+    assert_eq!(drain(&mut store, "hub"), (0, 1));
+    assert_eq!(relay.flush_at(at(41)).sent, 0, "nothing left to flush");
+
+    // The flush restarted the interval: the next step waits for it, then goes
+    // out on an ordinary pump.
+    drag(&mut editor, 9.0);
+    session.pump_at(&mut editor, &mut link, at(50)).unwrap();
+    relay.pump_at(at(50));
+    assert_eq!(drain(&mut store, "hub"), (0, 0));
+    relay.pump_at(at(1039));
+    assert_eq!(drain(&mut store, "hub"), (0, 0));
+    relay.pump_at(at(1040));
+    assert_eq!(drain(&mut store, "hub"), (0, 1));
+
+    // No periodic hello for the store; the client connected with `connect`
+    // keeps the relay's 5 s.
+    drain(&mut link, "hub");
+    relay.pump_at(at(6000));
+    assert_eq!(drain(&mut store, "hub"), (0, 0));
+    assert_eq!(drain(&mut link, "hub").0, 1);
+}

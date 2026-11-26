@@ -29,7 +29,8 @@ pub struct SessionConfig {
     pub max_messages_per_pump: usize,
     /// Send local changes at most this often. Zero sends on every pump; the shared
     /// folder uses a few hundred milliseconds so a drag does not become dozens of
-    /// SMB appends per second.
+    /// SMB appends per second. What it holds back waits for a later pump: call
+    /// [`SyncSession::flush`] before closing the link.
     pub min_send_interval: Duration,
     /// Re-send our presence this often while nothing changes (heartbeat).
     pub presence_heartbeat: Duration,
@@ -273,7 +274,39 @@ impl SyncSession {
         let send_due = self
             .last_send
             .is_none_or(|t| now.saturating_duration_since(t) >= self.config.min_send_interval);
-        if send_due && self.flush(docs, transport, &mut out)? {
+        if send_due && self.send_missing(docs, transport, &mut out)? {
+            self.last_send = Some(now);
+        }
+        Ok(out)
+    }
+
+    /// Send every document's ops the remote is not known to have right now,
+    /// ignoring `min_send_interval`. Nothing is received and no `Hello` or
+    /// presence goes out. Call it after the last [`pump`](Self::pump) before
+    /// closing a link whose sends may be held back, or the last edits never
+    /// leave. Sends nothing before the remote's first `Hello` (we do not know
+    /// what it has).
+    ///
+    /// Only [`PumpOutcome::sent`] and [`PumpOutcome::errors`] are filled in.
+    /// Errors are transport failures, as in [`pump`](Self::pump).
+    pub fn flush(
+        &mut self,
+        docs: &dyn DocSet,
+        transport: &mut dyn Transport,
+    ) -> Result<PumpOutcome, SyncError> {
+        self.flush_at(docs, transport, Instant::now())
+    }
+
+    /// [`flush`](Self::flush) with an explicit clock (it restarts the
+    /// `min_send_interval` wait).
+    pub fn flush_at(
+        &mut self,
+        docs: &dyn DocSet,
+        transport: &mut dyn Transport,
+        now: Instant,
+    ) -> Result<PumpOutcome, SyncError> {
+        let mut out = PumpOutcome::default();
+        if self.send_missing(docs, transport, &mut out)? {
             self.last_send = Some(now);
         }
         Ok(out)
@@ -459,7 +492,7 @@ impl SyncSession {
 
     /// Send every document's ops the remote is not known to have. Returns whether
     /// anything was sent.
-    fn flush(
+    fn send_missing(
         &mut self,
         docs: &dyn DocSet,
         transport: &mut dyn Transport,

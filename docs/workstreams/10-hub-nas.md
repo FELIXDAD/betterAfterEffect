@@ -87,6 +87,8 @@
 ### 2026-11-26（zjzcoder，C 多人协作）
 
 - 上面前三条已在 09 侧解决（`collab/sync-hub-requests`）：会话出错前先导入；`HubLimits` 默认单条消息 256 MiB、对方不读时最多积压 16 MiB 后断开。`PeerLink` 的"晚一次报错"绕行已去掉，`idle_projects_are_unloaded_and_reloaded` 照常通过。
+- 第 4 条也已解决：工程目录用 `Relay::connect_with` 接上，`min_send_interval` 300 ms（`STORE_SEND_INTERVAL`）、`hello_interval = None`；客户端之间照常立即转发。关闭工程（卸载、退出）时先最后 `pump` 一次，再 `Relay::flush()` 把被推迟的写出去。
+  - 新测试：拖动 100 步，`hub.log` 只有 3 条记录（不设间隔时 101 条）；拖动后立即退出 Hub、立即卸载工程，重新加载后每一步都在。去掉 `flush` 这两个测试都会失败。
 
 ## 请求（其他工作流在这里留言）
 

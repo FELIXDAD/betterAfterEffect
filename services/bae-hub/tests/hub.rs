@@ -3,9 +3,11 @@
 
 mod common;
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use bae_hub::{Access, Anonymous};
+use bae_model::loro::VersionVector;
 use bae_model::{Op, SublayerId, Value};
 use bae_sync::{DocKey, DocSet, PresenceState};
 use common::*;
@@ -260,6 +262,140 @@ fn idle_projects_are_unloaded_and_reloaded() {
         std::thread::sleep(Duration::from_millis(50));
     }
     let mut again = vec![Client::join(addr, PROJECT, READ, "bob", &base)];
+    pump_until(&mut again, Duration::from_secs(10), |c| {
+        c[0].stage
+            .version(&root)
+            .is_some_and(|v| v.includes_vv(&want))
+    });
+    assert_eq!(again[0].fingerprint(), expected);
+}
+
+/// A drag by `clients[0]`: `steps` changes of one value, each sent at once,
+/// about `every` apart. Returns the root version after the last step, once
+/// `clients[1]` has it (so the hub has every step in memory).
+fn drag(clients: &mut [Client], steps: usize, every: Duration) -> VersionVector {
+    let root = DocKey::sublayer(&SublayerId::root());
+    for i in 0..steps {
+        let c = &mut clients[0];
+        c.stage.set_edit_target(&SublayerId::root()).unwrap();
+        let who = c.who.clone();
+        c.stage
+            .transact(&who, "drag", |tx| {
+                tx.apply(Op::SetValue {
+                    path: p("/comps/main/layers/title"),
+                    attr: "opacity".into(),
+                    value: Some(Value::Float(i as f64)),
+                })
+            })
+            .unwrap();
+        for c in clients.iter_mut() {
+            c.pump();
+        }
+        std::thread::sleep(every);
+    }
+    let want = clients[0].stage.version(&root).unwrap();
+    pump_until(clients, Duration::from_secs(10), |c| {
+        c[1].stage
+            .version(&root)
+            .is_some_and(|v| v.includes_vv(&want))
+    });
+    want
+}
+
+/// Records in one of the hub's logs (spec 4.2), not counting the header.
+fn log_records(path: &Path) -> usize {
+    let bytes = std::fs::read(path).unwrap();
+    let (mut at, mut n) = (0, 0);
+    while at + 12 <= bytes.len() {
+        let len = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        at += 12 + len;
+        n += 1;
+    }
+    assert_eq!(at, bytes.len(), "torn record in {}", path.display());
+    n - 1
+}
+
+/// The hub writes the project directory at most every few hundred milliseconds,
+/// so a drag becomes a few appends; shutting down right after the drag still
+/// writes its last steps (they were held back by that interval).
+#[test]
+fn a_drag_is_written_in_batches_and_kept_on_shutdown() {
+    const STEPS: usize = 100;
+    let data = tempfile::tempdir().unwrap();
+    let hub = start(config(data.path()));
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "alice", &base),
+        Client::join(addr, PROJECT, WRITE, "bob", &base),
+    ];
+    pump_until(&mut clients, Duration::from_secs(10), |c| {
+        c.iter().all(|c| c.session.is_connected())
+    });
+    let want = drag(&mut clients, STEPS, Duration::from_millis(3));
+    let expected = clients[0].fingerprint();
+
+    hub.shutdown();
+    drop(clients);
+    let records = log_records(
+        &data
+            .path()
+            .join(format!("projects/{PROJECT}/updates/root/hub.log")),
+    );
+    println!("drag of {STEPS} steps: {records} records in the hub's log");
+    assert!(
+        records < STEPS / 4,
+        "{records} log records for a drag of {STEPS} steps"
+    );
+
+    let hub = start(config(data.path()));
+    let root = DocKey::sublayer(&SublayerId::root());
+    let mut late = vec![Client::join(
+        hub.local_addr(),
+        PROJECT,
+        WRITE,
+        "dave",
+        &base,
+    )];
+    pump_until(&mut late, Duration::from_secs(20), |c| {
+        c[0].stage
+            .version(&root)
+            .is_some_and(|v| v.includes_vv(&want))
+    });
+    assert_eq!(late[0].fingerprint(), expected);
+}
+
+/// Unloading an idle project right after a drag still writes its last steps.
+#[test]
+fn a_drag_is_kept_when_the_project_is_unloaded() {
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.idle_unload = Some(Duration::from_millis(100));
+    let hub = start(cfg);
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "alice", &base),
+        Client::join(addr, PROJECT, WRITE, "bob", &base),
+    ];
+    pump_until(&mut clients, Duration::from_secs(10), |c| {
+        c.iter().all(|c| c.session.is_connected())
+    });
+    let want = drag(&mut clients, 50, Duration::from_millis(3));
+    let expected = clients[0].fingerprint();
+    drop(clients);
+
+    let start = Instant::now();
+    loop {
+        let list = http_get(addr, "/v1/projects", Some(WRITE));
+        if list.body.contains("\"loaded\":false") {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "{}", list.body);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let root = DocKey::sublayer(&SublayerId::root());
+    let mut again = vec![Client::join(addr, PROJECT, READ, "carol", &base)];
     pump_until(&mut again, Duration::from_secs(10), |c| {
         c[0].stage
             .version(&root)

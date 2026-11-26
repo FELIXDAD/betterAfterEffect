@@ -16,7 +16,8 @@ use crate::protocol::Message;
 use crate::session::{SessionConfig, SyncSession};
 use crate::transport::Transport;
 
-/// A connected client, as returned by [`Relay::connect`].
+/// A connected client, as returned by [`Relay::connect`] and
+/// [`Relay::connect_with`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PeerHandle(u64);
 
@@ -88,11 +89,37 @@ impl Relay {
         &self.docs
     }
 
-    pub fn connect(&mut self, transport: Box<dyn Transport + Send>) -> PeerHandle {
-        let handle = PeerHandle(self.next_handle);
-        self.next_handle += 1;
+    /// The session settings [`connect`](Self::connect) gives a peer: the relay's
+    /// client ID and hello interval, defaults otherwise. Start from it to give one
+    /// peer its own settings with [`connect_with`](Self::connect_with).
+    pub fn peer_config(&self) -> SessionConfig {
         let mut config = SessionConfig::new(self.client.clone());
         config.hello_interval = self.hello_interval;
+        config
+    }
+
+    /// Connect a client with [`peer_config`](Self::peer_config).
+    pub fn connect(&mut self, transport: Box<dyn Transport + Send>) -> PeerHandle {
+        let config = self.peer_config();
+        self.connect_with(transport, config)
+    }
+
+    /// Connect a peer with its own session settings, e.g. a store that should be
+    /// written at most every few hundred milliseconds (`min_send_interval`) and
+    /// needs no periodic `Hello`. A peer with a `min_send_interval` may have
+    /// sends pending: [`flush`](Self::flush) before dropping the relay.
+    ///
+    /// `config.client` is ignored and replaced by the relay's own ID: the relay is
+    /// one client to everyone it talks to, and its sessions drop presence that
+    /// carries that ID.
+    pub fn connect_with(
+        &mut self,
+        transport: Box<dyn Transport + Send>,
+        mut config: SessionConfig,
+    ) -> PeerHandle {
+        let handle = PeerHandle(self.next_handle);
+        self.next_handle += 1;
+        config.client = self.client.clone();
         self.peers.push(Peer {
             handle,
             session: SyncSession::new(config),
@@ -200,6 +227,37 @@ impl Relay {
             if received == 0 && !any_failed {
                 break;
             }
+        }
+        out
+    }
+
+    /// Send every peer what it is missing right now, ignoring each session's
+    /// `min_send_interval` (see [`SyncSession::flush`]); nothing is received.
+    /// Call it after the last [`pump`](Self::pump) before dropping the relay, or
+    /// edits held back for a peer connected with
+    /// [`connect_with`](Self::connect_with) are never sent. Peers whose transport
+    /// fails are disconnected, as in `pump`.
+    pub fn flush(&mut self) -> RelayOutcome {
+        self.flush_at(Instant::now())
+    }
+
+    /// [`flush`](Self::flush) with an explicit clock.
+    pub fn flush_at(&mut self, now: Instant) -> RelayOutcome {
+        let mut out = RelayOutcome::default();
+        let mut failed = Vec::new();
+        for peer in &mut self.peers {
+            match peer.session.flush_at(&self.docs, &mut peer.transport, now) {
+                Ok(o) => {
+                    out.sent += o.sent;
+                    out.errors
+                        .extend(o.errors.into_iter().map(|e| (peer.handle, e)));
+                }
+                Err(e) => failed.push((peer.handle, e)),
+            }
+        }
+        for (handle, e) in failed {
+            self.disconnect_at(handle, now);
+            out.disconnected.push((handle, e));
         }
         out
     }

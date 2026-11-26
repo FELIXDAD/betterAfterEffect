@@ -60,7 +60,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
    - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方丢了数据时（比如 Hub 重启）能重新补发；代价最多是重复发送，CRDT 导入是幂等的。
    - `Updates` / `Snapshot`：`remote[doc]` 并入 `version`；本地已经包含 `version` 就跳过，否则导入。本地没有这个文档时不导入，在 `PumpOutcome::unknown_docs` 里报告（见 2.5）。
    - `SnapshotRequest`：导出快照发回去。
-3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。
+3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。被推迟的部分只有之后的 `pump` 才会发出，所以关闭连接前（最后一次 `pump` 之后）要调用 `SyncSession::flush`：不管 `min_send_interval`，立即把对方缺的发出去（不收消息，也不发 `Hello` 和在线状态）。
 
 在收到对方第一个 `Hello` 之前不发任何数据（不知道对方有什么，全量发送太浪费）。
 
@@ -84,6 +84,10 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - `Relay::pump` 在同一次调用里最多循环 4 轮，让一个客户端的修改在一次调用内转发给其他人。
 - Hub 用 `MemDocs::load` 恢复持久化的快照，用 `docs().export_snapshot` 保存。Hub 重启丢了数据也没关系：客户端重连后对方 `Hello` 里版本变小，客户端会把缺的重新上传。
 - 传输出错的连接会被断开（`RelayOutcome::disconnected`）。
+- **按连接设置会话**：`Relay::connect` 给每个连接同样的设置（`Relay::peer_config()`：Relay 自己的 `ClientId` 和 `hello_interval`，其他为默认值）。`Relay::connect_with(transport, config)` 给某个连接单独设置，一般从 `peer_config()` 改起。`config.client` 一律换成 Relay 自己的 ID（Relay 对所有连接都是同一个客户端，各会话也靠它认出自己的在线状态）。
+  - Hub（10）用它接工程目录（`DirTransport`）：`min_send_interval` 300 ms、`hello_interval = None`（4.5 的推荐设置）。客户端照常每次 `pump` 立即收到修改，只是写盘合并了：测试里 100 步的拖动，`hub.log` 从 101 条记录降到 3 条。
+  - 有连接设了 `min_send_interval` 时，丢弃 Relay 之前要先 `pump` 再 `Relay::flush()`（对每个连接调用 `SyncSession::flush`），否则被推迟的最后几次修改永远发不出去。Hub 卸载工程、退出时都这样做。
+  - 验证：`tests/convergence.rs` 的 `a_peer_with_its_own_session_settings`（单独的发送间隔和 `Hello` 间隔生效、`flush` 立即发出、`ClientId` 用 Relay 的）；`services/bae-hub/tests/hub.rs` 里拖动之后立即退出 Hub、立即卸载工程，重新加载后每一步都在。
 
 ### 3.1 WebSocket 传输（PR E，feature `hub`）
 
@@ -150,7 +154,7 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 - 第一次扫描完后，传输层发一个 `Hello`（`client` 为 `shared-folder`），版本 = 目录里所有记录和基础快照版本的并集。会话据此把目录里还没有的本地修改（比如离线时的修改）写进自己的日志。
 - 会话发来的 `Hello`：如果某个文档目录里的版本没有被会话的版本包含，就从头重新交付这个文档的所有日志（用于 2.5 的场景），然后回一个自己的 `Hello`（会话 `reset()` 之后靠它恢复）。
-- 共享目录会话的推荐设置：`hello_interval = None`（目录不会丢数据），`min_send_interval` 几百毫秒。
+- 共享目录会话的推荐设置：`hello_interval = None`（目录不会丢数据），`min_send_interval` 几百毫秒；关闭前调用 `flush`（2.4）。
 - 会话发来的 `Updates` → 追加到自己的日志；`Snapshot` → 压缩重写自己的日志。
 
 ### 4.6 验证（`crates/bae-sync/tests/shared_dir.rs`）
