@@ -29,6 +29,72 @@ enum Kind {
     Effect,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IconMenu {
+    Composition,
+    Layer,
+    Solid,
+    Labels,
+}
+
+fn icon_menu_for(stage: &Stage, node: &Node) -> Option<IconMenu> {
+    match node.kind {
+        Kind::Comp => Some(IconMenu::Composition),
+        Kind::Layer => Some(IconMenu::Layer),
+        Kind::Solid => Some(IconMenu::Solid),
+        Kind::Effect => Some(IconMenu::Labels),
+        Kind::Footage => stage
+            .prim(&node.item)
+            .and_then(|v| bae_model::asset::AssetFile::from_prim(&v))
+            .map(|_| IconMenu::Labels),
+    }
+}
+
+fn node_label(stage: &Stage, node: &Node) -> usize {
+    if let Some(label) = stage
+        .prim(&node.item)
+        .and_then(|v| v.value("label").and_then(|label| label.as_f64()))
+    {
+        return label.clamp(0.0, 16.0) as usize;
+    }
+    match node.kind {
+        Kind::Solid => 1,
+        Kind::Footage => 3,
+        Kind::Effect => query::owning_layer(stage, &node.item)
+            .map_or(0, |l| crate::actions::label_of(stage, &l) as usize),
+        _ => 0,
+    }
+}
+
+/// The generated solid has no source file. AE exposes the Project operations but
+/// disables commands that need a file or a composition.
+const SOLID_ICON: &[crate::context_menu::Entry] = {
+    use crate::context_menu::Entry::*;
+    &[
+        Off("Composition Settings..."),
+        Off("Open in Essential Graphics"),
+        Off("New Comp from Selection..."),
+        Own("Replace with 0 Precomps"),
+        Menu("File/Create Proxy"),
+        Menu("File/Set Proxy"),
+        Menu("File/Import"),
+        Menu("File/Import Recent Footage"),
+        Menu("File/Interpret Footage"),
+        Menu("File/Replace Footage"),
+        Own("Reload Footage"),
+        Off("License..."),
+        Off(if cfg!(target_os = "macos") {
+            "Reveal in Finder"
+        } else {
+            "Reveal in Explorer"
+        }),
+        Off("Reveal in Bridge"),
+        Sub("Reveal in Composition", &[]),
+        Off("Solids Folder"),
+        Own("Rename"),
+    ]
+};
+
 struct Node {
     item: PrimPath,
     kind: Kind,
@@ -213,13 +279,13 @@ pub struct FlowchartPanel {
     options: Options,
     expanded: std::collections::HashSet<PrimPath>,
     positions: HashMap<(PrimPath, Option<PrimPath>), egui::Vec2>,
-    root: Option<PrimPath>,
     last_active: Option<PrimPath>,
     selected: Option<PrimPath>,
     rename: Option<(PrimPath, String)>,
 }
 
 const ZH: &[(&str, &str)] = &[
+    ("Replace with 0 Precomps", "替换为 0 个预合成"),
     ("Show Footage", "显示素材"),
     ("Show Solids", "显示纯色"),
     ("Show Layers", "显示图层"),
@@ -290,22 +356,27 @@ impl FlowchartPanel {
     }
 
     fn label_menu(&self, ui: &mut Ui, cx: &mut PanelContext<'_>, node: &Node, nodes: &[Node]) {
-        let project_item = matches!(node.kind, Kind::Comp | Kind::Footage | Kind::Solid);
-        let label = |n: &Node| crate::actions::label_of(cx.stage, &n.item) as usize;
+        let can_select = matches!(node.kind, Kind::Comp | Kind::Layer);
+        let label = |n: &Node| node_label(cx.stage, n);
         let current = label(node);
         if ui
-            .add_enabled(project_item, egui::Button::new(tr("Select Label Group")))
+            .add_enabled(can_select, egui::Button::new(tr("Select Label Group")))
             .clicked()
         {
-            let mut items = Vec::new();
-            for n in nodes.iter().filter(|n| {
-                matches!(n.kind, Kind::Comp | Kind::Footage | Kind::Solid) && label(n) == current
-            }) {
-                if !items.contains(&n.item) {
-                    items.push(n.item.clone());
+            if node.kind == Kind::Layer {
+                cx.invoke(crate::actions::ids::SELECT_LABEL_GROUP);
+            } else {
+                let mut items = Vec::new();
+                for n in nodes.iter().filter(|n| {
+                    matches!(n.kind, Kind::Comp | Kind::Footage | Kind::Solid)
+                        && label(n) == current
+                }) {
+                    if !items.contains(&n.item) {
+                        items.push(n.item.clone());
+                    }
                 }
+                common::session(cx.resources).lock().selected_items = items;
             }
-            common::session(cx.resources).lock().selected_items = items;
             ui.close();
         }
         ui.separator();
@@ -355,10 +426,17 @@ impl FlowchartPanel {
         self.last_active.clone_from(&s.active_comp);
     }
 
-    fn icon_menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, n: &Node) {
+    fn icon_menu(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut PanelContext<'_>,
+        n: &Node,
+        menu: IconMenu,
+        nodes: &[Node],
+    ) {
         let session = common::session(cx.resources);
-        let rename = match n.kind {
-            Kind::Comp => {
+        let rename = match menu {
+            IconMenu::Composition => {
                 use crate::context_menu as m;
                 for entry in m::VIEWER_BLANK {
                     match entry {
@@ -381,19 +459,31 @@ impl FlowchartPanel {
                 }
                 false
             }
-            Kind::Layer => return,
-            Kind::Effect => {
-                let now = session.lock().active_time();
-                crate::effects::controls::effect_menu(ui, cx, &n.item, now);
+            IconMenu::Layer => crate::timeline::layer_menu(ui, cx, &session, &n.item).is_some(),
+            IconMenu::Labels => {
+                self.label_menu(ui, cx, n, nodes);
                 false
             }
-            _ => {
-                use crate::context_menu as m;
-                let Some(kind) = item_kind(cx.stage, &n.item) else {
-                    return;
-                };
-                m::show_item(ui, cx, m::PROJECT_ITEM, &[], kind.context_kind()) == Some("Rename")
-            }
+            IconMenu::Solid => match crate::context_menu::show(ui, cx, SOLID_ICON) {
+                Some("Rename") => true,
+                Some("Replace with 0 Precomps") => {
+                    cx.invoke_with(
+                        "item.replace_with_precomp",
+                        serde_json::json!({"item":n.item}),
+                    );
+                    false
+                }
+                Some("Reload Footage") => {
+                    // Solids are generated from the stage. Re-evaluate their current source
+                    // on the next composition redraw, without an import or an undo step.
+                    let mut s = session.lock();
+                    let generation = s.solid_reload.as_ref().map_or(1, |(n, _)| n + 1);
+                    s.solid_reload = Some((generation, n.item.clone()));
+                    ui.ctx().request_repaint();
+                    false
+                }
+                _ => false,
+            },
         };
         if rename {
             self.rename = Some((n.item.clone(), query::display_name_of(cx.stage, &n.item)));
@@ -404,10 +494,9 @@ impl FlowchartPanel {
 impl Panel for FlowchartPanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // AE: "Flowchart <comp>".
-        let comp = self
-            .root
-            .clone()
-            .or_else(|| common::session(cx.resources).lock().active_comp.clone());
+        let session = common::session(cx.resources);
+        let s = session.lock();
+        let comp = s.flowchart_root.clone().or_else(|| s.active_comp.clone());
         let name = comp.map_or_else(
             || tr("(none)").to_owned(),
             |c| bae_motion::query::display_name_of(cx.stage, &c),
@@ -449,21 +538,28 @@ impl Panel for FlowchartPanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let full = ui.max_rect();
+        if let Some(progress) = crate::render_queue::panel_progress(cx.resources, cx.stage) {
+            ui.label(progress);
+        }
+        let full = ui.available_rect_before_wrap();
         let canvas = ui.allocate_rect(full, Sense::click_and_drag());
         let p = ui.painter_at(full);
         p.rect_filled(full, 0.0, Color32::from_gray(35));
         let session = common::session(cx.resources);
-        let active = session.lock().active_comp.clone();
-        if active != self.last_active || self.root.as_ref().is_some_and(|r| !cx.stage.has_prim(r)) {
-            self.root.clone_from(&active);
+        let (active, mut root) = {
+            let s = session.lock();
+            (s.active_comp.clone(), s.flowchart_root.clone())
+        };
+        if active != self.last_active || root.as_ref().is_some_and(|r| !cx.stage.has_prim(r)) {
+            root.clone_from(&active);
+            session.lock().flowchart_root.clone_from(&root);
             self.last_active = active;
             self.expanded.clear();
             self.offset = egui::Vec2::ZERO;
             self.positions.clear();
             self.rename = None;
         }
-        let Some(root) = self.root.clone() else {
+        let Some(root) = root else {
             return;
         };
         let nodes = chart(cx.stage, &root, &self.options, &|p| {
@@ -648,12 +744,14 @@ impl Panel for FlowchartPanel {
                 self.select(cx, n);
             }
             if (title.double_clicked() || icon_resp.double_clicked()) && n.kind == Kind::Comp {
-                self.root = Some(n.item.clone());
+                session.lock().flowchart_root = Some(n.item.clone());
                 self.offset = egui::Vec2::ZERO;
                 self.positions.clear();
             }
-            if n.kind != Kind::Layer {
-                common::context_menu(&icon_resp, &mut |ui| self.icon_menu(ui, cx, n));
+            if let Some(menu) = icon_menu_for(cx.stage, n) {
+                common::context_menu(&icon_resp, &mut |ui| {
+                    self.icon_menu(ui, cx, n, menu, &nodes)
+                });
             }
             common::context_menu(&title, &mut |ui| self.label_menu(ui, cx, n, &nodes));
         }
@@ -803,13 +901,36 @@ mod tests {
         let mut requests = bae_ui::PanelRequests::default();
         let mut cx =
             PanelContext::new(&id, "Flowchart", &stage, &author, &resources, &mut requests);
-        for (kind, path) in [(Kind::Comp, comp), (Kind::Layer, layer)] {
+        let solid = stage
+            .prim(&PrimPath::new(layer.as_str().unwrap()).unwrap())
+            .unwrap()
+            .value("source")
+            .and_then(|v| v.as_prim_ref())
+            .unwrap()
+            .to_string();
+        for (kind, path) in [
+            (Kind::Comp, comp.clone()),
+            (Kind::Layer, layer.clone()),
+            (Kind::Solid, serde_json::json!(solid)),
+            (Kind::Footage, serde_json::json!("/Unresolved")),
+            (Kind::Effect, serde_json::json!("/Effect")),
+        ] {
             let mut nodes = Vec::new();
             push(
                 &mut nodes,
                 &PrimPath::new(path.as_str().unwrap()).unwrap(),
                 kind,
                 None,
+            );
+            assert_eq!(
+                icon_menu_for(&stage, &nodes[0]),
+                match kind {
+                    Kind::Comp => Some(IconMenu::Composition),
+                    Kind::Layer => Some(IconMenu::Layer),
+                    Kind::Solid => Some(IconMenu::Solid),
+                    Kind::Footage => None,
+                    Kind::Effect => Some(IconMenu::Labels),
+                }
             );
             let ctx = egui::Context::default();
             ctx.enable_accesskit();
@@ -822,10 +943,15 @@ mod tests {
                 (
                     "Select Label Group",
                     "选择标签组",
-                    kind == Kind::Comp,
+                    matches!(kind, Kind::Comp | Kind::Layer),
                     false,
                 ),
-                ("Red", "红色", true, kind == Kind::Comp),
+                (
+                    "Red",
+                    "红色",
+                    true,
+                    matches!(kind, Kind::Comp | Kind::Solid),
+                ),
                 ("Blue", "蓝色", true, kind == Kind::Layer),
                 ("Edit Label Colors...", "编辑标签颜色...", true, false),
             ] {
@@ -844,5 +970,56 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn solid_icon_menu_matches_the_windows_inventory() {
+        use crate::context_menu::Entry::*;
+        let mut app = bae_app::AppBuilder::new();
+        app.add_module(crate::MotionUiModule);
+        let _app = app.build();
+        let expected = [
+            ("合成设置...", false),
+            ("在基本图形中打开", false),
+            ("基于所选项新建合成...", false),
+            ("替换为 0 个预合成", true),
+            ("创建代理", true),
+            ("设置代理", true),
+            ("导入", true),
+            ("导入最近的素材", true),
+            ("解释素材", true),
+            ("替换素材", true),
+            ("重新加载素材", true),
+            ("许可...", false),
+            (
+                if cfg!(target_os = "macos") {
+                    "在 Finder 中显示"
+                } else {
+                    "在资源管理器中显示"
+                },
+                false,
+            ),
+            ("在 Bridge 中显示", false),
+            ("在合成中显示", false),
+            ("纯色文件夹", false),
+            ("重命名", true),
+        ];
+        let actual: Vec<_> = SOLID_ICON
+            .iter()
+            .map(|entry| {
+                let (title, enabled) = match *entry {
+                    Own(title) => (title, true),
+                    Off(title) | Sub(title, []) => (title, false),
+                    Menu(path) => match crate::context_menu::find(path) {
+                        Some(crate::catalog::Node::Submenu(menu)) => {
+                            (menu.title, !menu.children.is_empty())
+                        }
+                        other => panic!("missing solid action {path}: {other:?}"),
+                    },
+                    _ => panic!("unexpected solid menu row"),
+                };
+                (bae_ui::i18n::translation(title).unwrap_or(title), enabled)
+            })
+            .collect();
+        assert_eq!(actual, expected);
     }
 }

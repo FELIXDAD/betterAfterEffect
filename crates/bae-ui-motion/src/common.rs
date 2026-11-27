@@ -137,6 +137,27 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 }
 
 /// English label of a property (displayed through `tr`).
+/// Integer properties AE shows as a dropdown: their values and names.
+pub(crate) fn int_choices(attr: &str) -> Option<&'static [(i64, &'static str)]> {
+    match attr {
+        "material:casts_shadows" | "material:accepts_shadows" => {
+            Some(&[(0, "Off"), (1, "On"), (2, "Only")])
+        }
+        "camera:iris_shape" => Some(&[
+            (1, "Fast Rectangle"),
+            (3, "Triangle"),
+            (4, "Square"),
+            (5, "Pentagon"),
+            (6, "Hexagon"),
+            (7, "Heptagon"),
+            (8, "Octagon"),
+            (9, "Nonagon"),
+            (10, "Decagon"),
+        ]),
+        _ => None,
+    }
+}
+
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
         "audio:levels" => "Audio Levels",
@@ -213,8 +234,42 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "feather" => "Mask Feather",
         "expansion" => "Mask Expansion",
         "camera:zoom" => "Zoom",
+        "camera:depth_of_field" => "Depth of Field",
+        "camera:focus_distance" => "Focus Distance",
+        "camera:aperture" => "Aperture",
+        "camera:blur_level" => "Blur Level",
+        "camera:iris_shape" => "Iris Shape",
+        "camera:iris_rotation" => "Iris Rotation",
+        "camera:iris_roundness" => "Iris Roundness",
+        "camera:iris_aspect_ratio" => "Iris Aspect Ratio",
+        "camera:iris_diffraction_fringe" => "Iris Diffraction Fringe",
+        "camera:highlight_gain" => "Highlight Gain",
+        "camera:highlight_threshold" => "Highlight Threshold",
+        "camera:highlight_saturation" => "Highlight Saturation",
         "light:intensity" => "Intensity",
         "light:color" => "Color",
+        "light:cone_angle" => "Cone Angle",
+        "light:cone_feather" => "Cone Feather",
+        "light:falloff" => "Falloff",
+        "light:radius" => "Radius",
+        "light:falloff_distance" => "Falloff Distance",
+        "light:casts_shadows" | "material:casts_shadows" => "Casts Shadows",
+        "light:shadow_darkness" => "Shadow Darkness",
+        "light:shadow_diffusion" => "Shadow Diffusion",
+        "material:light_transmission" => "Light Transmission",
+        "material:accepts_shadows" => "Accepts Shadows",
+        "material:accepts_lights" => "Accepts Lights",
+        // AE's Chinese UI calls the material's Ambient 周围 (the light type is 环境).
+        "material:ambient" => {
+            return match bae_ui::i18n::lang() {
+                bae_ui::i18n::Lang::Zh => "周围".into(),
+                _ => "Ambient".into(),
+            };
+        }
+        "material:diffuse" => "Diffuse",
+        "material:specular_intensity" => "Specular Intensity",
+        "material:specular_shininess" => "Specular Shininess",
+        "material:metal" => "Metal",
         other => {
             // Effect parameters and unknown attributes: a readable form of the name.
             let s = other.rsplit(':').next().unwrap_or(other).replace('_', " ");
@@ -516,7 +571,9 @@ pub(crate) fn apply_edit(
         Edit::Live(value) => {
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value,
@@ -535,7 +592,9 @@ pub(crate) fn apply_edit(
             let peers = edit_peers(cx.stage, session, path, attr);
             let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
             // Shown as committed until the command has run.
+            let auto_key = session.lock().auto_key;
             session.lock().scrub = Some(Scrub {
+                auto_key,
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value: value.clone(),
@@ -832,12 +891,19 @@ pub(crate) fn new_layer(
         return;
     };
     let mut params = json!({"comp": comp, "kind": kind, "name": name, "index": index});
-    // Preferences: the kind's default label; new layers start at the comp's
-    // start, or at the current time when that option is off.
-    let prefs = crate::prefs::current(cx.resources);
-    params["label"] = json!(crate::prefs::layer_label(&prefs, kind));
-    if !crate::prefs::layers_at_comp_start(&prefs) {
-        params["start"] = json!(session.lock().time(&comp));
+    if let Some(info) = query::comp_info(stage, &comp) {
+        crate::prefs::apply_layer_defaults(cx.resources, session, &info, kind, &mut params);
+    }
+    if matches!(kind, LayerKind::Solid | LayerKind::Adjustment) {
+        let prefs = crate::prefs::current(cx.resources);
+        let name = prefs.str("project.new_project_solids_folder");
+        let name = if name == "Solids" || name.trim().is_empty() {
+            bae_ui::tr("Solids")
+        } else {
+            name
+        };
+        params["solids_folder_name"] = json!(name);
+        params["solids_folder_label"] = json!(prefs.int("labels.label_default_folder"));
     }
     if let (Some(p), serde_json::Value::Object(m)) = (params.as_object_mut(), extra) {
         p.extend(m);
@@ -852,6 +918,26 @@ pub(crate) fn new_layer(
 pub(crate) fn active_comp(stage: &Stage, session: &SharedSession) -> Option<CompInfo> {
     let comp = session.lock().active_comp.clone()?;
     query::comp_info(stage, &comp)
+}
+
+/// A viewer tab uses the same swatch as its project item or layer.
+pub(crate) fn related_tab(
+    cx: &PanelContext<'_>,
+    panel: &str,
+    path: &PrimPath,
+    name: &str,
+) -> bae_ui::TabInfo {
+    let tab = bae_ui::TabInfo::new(format!("{} {name}", tr(panel)));
+    let prefs = crate::prefs::current(cx.resources);
+    if !prefs.bool("appearance.use_label_color_for_related_tabs") {
+        return tab;
+    }
+    let label = crate::actions::label_of(cx.stage, path);
+    if (1..=16).contains(&label) {
+        tab.label(bae_ui::settings::label_color(&prefs, label as usize))
+    } else {
+        tab
+    }
 }
 
 /// Whether a layer is 3D (`three_d` switch; cameras and lights always are).

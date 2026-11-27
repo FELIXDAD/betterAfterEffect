@@ -277,7 +277,14 @@ impl SourceResolver for Resolver<'_> {
         let Some(file) = &footage.file else {
             return Ok(None);
         };
-        match self.footage.get(file, footage.sequence) {
+        match self.footage.get(
+            file,
+            &footage.asset,
+            footage.file_revision,
+            footage.sequence,
+            footage.alphabetical,
+            footage.psd_layer,
+        ) {
             Ok(source) => Ok(Some(source)),
             Err(message) => {
                 self.warnings.push(message);
@@ -521,7 +528,8 @@ impl Renderer {
         }
         let encode_start = Instant::now();
         let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
-        let tiles = (request.roi.is_some() || feedback).then(|| crate::exec::TileCache {
+        let tiles = (self.frames.stats().budget > 0 || feedback).then(|| crate::exec::TileCache {
+            whole_surfaces: request.roi.is_some(),
             feedback,
             frames: &mut self.frames,
             request: RenderRequest {

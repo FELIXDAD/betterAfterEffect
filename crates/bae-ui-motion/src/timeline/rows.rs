@@ -163,14 +163,20 @@ impl TimelinePanel {
                     .filter(|c| cols.visible(*c))
                     .collect();
                 if let (Some(first), Some(last)) = (lead_cols.first(), lead_cols.last()) {
-                    let lead = ui.interact(
-                        Rect::from_min_max(
-                            pos2(l + cols.x(*first), rect.top()),
-                            pos2(l + cols.right(*last), rect.bottom()),
-                        ),
-                        rid("lead"),
-                        Sense::click(),
-                    );
+                    let lead = ui
+                        .interact(
+                            Rect::from_min_max(
+                                pos2(l + cols.x(*first), rect.top()),
+                                pos2(l + cols.right(*last), rect.bottom()),
+                            ),
+                            rid("lead"),
+                            Sense::click(),
+                        )
+                        .labeled_toggle(
+                            egui::WidgetType::SelectableLabel,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("Label and Layer Number")]),
+                            layer_selected,
+                        );
                     if lead.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
@@ -268,10 +274,15 @@ impl TimelinePanel {
                     if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
                         crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
                     }
-                    // AE: a double-click opens a pre-comp's comp, any other layer
-                    // in the Layer panel; Enter renames.
-                    if resp.double_clicked() && !self.open_precomp(cx, session, layer) {
-                        crate::layer_panel::open(cx, session, layer);
+                    if resp.double_clicked() {
+                        crate::layer_panel::open_clicked(
+                            cx,
+                            session,
+                            layer,
+                            ui.input(|i| i.modifiers.alt),
+                            crate::tools::shared(cx.resources).current(),
+                            &mut self.eval,
+                        );
                     }
                     if resp.drag_started() && !locked {
                         if !layer_selected {
@@ -531,8 +542,15 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
-                self.waveforms
-                    .draw(ui, stage, layer, axis, graph, color::TEXT);
+                self.waveforms.draw(
+                    ui,
+                    stage,
+                    layer,
+                    axis,
+                    graph,
+                    color::TEXT,
+                    self.display.rectified,
+                );
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.x(Column::Name) + row.depth as f32 * 14.0;
@@ -937,6 +955,23 @@ impl TimelinePanel {
             let style_edit = crate::layer_styles::edit(&mut child, id, path, attr, &value);
             let edit = if let Some(edit) = style_edit {
                 edit
+            } else if let Some(choices) = common::int_choices(attr) {
+                // AE's dropdowns stored as numbers (Off / On / Only, Iris
+                // Shape); older projects stored the shadow switches as booleans.
+                let cur = match &value {
+                    bae_model::Value::Bool(on) => i64::from(*on),
+                    v => v.as_f64().map_or(0, |n| n.round() as i64),
+                };
+                let names: Vec<&str> = choices.iter().map(|(_, n)| tr(n)).collect();
+                let mut sel = choices.iter().position(|(v, _)| *v == cur).unwrap_or(0);
+                let before = sel;
+                widgets::dropdown(&mut child, id.with("int_choice"), &mut sel, &names, 160.0)
+                    .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
+                if sel != before {
+                    common::Edit::Commit(bae_model::Value::Int(choices[sel].0))
+                } else {
+                    common::Edit::None
+                }
             } else if let bae_model::Value::Bool(on) = value {
                 // AE's timeline switches On/Off with hot text, not a checkbox.
                 let text = tr(if on { "On" } else { "Off" });
@@ -1186,7 +1221,7 @@ impl TimelinePanel {
         let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
         let top = rect.top() - line as f32 * ROW_H;
-        let field = Rect::from_min_max(
+        let mut field = Rect::from_min_max(
             pos2(axis.left + 4.0, top),
             pos2(rect.right() - 4.0, top + lines as f32 * ROW_H),
         );
@@ -1194,6 +1229,17 @@ impl TimelinePanel {
             Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
             _ => expr.source.clone(),
         };
+        let mut editor_rows = lines;
+        if expr.enabled
+            && let Some(error) =
+                crate::expr_menu::inline_error(ui, cx.resources, path, attr, &buf, &expr.source)
+        {
+            let annotation =
+                Rect::from_min_max(pos2(field.left(), field.bottom() - ROW_H), field.max);
+            field.max.y = annotation.top();
+            editor_rows = editor_rows.saturating_sub(1).max(1);
+            crate::expr_menu::error_line(ui, annotation, &error);
+        }
         // Just added: the field takes the focus with the whole text selected.
         let focus = {
             let mut s = session.lock();
@@ -1228,7 +1274,7 @@ impl TimelinePanel {
             field,
             field_id,
             &mut buf,
-            Some(lines),
+            Some(editor_rows),
         );
         let r = shown.response.response.labeled(
             egui::WidgetType::TextEdit,
@@ -1299,7 +1345,7 @@ fn insert_expression(
 /// these words read differently elsewhere in AE's Chinese UI (a text selector's
 /// Intersect is 相交, a mask's 交集; its Add is 相加, the shape tools' 添加).
 fn option_label(token: &str) -> &'static str {
-    const NAMES: [(&str, &str, &str); 18] = [
+    const NAMES: [(&str, &str, &str); 20] = [
         ("percentage", "Percentage", "百分比"),
         ("index", "Index", "索引"),
         ("characters", "Characters", "字符"),
@@ -1322,6 +1368,12 @@ fn option_label(token: &str) -> &'static str {
         ("triangle", "Triangle", "三角形"),
         ("round", "Round", "圆形"),
         ("smooth", "Smooth", "平滑"),
+        ("none", "None", "无"),
+        (
+            "inverse_square_clamped",
+            "Inverse Square Clamped",
+            "反向平方限制",
+        ),
     ];
     let zh = bae_ui::i18n::lang() == bae_ui::i18n::Lang::Zh;
     NAMES

@@ -14,6 +14,7 @@ use crate::common;
 use crate::session::{KeyClipboard, Pending, Reveal, SharedSession};
 
 pub mod ids {
+    pub const CACHE_WHEN_IDLE: &str = "motion.comp.cache_frames_when_idle";
     pub const PLAY: &str = "motion.play";
     pub const GO_START: &str = "motion.go_start";
     pub const GO_END: &str = "motion.go_end";
@@ -48,6 +49,12 @@ pub mod ids {
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
     pub const MINI_FLOW: &str = "motion.comp.composition_mini_flowchart";
+    /// Composition ▸ Composition Flowchart (Ctrl+Shift+F11): the Flowchart
+    /// panel for the active comp.
+    pub const COMP_FLOWCHART: &str = "motion.comp.composition_flowchart";
+    /// Layer ▸ Reveal ▸ Reveal Composition in Project (and the Timeline's
+    /// empty-space menu): the comp selected in the Project panel.
+    pub const REVEAL_COMP_IN_PROJECT: &str = "motion.layer.reveal_composition_in_project";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
@@ -68,6 +75,11 @@ pub mod ids {
     pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > Import > Solid... / Placeholder...: a new solid or placeholder item.
+    pub const IMPORT_SOLID: &str = "motion.file.import_solid";
+    pub const IMPORT_PLACEHOLDER: &str = "motion.file.import_placeholder";
+    /// File > New Comp from Selection... (Alt+\).
+    pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
     pub const REPLACE_FOOTAGE: &str = "motion.file.replace_footage_file";
     /// File > Reload Footage (Cmd/Ctrl+Alt+L).
@@ -140,6 +152,56 @@ pub mod ids {
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
     /// Layer ▸ Track Matte ▸ … (params `{"matte": "alpha", "source": "above"}`).
     pub const TRACK_MATTE: &str = "motion.layer.track_matte";
+    /// ; — zoom in to frames (again: the whole comp); Shift+; — the whole
+    /// comp and back to the last zoom.
+    pub const ZOOM_FRAMES: &str = "motion.timeline.zoom_to_frames";
+    pub const ZOOM_TOGGLE: &str = "motion.timeline.zoom_toggle_full";
+    /// D: scroll the Timeline to the CTI; X: the selected layer to the top.
+    pub const SCROLL_TO_NOW: &str = "motion.timeline.scroll_to_current_time";
+    pub const SCROLL_LAYER_TOP: &str = "motion.timeline.scroll_selected_layer_to_top";
+    /// Ctrl+`: show / hide every property of the selected layers.
+    pub const TWIRL: &str = "motion.timeline.twirl";
+    /// Ctrl+Alt+V: paste layers at the current time.
+    pub const PASTE_AT_TIME: &str = "motion.edit.paste_at_current_time";
+    /// Ctrl+Down / Ctrl+Up (Shift adds): the next layer down / up the stack.
+    pub const SELECT_NEXT_LAYER: &str = "motion.layer.select_next";
+    pub const SELECT_PREV_LAYER: &str = "motion.layer.select_previous";
+    /// Numpad 1–9 (Shift toggles): layer number N.
+    pub const SELECT_LAYER_N: &str = "motion.timeline.select_layer";
+    /// Alt+PageUp / PageDown (Shift ×10): the selected layers a frame earlier
+    /// / later.
+    pub const NUDGE_TIME: &str = "motion.layer.nudge_time";
+    /// Alt+Left / Right (Shift ×10): the selected keyframes a frame earlier /
+    /// later.
+    pub const NUDGE_KEYS: &str = "motion.timeline.nudge_keyframes";
+    /// Numpad + / − with no modifier, Ctrl or Alt, Ctrl+Alt (Shift ×10):
+    /// rotation, scale, opacity of the selected layers by `delta`.
+    pub const NUDGE_ROTATION: &str = "motion.layer.nudge_rotation";
+    pub const NUDGE_SCALE: &str = "motion.layer.nudge_scale";
+    pub const NUDGE_OPACITY: &str = "motion.layer.nudge_opacity";
+    /// Ctrl+Alt+B: the work area spans the selected layers.
+    pub const WORK_AREA_TO_SELECTION: &str = "motion.comp.set_work_area_to_selection";
+    /// Shift+Home / Shift+End: the CTI to the work area's first / last frame.
+    pub const GO_WORK_AREA_START: &str = "motion.comp.go_to_work_area_start";
+    pub const GO_WORK_AREA_END: &str = "motion.comp.go_to_work_area_end";
+    /// Ctrl+Alt+Shift+Left / Right: the previous / next layer in or out point.
+    pub const GO_PREV_IN_OUT: &str = "motion.comp.go_to_previous_in_or_out_point";
+    pub const GO_NEXT_IN_OUT: &str = "motion.comp.go_to_next_in_or_out_point";
+    /// Alt+Home / Alt+End: the selected layers' in point to the comp start, out
+    /// point to the comp end.
+    pub const IN_TO_COMP_START: &str = "motion.layer.move_in_point_to_comp_start";
+    pub const OUT_TO_COMP_END: &str = "motion.layer.move_out_point_to_comp_end";
+    /// Ctrl+Shift+, / Ctrl+Alt+,: stretch the in / out point to the CTI.
+    pub const STRETCH_IN: &str = "motion.timeline.stretch_in_point_to_current_time";
+    pub const STRETCH_OUT: &str = "motion.timeline.stretch_out_point_to_current_time";
+    /// Ctrl+Alt+A: every keyframe and property the Timeline shows.
+    pub const SELECT_VISIBLE_KEYS: &str = "motion.timeline.select_all_visible_keyframes";
+    /// Shift+F2, Ctrl+Alt+Shift+A: no keyframe or property selected (layers stay).
+    pub const DESELECT_KEYS: &str = "motion.comp.deselect_all_keyframes";
+    /// Shift+J / Shift+K: the previous / next keyframe of the selected
+    /// properties (else of the selected layers).
+    pub const PREV_SELECTED_KEY: &str = "motion.timeline.previous_keyframe_in_selection";
+    pub const NEXT_SELECTED_KEY: &str = "motion.timeline.next_keyframe_in_selection";
     /// F4 / Shift+F4 (the Timeline handles them).
     pub const TOGGLE_SWITCHES_MODES: &str = "motion.timeline.toggle_switches_modes";
     pub const TOGGLE_PARENT_COLUMN: &str = "motion.timeline.toggle_parent_column";
@@ -173,6 +235,27 @@ pub mod ids {
     /// Layer ▸ Open Layer Source (Alt+Enter): a pre-comp's composition, footage
     /// in the Footage panel.
     pub const OPEN_LAYER_SOURCE: &str = "motion.layer.open_layer_source";
+    /// File ▸ Add Footage to Comp (Cmd/Ctrl+/): the selected Project items as
+    /// layers of the active comp.
+    pub const ADD_FOOTAGE_TO_COMP: &str = "motion.file.add_footage_to_comp";
+    /// Edit ▸ Edit Original (Cmd/Ctrl+E).
+    pub const EDIT_ORIGINAL: &str = "motion.edit.edit_original";
+    /// Edit ▸ Label ▸ Edit Label Colors…: Preferences ▸ Labels.
+    pub const EDIT_LABEL_COLORS: &str = "motion.edit.edit_label_colors";
+    /// Animation ▸ Separate Dimensions (Position of the selected layers).
+    pub const SEPARATE_DIMENSIONS: &str = "motion.anim.separate_dimensions";
+    /// Layer ▸ Camera ▸ Camera Settings… (and View ▸): the selected camera, else
+    /// the comp's active camera.
+    pub const CAMERA_SETTINGS: &str = "motion.layer.camera_settings";
+    /// Composition ▸ Crop Comp to Region of Interest / to Selected Layer(s)
+    /// Bounds.
+    pub const CROP_TO_ROI: &str = "motion.comp.crop_comp_to_region_of_interest";
+    pub const CROP_TO_LAYERS: &str = "motion.comp.crop_comp_to_selected_layer_bounds";
+    /// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest / to Layer,
+    /// Set Focus Distance to Layer.
+    pub const FOCUS_TO_POI: &str = "motion.layer.link_focus_distance_to_point_of_interest";
+    pub const LINK_FOCUS_TO_LAYER: &str = "motion.layer.link_focus_distance_to_layer";
+    pub const SET_FOCUS_TO_LAYER: &str = "motion.layer.set_focus_distance_to_layer";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -253,6 +336,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EXPONENTIAL_SCALE, "Exponential Scale"),
     (ids::SEQUENCE_LAYERS, "Sequence Layers..."),
     (ids::PLAY, "Play/Stop"),
+    (ids::CACHE_WHEN_IDLE, "Cache Frames When Idle"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
     ("motion.file.find", "Find"),
@@ -284,10 +368,15 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::MINI_FLOW, "Composition Mini-Flowchart"),
+    (ids::COMP_FLOWCHART, "Composition Flowchart"),
+    (ids::REVEAL_COMP_IN_PROJECT, "Reveal Composition in Project"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::IMPORT_SOLID, "Solid..."),
+    (ids::IMPORT_PLACEHOLDER, "Placeholder..."),
+    (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
     (ids::REVEAL_IN_EXPLORER, "Reveal in Explorer"),
@@ -308,6 +397,42 @@ pub const ACTIONS: &[(&str, &str)] = &[
         "Toggle Switches / Modes Columns",
     ),
     (ids::TOGGLE_PARENT_COLUMN, "Show / Hide Parent Column"),
+    (ids::ZOOM_FRAMES, "Zoom In to Frames"),
+    (ids::ZOOM_TOGGLE, "Toggle Zoom Level"),
+    (ids::SCROLL_TO_NOW, "Scroll to Current Time"),
+    (ids::SCROLL_LAYER_TOP, "Scroll Selected Layer to Top"),
+    (ids::PASTE_AT_TIME, "Paste Layers at Current Time"),
+    (
+        ids::WORK_AREA_TO_SELECTION,
+        "Set Work Area to Selected Layers",
+    ),
+    (ids::GO_WORK_AREA_START, "Go to Work Area Start"),
+    (ids::GO_WORK_AREA_END, "Go to Work Area End"),
+    (ids::GO_PREV_IN_OUT, "Go to Previous Layer In or Out Point"),
+    (ids::GO_NEXT_IN_OUT, "Go to Next Layer In or Out Point"),
+    (
+        ids::IN_TO_COMP_START,
+        "Align Selected Layers' In Points to Composition Start",
+    ),
+    (
+        ids::OUT_TO_COMP_END,
+        "Align Selected Layers' Out Points to Composition End",
+    ),
+    (ids::STRETCH_IN, "Stretch Layer In Point to Current Time"),
+    (ids::STRETCH_OUT, "Stretch Layer Out Point to Current Time"),
+    (
+        ids::SELECT_VISIBLE_KEYS,
+        "Select All Visible Keyframes and Revealed Properties",
+    ),
+    (ids::DESELECT_KEYS, "Deselect All Keyframes and Properties"),
+    (
+        ids::PREV_SELECTED_KEY,
+        "Go to Previous Keyframe on Selected Layers/Properties",
+    ),
+    (
+        ids::NEXT_SELECTED_KEY,
+        "Go to Next Keyframe on Selected Layers/Properties",
+    ),
     (ids::BLENDING_MODE, "Blending Mode"),
     (ids::BLENDING_MODE_STEP, "Next Blending Mode"),
     (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
@@ -338,6 +463,19 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_FOLDER, "New Folder"),
     (ids::OPEN_LAYER, "Open Layer"),
     (ids::OPEN_LAYER_SOURCE, "Open Layer Source"),
+    (ids::ADD_FOOTAGE_TO_COMP, "Add Footage to Comp"),
+    (ids::EDIT_ORIGINAL, "Edit Original..."),
+    (ids::EDIT_LABEL_COLORS, "Edit Label Colors..."),
+    (ids::SEPARATE_DIMENSIONS, "Separate Dimensions"),
+    (ids::CAMERA_SETTINGS, "Camera Settings..."),
+    (ids::CROP_TO_ROI, "Crop Comp to Region of Interest"),
+    (ids::CROP_TO_LAYERS, "Crop Comp to Selected Layer(s) Bounds"),
+    (
+        ids::FOCUS_TO_POI,
+        "Link Focus Distance to Point of Interest",
+    ),
+    (ids::LINK_FOCUS_TO_LAYER, "Link Focus Distance to Layer"),
+    (ids::SET_FOCUS_TO_LAYER, "Set Focus Distance to Layer"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -423,6 +561,176 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         r#"{"what":"audio:levels","add":true}"#,
         "Add Audio Levels to Revealed Properties",
     ),
+    (
+        ids::REVEAL,
+        r#"{"what":"animated","add":true}"#,
+        "Add Animated Properties to Revealed Properties",
+    ),
+    (
+        ids::TWIRL,
+        r#"{"explode":true,"preserve_solo":false}"#,
+        "Show or Hide All Properties of Selected Layers",
+    ),
+    (ids::PLAY, r#"{"alternate":true}"#, "Preview (Shift)"),
+    (
+        ids::MOVE_IN,
+        r#"{"relative":true}"#,
+        "Set Layer In Point (Relative to Selection)",
+    ),
+    (
+        ids::SELECT_NEXT_LAYER,
+        r#"{"add":false}"#,
+        "Select Next Layer",
+    ),
+    (
+        ids::SELECT_NEXT_LAYER,
+        r#"{"add":true}"#,
+        "Extend Selection to Next Layer",
+    ),
+    (
+        ids::SELECT_PREV_LAYER,
+        r#"{"add":false}"#,
+        "Select Previous Layer",
+    ),
+    (
+        ids::SELECT_PREV_LAYER,
+        r#"{"add":true}"#,
+        "Extend Selection to Previous Layer",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":-1}"#,
+        "Move Layer 1 Frame Earlier",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":-10}"#,
+        "Move Layer 10 Frames Earlier",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":1}"#,
+        "Move Layer 1 Frame Later",
+    ),
+    (
+        ids::NUDGE_TIME,
+        r#"{"frames":10}"#,
+        "Move Layer 10 Frames Later",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":-1}"#,
+        "Move Selected Keyframes 1 Frame Earlier",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":-10}"#,
+        "Move Selected Keyframes 10 Frames Earlier",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":1}"#,
+        "Move Selected Keyframes 1 Frame Later",
+    ),
+    (
+        ids::NUDGE_KEYS,
+        r#"{"frames":10}"#,
+        "Move Selected Keyframes 10 Frames Later",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":1}"#,
+        "Rotate Layer 1 Degree Clockwise",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":10}"#,
+        "Rotate Layer 10 Degrees Clockwise",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":-1}"#,
+        "Rotate Layer 1 Degree Counterclockwise",
+    ),
+    (
+        ids::NUDGE_ROTATION,
+        r#"{"delta":-10}"#,
+        "Rotate Layer 10 Degrees Counterclockwise",
+    ),
+    (ids::NUDGE_SCALE, r#"{"delta":1}"#, "Scale Layer Up 1%"),
+    (ids::NUDGE_SCALE, r#"{"delta":10}"#, "Scale Layer Up 10%"),
+    (ids::NUDGE_SCALE, r#"{"delta":-1}"#, "Scale Layer Down 1%"),
+    (ids::NUDGE_SCALE, r#"{"delta":-10}"#, "Scale Layer Down 10%"),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":1}"#,
+        "Increase Layer Opacity 1%",
+    ),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":10}"#,
+        "Increase Layer Opacity 10%",
+    ),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":-1}"#,
+        "Decrease Layer Opacity 1%",
+    ),
+    (
+        ids::NUDGE_OPACITY,
+        r#"{"delta":-10}"#,
+        "Decrease Layer Opacity 10%",
+    ),
+    (
+        ids::MOVE_OUT,
+        r#"{"relative":true}"#,
+        "Set Layer Out Point (Relative to Selection)",
+    ),
+    (
+        ids::TRIM_IN,
+        r#"{"relative":true}"#,
+        "Trim Layer In Point (Relative to Selection)",
+    ),
+    (
+        ids::TRIM_OUT,
+        r#"{"relative":true}"#,
+        "Trim Layer Out Point (Relative to Selection)",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_path","add":false}"#,
+        "Reveal Mask Path",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_path","add":true}"#,
+        "Add Mask Path to Revealed Properties",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_feather","add":false}"#,
+        "Reveal Mask Feather",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"mask_feather","add":true}"#,
+        "Add Mask Feather to Revealed Properties",
+    ),
+    (
+        ids::TOGGLE_KEY,
+        r#"{"attr":"mask_path"}"#,
+        "Mask Path: Add or Remove Keyframe",
+    ),
+    (
+        ids::TOGGLE_KEY,
+        r#"{"attr":"mask_feather"}"#,
+        "Mask Feather: Add or Remove Keyframe",
+    ),
+    (
+        ids::TOGGLE_KEY,
+        r#"{"attr":"audio:levels"}"#,
+        "Audio Levels: Add or Remove Keyframe",
+    ),
 ];
 
 /// Layer kinds by name, for both the UI action and the model command it runs.
@@ -451,6 +759,19 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
     let parse = |json: &str| serde_json::from_str(json).expect("variant parameters are JSON");
     for (command, params, title) in VARIANTS {
         add(command, parse(params), (*title).to_owned());
+    }
+    // Numpad 1–9: select (Shift: toggle) layer number N.
+    for n in 1..10 {
+        add(
+            ids::SELECT_LAYER_N,
+            json!({ "index": n }),
+            format!("Select Layer by Number: {n}"),
+        );
+        add(
+            ids::SELECT_LAYER_N,
+            json!({ "index": n, "toggle": true }),
+            format!("Toggle Layer Selection by Number: {n}"),
+        );
     }
     // Numbered comp markers (Shift+0–9, 0–9): one row per number.
     for n in 0..10 {
@@ -863,9 +1184,148 @@ fn transform_edits(
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
+/// File ▸ Add Footage to Comp: the selected Project items (not folders) as
+/// layers of the active comp, the first one on top (AE).
+fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
+    use crate::project::{DropPlacement, ItemDrag, ItemKind, item_kind};
+    let items: Vec<PrimPath> = session
+        .lock()
+        .selected_items
+        .iter()
+        .filter(|p| matches!(item_kind(cx.stage, p), Some(k) if k != ItemKind::Folder))
+        .cloned()
+        .collect();
+    for item in items.into_iter().rev() {
+        ItemDrag(item).add_as_layer(cx, session, DropPlacement::Viewer(None));
+    }
+}
+
+/// Whether every one of `layers` has its Position separated (Animation ▸
+/// Separate Dimensions is checked).
+pub(crate) fn all_separated(stage: &bae_model::Stage, layers: &[PrimPath]) -> bool {
+    !layers.is_empty()
+        && layers
+            .iter()
+            .all(|l| bae_motion::dimensions::is_separated(stage, l))
+}
+
+/// The camera Camera Settings edits: the selected camera layer, else the
+/// topmost camera of the active comp (AE's active camera).
+fn camera_settings_target(stage: &bae_model::Stage, session: &SharedSession) -> Option<PrimPath> {
+    let is_camera = |l: &PrimPath| query::layer_kind(stage, l).as_deref() == Some("camera");
+    let s = session.lock();
+    if let Some(layer) = s.selected_layers.iter().find(|l| is_camera(l)) {
+        return Some(layer.clone());
+    }
+    let comp = s.active_comp.clone()?;
+    drop(s);
+    query::comp_layers(stage, &comp).into_iter().find(is_camera)
+}
+
+/// The comp-space box around `layers`' content at `now` ([left, top, right,
+/// bottom]; Crop Comp to Selected Layer(s) Bounds).
+fn layers_bounds(
+    stage: &bae_model::Stage,
+    comp: &PrimPath,
+    now: Time,
+    layers: &[PrimPath],
+) -> Option<[f64; 4]> {
+    use bae_anim::glam::DVec3;
+    let evaluated = bae_anim::Evaluator::new()
+        .evaluate_comp(stage, comp, now)
+        .ok()?;
+    let mut rect: Option<[f64; 4]> = None;
+    for l in evaluated.layers.iter().filter(|l| layers.contains(&l.path)) {
+        let Some((a, b)) = crate::render::layer_bounds(l) else {
+            continue;
+        };
+        for (x, y) in [(a.x, a.y), (b.x, a.y), (a.x, b.y), (b.x, b.y)] {
+            let p = l.world_matrix.transform_point3(DVec3::new(x, y, 0.0));
+            let r = rect.get_or_insert([p.x, p.y, p.x, p.y]);
+            *r = [r[0].min(p.x), r[1].min(p.y), r[2].max(p.x), r[3].max(p.y)];
+        }
+    }
+    rect.filter(|r| r[2] - r[0] >= 1.0 && r[3] - r[1] >= 1.0)
+}
+
+/// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest (each selected
+/// camera), Link Focus Distance to Layer and Set Focus Distance to Layer (a
+/// selected camera and one other selected layer): AE's expressions, or the
+/// distance now along the camera's view.
+fn camera_focus(cx: &mut PanelContext<'_>, session: &SharedSession, id: &str) {
+    use bae_anim::glam::DVec3;
+    let stage = cx.stage;
+    let (selected, comp, now) = {
+        let s = session.lock();
+        let Some(comp) = s.active_comp.clone() else {
+            return;
+        };
+        (s.selected_layers.clone(), comp.clone(), s.time(&comp))
+    };
+    let is_camera = |l: &PrimPath| query::layer_kind(stage, l).as_deref() == Some("camera");
+    let cameras: Vec<PrimPath> = selected
+        .iter()
+        .filter(|l| is_camera(l) && !query::is_locked(stage, l))
+        .cloned()
+        .collect();
+    const ATTR: &str = "camera:focus_distance";
+    if id == ids::FOCUS_TO_POI {
+        let items: Vec<_> = cameras
+            .iter()
+            .map(
+                |c| json!({"path": c, "attr": ATTR, "source": "length(position, pointOfInterest)"}),
+            )
+            .collect();
+        if !items.is_empty() {
+            cx.invoke_with("attr.set_expressions", json!({ "items": items }));
+        }
+        return;
+    }
+    let others: Vec<&PrimPath> = selected.iter().filter(|l| !is_camera(l)).collect();
+    let (Some(camera), [target]) = (cameras.first(), others.as_slice()) else {
+        return;
+    };
+    if id == ids::LINK_FOCUS_TO_LAYER {
+        let name = query::display_name_of(stage, target)
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let source = format!(
+            "m = thisComp.layer(\"{name}\");\nv = sub(m.toWorld(m.anchorPoint), toWorld([0,0,0]));\ndot(v, toWorldVec([0,0,1]))"
+        );
+        cx.invoke_with(
+            "attr.set_expressions",
+            json!({"items": [{"path": camera, "attr": ATTR, "source": source}]}),
+        );
+        return;
+    }
+    let Ok(evaluated) = bae_anim::Evaluator::new().evaluate_comp(stage, &comp, now) else {
+        return;
+    };
+    let find = |p: &PrimPath| evaluated.layers.iter().find(|l| l.path == *p);
+    let (Some(cam), Some(layer)) = (find(camera), find(target)) else {
+        return;
+    };
+    let point = layer
+        .world_matrix
+        .transform_point3(layer.transform.anchor_point);
+    let eye = cam.world_matrix.transform_point3(DVec3::ZERO);
+    let forward = cam
+        .world_matrix
+        .transform_vector3(DVec3::Z)
+        .normalize_or_zero();
+    let distance = (point - eye).dot(forward);
+    if distance > 0.0 {
+        let time = query::to_key_time(stage, camera, now);
+        cx.invoke_with(
+            "attr.set_many",
+            json!({"edits": [{"path": camera, "attr": ATTR, "time": time, "value": bae_model::Value::Float(distance)}]}),
+        );
+    }
+}
+
 /// File ▸ New ▸ New Folder: an “Untitled N” folder in the folder selected in
 /// the Project panel, else at the top level (AE).
-fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
+pub(crate) fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
     use crate::project::{ItemKind, item_kind};
     let parent = session
         .lock()
@@ -880,7 +1340,8 @@ fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
         parent.as_ref().unwrap_or(&root),
         "Untitled",
     );
-    let mut params = json!({ "name": name });
+    let prefs = crate::prefs::current(cx.resources);
+    let mut params = json!({ "name": name, "label": prefs.int("labels.label_default_folder") });
     if let Some(folder) = &parent {
         params["parent"] = json!(folder);
     }
@@ -932,6 +1393,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::CACHE_WHEN_IDLE {
+        if let Some(store) = cx.resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
+            let mut prefs = (*store.current()).clone();
+            let key = bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE;
+            prefs.set(key, !prefs.bool(key));
+            if let Err(error) = store.set(prefs) {
+                tracing::warn!(%error, "could not save idle cache setting");
+            }
+        }
+        return true;
+    }
     if id == ids::TRACK_MOTION {
         let layer = session.lock().selected_layers.first().cloned();
         if let Some(layer) = layer
@@ -955,6 +1427,61 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::NEW_FOLDER => {
             new_folder(cx, session);
+            return true;
+        }
+        ids::ADD_FOOTAGE_TO_COMP => {
+            add_footage_to_comp(cx, session);
+            return true;
+        }
+        ids::EDIT_ORIGINAL => {
+            crate::import::edit_original(cx, session);
+            return true;
+        }
+        ids::EDIT_LABEL_COLORS => {
+            cx.invoke_with(bae_ui::settings::ACTION, json!({"page": "labels"}));
+            return true;
+        }
+        ids::SEPARATE_DIMENSIONS => {
+            let layers = target_layers(stage, &session.lock());
+            if !layers.is_empty() {
+                let separated = !all_separated(stage, &layers);
+                cx.invoke_with(
+                    "transform.separate_dimensions",
+                    json!({"layers": layers, "separated": separated}),
+                );
+            }
+            return true;
+        }
+        ids::CAMERA_SETTINGS => {
+            if let Some(camera) = camera_settings_target(stage, session) {
+                crate::dialogs::layer_settings(cx, session, &camera);
+            }
+            return true;
+        }
+        ids::CROP_TO_ROI => {
+            let roi = session.lock().roi.clone();
+            let active = session.lock().active_comp.clone();
+            if let Some((comp, rect)) = roi.filter(|(c, _)| Some(c) == active.as_ref()) {
+                cx.invoke_with("comp.crop", json!({"comp": comp, "rect": rect}));
+                session.lock().roi_cropped = true;
+            }
+            return true;
+        }
+        ids::CROP_TO_LAYERS => {
+            let (comp, now, layers) = {
+                let s = session.lock();
+                let Some(comp) = s.active_comp.clone() else {
+                    return true;
+                };
+                (comp.clone(), s.time(&comp), s.selected_layers.clone())
+            };
+            if let Some(rect) = layers_bounds(stage, &comp, now, &layers) {
+                cx.invoke_with("comp.crop", json!({"comp": comp, "rect": rect}));
+            }
+            return true;
+        }
+        ids::FOCUS_TO_POI | ids::LINK_FOCUS_TO_LAYER | ids::SET_FOCUS_TO_LAYER => {
+            camera_focus(cx, session, id);
             return true;
         }
         ids::OPEN_LAYER | ids::OPEN_LAYER_SOURCE => {
@@ -1023,7 +1550,41 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             return true;
         }
         ids::IMPORT_FILE => {
-            crate::import::import_file(cx, session);
+            if let Some(paths) = inv.params.get("paths") {
+                if let Ok(paths) = serde_json::from_value::<Vec<std::path::PathBuf>>(paths.clone())
+                {
+                    crate::import::import_paths(cx, &paths, None);
+                }
+            } else {
+                crate::import::import_file(cx, session);
+            }
+            return true;
+        }
+        ids::NEW_COMP_FROM_SELECTION => {
+            // Comps, footage and solids selected in the Project panel.
+            let items: Vec<PrimPath> = session
+                .lock()
+                .selected_items
+                .iter()
+                .filter(|i| {
+                    query::comp_info(stage, i).is_some()
+                        || stage
+                            .prim(i)
+                            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+                })
+                .cloned()
+                .collect();
+            let prefs = crate::prefs::current(cx.resources);
+            let still = crate::import::ImportDefaults::of(&prefs).still_duration;
+            crate::dialogs::comp_from_selection(cx, items, still);
+            return true;
+        }
+        ids::IMPORT_SOLID => {
+            crate::dialogs::import_solid(cx, session);
+            return true;
+        }
+        ids::IMPORT_PLACEHOLDER => {
+            crate::dialogs::import_placeholder(cx);
             return true;
         }
         ids::REPLACE_FOOTAGE => {
@@ -1092,12 +1653,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         // F4 / Shift+F4 with another panel in front: the Timeline toggles its
         // columns on its next frame (AE: they work whatever panel is active).
-        ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN => {
-            let id = if id == ids::TOGGLE_SWITCHES_MODES {
-                ids::TOGGLE_SWITCHES_MODES
-            } else {
-                ids::TOGGLE_PARENT_COLUMN
-            };
+        ids::TOGGLE_SWITCHES_MODES
+        | ids::TOGGLE_PARENT_COLUMN
+        | ids::SELECT_VISIBLE_KEYS
+        | ids::ZOOM_FRAMES
+        | ids::ZOOM_TOGGLE
+        | ids::SCROLL_TO_NOW
+        | ids::SCROLL_LAYER_TOP
+        | ids::TWIRL => {
+            let id = crate::timeline::QUEUED
+                .into_iter()
+                .find(|i| *i == id)
+                .unwrap_or(ids::TOGGLE_PARENT_COLUMN);
             session.lock().timeline_toggles.push(id);
             return true;
         }
@@ -1227,6 +1794,11 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
+        ids::COMP_FLOWCHART => cx.open_panel("flowchart"),
+        ids::REVEAL_COMP_IN_PROJECT => {
+            s.selected_items = vec![info.path.clone()];
+            cx.open_panel("project");
+        }
         ids::MINI_FLOW => {
             s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
                 stage, &info.path,
@@ -1245,6 +1817,38 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             s.set_time(&info, now + Time(frame.0 * n));
         }
         ids::PREV_KEY | ids::NEXT_KEY => jump_to_key(stage, &mut s, &info, id == ids::NEXT_KEY),
+        ids::PREV_SELECTED_KEY | ids::NEXT_SELECTED_KEY => {
+            let now = s.time(&info.path);
+            let mut times: Vec<Time> = Vec::new();
+            if s.selected_props.is_empty() {
+                for l in &layers {
+                    times.extend(layer_key_times(stage, l));
+                }
+            } else {
+                for (p, a) in &s.selected_props {
+                    if let Some(spec) = query::attr_spec(stage, p, a) {
+                        times.extend(
+                            spec.keyframes
+                                .keys()
+                                .map(|t| query::to_comp_time(stage, p, *t)),
+                        );
+                    }
+                }
+            }
+            let times = times.into_iter().map(|t| info.frame_rate.snap(t));
+            let pick = if id == ids::NEXT_SELECTED_KEY {
+                times.filter(|t| *t > now).min()
+            } else {
+                times.filter(|t| *t < now).max()
+            };
+            if let Some(t) = pick {
+                s.set_time(&info, t);
+            }
+        }
+        ids::DESELECT_KEYS => {
+            s.selected_keys.clear();
+            s.selected_props.clear();
+        }
         ids::GO_IN | ids::GO_OUT => {
             if let Some(l) = layers.first() {
                 let t = query::layer_timing(stage, l);
@@ -1272,19 +1876,225 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
         ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
-            let queue = crate::render_queue::shared(cx.resources);
-            let dir = crate::render_queue::default_output_dir();
-            let mut queue = queue.lock();
-            if id == ids::SAVE_FRAME_AS {
-                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
-            } else {
-                queue.add(&info, &dir);
-            }
-            queue.assign_output(
-                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
-            );
-            drop(queue);
+            let frame = (id == ids::SAVE_FRAME_AS).then(|| info.frame_rate.time_to_frame(now));
+            crate::render_queue::add_to_queue(cx, &info, frame);
             cx.open_panel("render_queue");
+        }
+        ids::SELECT_NEXT_LAYER | ids::SELECT_PREV_LAYER => {
+            let all = query::comp_layers(stage, &info.path);
+            let add = inv.params.get("add").and_then(|v| v.as_bool()) == Some(true);
+            let at: Vec<usize> = s
+                .selected_layers
+                .iter()
+                .filter_map(|l| all.iter().position(|x| x == l))
+                .collect();
+            let next = if id == ids::SELECT_NEXT_LAYER {
+                at.iter()
+                    .max()
+                    .map_or(0, |i| (i + 1).min(all.len().saturating_sub(1)))
+            } else {
+                at.iter().min().map_or(0, |i| i.saturating_sub(1))
+            };
+            if let Some(l) = all.get(next).cloned() {
+                if add {
+                    if !s.selected_layers.contains(&l) {
+                        s.selected_layers.push(l);
+                    }
+                } else {
+                    s.selected_layers = vec![l];
+                }
+                s.selected_keys.clear();
+            }
+        }
+        ids::SELECT_LAYER_N => {
+            let all = query::comp_layers(stage, &info.path);
+            let n = inv
+                .params
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1) as usize;
+            if let Some(l) = n.checked_sub(1).and_then(|i| all.get(i)).cloned() {
+                if inv.params.get("toggle").and_then(|v| v.as_bool()) == Some(true) {
+                    if let Some(i) = s.selected_layers.iter().position(|x| *x == l) {
+                        s.selected_layers.remove(i);
+                    } else {
+                        s.selected_layers.push(l);
+                    }
+                } else {
+                    s.selected_layers = vec![l];
+                }
+            }
+        }
+        ids::NUDGE_TIME | ids::NUDGE_KEYS => {
+            let frames = inv
+                .params
+                .get("frames")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1);
+            let delta = Time(frame.0 * frames);
+            if id == ids::NUDGE_TIME {
+                if !layers.is_empty() {
+                    cx.invoke_with(
+                        "layer.shift_time",
+                        json!({"layers": layers, "delta": delta}),
+                    );
+                }
+            } else if !keys.is_empty() {
+                cx.invoke_with("key.move", json!({"keys": keys, "delta": delta}));
+                // The selection names where the keys land.
+                let moved: Vec<KeyRef> = keys
+                    .iter()
+                    .map(|k| KeyRef::new(k.path.clone(), &k.attr, k.time + delta))
+                    .collect();
+                s.selected_keys = moved.clone();
+                s.expect(Pending::Keys(moved));
+            }
+        }
+        ids::NUDGE_ROTATION | ids::NUDGE_SCALE | ids::NUDGE_OPACITY if !layers.is_empty() => {
+            let delta = inv
+                .params
+                .get("delta")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let attr = match id {
+                ids::NUDGE_ROTATION => "transform:rotation",
+                ids::NUDGE_SCALE => "transform:scale",
+                _ => "transform:opacity",
+            };
+            let mut edits = Vec::new();
+            for l in &layers {
+                let kt = query::to_key_time(stage, l, now);
+                let Some(v) = query::sample_attr(stage, l, attr, kt) else {
+                    continue;
+                };
+                let three_d = common::is_3d(stage, l);
+                let value = match v {
+                    bae_model::Value::Float(x) if attr == "transform:opacity" => {
+                        bae_model::Value::Float((x + delta).clamp(0.0, 100.0))
+                    }
+                    bae_model::Value::Float(x) => bae_model::Value::Float(x + delta),
+                    bae_model::Value::Vec3([x, y, z]) => bae_model::Value::Vec3([
+                        x + delta,
+                        y + delta,
+                        if three_d { z + delta } else { z },
+                    ]),
+                    bae_model::Value::Vec2([x, y]) => {
+                        bae_model::Value::Vec2([x + delta, y + delta])
+                    }
+                    other => other,
+                };
+                edits.push(json!({"path": l, "attr": attr, "time": kt, "value": value}));
+            }
+            if !edits.is_empty() {
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
+        }
+        // Relative to the selection (Shift / Alt+Shift+[ ]): the earliest in
+        // point (latest out point) goes to the CTI and the others keep their
+        // offsets from it (AE).
+        ids::MOVE_IN | ids::MOVE_OUT | ids::TRIM_IN | ids::TRIM_OUT
+            if inv.params.get("relative").and_then(|v| v.as_bool()) == Some(true)
+                && !layers.is_empty() =>
+        {
+            let spans: Vec<(PrimPath, Time, Time)> = layers
+                .iter()
+                .map(|l| {
+                    let t = query::layer_timing(stage, l);
+                    (
+                        l.clone(),
+                        t.in_point.min(t.out_point),
+                        t.in_point.max(t.out_point),
+                    )
+                })
+                .collect();
+            let first = spans.iter().map(|(_, a, _)| *a).min().unwrap_or(now);
+            let last = spans.iter().map(|(_, _, b)| *b).max().unwrap_or(now);
+            let ins = id == ids::MOVE_IN || id == ids::TRIM_IN;
+            let delta = if ins { now - first } else { now + frame - last };
+            if delta != Time::ZERO {
+                if id == ids::MOVE_IN || id == ids::MOVE_OUT {
+                    cx.invoke_with(
+                        "layer.shift_time",
+                        json!({"layers": layers, "delta": delta}),
+                    );
+                } else {
+                    for (l, a, b) in spans {
+                        let field = if ins {
+                            json!({"layers": [l], "in_point": (a + delta).min(b - frame)})
+                        } else {
+                            json!({"layers": [l], "out_point": (b + delta).max(a + frame)})
+                        };
+                        cx.invoke_with("layer.trim", field);
+                    }
+                }
+            }
+        }
+        ids::WORK_AREA_TO_SELECTION if !layers.is_empty() => {
+            let (mut start, mut end) = (Time::MAX, Time::MIN);
+            for l in &layers {
+                let t = query::layer_timing(stage, l);
+                start = start.min(t.in_point.min(t.out_point));
+                end = end.max(t.in_point.max(t.out_point));
+            }
+            let (start, end) = (start.max(Time::ZERO), end.min(info.duration));
+            if end > start {
+                cx.invoke_with(
+                    "comp.set_work_area",
+                    json!({"comp": info.path, "start": start, "end": end}),
+                );
+            }
+        }
+        ids::GO_WORK_AREA_START => s.set_time(&info, info.work_area.start),
+        ids::GO_WORK_AREA_END => {
+            s.set_time(&info, (info.work_area.end - frame).max(Time::ZERO));
+        }
+        ids::GO_PREV_IN_OUT | ids::GO_NEXT_IN_OUT => {
+            let mut times = Vec::new();
+            for l in query::comp_layers(stage, &info.path) {
+                let t = query::layer_timing(stage, &l);
+                let (a, b) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
+                times.push(info.frame_rate.snap(a));
+                times.push(info.frame_rate.snap(b - frame));
+            }
+            let times = times.into_iter();
+            let pick = if id == ids::GO_NEXT_IN_OUT {
+                times.filter(|t| *t > now).min()
+            } else {
+                times.filter(|t| *t < now).max()
+            };
+            if let Some(t) = pick {
+                s.set_time(&info, t.clamp(Time::ZERO, info.duration));
+            }
+        }
+        ids::IN_TO_COMP_START | ids::OUT_TO_COMP_END => {
+            for l in &layers {
+                let t = query::layer_timing(stage, l);
+                let delta = if id == ids::IN_TO_COMP_START {
+                    Time::ZERO - t.in_point.min(t.out_point)
+                } else {
+                    info.duration - t.in_point.max(t.out_point)
+                };
+                if delta != Time::ZERO {
+                    cx.invoke_with("layer.shift_time", json!({"layers": [l], "delta": delta}));
+                }
+            }
+        }
+        ids::STRETCH_IN | ids::STRETCH_OUT => {
+            for l in &layers {
+                let t = query::layer_timing(stage, l);
+                let (a, b) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
+                let (duration, hold) = if id == ids::STRETCH_IN {
+                    (b - now, "out_point")
+                } else {
+                    (now + frame - a, "in_point")
+                };
+                if duration > Time::ZERO {
+                    cx.invoke_with(
+                        "layer.time_stretch",
+                        json!({"layers": [l], "new_duration": duration, "hold": hold}),
+                    );
+                }
+            }
         }
         ids::TRIM_IN if !layers.is_empty() => {
             cx.invoke_with("layer.trim", json!({"layers": layers, "in_point": now}));
@@ -1471,22 +2281,34 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     Some(_) => {}
                     None => cx.invoke_with(
                         "marker.add",
-                        json!({"owner": info.path, "time": now, "comment": n.to_string()}),
+                        json!({"owner": info.path, "time": now, "comment": n.to_string(), "label": crate::prefs::marker_label(&crate::prefs::current(cx.resources), false)}),
                     ),
                 }
             }
         }
         ids::ADD_MARKER => {
+            let label = crate::prefs::marker_label(&crate::prefs::current(cx.resources), false);
             if layers.is_empty() {
-                cx.invoke_with("marker.add", json!({"owner": info.path, "time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owner": info.path, "time": now, "label": label}),
+                );
             } else {
-                cx.invoke_with("marker.add", json!({"owners": layers, "comp_time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owners": layers, "comp_time": now, "label": label}),
+                );
             }
         }
         ids::ADD_MARKER_DIALOG => {
             let owner = layers.first().cloned().unwrap_or_else(|| info.path.clone());
             s.key_dialog = Some(crate::timeline::KeyDialog::Marker(Box::new(
-                crate::timeline::MarkerDialog::new_marker(&info, owner, now),
+                crate::timeline::MarkerDialog::new_marker(
+                    &info,
+                    owner,
+                    now,
+                    crate::prefs::marker_label(&crate::prefs::current(cx.resources), false),
+                ),
             )));
         }
         ids::DELETE_ALL_MARKERS if !layers.is_empty() => {
@@ -1527,17 +2349,71 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             } else {
                 layers.clone()
             };
-            let what = if what == "audio:levels" && !add {
-                let previous = s.last_l.take();
-                if previous.is_some_and(|at| at.elapsed() < Duration::from_millis(450)) {
-                    "audio:waveform"
+            // Double presses (AE): LL the waveform, MM every mask property, EE
+            // the expressions.
+            let double = |slot: &mut Option<Instant>| {
+                if slot
+                    .take()
+                    .is_some_and(|at| at.elapsed() < Duration::from_millis(450))
+                {
+                    true
                 } else {
-                    s.last_l = Some(Instant::now());
-                    what
+                    *slot = Some(Instant::now());
+                    false
                 }
-            } else {
-                what
             };
+            let what = match (what, add) {
+                ("audio:levels", false) if double(&mut s.last_l) => "audio:waveform",
+                ("mask_path", false) if double(&mut s.last_m) => "masks",
+                ("effects", false) if double(&mut s.last_e) => "expressions",
+                _ => what,
+            };
+            // Shift+U: the animated properties added to those shown.
+            if what == "animated" && add {
+                for l in targets {
+                    let mut list: Vec<(PrimPath, String)> = Vec::new();
+                    let current = s.reveal.get(&l).cloned();
+                    let shown = current
+                        .iter()
+                        .flat_map(|r| crate::props::revealed(stage, &l, r))
+                        .chain(crate::props::revealed(stage, &l, &Reveal::Animated));
+                    for n in shown {
+                        if let crate::props::Node::Prop { path, attr, .. } = n
+                            && !list.iter().any(|(p, a)| *p == path && *a == attr)
+                        {
+                            list.push((path, attr));
+                        }
+                    }
+                    if !list.is_empty() {
+                        s.reveal.insert(l, Reveal::Props(list));
+                    }
+                }
+                return true;
+            }
+            // EE: the properties with expressions.
+            if what == "expressions" {
+                for l in targets {
+                    let list: Vec<(PrimPath, String)> =
+                        crate::props::revealed(stage, &l, &Reveal::Animated)
+                            .into_iter()
+                            .filter_map(|n| match n {
+                                crate::props::Node::Prop { path, attr, .. }
+                                    if query::attr_spec(stage, &path, &attr)
+                                        .is_some_and(|s| s.expression.is_some()) =>
+                                {
+                                    Some((path, attr))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                    if list.is_empty() {
+                        s.reveal.remove(&l);
+                    } else {
+                        s.reveal.insert(l, Reveal::Props(list));
+                    }
+                }
+                return true;
+            }
             let reveal = if what == "animated" {
                 let double = s
                     .last_u
@@ -1585,38 +2461,55 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::TOGGLE_KEY => {
-            let Some(attr) = inv.params.get("attr").and_then(|v| v.as_str()) else {
+            let Some(reveal_as) = inv.params.get("attr").and_then(|v| v.as_str()) else {
                 return true;
             };
-            for l in &layers {
-                let kt = query::to_key_time(stage, l, now);
-                let spec = query::attr_spec(stage, l, attr);
+            // Mask Path / Mask Feather (Alt+Shift+M / F): every mask of the layer.
+            let mask_attr = match reveal_as {
+                "mask_path" => Some("path"),
+                "mask_feather" => Some("feather"),
+                _ => None,
+            };
+            let targets: Vec<(PrimPath, PrimPath)> = layers
+                .iter()
+                .flat_map(|l| match mask_attr {
+                    Some(_) => crate::props::masks_of(stage, l)
+                        .into_iter()
+                        .map(|m| (l.clone(), m))
+                        .collect::<Vec<_>>(),
+                    None => vec![(l.clone(), l.clone())],
+                })
+                .collect();
+            let attr = mask_attr.unwrap_or(reveal_as);
+            for (l, path) in &targets {
+                let kt = query::to_key_time(stage, path, now);
+                let spec = query::attr_spec(stage, path, attr);
                 match spec {
                     Some(a) if a.keyframes.contains_key(&kt) => {
                         cx.invoke_with(
                             "key.delete",
-                            json!({"keys": [KeyRef::new(l.clone(), attr, kt)]}),
+                            json!({"keys": [KeyRef::new(path.clone(), attr, kt)]}),
                         );
                     }
                     Some(a) if a.is_animated() => {
-                        if let Some(v) = query::sample_attr(stage, l, attr, kt) {
+                        if let Some(v) = query::sample_attr(stage, path, attr, kt) {
                             cx.invoke_with(
                                 "attr.set_at",
-                                json!({"path": l, "attr": attr, "time": kt, "value": v}),
+                                json!({"path": path, "attr": attr, "time": kt, "value": v}),
                             );
                         }
                     }
                     _ => cx.invoke_with(
                         "attr.set_animated",
-                        json!({"path": l, "attr": attr, "animated": true, "time": kt}),
+                        json!({"path": path, "attr": attr, "animated": true, "time": kt}),
                     ),
                 }
                 let mut r = match s.reveal.get(l) {
                     Some(Reveal::Attrs(v)) => v.clone(),
                     _ => Vec::new(),
                 };
-                if !r.iter().any(|a| a == attr) {
-                    r.push(attr.to_owned());
+                if !r.iter().any(|a| a == reveal_as) {
+                    r.push(reveal_as.to_owned());
                 }
                 s.reveal.insert(l.clone(), Reveal::Attrs(r));
             }
@@ -1973,6 +2866,21 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
         }
+        ids::PASTE_AT_TIME if !s.layer_clipboard.is_empty() => {
+            let before = query::comp_layers(stage, &info.path);
+            let above = before
+                .iter()
+                .find(|l| s.selected_layers.contains(l))
+                .cloned();
+            cx.invoke_with(
+                "layer.paste",
+                json!({"comp": info.path, "layers": s.layer_clipboard, "above": above, "time": now}),
+            );
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before,
+            });
+        }
         ids::PASTE if !s.layer_clipboard.is_empty() => {
             // Above the topmost selected layer, else on top; named like
             // Duplicate; the pasted layers end up selected.
@@ -2138,6 +3046,20 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Find", "查找"),
     ("Open Layer", "打开图层"),
     ("Open Layer Source", "打开图层源"),
+    ("Add Footage to Comp", "将素材添加到合成"),
+    ("Edit Original...", "编辑原稿..."),
+    // AE 2026 zh_CN menus.
+    ("Crop Comp to Region of Interest", "裁剪合成到目标区域"),
+    (
+        "Crop Comp to Selected Layer(s) Bounds",
+        "裁切合成至选定图层边界",
+    ),
+    (
+        "Link Focus Distance to Point of Interest",
+        "将焦距链接到目标点",
+    ),
+    ("Link Focus Distance to Layer", "将焦距链接到图层"),
+    ("Set Focus Distance to Layer", "将焦距设置为图层"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

@@ -13,6 +13,14 @@ fn main() {
     println!("cargo:rerun-if-changed={}", res.display());
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_os == "macos" {
+        println!("cargo:rerun-if-changed=src/shell/mac_panels.m");
+        cc::Build::new()
+            .file("src/shell/mac_panels.m")
+            .flag("-fobjc-arc")
+            .compile("bae_mac_panels");
+        println!("cargo:rustc-link-lib=framework=UserNotifications");
+    }
     if target_os == "windows" && target_env == "msvc" {
         let mut resources = fs::read(&res)
             .unwrap_or_else(|error| panic!("{}: {error}; run `cargo xtask icons`", res.display()));

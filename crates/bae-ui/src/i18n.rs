@@ -130,7 +130,22 @@ macro_rules! tr {
 
 /// Shell strings. Keep in sync with docs/glossary.md.
 const ZH: &[(&str, &str)] = &[
+    ("Theme name", "主题名称"),
+    (
+        "Drop files here to import footage.",
+        "将文件拖到这里即可导入素材。",
+    ),
+    (
+        "Hold Space and drag to pan the composition.",
+        "按住空格键拖动，可平移合成视图。",
+    ),
+    (
+        "Drag the time indicator to preview a frame.",
+        "拖动时间指示器可预览对应帧。",
+    ),
+    ("Got it", "知道了"),
     // Numpad keys in shortcuts (AE: 数字小键盘).
+    ("Num Clear", "数字小键盘 清除"),
     ("Num *", "数字小键盘 *"),
     ("Num /", "数字小键盘 /"),
     ("Num +", "数字小键盘 +"),
@@ -174,7 +189,12 @@ const ZH: &[(&str, &str)] = &[
     ("Edit Workspaces...", "编辑工作区..."),
     ("Edit Workspaces", "编辑工作区"),
     ("Save as New Workspace...", "另存为新工作区..."),
-    ("New Workspace", "新建工作区"),
+    ("New Workspace", "新工作区"),
+    (
+        "Assign Shortcut to “{name}” Workspace",
+        "将快捷键分配给“{name}”工作区",
+    ),
+    ("{key} (replaces “{name}”)", "{key}（替换“{name}”）"),
     ("Show in Bar", "显示在工作区栏"),
     ("Delete", "删除"),
     ("Name", "名称"),

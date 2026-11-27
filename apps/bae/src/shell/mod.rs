@@ -18,6 +18,8 @@
 
 pub(crate) mod builtin_scripts;
 mod dialogs;
+#[cfg(target_os = "macos")]
+mod mac_panels;
 mod menu;
 mod numpad;
 #[cfg(target_os = "macos")]
@@ -39,6 +41,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::i18n::tr;
 use anyhow::Context as _;
 use bae_app::{App, AppBuilder, AppModule};
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
@@ -84,6 +87,11 @@ impl AppModule for ShellModule {
 
     fn finish(&self, app: &mut AppBuilder) {
         builtin_scripts::register(app);
+        #[cfg(target_os = "macos")]
+        let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
+            "bae.macos.notifications",
+            Arc::new(mac_panels::NotificationWarmUp),
+        );
         ui::register_panels(app);
         // BAE's own menu entries (History and Agent panels, Agent workspace),
         // registered next to the AE menus the motion workspace contributes.
@@ -131,6 +139,8 @@ enum UserEvent {
     /// see `open_documents`.
     #[cfg(target_os = "macos")]
     OpenFiles(Vec<std::path::PathBuf>),
+    #[cfg(target_os = "macos")]
+    Render(bae_ui_motion::render_queue::RenderEvent),
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -202,6 +212,12 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     // `run_app` (so a project double-clicked to launch BAE is not missed).
     #[cfg(target_os = "macos")]
     {
+        let render_proxy = proxy.clone();
+        app.insert_resource(bae_ui_motion::render_queue::RenderFeedback(Arc::new(
+            move |event| {
+                let _ = render_proxy.send_event(UserEvent::Render(event));
+            },
+        )));
         let proxy = std::sync::Mutex::new(proxy.clone());
         open_documents::install(move |paths| {
             let proxy = proxy
@@ -235,13 +251,32 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     let workbench_state = loaded.map(|l| l.value.0).unwrap_or_default();
     let mut document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
     document.add_module_commands(&app);
+    let prefs = Arc::new(match &dirs {
+        Some(dirs) if global.smoke_test.is_none() => {
+            bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
+        }
+        _ => bae_prefs::PrefsStore::default(),
+    });
     // `bae <project>`: open it now. One project at a time, like AE.
     let mut startup_error = None;
-    if let Some(path) = global.open.first() {
+    let settings = prefs.current();
+    let startup = global.open.first().map(|p| p.as_path()).or_else(|| {
+        if global.safe_mode {
+            None
+        } else {
+            files::template_path(&settings)
+        }
+    });
+    if let Some(path) = startup {
         if global.open.len() > 1 {
             tracing::warn!("only the first project is opened: {}", path.display());
         }
-        match document.open(path) {
+        let result = if global.open.is_empty() {
+            Document::load_template(path).map(|opened| document.replace(opened))
+        } else {
+            document.open(path)
+        };
+        match result {
             Ok(()) => {
                 #[cfg(target_os = "macos")]
                 if global.smoke_test.is_none()
@@ -251,6 +286,14 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
                 }
                 tracing::info!("opened {}", path.display());
                 crate::view_state::restore(&mut app, &document);
+            }
+            // A missing template at startup: the blank project, without a
+            // dialog on every launch (File > New Project says why).
+            Err(error) if global.open.is_empty() && global.smoke_test.is_none() => {
+                tracing::warn!(
+                    "project template not loaded: {}",
+                    crate::file_error::describe_open(path, &error)
+                );
             }
             Err(error) if global.smoke_test.is_some() => {
                 eprintln!(
@@ -269,14 +312,6 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             }
         }
     }
-    // Preferences: read from the config folder; smoke tests use the defaults and
-    // never write them.
-    let prefs = Arc::new(match &dirs {
-        Some(dirs) if global.smoke_test.is_none() => {
-            bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
-        }
-        _ => bae_prefs::PrefsStore::default(),
-    });
     app.insert_resource(prefs.clone());
     let project_file = bae_ui::files::ProjectFile::default();
     project_file.set(document.location().map(std::path::Path::to_owned));
@@ -285,9 +320,14 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());
     let mut workspace = Workspace::new(&mut app, workbench_state);
+    workspace.restore_project_workspace(&document);
+    #[cfg(target_os = "macos")]
+    workspace.set_standard_system_shortcuts(
+        prefs.current().bool("composition.use_system_shortcut_keys"),
+    );
     workspace.set_extra_commands(document.command_titles());
-    if first_run {
-        workspace.show_role_picker();
+    if startup.is_none() && global.smoke_test.is_none() && !global.safe_mode {
+        workspace.start_without_project(first_run);
     }
 
     let mut shell = Shell {
@@ -314,9 +354,11 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         ui_passes: 0,
         accesskit_active: false,
         exit_code: ExitCode::SUCCESS,
+        restart_safe: false,
         prefs_generation: prefs.generation(),
         prefs,
         menu_lang: bae_ui::i18n::lang(),
+        menu_registry_generation: 0,
         autosave: crate::autosave::AutoSave::default(),
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
@@ -324,7 +366,26 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         return ExitCode::FAILURE;
     }
     muda::MenuEvent::set_event_handler(None::<fn(muda::MenuEvent)>);
-    shell.exit_code
+    let exit_code = shell.exit_code;
+    if shell.restart_safe {
+        let project = shell.document.location().map(std::path::Path::to_owned);
+        drop(shell);
+        drop(_instance);
+        let launched = std::env::current_exe().and_then(|exe| {
+            std::process::Command::new(exe)
+                .arg("--safe-mode")
+                .args(project)
+                .spawn()
+        });
+        if let Err(error) = launched {
+            rfd::MessageDialog::new()
+                .set_title(tr("Start in Safe Mode..."))
+                .set_description(error.to_string())
+                .show();
+            return ExitCode::FAILURE;
+        }
+    }
+    exit_code
 }
 
 struct SmokeTest {
@@ -361,6 +422,7 @@ struct Shell {
     menu: Option<menu::AppMenu>,
     /// The UI language the menu bar was built in.
     menu_lang: bae_ui::Lang,
+    menu_registry_generation: u64,
     workspace: Workspace,
     workbench_file: Option<SettingsFile<WorkbenchSettings>>,
     document: Document,
@@ -387,11 +449,14 @@ struct Shell {
     /// A screen reader / automation client is reading the accesskit tree.
     accesskit_active: bool,
     exit_code: ExitCode,
+    restart_safe: bool,
 }
 
 /// Everything tied to the window and the current GPU device.
 struct WindowView {
     window: Arc<Window>,
+    #[cfg(target_os = "macos")]
+    control_click: bool,
     gpu: Arc<GpuContext>,
     surface: WindowSurface,
     egui_ctx: egui::Context,
@@ -405,6 +470,9 @@ struct WindowView {
     offscreen: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Screenshot replies for the next frame's input (the eyedropper).
     screenshots: Vec<egui::Event>,
+    /// Shift held as of the last modifier change, and when it last went up
+    /// ([`numpad::restore_shift`]).
+    shift: (bool, Option<std::time::Instant>),
 }
 
 impl Drop for WindowView {
@@ -427,6 +495,8 @@ impl Shell {
             .window_state
             .apply(attributes, event_loop)
             .with_visible(false);
+        #[cfg(target_os = "macos")]
+        let attributes = attributes.with_theme(Some(winit::window::Theme::Dark));
         #[cfg(windows)]
         let attributes = with_exe_icon(attributes);
         let window = event_loop
@@ -492,6 +562,9 @@ impl Shell {
 
         let egui_ctx = egui::Context::default();
         bae_ui::theme::apply(&egui_ctx);
+        // Double-clicks follow the system setting, as in AE (egui's 0.3 s,
+        // measured between frames, missed ordinary double-clicks, #735).
+        egui_ctx.options_mut(|o| o.input_options.max_double_click_delay = double_click_time());
         // Extra egui viewports (floating panels) render embedded in the main
         // window until native multi-window support lands.
         egui_ctx.set_embed_viewports(true);
@@ -547,6 +620,8 @@ impl Shell {
             ..StatusInfo::default()
         };
         Ok(WindowView {
+            #[cfg(target_os = "macos")]
+            control_click: false,
             window,
             gpu,
             surface,
@@ -558,6 +633,7 @@ impl Shell {
             lost_subscription,
             offscreen: None,
             screenshots: Vec::new(),
+            shift: (false, None),
         })
     }
 
@@ -630,6 +706,7 @@ impl Shell {
                 let outcome = crate::view_state::run_file_command(
                     &mut self.app,
                     &mut self.document,
+                    &mut self.workspace,
                     &mut *dialogs,
                     &inv,
                 );
@@ -683,6 +760,12 @@ impl Shell {
         let prefs = self.prefs.current();
         crate::i18n::apply_setting(prefs.str(bae_prefs::keys::LANGUAGE));
         bae_ui::settings::apply(&prefs);
+        #[cfg(target_os = "macos")]
+        {
+            let standard = prefs.bool("composition.use_system_shortcut_keys");
+            self.workspace.set_standard_system_shortcuts(standard);
+            mac_panels::system_shortcuts(standard);
+        }
         self.document.set_undo_limit(prefs.levels_of_undo());
         if let Some(menu) = &mut self.menu {
             menu.set_undo_state(self.document.undo_state());
@@ -695,7 +778,11 @@ impl Shell {
     /// menu bar is rebuilt in it and new items are named in it.
     fn sync_language(&mut self) {
         let lang = bae_ui::i18n::lang();
-        if lang == self.menu_lang {
+        let generation = self
+            .app
+            .get_registry::<bae_ui::MenuItemSpec>()
+            .map_or(0, |r| r.generation());
+        if lang == self.menu_lang && generation == self.menu_registry_generation {
             return;
         }
         self.menu_lang = lang;
@@ -715,12 +802,22 @@ impl Shell {
         if let Some(old) = self.menu.take() {
             old.detach(&view.window);
         }
+        self.menu_registry_generation = self
+            .app
+            .get_registry::<bae_ui::MenuItemSpec>()
+            .map_or(0, |r| r.generation());
         let contributed = self.workspace.contributed_menus(&self.app);
         let actions = self.workspace.handled_actions(&self.app);
         match menu::AppMenu::new(&contributed, actions) {
             Ok(mut menu) => {
                 menu.set_undo_state(self.document.undo_state());
                 menu.attach(&view.window);
+                #[cfg(target_os = "macos")]
+                mac_panels::system_shortcuts(
+                    self.prefs
+                        .current()
+                        .bool("composition.use_system_shortcut_keys"),
+                );
                 self.menu = Some(menu);
             }
             Err(error) => tracing::warn!("native menu unavailable: {error}"),
@@ -728,7 +825,7 @@ impl Shell {
     }
 
     /// Buttons of the Preferences window that need the system.
-    fn run_settings_requests(&mut self) {
+    fn run_settings_requests(&mut self, event_loop: &ActiveEventLoop) {
         for request in self.workspace.take_settings_requests() {
             if let Some((title, body)) =
                 crate::ui::hardware_information(&request, self.app.resources())
@@ -740,18 +837,34 @@ impl Shell {
                     dialog = dialog.set_parent(&*view.window);
                 }
                 dialog.show();
+            } else if request == "startup_repair.start_in_safe_mode" {
+                let mut dialog = rfd::MessageDialog::new()
+                    .set_title(tr("Start in Safe Mode..."))
+                    .set_description(tr(
+                        "Restart BAE with installed plugins disabled for this session?",
+                    ))
+                    .set_buttons(rfd::MessageButtons::OkCancel);
+                if let Some(view) = &self.view {
+                    dialog = dialog.set_parent(&*view.window);
+                }
+                if dialog.show() == rfd::MessageDialogResult::Ok {
+                    self.quit(event_loop);
+                    self.restart_safe = event_loop.exiting();
+                }
             } else if request == crate::ui::REVEAL_PREFERENCES {
                 if let Some(dirs) = self.app.resource::<AppDirs>() {
                     reveal(&dirs.config_file(bae_prefs::FILE_NAME));
                 }
             } else if let Some(key) = request.strip_prefix("choose:") {
-                let mut dialog = rfd::FileDialog::new();
-                if let Some(view) = &self.view {
-                    dialog = dialog.set_parent(&*view.window);
-                }
                 let picked = if key == "project.project_template" {
-                    dialog.add_filter("BAE", &["bae", "baez"]).pick_file()
+                    self.dialogs()
+                        .pick_project()
+                        .map(|p| crate::document::project_path(&p))
                 } else {
+                    let mut dialog = rfd::FileDialog::new();
+                    if let Some(view) = &self.view {
+                        dialog = dialog.set_parent(&*view.window);
+                    }
                     dialog.pick_folder()
                 };
                 if let Some(path) = picked {
@@ -769,7 +882,11 @@ impl Shell {
             return None;
         }
         let prefs = self.prefs.current();
-        match self.autosave.tick(Instant::now(), &prefs, &self.document) {
+        let queue = self.app.resource::<bae_ui_motion::SharedRenderQueue>();
+        match self
+            .autosave
+            .tick(Instant::now(), &prefs, &self.document, queue)
+        {
             Some(Ok(path)) => tracing::info!("auto-saved {}", path.display()),
             Some(Err(error)) => tracing::warn!("auto-save failed: {error:#}"),
             None => {}
@@ -875,7 +992,12 @@ impl Shell {
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         if self.smoke.is_none() {
             let mut dialogs = self.dialogs();
-            if !crate::view_state::confirm_quit(&self.app, &mut self.document, &mut *dialogs) {
+            if !crate::view_state::confirm_quit(
+                &self.app,
+                &mut self.document,
+                &self.workspace,
+                &mut *dialogs,
+            ) {
                 self.request_redraw();
                 return;
             }
@@ -968,6 +1090,27 @@ impl Shell {
         input
             .viewports
             .insert(egui::ViewportId::ROOT, view.viewport_info.clone());
+        #[cfg(target_os = "macos")]
+        for event in &mut input.events {
+            if let egui::Event::PointerButton {
+                button,
+                pressed,
+                modifiers,
+                ..
+            } = event
+                && *button == egui::PointerButton::Primary
+            {
+                if *pressed {
+                    view.control_click = modifiers.ctrl;
+                }
+                if view.control_click {
+                    *button = egui::PointerButton::Secondary;
+                }
+                if !*pressed {
+                    view.control_click = false;
+                }
+            }
+        }
         input.events.append(&mut view.screenshots);
         view.viewport_info.events.clear();
 
@@ -990,7 +1133,7 @@ impl Shell {
             )
             .with_open_panels(&open);
             menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
-            menu.set_workspace_title(workspace.active_workspace_title());
+            menu.sync_workspace_titles(workspace);
         }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
@@ -1265,6 +1408,30 @@ fn screenshot(
     ))
 }
 
+/// The system's double-click interval, seconds (Windows: Mouse settings,
+/// 500 ms by default; macOS: Double-click speed). 0.5 s elsewhere.
+fn double_click_time() -> f64 {
+    #[cfg(windows)]
+    {
+        // SAFETY: no arguments; reads a per-user system setting.
+        let ms = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+        if ms > 0 {
+            return f64::from(ms) / 1000.0;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::{class, msg_send};
+        // SAFETY: `+[NSEvent doubleClickInterval]` returns an NSTimeInterval
+        // (double) and has no preconditions.
+        let s: f64 = unsafe { msg_send![class!(NSEvent), doubleClickInterval] };
+        if s > 0.0 {
+            return s;
+        }
+    }
+    0.5
+}
+
 /// The command for projects Finder asked to open: one project at a time, like AE and
 /// like `bae <project>`, so only the first is opened. Goes through the normal
 /// `file.open_project` (unsaved-changes question, error dialog).
@@ -1315,7 +1482,17 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .init_accesskit(event_loop, &view.window, self.proxy.clone());
                 view.window.set_visible(true);
                 view.window.request_redraw();
+                let software = view.gpu.capabilities().software;
                 self.view = Some(view);
+                if software
+                    && self.smoke.is_none()
+                    && self
+                        .prefs
+                        .current()
+                        .bool("startup_repair.show_system_compatibility_issues")
+                {
+                    self.set_notice(tr("BAE is using software rendering. Check that a hardware GPU driver is available.").to_owned());
+                }
                 if self.menu.is_none() {
                     self.menu_lang = bae_ui::i18n::lang();
                     self.build_menu();
@@ -1359,8 +1536,27 @@ impl ApplicationHandler<UserEvent> for Shell {
                 .events
                 .push(egui::Event::PointerMoved(pos));
         }
+        if let WindowEvent::ModifiersChanged(m) = &event {
+            let held = m.state().shift_key();
+            if view.shift.0 && !held {
+                view.shift.1 = Some(std::time::Instant::now());
+            }
+            view.shift.0 = held;
+        }
         let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
+        // Shift+numpad navigation keys (Windows drops Shift around them, #468).
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
+        {
+            numpad::restore_shift(
+                &mut view.egui_state.egui_input_mut().events,
+                before,
+                code,
+                &key.logical_key,
+                view.shift.1,
+            );
+        }
         // Numpad keys are their own keys in AE's shortcuts (#261).
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
@@ -1435,9 +1631,10 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .as_ref()
                     .and_then(|m| m.contributed_invocation(id))
                     .unwrap_or_else(|| menu::invocation(id));
-                // A modal dialog is open: menu commands (and their key
-                // equivalents) do not reach the project behind it; Quit still works.
-                if self.workspace.modal_open(self.app.resources()) && inv.id != ids::QUIT {
+                if !self
+                    .workspace
+                    .accepts_native_menu(self.app.resources(), &inv)
+                {
                     return;
                 }
                 // Undo / Redo, Cut / Copy / Paste and Select All (their native
@@ -1477,10 +1674,17 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
             #[cfg(target_os = "macos")]
+            UserEvent::Render(event) => mac_panels::render_event(
+                event,
+                self.prefs
+                    .current()
+                    .bool("export.auto_enable_render_notifications"),
+            ),
+            #[cfg(target_os = "macos")]
             UserEvent::OpenFiles(paths) => {
                 // A file command like File > Open: `dispatch` runs it through
                 // `view_state::run_file_command`, so the project's comps are restored.
-                if let Some(inv) = open_files_invocation(&paths) {
+                if let Some(inv) = open_documents::invocation(&paths) {
                     self.pending.push(inv);
                 }
             }
@@ -1511,7 +1715,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.run_pending(event_loop);
         self.sync_prefs();
         self.sync_language();
-        self.run_settings_requests();
+        self.run_settings_requests(event_loop);
         // OK in Keyboard Shortcuts: save the shortcuts now, not only at exit.
         if self.workspace.take_save_request() {
             self.save_window_state();

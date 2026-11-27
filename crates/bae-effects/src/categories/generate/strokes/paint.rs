@@ -13,7 +13,15 @@ use crate::{
 
 const LABEL: &str = "bae.effects.path_paint";
 const TILE: u32 = 32;
-const UNIFORM_SIZE: u32 = 80;
+const UNIFORM_SIZE: u32 = 128;
+/// Style: the Clone Stamp, the dab showing the image at [`Paint::offset`].
+pub(super) const CLONE: u32 = 6;
+/// Style: the dab restores [`Paint::restore`] (Eraser: Paint Only, Last
+/// Stroke Only).
+pub(super) const RESTORE: u32 = 7;
+/// Style: the Clone Stamp reading another layer or time, [`Paint::restore`],
+/// at [`Paint::offset`].
+pub(super) const CLONE_FROM: u32 = 8;
 
 pub(super) struct Paint {
     pub marks: Vec<Mark>,
@@ -21,6 +29,10 @@ pub(super) struct Paint {
     pub profile: u32,
     pub opacity: f32,
     pub gradient: [f32; 4],
+    /// [`CLONE`]: where each dab reads, relative to it (layer pixels).
+    pub offset: DVec2,
+    /// [`RESTORE`]: the image the dabs bring back.
+    pub restore: Option<GpuImage>,
 }
 
 pub(super) struct Mark {
@@ -55,6 +67,8 @@ impl Paint {
             profile,
             opacity,
             gradient: [1., 1., 1., 0.5],
+            offset: DVec2::ZERO,
+            restore: None,
         }
     }
 
@@ -162,7 +176,11 @@ impl Paint {
             .u32(52, self.style)
             .u32(56, self.profile | (u32::from(p.float) << 31))
             .f32(60, self.opacity)
-            .f32s(64, &self.gradient);
+            .f32s(64, &self.gradient)
+            .f32(80, (self.offset.x / grid) as f32)
+            .f32(84, (self.offset.y / grid) as f32);
+        let restore = self.restore.as_ref().unwrap_or(input);
+        image_grid::image_coords(&mut u, 96, restore, grid);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &pipeline,
@@ -172,6 +190,7 @@ impl Paint {
                 Resource::View(&out.view),
                 Resource::Buffer(&marks),
                 Resource::Buffer(&bins),
+                Resource::View(&restore.view),
             ],
         );
         let mut pass = target
@@ -213,6 +232,7 @@ pub(super) fn kernel(
                     (2, Binding::Storage(format)),
                     (3, Binding::ReadBuffer),
                     (4, Binding::ReadBuffer),
+                    (5, Binding::Texture),
                 ],
                 workgroup: [8, 8, 1],
             })

@@ -301,6 +301,52 @@ impl Document {
         Ok(())
     }
 
+    /// Keep the template's stage, manifest and asset locator in an untitled document.
+    pub fn load_template(path: &Path) -> anyhow::Result<OpenedProject> {
+        let opened = Self::load(path)?;
+        let mut project = Project::from_stage(opened.project.stage);
+        project.manifest = opened.project.manifest;
+        // The new document has no base directory. Point loose media at the
+        // template's actual files. Embedded media travels with its package.
+        if let Some(base) = opened.assets.base_dir() {
+            let mut relinks = Vec::new();
+            for path in project.stage.traverse() {
+                let Some(mut file) = project
+                    .stage
+                    .prim(&path)
+                    .filter(|prim| prim.is_a(&bae_model::PrimType::ASSET))
+                    .and_then(|prim| bae_model::AssetFile::from_prim(&prim))
+                else {
+                    continue;
+                };
+                let Some(rel) = &file.relative else { continue };
+                if opened.assets.package().is_some_and(|pkg| pkg.contains(rel)) {
+                    continue;
+                }
+                let media = base.join(rel);
+                if media.is_file() {
+                    file.original = bae_model::asset::to_slash(&fs::canonicalize(media)?);
+                    file.relative = None;
+                    relinks.push(bae_package::Relink { path, file });
+                }
+            }
+            if !relinks.is_empty() {
+                let mut commands = CommandRegistry::new();
+                commands.register(bae_package::commands::SetAssetFiles)?;
+                commands.execute(
+                    &mut project.stage,
+                    &AuthorId::system(),
+                    "asset.set_files",
+                    serde_json::json!({"assets": relinks}),
+                )?;
+            }
+        }
+        Ok(OpenedProject {
+            project,
+            assets: opened.assets,
+        })
+    }
+
     /// Replace the open project with a new untitled one.
     pub fn new_project(&mut self) {
         self.replace(OpenedProject {
@@ -347,13 +393,40 @@ impl Document {
     /// in; if anything fails, the existing project is left as it was. Files
     /// embedded in a `.baez` the project came from are extracted with it.
     pub fn save_as_replacing(&mut self, target: &Path) -> anyhow::Result<()> {
+        self.write_copy(target, true)?;
+        let context = || target.display().to_string();
+        self.project.save_as(target).with_context(context)?;
+        self.saved = SavePoint::of(&self.project.stage);
+        self.assets = AssetLocator::for_project(&self.project).with_context(context)?;
+        Ok(())
+    }
+
+    /// Auto-save: a copy of the project's own files, written next to the
+    /// previous one and then swapped in. Files embedded in a `.baez` stay in
+    /// the package (AE's auto-save never copies footage): extracting them into
+    /// every version stalled the UI and multiplied the disk use.
+    pub fn save_copy(&self, target: &Path) -> anyhow::Result<()> {
+        self.write_copy(target, false)
+    }
+
+    /// Writes an independent copy to `target` through a temporary folder next
+    /// to it, then replaces what was there; `with_package` also extracts the
+    /// files embedded in the `.baez` the project came from.
+    fn write_copy(&self, target: &Path, with_package: bool) -> anyhow::Result<()> {
         let context = || target.display().to_string();
         let tmp = sibling(target, "saving");
         let backup = sibling(target, "replaced");
+        if let Some(parent) = tmp.parent().filter(|p| !p.as_os_str().is_empty()) {
+            fs::create_dir_all(parent).with_context(context)?;
+        }
+        // Left over from an earlier attempt whose cleanup failed.
+        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&backup);
+        fs::create_dir(&tmp).with_context(context)?;
         let written = (|| -> anyhow::Result<()> {
             let mut copy = self.detached_copy()?;
             copy.save_as(&tmp)?;
-            if let Some(pkg) = self.assets.package() {
+            if with_package && let Some(pkg) = self.assets.package() {
                 for entry in pkg.entries() {
                     pkg.extract_entry(&entry.name, &tmp.join(native(&entry.name)))?;
                 }
@@ -364,30 +437,23 @@ impl Document {
             let _ = fs::remove_dir_all(&tmp);
             return Err(error.context(context()));
         }
-        if let Err(error) = fs::rename(target, &backup) {
+        let replacing = target.exists();
+        if replacing && let Err(error) = fs::rename(target, &backup) {
             let _ = fs::remove_dir_all(&tmp);
             return Err(anyhow::Error::new(error).context(context()));
         }
         if let Err(error) = fs::rename(&tmp, target) {
-            let _ = fs::rename(&backup, target);
             let _ = fs::remove_dir_all(&tmp);
+            if replacing {
+                fs::rename(&backup, target).with_context(context)?;
+            }
             return Err(anyhow::Error::new(error).context(context()));
         }
-        let _ = fs::remove_dir_all(&backup);
-        // The folder holds the project now; make it the location (rewrites the
-        // same project files in place, atomically per file).
-        self.project.save_as(target).with_context(context)?;
-        self.saved = SavePoint::of(&self.project.stage);
-        self.assets = AssetLocator::for_project(&self.project).with_context(context)?;
-        Ok(())
-    }
-
-    /// Writes a copy of the project to `target` (a `.bae` folder) without changing
-    /// its location or saved state (auto-save).
-    pub fn save_copy(&self, target: &Path) -> anyhow::Result<()> {
-        let mut copy = self.detached_copy()?;
-        copy.save_as(target)
-            .with_context(|| target.display().to_string())?;
+        // The new copy is in place: a backup that will not go away is only
+        // worth a log line, not a failed save.
+        if replacing && let Err(error) = fs::remove_dir_all(&backup) {
+            tracing::warn!("could not remove {}: {error}", backup.display());
+        }
         Ok(())
     }
 
@@ -664,6 +730,51 @@ mod tests {
     }
 
     #[test]
+    fn saving_a_template_copy_keeps_its_external_media() {
+        let dir = tempfile::tempdir().unwrap();
+        let template = dir.path().join("Template.bae");
+        let mut source = Project::new();
+        let mut commands = CommandRegistry::with_builtins();
+        commands
+            .register(bae_package::commands::SetAssetFiles)
+            .unwrap();
+        for (id, params) in [
+            (
+                "prim.create",
+                serde_json::json!({"path": "/Card", "prim_type": "Asset"}),
+            ),
+            (
+                "asset.set_files",
+                serde_json::json!({"assets": [{"path": "/Card", "file": {
+                    "relative": "card.png", "original": "/old-location/card.png", "size": 4
+                }}]}),
+            ),
+        ] {
+            commands
+                .execute(&mut source.stage, &AuthorId::system(), id, params)
+                .unwrap();
+        }
+        source.save_as(&template).unwrap();
+        let media = template.join("card.png");
+        fs::write(&media, b"card").unwrap();
+        let mut doc = Document::new(None);
+        doc.replace(Document::load_template(&template).unwrap());
+        let target = dir.path().join("Work.baez");
+        doc.save_as(&target).unwrap();
+        let reopened = Document::load(&target).unwrap();
+        let prim = reopened
+            .project
+            .stage
+            .prim(&"/Card".parse().unwrap())
+            .unwrap();
+        let file = bae_model::AssetFile::from_prim(&prim).unwrap();
+        assert!(same_path(
+            reopened.assets.locate(&file).path().unwrap(),
+            &media
+        ));
+    }
+
+    #[test]
     fn baez_open_save_and_save_as_keep_embedded_assets() {
         let dir = tempfile::tempdir().unwrap();
         // A package with one embedded file, written by the model.
@@ -715,6 +826,19 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        // Auto-save copies the project files only; the footage stays in the
+        // package.
+        let auto = dir.path().join("Auto.bae");
+        again.save_copy(&auto).unwrap();
+        assert!(auto.join("project.json").is_file());
+        assert!(
+            !auto
+                .join("assets")
+                .join("footage")
+                .join("clip.mov")
+                .exists()
+        );
 
         // Save As another package and as a folder.
         let copy = dir.path().join("Copy.baez");

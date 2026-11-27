@@ -14,7 +14,7 @@ use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_model::{PrimPath, Stage, Value};
 use bae_motion::query::{self, CompInfo};
-use bae_motion::shape::{Geometry, ShapeKind, mask_color, takes_masks};
+use bae_motion::shape::{Geometry, ShapeKind, takes_masks};
 use bae_ui::PanelContext;
 use bae_ui::theme;
 use egui::{Color32, Event, Key, Painter, PointerButton, Response, Shape, Stroke, Ui};
@@ -335,7 +335,16 @@ impl ShapeDrag {
         options: &ToolOptions,
     ) {
         if let Some(g) = self.geometry() {
-            run(cx, session, info, &self.target, g, self.bezier, options);
+            run(
+                cx,
+                session,
+                info,
+                &self.target,
+                g,
+                self.bezier,
+                options,
+                self.color,
+            );
         }
     }
 }
@@ -347,6 +356,7 @@ fn paint_json(p: &crate::tools::Paint) -> Option<serde_json::Value> {
 /// Create the shape or mask `g` (target space) for `target`; new shape layers are
 /// selected once they exist. Returns the layer that gets it (for a new layer, the
 /// path it will have).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run(
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
@@ -355,6 +365,7 @@ pub(crate) fn run(
     g: Geometry,
     bezier: bool,
     options: &ToolOptions,
+    outline: Color32,
 ) -> Option<PrimPath> {
     let stage = cx.stage;
     let mut params = serde_json::to_value(&g).unwrap_or_default();
@@ -364,15 +375,23 @@ pub(crate) fn run(
             // "Mask N" / "蒙版 N": named by the command in the naming language;
             // Appearance > Cycle Mask Colors.
             obj.insert("layer".into(), json!(layer));
-            let cycle = super::prefs::ViewerPrefs::current(cx.resources).cycle_mask_colors;
-            obj.insert("cycle_colors".into(), json!(cycle));
+            obj.insert(
+                "color".into(),
+                json!(outline.to_array().map(|v| f64::from(v) / 255.0)),
+            );
             cx.invoke_with("mask.create", params);
             Some(layer.clone())
         }
         Target::Shape(layer) => {
             obj.insert("layer".into(), json!(layer));
             add_paint(obj, bezier, options);
+            let before = crate::session::shape_groups(stage, layer);
             cx.invoke_with("shape.add", params);
+            // AE selects the new group: its box scales it around its anchor.
+            session.lock().expect(Pending::NewGroup {
+                layer: layer.clone(),
+                before,
+            });
             Some(layer.clone())
         }
         Target::NewLayer => {
@@ -398,9 +417,20 @@ pub(crate) fn run(
             let center = super::prefs::ViewerPrefs::current(cx.resources).center_shape_anchor;
             obj.insert("center_anchor".into(), json!(center));
             add_paint(obj, bezier, options);
+            crate::prefs::apply_layer_defaults(
+                cx.resources,
+                session,
+                info,
+                bae_model::LayerKind::Shape,
+                &mut params,
+            );
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
             s.expect(Pending::Layer(path.clone()));
+            s.expect(Pending::NewGroup {
+                layer: path.clone(),
+                before: Vec::new(),
+            });
             s.reserve_name(path.clone(), name);
             Some(path)
         }
@@ -510,7 +540,17 @@ pub(crate) fn fill_target(
             }
         }
     }
-    run(cx, session, info, &target, g, options.bezier_path, &options);
+    let color = preview_color(cx, &target, info, None);
+    run(
+        cx,
+        session,
+        info,
+        &target,
+        g,
+        options.bezier_path,
+        &options,
+        color,
+    );
 }
 
 fn empty_geometry() -> Geometry {
@@ -531,17 +571,15 @@ fn empty_geometry() -> Geometry {
 
 /// Outline color of the shape being drawn: the next mask color on a mask target,
 /// the shape layer's label color otherwise (AE draws the rubber band in it).
-pub(super) fn preview_color(stage: &Stage, target: &Target) -> Color32 {
+pub(super) fn preview_color(
+    cx: &PanelContext<'_>,
+    target: &Target,
+    info: &CompInfo,
+    pixel: Option<[u8; 4]>,
+) -> Color32 {
+    let stage = cx.stage;
     match target {
-        Target::Mask(layer) => {
-            let count = layer
-                .child("masks")
-                .map(|m| stage.children(&m).len())
-                .unwrap_or(0);
-            let [r, g, b, _] = mask_color(count, true);
-            let u = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-            Color32::from_rgb(u(r), u(g), u(b))
-        }
+        Target::Mask(layer) => crate::masks::new_mask_color(cx, layer, info, pixel),
         Target::Shape(layer) => {
             let label = stage
                 .prim(layer)
@@ -570,6 +608,7 @@ pub(super) fn frame(
     comp: &EvaluatedComp,
     view: &View,
     tool: Tool,
+    start_color: Option<[u8; 4]>,
 ) {
     let tools = crate::tools::shared(cx.resources);
     if slot.is_none() && tool.is_shape() && resp.drag_started_by(PointerButton::Primary) {
@@ -582,7 +621,7 @@ pub(super) fn frame(
             let target = Target::of(cx.stage, &info.path, &selected, options.creates_mask);
             let to_comp = target_matrix(info, comp, &target);
             let alt = ui.input(|i| i.modifiers.alt);
-            let color = preview_color(cx.stage, &target);
+            let color = preview_color(cx, &target, info, start_color);
             session.lock().stop();
             *slot = Some(ShapeDrag::new(
                 tool,

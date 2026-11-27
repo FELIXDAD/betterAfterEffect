@@ -313,6 +313,44 @@ fn offset_attr(
     write_attr(tx, path, attr, spec)
 }
 
+/// Move every top-level (unparented) layer of `comp` by `d` pixels, keyframes
+/// included. AE moves locked ones too: the frame changes, not the layers'
+/// place in it.
+fn move_top_layers(
+    tx: &mut Transaction<'_>,
+    comp: &PrimPath,
+    d: [f64; 2],
+) -> Result<(), CommandError> {
+    if d == [0.0, 0.0] {
+        return Ok(());
+    }
+    tx.allow_locked(|tx| -> Result<(), CommandError> {
+        for layer in query::comp_layers(tx.stage(), comp) {
+            let view = tx.stage().prim(&layer);
+            let parented = view
+                .as_ref()
+                .and_then(|v| query::static_value(v, "parent"))
+                .is_some_and(|v| matches!(v, Value::PrimRef(_)));
+            if parented {
+                continue;
+            }
+            let separate = view
+                .as_ref()
+                .and_then(|v| query::static_value(v, "transform:separate_dimensions"))
+                .and_then(|v| v.as_bool())
+                == Some(true);
+            if separate {
+                offset_attr(tx, &layer, "transform:position_x", [d[0], 0.0])?;
+                offset_attr(tx, &layer, "transform:position_y", [d[1], 0.0])?;
+            } else {
+                offset_attr(tx, &layer, "transform:position", d)?;
+            }
+            offset_attr(tx, &layer, "transform:point_of_interest", d)?;
+        }
+        Ok(())
+    })
+}
+
 impl Command for SetCompSettings {
     type Params = CompSettingsParams;
     type Output = ();
@@ -342,35 +380,7 @@ impl Command for SetCompSettings {
                 (f64::from(width) - f64::from(info.width)) * f[0],
                 (f64::from(height) - f64::from(info.height)) * f[1],
             ];
-            if d != [0.0, 0.0] {
-                // AE moves every top-level layer, locked ones too: the frame
-                // changes, not the layers' place in it.
-                tx.allow_locked(|tx| -> Result<(), CommandError> {
-                    for layer in query::comp_layers(tx.stage(), &p.comp) {
-                        let view = tx.stage().prim(&layer);
-                        let parented = view
-                            .as_ref()
-                            .and_then(|v| query::static_value(v, "parent"))
-                            .is_some_and(|v| matches!(v, Value::PrimRef(_)));
-                        if parented {
-                            continue;
-                        }
-                        let separate = view
-                            .as_ref()
-                            .and_then(|v| query::static_value(v, "transform:separate_dimensions"))
-                            .and_then(|v| v.as_bool())
-                            == Some(true);
-                        if separate {
-                            offset_attr(tx, &layer, "transform:position_x", [d[0], 0.0])?;
-                            offset_attr(tx, &layer, "transform:position_y", [d[1], 0.0])?;
-                        } else {
-                            offset_attr(tx, &layer, "transform:position", d)?;
-                        }
-                        offset_attr(tx, &layer, "transform:point_of_interest", d)?;
-                    }
-                    Ok(())
-                })?;
-            }
+            move_top_layers(tx, &p.comp, d)?;
         }
         if let Some(a) = p.pixel_aspect {
             if !(a.is_finite() && (0.01..=100.0).contains(&a)) {
@@ -529,6 +539,40 @@ impl Command for SetWorkArea {
 
 // ---------------------------------------------------------------------------
 
+pub struct CropComp;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CropCompParams {
+    pub comp: PrimPath,
+    /// The part of the frame to keep, comp pixels: [left, top, right, bottom].
+    /// Rounded outward to whole pixels.
+    pub rect: [f64; 4],
+}
+
+impl Command for CropComp {
+    type Params = CropCompParams;
+    type Output = ();
+    const ID: &'static str = "comp.crop";
+    const TITLE: &'static str = "Crop Comp";
+    const DESCRIPTION: &'static str = "Composition > Crop Comp to Region of Interest / to Selected Layer(s) Bounds: the comp becomes the size of `rect` and the top-level layers move so that what was inside it stays in place on screen.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        query::comp_info(tx.stage(), &p.comp)
+            .ok_or_else(|| fail(format!("{} is not a comp", p.comp)))?;
+        let [l, t, r, b] = p.rect;
+        let (l, t, r, b) = (l.floor(), t.floor(), r.ceil(), b.ceil());
+        let (w, h) = (r - l, b - t);
+        if !(1.0..=30_000.0).contains(&w) || !(1.0..=30_000.0).contains(&h) {
+            return Err(fail("comp size must be between 1 and 30000 pixels"));
+        }
+        set(tx, &p.comp, "width", Value::Int(w as i64))?;
+        set(tx, &p.comp, "height", Value::Int(h as i64))?;
+        move_top_layers(tx, &p.comp, [-l, -t])
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 pub struct TrimCompToWorkArea;
 
 #[derive(Deserialize, JsonSchema)]
@@ -596,6 +640,9 @@ pub struct CreateFolderParams {
     /// Parent folder (default the project root).
     #[serde(default)]
     pub parent: Option<PrimPath>,
+    /// Project panel label, 0 to 16.
+    #[serde(default)]
+    pub label: Option<i64>,
 }
 
 /// Output of commands that create one prim.
@@ -617,12 +664,22 @@ impl Command for CreateFolder {
         let name = p.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| {
             query::next_numbered_name(tx.stage(), &parent, crate::names::localized("Untitled"))
         });
-        let path = child(
-            &parent,
-            &query::unique_child_name(tx.stage(), &parent, &name),
-        )?;
-        create(tx, &path, PrimType::FOLDER, None)?;
-        set(tx, &path, "name", Value::String(name))?;
+        let path = create_project_folder(tx, &parent, name, p.label)?;
         Ok(PathOutput { path })
     }
+}
+
+pub(crate) fn create_project_folder(
+    tx: &mut Transaction<'_>,
+    parent: &PrimPath,
+    name: String,
+    label: Option<i64>,
+) -> Result<PrimPath, CommandError> {
+    let path = child(parent, &query::unique_child_name(tx.stage(), parent, &name))?;
+    create(tx, &path, PrimType::FOLDER, None)?;
+    set(tx, &path, "name", Value::String(name))?;
+    if let Some(label) = label.filter(|n| (0..=16).contains(n)) {
+        set(tx, &path, "label", Value::Int(label))?;
+    }
+    Ok(path)
 }
