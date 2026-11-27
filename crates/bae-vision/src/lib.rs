@@ -4,12 +4,17 @@ use bae_model::{Time, Value};
 pub const ROTO: &str = "ADBE Samurai";
 /// Internal effect parameters outside AE's public controls.
 pub const STROKES: u32 = 0;
+pub const EDGE_STROKES: u32 = 50_005;
 pub const SPAN: u32 = 50_001;
 pub const FROZEN: u32 = 50_002;
-/// Bake outputs the raw segmentation as alpha for the frozen footage sequence.
+/// Bake stores confidence, refine coverage and temporal confidence in RGB.
 pub const BAKE: u32 = 50_003;
 /// Comp start, layer start (flicks) and stretch (%) at bake time.
 pub const FROZEN_TIMING: u32 = 50_004;
+/// [`FROZEN_RGB`] when the frozen matte stores the [`BAKE`] channels; absent
+/// for mattes frozen before, which store the confidence in alpha.
+pub const FROZEN_FORMAT: u32 = 50_006;
+pub const FROZEN_RGB: i64 = 2;
 pub const SEGMENT_SHADER: &str = include_str!("segment.wgsl");
 
 /// Consecutive segments preserve pen order and the source time of each seed.

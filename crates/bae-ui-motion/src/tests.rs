@@ -512,7 +512,7 @@ fn panels_render_a_project() {
     let mut viewer = CompositionViewer::new(None);
     let mut props = crate::PropertiesPanel::default();
     let mut fx = crate::EffectControlsPanel::default();
-    let mut preview = crate::PreviewPanel;
+    let mut preview = crate::PreviewPanel::default();
     h.session().lock().selected_layers = vec![shape.clone()];
     for _ in 0..2 {
         assert!(
@@ -782,6 +782,38 @@ fn gpu_preview_publishes_the_rendered_comp() {
         Some(first),
         "pending: last reading"
     );
+    // Playback recycles textures: a new frame in the texture of the one shown
+    // before is read again, not answered from the old reading.
+    let target = bae_render::OutputTarget::new(device.device(), [4, 4]);
+    let texture = target.view().texture().clone();
+    let rect = bae_render::IRect::new(0, 0, 4, 4);
+    let fill = |rgba: [u8; 4]| {
+        let region = bae_gpu::transfer::TextureRegion::full(&texture);
+        bae_gpu::transfer::upload_texture(&device, &texture, region, &rgba.repeat(16)).unwrap();
+    };
+    let wait = |preview: &mut crate::gpu_preview::GpuPreview, want: [u8; 4]| {
+        let mut got = None;
+        for _ in 0..200 {
+            got = preview.pixel([1.0, 1.0], &ctx);
+            if got == Some(want) {
+                break;
+            }
+            let _ = device
+                .device()
+                .poll(bae_gpu::wgpu::PollType::wait_indefinitely());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        got
+    };
+    for (n, colour) in [[0, 255, 0, 255], [0, 0, 255, 255]].into_iter().enumerate() {
+        fill(colour);
+        preview.show_cached(crate::playback::ShownFrame {
+            texture: texture.clone(),
+            rect,
+            hold: std::sync::Arc::new(n),
+        });
+        assert_eq!(wait(&mut preview, colour), Some(colour), "frame {n}");
+    }
     let id = preview.viewport();
     drop(preview);
     assert!(registry.get(id).is_none(), "removed on drop");

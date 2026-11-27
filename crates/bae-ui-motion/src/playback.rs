@@ -64,6 +64,15 @@ struct Scene {
     effects: Option<PreviewEffects>,
 }
 
+/// The frame on screen. `hold` keeps its texture from being reused for
+/// another frame (spare targets are recycled) and tells frames apart: a new
+/// frame can arrive in a recycled texture.
+pub(crate) struct ShownFrame {
+    pub texture: wgpu::Texture,
+    pub rect: IRect,
+    pub hold: Arc<dyn Send + Sync>,
+}
+
 struct Slot {
     channels: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     registry: Arc<ViewportTextureRegistry>,
@@ -162,6 +171,7 @@ struct Demand {
     idle_allowance: usize,
     range: TimeRange,
     looping: bool,
+    skip: u32,
     rate: FrameRate,
     repaint: egui::Context,
 }
@@ -352,6 +362,55 @@ impl PlaybackPreview {
         }
     }
 
+    /// Advance over completed frames and request at most one small batch.
+    /// A long work area must not allocate a frame list on the UI thread.
+    pub(super) fn fill_cache(
+        &self,
+        pass: &mut crate::session::CachePass,
+        rate: FrameRate,
+        frame_bytes: u64,
+    ) -> bool {
+        let mut state = self.shared.state.lock().unwrap();
+        let Some(scene) = state.cache.scene.as_ref() else {
+            return false;
+        };
+        let capacity =
+            (state.cache.frames.stats().budget / frame_bytes.max(1)).min(i64::MAX as u64) as i64;
+        let limit = pass
+            .first
+            .saturating_add(capacity.saturating_mul(pass.step).min(pass.frames));
+        for _ in 0..32 {
+            if pass.next >= limit {
+                return true;
+            }
+            let t = rate.frame_to_time(pass.frame(pass.next));
+            if state.failed.contains(&t) {
+                return true;
+            }
+            if !state.cache.frames.contains(&scene.frame(t)) {
+                break;
+            }
+            pass.next += pass.step;
+        }
+        if pass.next >= limit {
+            return true;
+        }
+        if let Some(demand) = state.demand.as_mut() {
+            // Keep the displayed frame first while the worker fills this batch.
+            let displayed = demand.times.first().copied();
+            demand.times.truncate(1);
+            demand.times.extend(
+                (pass.next..limit)
+                    .step_by(pass.step as usize)
+                    .take(16)
+                    .map(|f| rate.frame_to_time(pass.frame(f)))
+                    .filter(|t| Some(*t) != displayed),
+            );
+            self.shared.changed.notify_one();
+        }
+        false
+    }
+
     pub(super) fn invalidate_source(&mut self, event: &bae_model::StageEvent) {
         self.stop();
         let mut state = self.shared.state.lock().unwrap();
@@ -387,6 +446,7 @@ impl PlaybackPreview {
         rate: FrameRate,
         range: TimeRange,
         looping: bool,
+        skip: u32,
         resolution: u32,
         repaint: &egui::Context,
     ) -> Option<(PreviewImage, Time, &[AttrError])> {
@@ -449,6 +509,7 @@ impl PlaybackPreview {
                 idle_allowance: 0,
                 range,
                 looping,
+                skip,
                 rate,
                 repaint: repaint.clone(),
             });
@@ -456,11 +517,13 @@ impl PlaybackPreview {
         let d = state.demand.as_mut().unwrap();
         let discontinuity = d.times.first().is_some_and(|old| time < *old)
             || d.range != range
+            || d.skip != skip
             || d.looping != looping
             || d.rate != rate;
         if discontinuity || d.times.first() != Some(&time) {
             d.range = range;
             d.looping = looping;
+            d.skip = skip;
             d.rate = rate;
             d.times.clear();
             let mut frame = rate.time_to_frame(time);
@@ -477,7 +540,7 @@ impl PlaybackPreview {
                     break;
                 }
                 d.times.push(t);
-                frame += 1;
+                frame += i64::from(skip) + 1;
             }
             let times = d.times.clone();
             if discontinuity {
@@ -534,9 +597,13 @@ impl PlaybackPreview {
         self.shown.as_ref()?.channels.clone()
     }
 
-    pub(super) fn shown_texture(&self) -> Option<(wgpu::Texture, IRect)> {
+    pub(super) fn shown_texture(&self) -> Option<ShownFrame> {
         let shown = self.shown.as_ref()?;
-        Some((shown.texture.clone(), shown.rect))
+        Some(ShownFrame {
+            texture: shown.texture.clone(),
+            rect: shown.rect,
+            hold: shown.clone(),
+        })
     }
 }
 

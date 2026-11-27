@@ -175,6 +175,17 @@ impl Message {
         }
     }
 
+    /// About how many bytes [`encode`](Self::encode) produces, without encoding
+    /// (for flow control, [`crate::Transport::backlog`]).
+    pub(crate) fn approx_len(&self) -> usize {
+        match self {
+            Message::Updates { data, .. } | Message::Snapshot { data, .. } => data.len() + 64,
+            Message::Presence { state, .. } => state.as_ref().map_or(0, Vec::len) + 64,
+            Message::Hello { versions, .. } => 64 + 64 * versions.len(),
+            Message::SnapshotRequest { .. } => 64,
+        }
+    }
+
     /// Binary encoding: a tag byte, then the fields; strings and byte arrays are
     /// LEB128-length-prefixed, version vectors use Loro's encoding.
     pub fn encode(&self) -> Vec<u8> {

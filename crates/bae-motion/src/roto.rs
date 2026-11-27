@@ -21,6 +21,8 @@ pub struct Params {
     points: Vec<[f64; 2]>,
     radius: f64,
     background: bool,
+    #[serde(default)]
+    refine: bool,
 }
 
 impl Command for Stroke {
@@ -51,7 +53,7 @@ impl Command for Stroke {
         let path = match existing {
             Some(path) => path,
             None => {
-                if p.background {
+                if p.background || p.refine {
                     return Err(fail("Mark foreground first"));
                 }
                 let def = effect::find_def(&self.0, ROTO)
@@ -77,7 +79,11 @@ impl Command for Stroke {
         {
             return Err(fail("Unfreeze the propagation span before painting"));
         }
-        let attr = param_attr(STROKES);
+        let attr = param_attr(if p.refine {
+            bae_vision::EDGE_STROKES
+        } else {
+            STROKES
+        });
         let mut data = match prim.value(&attr) {
             Some(Value::FloatList(v)) => v.clone(),
             _ => Vec::new(),
@@ -162,6 +168,12 @@ impl Command for Freeze {
                     timing.layer_time(p.start).0 as f64,
                     timing.stretch_percent(),
                 ]),
+            )?;
+            set(
+                tx,
+                &p.effect,
+                &param_attr(bae_vision::FROZEN_FORMAT),
+                Value::Int(bae_vision::FROZEN_RGB),
             )?;
             set(tx, &p.effect, &attr, Value::PrimRef(footage.clone()))?;
         } else if let Some(old) = old {
