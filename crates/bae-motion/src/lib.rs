@@ -206,6 +206,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(InterpretFootage),
         r.register(AutoOrient),
         r.register(SetProjectSettings),
+        r.register(project_settings::SetMetadata),
         r.register(SetText),
         r.register(SetTextStyle),
         r.register(SetExpressions),
