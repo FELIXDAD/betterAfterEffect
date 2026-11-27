@@ -56,6 +56,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Composition viewer: an effect or the text renderer still warming up.
     ("Preparing…", "正在准备…"),
     ("Time Stretch", "时间伸缩"),
+    ("New Item", "新建项"),
     // Panel-scoped zoom shortcuts (timeline: = / -, viewer: . / , / ?)
     ("Zoom In Time", "放大时间"),
     ("Zoom Out Time", "缩小时间"),
