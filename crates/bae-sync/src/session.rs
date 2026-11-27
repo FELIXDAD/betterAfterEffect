@@ -118,15 +118,23 @@ impl InFlight {
 
 /// What the update of a document that did not fit in one message
 /// ([`SyncError::MessageTooLarge`]) was made of: for each Loro peer whose ops
-/// the remote lacked, how many of them it had. Local edits only make the
-/// update larger, and so do the remote getting other peers' ops (from
-/// collaborators) or losing some; it can only get smaller once the remote has
-/// more ops of one of these peers (it got them another way: a shared folder,
-/// another client of the hub). Until then exporting it again (up to hundreds
-/// of MiB, on the thread that owns the stage) would only fail again.
+/// the remote lacked, how many of them it had, and the local version then.
+/// Local edits only make the update larger, and so do the remote getting
+/// other peers' ops (from collaborators) or losing some; it can only get
+/// smaller once the remote has more ops of one of these peers (it got them
+/// another way: a shared folder, another client of the hub). Until then
+/// exporting it again (up to hundreds of MiB, on the thread that owns the
+/// stage) would only fail again.
+///
+/// That holds as long as the local document still holds what did not fit:
+/// its version only grows. A document replaced under the same key (a
+/// sublayer deleted and created again) has a new history, and its update is
+/// a different one: tried at once.
 #[derive(Debug)]
 struct TooLarge {
     lacked: Vec<(PeerID, Counter)>,
+    /// The local version whose update did not fit.
+    local: VersionVector,
 }
 
 impl TooLarge {
@@ -138,15 +146,22 @@ impl TooLarge {
                 (end.max(0) > had).then_some((*peer, had))
             })
             .collect();
-        TooLarge { lacked }
+        TooLarge {
+            lacked,
+            local: local.clone(),
+        }
     }
 
-    /// Whether the update may have become smaller now that the remote has
-    /// `known`.
-    fn may_fit(&self, known: &VersionVector) -> bool {
-        self.lacked
-            .iter()
-            .any(|(peer, had)| counter(known, peer) > *had)
+    /// Whether the update may have become smaller now that the local
+    /// document is at `local` and the remote has `known`: the remote has
+    /// more of the ops it lacked, or the document is not the one that did
+    /// not fit (it was replaced).
+    fn may_fit(&self, local: &VersionVector, known: &VersionVector) -> bool {
+        !local.includes_vv(&self.local)
+            || self
+                .lacked
+                .iter()
+                .any(|(peer, had)| counter(known, peer) > *had)
     }
 }
 
@@ -336,10 +351,11 @@ pub struct SyncSession {
     /// Documents whose update did not fit in one message: not exported again
     /// until it may have become smaller (see [`TooLarge`]) or `reset`.
     too_large: BTreeMap<DocKey, TooLarge>,
-    /// Documents whose snapshot did not fit in one message: a snapshot only
-    /// grows, so their snapshot requests are not answered (nor kept) until
-    /// `reset`.
-    snapshot_too_large: BTreeSet<DocKey>,
+    /// Documents whose snapshot did not fit in one message, with the local
+    /// version then: a snapshot only grows, so their snapshot requests are
+    /// not answered (nor kept) until `reset`, or until the document is
+    /// replaced (its version no longer includes this one, see [`TooLarge`]).
+    snapshot_too_large: BTreeMap<DocKey, VersionVector>,
     stats: SyncStats,
     presence: Option<PresenceState>,
     presence_dirty: bool,
@@ -367,7 +383,7 @@ impl SyncSession {
             next_doc: None,
             snapshot_requests: VecDeque::new(),
             too_large: BTreeMap::new(),
-            snapshot_too_large: BTreeSet::new(),
+            snapshot_too_large: BTreeMap::new(),
             stats: SyncStats::default(),
             presence: None,
             presence_dirty: false,
@@ -567,21 +583,34 @@ impl SyncSession {
     /// [`PumpOutcome::errors`]; it is exported again only once the remote has
     /// more of the ops it lacked (it got them another way), or after
     /// [`reset`](Self::reset). Local edits only make the update larger, so
-    /// they do not make it try again.
+    /// they do not make it try again. A document replaced under the same key
+    /// (a sublayer deleted and created again) is not listed: it is another
+    /// document, tried on the next send.
     pub fn too_large(&self, docs: &dyn DocSet) -> Vec<DocKey> {
         self.too_large
-            .keys()
-            .filter(|key| {
+            .iter()
+            .filter(|(key, memo)| {
                 docs.version(key).is_some_and(|local| {
-                    !self
-                        .remote
-                        .as_ref()
-                        .and_then(|r| r.get(*key))
-                        .is_some_and(|known| known.includes_vv(&local))
+                    local.includes_vv(&memo.local)
+                        && !self
+                            .remote
+                            .as_ref()
+                            .and_then(|r| r.get(*key))
+                            .is_some_and(|known| known.includes_vv(&local))
                 })
             })
-            .cloned()
+            .map(|(key, _)| key.clone())
             .collect()
+    }
+
+    /// Whether `doc`'s snapshot is known not to fit in one message on this
+    /// link: it did not, and the document is still the one it was then (a
+    /// snapshot only grows).
+    fn snapshot_too_large(&self, docs: &dyn DocSet, doc: &DocKey) -> bool {
+        self.snapshot_too_large.get(doc).is_some_and(|then| {
+            docs.version(doc)
+                .is_some_and(|local| local.includes_vv(then))
+        })
     }
 
     /// Exchange messages without blocking: say hello when due, import what
@@ -631,7 +660,7 @@ impl SyncSession {
         for doc in incoming.snapshot_requests {
             if self.config.send_data
                 && docs.version(&doc).is_some()
-                && !self.snapshot_too_large.contains(&doc)
+                && !self.snapshot_too_large(docs, &doc)
                 && !self.snapshot_requests.contains(&doc)
             {
                 self.snapshot_requests.push_back(doc);
@@ -844,7 +873,8 @@ impl SyncSession {
     /// ([`SyncError::MessageTooLarge`]) is reported in `out.errors` and not
     /// counted as sent. A snapshot holds the whole history, so it only grows:
     /// later requests for that document are not answered on this link (not
-    /// exported again on every request) until [`reset`](Self::reset).
+    /// exported again on every request) until [`reset`](Self::reset), or
+    /// until the document is replaced under the same key.
     fn send_snapshot(
         &mut self,
         docs: &dyn DocSet,
@@ -852,7 +882,7 @@ impl SyncSession {
         doc: DocKey,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
-        if !self.config.send_data || self.snapshot_too_large.contains(&doc) {
+        if !self.config.send_data || self.snapshot_too_large(docs, &doc) {
             return Ok(());
         }
         let Some(version) = docs.version(&doc) else {
@@ -872,13 +902,14 @@ impl SyncSession {
         };
         match self.send(transport, msg, out) {
             Err(e @ SyncError::MessageTooLarge { .. }) => {
-                self.snapshot_too_large.insert(doc);
+                self.snapshot_too_large.insert(doc, version);
                 out.errors.push(e);
                 Ok(())
             }
             // Counted as sent even when the send failed otherwise, as in
             // `send_missing`.
             r => {
+                self.snapshot_too_large.remove(&doc);
                 if let Some(remote) = &mut self.remote {
                     remote.entry(doc.clone()).or_default().merge(&version);
                     if self.config.hello_interval.is_some() {
@@ -971,7 +1002,9 @@ impl SyncSession {
     /// ([`SyncError::MessageTooLarge`]: nothing was sent, the link is fine) is
     /// only skipped: reported in `out.errors`, not counted as sent (so not
     /// known by the remote, not on its way, and unsynced), and not exported
-    /// again until it may have become smaller ([`TooLarge`]).
+    /// again until it may have become smaller ([`TooLarge`]). What is
+    /// remembered of documents no longer in `docs` (a sublayer removed) is
+    /// forgotten here.
     ///
     /// With `flow`, stops before a document while the transport's backlog is
     /// over `max_backlog`; the next call starts with that document. Sends
@@ -991,6 +1024,10 @@ impl SyncSession {
         };
         let max_backlog = self.config.max_backlog.filter(|_| flow);
         let mut keys = docs.doc_keys();
+        if !self.too_large.is_empty() || !self.snapshot_too_large.is_empty() {
+            self.too_large.retain(|k, _| keys.contains(k));
+            self.snapshot_too_large.retain(|k, _| keys.contains(k));
+        }
         if let Some(next) = self.next_doc.take()
             && let Some(i) = keys.iter().position(|k| *k == next)
         {
@@ -1009,7 +1046,11 @@ impl SyncSession {
             }
             // Did not fit, and cannot have become smaller since: skipped
             // before flow control, so it never holds up the others.
-            if self.too_large.get(&key).is_some_and(|t| !t.may_fit(known)) {
+            if self
+                .too_large
+                .get(&key)
+                .is_some_and(|t| !t.may_fit(&local, known))
+            {
                 continue;
             }
             if let Some(max) = max_backlog
@@ -1646,6 +1687,132 @@ mod tests {
             t.backlog = 0;
         }
         assert!(s.too_large(&docs).is_empty());
+        assert!(s.unsynced(&docs).is_empty());
+    }
+
+    /// Documents whose key can get a new document: a sublayer deleted and
+    /// created again (`Stage::remove_sublayer`, `create_sublayer`).
+    #[derive(Default)]
+    struct Replaceable(BTreeMap<DocKey, bae_model::loro::LoroDoc>);
+
+    impl Replaceable {
+        /// A new document under `doc` (a fresh Loro peer) holding `value`.
+        fn put(&mut self, doc: &str, value: String) {
+            let d = bae_model::loro::LoroDoc::new();
+            d.get_map("m").insert("v", value).unwrap();
+            d.commit();
+            self.0.insert(key(doc), d);
+        }
+    }
+
+    impl DocSet for Replaceable {
+        fn doc_keys(&self) -> Vec<DocKey> {
+            self.0.keys().cloned().collect()
+        }
+
+        fn version(&self, doc: &DocKey) -> Option<VersionVector> {
+            Some(self.0.get(doc)?.oplog_vv())
+        }
+
+        fn export_updates(
+            &self,
+            doc: &DocKey,
+            since: &VersionVector,
+        ) -> Result<Vec<u8>, SyncError> {
+            Ok(self.0[doc].export(bae_model::loro::ExportMode::updates(since))?)
+        }
+
+        fn export_snapshot(&self, doc: &DocKey) -> Result<Vec<u8>, SyncError> {
+            Ok(self.0[doc].export(bae_model::loro::ExportMode::Snapshot)?)
+        }
+
+        fn import(&mut self, doc: &DocKey, data: &[u8]) -> Result<Imported, SyncError> {
+            match self.0.get(doc) {
+                Some(d) => {
+                    d.import(data)?;
+                    Ok(Imported::Done(None))
+                }
+                None => Ok(Imported::UnknownDoc),
+            }
+        }
+    }
+
+    /// A document that did not fit is replaced by another under the same key
+    /// (the layer deleted and created again, now small): the memo of what
+    /// did not fit is about the old one, whose ops the new one does not
+    /// hold, so the new one is sent at once, also when the old one was
+    /// removed for a pump first. Nor is its snapshot refused.
+    #[test]
+    fn a_document_replaced_under_the_same_key_is_sent() {
+        let mut docs = Replaceable::default();
+        docs.put("a", text(1, 8000));
+        docs.put("b", text(2, 600));
+        let mut config = SessionConfig::new(ClientId::new("app").unwrap());
+        config.hello_interval = Some(Duration::from_secs(3600));
+        config.max_backlog = None;
+        let mut s = SyncSession::new(config);
+        let mut t = Lagging {
+            max: Some(4000),
+            ..Lagging::default()
+        };
+        let too_large = |out: &PumpOutcome| {
+            out.errors
+                .iter()
+                .filter(|e| matches!(e, SyncError::MessageTooLarge { .. }))
+                .count()
+        };
+        t.inbox.push_back(Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            client: ClientId::new("hub").unwrap(),
+            versions: Vec::new(),
+            seq: 1,
+            ack: None,
+        });
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(too_large(&out), 1, "{:?}", out.errors);
+        assert_eq!(t.data_sent(), ["b"]);
+        assert_eq!(s.too_large(&docs), [key("a")]);
+        // Its snapshot does not fit either.
+        t.inbox
+            .push_back(Message::SnapshotRequest { doc: key("a") });
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(too_large(&out), 1, "{:?}", out.errors);
+        assert!(t.data_sent().is_empty());
+
+        // Replaced between two pumps: no longer listed as too large, sent on
+        // the next pump, and its snapshot is answered.
+        docs.put("a", "new layer".into());
+        assert!(s.too_large(&docs).is_empty());
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert_eq!(t.data_sent(), ["a"]);
+        assert!(s.unsynced(&docs).is_empty());
+        assert!(s.too_large(&docs).is_empty());
+        t.inbox
+            .push_back(Message::SnapshotRequest { doc: key("a") });
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert_eq!(snapshots_sent(&mut t), ["a"]);
+
+        // Too large again; removed for a pump, then a small one under the
+        // same key.
+        docs.put("a", text(3, 8000));
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(too_large(&out), 1, "{:?}", out.errors);
+        t.inbox
+            .push_back(Message::SnapshotRequest { doc: key("a") });
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert_eq!(too_large(&out), 1, "{:?}", out.errors);
+        assert!(t.data_sent().is_empty());
+        docs.0.remove(&key("a"));
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        // Forgotten with the document.
+        assert!(s.too_large.is_empty() && s.snapshot_too_large.is_empty());
+        docs.put("a", "newer layer".into());
+        let out = s.pump(&mut docs, &mut t).unwrap();
+        assert!(out.errors.is_empty(), "{:?}", out.errors);
+        assert_eq!(t.data_sent(), ["a"]);
         assert!(s.unsynced(&docs).is_empty());
     }
 }
