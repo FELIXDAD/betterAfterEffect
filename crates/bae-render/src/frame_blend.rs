@@ -95,6 +95,7 @@ impl LayerSource for MotionFrame {
             encoder: ctx.encoder,
             format: ctx.format,
             allocator: ctx.allocator,
+            intermediates: None,
             effect_inputs: &[(self.next.clone(), next)],
             effect_masks: &[],
         };

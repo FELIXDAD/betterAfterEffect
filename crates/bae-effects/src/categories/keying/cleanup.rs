@@ -200,7 +200,21 @@ impl Effect for Cleanup {
         let v = Params::new(&self.def, p);
         let radius = match self.method {
             Method::Key if v.popup(1) != 2 => 2. * v.f(6) * p.scale,
-            Method::Wire if v.popup(3) >= 3 => v.f(4) * p.scale + 2.,
+            // Displace reads (2 * half width + 1) / |axis . normal| from a
+            // pixel inside the wire.
+            Method::Wire if v.popup(3) >= 3 => {
+                let line = match (v.value(1), v.value(2)) {
+                    (Some(Value::Vec2(a)), Some(Value::Vec2(b))) => [b[0] - a[0], b[1] - a[1]],
+                    _ => [1., 0.],
+                };
+                let length = line[0].hypot(line[1]).max(1e-9);
+                let across = if v.popup(3) == 4 {
+                    (line[1] / length).abs()
+                } else {
+                    1.
+                };
+                (v.f(4) * p.scale + 1.) / across.max(0.05) + 2.
+            }
             _ => 0.,
         };
         roi.inflate(radius.ceil() as i32)

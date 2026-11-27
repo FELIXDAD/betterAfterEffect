@@ -32,6 +32,22 @@ pub fn layer(number: Option<usize>, name: &str) -> String {
     }
 }
 
+/// A control displaying a verbatim value (device name, font, path or code sample).
+pub const VERBATIM_VALUE: &str = "verbatim-value";
+/// A link that displays the file name and exposes its full path to assistive technology.
+pub const FILE_NAME_VALUE: &str = "file-name-value";
+/// The selected system output includes the translated default-choice caption.
+pub const SYSTEM_OUTPUT: &str = "system-audio-output";
+/// The adapter name is followed by the backend and translated adapter kind.
+pub const GPU_STATUS: &str = "gpu-status";
+
+/// Identify the source of a value without changing the label or value read by AT.
+pub fn value_source(response: &Response, class: &'static str) {
+    response
+        .ctx
+        .accesskit_node_builder(response.id, |node| node.set_class_name(class));
+}
+
 /// Accessibility labels for a [`Response`].
 pub trait Accessible: Sized {
     /// Name the widget.

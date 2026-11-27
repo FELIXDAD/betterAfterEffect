@@ -4,7 +4,12 @@
 //! search field on top. Double-click a folder to open it, a file to import it
 //! (as File ▸ Import does).
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, mpsc};
+
+mod thumbnails;
+use thumbnails::{ResultImage, Thumbnails};
 
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
@@ -28,11 +33,16 @@ struct Entry {
 #[derive(Default, Serialize, Deserialize)]
 struct State {
     folder: Option<PathBuf>,
+    #[serde(default)]
+    thumbnails: bool,
 }
 
 /// Registers the panel and its Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    let worker = Arc::new(Thumbnails::default());
+    let _ = app.register_arc::<dyn bae_gpu::WarmUp>("bae.media/browser-thumbnails", worker.clone());
+    app.insert_resource(worker);
     crate::register_panel(
         app,
         "media_browser",
@@ -53,6 +63,9 @@ pub struct MediaBrowserPanel {
     /// The listing of `state.folder` (read when the folder changes).
     listing: Option<(PathBuf, Vec<Entry>)>,
     extensions: Vec<String>,
+    previews: HashMap<PathBuf, Option<egui::TextureHandle>>,
+    pending: HashSet<PathBuf>,
+    replies: Option<(mpsc::Sender<ResultImage>, mpsc::Receiver<ResultImage>)>,
 }
 
 impl MediaBrowserPanel {
@@ -88,6 +101,9 @@ impl MediaBrowserPanel {
     fn entries(&mut self) -> Vec<Entry> {
         let folder = self.folder();
         if self.listing.as_ref().map(|(f, _)| f) != Some(&folder) {
+            self.previews.clear();
+            self.pending.clear();
+            self.replies = None;
             if self.extensions.is_empty() {
                 self.extensions = bae_media::builtin_formats()
                     .iter()
@@ -139,6 +155,16 @@ impl MediaBrowserPanel {
 }
 
 impl Panel for MediaBrowserPanel {
+    fn menu(&mut self, ui: &mut Ui, _: &mut PanelContext<'_>) {
+        for (value, title) in [(false, "List View"), (true, "Thumbnail View")] {
+            if ui
+                .radio_value(&mut self.state.thumbnails, value, tr(title))
+                .clicked()
+            {
+                ui.close();
+            }
+        }
+    }
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let folder = self.folder();
         // Top bar: back, forward, the folder, search.
@@ -184,7 +210,8 @@ impl Panel for MediaBrowserPanel {
             );
         });
         ui.add_space(4.0);
-        let area = ui.available_rect_before_wrap();
+        let mut area = ui.available_rect_before_wrap();
+        area.max.y = (area.max.y - 24.0).max(area.min.y);
         ui.allocate_rect(area, Sense::hover());
         let side = Rect::from_min_size(area.min, vec2(SIDE.min(area.width() * 0.4), area.height()));
         let list = Rect::from_min_max(pos2(side.right() + 1.0, area.top()), area.max);
@@ -192,7 +219,15 @@ impl Panel for MediaBrowserPanel {
         p.rect_filled(side, 0.0, color::PANEL);
         p.rect_filled(list, 0.0, color::FIELD);
         self.places(ui, side);
-        self.list(ui, cx, list);
+        if self.state.thumbnails {
+            self.grid(ui, cx, list);
+        } else {
+            self.list(ui, cx, list);
+        }
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.state.thumbnails, false, tr("List View"));
+            ui.selectable_value(&mut self.state.thumbnails, true, tr("Thumbnail View"));
+        });
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
@@ -300,6 +335,94 @@ impl MediaBrowserPanel {
                     }
                 }
             });
+        self.open_entry(cx, open);
+    }
+
+    fn grid(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>, r: Rect) {
+        let entries = self.entries();
+        let (tx, rx) = self.replies.get_or_insert_with(mpsc::channel);
+        for (path, image) in rx.try_iter() {
+            self.pending.remove(&path);
+            let texture = image.map(|i| {
+                ui.ctx()
+                    .load_texture("media thumbnail", i, egui::TextureOptions::LINEAR)
+            });
+            self.previews.insert(path, texture);
+        }
+        let worker = cx.resources.get::<Arc<Thumbnails>>();
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r));
+        let columns = ((r.width() - 12.0) / 110.0).floor().max(1.0) as usize;
+        let mut open = None;
+        egui::ScrollArea::vertical()
+            .id_salt("media-thumbnails")
+            .show_rows(
+                &mut child,
+                88.0,
+                entries.len().div_ceil(columns),
+                |ui, rows| {
+                    let visible =
+                        &entries[rows.start * columns..(rows.end * columns).min(entries.len())];
+                    self.previews
+                        .retain(|path, _| visible.iter().any(|e| &e.path == path));
+                    for row in visible.chunks(columns) {
+                        ui.horizontal(|ui| {
+                            for e in row {
+                                let (rect, response) =
+                                    ui.allocate_exact_size(vec2(102.0, 88.0), Sense::click());
+                                let p = ui.painter_at(rect);
+                                if self.selected.as_ref() == Some(&e.path) {
+                                    p.rect_filled(rect, 1.0, color::ACCENT_DIM);
+                                }
+                                let center = pos2(rect.center().x, rect.top() + 34.0);
+                                if let Some(Some(texture)) = self.previews.get(&e.path) {
+                                    p.image(
+                                        texture.id(),
+                                        Rect::from_center_size(center, texture.size_vec2()),
+                                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                                        Color32::WHITE,
+                                    );
+                                } else {
+                                    icons::paint(
+                                        &p,
+                                        Rect::from_center_size(center, vec2(20.0, 20.0)),
+                                        if e.folder {
+                                            Icon::Folder
+                                        } else {
+                                            Icon::Footage
+                                        },
+                                        color::ICON,
+                                    );
+                                    if !e.folder
+                                        && !self.previews.contains_key(&e.path)
+                                        && !self.pending.contains(&e.path)
+                                        && worker.is_some_and(|w| w.request(&e.path, tx, ui.ctx()))
+                                    {
+                                        self.pending.insert(e.path.clone());
+                                    }
+                                }
+                                p.text(
+                                    pos2(rect.center().x, rect.bottom() - 4.0),
+                                    Align2::CENTER_BOTTOM,
+                                    &e.name,
+                                    theme::body(),
+                                    color::TEXT,
+                                );
+                                if response.clicked() {
+                                    self.selected = Some(e.path.clone());
+                                }
+                                if response.double_clicked() {
+                                    open = Some(e.clone());
+                                }
+                                response.on_hover_text(&e.name);
+                            }
+                        });
+                    }
+                },
+            );
+        self.open_entry(cx, open);
+    }
+
+    fn open_entry(&mut self, cx: &mut PanelContext<'_>, open: Option<Entry>) {
         if let Some(e) = open {
             if e.folder {
                 self.go(e.path);
@@ -340,6 +463,8 @@ fn size_text(bytes: u64) -> String {
 
 /// Chinese for the panel (AE 26).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("List View", "列表视图"),
+    ("Thumbnail View", "缩略图视图"),
     ("Go Back", "上一步"),
     ("Go Forward", "前进"),
     ("Favorites", "收藏夹"),

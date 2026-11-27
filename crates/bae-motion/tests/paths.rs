@@ -182,3 +182,34 @@ fn shape_paths_are_edited_too() {
             .is_err()
     );
 }
+
+#[test]
+fn feather_topology_is_optional_and_other_keys_keep_their_own_geometry() {
+    let mut fx = Fx::new();
+    let mask = fx.mask();
+    let base = fx.path(&mask);
+    fx.run(
+        "attr.set_animated",
+        json!({ "path": mask, "attr": "path", "animated": true, "time": 0 }),
+    );
+    let mut later = base.clone();
+    later.vertices[0][0] += 50.0;
+    let point = bae_model::FeatherPoint {
+        segment: 1,
+        t: 0.5,
+        ..Default::default()
+    };
+    later.feather.push(point);
+    let mut args = serde_json::to_value(later).unwrap();
+    args["path"] = json!(mask);
+    args["time"] = json!(second());
+    fx.run("path.set_vertices", args.clone());
+    assert!(fx.keys(&mask)[0].feather.is_empty());
+    fx.stage.undo(&fx.author).unwrap();
+    args["topology"] = json!({"add_feather": point});
+    fx.run("path.set_vertices", args);
+    let keys = fx.keys(&mask);
+    assert!(keys.iter().all(|k| k.feather == vec![point]));
+    assert_eq!(keys[0].vertices, base.vertices);
+    assert_ne!(keys[0].vertices, keys[1].vertices);
+}
