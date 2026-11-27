@@ -3451,6 +3451,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Set Proxy: File...", "设置代理：文件..."),
     ("Set Proxy: None", "设置代理：无"),
     ("Set Proxy File", "设置代理文件"),
+    (
+        "The proxy file is missing; the original is used.",
+        "代理文件丢失，已改用原素材。",
+    ),
     // Model commands (Undo, History).
     ("Set Proxy", "设置代理"),
     ("Use Proxy", "使用代理"),

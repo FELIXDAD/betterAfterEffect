@@ -92,6 +92,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Disk Cache:", "磁盘缓存:"),
     ("Read Only", "只读"),
     ("Proxy Use:", "代理使用:"),
+    ("Use All Proxies", "使用所有代理"),
+    ("Use Comp Proxies Only", "仅使用合成代理"),
     ("Use No Proxies", "不使用代理"),
     ("Effects:", "效果:"),
     ("Solo Switches:", "单独开关:"),

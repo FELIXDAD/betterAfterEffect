@@ -71,10 +71,12 @@ pub enum ProxyUse {
     /// Use No Proxies (renders, unless their settings say otherwise).
     #[default]
     None,
-    /// Use Comp Proxies Only.
+    /// Use Comp Proxies Only: comps' proxies, on or off.
     CompsOnly,
-    /// Use All Proxies / Current Settings: every proxy that is on (previews).
+    /// Use All Proxies: every proxy, on or off.
     All,
+    /// Current Settings: the proxies that are on (previews).
+    Current,
 }
 
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
@@ -144,7 +146,7 @@ impl AnimEvaluator {
         self.purpose = purpose;
         // AE previews draw every proxy that is on; renders none by default.
         if purpose == RenderPurpose::Preview {
-            self.proxies = ProxyUse::All;
+            self.proxies = ProxyUse::Current;
         }
         self
     }
@@ -155,7 +157,7 @@ impl AnimEvaluator {
     }
 
     /// The proxy of `item` to draw and its file, when proxies of its kind are
-    /// used, it has one that is on and the file is there (else the original
+    /// used, it has one (that is on, for Current Settings) and the file is there (else the original
     /// is drawn, with a warning).
     fn proxy_for(
         &mut self,
@@ -163,15 +165,12 @@ impl AnimEvaluator {
         item: &PrimPath,
         comp: bool,
     ) -> Option<(PrimPath, Option<PathBuf>)> {
-        let used = match self.proxies {
-            ProxyUse::All => true,
-            ProxyUse::CompsOnly => comp,
-            ProxyUse::None => false,
+        let proxy = match self.proxies {
+            ProxyUse::None => return None,
+            ProxyUse::CompsOnly if !comp => return None,
+            ProxyUse::Current => bae_model::asset::proxy_in_use(stage, item)?,
+            ProxyUse::CompsOnly | ProxyUse::All => bae_model::asset::proxy_of(stage, item)?,
         };
-        if !used {
-            return None;
-        }
-        let proxy = bae_model::asset::proxy_in_use(stage, item)?;
         let view = stage.prim(&proxy)?;
         match self.assets.file(&view) {
             Ok(Some(file)) => Some((proxy, Some(file))),
