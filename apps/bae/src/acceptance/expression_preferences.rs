@@ -49,6 +49,45 @@ fn expression_typing_honours_pairing_and_indentation_in_the_workbench() {
 }
 
 #[test]
+fn timeline_shows_the_evaluated_expression_error_inline() {
+    let mut h = gui();
+    new_comp(&mut h);
+    new_solid(&mut h);
+    let path = h.state().layers()[0].clone();
+    h.state_mut().workspace.focus_panel("timeline");
+    key(&mut h, Modifiers::NONE, Key::P);
+    h.state_mut().dispatch(Invocation::with_params(
+        "attr.set_expressions",
+        serde_json::json!({"items":[{"path":path,"attr":"transform:position","source":"missingInlineValue + 1"}]}),
+    ));
+    for enabled in [true, false, true] {
+        let mut p = (*h.state().prefs.current()).clone();
+        p.set(
+            "scripting_expressions.show_expression_error_warning_banner",
+            false,
+        );
+        p.set("scripting_expressions.expr_inline_errors", enabled);
+        h.state().prefs.set(p).unwrap();
+        settle(&mut h);
+        let msg = h
+            .state()
+            .session()
+            .lock()
+            .expr_errors
+            .iter()
+            .find(|e| e.prim == path && e.attr == "transform:position")
+            .expect("the viewer evaluated the invalid expression")
+            .message
+            .clone();
+        assert_eq!(
+            find_text(&h, msg.lines().next().unwrap()).is_some(),
+            enabled,
+            "{msg}"
+        );
+    }
+}
+
+#[test]
 fn expression_gutter_and_guides_follow_preferences_in_the_timeline() {
     let mut h = gui();
     new_comp(&mut h);
