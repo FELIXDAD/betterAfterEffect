@@ -206,15 +206,28 @@ fn header(
                     s.selected_effects.push(effect.clone());
                 }
             }
-            // Drag an effect header onto another one to reorder (AE).
-            title.dnd_set_drag_payload(EffectMove(effect.clone()));
-            if let Some(moved) = title.dnd_release_payload::<EffectMove>()
+            // Drag an effect header onto another one to reorder (AE): a line
+            // above the header it goes before.
+            crate::drag_feedback::source(
+                &title,
+                || crate::drag_feedback::Ghost::of(&title, 1),
+                || EffectMove(effect.clone()),
+            );
+            if let Some(moved) = title.dnd_hover_payload::<EffectMove>()
                 && moved.0 != *effect
             {
-                cx.invoke_with(
-                    "effect.reorder",
-                    json!({"effects": [moved.0], "index": index}),
+                crate::drag_feedback::accept(ui.ctx());
+                ui.painter().hline(
+                    ui.max_rect().x_range(),
+                    title.rect.top() - 1.0,
+                    egui::Stroke::new(2.0, color::ACCENT),
                 );
+                if title.dnd_release_payload::<EffectMove>().is_some() {
+                    cx.invoke_with(
+                        "effect.reorder",
+                        json!({"effects": [moved.0], "index": index}),
+                    );
+                }
             }
             title.context_menu(|ui| effect_menu(ui, cx, effect, now));
         }

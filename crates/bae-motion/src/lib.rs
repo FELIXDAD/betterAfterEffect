@@ -112,8 +112,8 @@ use bae_model::{CommandRegistry, DynCommand};
 
 pub use camera::{CameraSettings, LightSettings, SetCameraSettings, SetLightSettings};
 pub use comp::{
-    CompOutput, CreateComp, CreateFolder, CropComp, ResizeAnchor, SetCompSettings, SetWorkArea,
-    TrimCompToWorkArea,
+    CompOutput, CreateComp, CreateFolder, CropComp, MoveItems, ResizeAnchor, SetCompSettings,
+    SetWorkArea, TrimCompToWorkArea,
 };
 pub use content::{
     CopiedContent, DeleteContent, DuplicateContent, GroupShapes, PasteContent, UngroupShapes,
@@ -184,6 +184,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
+        r.register(MoveItems),
         r.register(ImportItems),
         r.register(NewItem),
         r.register(photoshop::ImportPhotoshop),
