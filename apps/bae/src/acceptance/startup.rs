@@ -717,13 +717,31 @@ fn render_queue_items_are_told_apart() {
     settle(&mut h);
     let all = labels(&h);
     for n in [1, 2] {
-        for what in ["Remove", "Output To", "Format"] {
+        for what in [
+            "Remove",
+            "Output To",
+            "Format",
+            "Log",
+            "File Name and Location Templates",
+        ] {
             let name = format!("Render Item {n} “Comp 1” · {what}");
             assert!(all.contains(&name), "no {name:?}: {all:?}");
         }
     }
     let dupes = repeated_names(&h);
     assert!(dupes.is_empty(), "{dupes:#?}");
+
+    let first = h.state().render_queue().lock().items()[0].id;
+    h.state_mut().invoke(Invocation::with_params(
+        "motion.comp.add_output_module",
+        serde_json::json!({"queue_item": first}),
+    ));
+    settle(&mut h);
+    for module in [1, 2] {
+        let name = format!("Output Module {module} · File Name and Location Templates");
+        assert!(queue_control(&h, 1, &name).is_some(), "{name}");
+    }
+    assert!(repeated_names(&h).is_empty(), "{:#?}", repeated_names(&h));
 }
 
 // ---- Retest of #128 (dev dbdbb7c): numbered names ----

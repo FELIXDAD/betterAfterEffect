@@ -113,6 +113,44 @@ fn transmit_stays_disabled_even_with_a_saved_enabled_value() {
 }
 
 #[test]
+fn home_preference_controls_startup_and_new_project_opens_the_editor() {
+    let mut g = Gui::new();
+    let mut prefs = (*g.prefs.current()).clone();
+    prefs.set("startup_repair.enable_home_screen", false);
+    g.prefs.set(prefs.clone()).unwrap();
+    g.workspace.start_without_project(false);
+    let mut h = gui_with(g);
+    settle(&mut h);
+    assert!(!find_text(&h, "Welcome to BAE").is_some());
+    prefs.set("startup_repair.enable_home_screen", true);
+    h.state().prefs.set(prefs).unwrap();
+    h.state_mut().workspace.start_without_project(false);
+    settle(&mut h);
+    assert!(find_text(&h, "Welcome to BAE").is_some());
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "New Project")
+        .click();
+    settle(&mut h);
+    assert!(!find_text(&h, "Welcome to BAE").is_some());
+    new_comp(&mut h);
+    assert!(h.state().active_comp().is_some());
+}
+
+#[test]
+fn a_native_menu_command_dismisses_home_and_runs_once() {
+    let mut h = gui();
+    h.state_mut().workspace.start_without_project(false);
+    settle(&mut h);
+    assert!(find_text(&h, "Welcome to BAE").is_some());
+    assert!(h.state_mut().menu("motion.composition.new"));
+    settle(&mut h);
+    assert!(find_text(&h, "Welcome to BAE").is_none());
+    assert!(dialog_open(&h));
+    assert!(!h.state_mut().menu("motion.composition.new"));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(bae_motion::query::comps(h.state().stage()).len(), 1);
+}
+
+#[test]
 fn panel_coachmarks_can_be_dismissed_and_reset() {
     let mut h = gui();
     h.state_mut().workspace.focus_panel("project");

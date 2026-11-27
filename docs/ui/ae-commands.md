@@ -76,7 +76,7 @@
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
 | Find | 131093 | `motion.file.find` |  | Ctrl+F | Cmd+F | E | ✅ |
 | Add Footage to Comp | 131095 | `motion.file.add_footage_to_comp` |  | Ctrl+/ | Cmd+/ | E | ✅ |
-| New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ☐ |
+| New Comp from Selection... | 131096 | `motion.file.new_comp_from_selection` |  | Alt+\\ | Opt+\\ | E | ✅ |
 | Dependencies ▸ Collect Files... | 22806529 | `motion.file.collect_files` |  |  |  | B | ⏸ |
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ⏸ |
 | Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ⏸ |
@@ -210,7 +210,7 @@
 | Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
 | Preview ▸ Play Current Preview | 10682369 | `motion.play` |  | Space | Space | B | ✅ |
-| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ⏸ |
+| Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ✅ |
 | Preview ▸ Audio | 10682372 | `motion.comp.preview_audio` |  |  |  | B | ⏸ |
 | Save Frame As ▸ File... | 15335425 | `motion.comp.save_frame_as_file` |  | Ctrl+Alt+S | Cmd+Opt+S | B | ✅ |
 | Save Frame As ▸ Photoshop Layers... | 15335427 | `motion.comp.save_frame_as_photoshop_layers` |  |  |  | B | ⏸ |
@@ -221,7 +221,7 @@
 | Responsive Design — Time ▸ Create Intro | 2097153 | `motion.comp.create_intro` |  |  |  | B | ⏸ |
 | Responsive Design — Time ▸ Create Outro | 2097154 | `motion.comp.create_outro` |  |  |  | B | ⏸ |
 | Responsive Design — Time ▸ Create Protected Region from Work Area | 2097155 | `motion.comp.create_protected_region_from_work_area` |  |  |  | B | ⏸ |
-| Composition Flowchart | 327701 | `motion.comp.composition_flowchart` |  | Ctrl+Shift+F11 | Cmd+Shift+F11 | E | ⏸ |
+| Composition Flowchart | 327701 | `motion.comp.composition_flowchart` |  | Ctrl+Shift+F11 | Cmd+Shift+F11 | E | ✅ |
 | Composition Mini-Flowchart | 327702 | `motion.comp.composition_mini_flowchart` |  | Tab | Tab | E | ✅ |
 | VR ▸ Create VR Environment... | 328466433 | `motion.comp.create_vr_environment` |  |  |  | B | ⏸ |
 | VR ▸ Extract Cubemap... | 328466434 | `motion.comp.extract_cubemap` |  |  |  | B | ⏸ |
@@ -393,7 +393,7 @@
 | Reveal ▸ Reveal in Explorer | 23003137 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ☐ |
 | Reveal ▸ Reveal Layer in Project Flowchart | 23003139 | `motion.layer.reveal_layer_in_project_flowchart` |  |  |  | E | ⏸ |
-| Reveal ▸ Reveal Composition in Project | 23003140 | `motion.layer.reveal_composition_in_project` |  |  |  | B | ☐ |
+| Reveal ▸ Reveal Composition in Project | 23003140 | `motion.layer.reveal_composition_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Expression Errors | 23003141 | `motion.layer.reveal_expression_errors` |  |  |  | C | ⏸ |
 | Create ▸ Convert to Editable Text | 23068673 | `motion.layer.convert_to_editable_text` |  |  |  | B | ⏸ |
 | Create ▸ Create Shapes from Text | 23068674 | `motion.layer.create_shapes_from_text` |  |  |  | A | ⏸ |

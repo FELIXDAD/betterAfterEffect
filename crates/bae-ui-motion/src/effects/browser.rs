@@ -31,6 +31,7 @@ pub struct EffectsPanel {
 enum Selection {
     Effect(String),
     Preset(PathBuf),
+    Builtin(&'static str),
 }
 
 impl Selection {
@@ -39,6 +40,7 @@ impl Selection {
         installed: Option<&'a super::manager::Installed>,
     ) -> Option<&'a std::path::Path> {
         match self {
+            Self::Builtin(_) => None,
             Self::Preset(path) => Some(path),
             Self::Effect(name) => installed?.location(name),
         }
@@ -112,6 +114,64 @@ fn project_depth(stage: &bae_model::Stage) -> u8 {
 }
 
 impl EffectsPanel {
+    fn preset_folder(&mut self, ui: &mut Ui, key: &str, label: &str, searching: bool) -> bool {
+        let mut open = searching || self.open.contains(key);
+        ui.horizontal(|ui| {
+            let toggle = widgets::disclosure(ui, &mut open).clicked();
+            let label = ui.selectable_label(false, tr(label)).clicked();
+            if label {
+                open = !open;
+            }
+            if !searching && (toggle || label) {
+                if open {
+                    self.open.insert(key.to_owned());
+                } else {
+                    self.open.remove(key);
+                }
+            }
+        });
+        searching || open
+    }
+
+    fn builtin_folders(
+        &mut self,
+        ui: &mut Ui,
+        recipes: &'static [crate::presets::builtins::Recipe],
+        prefix: &str,
+        query: &str,
+        apply: &mut Option<Arc<[bae_motion::effect::PresetEffect]>>,
+    ) {
+        let segment = |r: &crate::presets::builtins::Recipe| {
+            r.folder[prefix.len()..].split('/').next().unwrap_or("")
+        };
+        for group in recipes.chunk_by(|a, b| segment(a) == segment(b)) {
+            let folder = segment(&group[0]);
+            let path = format!("{prefix}{folder}");
+            let matches = |name: &str| {
+                name.to_lowercase().contains(query) || tr(name).to_lowercase().contains(query)
+            };
+            if !group
+                .iter()
+                .any(|r| matches(r.name) || r.folder.split('/').any(matches))
+            {
+                continue;
+            }
+            if self.preset_folder(ui, &format!("presets/{path}"), folder, !query.is_empty()) {
+                ui.indent(&path, |ui| {
+                    if group[0].folder != path {
+                        self.builtin_folders(ui, group, &format!("{path}/"), query, apply);
+                    } else {
+                        for r in group.iter().filter(|r| matches(r.name) || r.folder.split('/').any(matches)) {
+                            let resp = ui.selectable_label(matches!(self.selection, Some(Selection::Builtin(n)) if n == r.name), tr(r.name));
+                            if resp.clicked() { self.selection = Some(Selection::Builtin(r.name)); }
+                            if resp.double_clicked() { *apply = Some(vec![r.build()].into()); }
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     pub(super) fn restore(state: Option<&serde_json::Value>) -> Self {
         Self {
             options: state
@@ -318,19 +378,10 @@ impl Panel for EffectsPanel {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 // * Animation Presets first, as in AE.
-                if self.options.show_presets {
-                    let mut open = searching || self.open.contains(PRESETS);
-                    ui.horizontal(|ui| {
-                        if widgets::disclosure(ui, &mut open).clicked() && !searching {
-                            if open {
-                                self.open.insert(PRESETS.to_owned());
-                            } else {
-                                self.open.remove(PRESETS);
-                            }
-                        }
-                        ui.label(tr(PRESETS));
-                    });
-                    if open {
+                if self.options.show_presets && self.preset_folder(ui, PRESETS, PRESETS, searching) {
+                    ui.indent(PRESETS, |ui| {
+                        self.builtin_folders(ui, crate::presets::builtins::LIBRARY, "", &query, &mut apply_preset);
+                        if !self.preset_folder(ui, "presets/user", "User Presets", searching) { return; }
                         for entry in presets
                             .iter()
                             .filter(|e| query.is_empty() || e.name.to_lowercase().contains(&query))
@@ -350,7 +401,7 @@ impl Panel for EffectsPanel {
                                 }
                             });
                         }
-                    }
+                    });
                 }
                 for (shown, (category, mut effects)) in by_category {
                     if self.options.grouping != Grouping::Alphabetical {
