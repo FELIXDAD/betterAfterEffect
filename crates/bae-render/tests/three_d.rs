@@ -1052,5 +1052,28 @@ fn models_receive_model_shadows() {
         .collect();
     assert!(draws[1] < draws[0], "light maps reused: {draws:?}");
     assert_eq!(draws[1], draws[2], "{draws:?}");
+    // A 3D solid casting shadows throws its shadow on the slab as well.
+    let mut card_scene = scene(ShadowMode::Off);
+    card_scene.layers[0].visible = false;
+    let mut card = solid_3d(
+        "card",
+        RED,
+        [40, 40],
+        DVec3::new(100.0, 100.0, 0.0),
+        DVec3::ZERO,
+    );
+    card.material.casts_shadows = ShadowMode::On;
+    card_scene.layers.insert(0, card.clone());
+    let with_card = render(&mut r, &card_scene);
+    card.material.casts_shadows = ShadowMode::Off;
+    card_scene.layers[0] = card;
+    let without = render(&mut r, &card_scene);
+    assert!(
+        luma(&with_card, 125, 100) + 150 < luma(&without, 125, 100),
+        "card shadow: {:?} vs {:?}",
+        with_card.px(125, 100),
+        without.px(125, 100)
+    );
+    assert_eq!(luma(&with_card, 60, 100), luma(&without, 60, 100));
     std::fs::remove_dir_all(dir).ok();
 }
