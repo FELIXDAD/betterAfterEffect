@@ -38,9 +38,15 @@ pub enum SyncError {
     /// A message is larger than the link takes in one piece
     /// ([`crate::Transport::max_message_size`]: a hub link's `max_message`,
     /// or less if the other side said it takes less). Nothing was sent and the
-    /// link is still usable. A session skips only that document (reported
-    /// once in `PumpOutcome::errors`, listed by `SyncSession::too_large` and
-    /// as unsynced) and goes on with the others (`docs/spec/sync.md` §2.4).
+    /// link is still usable. For document data a session skips only that
+    /// document (reported once in `PumpOutcome::errors`, listed by
+    /// `SyncSession::too_large` and as unsynced) and goes on with the others
+    /// (`docs/spec/sync.md` §2.4). A message without a document (`doc` is
+    /// `None`: a `Hello`, presence) cannot be skipped, the link does not work
+    /// without it: `SyncSession::pump` returns the error like a link failure
+    /// (`Connection` reconnects with backoff, `Relay` drops the peer). That
+    /// only happens on a link that takes less than a `Hello`, which grows
+    /// with the documents and the sessions that edited them.
     /// `doc`: the document of the message, if it has one.
     #[error(
         "message of {size} bytes{} is over the link's limit of {max} bytes per message",

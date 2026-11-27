@@ -186,6 +186,9 @@ pub struct HubConfig {
     /// does not know it is read-only (`SessionConfig::send_data`) sends those
     /// edits after every `Hello` of the hub and every reconnect, so a viewer
     /// with more than this in one document is dropped every time it connects.
+    /// A viewer whose `Hello` is over it cannot connect at all: its session's
+    /// pump fails (`SyncError::MessageTooLarge` without a document) and
+    /// `Connection` retries with backoff.
     /// Clients that know their token is read-only (`GET /v1/status`) set
     /// `send_data = false` and never send data at all.
     pub read_only_max_incoming: usize,

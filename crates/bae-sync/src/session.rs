@@ -648,7 +648,11 @@ impl SyncSession {
     /// the transport signals incoming data (or on a timer).
     ///
     /// Errors are transport failures; the link must be re-established (then call
-    /// [`reset`](Self::reset)). Payloads received before the failure are still
+    /// [`reset`](Self::reset)). So is a message without a document that does
+    /// not fit in one message on the link ([`SyncError::MessageTooLarge`]
+    /// with no `doc`: our `Hello` or presence), which the link cannot do
+    /// without; document data that does not fit is only skipped (in
+    /// [`PumpOutcome::errors`]). Payloads received before the failure are still
     /// imported (their [`StageEvent`]s reach `Stage::subscribe` listeners; the
     /// outcome itself is lost with the error), and snapshot requests received
     /// before it are still kept and answered (at most
@@ -1958,6 +1962,74 @@ mod tests {
         assert!(
             ratio < 30.0,
             "8 times the documents took {ratio:.0} times as long ({small:?}, {large:?})"
+        );
+    }
+
+    /// Only document data is skipped when it does not fit (spec 2.4). A
+    /// message without a document that does not fit (a `Hello` listing
+    /// many documents, our presence) is a link error: the link cannot work
+    /// without it, so `pump` returns it (a `Connection` reconnects with
+    /// backoff, a relay drops the peer). Only a link that takes less than a
+    /// `Hello` does this.
+    #[test]
+    fn a_hello_or_presence_that_does_not_fit_fails_the_pump() {
+        let session = |presence: Option<&str>| {
+            let mut s = SyncSession::new(SessionConfig::new(ClientId::new("app").unwrap()));
+            if let Some(name) = presence {
+                s.set_presence(PresenceState {
+                    name: name.to_owned(),
+                    ..PresenceState::default()
+                });
+            }
+            s
+        };
+        // What the first pump sends: its `Hello` and presence, and their sizes.
+        let first = |docs: &mut MemDocs, presence: Option<&str>| {
+            let mut t = Lagging::default();
+            session(presence).pump(docs, &mut t).unwrap();
+            let size = |hello: bool| {
+                t.sent
+                    .iter()
+                    .find(|m| matches!(m, Message::Hello { .. }) == hello)
+                    .map(Message::encoded_len)
+            };
+            (size(true).unwrap(), size(false))
+        };
+        let refused = |r: Result<PumpOutcome, SyncError>| match r {
+            Err(SyncError::MessageTooLarge {
+                doc: None, size, ..
+            }) => size,
+            r => panic!("{r:?}"),
+        };
+
+        // A `Hello` of five documents over the limit.
+        let mut docs = five_docs();
+        let (hello, _) = first(&mut docs, None);
+        let mut t = Lagging {
+            max: Some(hello - 1),
+            ..Lagging::default()
+        };
+        assert_eq!(refused(session(None).pump(&mut docs, &mut t)), hello);
+        assert!(t.sent.is_empty());
+
+        // Presence over the limit, after a `Hello` that fits.
+        let mut docs = MemDocs::new();
+        let name = "n".repeat(200);
+        let (hello, presence) = first(&mut docs, Some(&name));
+        let presence = presence.unwrap();
+        assert!(hello < presence);
+        let mut t = Lagging {
+            max: Some(presence - 1),
+            ..Lagging::default()
+        };
+        assert_eq!(
+            refused(session(Some(&name)).pump(&mut docs, &mut t)),
+            presence
+        );
+        assert!(
+            matches!(t.sent[..], [Message::Hello { .. }]),
+            "{:?}",
+            t.sent
         );
     }
 }
