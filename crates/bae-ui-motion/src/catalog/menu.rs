@@ -248,9 +248,9 @@ const FILE: &[Node] = &[
             it(22806532, "Remove Unused Footage", "motion.file.remove_unused_footage", "", B, Done),
             it(22806533, "Reduce Project", "motion.file.reduce_project", "", B, Done),
             SEP,
-            it(22806535, "Find Missing Effects", "motion.file.find_missing_effects", "", E, Later),
-            it(22806536, "Find Missing Fonts", "motion.file.find_missing_fonts", "", E, Later),
-            it(22806537, "Find Missing Footage", "motion.file.find_missing_footage", "", E, Later),
+            it(22806535, "Find Missing Effects", "motion.file.find_missing_effects", "", E, Done),
+            it(22806536, "Find Missing Fonts", "motion.file.find_missing_fonts", "", E, Done),
+            it(22806537, "Find Missing Footage", "motion.file.find_missing_footage", "", E, Done),
         ],
     ),
     it(131099, "Watch Folder...", "motion.file.watch_folder", "", B, Adobe),
@@ -314,8 +314,8 @@ const FILE: &[Node] = &[
             it(11141121, "File...", "motion.file.replace_footage_file", "", E, Done),
             it(11141122, "With Layered Comp", "motion.file.replace_footage_with_layered_comp", "", B, Adobe),
             SEP,
-            it(11141124, "Placeholder...", "motion.file.replace_footage_placeholder", "", E, Later),
-            it(11141125, "Solid...", "motion.file.replace_footage_solid", "", E, Later),
+            it(11141124, "Placeholder...", "motion.file.replace_footage_placeholder", "", E, Done),
+            it(11141125, "Solid...", "motion.file.replace_footage_solid", "", E, Done),
         ],
     ),
     it(131107, "Reload Footage", "motion.file.reload_footage", "", E, Done),
@@ -979,7 +979,7 @@ const ANIMATION: &[Node] = &[
 /// View.
 #[rustfmt::skip]
 const VIEW: &[Node] = &[
-    it(589825, "Split with New Locked Viewer", "motion.view.split_with_new_locked_viewer", "", A, Later),
+    it(589825, "Split with New Locked Viewer", "motion.view.split_with_new_locked_viewer", "", A, Done),
     SEP,
     it(589827, "Zoom In", "viewer.zoom_in", "", A, Done),
     it(589828, "Zoom Out", "viewer.zoom_out", "", A, Done),
@@ -1049,11 +1049,11 @@ const VIEW: &[Node] = &[
     sub(
         "Switch View Layout",
         &[
-            it(23396353, "1 View", "motion.view.view_layout", r#"{"views":1}"#, A, Later),
-            it(23396354, "2 Views", "motion.view.view_layout", r#"{"views":2}"#, A, Later),
-            it(23396355, "4 Views", "motion.view.view_layout", r#"{"views":4}"#, A, Later),
+            it(23396353, "1 View", "motion.view.view_layout", r#"{"views":1}"#, A, Done),
+            it(23396354, "2 Views", "motion.view.view_layout", r#"{"views":2}"#, A, Done),
+            it(23396355, "4 Views", "motion.view.view_layout", r#"{"views":4}"#, A, Done),
             SEP,
-            it(23396357, "Share View Options", "motion.view.share_view_options", "", A, Later),
+            it(23396357, "Share View Options", "motion.view.share_view_options", "", A, Done),
         ],
     ),
     sub(
@@ -1193,7 +1193,7 @@ const HELP: &[Node] = &[
     it(720905, "Animation Presets...", "motion.help.animation_presets", "", B, Later),
     it(720906, "Keyboard Shortcuts...", "motion.help.keyboard_shortcuts", "", B, Todo),
     SEP,
-    it(720908, "System Compatibility Report...", "motion.help.system_compatibility_report", "", B, Later),
+    it(720908, "System Compatibility Report...", "motion.help.system_compatibility_report", "", B, Done),
     it(720909, "Enable Logging", "motion.help.enable_logging", "", B, Done),
     it(720910, "Reveal Logging File", "motion.help.reveal_logging_file", "", B, Done),
     SEP,

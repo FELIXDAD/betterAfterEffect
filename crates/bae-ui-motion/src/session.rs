@@ -328,6 +328,9 @@ pub struct Session {
     /// The mask or shape path whose vertices the Composition viewer has
     /// selected (Ctrl+T then runs Free Transform Points, AE).
     pub(crate) vertex_path: Option<PrimPath>,
+    /// Composition viewers opened locked to a comp (View > Split with New
+    /// Locked Viewer), by panel id, until they take it.
+    pub(crate) viewer_pins: HashMap<String, PrimPath>,
     /// Their indices.
     pub(crate) vertex_indices: Vec<usize>,
     /// Vertices of `vertex_path` the viewer selects next (after Set First
@@ -401,6 +404,8 @@ pub struct Session {
     /// Layer ▸ Reveal ▸ … in Project: the item the Project panel selects and
     /// scrolls to next frame.
     pub(crate) reveal_in_project: Option<PrimPath>,
+    /// Text the Project panel's search takes next frame (Find Missing Footage).
+    pub(crate) project_search: Option<String>,
     /// File ▸ Interpret Footage ▸ Remember Interpretation: `footage.interpret`
     /// parameters (without `items`) for Apply Interpretation.
     pub(crate) remembered_interpretation: Option<serde_json::Value>,

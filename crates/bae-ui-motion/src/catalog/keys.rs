@@ -256,7 +256,7 @@ pub const KEYS: &[Key] = &[
     k("CDirItemTabPanelTime", "TimeStepForward", "Ctrl+RightArrow|PadPageDown|PageDOWN", "motion.step", r#"{"frames":1}"#, B, Done, 0),
     k("CDirItemTabPanelTime", "TimeStepForwardMore", "Shift+PageDOWN|Ctrl+Shift+RightArrow", "motion.step", r#"{"frames":10}"#, B, Done, 0),
     k("CDirTabPanel", "NewViewer", "Alt+Shift+N", "motion.view.new_viewer", "", A, Later, 0),
-    k("CDirTabPanel", "NewViewerNewFrame", "Ctrl+Alt+Shift+N", "motion.view.split_with_new_locked_viewer", "", A, Later, 0),
+    k("CDirTabPanel", "NewViewerNewFrame", "Ctrl+Alt+Shift+N", "motion.view.split_with_new_locked_viewer", "", A, Done, 0),
     k("CDirTabPanel", "OpenMiniFlowPopup", "Tab", "motion.comp.composition_mini_flowchart", "", E, Done, 0),
     k("CEggApp", "BrowseInBridge", "Ctrl+Alt+Shift+O", "motion.file.browse_in_bridge", "", B, Adobe, 0),
     k("CEggApp", "CancelAllPreviews", "Esc", "motion.comp.cancel_all_previews", "", B, Todo, 0),

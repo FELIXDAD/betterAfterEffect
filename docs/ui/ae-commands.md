@@ -81,9 +81,9 @@
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ✅ |
 | Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ✅ |
 | Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ✅ |
-| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ⏸ |
-| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ⏸ |
-| Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ⏸ |
+| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ✅ |
+| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ✅ |
+| Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ✅ |
 | Watch Folder... | 131099 | `motion.file.watch_folder` |  |  |  | B | Ⓐ |
 | Scripts ▸ Run Script File... | 917505 | `motion.file.run_script_file` |  |  |  | B | ⏸ |
 | Scripts ▸ Install Script File... | 917506 | `motion.file.install_script_file` |  |  |  | B | ⏸ |
@@ -111,8 +111,8 @@
 | Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ✅ |
 | Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
-| Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
-| Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ⏸ |
+| Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ✅ |
+| Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ✅ |
 | Reload Footage | 131107 | `motion.file.reload_footage` |  | Ctrl+Alt+L | Cmd+Opt+L | E | ✅ |
 | License... | 131108 | `motion.file.license` |  |  |  | B | Ⓐ |
 | Reveal in Explorer | 131109 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
@@ -503,7 +503,7 @@
 
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| Split with New Locked Viewer | 589825 | `motion.view.split_with_new_locked_viewer` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | A | ⏸ |
+| Split with New Locked Viewer | 589825 | `motion.view.split_with_new_locked_viewer` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | A | ✅ |
 | Zoom In | 589827 | `viewer.zoom_in` |  | . / Ctrl+Alt+= | . / Cmd+Opt+= | A | ✅ |
 | Zoom Out | 589828 | `viewer.zoom_out` |  | , / Ctrl+Alt+- | , / Cmd+Opt+- | A | ✅ |
 | Resolution ▸ Full | 8650753 | `motion.view.resolution` | `{"factor":1}` | Ctrl+J | Cmd+J | B | ☐ |
@@ -543,10 +543,10 @@
 | Camera Settings... | 589851 | `motion.layer.camera_settings` |  |  |  | E | ✅ |
 | Reset 3D View | 589852 | `motion.view.reset_3d_view` |  |  |  | A | ⏸ |
 | Create Camera from 3D View | 589853 | `motion.view.create_camera_from_3d_view` |  |  |  | A | ⏸ |
-| Switch View Layout ▸ 1 View | 23396353 | `motion.view.view_layout` | `{"views":1}` |  |  | A | ⏸ |
-| Switch View Layout ▸ 2 Views | 23396354 | `motion.view.view_layout` | `{"views":2}` |  |  | A | ⏸ |
-| Switch View Layout ▸ 4 Views | 23396355 | `motion.view.view_layout` | `{"views":4}` |  |  | A | ⏸ |
-| Switch View Layout ▸ Share View Options | 23396357 | `motion.view.share_view_options` |  |  |  | A | ⏸ |
+| Switch View Layout ▸ 1 View | 23396353 | `motion.view.view_layout` | `{"views":1}` |  |  | A | ✅ |
+| Switch View Layout ▸ 2 Views | 23396354 | `motion.view.view_layout` | `{"views":2}` |  |  | A | ✅ |
+| Switch View Layout ▸ 4 Views | 23396355 | `motion.view.view_layout` | `{"views":4}` |  |  | A | ✅ |
+| Switch View Layout ▸ Share View Options | 23396357 | `motion.view.share_view_options` |  |  |  | A | ✅ |
 | Switch 3D View ▸ Active Camera (Default) | 12058625 | `motion.view.switch_3d_view` | `{"view":"active_camera"}` |  |  | A | ⏸ |
 | Switch 3D View ▸ Default | 12058627 | `motion.view.switch_3d_view` | `{"view":"default"}` |  |  | A | ⏸ |
 | Switch 3D View ▸ Front | 12058629 | `motion.view.switch_3d_view` | `{"view":"front"}` |  |  | A | ⏸ |
@@ -645,7 +645,7 @@
 | Effect Reference... | 720904 | `motion.help.effect_reference` |  |  |  | B | ⏸ |
 | Animation Presets... | 720905 | `motion.help.animation_presets` |  |  |  | B | ⏸ |
 | Keyboard Shortcuts... | 720906 | `motion.help.keyboard_shortcuts` |  |  |  | B | ☐ |
-| System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ⏸ |
+| System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ✅ |
 | Enable Logging | 720909 | `motion.help.enable_logging` |  |  |  | B | ✅ |
 | Reveal Logging File | 720910 | `motion.help.reveal_logging_file` |  |  |  | B | ✅ |
 | Online User Forums... | 720912 | `motion.help.online_user_forums` |  |  |  | B | ⏸ |
