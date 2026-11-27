@@ -349,8 +349,8 @@ pub struct ConnectionStatus {
     /// stuck ([`ConnectionConfig::io_stall`]), taken by a link that does
     /// not write them ([`Connection::link_notes`]), or not sent because a
     /// document's changes do not fit in one message on the link
-    /// ([`SyncSession::too_large`] via [`Connection::session`]; reported once
-    /// in [`ConnectionOutcome::errors`]).
+    /// ([`SyncSession::too_large`] via [`Connection::session`]; reported in
+    /// [`ConnectionOutcome::errors`] when skipped).
     pub unsynced: bool,
     /// Others online (0 unless online).
     pub peers: usize,
@@ -381,11 +381,18 @@ pub struct ConnectionOutcome {
     /// received data that could not be imported (corrupt payload, unknown
     /// type, model error), a document that could not be exported, or one
     /// whose changes do not fit in one message on this link
-    /// ([`SyncError::MessageTooLarge`]). That one is reported once per
-    /// document and link, then not sent: it stays unsynced
+    /// ([`SyncError::MessageTooLarge`]). That one is reported when it is
+    /// skipped, then not sent: it stays unsynced
     /// ([`ConnectionStatus::unsynced`], [`Closing::unsynced`]) and
-    /// `session().too_large(docs)` lists it ([`SyncSession::too_large`]).
-    /// Show it, e.g. "this layer is too large to sync through the hub".
+    /// `session().too_large(docs)` lists it ([`SyncSession::too_large`]). It
+    /// is tried again only when it may fit now (the remote got more of it
+    /// another way, or the document was replaced; spec 2.4 step 3), and
+    /// reported again if it still does not; a snapshot answer that does not
+    /// fit is only reported, once per link. So show what
+    /// `session().too_large(docs)` lists, e.g. "this layer is too large to
+    /// sync through the hub", rather than one notice per error. Our presence
+    /// that does not fit (a very long selection; no `doc`) is reported the
+    /// same way and not shown to the others until a smaller one fits.
     pub errors: Vec<SyncError>,
 }
 
@@ -986,11 +993,14 @@ impl Connection {
 
     /// Documents of `docs` the remote has ops of that we lack, while online
     /// ([`SyncSession::behind`]); empty otherwise (after a link failure the
-    /// session still answers for the old link). Usually on their way. One
-    /// that stays listed is not coming on this link, e.g. it does not fit in
+    /// session still answers for the old link). Usually on their way: they
+    /// leave the list as they arrive, which on a first sync of a large
+    /// project over a slow link takes as long as the transfer. One that
+    /// stays listed may not be coming on this link, e.g. it does not fit in
     /// one message from the hub to us (only the hub knows, and logs it):
     /// [`status`](Self::status) still says online, and `unsynced` is only
-    /// about local edits. Show such a document as not received.
+    /// about local edits. See [`SyncSession::behind`] for when to show a
+    /// document as not received.
     pub fn behind(&self, docs: &dyn DocSet) -> Vec<DocKey> {
         if self.is_online() {
             self.session.behind(docs)

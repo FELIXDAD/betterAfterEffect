@@ -3,17 +3,18 @@
 //! on. While collaborators edit the document, the remote's version of it keeps
 //! changing, but not in a way that can make the update smaller, so it is not
 //! exported again. It is tried again once the remote got more of the missing
-//! ops (here: by another route), or after `reset`. Ported from #760.
+//! ops (here: by another route), or after `reset`. Ported from #760. A
+//! presence that does not fit is skipped the same way.
 
 mod common;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use bae_model::loro::{ExportMode, LoroDoc, VersionVector};
 use bae_sync::{
-    ClientId, DocKey, DocSet, Imported, MemDocs, MemoryTransport, Message, SessionConfig,
-    SyncError, SyncSession, Transport,
+    ClientId, DocKey, DocSet, Imported, MemDocs, MemoryTransport, Message, PresenceState, Relay,
+    SessionConfig, SyncError, SyncSession, Transport,
 };
 use common::*;
 
@@ -50,11 +51,12 @@ impl Transport for Limited {
 }
 
 /// [`MemDocs`] that counts how often the session exported anything of one
-/// document.
+/// document, and records which documents it exported snapshots of.
 struct Counted {
     docs: MemDocs,
     doc: DocKey,
     exports: Cell<usize>,
+    snapshots: RefCell<Vec<DocKey>>,
 }
 
 impl DocSet for Counted {
@@ -77,6 +79,7 @@ impl DocSet for Counted {
         if doc == &self.doc {
             self.exports.set(self.exports.get() + 1);
         }
+        self.snapshots.borrow_mut().push(doc.clone());
         self.docs.export_snapshot(doc)
     }
 
@@ -131,6 +134,7 @@ impl Pair {
                 docs: a,
                 doc: big(),
                 exports: Cell::new(0),
+                snapshots: RefCell::new(Vec::new()),
             },
             b,
             sa: SyncSession::new(config("a")),
@@ -260,6 +264,23 @@ fn an_oversized_update_is_not_exported_again_while_the_remote_edits() {
     assert_eq!(p.too_large, 2, "not tried exactly once after reset");
     assert_eq!(p.a.exports.get(), exports + 2);
 
+    // `b` gets part of what it lacks another way, but what is left still
+    // does not fit: tried once more and reported again (spec 2.4 step 3:
+    // reported again whenever a retry does not fit), then not again.
+    let part =
+        p.a.docs
+            .export_updates(&big(), &p.b.version(&big()).unwrap())
+            .unwrap();
+    p.a_edits(&big(), &letters(256 << 10, 3));
+    p.b.import(&big(), &part).unwrap();
+    for _ in 0..20 {
+        p.b_edits(&big());
+        p.pump();
+    }
+    assert_eq!(p.too_large, 3, "a partial gain is not tried exactly once");
+    assert_eq!(p.a.exports.get(), exports + 3);
+    assert_eq!(p.sa.too_large(&p.a), [big()]);
+
     // `b` gets the large edit another way (say, a shared folder). Its next
     // hello shows it has more of `a`'s ops, the update is small now, and `a`'s
     // newer edits go out again.
@@ -270,7 +291,7 @@ fn an_oversized_update_is_not_exported_again_while_the_remote_edits() {
         p.pump();
     }
     assert!(p.b_has_all_of(&big()), "a's later edit did not arrive");
-    assert_eq!(p.too_large, 2);
+    assert_eq!(p.too_large, 3);
     assert!(p.sa.unsynced(&p.a).is_empty());
     assert!(p.sa.too_large(&p.a).is_empty());
     assert!(p.sb.is_caught_up(&p.b));
@@ -298,13 +319,19 @@ fn an_oversized_snapshot_is_not_exported_on_every_request() {
     assert_eq!(p.too_large, 2);
     assert_eq!(p.a.exports.get(), exports + 1);
     assert_eq!(p.sa.pending_snapshot_requests(), 0);
-    // Other answers still go out.
-    p.a_edits(&small(), "s");
+    // Other answers still go out (`b` has all of `small`, so only the
+    // answer can bring it anything: count the export and the arrival).
+    assert!(p.b_has_all_of(&small()));
+    p.a.snapshots.borrow_mut().clear();
+    let arrived = |p: &Pair| p.sb.stats().imports + p.sb.stats().redundant;
+    let before = arrived(&p);
     p.tb.send(Message::SnapshotRequest { doc: small() })
         .unwrap();
     p.pump();
     p.pump();
-    assert!(p.b_has_all_of(&small()));
+    assert_eq!(*p.a.snapshots.borrow(), [small()]);
+    assert_eq!(arrived(&p), before + 1, "the answer did not arrive");
+    assert_eq!(p.sa.pending_snapshot_requests(), 0);
 
     p.sa.reset();
     p.tb.send(Message::SnapshotRequest { doc: big() }).unwrap();
@@ -314,4 +341,90 @@ fn an_oversized_snapshot_is_not_exported_on_every_request() {
     // The update and the snapshot, once each.
     assert_eq!(p.too_large, 4);
     assert_eq!(p.a.exports.get(), exports + 3);
+}
+
+/// A collaborator's presence that does not fit in one message to a client (a
+/// very long selection, a link that takes little): the relay skips it for
+/// that client and reports it once, and the client stays connected. Before,
+/// the relay dropped the client; it reconnected, got the same presence and
+/// was dropped again for as long as the selection stayed.
+#[test]
+fn a_presence_that_does_not_fit_is_skipped_by_the_relay() {
+    let mut relay = Relay::new(ClientId::new("hub").unwrap());
+    let mut sessions = Vec::new();
+    let mut links = Vec::new();
+    let mut handles = Vec::new();
+    let mut docs = Vec::new();
+    for (i, limited) in [false, false, true].into_iter().enumerate() {
+        let (mine, theirs) = MemoryTransport::pair();
+        handles.push(if limited {
+            relay.connect(Box::new(Limited(theirs)))
+        } else {
+            relay.connect(Box::new(theirs))
+        });
+        links.push(mine);
+        docs.push(MemDocs::new());
+        let mut config = SessionConfig::new(ClientId::new(&format!("p{i}")).unwrap());
+        config.hello_interval = Some(Duration::from_secs(5));
+        sessions.push(SyncSession::new(config));
+    }
+    let t0 = Instant::now();
+    let mut now = Duration::ZERO;
+    // Pumps everyone twice; returns what the relay reported.
+    let mut step = |sessions: &mut Vec<SyncSession>, dt: Duration| {
+        now += dt;
+        let mut too_large = Vec::new();
+        for _ in 0..2 {
+            for i in 0..sessions.len() {
+                let out = sessions[i]
+                    .pump_at(&mut docs[i], &mut links[i], t0 + now)
+                    .unwrap();
+                assert!(out.errors.is_empty(), "{:?}", out.errors);
+            }
+            let out = relay.pump_at(t0 + now);
+            assert!(out.disconnected.is_empty(), "{:?}", out.disconnected);
+            too_large.extend(out.errors);
+        }
+        too_large
+    };
+    let names = |s: &SyncSession| -> Vec<String> {
+        s.presence().into_iter().map(|p| p.state.name).collect()
+    };
+    let presence = |name: &str, selected: usize| PresenceState {
+        name: name.to_owned(),
+        selection: (0..selected)
+            .map(|i| p(&format!("/comps/main/layers/layer_{i:05}")))
+            .collect(),
+        ..PresenceState::default()
+    };
+
+    // About 100 KiB of selection: more than the third client takes.
+    sessions[0].set_presence(presence("alice", 3000));
+    sessions[1].set_presence(presence("bob", 0));
+    let mut too_large = step(&mut sessions, Duration::from_millis(10));
+    assert_eq!(names(&sessions[1]), ["alice"]);
+    assert_eq!(names(&sessions[2]), ["bob"]);
+    assert!(
+        matches!(
+            &too_large[..],
+            [(h, SyncError::MessageTooLarge { doc: None, max: LIMIT, .. })] if *h == handles[2]
+        ),
+        "{too_large:?}"
+    );
+    // Heartbeats keep it going to the others, and are neither sent to the
+    // third client nor reported again; nobody is dropped.
+    for _ in 0..6 {
+        too_large.extend(step(&mut sessions, Duration::from_secs(5)));
+    }
+    assert_eq!(too_large.len(), 1, "{too_large:?}");
+    assert_eq!(names(&sessions[1]), ["alice"]);
+    assert_eq!(names(&sessions[2]), ["bob"]);
+    // A smaller selection reaches it.
+    sessions[0].set_presence(presence("alice", 3));
+    too_large.extend(step(&mut sessions, Duration::from_millis(10)));
+    assert_eq!(names(&sessions[2]), ["alice", "bob"]);
+    // Too large again after one fitted: reported again.
+    sessions[0].set_presence(presence("alice", 3000));
+    too_large.extend(step(&mut sessions, Duration::from_millis(10)));
+    assert_eq!(too_large.len(), 2, "{too_large:?}");
 }

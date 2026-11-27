@@ -241,9 +241,11 @@ pub struct SessionConfig {
     /// write ([`crate::DirTransport::open_read_only`]). [`crate::Connection`]
     /// sets it from the access the remote granted. The hub drops such data
     /// anyway, and takes only small messages from read-only connections (its
-    /// `read_only_max_incoming`): a viewer with more local edits than that in
-    /// one document would be dropped each time it sent them, which is after
-    /// every `Hello` of the hub and every reconnect. `Hello`s, presence and
+    /// `read_only_max_incoming`, which it tells the client in the
+    /// handshake): sending them anyway costs the export and the transfer
+    /// after every `Hello` of the hub and every reconnect, and a document
+    /// over that limit is skipped as too large (a client that does not read
+    /// the hub's limit, an older build, is dropped each time). `Hello`s, presence and
     /// receiving go on as usual; local edits stay local
     /// ([`unsynced`](SyncSession::unsynced) keeps listing them, nothing counts
     /// as on its way). Default `true`.
@@ -279,11 +281,15 @@ pub struct PumpOutcome {
     pub unknown_docs: Vec<DocKey>,
     /// Problems with single messages or documents; the link is still usable:
     /// received data that could not be imported (corrupt payload, model
-    /// error), a document that could not be exported, or one whose changes do
+    /// error), a document that could not be exported, one whose changes do
     /// not fit in one message on this link ([`SyncError::MessageTooLarge`]:
-    /// reported once, then not exported again until the update may have
-    /// become smaller or after [`SyncSession::reset`], see
-    /// [`SyncSession::too_large`]).
+    /// reported when skipped, then not exported again until the update may
+    /// have become smaller or after [`SyncSession::reset`], and reported
+    /// again if that retry does not fit either, see
+    /// [`SyncSession::too_large`]; a snapshot answer that does not fit is
+    /// reported once per link), or our presence that does not fit (no
+    /// `doc`; not sent until it changes, reported again only after one
+    /// fitted).
     pub errors: Vec<SyncError>,
     /// Someone came online, went offline or changed their presence.
     pub presence_changed: bool,
@@ -363,6 +369,11 @@ pub struct SyncSession {
     presence_leave: bool,
     presence_seq: u64,
     last_presence: Option<Instant>,
+    /// Our presence did not fit in one message on this link
+    /// ([`SyncError::MessageTooLarge`], reported once): heartbeats are not
+    /// sent, a changed presence is tried again (reported again only after
+    /// one fitted) and `reset` clears it.
+    presence_too_large: bool,
     peers: PresenceTable,
 }
 
@@ -390,6 +401,7 @@ impl SyncSession {
             presence_leave: false,
             presence_seq: initial_seq(),
             last_presence: None,
+            presence_too_large: false,
             peers: PresenceTable::default(),
         }
     }
@@ -489,6 +501,7 @@ impl SyncSession {
         self.too_large.clear();
         self.snapshot_too_large.clear();
         self.presence_dirty = self.presence.is_some();
+        self.presence_too_large = false;
         self.presence_seq = (self.presence_seq + 1).max(initial_seq());
         self.peers = PresenceTable::default();
     }
@@ -552,16 +565,23 @@ impl SyncSession {
     /// ([`PumpOutcome::unknown_docs`]).
     ///
     /// Usually they are on their way (a first sync, data the remote's flow
-    /// control holds back) and leave the list within a few pumps. One that
-    /// stays listed is not coming on this link, and only the remote knows
-    /// why: its changes do not fit in one message to us (spec 2.4: a
-    /// sublayer over the hub's message limit, which the hub skips for this
-    /// client and only logs; nothing tells this side), or what it sent did
-    /// not import here ([`PumpOutcome::errors`]), or Loro holds ops back for
-    /// missing dependencies. Meanwhile a `crate::Connection` still shows
-    /// online and nothing unsynced (that is about local edits): show the
-    /// documents that stay listed for a while (say a minute) as not
-    /// received.
+    /// control holds back) and leave the list as they arrive. That can take
+    /// as long as the transfer: the remote sends one document after another,
+    /// and a large layer is one message (200 MB over 10 Mbit/s is about three
+    /// minutes), so on a first sync of a large project over a slow link
+    /// documents stay listed for minutes. One that stays listed may not be
+    /// coming on this link, and only the remote knows why: its changes do
+    /// not fit in one message to us (spec 2.4: a sublayer over the hub's
+    /// message limit, which the hub skips for this client and only logs;
+    /// nothing tells this side), or what it sent did not import here
+    /// ([`PumpOutcome::errors`]), or Loro holds ops back for missing
+    /// dependencies. This side cannot tell those from a slow transfer.
+    /// Meanwhile a `crate::Connection` still shows online and nothing
+    /// unsynced (that is about local edits). So show listed documents as
+    /// "not received yet" while online, and as not received (not coming)
+    /// only on lack of progress: e.g. no document data arrived for several
+    /// minutes ([`SyncStats::bytes_received`] unchanged) while some stay
+    /// listed.
     pub fn behind(&self, docs: &dyn DocSet) -> Vec<DocKey> {
         let Some(remote) = &self.confirmed else {
             return Vec::new();
@@ -609,10 +629,12 @@ impl SyncSession {
     /// because they do not fit in one message on this link
     /// ([`Transport::max_message_size`], [`SyncError::MessageTooLarge`]; e.g.
     /// a sublayer over a hub's message limit). They are also in
-    /// [`unsynced`](Self::unsynced). Each was reported once in
-    /// [`PumpOutcome::errors`]; it is exported again only once the remote has
-    /// more of the ops it lacked (it got them another way), or after
-    /// [`reset`](Self::reset). Local edits only make the update larger, so
+    /// [`unsynced`](Self::unsynced). Each was reported in
+    /// [`PumpOutcome::errors`] when skipped; it is exported again only once
+    /// the remote has more of the ops it lacked (it got them another way), or
+    /// after [`reset`](Self::reset), and reported again if it still does not
+    /// fit. A snapshot answer that does not fit is not listed (the remote
+    /// usually has everything then): it is only reported, once per link. Local edits only make the update larger, so
     /// they do not make it try again. A document replaced under the same key
     /// (a sublayer deleted and created again) is not listed: it is another
     /// document, tried on the next send.
@@ -648,11 +670,10 @@ impl SyncSession {
     /// the transport signals incoming data (or on a timer).
     ///
     /// Errors are transport failures; the link must be re-established (then call
-    /// [`reset`](Self::reset)). So is a message without a document that does
-    /// not fit in one message on the link ([`SyncError::MessageTooLarge`]
-    /// with no `doc`: our `Hello` or presence), which the link cannot do
-    /// without; document data that does not fit is only skipped (in
-    /// [`PumpOutcome::errors`]). Payloads received before the failure are still
+    /// [`reset`](Self::reset)). So is a `Hello` that does not fit in one
+    /// message on the link ([`SyncError::MessageTooLarge`] with no `doc`),
+    /// which the link cannot do without; document data and our presence that
+    /// do not fit are only skipped (in [`PumpOutcome::errors`]). Payloads received before the failure are still
     /// imported (their [`StageEvent`]s reach `Stage::subscribe` listeners; the
     /// outcome itself is lost with the error), and snapshot requests received
     /// before it are still kept and answered (at most
@@ -956,6 +977,16 @@ impl SyncSession {
     }
 
     /// Send our presence when it changed or the heartbeat is due, or "left".
+    ///
+    /// A presence that does not fit in one message on the link
+    /// ([`SyncError::MessageTooLarge`]: its selection or `editing` lists are
+    /// very long and the link takes little, e.g. a hub's read-only limit) is
+    /// skipped like a document: reported once in `out.errors`, not sent again
+    /// until it changes, and the link goes on. Others see our last presence
+    /// that fitted until it expires (`presence_ttl`). Failing the pump
+    /// instead would drop the link and send the same presence after every
+    /// reconnect, so a viewer selecting many layers would go offline for
+    /// good.
     fn maybe_presence(
         &mut self,
         transport: &mut dyn Transport,
@@ -966,9 +997,10 @@ impl SyncSession {
             None
         } else if let Some(p) = &self.presence {
             let due = self.presence_dirty
-                || self.last_presence.is_none_or(|t| {
-                    now.saturating_duration_since(t) >= self.config.presence_heartbeat
-                });
+                || (!self.presence_too_large
+                    && self.last_presence.is_none_or(|t| {
+                        now.saturating_duration_since(t) >= self.config.presence_heartbeat
+                    }));
             if !due {
                 return Ok(());
             }
@@ -983,7 +1015,17 @@ impl SyncSession {
             ttl_ms: u32::try_from(self.config.presence_ttl.as_millis()).unwrap_or(u32::MAX),
             state,
         };
-        self.send(transport, msg, out)?;
+        match self.send(transport, msg, out) {
+            Ok(()) => self.presence_too_large = false,
+            // "Left" carries no state and always fits.
+            Err(e @ SyncError::MessageTooLarge { .. }) if !self.presence_leave => {
+                if !self.presence_too_large {
+                    self.presence_too_large = true;
+                    out.errors.push(e);
+                }
+            }
+            Err(e) => return Err(e),
+        }
         self.presence_dirty = false;
         self.presence_leave = false;
         self.last_presence = Some(now);
@@ -1178,11 +1220,13 @@ mod tests {
         sent: Vec<Message>,
         backlog: usize,
         max: Option<usize>,
+        /// Messages refused as too large.
+        refused: usize,
     }
 
     impl Transport for Lagging {
         fn send(&mut self, msg: Message) -> Result<(), SyncError> {
-            crate::transport::check_size(&msg, self.max)?;
+            crate::transport::check_size(&msg, self.max).inspect_err(|_| self.refused += 1)?;
             self.backlog += msg.approx_len();
             self.sent.push(msg);
             Ok(())
@@ -1830,6 +1874,8 @@ mod tests {
         let out = s.pump(&mut docs, &mut t).unwrap();
         assert!(out.errors.is_empty(), "{:?}", out.errors);
         assert_eq!(snapshots_sent(&mut t), ["a"]);
+        // The answer that went out drops the old document's snapshot memo.
+        assert!(!s.snapshot_too_large.contains_key(&key("a")));
 
         // Too large again; removed for a pump, then a small one under the
         // same key.
@@ -1965,14 +2011,15 @@ mod tests {
         );
     }
 
-    /// Only document data is skipped when it does not fit (spec 2.4). A
-    /// message without a document that does not fit (a `Hello` listing
-    /// many documents, our presence) is a link error: the link cannot work
-    /// without it, so `pump` returns it (a `Connection` reconnects with
-    /// backoff, a relay drops the peer). Only a link that takes less than a
-    /// `Hello` does this.
+    /// A `Hello` that does not fit (it lists many documents) is a link error:
+    /// the link cannot work without it, so `pump` returns it (a `Connection`
+    /// reconnects with backoff, a relay drops the peer). Our presence is
+    /// skipped like document data (spec 2.4 step 3): reported once, not sent
+    /// again until it changes, and the link goes on; otherwise a viewer
+    /// selecting many layers on a hub with a small read-only limit would
+    /// reconnect for ever.
     #[test]
-    fn a_hello_or_presence_that_does_not_fit_fails_the_pump() {
+    fn a_hello_that_does_not_fit_fails_the_pump_and_presence_is_skipped() {
         let session = |presence: Option<&str>| {
             let mut s = SyncSession::new(SessionConfig::new(ClientId::new("app").unwrap()));
             if let Some(name) = presence {
@@ -1995,24 +2042,39 @@ mod tests {
             };
             (size(true).unwrap(), size(false))
         };
-        let refused = |r: Result<PumpOutcome, SyncError>| match r {
-            Err(SyncError::MessageTooLarge {
-                doc: None, size, ..
-            }) => size,
-            r => panic!("{r:?}"),
+        let too_large = |errors: &[SyncError]| {
+            errors
+                .iter()
+                .filter(|e| matches!(e, SyncError::MessageTooLarge { doc: None, .. }))
+                .count()
+        };
+        let presence_sent = |t: &mut Lagging| {
+            let n = t
+                .sent
+                .iter()
+                .filter(|m| matches!(m, Message::Presence { .. }))
+                .count();
+            t.sent.clear();
+            n
         };
 
-        // A `Hello` of five documents over the limit.
+        // A `Hello` of five documents over the limit: the link cannot work.
         let mut docs = five_docs();
         let (hello, _) = first(&mut docs, None);
         let mut t = Lagging {
             max: Some(hello - 1),
             ..Lagging::default()
         };
-        assert_eq!(refused(session(None).pump(&mut docs, &mut t)), hello);
+        match session(None).pump(&mut docs, &mut t) {
+            Err(SyncError::MessageTooLarge {
+                doc: None, size, ..
+            }) => assert_eq!(size, hello),
+            r => panic!("{r:?}"),
+        }
         assert!(t.sent.is_empty());
 
-        // Presence over the limit, after a `Hello` that fits.
+        // Presence over the limit, after a `Hello` that fits: skipped and
+        // reported once, the link goes on.
         let mut docs = MemDocs::new();
         let name = "n".repeat(200);
         let (hello, presence) = first(&mut docs, Some(&name));
@@ -2022,12 +2084,67 @@ mod tests {
             max: Some(presence - 1),
             ..Lagging::default()
         };
-        assert_eq!(
-            refused(session(Some(&name)).pump(&mut docs, &mut t)),
-            presence
-        );
+        let mut s = session(Some(&name));
+        let start = Instant::now();
+        let out = s.pump_at(&mut docs, &mut t, start).unwrap();
+        assert_eq!(too_large(&out.errors), 1, "{:?}", out.errors);
         assert!(
             matches!(t.sent[..], [Message::Hello { .. }]),
+            "{:?}",
+            t.sent
+        );
+        t.sent.clear();
+        // Heartbeats do not try it again, nor report it again.
+        assert_eq!(t.refused, 1);
+        let heartbeat = s.config.presence_heartbeat;
+        for i in 1..4 {
+            let out = s.pump_at(&mut docs, &mut t, start + heartbeat * i).unwrap();
+            assert_eq!(too_large(&out.errors), 0, "{:?}", out.errors);
+            assert_eq!(presence_sent(&mut t), 0);
+        }
+        assert_eq!(t.refused, 1, "a heartbeat tried it again");
+        // A changed presence that still does not fit: tried, not reported again.
+        s.set_presence(PresenceState {
+            name: "m".repeat(200),
+            ..PresenceState::default()
+        });
+        let out = s.pump_at(&mut docs, &mut t, start + heartbeat * 4).unwrap();
+        assert_eq!(too_large(&out.errors), 0, "{:?}", out.errors);
+        assert_eq!(presence_sent(&mut t), 0);
+        // One that fits goes out, and heartbeats resume.
+        s.set_presence(PresenceState {
+            name: "short".to_owned(),
+            ..PresenceState::default()
+        });
+        s.pump_at(&mut docs, &mut t, start + heartbeat * 5).unwrap();
+        assert_eq!(presence_sent(&mut t), 1);
+        s.pump_at(&mut docs, &mut t, start + heartbeat * 6).unwrap();
+        assert_eq!(presence_sent(&mut t), 1);
+        // Too large again after one fitted: reported again.
+        s.set_presence(PresenceState {
+            name: name.clone(),
+            ..PresenceState::default()
+        });
+        let out = s.pump_at(&mut docs, &mut t, start + heartbeat * 7).unwrap();
+        assert_eq!(too_large(&out.errors), 1, "{:?}", out.errors);
+        assert_eq!(presence_sent(&mut t), 0);
+        // A new link (maybe with a larger limit) tries it again at once.
+        s.reset();
+        t.max = None;
+        s.pump_at(&mut docs, &mut t, start + heartbeat * 7).unwrap();
+        assert_eq!(presence_sent(&mut t), 1);
+        // "Left" goes out on a link that took no presence.
+        t.max = Some(presence - 1);
+        s.reset();
+        let out = s.pump_at(&mut docs, &mut t, start + heartbeat * 8).unwrap();
+        assert_eq!(too_large(&out.errors), 1, "{:?}", out.errors);
+        t.sent.clear();
+        s.clear_presence();
+        s.pump_at(&mut docs, &mut t, start + heartbeat * 8).unwrap();
+        assert!(
+            t.sent
+                .iter()
+                .any(|m| matches!(m, Message::Presence { state: None, .. })),
             "{:?}",
             t.sent
         );

@@ -9,6 +9,7 @@
 //! that reads slowly does not make the relay queue the project again for each
 //! of its `Hello`s.
 
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use crate::client::ClientId;
@@ -30,6 +31,38 @@ struct Peer {
     transport: Box<dyn Transport + Send>,
     /// Current presence of the others has been sent to this peer.
     greeted: bool,
+    /// Clients whose presence did not fit in one message to this peer
+    /// (reported once, until one of theirs fits again).
+    presence_too_large: BTreeSet<ClientId>,
+}
+
+impl Peer {
+    /// Forward another client's presence to this peer. One that does not fit
+    /// in one message to it ([`SyncError::MessageTooLarge`]: a very long
+    /// selection, and a peer that takes little) is skipped like document
+    /// data: reported in `out.errors` once per sender until one of that
+    /// sender's fits again, and the link goes on. Dropping the peer instead
+    /// would make it reconnect, get the same presence and be dropped again,
+    /// for as long as that collaborator keeps the selection.
+    fn forward_presence(&mut self, msg: &Message, out: &mut RelayOutcome) -> Result<(), SyncError> {
+        let Message::Presence { client, .. } = msg else {
+            return Ok(());
+        };
+        match self.transport.send(msg.clone()) {
+            Ok(()) => {
+                out.sent += 1;
+                self.presence_too_large.remove(client);
+                Ok(())
+            }
+            Err(e @ SyncError::MessageTooLarge { .. }) => {
+                if self.presence_too_large.insert(client.clone()) {
+                    out.errors.push((self.handle, e));
+                }
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// What one [`Relay::pump`] did.
@@ -131,6 +164,7 @@ impl Relay {
             session: SyncSession::new(config),
             transport,
             greeted: false,
+            presence_too_large: BTreeSet::new(),
         });
         handle
     }
@@ -226,11 +260,10 @@ impl Relay {
                 if !peer.greeted {
                     peer.greeted = true;
                     for (_, msg) in self.presence.raw() {
-                        if let Err(e) = peer.transport.send(msg.clone()) {
+                        if let Err(e) = peer.forward_presence(msg, &mut out) {
                             failed.push((peer.handle, e));
                             break;
                         }
-                        out.sent += 1;
                     }
                 }
             }
@@ -241,10 +274,8 @@ impl Relay {
                     continue;
                 }
                 for peer in self.peers.iter_mut().filter(|p| p.handle != from) {
-                    if let Err(e) = peer.transport.send(msg.clone()) {
+                    if let Err(e) = peer.forward_presence(&msg, &mut out) {
                         failed.push((peer.handle, e));
-                    } else {
-                        out.sent += 1;
                     }
                 }
             }

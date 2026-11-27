@@ -126,12 +126,13 @@ pub trait Transport {
     /// ([`Message::encoded_len`]). A larger one fails with
     /// [`SyncError::MessageTooLarge`] at once: nothing is sent or queued, and
     /// the link stays usable (a session skips a document whose data does not
-    /// fit and sends the others, `docs/spec/sync.md` §2.4; a `Hello` or
-    /// presence that does not fit fails its pump like a link error). A hub
-    /// link's is its
-    /// `HubLimits::max_message`, or less if the hub said it takes less. Must
-    /// not change while the transport is in use ([`crate::ThreadedTransport`]
-    /// reads it once). The default, `None`: no limit.
+    /// fit, or its presence, and sends the rest, `docs/spec/sync.md` §2.4; a
+    /// `Hello` that does not fit fails its pump like a link error). A hub
+    /// link's is its `HubLimits::max_message`, or less if the hub said it
+    /// takes less; a shared folder's is the largest record its logs can hold
+    /// (1 GiB). Must not change while the transport is in use
+    /// ([`crate::ThreadedTransport`] reads it once). The default, `None`: no
+    /// limit.
     fn max_message_size(&self) -> Option<usize> {
         None
     }

@@ -824,7 +824,7 @@ fn a_slow_reader_is_not_flooded_by_its_own_hellos() {
 /// over. Both ways: the hub learns the client's limit from the request.
 #[test]
 fn each_side_sends_at_most_what_the_other_takes() {
-    use bae_sync::{HubLimits, Transport};
+    use bae_sync::{DocKey, HubLimits, Message, Transport};
     let small = HubLimits {
         max_message: 64 << 10,
         max_incoming: 64 << 10,
@@ -857,13 +857,46 @@ fn each_side_sends_at_most_what_the_other_takes() {
         },
     )
     .unwrap();
-    let hub = hub.join().unwrap();
+    let mut hub = hub.join().unwrap();
+    let mut client = client;
     assert_eq!(hub.peer_max_incoming(), Some(32 << 10));
     assert_eq!(hub.max_message_size(), Some(32 << 10));
     assert_eq!(
         client.max_message_size(),
         Some(HubLimits::default().max_message)
     );
+    // The hub's `send` keeps to it (a hub link is not behind a
+    // `ThreadedTransport`, which would check it too): nothing is sent, the
+    // link goes on.
+    let doc = DocKey::parse("root").unwrap();
+    let data = |n: usize| Message::Updates {
+        doc: doc.clone(),
+        version: Default::default(),
+        data: vec![7; n],
+    };
+    match hub.send(data(48 << 10)) {
+        Err(SyncError::MessageTooLarge {
+            doc: Some(d), max, ..
+        }) => {
+            assert_eq!((d, max), (doc.clone(), 32 << 10));
+        }
+        r => panic!("{r:?}"),
+    }
+    assert_eq!(hub.backlog(), 0);
+    hub.send(data(1000)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let got = loop {
+        assert!(
+            Instant::now() < deadline,
+            "the small message did not arrive"
+        );
+        hub.recv().unwrap();
+        if let Some(m) = client.recv().unwrap() {
+            break m;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(got, data(1000));
 }
 
 /// A hub configured for smaller messages than the client sends (here

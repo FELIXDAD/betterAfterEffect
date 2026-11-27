@@ -103,6 +103,10 @@ impl NotesCopier {
 /// over yet plus the inner transport's backlog as the worker last saw it.
 ///
 /// A failed `send` of the inner transport surfaces through a later `recv`.
+/// `send` itself fails only for a message over the inner transport's
+/// [`Transport::max_message_size`] ([`SyncError::MessageTooLarge`]: not
+/// queued, the link goes on), and with [`SyncError::Closed`] after `close`
+/// or once the worker has ended (`recv` reports why).
 /// [`Transport::close`] waits until everything queued was handed to the inner
 /// transport, then closes that (which may wait until the messages arrived, see
 /// its `close`), and returns the first error that `recv` did not report yet, so
