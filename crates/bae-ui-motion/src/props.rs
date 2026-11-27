@@ -337,6 +337,18 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
         )),
         _ => None,
     };
+    // Advanced 3D: text and shape layers' Geometry Options, before their
+    // Material Options.
+    if three_d && matches!(kind.as_str(), "text" | "shape") && advanced_3d(stage, layer) {
+        out.push(Node::Group {
+            id: format!("{layer}#geometry_options"),
+            label: tr("Geometry Options").to_owned(),
+            children: GEOMETRY_OPTIONS
+                .into_iter()
+                .map(|a| prop(stage, layer, a, three_d))
+                .collect(),
+        });
+    }
     if let Some((id, label, attrs)) = options {
         out.push(Node::Group {
             id: format!("{layer}#{id}"),
@@ -402,12 +414,25 @@ const ADVANCED_3D_MATERIAL_OPTIONS: [&str; 17] = [
     "material:index_of_refraction",
 ];
 
-fn material_options(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
-    let advanced = query::owning_comp(stage, layer)
+/// Advanced 3D Geometry Options of text and shape layers, in AE's order.
+const GEOMETRY_OPTIONS: [&str; 5] = [
+    "geometry:bevel_style",
+    "geometry:bevel_direction",
+    "geometry:bevel_depth",
+    "geometry:hole_bevel_depth",
+    "geometry:extrusion_depth",
+];
+
+/// Whether `layer`'s comp renders 3D with Advanced 3D.
+fn advanced_3d(stage: &Stage, layer: &PrimPath) -> bool {
+    query::owning_comp(stage, layer)
         .and_then(|c| stage.prim(&c))
         .and_then(|v| query::static_value(&v, "renderer"))
-        .is_some_and(|v| v.as_str() == Some("advanced_3d"));
-    if advanced {
+        .is_some_and(|v| v.as_str() == Some("advanced_3d"))
+}
+
+fn material_options(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
+    if advanced_3d(stage, layer) {
         ADVANCED_3D_MATERIAL_OPTIONS.to_vec()
     } else {
         MATERIAL_OPTIONS.to_vec()

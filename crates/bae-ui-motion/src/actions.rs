@@ -276,6 +276,10 @@ pub mod ids {
     /// Edit ▸ Purge ▸ … (`{"what": …}`): the memory caches here; the undo
     /// steps and the disk cache in the shell (not handled here).
     pub const PURGE: &str = "motion.edit.purge";
+    /// File ▸ Dependencies ▸ Find Missing Effects / Fonts: the Project panel
+    /// lists the comps that use them.
+    pub const FIND_MISSING_EFFECTS: &str = "motion.file.find_missing_effects";
+    pub const FIND_MISSING_FONTS: &str = "motion.file.find_missing_fonts";
     /// Help ▸ System Compatibility Report…
     pub const SYSTEM_REPORT: &str = "motion.help.system_compatibility_report";
     pub const CONSOLIDATE: &str = "motion.file.consolidate_all_footage";
@@ -512,6 +516,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::REMOVE_UNUSED, "Remove Unused Footage"),
     (ids::FIND_MISSING_FOOTAGE, "Find Missing Footage"),
     (ids::PURGE, "Purge"),
+    (ids::FIND_MISSING_EFFECTS, "Find Missing Effects"),
+    (ids::FIND_MISSING_FONTS, "Find Missing Fonts"),
     (ids::SYSTEM_REPORT, "System Compatibility Report..."),
     (ids::CONSOLIDATE, "Consolidate All Footage"),
     (ids::REDUCE_PROJECT, "Reduce Project"),
@@ -1611,6 +1617,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
             // Undo steps and the disk cache: the shell's.
             return what == Some("image_cache_memory");
+        }
+        ids::FIND_MISSING_EFFECTS | ids::FIND_MISSING_FONTS => {
+            let term = if id == ids::FIND_MISSING_EFFECTS {
+                crate::project::MISSING_EFFECTS
+            } else {
+                crate::project::MISSING_FONTS
+            };
+            session.lock().project_search = Some(bae_ui::tr(term).to_owned());
+            cx.open_panel("project");
+            return true;
         }
         ids::FIND_MISSING_FOOTAGE => {
             session.lock().project_search =
@@ -3303,6 +3319,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Purge All Disk Cache", "清理所有磁盘缓存"),
     ("Purge Undo", "清理撤消"),
     ("Purge Image Cache Memory", "清理图像缓存内存"),
+    ("Find Missing Effects", "查找缺失的效果"),
+    ("Find Missing Fonts", "查找缺失的字体"),
+    ("Missing Effects", "缺失效果"),
+    ("Missing Fonts", "缺失字体"),
     ("Missing Footage", "缺失素材"),
     ("System Compatibility Report...", "系统兼容性报告..."),
     ("System Compatibility Report", "系统兼容性报告"),
