@@ -18,6 +18,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Project Settings", "项目设置"),
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
     // (#136). The command crate stays UI-free; its titles are translated here.
+    ("Roto Brush Stroke", "Roto 笔刷笔触"),
+    ("Freeze Roto Brush", "冻结 Roto 笔刷"),
     ("Waveform Audio (WAV)", "波形音频（WAV）"),
     ("Stereo, 48 kHz, 24-bit PCM", "立体声，48 kHz，24 位 PCM"),
     ("Convert Audio to Keyframes", "将音频转换为关键帧"),
