@@ -35,3 +35,20 @@ pub fn span(value: Option<&Value>) -> Option<[Time; 2]> {
         _ => None,
     }
 }
+
+/// Sampling policies for reconstructing the transparent part of a layer.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum FillMethod {
+    #[default]
+    Object,
+    Surface,
+    EdgeBlend,
+}
+#[derive(Clone, Copy, Default)]
+pub struct FillSettings {
+    pub method: FillMethod,
+    pub expansion: u32,
+    /// Fraction of the local exposure difference to compensate on temporal samples.
+    pub lighting: f32,
+}
+pub const FILL_SHADER: &str = include_str!("fill.wgsl");

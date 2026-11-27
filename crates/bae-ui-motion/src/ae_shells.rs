@@ -61,20 +61,6 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
         ],
     ),
     (
-        "content_aware_fill",
-        "Content-Aware Fill",
-        &[
-            Title("Fill Target"),
-            Area(""),
-            Pair("Alpha Expansion", Value("0")),
-            Pair("Fill Method", Dropdown("Object")),
-            Pair("Lighting Correction", Dropdown("None")),
-            Pair("Range", Dropdown("Work Area")),
-            Line(&[Button("Create Reference Frame")]),
-            Line(&[Button("Generate Fill Layer")]),
-        ],
-    ),
-    (
         "motion_sketch",
         "Motion Sketch",
         &[
@@ -441,6 +427,7 @@ mod tests {
                     | "character"
                     | "align"
                     | "tracker"
+                    | "content_aware_fill"
                     | "create_nulls_from_paths"
                     | "vr_comp_editor"
                     | "paragraph"

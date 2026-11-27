@@ -37,3 +37,67 @@ fn roto_foreground_and_background_propagate_on_both_sides_of_a_seed() {
         );
     }
 }
+
+mod common;
+#[test]
+fn fill_uses_visible_temporal_samples_or_spatial_boundaries_and_keeps_the_exterior_clear() {
+    use bae_vision::{FillMethod, FillSettings};
+    use common::{F16, Pixels};
+    let Some(gpu) = common::context() else {
+        return;
+    };
+    let rect = bae_render::IRect::new(0, 0, 32, 16);
+    let pattern = |x: i32| {
+        if x < 16 {
+            [1., 0., 0., 1.]
+        } else {
+            [0., 0., 1., 1.]
+        }
+    };
+    let src = Pixels::new(rect, |x, _| {
+        if (11..21).contains(&x) {
+            [0.; 4]
+        } else {
+            pattern(x)
+        }
+    })
+    .upload(&gpu, F16);
+    let other = Pixels::new(rect, |x, _| {
+        if (11..21).contains(&x) {
+            [0., 1., 0., 1.]
+        } else {
+            pattern(x)
+        }
+    })
+    .upload(&gpu, F16);
+    let mut target = bae_effects::Standalone::new(gpu.clone(), F16);
+    for method in [
+        FillMethod::Object,
+        FillMethod::Surface,
+        FillMethod::EdgeBlend,
+    ] {
+        let patch = bae_effects::content_aware_fill(
+            &mut target,
+            &src,
+            &other,
+            &other,
+            FillSettings {
+                method,
+                expansion: 1,
+                lighting: 0.,
+            },
+        )
+        .unwrap();
+        target.submit();
+        let px = Pixels::download(&gpu, &patch);
+        assert_eq!(px.get(3, 8), [0.; 4]);
+        assert_eq!(px.get(10, 8)[3], 1., "one-pixel expansion");
+        let p = px.get(15, 8);
+        assert_eq!(p[3], 1.);
+        match method {
+            FillMethod::Object => assert!(p[1] > 0.9, "temporal donor: {p:?}"),
+            FillMethod::Surface => assert!(p[0] > 0.9 || p[2] > 0.9, "intact patch: {p:?}"),
+            FillMethod::EdgeBlend => assert!(p[0] > 0.02 && p[2] > 0.02, "boundary blend: {p:?}"),
+        }
+    }
+}

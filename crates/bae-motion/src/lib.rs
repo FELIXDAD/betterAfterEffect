@@ -74,6 +74,7 @@ pub mod content;
 pub mod dimensions;
 pub mod effect;
 pub mod expressions;
+mod fill;
 pub mod import;
 pub mod interpret;
 pub mod keys;
@@ -146,6 +147,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateComp),
         r.register(paint::AddStroke),
         r.register(roto::Freeze),
+        r.register(fill::AddFillLayer),
         r.register(tracker::CreateTracker),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
