@@ -187,6 +187,13 @@ impl Stage {
         }
     }
 
+    /// Forgets every undo and redo step (AE Edit ▸ Purge ▸ Undo); the stage
+    /// itself does not change.
+    pub fn clear_undo(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+
     /// Undo steps kept per author.
     pub fn undo_limit(&self) -> usize {
         self.undo_limit

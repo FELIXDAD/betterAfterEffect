@@ -166,12 +166,12 @@
 | Select Keyframe Label Group ▸ Visible Keyframes on Selected Layers | 23592964 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_selected_layers"}` |  |  | C | ◐ |
 | Select Keyframe Label Group ▸ Visible Keyframes on All Layers | 23592965 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_all_layers"}` |  |  | C | ◐ |
 | Purge ▸ All Cache... | 11403265 | `motion.edit.purge` | `{"what":"all_caches"}` | Alt+Z | Opt+Z | B | ⏸ |
-| Purge ▸ All Memory & Disk Cache... | 11403266 | `motion.edit.purge` | `{"what":"memory_and_disk_cache"}` |  |  | B | ⏸ |
-| Purge ▸ All Memory | 11403267 | `motion.edit.purge` | `{"what":"all_memory"}` | Ctrl+Alt+PadSlash | Control+PadClear / Cmd+Opt+PadSlash | B | ⏸ |
-| Purge ▸ All Disk Cache... | 11403268 | `motion.edit.purge` | `{"what":"disk_cache"}` |  |  | B | ⏸ |
+| Purge ▸ All Memory & Disk Cache... | 11403266 | `motion.edit.purge` | `{"what":"memory_and_disk_cache"}` |  |  | B | ✅ |
+| Purge ▸ All Memory | 11403267 | `motion.edit.purge` | `{"what":"all_memory"}` | Ctrl+Alt+PadSlash | Control+PadClear / Cmd+Opt+PadSlash | B | ✅ |
+| Purge ▸ All Disk Cache... | 11403268 | `motion.edit.purge` | `{"what":"disk_cache"}` |  |  | B | ✅ |
 | Purge ▸ All 3D Cache... | 11403269 | `motion.edit.purge` | `{"what":"3d_cache"}` |  |  | B | ⏸ |
-| Purge ▸ Undo | 11403270 | `motion.edit.purge` | `{"what":"undo"}` |  |  | B | ☐ |
-| Purge ▸ Image Cache Memory | 11403271 | `motion.edit.purge` | `{"what":"image_cache_memory"}` |  |  | B | ⏸ |
+| Purge ▸ Undo | 11403270 | `motion.edit.purge` | `{"what":"undo"}` |  |  | B | ✅ |
+| Purge ▸ Image Cache Memory | 11403271 | `motion.edit.purge` | `{"what":"image_cache_memory"}` |  |  | B | ✅ |
 | Purge ▸ Snapshot | 11403272 | `motion.edit.purge` | `{"what":"snapshot"}` |  |  | B | ⏸ |
 | Edit Original... | 196636 | `motion.edit.edit_original` |  | Ctrl+E | Cmd+E | B | ✅ |
 | Edit in Adobe Audition | 196637 | `motion.edit.edit_in_adobe_audition` |  |  |  | B | Ⓐ |
