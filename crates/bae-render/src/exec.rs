@@ -550,7 +550,9 @@ pub(crate) fn execute(
                 // texels: this frame tests the casters per pixel, and the map
                 // is drawn once the same key comes again (animated shadows
                 // pay for maps only where they are cheaper, such as at 4K).
-                None if !shadow_maps.stable(&map.layer, node.key)
+                // (Model casters exist only in maps.)
+                None if map.lighting.models.is_empty()
+                    && !shadow_maps.stable(&map.layer, node.key)
                     && map.screen_texels <= {
                         let (_, [w, h]) = map.lighting.shadow_map_size();
                         u64::from(w) * u64::from(h)
@@ -631,6 +633,26 @@ pub(crate) fn execute(
                         &draw,
                     );
                     ctx.passes += 1;
+                    if !l.models.is_empty() {
+                        let drawn: Vec<(u32, usize)> = slots
+                            .iter()
+                            .enumerate()
+                            .filter(|(slot, _)| draw[*slot])
+                            .map(|(slot, &li)| (slot as u32, li))
+                            .collect();
+                        let mesh = ctx.pipelines.mesh();
+                        ctx.draw_calls += mesh::encode_shadows(
+                            &mut mesh.lock(),
+                            device,
+                            gpu.queue(),
+                            &mut encoder,
+                            l,
+                            &drawn,
+                            [w, h],
+                            &target,
+                        );
+                        ctx.passes += 1;
+                    }
                     for (slot, cached) in reuse.iter().enumerate() {
                         let Some((from, from_slot)) = cached else {
                             continue;

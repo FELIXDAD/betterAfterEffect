@@ -52,6 +52,8 @@ pub(crate) struct MeshPipelines {
     env: EnvPipelines,
     /// Bound when no environment light has a picture.
     no_env: wgpu::TextureView,
+    /// Model shadows in receivers' shadow maps.
+    shadow: Option<(wgpu::BindGroupLayout, wgpu::RenderPipeline)>,
 }
 
 impl MeshPipelines {
@@ -168,6 +170,7 @@ impl MeshPipelines {
             depth: None,
             env: EnvPipelines::new(device),
             no_env,
+            shadow: None,
         }
     }
 
@@ -175,6 +178,81 @@ impl MeshPipelines {
     pub(crate) fn warm(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
         self.pipeline(device, format);
         self.env.warm(device, format);
+        self.shadow_pipeline(device);
+    }
+
+    /// The model shadow pipeline (into [`super::shadowmap::FORMAT`] maps).
+    fn shadow_pipeline(
+        &mut self,
+        device: &wgpu::Device,
+    ) -> &(wgpu::BindGroupLayout, wgpu::RenderPipeline) {
+        self.shadow.get_or_insert_with(|| {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("bae-render.mesh.shadow"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../gpu/model_shadow.wgsl").into()),
+            });
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bae-render.mesh.shadow"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("bae-render.mesh.shadow"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+            let attributes = [wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            }];
+            let min = wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Min,
+            };
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("bae-render.mesh.shadow"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_shadow"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: 32,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &attributes,
+                    })],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_shadow"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: super::shadowmap::FORMAT,
+                        blend: Some(wgpu::BlendState {
+                            color: min,
+                            alpha: min,
+                        }),
+                        write_mask: wgpu::ColorWrites::COLOR,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            (layout, pipeline)
+        })
     }
 
     fn pipeline(
@@ -673,4 +751,145 @@ impl MeshPipelines {
     pub(crate) fn has_env(&mut self, key: u64, width: u32, linear: bool) -> bool {
         self.env.has(key, width, linear)
     }
+}
+
+/// Draws the shadows of the 3D models of `lighting` into the slots `slots`
+/// (slot index, light index) of its shadow map `target` (each slot
+/// `size` texels; the map spans `lighting.rect` in layer pixels). Returns
+/// the number of draws.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn encode_shadows(
+    pipelines: &mut Option<MeshPipelines>,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    lighting: &crate::light::Lighting,
+    slots: &[(u32, usize)],
+    size: [u32; 2],
+    target: &GpuImage,
+) -> usize {
+    let p = pipelines.get_or_insert_with(|| MeshPipelines::new(device));
+    let keys: Vec<usize> = lighting
+        .models
+        .iter()
+        .map(|m| p.upload(device, queue, &m.model))
+        .collect();
+    let (layout, pipeline) = p.shadow_pipeline(device).clone();
+    let mut draws = Vec::new();
+    for &(slot, li) in slots {
+        let Some(light) = lighting.lights.get(li) else {
+            continue;
+        };
+        let Some((clip, side)) = shadow_projection(lighting, light) else {
+            continue;
+        };
+        let value = 1.0 - (light.shadow_darkness / 100.0).clamp(0.0, 1.0);
+        for (m, key) in lighting.models.iter().zip(&keys) {
+            let mut data: Vec<f32> = Vec::with_capacity(40);
+            data.extend(clip.to_cols_array().map(|v| v as f32));
+            data.extend(m.matrix.to_cols_array().map(|v| v as f32));
+            data.extend(side.map(|v| v as f32));
+            data.extend([value, value, value, 1.0]);
+            let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("bae-render.mesh.shadow"),
+                contents: bytemuck::cast_slice(&data),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bae-render.mesh.shadow"),
+                layout: &layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                }],
+            });
+            draws.push((slot, *key, group));
+        }
+    }
+    if draws.is_empty() {
+        return 0;
+    }
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("bae-render.mesh.shadow"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &target.view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    pass.set_pipeline(&pipeline);
+    let [w, h] = size;
+    let mut count = 0;
+    for (slot, key, group) in &draws {
+        pass.set_viewport((slot * w) as f32, 0.0, w as f32, h as f32, 0.0, 1.0);
+        pass.set_scissor_rect(slot * w, 0, w, h);
+        pass.set_bind_group(0, group, &[]);
+        for (vb, ib, n, _) in &p.models[key].parts {
+            pass.set_vertex_buffer(0, vb.slice(..));
+            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..*n, 0, 0..1);
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Comp space → shadow map slot clip space for `light` on the receiver of
+/// `lighting`: the planar projection from the light onto the receiver
+/// plane, then the receiver's layer pixels, then the slot. With the plane
+/// as `a·x + b·y + c·z + d`, positive on the light's side. `None` for lights
+/// without a position or direction (ambient, environment) or a degenerate
+/// receiver.
+fn shadow_projection(
+    lighting: &crate::light::Lighting,
+    light: &crate::light::Light,
+) -> Option<(DMat4, [f64; 4])> {
+    use glam::DVec4;
+    let m = lighting.matrix;
+    let n = m.x_axis.truncate().cross(m.y_axis.truncate());
+    if n.length_squared() < 1e-18 {
+        return None;
+    }
+    let plane = DVec4::from((n, -n.dot(m.w_axis.truncate())));
+    let source = match light.kind {
+        LightKind::Point | LightKind::Spot => DVec4::from((light.position(), 1.0)),
+        LightKind::Parallel => DVec4::from((-light.direction(), 0.0)),
+        LightKind::Ambient | LightKind::Environment => return None,
+    };
+    let along = plane.dot(source);
+    if along.abs() < 1e-12 {
+        return None;
+    }
+    // Blinn's planar shadow matrix: (π·L) I − L πᵀ, signed so that points
+    // between the light and the plane keep w > 0.
+    let s = along.signum();
+    let project = DMat4::from_cols(
+        DVec4::X * along - source * plane.x,
+        DVec4::Y * along - source * plane.y,
+        DVec4::Z * along - source * plane.z,
+        DVec4::W * along - source * plane.w,
+    ) * s;
+    let to_layer = m.inverse();
+    let r = lighting.rect;
+    let (rw, rh) = (r.x1 - r.x0, r.y1 - r.y0);
+    if rw <= 0.0 || rh <= 0.0 {
+        return None;
+    }
+    let to_slot = DMat4::from_cols_array_2d(&[
+        [2.0 / rw, 0.0, 0.0, -1.0 - 2.0 * r.x0 / rw],
+        [0.0, -2.0 / rh, 0.0, 1.0 + 2.0 * r.y0 / rh],
+        [0.0, 0.0, 0.0, 0.5],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .transpose();
+    let side = plane * s;
+    Some((to_slot * to_layer * project, side.to_array()))
 }
