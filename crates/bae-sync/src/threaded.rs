@@ -1,7 +1,7 @@
 //! [`ThreadedTransport`]: runs a blocking transport on its own thread.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -30,6 +30,10 @@ struct Backlog {
     queued: AtomicUsize,
     /// The inner transport's own backlog, as the worker last saw it.
     inner: AtomicUsize,
+    /// [`Transport::backlog`] reported more than 0 since the worker last saw
+    /// everything gone: a session may be holding back for it, so the worker
+    /// wakes the stage thread once it all left.
+    watched: AtomicBool,
 }
 
 impl Backlog {
@@ -46,10 +50,11 @@ impl Backlog {
 ///
 /// The worker polls the inner transport every `tick`, and calls `on_receive`
 /// after queuing new messages: hook it to "request a repaint" or "pump soon" so the
-/// stage thread picks them up. It also calls it when what was sent had to wait
-/// (it was still queued, or in the inner transport's [`Transport::backlog`],
-/// after a whole round of the worker) and has now all left: a session that held
-/// back sends for it ([`crate::SessionConfig::max_backlog`]) goes on.
+/// stage thread picks them up. It also calls it once everything sent has left
+/// (the queue and the inner transport's [`Transport::backlog`] are empty) if
+/// `backlog` reported more than 0 since it last did: a session that held back
+/// sends for it ([`crate::SessionConfig::max_backlog`]) goes on. That is at
+/// the end of the worker's round that emptied it, or at most a `tick` later.
 ///
 /// [`Transport::backlog`] is what `send` queued that the worker has not handed
 /// over yet plus the inner transport's backlog as the worker last saw it.
@@ -132,8 +137,6 @@ fn run<T: Transport>(
     on_receive: Notify,
     backlog: &Backlog,
 ) {
-    // Something waited at the end of the last round.
-    let mut waited = false;
     loop {
         // Wait for outgoing messages or the next tick.
         let mut outgoing = Vec::new();
@@ -186,11 +189,14 @@ fn run<T: Transport>(
             }
         }
         backlog.inner.store(inner.backlog(), Ordering::Release);
-        let waits = backlog.total() > 0;
-        if got || (waited && !waits) {
+        // Whoever saw a backlog may be holding back for it, however short it
+        // lasted (one round, the common case: one large message, the rest held
+        // back). `backlog` sets the flag after it read the total, so one that
+        // raced with this check is seen a round later.
+        let drained = backlog.total() == 0 && backlog.watched.swap(false, Ordering::AcqRel);
+        if got || drained {
             on_receive();
         }
-        waited = waits;
     }
 }
 
@@ -218,7 +224,11 @@ impl Transport for ThreadedTransport {
     }
 
     fn backlog(&self) -> usize {
-        self.backlog.total()
+        let total = self.backlog.total();
+        if total > 0 {
+            self.backlog.watched.store(true, Ordering::Release);
+        }
+        total
     }
 }
 
@@ -292,8 +302,8 @@ mod tests {
         // Let the worker finish that round (it may wake us for it).
         std::thread::sleep(Duration::from_millis(50));
         // What waits in the inner transport counts too, and once that drained
-        // after waiting a whole round, the stage thread is woken so a session
-        // that held back sends goes on.
+        // (after `backlog` reported it), the stage thread is woken so a
+        // session that held back sends goes on.
         let before = wakes.load(Ordering::Acquire);
         inner.store(12_345, Ordering::Release);
         wait_until("the inner backlog", || t.backlog() == 12_345);
@@ -302,5 +312,86 @@ mod tests {
         wait_until("the wake-up", || wakes.load(Ordering::Acquire) > before);
         assert_eq!(t.backlog(), 0);
         t.close().unwrap();
+    }
+
+    /// Hands out one `Hello` (a peer that has nothing), takes 30 ms per
+    /// message, never has a backlog of its own (a shared folder): records the
+    /// documents of the data it was sent.
+    struct Folder {
+        hello: Option<Message>,
+        data: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl Transport for Folder {
+        fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+            std::thread::sleep(Duration::from_millis(30));
+            if let Message::Updates { doc, .. } = msg {
+                self.data.lock().unwrap().push(doc.to_string());
+            }
+            Ok(())
+        }
+
+        fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+            Ok(self.hello.take())
+        }
+    }
+
+    /// A session that held back documents for the queue (`max_backlog`) and
+    /// is pumped only when woken goes on once the queue drained, also when
+    /// the worker took everything in one round, so the backlog never lasted
+    /// a whole round (the common case: one large document, then the rest
+    /// held back). The rest used to wait for some unrelated pump.
+    #[test]
+    fn a_session_held_back_by_the_queue_is_woken_when_it_drained() {
+        use crate::{ClientId, MemDocs, SessionConfig, SyncSession};
+        use bae_model::loro::{ExportMode, LoroDoc};
+
+        let mut docs = MemDocs::new();
+        let names = ["a", "b", "c"];
+        for (i, name) in names.into_iter().enumerate() {
+            let d = LoroDoc::new();
+            let value: String = (0..4000)
+                .map(|j| char::from(b'a' + ((i * 7 + j * 13) % 26) as u8))
+                .collect();
+            d.get_map("m").insert("v", value).unwrap();
+            d.commit();
+            docs.load(
+                DocKey::parse(name).unwrap(),
+                &d.export(ExportMode::Snapshot).unwrap(),
+            )
+            .unwrap();
+        }
+        let data = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let folder = Folder {
+            hello: Some(Message::hello(ClientId::new("folder").unwrap(), Vec::new())),
+            data: data.clone(),
+        };
+        let (wake, woken) = mpsc::channel();
+        let mut t = ThreadedTransport::spawn(folder, Duration::from_millis(1), move || {
+            let _ = wake.send(());
+        });
+        let mut config = SessionConfig::new(ClientId::new("app").unwrap());
+        config.hello_interval = None;
+        config.max_backlog = Some(1000);
+        let mut session = SyncSession::new(config);
+        session.pump(&mut docs, &mut t).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        // Pumped only when woken.
+        while data.lock().unwrap().len() < names.len() {
+            match woken.recv_timeout(Duration::from_millis(10)) {
+                Ok(()) => {
+                    session.pump(&mut docs, &mut t).unwrap();
+                }
+                Err(_) => assert!(
+                    Instant::now() < deadline,
+                    "not woken; sent {:?}, held back {} times",
+                    data.lock().unwrap(),
+                    session.stats().held_back
+                ),
+            }
+        }
+        assert!(session.stats().held_back >= 2, "{:?}", session.stats());
+        t.close().unwrap();
+        assert_eq!(data.lock().unwrap().len(), names.len());
     }
 }

@@ -79,7 +79,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 `SyncSession::pump` 在持有 `Stage` 的线程上调用，不做阻塞 I/O。共享目录、网络的 I/O 由传输层放在后台线程里做，通过队列交给会话：`ThreadedTransport::spawn(内层传输, tick, on_receive)` 把任何会阻塞的传输搬到后台线程，收到消息后调用 `on_receive`（接到"请求重绘 / 尽快 pump"上）。
 
-`ThreadedTransport` 的 `send` 只是放进队列，内层传输发送失败要等之后的 `recv` 才报告。它的 `backlog()` 是队列里还没交给内层传输的字节数加上内层传输自己的积压（后台线程每轮更新一次）；排过队的数据（一整轮之后还在队列或内层传输里）全部发出去时，后台线程也调用一次 `on_receive`，让因为积压暂停发送的会话（2.4 第 4 步）接着发。`Transport::close()` 等后台线程把队列里的消息都交给内层传输，再关闭内层传输（调用它的 `close`），然后返回 `recv` 还没报告的第一个错误。关闭前想知道最后几条有没有送到，就调用 `close`。丢弃时同样会等队列交给内层传输，但不关闭内层传输（直接丢弃），也看不到错误。`close` 的默认实现什么都不做，只适合 `send` 返回前就做完 I/O 的传输；`HubTransport` 等对方确认关闭（3.1），`DirTransport` 还有日志落后时报错（4.3）。
+`ThreadedTransport` 的 `send` 只是放进队列，内层传输发送失败要等之后的 `recv` 才报告。它的 `backlog()` 是队列里还没交给内层传输的字节数加上内层传输自己的积压（后台线程每轮更新一次）；`backlog()` 报告过大于 0 之后，队列和内层传输都清空时，后台线程也调用一次 `on_receive`（在清空它的那一轮结束时，最晚再晚一个 `tick`），让因为积压暂停发送的会话（2.4 第 4 步）接着发。以前只在积压撑过后台线程一整轮时才叫醒：最常见的情况（发出一个大文档，其余的暂停，后台线程一轮就写完）反而叫不醒，只靠 `on_receive` 来 pump 的应用要等到别的事触发 pump 才接着发（`a_session_held_back_by_the_queue_is_woken_when_it_drained`）。内层传输自己的积压（`HubTransport` 的写缓冲）要降到 0 才叫醒，不是降到 `max_backlog` 以下就叫；应用定时的 pump 会更早接着发。`Transport::close()` 等后台线程把队列里的消息都交给内层传输，再关闭内层传输（调用它的 `close`），然后返回 `recv` 还没报告的第一个错误。关闭前想知道最后几条有没有送到，就调用 `close`。丢弃时同样会等队列交给内层传输，但不关闭内层传输（直接丢弃），也看不到错误。`close` 的默认实现什么都不做，只适合 `send` 返回前就做完 I/O 的传输；`HubTransport` 等对方确认关闭（3.1），`DirTransport` 还有日志落后时报错（4.3）。
 
 会阻塞的不只是收发：`DirTransport::open` 要在共享目录上建目录、拿锁，锁被占用时最多重试 2 秒（4.7 的清理删别人的文件时会短暂拿住对方的锁）才报 `ClientIdInUse`；`HubTransport::connect` 最多等 `timeout`。两者都要在后台线程上调用（比如之后运行 `ThreadedTransport` 的那个线程），不要在界面线程上。
 
