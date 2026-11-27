@@ -21,6 +21,7 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_colors;
 mod appearance_preferences;
 mod audio_preferences;
 #[cfg(target_os = "windows")]
@@ -68,6 +69,7 @@ mod shortcuts_dialog;
 mod startup;
 #[cfg(target_os = "macos")]
 mod stress;
+mod text_orientation;
 #[cfg(target_os = "macos")]
 mod timeline;
 #[cfg(target_os = "macos")]

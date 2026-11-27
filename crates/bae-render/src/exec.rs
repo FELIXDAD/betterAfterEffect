@@ -182,7 +182,6 @@ impl ImageAllocator for PoolAllocator<'_> {
 /// existing byte-limited frame cache. Entries are published after submission.
 pub(crate) struct TileCache<'a> {
     pub whole_surfaces: bool,
-    pub feedback: bool,
     pub frames: &'a mut crate::cache::FrameCache<GpuImage>,
     pub request: u64,
     pub comp: &'a crate::RenderComp,
@@ -273,6 +272,7 @@ pub(crate) fn execute(
         label: Some("bae-render.frame"),
     });
     let needed = needed_nodes(graph, &pipelines.mesh());
+    let tainted = feedback_taint(graph);
     let mut uses = graph.use_counts();
     let mut outputs: Vec<Option<GpuImage>> = vec![None; graph.nodes.len()];
     let mut ctx = ExecCtx {
@@ -314,7 +314,7 @@ pub(crate) fn execute(
         let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
             NodeKind::Effect(fx)
                 if fx.feedback.is_some()
-                    || (cache.whole_surfaces && !cache.feedback && fx.effect.full_surface()) =>
+                    || (cache.whole_surfaces && !tainted[index] && fx.effect.full_surface()) =>
             {
                 Some(crate::cache::FrameKey {
                     comp: fx.instance.path.clone(),
@@ -328,7 +328,7 @@ pub(crate) fn execute(
         // Re-encode one pass; never walk or regenerate the history.
         let cached = surface_key
             .as_ref()
-            .filter(|_| tiles.as_ref().is_some_and(|cache| !cache.feedback))
+            .filter(|_| !tainted[index])
             .and_then(|key| {
                 let frames = &mut tiles.as_mut()?.frames;
                 (frames.content_hash(key) == Some(node.key))
@@ -441,7 +441,7 @@ pub(crate) fn execute(
                 let image_cache = tiles
                     .as_mut()
                     .filter(|c| {
-                        !c.feedback
+                        !tainted[index]
                             && c.frames.stats().budget > 0
                             && !graph.incomplete
                             && !incomplete
@@ -715,9 +715,11 @@ pub(crate) fn execute(
                 .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
         if let Some(key) = surface_key {
-            surfaces.push((key, node.key, image.clone()));
+            let history = matches!(&node.kind, NodeKind::Effect(fx) if fx.feedback.is_some());
+            surfaces.push((key, node.key, image.clone(), history));
         }
-        if graph.time_dependent && intermediates.stats().budget > 0 {
+        // A tainted image has no identity: its key does not cover the history.
+        if graph.time_dependent && intermediates.stats().budget > 0 && !tainted[index] {
             use std::hash::{Hash, Hasher};
             let mut identity = rustc_hash::FxHasher::default();
             node.key.hash(&mut identity);
@@ -765,7 +767,7 @@ pub(crate) fn execute(
         && !incomplete
         && let Some(cache) = tiles
     {
-        for (key, hash, image) in surfaces {
+        for (key, hash, image, history) in surfaces {
             let bytes = image.byte_size();
             cache.frames.insert_surface(
                 key,
@@ -773,7 +775,7 @@ pub(crate) fn execute(
                 bytes,
                 cache.comp.dependencies(),
                 hash,
-                cache.feedback,
+                history,
             );
         }
         intermediates.publish(cache.frames, cache.comp);
@@ -786,6 +788,19 @@ pub(crate) fn execute(
         node_times,
         output,
     })
+}
+
+/// Nodes whose image depends on a feedback effect's earlier output: a feedback
+/// effect and whatever reads it. Their content key does not cover that history,
+/// so only they skip shared surfaces; the rest of the comp is still reused.
+fn feedback_taint(graph: &RenderGraph) -> Vec<bool> {
+    let mut tainted = vec![false; graph.nodes.len()];
+    for (index, node) in graph.nodes.iter().enumerate() {
+        let mut taint = matches!(&node.kind, NodeKind::Effect(fx) if fx.feedback.is_some());
+        node.kind.for_each_input(|id| taint |= tainted[id.index()]);
+        tainted[index] = taint;
+    }
+    tainted
 }
 
 /// The nodes to execute: all but an environment light's picture whose maps

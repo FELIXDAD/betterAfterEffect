@@ -84,6 +84,11 @@ const ZH: &[(&str, &str)] = &[
         "“{file}” is a folder but not a BAE project. Choose another name.",
         "“{file}”是一个文件夹，但不是 BAE 项目。请换一个名字。",
     ),
+    ("Empty Disk Cache", "清空磁盘缓存"),
+    (
+        "Delete cached preview frames from this folder?",
+        "清除此文件夹中的预览帧缓存？",
+    ),
     ("Could not open the project.", "无法打开项目。"),
     ("RAM Available for BAE:", "BAE 可用内存："),
     ("Memory Usage Details", "内存使用情况详细信息"),

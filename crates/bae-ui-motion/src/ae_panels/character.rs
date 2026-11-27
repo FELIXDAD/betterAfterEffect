@@ -26,14 +26,13 @@ static FONTS: std::sync::OnceLock<std::sync::Mutex<bae_text::FontSystem>> =
 /// Starts scanning the installed fonts on a background thread (at startup,
 /// before the Character panel first needs them).
 pub(crate) fn prewarm() {
-    if FONTS.get().is_some() {
-        return;
-    }
-    let _ = std::thread::Builder::new()
-        .name("bae-font-scan".into())
-        .spawn(|| {
-            FONTS.get_or_init(|| std::sync::Mutex::new(bae_text::FontSystem::new()));
+    crate::render::vertical_text::start_worker(|| {
+        FONTS.get_or_init(|| {
+            let mut fonts = bae_text::FontSystem::new();
+            bae_text::layout_text(&mut fonts, &bae_text::layout::vertical_warmup_document());
+            std::sync::Mutex::new(fonts)
         });
+    });
 }
 
 /// `f` on the installed fonts, or `None` while they are still being scanned.
@@ -45,8 +44,24 @@ fn with_fonts<R>(f: impl FnOnce(&mut bae_text::FontSystem) -> R) -> Option<R> {
 
 /// Use the warmed font collection for a pointer hit without waiting for a font scan.
 pub(crate) fn hit_layout(doc: &TextDocument) -> Option<bae_text::TextLayout> {
+    // The viewer asks every frame (bounds, hit tests, the vertical preview):
+    // the last few layouts are kept.
+    static RECENT: std::sync::Mutex<Vec<(TextDocument, bae_text::TextLayout)>> =
+        std::sync::Mutex::new(Vec::new());
+    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(i) = recent.iter().position(|(d, _)| d == doc) {
+        let hit = recent.remove(i);
+        let layout = hit.1.clone();
+        recent.push(hit);
+        return Some(layout);
+    }
     let mut fonts = FONTS.get()?.try_lock().ok()?;
-    Some(bae_text::layout_text(&mut fonts, doc))
+    let layout = bae_text::layout_text(&mut fonts, doc);
+    if recent.len() >= 16 {
+        recent.remove(0);
+    }
+    recent.push((doc.clone(), layout.clone()));
+    Some(layout)
 }
 
 /// AE's size and leading presets (px).
@@ -138,6 +153,7 @@ impl Panel for CharacterPanel {
         };
         let font = selected.character(|s| s.font.clone()).unwrap_or_default();
         let mut change = json!({});
+        let mut gesture = Gesture::None;
         let id = ui.id().with("character");
         let (family, face_style) = with_fonts(|f| match f.resolve(&font) {
             bae_text::FontMatch::Found(face) => (face.family.clone(), style_name(&face)),
@@ -244,6 +260,7 @@ impl Panel for CharacterPanel {
             field_icon(ui, Icon::TextSize, tr("Set the font size"));
             if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("size"),
                 selected.character(|s| s.font_size),
                 tr("px"),
@@ -262,6 +279,7 @@ impl Panel for CharacterPanel {
                 Some(Some(l)) => {
                     if let Some(v) = number(
                         ui,
+                        &mut gesture,
                         id.with("leading"),
                         Some(l),
                         tr("px"),
@@ -275,6 +293,7 @@ impl Panel for CharacterPanel {
                 None => {
                     if let Some(v) = number(
                         ui,
+                        &mut gesture,
                         id.with("leading"),
                         None,
                         tr("px"),
@@ -323,6 +342,7 @@ impl Panel for CharacterPanel {
             );
             if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("tracking"),
                 selected.character(|s| s.tracking),
                 "",
@@ -342,6 +362,7 @@ impl Panel for CharacterPanel {
             field_icon(ui, Icon::TextStroke, tr("Set the stroke width"));
             if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("stroke_width"),
                 selected.character(|s| s.stroke_width),
                 tr("px"),
@@ -404,6 +425,7 @@ impl Panel for CharacterPanel {
             field_icon(ui, Icon::TextBaselineShift, tr("Set the baseline shift"));
             if let Some(v) = number(
                 ui,
+                &mut gesture,
                 id.with("baseline"),
                 selected.character(|s| s.baseline_shift),
                 tr("px"),
@@ -496,55 +518,28 @@ impl Panel for CharacterPanel {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            ui.add_enabled_ui(false, |ui| {
-                let mut off = false;
-                bae_ui::widgets::checkbox(ui, &mut off, tr("Ligatures"));
-                ui.add_space(24.0);
-                bae_ui::widgets::checkbox(ui, &mut off, tr("Hindi Digits"));
-            });
+            let mut ligatures = selected.character(|s| s.ligatures).unwrap_or(false);
+            if bae_ui::widgets::checkbox(ui, &mut ligatures, tr("Ligatures")).changed() {
+                change["ligatures"] = json!(ligatures);
+            }
+            ui.add_space(24.0);
+            let mut hindi = selected.character(|s| s.hindi_digits).unwrap_or(false);
+            if bae_ui::widgets::checkbox(ui, &mut hindi, tr("Hindi Digits")).changed() {
+                change["hindi_digits"] = json!(hindi);
+            }
         });
 
-        if change.as_object().is_some_and(|o| !o.is_empty()) {
-            if layers.is_empty() {
-                // No text selected: the settings for new text (AE).
-                let mut d = doc.clone();
-                if let Ok(c) = serde_json::from_value::<bae_motion::TextStyleChange>(change.clone())
-                {
-                    c.apply(&mut d, 0..usize::MAX);
-                }
-                session.lock().text_defaults = Some(d);
-            } else {
-                cx.invoke_with(
-                    "text.set_style",
-                    json!({ "layers": layers, "time": time, "style": change, "range":range }),
-                );
-            }
+        super::text_menu::Selection {
+            layers,
+            time,
+            range,
+            doc,
         }
+        .send(cx, change, gesture);
     }
 
     fn menu(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let _ = cx;
-        // AE's panel menu items; the ones the text engine does not do yet are greyed.
-        ui.add_enabled_ui(false, |ui| {
-            for item in [
-                "Faux Bold",
-                "Faux Italic",
-                "Standard Vertical Roman Alignment",
-                "Tate-Chuu-Yoko",
-                "All Caps",
-                "Small Caps",
-                "Superscript",
-                "Subscript",
-                "Ligatures",
-                "Hindi Digits",
-                "Use Smart Quotes",
-                "Show Font Names in English",
-                "No Break",
-                "Reset Character",
-            ] {
-                let _ = ui.button(tr(item));
-            }
-        });
+        super::text_menu::show(ui, cx, true);
     }
 }
 
@@ -665,9 +660,24 @@ impl CharacterPanel {
     }
 }
 
-/// A hot number whose dragged value commits on release; a typed one at once.
+/// How a panel number was edited this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Gesture {
+    #[default]
+    None,
+    /// Being dragged: previewed on the layers, no command yet.
+    Live,
+    /// A drag ended (with or without a change).
+    Ended,
+}
+
+/// A hot number: while dragged its value is previewed (`Gesture::Live`), it
+/// commits on release only when it changed (no empty undo step); a typed one
+/// commits at once.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn number(
     ui: &mut Ui,
+    gesture: &mut Gesture,
     id: Id,
     model: Option<f64>,
     suffix: &str,
@@ -702,10 +712,15 @@ pub(crate) fn number(
         .inner;
     if resp.drag_stopped() {
         ui.data_mut(|d| d.remove::<f64>(key));
+        *gesture = Gesture::Ended;
         return (Some(v) != model).then_some(v);
     }
     if resp.dragged() {
         ui.data_mut(|d| d.insert_temp(key, v));
+        if pending != Some(v) {
+            *gesture = Gesture::Live;
+            return Some(v);
+        }
         return None;
     }
     (resp.changed() && Some(v) != model).then_some(v)

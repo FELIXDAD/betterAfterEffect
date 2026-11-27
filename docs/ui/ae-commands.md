@@ -64,8 +64,8 @@
 | Import ▸ From Libraries... | 9764867 | `motion.file.from_libraries` |  |  |  | B | Ⓐ |
 | Import ▸ Import Adobe Premiere Project... | 9764868 | `motion.file.import_adobe_premiere_project` |  |  |  | B | Ⓐ |
 | Import ▸ Vanishing Point (.vpe)... | 9764869 | `motion.file.vanishing_point_vpe` |  |  |  | B | Ⓐ |
-| Import ▸ Placeholder... | 9764870 | `motion.file.import_placeholder` |  |  |  | E | ☐ |
-| Import ▸ Solid... | 9764871 | `motion.file.import_solid` |  |  |  | E | ☐ |
+| Import ▸ Placeholder... | 9764870 | `motion.file.import_placeholder` |  |  |  | E | ✅ |
+| Import ▸ Solid... | 9764871 | `motion.file.import_solid` |  |  |  | E | ✅ |
 | Import Recent Footage ▸ (recent footage) |  | `motion.file.import_recent_footage` |  |  |  | E | ⋯ |
 | Export ▸ Maxon Cinema 4D Exporter... | 11665409 | `motion.file.maxon_cinema_4d_exporter` |  |  |  | B | Ⓐ |
 | Export ▸ Export Adobe Premiere Project... | 11665410 | `motion.file.export_adobe_premiere_project` |  |  |  | B | Ⓐ |
@@ -107,8 +107,8 @@
 | Set Proxy ▸ None | 9830403 | `motion.file.set_proxy_none` |  |  |  | E | ⏸ |
 | Interpret Footage ▸ Main... | 10420225 | `motion.file.interpret_footage_main` |  | Ctrl+Alt+G | Cmd+Opt+G | E | ✅ |
 | Interpret Footage ▸ Proxy... | 10420226 | `motion.file.interpret_footage_proxy` |  |  |  | E | ⏸ |
-| Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ☐ |
-| Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ☐ |
+| Interpret Footage ▸ Remember Interpretation | 10420228 | `motion.file.remember_interpretation` |  | Ctrl+Alt+C | Cmd+Opt+C | E | ✅ |
+| Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ✅ |
 | Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
 | Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
@@ -204,8 +204,8 @@
 | Composition Settings... | 327683 | `motion.comp.composition_settings` |  | Ctrl+K | Cmd+K | E | ✅ |
 | Set Poster Time | 327684 | `motion.comp.set_poster_time` |  |  |  | B | ☐ |
 | Trim Comp to Work Area | 327685 | `motion.trim_comp` |  | Ctrl+Shift+X | Cmd+Shift+X | B | ✅ |
-| Crop Comp to Region of Interest | 327686 | `motion.comp.crop_comp_to_region_of_interest` |  |  |  | B | ⏸ |
-| Crop Comp to Selected Layer(s) Bounds | 327687 | `motion.comp.crop_comp_to_selected_layer_bounds` |  |  |  | B | ⏸ |
+| Crop Comp to Region of Interest | 327686 | `motion.comp.crop_comp_to_region_of_interest` |  |  |  | B | ✅ |
+| Crop Comp to Selected Layer(s) Bounds | 327687 | `motion.comp.crop_comp_to_selected_layer_bounds` |  |  |  | B | ✅ |
 | Add to Adobe Media Encoder Queue... | 327689 | `motion.comp.add_to_adobe_media_encoder_queue` |  | Ctrl+Alt+M | Cmd+Opt+M | B | Ⓐ |
 | Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Control+Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
@@ -391,7 +391,7 @@
 | Arrange ▸ Send Backward | 12910595 | `motion.order` | `{"to":"backward"}` | Ctrl+[ / Ctrl+Alt+Down | Cmd+[ / Cmd+Opt+Down | B | ✅ |
 | Arrange ▸ Send to Back | 12910596 | `motion.order` | `{"to":"back"}` | Ctrl+Shift+[ / Ctrl+Alt+Shift+Down / Ctrl+Shift+- | Cmd+Shift+[ / Cmd+Opt+Shift+Down / Cmd+Shift+- | B | ✅ |
 | Reveal ▸ Reveal in Explorer | 23003137 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
-| Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ☐ |
+| Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Layer in Project Flowchart | 23003139 | `motion.layer.reveal_layer_in_project_flowchart` |  |  |  | E | ⏸ |
 | Reveal ▸ Reveal Composition in Project | 23003140 | `motion.layer.reveal_composition_in_project` |  |  |  | B | ✅ |
 | Reveal ▸ Reveal Expression Errors | 23003141 | `motion.layer.reveal_expression_errors` |  |  |  | C | ⏸ |
@@ -409,9 +409,9 @@
 | Camera ▸ Create Stereo 3D Rig | 21954562 | `motion.layer.create_stereo_3d_rig` |  |  |  | B | ⏸ |
 | Camera ▸ Create Orbit Null | 21954563 | `motion.layer.create_orbit_null` |  |  |  | B | ⏸ |
 | Camera ▸ Create Cameras from 3D Model | 21954564 | `motion.layer.create_cameras_from_3d_model` |  |  |  | B | ⏸ |
-| Camera ▸ Link Focus Distance to Point of Interest | 21954566 | `motion.layer.link_focus_distance_to_point_of_interest` |  |  |  | B | ⏸ |
-| Camera ▸ Link Focus Distance to Layer | 21954567 | `motion.layer.link_focus_distance_to_layer` |  |  |  | B | ⏸ |
-| Camera ▸ Set Focus Distance to Layer | 21954568 | `motion.layer.set_focus_distance_to_layer` |  |  |  | B | ⏸ |
+| Camera ▸ Link Focus Distance to Point of Interest | 21954566 | `motion.layer.link_focus_distance_to_point_of_interest` |  |  |  | B | ✅ |
+| Camera ▸ Link Focus Distance to Layer | 21954567 | `motion.layer.link_focus_distance_to_layer` |  |  |  | B | ✅ |
+| Camera ▸ Set Focus Distance to Layer | 21954568 | `motion.layer.set_focus_distance_to_layer` |  |  |  | B | ✅ |
 | Camera ▸ Camera Settings... | 21954570 | `motion.layer.camera_settings` |  |  |  | E | ✅ |
 | Camera ▸ Reset 3D View | 21954571 | `motion.view.reset_3d_view` |  |  |  | A | ⏸ |
 | Light ▸ Create Lights from 3D Model | 328990721 | `motion.layer.create_lights_from_3d_model` |  |  |  | B | ⏸ |
