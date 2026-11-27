@@ -33,6 +33,8 @@ struct SceneKey {
     path: PrimPath,
     resolution: u32,
     nested_switches: bool,
+    /// The display transform (cached frames are display-converted).
+    display: u64,
     scope_source: bool,
     sources: Option<u64>,
     effects: Option<u64>,
@@ -43,7 +45,8 @@ impl SceneKey {
         FrameKey {
             comp: self.path.clone(),
             time,
-            request: u64::from(self.resolution) | (u64::from(self.nested_switches) << 32),
+            request: (u64::from(self.resolution) | (u64::from(self.nested_switches) << 32))
+                ^ self.display.rotate_left(40),
         }
     }
 
@@ -51,6 +54,7 @@ impl SceneKey {
         self.path == other.path
             && self.resolution == other.resolution
             && self.nested_switches == other.nested_switches
+            && self.display == other.display
             && self.scope_source == other.scope_source
             && self.sources == other.sources
             && self.effects == other.effects
@@ -101,6 +105,7 @@ impl Drop for Slot {
 impl Slot {
     fn image(&self) -> Option<PreviewImage> {
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect,
         })
@@ -468,6 +473,7 @@ impl PlaybackPreview {
             resolution,
             nested_switches: crate::prefs::current(resources)
                 .bool("composition.switches_affect_nested_comps"),
+            display: crate::display_color::current().0,
             scope_source: crate::scopes::needs_working_frame(repaint),
             sources: sources.map(|s| s.0.generation()),
             effects: effects.map(|e| e.0.generation()),

@@ -1,6 +1,6 @@
 use bae_anim::glam::{DQuat, DVec3};
 use bae_model::Time;
-use bae_motion::camera_track::{Pose, Sample, Settings, solve};
+use bae_motion::camera_track::{Measurements, Pose, Sample, Settings, solve};
 #[test]
 fn reconstructs_perspective_and_zoom_from_image_measurements() {
     for (shot, method) in [(4, 3), (1, 1), (2, 5)] {
@@ -36,7 +36,11 @@ fn reconstructs_perspective_and_zoom_from_image_measurements() {
                         }
                     })
                     .collect();
-                (Time(i), samples)
+                Measurements {
+                    time: Time(i),
+                    samples,
+                    layer_from_comp: bae_anim::glam::DAffine2::IDENTITY.to_cols_array(),
+                }
             })
             .collect();
         let solution = solve([640, 360], frames, settings, || false).unwrap();
@@ -62,7 +66,15 @@ fn empty_measurements_and_cancellation_do_not_produce_cameras() {
         method: 1,
         detailed: false,
     };
-    let empty = || vec![(Time(0), vec![]), (Time(1), vec![])];
+    let empty = || {
+        (0..2)
+            .map(|i| Measurements {
+                time: Time(i),
+                samples: vec![],
+                layer_from_comp: bae_anim::glam::DAffine2::IDENTITY.to_cols_array(),
+            })
+            .collect()
+    };
     assert!(solve([640, 360], empty(), settings, || false).is_err());
     assert_eq!(
         solve([640, 360], empty(), settings, || true).unwrap_err(),

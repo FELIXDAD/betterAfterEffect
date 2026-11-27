@@ -160,6 +160,10 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
 fn comp_switches_and_layer_switches_reach_the_render_request() {
     use crate::actions::ids;
     let mut h = H::new();
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set("previews.auto_enable_frame_blending_motion_blur", false);
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
     h.keys(POS, &[(0.0, vec3(0.0, 0.0)), (1.0, vec3(600.0, 0.0))]);
     let comp = h.comp.clone();
     let mut tl = h.bars();
@@ -412,7 +416,11 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
     let r = h.click(&mut tl, row, Modifiers::NONE);
     assert_eq!(r.invocations.len(), 1);
     h.apply(&r);
-    for expected in [true, false, true] {
+    assert_eq!(
+        query::static_value(&h.stage.prim(&comp).unwrap(), "frame_blending"),
+        Some(Value::Bool(true))
+    );
+    for expected in [false, true, false] {
         let r = h.click(&mut tl, master, Modifiers::NONE);
         h.apply(&r);
         assert_eq!(
@@ -441,6 +449,10 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
     let pixel_motion = effects.contains(super::super::FRAME_INTERPOLATOR_ID);
     h.resources
         .insert(crate::gpu_preview::PreviewEffects(effects));
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set("previews.auto_enable_frame_blending_motion_blur", false);
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
     let modes = ["frame_mix", "pixel_motion", "off"];
     for expected in modes
         .into_iter()
@@ -449,6 +461,10 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
         let r = h.click(&mut tl, row, Modifiers::NONE);
         assert_eq!(r.invocations.len(), 1, "one edit per click");
         h.apply(&r);
+        assert_eq!(
+            query::static_value(&h.stage.prim(&comp).unwrap(), "frame_blending"),
+            Some(Value::Bool(false))
+        );
         assert_eq!(
             query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
             Some(Value::Enum(expected.into()))
