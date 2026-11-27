@@ -274,6 +274,11 @@ pub mod ids {
     /// File ▸ Dependencies ▸ Remove Unused Footage / Consolidate All Footage /
     /// Reduce Project (the items selected in the Project panel are kept).
     pub const REMOVE_UNUSED: &str = "motion.file.remove_unused_footage";
+    /// File ▸ Dependencies ▸ Find Missing Footage: the Project panel lists the
+    /// footage whose file is not found.
+    pub const FIND_MISSING_FOOTAGE: &str = "motion.file.find_missing_footage";
+    /// Help ▸ System Compatibility Report…
+    pub const SYSTEM_REPORT: &str = "motion.help.system_compatibility_report";
     pub const CONSOLIDATE: &str = "motion.file.consolidate_all_footage";
     pub const REDUCE_PROJECT: &str = "motion.file.reduce_project";
     pub const REVEAL_LOG: &str = "motion.help.reveal_logging_file";
@@ -511,6 +516,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::SET_FOCUS_TO_LAYER, "Set Focus Distance to Layer"),
     (ids::ENABLE_LOGGING, "Enable Logging"),
     (ids::REMOVE_UNUSED, "Remove Unused Footage"),
+    (ids::FIND_MISSING_FOOTAGE, "Find Missing Footage"),
+    (ids::SYSTEM_REPORT, "System Compatibility Report..."),
     (ids::CONSOLIDATE, "Consolidate All Footage"),
     (ids::REDUCE_PROJECT, "Reduce Project"),
     (ids::REVEAL_LOG, "Reveal Logging File"),
@@ -1222,6 +1229,37 @@ fn transform_edits(
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
+/// Help ▸ System Compatibility Report…: AE's report (no known conflicts) and
+/// the system components BAE runs on.
+fn system_report(cx: &PanelContext<'_>) {
+    use bae_ui::tr;
+    let mut lines = vec![format!("BAE : {}", bae_platform::version_details())];
+    lines.push(format!(
+        "{} : {} {}",
+        tr("Operating System"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
+    if let Some(gpu) = cx.resources.get::<std::sync::Arc<bae_gpu::GpuContext>>() {
+        let a = gpu.adapter_info();
+        lines.push(format!(
+            "{} : {} ({:?}) {} {}",
+            tr("Video"),
+            a.name,
+            a.backend,
+            a.driver,
+            a.driver_info
+        ));
+    }
+    let message = format!(
+        "{}\n\n{}\n\n{}",
+        tr("No conflicts to report."),
+        tr("System Components:"),
+        lines.join("\n")
+    );
+    crate::dialogs::alert(cx, tr("System Compatibility Report"), message);
+}
+
 /// File ▸ Dependencies ▸ Remove Unused Footage, Consolidate All Footage and
 /// Reduce Project, then AE's alert with how many items went.
 fn clean_up(cx: &mut PanelContext<'_>, session: &SharedSession, id: &str) {
@@ -1564,6 +1602,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if let Some(camera) = camera_settings_target(stage, session) {
                 crate::dialogs::layer_settings(cx, session, &camera);
             }
+            return true;
+        }
+        ids::FIND_MISSING_FOOTAGE => {
+            session.lock().project_search =
+                Some(bae_ui::tr(crate::project::MISSING_FOOTAGE).to_owned());
+            cx.open_panel("project");
+            return true;
+        }
+        ids::SYSTEM_REPORT => {
+            system_report(cx);
             return true;
         }
         ids::REMOVE_UNUSED | ids::CONSOLIDATE | ids::REDUCE_PROJECT => {
@@ -3253,6 +3301,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Enable Logging", "启用日志记录"),
     // File ▸ Dependencies (AE 2026 zh_CN: menu items and their alerts).
     ("Remove Unused Footage", "删除未用过的素材"),
+    ("Find Missing Footage", "查找缺失的素材"),
+    ("Missing Footage", "缺失素材"),
+    ("System Compatibility Report...", "系统兼容性报告..."),
+    ("System Compatibility Report", "系统兼容性报告"),
+    ("No conflicts to report.", "无任何冲突要报告。"),
+    ("System Components:", "系统组件:"),
+    ("Operating System", "操作系统"),
     ("Consolidate All Footage", "整合所有素材"),
     ("Reduce Project", "减少项目"),
     (

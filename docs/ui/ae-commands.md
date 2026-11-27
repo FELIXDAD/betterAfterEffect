@@ -83,7 +83,7 @@
 | Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ✅ |
 | Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ⏸ |
 | Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ⏸ |
-| Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ⏸ |
+| Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ✅ |
 | Watch Folder... | 131099 | `motion.file.watch_folder` |  |  |  | B | Ⓐ |
 | Scripts ▸ Run Script File... | 917505 | `motion.file.run_script_file` |  |  |  | B | ⏸ |
 | Scripts ▸ Install Script File... | 917506 | `motion.file.install_script_file` |  |  |  | B | ⏸ |
@@ -645,7 +645,7 @@
 | Effect Reference... | 720904 | `motion.help.effect_reference` |  |  |  | B | ⏸ |
 | Animation Presets... | 720905 | `motion.help.animation_presets` |  |  |  | B | ⏸ |
 | Keyboard Shortcuts... | 720906 | `motion.help.keyboard_shortcuts` |  |  |  | B | ☐ |
-| System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ⏸ |
+| System Compatibility Report... | 720908 | `motion.help.system_compatibility_report` |  |  |  | B | ✅ |
 | Enable Logging | 720909 | `motion.help.enable_logging` |  |  |  | B | ✅ |
 | Reveal Logging File | 720910 | `motion.help.reveal_logging_file` |  |  |  | B | ✅ |
 | Online User Forums... | 720912 | `motion.help.online_user_forums` |  |  |  | B | ⏸ |

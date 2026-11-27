@@ -1069,6 +1069,9 @@ fn material(m: &bae_anim::MaterialState) -> Material {
         metal: percent(m.metal),
         transparency: percent(m.transparency),
         transparency_rolloff: percent(m.transparency_rolloff),
+        reflection_intensity: percent(m.reflection_intensity),
+        reflection_sharpness: percent(m.reflection_sharpness),
+        reflection_rolloff: percent(m.reflection_rolloff),
         shadow_color: [
             m.shadow_color[0] as f32,
             m.shadow_color[1] as f32,

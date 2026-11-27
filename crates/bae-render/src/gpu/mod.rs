@@ -416,6 +416,8 @@ pub(crate) struct Pipelines {
     /// By target format, blend kind and motion blur (`fs_motion`).
     composite: FxHashMap<(wgpu::TextureFormat, BlendKind, Variant), wgpu::RenderPipeline>,
     pub sampler: wgpu::Sampler,
+    /// Environment pictures (reflections): u wraps, trilinear.
+    pub env_sampler: wgpu::Sampler,
     pub dummy: wgpu::TextureView,
     pub empty_textures: wgpu::BindGroup,
     pub output_layout: wgpu::BindGroupLayout,
@@ -494,6 +496,7 @@ impl Shared {
             textures_layout: b.textures_layout.clone(),
             composite: FxHashMap::default(),
             sampler: b.sampler.clone(),
+            env_sampler: b.env_sampler.clone(),
             dummy: b.dummy.clone(),
             empty_textures: b.empty_textures.clone(),
             output_layout: b.output_layout.clone(),
@@ -671,7 +674,7 @@ impl bae_gpu::WarmUp for CompositorWarmUp {
 }
 
 /// The views of a texture bind group (src, matte, dst, mask, shadow).
-type TextureKey = [Option<wgpu::TextureView>; 5];
+type TextureKey = [Option<wgpu::TextureView>; 6];
 
 impl Pipelines {
     /// The renderer's pipelines: a view of the device's shared state.
@@ -727,12 +730,29 @@ impl Pipelines {
                 },
                 tex(4),
                 tex(5),
+                // Environment picture of reflecting layers and its sampler.
+                tex(6),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("bae-render.composite"),
             bind_group_layouts: &[Some(&draws_layout), Some(&textures_layout)],
             immediate_size: 0,
+        });
+        let env_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("bae-render.env"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("bae-render.linear"),
@@ -786,6 +806,14 @@ impl Pipelines {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(&dummy),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&dummy),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&env_sampler),
+                },
             ],
         });
 
@@ -838,6 +866,7 @@ impl Pipelines {
             textures_layout,
             composite: FxHashMap::default(),
             sampler,
+            env_sampler,
             dummy,
             empty_textures,
             output_layout,
@@ -952,6 +981,7 @@ impl Pipelines {
 
     /// A texture bind group (unused slots get the dummy texture; `shadow` is
     /// the shadow atlas of lit layers).
+    #[allow(clippy::too_many_arguments)]
     pub fn textures(
         &mut self,
         device: &wgpu::Device,
@@ -960,18 +990,20 @@ impl Pipelines {
         dst: Option<&wgpu::TextureView>,
         mask: Option<&wgpu::TextureView>,
         shadow: Option<&wgpu::TextureView>,
+        env: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
-        let key: TextureKey = [src, matte, dst, mask, shadow].map(|v| v.cloned());
+        let key: TextureKey = [src, matte, dst, mask, shadow, env].map(|v| v.cloned());
         let frame = self.frame;
         if let Some((group, used)) = self.bind_groups.get_mut(&key) {
             *used = frame;
             return group.clone();
         }
-        let group = self.create_textures(device, src, matte, dst, mask, shadow);
+        let group = self.create_textures(device, src, matte, dst, mask, shadow, env);
         self.bind_groups.insert(key, (group.clone(), frame));
         group
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn create_textures(
         &self,
         device: &wgpu::Device,
@@ -980,6 +1012,7 @@ impl Pipelines {
         dst: Option<&wgpu::TextureView>,
         mask: Option<&wgpu::TextureView>,
         shadow: Option<&wgpu::TextureView>,
+        env: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bae-render.textures"),
@@ -1008,6 +1041,14 @@ impl Pipelines {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(shadow.unwrap_or(&self.dummy)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(env.unwrap_or(&self.dummy)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&self.env_sampler),
                 },
             ],
         })

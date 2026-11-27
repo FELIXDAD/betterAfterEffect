@@ -1134,6 +1134,20 @@ impl MeshPipelines {
         self.frame += 1;
     }
 
+    /// The maps of environment picture node `key` (built from `image` when
+    /// missing; `None` when neither).
+    pub(crate) fn env_map(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        key: u64,
+        image: Option<&GpuImage>,
+        width: u32,
+        linear: bool,
+    ) -> Option<env::EnvMap> {
+        self.env.map(device, encoder, key, image, width, linear)
+    }
+
     /// Whether the maps of environment picture node `key` are built.
     pub(crate) fn has_env(&mut self, key: u64, width: u32, linear: bool) -> bool {
         self.env.has(key, width, linear)

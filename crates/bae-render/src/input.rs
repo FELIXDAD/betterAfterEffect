@@ -533,6 +533,9 @@ impl RenderLayer {
                     mat.metal,
                     mat.transparency,
                     mat.transparency_rolloff,
+                    mat.reflection_intensity,
+                    mat.reflection_sharpness,
+                    mat.reflection_rolloff,
                 ]
                 .map(f32::to_bits),
                 mat.shadow_color.map(f32::to_bits),
