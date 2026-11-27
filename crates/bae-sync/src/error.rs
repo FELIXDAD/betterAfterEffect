@@ -35,6 +35,14 @@ pub enum SyncError {
     NotADirectory(PathBuf),
     #[error("hub connection: {0}")]
     Hub(String),
+    /// The hub answered the WebSocket handshake with an HTTP error instead of
+    /// accepting it. `bae-hub` uses 401 (bad or missing token), 403 (the token
+    /// may not open this project), 404 (no such project, and the token may not
+    /// create it), 400 (invalid project ID) and 503 (shutting down).
+    /// `message` is the hub's `{"error": ...}` text when it arrived with the
+    /// response, else the status' standard reason.
+    #[error("hub refused the connection: {status} {message}")]
+    HubRefused { status: u16, message: String },
     #[error("no named version {0}")]
     UnknownCheckpoint(String),
     /// The version includes ops of sublayer `.0` that have not arrived here yet.

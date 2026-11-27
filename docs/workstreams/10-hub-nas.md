@@ -90,6 +90,7 @@
 - 第 4 条也已解决：工程目录用 `Relay::connect_with` 接上，`min_send_interval` 默认 300 ms（`HubConfig::store_send_interval`）、`hello_interval = None`；客户端之间照常立即转发。最后一个客户端断开时立即 `Relay::flush()`（否则要等 500 ms 的空闲轮询）。关闭工程（卸载、退出）时先最后 `pump` 一次，再 `flush`，再 `Relay::close_peer` 等存盘线程写完；最后几次写盘失败会记进日志。
   - 新测试：拖动 100 步，`hub.log` 只有 3 条记录（不设间隔时 101 条）。另外三个测试把写盘间隔设成 1 分钟，拖动只能靠 `flush` 写出：拖动后立即退出 Hub（客户端还连着）、最后一个客户端断开（工程不卸载）、工程被卸载，重新加载后每一步都在。去掉退出时的 `flush`，第一个失败；去掉客户端走光时的 `flush`，第二个失败；两个都去掉，卸载的测试也失败。
   - 评审后还修了 09 侧的一个老问题：`DirTransport` 写日志失败后不再接着追加（否则日志里有空洞而目录的 `Hello` 不承认，重新挂上的存盘连接不会补写），改为请求快照重写（spec 4.3）。
+- 握手响应带 `x-bae-access: read|write`（09 的 `HubTransport::accept_granting`，`collab/sync-connection`）：客户端不用再查 `/v1/status` 就知道自己是不是只读。新测试 `tests/connection.rs` 用应用的连接管理（`bae_sync::Connection`）跑真实 Hub：收敛；Hub 停掉再在同一端口启动后自动重连、离线修改不丢；401/403/404/400 不反复重试；只读令牌；关闭时最后的修改送到（README"测试"一节）。
 
 - 多进程测试（`tests/multiprocess.rs`，epic #737 子任务 7 第一部分）：用真实的 `bae-hub` 程序（命令行参数加 `BAE_HUB_TOKEN`，和部署时一样），编辑中途杀掉后在同一个数据目录和端口重启，客户端重连后收敛、不丢修改；客户端进程被杀后重启；经故障代理断线、延迟。默认 4 个测试并行约 2.5 秒，长时间测试在 `--ignored` 里（spec 3.1）。Hub 被杀时压缩到一半留下的 `hub.tmp-*` 现在下次打开工程时删掉（09 的修复，spec 4.3）。评审后：客户端都退出后再杀一次 Hub、重启，新客户端只能从 Hub 的磁盘拿到全部修改（原来清空数据目录也能通过）；`bae-hub` 由一个随测试进程退出的子进程启动，测试进程被强行杀掉时不再留下占着端口和数据目录的 Hub。
 

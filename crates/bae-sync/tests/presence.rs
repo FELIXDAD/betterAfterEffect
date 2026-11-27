@@ -162,6 +162,35 @@ fn presence_through_the_hub() {
     assert!(names(&hub.sessions[d]).is_empty());
 }
 
+/// After a dropped connection the client reconnects and resets its session:
+/// the others see it again at once, not after the next heartbeat, although the
+/// relay announced its departure with the sequence number its next heartbeat
+/// would have used.
+#[test]
+fn a_reconnected_client_is_seen_again_at_once() {
+    let mut hub = Hub::new(2);
+    hub.sessions[0].set_presence(state("alice"));
+    hub.sessions[1].set_presence(state("bob"));
+    hub.step(Duration::from_millis(10));
+    assert_eq!(names(&hub.sessions[1]), ["alice"]);
+
+    // Alice's link drops: the relay tells bob she left.
+    hub.relay.disconnect(hub.handles[0]);
+    hub.alive[0] = false;
+    assert!(hub.step(Duration::from_millis(10))[1]);
+    assert!(names(&hub.sessions[1]).is_empty());
+
+    // She reconnects (new link, reset session) well before her heartbeat.
+    let (mine, theirs) = MemoryTransport::pair();
+    hub.handles[0] = hub.relay.connect(Box::new(theirs));
+    hub.links[0] = mine;
+    hub.sessions[0].reset();
+    hub.alive[0] = true;
+    assert!(hub.step(Duration::from_millis(10))[1]);
+    assert_eq!(names(&hub.sessions[1]), ["alice"]);
+    assert_eq!(names(&hub.sessions[0]), ["bob"]);
+}
+
 #[test]
 fn stale_or_garbled_presence_is_ignored() {
     let mut hub = Hub::new(2);

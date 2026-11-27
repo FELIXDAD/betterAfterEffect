@@ -42,6 +42,16 @@ impl Access {
     }
 }
 
+/// What the handshake response tells the client (`x-bae-access`).
+impl From<Access> for bae_sync::Access {
+    fn from(access: Access) -> Self {
+        match access {
+            Access::Read => bae_sync::Access::Read,
+            Access::Write => bae_sync::Access::Write,
+        }
+    }
+}
+
 /// Access granted to connections without a token.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -143,6 +153,7 @@ pub struct HubConfig {
     pub idle_unload: Option<Duration>,
     /// Drop connections that sent nothing for this long (clients say `Hello`
     /// every few seconds, so silence means a dead link, e.g. a sleeping laptop).
+    /// Counted in bytes: a large message that takes longer to upload is fine.
     pub peer_timeout: Duration,
     /// How often a project relay polls its connections right after traffic...
     pub active_tick: Duration,

@@ -50,7 +50,7 @@ const SNAPSHOT_EXT: &str = "loro";
 /// one of that client's files (a few round trips to the file server, which may
 /// be far away over a VPN), so `open` retries a held lock for this long before
 /// it reports [`SyncError::ClientIdInUse`].
-const LOCK_WAIT: Duration = Duration::from_secs(2);
+pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(2);
 const LOCK_RETRY: Duration = Duration::from_millis(50);
 /// `len: u32` + 8 checksum bytes.
 const RECORD_HEADER: usize = 12;
@@ -340,7 +340,8 @@ pub struct DirTransport {
     root: PathBuf,
     client: ClientId,
     config: DirConfig,
-    _lock: File,
+    /// Held while attached (one session per client ID). `None`: read-only.
+    lock: Option<File>,
     own: BTreeMap<DocKey, OwnLog>,
     sources: BTreeMap<PathBuf, Source>,
     /// Union of the versions of everything read from or written to the folder.
@@ -416,11 +417,108 @@ impl DirTransport {
         let presence = root.join(PRESENCE);
         fs::create_dir_all(&presence).map_err(SyncError::io(&presence))?;
         let (lock, locked) = lock_client(&updates.join(format!("{client}.{LOCK_EXT}")), &client)?;
+        Ok(Self::new(root, client, config, Some(lock), locked))
+    }
+
+    /// Attach to `project` without writing anything, for a folder whose
+    /// `updates/` this user cannot write ([`DirTransport::open`] fails with
+    /// [`SyncError::Io`] of kind `PermissionDenied` or `ReadOnlyFilesystem`,
+    /// and a file of one's own cannot be created there either:
+    /// `PermissionDenied` alone can also be a lock file that is being
+    /// deleted, see `docs/spec/sync.md` 7.5).
+    /// Everyone's logs are read as usual, this client's own (from earlier
+    /// sessions) like the others'. Nothing is written: sending edits
+    /// (`Updates`, `Snapshot`) fails, our presence is not published, no lock is
+    /// taken, and there is no cleanup of departed clients' files (§4.7: no
+    /// compaction, no absorbing, nothing deleted, not even stale presence
+    /// files). Run the session without [`crate::SessionConfig::send_data`].
+    pub fn open_read_only(
+        project: impl AsRef<Path>,
+        client: ClientId,
+        config: DirConfig,
+    ) -> Result<Self, SyncError> {
+        let root = project.as_ref().to_owned();
+        if !root.is_dir() {
+            return Err(SyncError::NotADirectory(root));
+        }
+        Ok(Self::new(root, client, config, None, false))
+    }
+
+    /// Whether `client` may write in the `updates/` folder of `project`:
+    /// creates and deletes a file of its own there (`<client>.tmp-<random>`;
+    /// if the delete fails, the next [`open`](Self::open) of this client
+    /// removes it, holding the lock, with its other temporary files
+    /// ([`remove_leftovers`](Self::remove_leftovers)), and so does the cleanup
+    /// of §4.7 where it is turned on, `DirConfig::inactive_after`). `Ok(false)`:
+    /// creating it was refused (`PermissionDenied`, `ReadOnlyFilesystem`), or
+    /// `updates/` does not exist (so [`open`](Self::open) could not create
+    /// it). Other errors are returned as they are.
+    ///
+    /// [`open`](Self::open) failing with `PermissionDenied` does not say that
+    /// much on its own: on Windows (and SMB shares served by it) opening a
+    /// lock file that another client's cleanup deleted while holding it open
+    /// gives that error until the deletion completes, after any wait. Blocks
+    /// like `open` (a few round trips to the file server).
+    pub(crate) fn probe_writable(project: &Path, client: &ClientId) -> io::Result<bool> {
+        let probe = write_probe_path(project, client);
+        match OpenOptions::new().write(true).create_new(true).open(&probe) {
+            Ok(f) => {
+                drop(f);
+                let _ = fs::remove_file(&probe);
+                Ok(true)
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::PermissionDenied
+                        | io::ErrorKind::ReadOnlyFilesystem
+                        | io::ErrorKind::NotFound
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Whether [`open`](Self::open) can open `client`'s lock file in
+    /// `project` for writing: `Ok(true)` also when there is none (whether it
+    /// can be created is what [`probe_writable`](Self::probe_writable)
+    /// says), `Ok(false)` when opening it is refused (`PermissionDenied`,
+    /// `ReadOnlyFilesystem`: a read-only file, another user's, or on Windows
+    /// one being deleted). Opens it without locking or changing it. Blocks.
+    pub(crate) fn probe_lock(project: &Path, client: &ClientId) -> io::Result<bool> {
+        let path = project.join(UPDATES).join(format!("{client}.{LOCK_EXT}"));
+        match OpenOptions::new().write(true).open(&path) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// `leftovers`: remove the temporary files of an earlier session of ours
+    /// ([`remove_leftovers`](Self::remove_leftovers)); only while we hold
+    /// `lock`.
+    fn new(
+        root: PathBuf,
+        client: ClientId,
+        config: DirConfig,
+        lock: Option<File>,
+        leftovers: bool,
+    ) -> Self {
         let mut t = DirTransport {
             root,
             client,
             config,
-            _lock: lock,
+            lock,
             own: BTreeMap::new(),
             sources: BTreeMap::new(),
             folder: BTreeMap::new(),
@@ -443,23 +541,27 @@ impl DirTransport {
             #[cfg(feature = "watch")]
             _watcher: None,
         };
-        if locked {
+        if leftovers {
             t.remove_leftovers();
         }
         #[cfg(feature = "watch")]
         if t.config.watch {
             t.start_watcher();
         }
-        Ok(t)
+        t
     }
 
-    /// Delete the temporary files an earlier session with our client ID left
-    /// when its process died between writing and renaming them (a compaction,
-    /// a presence heartbeat, a clock probe). Others' cleanup passes only delete
-    /// them once they are `inactive_after` old (§4.7), and only where one runs,
-    /// so until then every crash at the wrong moment would leave one more. Only
-    /// done while we hold the client ID's lock, so no live session of ours is
-    /// writing them.
+    /// Delete the temporary files (`<client>.tmp-*` in `updates/**` and
+    /// `presence/`) an earlier session with our client ID left when its
+    /// process died between writing and renaming them (a compaction, a
+    /// presence heartbeat, a clock probe), or whose delete failed (the write
+    /// probe, [`probe_writable`](Self::probe_writable)). Others' cleanup
+    /// passes only delete them once they are `inactive_after` old (§4.7), and
+    /// only where one runs, so until then every crash at the wrong moment
+    /// would leave one more. Only done while we hold the client ID's lock, so
+    /// no live session of ours is writing them; a write probe of ours going on
+    /// just then (another process that wants to attach as us) only creates and
+    /// deletes its file, and does not mind that it is gone.
     fn remove_leftovers(&mut self) {
         let prefix = format!("{}{TMP_MARK}", self.client);
         let mut files = Vec::new();
@@ -478,6 +580,11 @@ impl DirTransport {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Opened with [`open_read_only`](Self::open_read_only).
+    pub fn is_read_only(&self) -> bool {
+        self.lock.is_none()
     }
 
     pub fn client(&self) -> &ClientId {
@@ -552,7 +659,7 @@ impl DirTransport {
             let Ok(doc) = DocKey::parse(&dir_rel) else {
                 continue;
             };
-            if stem == self.client.as_str() {
+            if stem == self.client.as_str() && !self.is_read_only() {
                 if !self.own.contains_key(&doc) && !self.newer.contains_key(&doc) {
                     let r = self.adopt_own(&doc, &path);
                     self.note(r);
@@ -657,7 +764,10 @@ impl DirTransport {
             let age = mtime
                 .and_then(|m| now.duration_since(m).ok())
                 .unwrap_or_default();
-            if age > PRESENCE_GC {
+            // Read-only: nothing is deleted (nor the server's clock probed with a
+            // file written for it); such a file is read like any other, and its
+            // TTL below decides.
+            if age > PRESENCE_GC && !self.is_read_only() {
                 // Only by the file server's clock: one of ours that runs a day
                 // fast must not delete running clients' heartbeats, which the
                 // cleanup (§4.7) takes as their sign of life.
@@ -1250,6 +1360,12 @@ impl DirTransport {
     // that vanished or was replaced, which no longer is that container.)
 
     fn maybe_cleanup(&mut self) {
+        // A read-only client writes nothing: no probe of the server's clock, no
+        // deletion, no snapshot to absorb a departed log (it has no log of its
+        // own to take one over with).
+        if self.is_read_only() {
+            return;
+        }
         let Some(after) = self.config.inactive_after else {
             return;
         };
@@ -1731,6 +1847,18 @@ impl DirTransport {
 
 impl Transport for DirTransport {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+        if self.is_read_only() {
+            return match &msg {
+                Message::Hello { versions, .. } => self.on_hello(versions.clone()),
+                Message::Updates { doc, .. } | Message::Snapshot { doc, .. } => {
+                    Err(SyncError::io(&self.log_path(doc))(io::Error::new(
+                        io::ErrorKind::ReadOnlyFilesystem,
+                        "the shared folder is open read-only",
+                    )))
+                }
+                Message::SnapshotRequest { .. } | Message::Presence { .. } => Ok(()),
+            };
+        }
         match &msg {
             Message::Hello { versions, .. } => self.on_hello(versions.clone()),
             Message::Updates { doc, version, .. } => {
@@ -1931,6 +2059,15 @@ fn lock_client(path: &Path, client: &ClientId) -> Result<(File, bool), SyncError
         }
         std::thread::sleep(LOCK_RETRY);
     }
+}
+
+/// A new file name for [`DirTransport::probe_writable`]: a temporary file of
+/// `client`'s in `updates/`, which [`DirTransport::remove_leftovers`] removes
+/// if the probe could not.
+fn write_probe_path(project: &Path, client: &ClientId) -> PathBuf {
+    project
+        .join(UPDATES)
+        .join(format!("{client}{TMP_MARK}{}", new_generation()))
 }
 
 /// Every record of the log at `path`, decoded.
@@ -2610,6 +2747,75 @@ mod tests {
         let tmp = path.with_extension("tmp-test");
         fs::write(&tmp, bytes).unwrap();
         fs::rename(&tmp, path).unwrap();
+    }
+
+    /// Temporary files of ours are removed when we open the folder writable,
+    /// also with the cleanup off (the default): probe files whose delete
+    /// failed (`probe_writable`, the clock probe) and what a crash left in
+    /// document folders and `presence/` (`remove_leftovers`); others' files
+    /// are left alone. `probe_lock` tells a lock file we can open, or none,
+    /// from one we cannot.
+    #[test]
+    fn our_leftover_probe_files_are_removed_on_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let updates = tmp.path().join(UPDATES);
+        fs::create_dir_all(updates.join("root")).unwrap();
+        fs::create_dir_all(tmp.path().join(PRESENCE)).unwrap();
+        let a = ClientId::new("a").unwrap();
+        // What `probe_writable` leaves when it cannot delete its file.
+        let probe = write_probe_path(tmp.path(), &a);
+        fs::write(&probe, b"").unwrap();
+        let ours = [
+            "updates/a.tmp-1",
+            "updates/root/a.tmp-4",
+            "presence/a.tmp-7",
+        ];
+        let others = [
+            "updates/b.tmp-3",
+            "updates/ab.tmp-5",
+            "updates/root/b.tmp-6",
+            "presence/b.tmp-8",
+        ];
+        for name in ours.iter().chain(&others) {
+            fs::write(tmp.path().join(name), b"").unwrap();
+        }
+        assert_eq!(DirConfig::default().inactive_after, None);
+        assert!(
+            DirTransport::probe_lock(tmp.path(), &a).unwrap(),
+            "no lock file"
+        );
+        let t = transport(tmp.path(), "a", DirConfig::default());
+        assert!(!probe.exists(), "{}", probe.display());
+        for gone in ours {
+            assert!(!tmp.path().join(gone).exists(), "{gone}");
+        }
+        for kept in others.iter().chain(&["updates/a.lock"]) {
+            assert!(tmp.path().join(kept).exists(), "{kept}");
+        }
+        assert_eq!(t.stats().stale_files_removed, 4);
+        assert!(t.last_error().is_none(), "{:?}", t.last_error());
+        // A probe of ours that can write leaves nothing behind.
+        assert!(DirTransport::probe_writable(tmp.path(), &a).unwrap());
+        let left: Vec<_> = fs::read_dir(&updates)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("a."))
+            .collect();
+        assert_eq!(left, ["a.lock"]);
+        // Held by `t`: still opens (the lock is advisory).
+        assert!(DirTransport::probe_lock(tmp.path(), &a).unwrap());
+        drop(t);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let lock = updates.join("a.lock");
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o444)).unwrap();
+            // Permissions do not apply to root.
+            if OpenOptions::new().write(true).open(&lock).is_err() {
+                assert!(!DirTransport::probe_lock(tmp.path(), &a).unwrap());
+            }
+        }
     }
 
     #[test]

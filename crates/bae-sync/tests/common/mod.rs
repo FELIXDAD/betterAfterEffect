@@ -125,11 +125,15 @@ impl SimNet {
                 net: self.clone(),
                 me: a,
                 peer: a + 1,
+                lossless: false,
+                keep_hellos: false,
             },
             SimEnd {
                 net: self.clone(),
                 me: a + 1,
                 peer: a,
+                lossless: false,
+                keep_hellos: false,
             },
         )
     }
@@ -179,14 +183,33 @@ pub struct SimEnd {
     net: SimNet,
     me: usize,
     peer: usize,
+    /// What this end sends is never dropped (still duplicated and delayed).
+    lossless: bool,
+    /// The `Hello`s this end sends are never dropped.
+    keep_hellos: bool,
+}
+
+impl SimEnd {
+    /// What this end sends is never dropped, whatever the conditions.
+    pub fn lossless(mut self) -> Self {
+        self.lossless = true;
+        self
+    }
+
+    /// The `Hello`s this end sends are never dropped, whatever the conditions.
+    pub fn keep_hellos(mut self) -> Self {
+        self.keep_hellos = true;
+        self
+    }
 }
 
 impl Transport for SimEnd {
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+        let keep = self.lossless || (self.keep_hellos && matches!(msg, Message::Hello { .. }));
         let bytes = msg.encode();
         let mut s = self.net.0.lock().unwrap();
         let c = s.conditions;
-        if s.rng.chance(c.drop_percent) {
+        if s.rng.chance(c.drop_percent) && !keep {
             s.dropped += 1;
             return Ok(());
         }

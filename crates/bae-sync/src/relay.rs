@@ -82,7 +82,9 @@ impl Relay {
     }
 
     /// How often the relay re-announces its versions to each client (repairs lost
-    /// messages on lossy links). Applies to clients connected afterwards.
+    /// messages on lossy links). Applies to clients connected afterwards. `None`
+    /// also gives up keeping large transfers as on their way (see
+    /// [`SessionConfig::hello_interval`]).
     pub fn set_hello_interval(&mut self, every: Option<Duration>) {
         self.hello_interval = every;
     }
