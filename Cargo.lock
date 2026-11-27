@@ -911,6 +911,7 @@ dependencies = [
  "clap",
  "glam",
  "half",
+ "image",
  "kurbo",
  "parking_lot",
  "png",
