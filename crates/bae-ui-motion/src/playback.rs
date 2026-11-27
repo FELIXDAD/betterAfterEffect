@@ -68,6 +68,15 @@ struct Scene {
     effects: Option<PreviewEffects>,
 }
 
+/// The frame on screen. `hold` keeps its texture from being reused for
+/// another frame (spare targets are recycled) and tells frames apart: a new
+/// frame can arrive in a recycled texture.
+pub(crate) struct ShownFrame {
+    pub texture: wgpu::Texture,
+    pub rect: IRect,
+    pub hold: Arc<dyn Send + Sync>,
+}
+
 struct Slot {
     channels: Option<Arc<crate::gpu_preview::ChannelFrame>>,
     registry: Arc<ViewportTextureRegistry>,
@@ -593,9 +602,13 @@ impl PlaybackPreview {
         self.shown.as_ref()?.channels.clone()
     }
 
-    pub(super) fn shown_texture(&self) -> Option<(wgpu::Texture, IRect)> {
+    pub(super) fn shown_texture(&self) -> Option<ShownFrame> {
         let shown = self.shown.as_ref()?;
-        Some((shown.texture.clone(), shown.rect))
+        Some(ShownFrame {
+            texture: shown.texture.clone(),
+            rect: shown.rect,
+            hold: shown.clone(),
+        })
     }
 }
 
