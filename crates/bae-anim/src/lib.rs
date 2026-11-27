@@ -56,6 +56,11 @@ pub use glam;
 
 use bae_model::PrimPath;
 
+/// Parse an editor draft using the expression compiler, without executing it.
+pub fn expression_syntax_error(source: &str) -> Option<String> {
+    expr::rewrite::rewrite(source).err().map(|e| e.to_string())
+}
+
 /// Evaluate `comp` at comp time `time`.
 ///
 /// Compiles the comp from scratch; use an [`Evaluator`] to reuse the compiled form

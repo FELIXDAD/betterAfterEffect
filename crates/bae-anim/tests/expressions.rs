@@ -89,6 +89,21 @@ fn eval(s: &Stage, t: f64) -> bae_anim::EvaluatedComp {
 }
 
 #[test]
+fn localized_pick_whip_lookups_read_the_same_property() {
+    let s = stage(|b| {
+        let target = b.layer(MAIN, "target", "null");
+        b.set(&target, "transform:rotation", 31.0);
+        let source = b.layer(MAIN, "source", "null");
+        b.expr(&source, "transform:rotation", 0.0,
+            r#"var peer = thisComp.layer("target");
+               peer("Transform")("Rotation") + peer("变换")("旋转") + (peer.name === "target" ? 1 : 0)"#);
+    });
+    let comp = eval(&s, 0.0);
+    assert!(comp.errors.is_empty(), "{:?}", comp.errors);
+    assert!(comp.layers.iter().any(|l| l.transform.rotation.z == 63.0));
+}
+
+#[test]
 fn vector_and_interpolation_examples() {
     let samples = [
         ("add([4,5],[1,2,3])[2]", 3.0),
