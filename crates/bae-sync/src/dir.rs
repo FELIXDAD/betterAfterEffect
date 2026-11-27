@@ -1094,6 +1094,8 @@ impl DirTransport {
         match File::open(&path).and_then(|mut f| read_header_kind(&mut f)) {
             Ok(Header::Newer(v)) => {
                 self.found_newer(doc, &path, v);
+                // What we were to write is not written: `close` says so.
+                self.refused.insert(doc.clone());
                 return Err(SyncError::io(&path)(io::Error::other(NEWER_LOG)));
             }
             Ok(_) => {}
@@ -3240,6 +3242,7 @@ mod tests {
         assert!(requests(&mut t) >= 1);
         assert!(t.send(snapshot(&b.v2, &b.snap2)).is_err());
         assert_eq!(fs::read(&path).unwrap(), newer);
+        assert!(t.close().is_err());
         // From then on nothing is written for it, and nothing is asked for.
         t.send(updates(&b.v2, &b.update)).unwrap();
         t.send(snapshot(&b.v2, &b.snap2)).unwrap();
