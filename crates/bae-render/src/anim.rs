@@ -262,12 +262,14 @@ impl AnimEvaluator {
         // hidden, not a parent or an active layer's matte): the frame does not
         // depend on their content (cache invalidation, `RenderLayer::inert`).
         let parents: Vec<usize> = ec.layers.iter().filter_map(|l| l.parent).collect();
-        let mattes: Vec<usize> = rc
+        let mut mattes: Vec<usize> = rc
             .layers
             .iter()
             .filter(|l| l.active)
             .filter_map(|l| l.track_matte.map(|m| m.layer))
             .collect();
+        // Environment lights read their source layer even when it is hidden.
+        mattes.extend(rc.lights.iter().filter_map(|l| Some(l.environment?.layer)));
         for (i, l) in rc.layers.iter_mut().enumerate() {
             l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
         }
@@ -355,6 +357,30 @@ impl AnimEvaluator {
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         // The render queue renders at Best Settings (every layer, nested
         // ones too, at Best); the Quality switches only change previews.
+        // Advanced 3D extrudes 3D text and shape layers.
+        out.extrusion = match (&l.geometry, ec.advanced_3d, l.switches.three_d) {
+            (Some(g), true, true) => g.extrusion_depth,
+            _ => 0.0,
+        };
+        out.bevel = l
+            .geometry
+            .as_ref()
+            .filter(|_| out.extrusion > 0.0)
+            .and_then(|g| {
+                use crate::model::extrude::{Bevel, BevelStyle};
+                let style = match g.bevel_style {
+                    2 => BevelStyle::Angular,
+                    3 => BevelStyle::Concave,
+                    4 => BevelStyle::Convex,
+                    _ => return None,
+                };
+                (g.bevel_depth > 0.0).then_some(Bevel {
+                    style,
+                    depth: g.bevel_depth,
+                    hole_scale: g.hole_bevel_depth / 100.0,
+                    inward: g.bevel_direction == 2,
+                })
+            });
         out.quality = match self.purpose {
             RenderPurpose::Final => bae_anim::LayerQuality::Best,
             _ => inherited.quality.min(l.switches.quality),
@@ -429,6 +455,11 @@ impl AnimEvaluator {
                         let strokes = crate::paint::strokes(&e.children, l.layer_time);
                         params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
                         params.extend(crate::paint::source_params(&strokes));
+                    }
+                    // The Puppet effect's pins at this frame.
+                    if e.match_name == crate::puppet::PUPPET_EFFECT {
+                        let pins = crate::puppet::pins(&e.children);
+                        params.push((crate::puppet::PINS_PARAM, crate::puppet::pack(&pins)));
                     }
                     RenderEffect {
                         path: e.path.clone(),
@@ -969,6 +1000,9 @@ fn collapse_3d_precomps(ec: &EvaluatedComp, rc: &mut RenderComp) {
             if let Some(index) = &mut light.scope_below {
                 shift(index);
             }
+            if let Some(e) = &mut light.environment {
+                shift(&mut e.layer);
+            }
         }
         rc.layers.splice(i..=i, inner);
         i += n.max(1);
@@ -991,11 +1025,11 @@ fn comp_lights(ec: &EvaluatedComp) -> Arc<[Light]> {
         .iter()
         .enumerate()
         .filter(|(_, l)| l.switches.enabled && l.active)
-        .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
+        .filter_map(|(i, l)| Some(light(ec, i, l, l.light.as_ref()?)))
         .collect()
 }
 
-fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
+fn light(ec: &EvaluatedComp, index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
     use bae_anim::{LightFalloff, LightType};
     Light {
         kind: match s.light_type {
@@ -1022,6 +1056,20 @@ fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
         shadow_darkness: s.shadow_darkness as f32,
         shadow_diffusion: s.shadow_diffusion as f32,
         scope_below: l.switches.adjustment.then_some(index),
+        // The source is a 2D layer of the same comp (AE refuses 3D layers).
+        environment: (s.light_type == LightType::Environment)
+            .then_some(s.source)
+            .flatten()
+            .filter(|&src| ec.layers.get(src).is_some_and(|l| !l.switches.three_d))
+            .map(|layer| crate::light::EnvironmentSource {
+                layer,
+                background: s.background_visible.then(|| {
+                    [
+                        (s.background_opacity / 100.0).clamp(0.0, 1.0) as f32,
+                        (s.background_blur / 100.0).clamp(0.0, 1.0) as f32,
+                    ]
+                }),
+            }),
     }
 }
 
@@ -1043,6 +1091,16 @@ fn material(m: &bae_anim::MaterialState) -> Material {
         specular_intensity: percent(m.specular_intensity),
         specular_shininess: percent(m.specular_shininess),
         metal: percent(m.metal),
+        transparency: percent(m.transparency),
+        transparency_rolloff: percent(m.transparency_rolloff),
+        reflection_intensity: percent(m.reflection_intensity),
+        reflection_sharpness: percent(m.reflection_sharpness),
+        reflection_rolloff: percent(m.reflection_rolloff),
+        shadow_color: [
+            m.shadow_color[0] as f32,
+            m.shadow_color[1] as f32,
+            m.shadow_color[2] as f32,
+        ],
     }
 }
 

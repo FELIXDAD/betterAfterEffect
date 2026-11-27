@@ -283,8 +283,7 @@ impl Tool {
         ) || self.is_shape()
             || self.is_pen()
             || self.is_camera()
-            // Vertical type needs a text direction in the model (not yet).
-            || self == Tool::TypeHorizontal
+            || self.is_type()
     }
 }
 
@@ -335,6 +334,8 @@ pub mod ids {
     pub const RESOLUTION: &str = "motion.view.resolution";
     /// Layer > Mask and Shape Path > Free Transform Points (catalog id).
     pub const FREE_TRANSFORM: &str = "motion.layer.free_transform_points";
+    /// View > Split with New Locked Viewer (Cmd/Ctrl+Alt+Shift+N).
+    pub const SPLIT_LOCKED: &str = "motion.view.split_with_new_locked_viewer";
 }
 
 /// `(action id, English title, default chord, what it does)`; chords from AE 26's
@@ -518,6 +519,26 @@ fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
     serde_json::json!({ "dx": dx, "dy": dy })
 }
 
+/// View > Split with New Locked Viewer: a new Composition viewer locked to
+/// the active comp, to the right of the focused viewer (else the main one).
+fn split_with_locked_viewer(cx: &mut PanelContext<'_>) {
+    let session = crate::common::session(cx.resources);
+    let Some(comp) = session.lock().active_comp.clone() else {
+        return;
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros());
+    let id = format!("composition:locked-{stamp}");
+    session.lock().viewer_pins.insert(id.clone(), comp);
+    let beside = cx
+        .focused_panel
+        .filter(|p| p.kind() == "composition")
+        .cloned()
+        .unwrap_or_else(|| bae_ui::PanelId::new("composition"));
+    cx.split_open(id, beside);
+}
+
 /// Whether a mask or shape path is selected: vertices in the Composition
 /// viewer, or its path property in the Timeline.
 fn path_selected(cx: &PanelContext<'_>) -> bool {
@@ -541,9 +562,11 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::NUDGE, "Nudge Layer Position"),
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
+            (ids::SPLIT_LOCKED, "Split with New Locked Viewer"),
             (crate::viewer::ZOOM_100, "Zoom to 100%"),
             (crate::viewer::FIT_UP_TO_100, "Fit up to 100%"),
         ])
+        .chain(crate::path_menu::ACTIONS.iter().copied())
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::view_options::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
@@ -648,8 +671,15 @@ pub fn bindings() -> Vec<Binding> {
         // passes it on to a drag or text it is editing.
         .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
         .chain(GIZMOS.iter().map(|(id, _, chord, _)| Binding::new(chord, id)))
+        // Cmd/Ctrl+T in the Composition and Timeline panels: Free Transform
+        // Points with a path selected, else the Type tools (AE; the Layer menu
+        // shows the shortcut).
+        .chain(FREE_TRANSFORM_PANELS.map(|k| Binding::new("Cmd+T", ids::FREE_TRANSFORM).when(k)))
         .collect()
 }
+
+/// Panels where Cmd/Ctrl+T is Free Transform Points when a path is selected.
+pub(crate) const FREE_TRANSFORM_PANELS: [&str; 2] = ["composition", "timeline"];
 
 /// The keymap extension holding [`bindings`].
 pub fn keymap_bindings() -> KeymapBindings {
@@ -968,6 +998,33 @@ pub struct ToolOptions {
     pub puppet_show_mesh: bool,
     pub puppet_expansion: f64,
     pub puppet_density: f64,
+    /// Puppet Record Options (Cmd/Ctrl-dragging a pin records it).
+    pub puppet_record: PuppetRecord,
+}
+
+/// AE's Puppet Record Options.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PuppetRecord {
+    /// Recorded time per real time, percent.
+    pub speed: f64,
+    /// How far (pixels) the recorded path may stray when thinning keyframes.
+    pub smoothing: f64,
+    /// Use Draft Deformation (stored; the deformation is the same).
+    pub draft: bool,
+    /// Show the mesh while recording.
+    pub show_mesh: bool,
+}
+
+impl Default for PuppetRecord {
+    fn default() -> Self {
+        PuppetRecord {
+            speed: 100.0,
+            smoothing: 5.0,
+            draft: false,
+            show_mesh: false,
+        }
+    }
 }
 
 impl Default for ToolOptions {
@@ -995,6 +1052,7 @@ impl Default for ToolOptions {
             puppet_show_mesh: false,
             puppet_expansion: 3.0,
             puppet_density: 10.0,
+            puppet_record: PuppetRecord::default(),
         }
     }
 }
@@ -1311,6 +1369,19 @@ impl ActionHandler for ToolActions {
             t.free_transform_request = true;
             return true;
         }
+        if crate::path_menu::handle(&inv.id, cx) {
+            return true;
+        }
+        if inv.id == ids::FREE_TRANSFORM
+            && !crate::path_menu::can_free_transform(cx.stage, cx.resources)
+        {
+            // The key with no mask or path to transform: the Type tools.
+            return shared(cx.resources).lock().shortcut(ids::TYPE, false);
+        }
+        if inv.id == ids::SPLIT_LOCKED {
+            split_with_locked_viewer(cx);
+            return true;
+        }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
             let mut t = tools.lock();
@@ -1430,6 +1501,26 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Expansion", "扩展"),
     ("Density", "密度"),
     ("Record Options...", "记录选项..."),
+    // Puppet Record Options (AE's zh_CN dictionary: PuppetRecordOptions).
+    ("Puppet Record Options", "操控录制选项"),
+    ("Use Draft Deformation", "使用草图变形"),
+    ("Show Mesh", "显示网格"),
+    (
+        "Command-drag pins to record animation.",
+        "按住 Command 键的同时拖动操控点可录制动画。",
+    ),
+    (
+        "Ctrl-drag pins to record animation.",
+        "按住 Control 键的同时拖动操控点可录制动画。",
+    ),
+    (
+        "To record pin motion, Command-click and drag pins",
+        "要记录固定点移动，请按住 Command 键单击并拖动固定点",
+    ),
+    (
+        "To record pin motion, Ctrl-click and drag pins",
+        "要记录固定点移动，请按住 Ctrl 键单击并拖动固定点",
+    ),
     ("Add", "添加"),
     ("None", "无"),
     ("Solid Color", "纯色"),

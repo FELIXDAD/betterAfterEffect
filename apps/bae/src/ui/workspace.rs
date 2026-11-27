@@ -189,6 +189,7 @@ pub(crate) fn hardware_information(
 /// The workbench plus shell-owned windows.
 pub struct Workspace {
     workbench: Workbench,
+    fullscreen_before_preview: Option<bool>,
     show_about: bool,
     home: bool,
     /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
@@ -228,11 +229,16 @@ impl Workspace {
         );
         Self {
             workbench,
+            fullscreen_before_preview: None,
             show_about: false,
             home: false,
             audio_page_visible: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
+                .with_cache_root(
+                    app.resource::<bae_platform::AppDirs>()
+                        .map(|dirs| dirs.cache.clone()),
+                )
                 .with_installed_ram(bae_platform::memory::total_bytes())
                 .with_host_buttons(&[
                     "appearance.reset_coachmarks",
@@ -240,6 +246,7 @@ impl Workspace {
                     "startup_repair.start_in_safe_mode",
                     MEMORY_DETAILS,
                     GPU_INFORMATION,
+                    "disk.empty_disk_cache",
                     "choose",
                 ]),
         }
@@ -249,6 +256,10 @@ impl Workspace {
     pub fn show_settings(&mut self, page: Option<&str>) {
         let current = self.prefs.current();
         self.settings.open(page, &current);
+    }
+
+    pub fn settings_draft(&self) -> &bae_prefs::Preferences {
+        self.settings.draft()
     }
 
     /// The Preferences window for application acceptance tests.
@@ -269,6 +280,10 @@ impl Workspace {
             true
         });
         requests
+    }
+
+    pub fn cache_free_space(&mut self, dir: &std::path::Path, free: u64) {
+        self.settings.set_cache_free_space(dir, free);
     }
 
     /// Answers a Choose Folder… button.
@@ -388,6 +403,7 @@ impl Workspace {
                 };
             });
         }
+        let mut fullscreen = false;
         if let Some(session) = resources.get::<bae_ui_motion::SharedSession>() {
             let audio_page = self.settings.is_open() && self.settings.page() == "audio";
             if audio_page && !self.audio_page_visible {
@@ -410,6 +426,21 @@ impl Workspace {
                         .request_repaint_after(std::time::Duration::from_millis(50));
                 }
             }
+            if s.fullscreen_preview()
+                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
+                s.stop();
+            }
+            fullscreen = s.fullscreen_preview();
+        }
+        if fullscreen && self.fullscreen_before_preview.is_none() {
+            self.fullscreen_before_preview =
+                Some(ui.input(|i| i.viewport().fullscreen.unwrap_or(false)));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        } else if !fullscreen && let Some(previous) = self.fullscreen_before_preview.take() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(previous));
         }
         let title = doc.title();
         let cx = WorkbenchContext {
@@ -419,6 +450,11 @@ impl Workspace {
             title: &title,
             dirty: doc.is_dirty(),
         };
+        if fullscreen {
+            return self
+                .workbench
+                .present_panel(ui, &cx, bae_ui::PanelId::new("composition"));
+        }
         self.workbench
             .set_external_modal(self.settings.is_open() || self.home);
         let mut out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));

@@ -43,6 +43,7 @@ mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+pub(crate) mod puppet_tool;
 mod scene_icons;
 mod select_tool;
 mod shape_tool;
@@ -54,6 +55,7 @@ pub(crate) mod view3d;
 pub(crate) mod view_options;
 
 pub(crate) use overlay::{mask_color, path_shapes};
+pub(crate) use puppet_tool::record_options_ui as puppet_record_options_ui;
 pub(crate) use transform::nudge_layers;
 
 /// The magnification popup (AE 26): `(magnification, label)`.
@@ -259,6 +261,8 @@ pub struct CompositionViewer {
     /// The view options of the last frame (saved with the panel).
     saved: guides::ViewOptions,
     locked: bool,
+    /// The comp a locked viewer keeps showing (AE's viewer lock).
+    pinned: Option<PrimPath>,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
     /// View ▸ Zoom to 100 % (/) waits for the frame's area.
@@ -305,6 +309,8 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    /// Puppet tools: the pin being dragged.
+    puppet: puppet_tool::PuppetState,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
     /// menu): Esc goes to it instead of switching to the last 3D view.
     esc_taken: bool,
@@ -312,6 +318,8 @@ pub struct CompositionViewer {
     escape: bool,
     /// The current time and since when it has not changed (idle prefetch).
     idle: Option<(PrimPath, Time, u64, std::time::Instant)>,
+    /// Pixel at primary press, before the pointer crosses the drag threshold.
+    mask_start_color: Option<[u8; 4]>,
     /// A camera tool drag.
     camera_drag: Option<camera_tool::CameraDrag>,
 }
@@ -338,8 +346,23 @@ impl CompositionViewer {
             let b = |k: &str| s.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
             v.restore = Some((b("safe"), b("grid")));
             v.checker = s.get("checker").and_then(|v| v.as_bool()).unwrap_or(false);
+            v.pinned = s
+                .get("pinned")
+                .and_then(|p| p.as_str())
+                .and_then(|p| PrimPath::new(p).ok());
+            v.locked = v.pinned.is_some();
         }
         v
+    }
+
+    /// The comp this viewer shows: the one it is locked to, else the active
+    /// comp.
+    fn shown_comp(&self, stage: &bae_model::Stage, session: &SharedSession) -> Option<CompInfo> {
+        self.pinned
+            .as_ref()
+            .filter(|_| self.locked)
+            .and_then(|p| query::comp_info(stage, p))
+            .or_else(|| common::active_comp(stage, session))
     }
 
     fn paint_guides(
@@ -726,7 +749,7 @@ impl Panel for CompositionViewer {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // Read from the session every frame, so New / Open / Close Project
         // update the tab (and its accessible name) at once (issue #215).
-        match common::active_comp(cx.stage, &common::session(cx.resources)) {
+        match self.shown_comp(cx.stage, &common::session(cx.resources)) {
             Some(info) => common::related_tab(cx, "Composition", &info.path, &info.name),
             None => TabInfo::new(tr("Composition")),
         }
@@ -740,7 +763,8 @@ impl Panel for CompositionViewer {
 
     fn save_state(&self) -> Option<serde_json::Value> {
         let (safe, grid) = self.restore.unwrap_or((self.saved.safe, self.saved.grid));
-        Some(json!({"safe": safe, "grid": grid, "checker": self.checker}))
+        let pinned = self.pinned.as_ref().filter(|_| self.locked);
+        Some(json!({"safe": safe, "grid": grid, "checker": self.checker, "pinned": pinned}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -813,6 +837,10 @@ impl Panel for CompositionViewer {
                     None => false,
                 }
             }
+            crate::actions::ids::DELETE if self.puppet.has_selection() => {
+                self.puppet.delete_selected(cx);
+                true
+            }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
                     self.delete_vertices(cx, &session, &info);
@@ -855,7 +883,26 @@ impl Panel for CompositionViewer {
         self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
         crate::import::drop_on_panel(ui, cx);
-        let Some(info) = common::active_comp(cx.stage, &session) else {
+        // A viewer opened locked takes its comp; locking keeps the comp shown.
+        if let Some(p) = session.lock().viewer_pins.remove(cx.panel.as_str()) {
+            self.pinned = Some(p);
+            self.locked = true;
+        }
+        if !self.locked {
+            self.pinned = None;
+        } else if self.pinned.is_none() {
+            self.pinned = session.lock().active_comp.clone();
+        }
+        // Working in a locked viewer makes its comp the active one (the
+        // Timeline and the other panels follow, AE).
+        if let Some(p) = self.pinned.clone().filter(|_| self.locked)
+            && query::comp_info(cx.stage, &p).is_some()
+            && session.lock().active_comp.as_ref() != Some(&p)
+            && (cx.focused || ui.ui_contains_pointer() && ui.input(|i| i.pointer.any_pressed()))
+        {
+            session.lock().open_comp(&p);
+        }
+        let Some(info) = self.shown_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
         };
@@ -874,9 +921,16 @@ impl Panel for CompositionViewer {
         let ppp = ui.ctx().pixels_per_point();
 
         let full = ui.available_rect_before_wrap();
-        let bar_h = 28.0;
+        let fullscreen = session.lock().fullscreen_preview();
+        let bar_h = if fullscreen { 0.0 } else { 28.0 };
         // The Composition Navigator along the top.
-        let nav = Rect::from_min_max(full.min, pos2(full.right(), full.top() + navigator::HEIGHT));
+        let nav = Rect::from_min_max(
+            full.min,
+            pos2(
+                full.right(),
+                full.top() + if fullscreen { 0.0 } else { navigator::HEIGHT },
+            ),
+        );
         let area = Rect::from_min_max(
             pos2(full.left(), nav.bottom()),
             pos2(full.right(), full.bottom() - bar_h),
@@ -901,11 +955,13 @@ impl Panel for CompositionViewer {
         let pane_rects = layout::rects(area, panes.len());
         let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
-        let (rulers, area) = guides::layout(area, opts.rulers);
+        let (rulers, area) = guides::layout(area, opts.rulers && !fullscreen);
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
-        navigator::bar(ui, cx, &session, nav);
+        if !fullscreen {
+            navigator::bar(ui, cx, &session, nav);
+        }
         if std::mem::take(&mut self.escape) {
             ui.input_mut(|i| {
                 i.events.push(egui::Event::Key {
@@ -1001,7 +1057,13 @@ impl Panel for CompositionViewer {
         {
             self.pan += resp.drag_delta();
         }
-        let (view, mag) = self.view(area, &info, ppp);
+        let (mut view, mut mag) = self.view(area, &info, ppp);
+        if fullscreen {
+            let size = vec2(info.width as f32, info.height as f32);
+            view.scale = (area.width() / size.x).min(area.height() / size.y);
+            view.origin = area.center() - size * view.scale * 0.5;
+            mag = ppp * view.scale;
+        }
         self.last_view = Some(view);
         if self.mag != mag {
             self.mag = mag;
@@ -1024,7 +1086,7 @@ impl Panel for CompositionViewer {
         let mut resolution = {
             let s = session.lock();
             // Preview ▸ Resolution overrides the viewer's while playing.
-            match s.preview.resolution.filter(|_| s.is_playing()) {
+            match s.preview_options().resolution.filter(|_| s.is_playing()) {
                 Some(r) => r,
                 None => render_factor(cx.stage, &info.path, s.auto_resolution, mag),
             }
@@ -1036,9 +1098,38 @@ impl Panel for CompositionViewer {
         }
         let wireframe = interacting && self.display.fast == display::Fast::Wireframe;
         self.render_factor = resolution;
+        let audio_only = {
+            let s = session.lock();
+            s.is_playing() && !s.preview_options().video
+        };
+        if audio_only {
+            if let Some(gpu) = self.gpu.as_mut() {
+                gpu.playback.stop();
+            }
+            ui.painter().rect_filled(area, 0.0, Color32::BLACK);
+            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session, None);
+            return;
+        }
         // Paint.
         let painter = ui.painter_at(area);
         let controls = view_options::shown_controls(&session.lock());
+        // Region of interest for Crop Comp to Region of Interest (AE turns it
+        // off once the comp is cropped to it).
+        {
+            let mut s = session.lock();
+            if std::mem::take(&mut s.roi_cropped) {
+                self.display.roi_on = false;
+                self.display.roi = None;
+            }
+            match self.display.roi() {
+                Some(r) => {
+                    let rect = [r.x0, r.y0, r.x1, r.y1].map(f64::from);
+                    s.roi = Some((info.path.clone(), rect));
+                }
+                None if s.roi.as_ref().is_some_and(|(c, _)| *c == info.path) => s.roi = None,
+                None => {}
+            }
+        }
         let pasteboard = session.lock().panel_background.color();
         painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
@@ -1088,13 +1179,27 @@ impl Panel for CompositionViewer {
         if self.nudge.is_some() && !ui.input(|i| arrows.iter().any(|k| i.key_down(*k))) {
             self.finish_nudge(cx, &session, &info);
         }
-        // Ctrl+T knows a path is selected (Free Transform Points).
-        session.lock().vertex_path = self
-            .select
-            .vertices
-            .prim
-            .clone()
-            .filter(|_| !self.select.vertices.is_empty());
+        // Ctrl+T and Layer ▸ Mask and Shape Path know which vertices are
+        // selected.
+        {
+            let mut s = session.lock();
+            if let Some(indices) = s.vertex_request.take()
+                && self.select.vertices.prim.is_some()
+            {
+                self.select.vertices.indices = indices;
+            }
+            s.vertex_path = self
+                .select
+                .vertices
+                .prim
+                .clone()
+                .filter(|_| !self.select.vertices.is_empty());
+            s.vertex_indices = if s.vertex_path.is_some() {
+                self.select.vertices.indices.clone()
+            } else {
+                Vec::new()
+            };
+        }
         let scrub = session.lock().scrub.clone();
         let editing = scrub.is_some()
             || self.nudge.is_some()
@@ -1122,16 +1227,30 @@ impl Panel for CompositionViewer {
                     ),
                     |pb| pb.range,
                 );
-                let looping = playback.is_some() && session.lock().loop_playback;
+                let caching = playback.as_ref().and_then(|pb| pb.caching.as_ref());
+                let frame_time = caching.map_or(time, |p| info.frame_rate.frame_to_time(p.first));
+                let poll_range = if caching.is_some() {
+                    bae_model::TimeRange::new(frame_time, frame_time + info.frame_duration())
+                } else {
+                    range
+                };
+                let looping = playback.is_some()
+                    && caching.is_none()
+                    && session.lock().preview_options().repeat;
                 let mut shown_now = false;
                 if let Some((image, actual, errors)) = gpu.playback.poll(
                     cx.stage,
                     cx.resources,
                     &info.path,
-                    time,
+                    frame_time,
                     info.frame_rate,
-                    range,
+                    poll_range,
                     looping,
+                    if playback.is_some() {
+                        session.lock().preview_options().skip
+                    } else {
+                        0
+                    },
                     resolution,
                     ui.ctx(),
                 ) {
@@ -1147,8 +1266,23 @@ impl Panel for CompositionViewer {
                         }
                     }
                 }
-                // A cold start: the clock waits for playback's first frame.
-                if playback.is_some() {
+                if let Some(pass) = caching {
+                    let mut pass = pass.clone();
+                    let bytes = u64::from(info.width.div_ceil(resolution))
+                        * u64::from(info.height.div_ceil(resolution))
+                        * 4;
+                    let done = gpu.playback.fill_cache(&mut pass, info.frame_rate, bytes);
+                    let mut s = session.lock();
+                    if let Some(pb) = s.playback.as_mut() {
+                        pb.caching = Some(pass);
+                    }
+                    if done {
+                        s.finish_cache(&info, true);
+                    }
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(25));
+                } else if playback.is_some() {
+                    // A cold start: wait until the first playback frame is ready.
                     session.lock().hold_first_frame(shown_now);
                 }
                 let prefs = crate::prefs::current(cx.resources);
@@ -1192,10 +1326,16 @@ impl Panel for CompositionViewer {
                 gpu.playback.publish_ranges(&session, info.frame_rate);
             }
         }
+        if self.gpu.is_none() && playback.as_ref().is_some_and(|pb| pb.caching.is_some()) {
+            session.lock().finish_cache(&info, false);
+        }
         if playback.is_some() && self.gpu.is_some() && !editing {
             self.on_gpu = completed.is_some();
             if let Some(image) = completed {
                 paint_image(&clip, &view, image);
+            }
+            if fullscreen {
+                return;
             }
             Self::paint_guides(cx, &painter, &clip, comp_rect, &view, opts);
             let (fps, dropped) = {
@@ -1211,6 +1351,7 @@ impl Panel for CompositionViewer {
                 color::TEXT_STRONG,
             );
             self.banner.ui(ui, cx, &session, area);
+            crate::tracker::camera::banner(ui, cx, area);
             bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session, None);
             return;
         }
@@ -1408,7 +1549,8 @@ impl Panel for CompositionViewer {
         }
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
-        if let Some(h) = resp.hover_pos() {
+        let tool = tools.lock().current();
+        if let Some(h) = resp.interact_pointer_pos().or(resp.hover_pos()) {
             let p = view.to_comp(h);
             let mut s = session.lock();
             s.info.pos = Some([p.x, p.y]);
@@ -1417,9 +1559,35 @@ impl Panel for CompositionViewer {
                 .cumulative_frame_nr()
                 .saturating_sub(s.info.shown_at)
                 < 3;
-            if shown && let Some(g) = self.gpu.as_mut() {
-                // Outside the rendered frame the comp is transparent (AE: A 0).
-                s.info.color = Some(g.pixel([p.x, p.y]).unwrap_or([0; 4]));
+            let mask = self.prefs.contrasting_masks
+                && (tool.is_shape() || tool == Tool::Pen)
+                && self.shape.is_none()
+                && !self.pen.busy()
+                && !s.selected_layers.is_empty();
+            if shown || mask {
+                let origin = ui.input(|i| i.pointer.press_origin());
+                let pressed = ui.input(|i| i.pointer.primary_pressed());
+                let down = ui.input(|i| i.pointer.primary_down());
+                if pressed {
+                    self.mask_start_color = None;
+                }
+                if mask
+                    && down
+                    && self.mask_start_color.is_none()
+                    && let Some(origin) = origin
+                {
+                    let p = view.to_comp(origin);
+                    self.mask_start_color = self
+                        .gpu
+                        .as_mut()
+                        .and_then(|g| g.pixel([p.x, p.y], ui.ctx()));
+                }
+                if shown || !down || pressed {
+                    s.info.color = self
+                        .gpu
+                        .as_mut()
+                        .and_then(|g| g.pixel([p.x, p.y], ui.ctx()));
+                }
             }
         }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
@@ -1577,7 +1745,6 @@ impl Panel for CompositionViewer {
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
         let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-        let tool = tools.lock().current();
         let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
         if !space {
             self.space_hold = None;
@@ -1660,6 +1827,7 @@ impl Panel for CompositionViewer {
             &comp,
             &view,
             effective,
+            self.mask_start_color,
         );
         if let Some(d) = &self.shape {
             d.paint(&painter, &view);
@@ -1715,6 +1883,21 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
+        // Puppet tools: pins added and dragged.
+        let selected_layers = session.lock().selected_layers.clone();
+        let puppet = puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+            effective,
+            &painter,
+            time,
+            &selected_layers,
+        );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.
@@ -1752,7 +1935,9 @@ impl Panel for CompositionViewer {
             &opts,
             effective == Tool::Selection && !path.owns && !points.owns,
         );
-        let select_cursor = if points.owns {
+        let select_cursor = if puppet.owns {
+            puppet.cursor
+        } else if points.owns {
             points.cursor
         } else if path.owns || sketching || guide_busy {
             path.cursor
@@ -1820,6 +2005,7 @@ impl Panel for CompositionViewer {
             &session,
             &comp,
             &view,
+            self.type_tool.editing.is_some(),
         );
 
         // Items dropped from the project panel become layers.
@@ -1848,6 +2034,7 @@ impl Panel for CompositionViewer {
             reference_axes(&ui.painter_at(area), area, &camera.world);
         }
         self.banner.ui(ui, cx, &session, area);
+        crate::tracker::camera::banner(ui, cx, area);
         self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
         let camera = comp.camera.and_then(|i| comp.layers.get(i));
         let camera = camera.map(|l| l.name.clone());
@@ -2033,6 +2220,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
         "composition",
         bae_ui::PanelKind::new("Composition", |spawn| {
             Box::new(CompositionViewer::new(spawn.state))
-        }),
+        })
+        .multi_instance(),
     );
 }

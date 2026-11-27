@@ -267,9 +267,13 @@ pub struct NewItemParams {
     #[serde(default)]
     pub duration: Option<bae_model::Time>,
     /// The folder to put it in (default: Solids for a solid, the items folder
-    /// for a placeholder).
+    /// for a placeholder; with `replace`, that item's folder).
     #[serde(default)]
     pub parent: Option<PrimPath>,
+    /// File ▸ Replace Footage ▸ Solid… / Placeholder…: this item's layers use
+    /// the new item, and this item goes.
+    #[serde(default)]
+    pub replace: Option<PrimPath>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -296,7 +300,13 @@ impl Command for NewItem {
         if name.is_empty() {
             return Err(fail("the item needs a name"));
         }
-        let parent = match p.parent {
+        if let Some(old) = &p.replace {
+            tx.stage().require_prim(old)?;
+        }
+        let parent = match p
+            .parent
+            .or_else(|| p.replace.as_ref().and_then(PrimPath::parent))
+        {
             Some(parent) => {
                 tx.stage().require_prim(&parent)?;
                 parent
@@ -352,6 +362,28 @@ impl Command for NewItem {
                 set(tx, &item, "duration", Value::Time(duration))?;
             }
         }
+        if let Some(old) = p.replace {
+            // Every layer showing the old item shows the new one (AE keeps
+            // the layers, locked ones too), then the old item goes.
+            let users: Vec<PrimPath> = query::comps(tx.stage())
+                .into_iter()
+                .flat_map(|c| query::comp_layers(tx.stage(), &c))
+                .filter(|l| {
+                    tx.stage()
+                        .prim(l)
+                        .and_then(|v| query::static_value(&v, "source"))
+                        == Some(Value::PrimRef(old.clone()))
+                })
+                .collect();
+            tx.allow_locked(|tx| -> Result<(), CommandError> {
+                for layer in &users {
+                    set(tx, layer, "source", Value::PrimRef(item.clone()))?;
+                }
+                Ok(())
+            })?;
+            crate::layer::DeleteItems
+                .run(tx, crate::layer::DeleteItemsParams { paths: vec![old] })?;
+        }
         Ok(NewItemOutput { item })
     }
 }
@@ -366,6 +398,45 @@ pub(crate) fn add_imported_layer(
     params.name = Some(query::display_name_of(tx.stage(), item));
     params.index = Some(0);
     Ok(CreateLayer.run(tx, params)?.path)
+}
+
+/// File ▸ Reload Footage, or files changed while the app was in the background:
+/// several items read their files again as one undo step.
+pub struct ReloadFiles;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReloadFilesParams {
+    pub items: Vec<ReloadItem>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ReloadItem {
+    pub item: PrimPath,
+    /// The file probed again (as for `item.replace_file`).
+    pub file: ImportFile,
+}
+
+impl Command for ReloadFiles {
+    type Params = ReloadFilesParams;
+    type Output = ();
+    const ID: &'static str = "item.reload_files";
+    const TITLE: &'static str = "Reload Footage";
+    const DESCRIPTION: &'static str = "Read footage items' files again (AE File > Reload Footage; also run when files changed while BAE was in the background): each item keeps its name and interpretation. One undo step for all items.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        for ReloadItem { item, file } in p.items {
+            ReplaceFile.run(
+                tx,
+                ReplaceFileParams {
+                    item,
+                    file,
+                    keep_name: true,
+                    keep_interpretation: true,
+                },
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// File ▸ Replace Footage ▸ File… (Cmd/Ctrl+H): a footage or placeholder item
@@ -402,8 +473,14 @@ impl Command for ReplaceFile {
             return Err(fail(format!("{} is not a footage item", p.item)));
         }
         let path = Path::new(&p.file.path);
-        let file = AssetFile::from_path(path, None, false)
+        let mut file = AssetFile::from_path(path, None, false)
             .map_err(|e| fail(format!("cannot use {}: {e}", p.file.path)))?;
+        if p.keep_name
+            && let Some(old) = AssetFile::from_prim(&view)
+            && old.file_name() == file.file_name()
+        {
+            file.relative = old.relative;
+        }
         if let Some(bad) = p.file.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
             return Err(fail(format!("{bad} is not a footage attribute")));
         }

@@ -439,12 +439,11 @@ pub(super) fn bottom_bar(
                 }
             }
             ui.separator();
-            // BAE's views always share the view options.
-            let mut shared = true;
-            ui.add_enabled(
-                false,
-                egui::Checkbox::new(&mut shared, tr("Share View Options")),
-            );
+            let mut shared = super::view3d::shares_options(cx.resources);
+            if ui.checkbox(&mut shared, tr("Share View Options")).clicked() {
+                cx.invoke(super::view3d::ids::SHARE);
+                ui.close();
+            }
         });
     }
     // Preview time: a click opens Go to Time.
