@@ -270,6 +270,9 @@ fn params(
     def: &EffectDef,
     now: Time,
 ) {
+    if def.match_name == bae_model::effect::stabilizer::MATCH_NAME {
+        crate::tracker::stabilizer::controls(ui, cx, effect);
+    }
     if def.match_name == "ADBE Deflicker" && ui.button(tr("Set Frame")).clicked() {
         let local = query::to_key_time(cx.stage, effect, now);
         cx.invoke_with(
