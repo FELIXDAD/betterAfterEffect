@@ -482,6 +482,7 @@ mod navigation;
 mod navigator;
 mod parity;
 mod pen;
+mod puppet;
 mod resolution;
 mod selection;
 mod shape_tools;

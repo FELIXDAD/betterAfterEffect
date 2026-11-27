@@ -126,7 +126,13 @@ pub fn file_menu_titles() -> Vec<String> {
 #[derive(Debug)]
 enum UserEvent {
     /// egui asked for a repaint after `delay`.
-    Repaint { delay: Duration },
+    Repaint {
+        delay: Duration,
+    },
+    CacheVolume {
+        dir: std::path::PathBuf,
+        free: u64,
+    },
     /// A native menu item was chosen; with the modifiers of the key press when
     /// its key equivalent fired ([`menu::key_equivalent_modifiers`]).
     Menu(muda::MenuEvent, Option<egui::Modifiers>),
@@ -147,6 +153,16 @@ impl From<egui_winit::accesskit_winit::Event> for UserEvent {
     fn from(event: egui_winit::accesskit_winit::Event) -> Self {
         UserEvent::AccessKit(event)
     }
+}
+
+fn measure_cache_volume(proxy: EventLoopProxy<UserEvent>, dir: std::path::PathBuf) {
+    let _ = std::thread::Builder::new()
+        .name("bae-cache-volume".into())
+        .spawn(move || {
+            if let Some(free) = bae_platform::disk::available_bytes(&dir) {
+                let _ = proxy.send_event(UserEvent::CacheVolume { dir, free });
+            }
+        });
 }
 
 /// A smoke test stops as failed if no frame completes for this long.
@@ -312,7 +328,18 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             }
         }
     }
+    prefs.update_capacity(bae_platform::memory::total_bytes(), None);
     app.insert_resource(prefs.clone());
+    if let Some(dirs) = dirs.as_ref().filter(|_| global.smoke_test.is_none()) {
+        measure_cache_volume(
+            proxy.clone(),
+            prefs.current().preview_cache_dir(&dirs.cache),
+        );
+        app.insert_resource(bae_ui_motion::disk_frames::DiskFrames::new(
+            dirs.cache.clone(),
+            &prefs,
+        ));
+    }
     let project_file = bae_ui::files::ProjectFile::default();
     project_file.set(document.location().map(std::path::Path::to_owned));
     app.insert_resource(project_file);
@@ -542,11 +569,17 @@ impl Shell {
         // The UI thread never waits for the warm-up (see `warm_up`).
         bae_render::set_interactive_thread(true);
         {
-            let tasks = self
+            let mut tasks: Vec<Arc<dyn bae_gpu::WarmUp>> = self
                 .app
                 .get_registry::<dyn bae_gpu::WarmUp>()
                 .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
                 .unwrap_or_default();
+            if let Some(disk) = self
+                .app
+                .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
+            {
+                tasks.push(disk.clone());
+            }
             // Frames drawn without something still warming up are incomplete
             // (not remembered by the viewers): repaint when work finishes.
             let proxy = std::sync::Mutex::new(self.proxy.clone());
@@ -827,7 +860,34 @@ impl Shell {
     /// Buttons of the Preferences window that need the system.
     fn run_settings_requests(&mut self, event_loop: &ActiveEventLoop) {
         for request in self.workspace.take_settings_requests() {
-            if let Some((title, body)) =
+            if request == "disk.measure_free_space" {
+                if let Some(dirs) = self.app.resource::<AppDirs>() {
+                    measure_cache_volume(
+                        self.proxy.clone(),
+                        self.workspace
+                            .settings_draft()
+                            .preview_cache_dir(&dirs.cache),
+                    );
+                }
+            } else if request == "disk.empty_disk_cache" {
+                if let Some(cache) = self
+                    .app
+                    .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
+                {
+                    let mut dialog = rfd::MessageDialog::new()
+                        .set_title(crate::i18n::tr("Empty Disk Cache"))
+                        .set_description(crate::i18n::tr(
+                            "Delete cached preview frames from this folder?",
+                        ))
+                        .set_buttons(rfd::MessageButtons::YesNo);
+                    if let Some(view) = &self.view {
+                        dialog = dialog.set_parent(&*view.window);
+                    }
+                    if dialog.show() == rfd::MessageDialogResult::Yes {
+                        cache.clear_folder(self.workspace.settings_draft());
+                    }
+                }
+            } else if let Some((title, body)) =
                 crate::ui::hardware_information(&request, self.app.resources())
             {
                 let mut dialog = rfd::MessageDialog::new()
@@ -1614,6 +1674,17 @@ impl ApplicationHandler<UserEvent> for Shell {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Repaint { delay } => self.schedule_repaint(delay),
+            UserEvent::CacheVolume { dir, free } => {
+                if self
+                    .app
+                    .resource::<AppDirs>()
+                    .is_some_and(|d| self.prefs.current().preview_cache_dir(&d.cache) == dir)
+                {
+                    self.prefs.update_capacity(None, Some(free));
+                }
+                self.workspace.cache_free_space(&dir, free);
+                self.request_redraw();
+            }
             UserEvent::Menu(event, keys) => {
                 let id = event.id.as_ref();
                 // The key equivalent fired on a chord with more modifiers than
