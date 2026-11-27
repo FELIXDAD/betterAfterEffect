@@ -230,12 +230,17 @@ impl Panel for PropertiesPanel {
                             }
                         });
                         let mut value = live.or(size).unwrap_or_default();
+                        // As the Character panel (AE): “72 px”, “86.4 px”.
+                        let display = |x: f64| crate::ae_panels::character::trimmed(x, 1);
+                        let parse = |t: &str| widgets::eval(t);
+                        let unit = format!(" {}", tr("px"));
                         let response = ui.add(
                             widgets::HotNumber::new(&mut value)
                                 .mixed(live.is_none() && size.is_none())
                                 .range(0.1..=1296.)
                                 .decimals(1)
-                                .suffix(tr("px"))
+                                .text(&display, &parse)
+                                .suffix(&unit)
                                 .label(tr("Font Size")),
                         );
                         if response.changed() || response.drag_stopped() {
@@ -770,8 +775,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Skip", "跳过"),
     ("Full Screen", "全屏"),
     ("On ({shortcut}) Stop:", "点击 ({shortcut}) 停止："),
-    ("Numpad 0", "小键盘 0"),
-    ("Shift + Numpad 0", "Shift + 小键盘 0"),
+    ("Numpad 0", "数字小键盘 0"),
+    ("Shift + Numpad 0", "Shift + 数字小键盘 0"),
     ("Cache From Current Time", "从当前时间缓存"),
     ("If caching, play cached frames", "如果缓存，则播放缓存的帧"),
     ("Move time to preview time", "将时间移到预览时间"),
