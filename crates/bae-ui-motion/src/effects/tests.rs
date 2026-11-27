@@ -166,8 +166,17 @@ fn commands(r: PanelRequests) -> Vec<Invocation> {
         .collect()
 }
 
+/// Effect ▸ Last Effect is process-wide: tests applying effects through the
+/// Effect menu take turns (in parallel one would change the other's).
+static LAST_EFFECT_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn last_effect() -> std::sync::MutexGuard<'static, ()> {
+    LAST_EFFECT_TURN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[test]
 fn apply_last_effect_and_remove_all() {
+    let _last = last_effect();
     let mut fx = Fx::new();
     let layer = fx.comp_with_layer();
     let r = fx.handle(Invocation::with_params(
@@ -776,6 +785,7 @@ fn effect_controls_flyout_uses_only_the_measured_panel_commands() {
 /// AE's message, mixed with others it is left out.
 #[test]
 fn effects_skip_lights_and_cameras() {
+    let _last = last_effect();
     let mut fx = Fx::new();
     let solid = fx.comp_with_layer();
     let comp = fx

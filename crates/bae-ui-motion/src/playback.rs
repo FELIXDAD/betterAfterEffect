@@ -603,6 +603,30 @@ impl PlaybackPreview {
         self.shown.as_ref()?.channels.clone()
     }
 
+    /// The worker's state, for a test that times out waiting for a frame.
+    #[cfg(test)]
+    pub(crate) fn debug_state(&self) -> String {
+        let s = self.shared.state.lock().unwrap();
+        let times = |v: &mut dyn Iterator<Item = Time>| v.map(|t| t.0).collect::<Vec<_>>();
+        format!(
+            "running={} epoch={} scene_rev={:?} cache={} demand={:?} queued={:?} ready={:?} failed={:?} shown={:?} shutdown={}",
+            self.running,
+            s.epoch,
+            s.demand.as_ref().map(|d| d.scene.key.revision),
+            s.cache.frames.stats().entries,
+            s.demand
+                .as_ref()
+                .map(|d| times(&mut d.times.iter().copied())),
+            times(&mut s.queued.iter().copied()),
+            times(&mut s.ready.iter().map(|r| r.time)),
+            times(&mut s.failed.iter().copied()),
+            self.shown
+                .as_ref()
+                .map(|r| (r.time.0, r.rect, r.image().is_some())),
+            s.shutdown,
+        )
+    }
+
     pub(super) fn shown_texture(&self) -> Option<ShownFrame> {
         let shown = self.shown.as_ref()?;
         Some(ShownFrame {
