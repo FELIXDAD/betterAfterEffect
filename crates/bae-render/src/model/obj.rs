@@ -135,6 +135,7 @@ pub(super) fn load(path: &Path) -> Result<Model, String> {
         parts,
         materials,
         textures,
+        bounds_cache: Default::default(),
     })
 }
 

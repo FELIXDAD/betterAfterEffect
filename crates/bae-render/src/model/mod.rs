@@ -5,6 +5,7 @@
 //! Files load on a background thread ([`get`]); a viewer frame waits for
 //! nothing (it is incomplete until the model is there).
 
+pub mod extrude;
 mod gltf;
 mod obj;
 
@@ -21,6 +22,42 @@ pub struct Model {
     pub materials: Vec<Material>,
     /// Decoded textures (straight RGBA8, sRGB).
     pub textures: Vec<Texture>,
+    /// [`Self::bounds`], once computed.
+    pub bounds_cache: std::sync::OnceLock<[[f32; 3]; 2]>,
+}
+
+impl Model {
+    /// The box around its triangles (model space): min and max corners.
+    pub fn bounds(&self) -> [[f32; 3]; 2] {
+        *self.bounds_cache.get_or_init(|| self.compute_bounds())
+    }
+
+    fn compute_bounds(&self) -> [[f32; 3]; 2] {
+        let mut lo = [f32::MAX; 3];
+        let mut hi = [f32::MIN; 3];
+        for p in self.parts.iter().flat_map(|p| p.positions.iter()) {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        if lo[0] > hi[0] {
+            return [[0.0; 3]; 2];
+        }
+        [lo, hi]
+    }
+
+    /// The 8 corners of [`Self::bounds`], in comp space by `matrix`.
+    pub fn corners(&self, matrix: &glam::DMat4) -> [glam::DVec3; 8] {
+        let [lo, hi] = self.bounds();
+        std::array::from_fn(|k| {
+            matrix.transform_point3(glam::DVec3::new(
+                f64::from(if k & 1 == 0 { lo[0] } else { hi[0] }),
+                f64::from(if k & 2 == 0 { lo[1] } else { hi[1] }),
+                f64::from(if k & 4 == 0 { lo[2] } else { hi[2] }),
+            ))
+        })
+    }
 }
 
 /// Triangles sharing a material.
@@ -122,6 +159,7 @@ impl Model {
         if lo[0] > hi[0] {
             return;
         }
+        self.bounds_cache = Default::default();
         let centre = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
         let size = (0..3)
             .map(|k| hi[k] - lo[k])
