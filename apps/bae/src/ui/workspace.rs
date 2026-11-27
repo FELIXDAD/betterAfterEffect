@@ -190,6 +190,7 @@ pub(crate) fn hardware_information(
 pub struct Workspace {
     workbench: Workbench,
     show_about: bool,
+    home: bool,
     /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
     prefs: Arc<bae_prefs::PrefsStore>,
     settings: bae_ui::settings::SettingsDialog,
@@ -202,6 +203,7 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        bae_ui_motion::tools::configure_camera_keys(app, &prefs);
         if let Some(session) = app.resource::<bae_ui_motion::SharedSession>().cloned() {
             let apply = move |p: &bae_prefs::Preferences| {
                 session.configure_output(
@@ -227,12 +229,15 @@ impl Workspace {
         Self {
             workbench,
             show_about: false,
+            home: false,
             audio_page_visible: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
                 .with_installed_ram(bae_platform::memory::total_bytes())
                 .with_host_buttons(&[
+                    "appearance.reset_coachmarks",
                     REVEAL_PREFERENCES,
+                    "startup_repair.start_in_safe_mode",
                     MEMORY_DETAILS,
                     GPU_INFORMATION,
                     "choose",
@@ -255,7 +260,15 @@ impl Workspace {
     /// Buttons of the Preferences window the shell runs ([`REVEAL_PREFERENCES`],
     /// `choose:<key>`).
     pub fn take_settings_requests(&mut self) -> Vec<String> {
-        self.settings.take_requests()
+        let mut requests = self.settings.take_requests();
+        requests.retain(|id| {
+            if id == "appearance.reset_coachmarks" {
+                self.workbench.reset_coachmarks();
+                return false;
+            }
+            true
+        });
+        requests
     }
 
     /// Answers a Choose Folder… button.
@@ -263,12 +276,38 @@ impl Workspace {
         self.settings.set(key, value);
     }
 
-    /// Ask for the user's role (first launch).
-    /// A modal dialog (the welcome / role picker, Preferences, a module dialog
-    /// such as Composition Settings) is open: it owns the keyboard and the menu
-    /// commands wait.
+    /// Whether Home or another dialog currently owns keyboard input.
     pub fn modal_open(&self, resources: &Resources) -> bool {
-        self.workbench.modal_open(resources) || self.settings.is_open()
+        self.home || self.workbench.modal_open(resources) || self.settings.is_open()
+    }
+
+    /// Home gives way to native menu commands. Other dialogs retain their modal guard.
+    pub fn accepts_native_menu(&mut self, resources: &Resources, inv: &Invocation) -> bool {
+        self.dismiss_home();
+        inv.id == bae_ui::action::ids::QUIT || !self.modal_open(resources)
+    }
+
+    /// Close the startup Home screen as soon as a command or project takes its place.
+    pub fn dismiss_home(&mut self) {
+        if self.home {
+            self.home = false;
+            // Native events can arrive before another frame refreshes the workbench.
+            self.workbench.set_external_modal(self.settings.is_open());
+        }
+    }
+
+    pub fn start_without_project(&mut self, first_run: bool) {
+        if self
+            .prefs
+            .current()
+            .bool("startup_repair.enable_home_screen")
+        {
+            if first_run {
+                self.show_role_picker();
+            } else {
+                self.home = true;
+            }
+        }
     }
 
     pub fn show_role_picker(&mut self) {
@@ -380,8 +419,28 @@ impl Workspace {
             title: &title,
             dirty: doc.is_dirty(),
         };
-        self.workbench.set_external_modal(self.settings.is_open());
-        let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
+        self.workbench
+            .set_external_modal(self.settings.is_open() || self.home);
+        let mut out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
+        if self.home {
+            let modal = egui::Modal::new(egui::Id::new("bae-home")).show(ui.ctx(), |ui| {
+                ui.heading(tr("Welcome to BAE"));
+                ui.horizontal(|ui| {
+                    for (label, id) in [
+                        ("New Project", bae_ui::action::ids::NEW_PROJECT),
+                        ("Open Project", bae_ui::action::ids::OPEN_PROJECT),
+                    ] {
+                        if ui.button(tr(label)).clicked() {
+                            out.push(Invocation::new(id));
+                            self.dismiss_home();
+                        }
+                    }
+                });
+            });
+            if modal.should_close() {
+                self.dismiss_home();
+            }
+        }
         if self.settings.is_open() {
             let outcome = self.settings.show(ui.ctx());
             if outcome == bae_ui::settings::Outcome::None {
@@ -496,6 +555,11 @@ impl Workspace {
     }
 
     /// The effective keymap of the active workspace (menu shortcuts).
+    #[cfg(target_os = "macos")]
+    pub fn set_standard_system_shortcuts(&mut self, standard: bool) {
+        self.workbench.set_standard_system_shortcuts(standard);
+    }
+
     pub fn keymap(&self) -> &bae_ui::Keymap {
         self.workbench.keymap()
     }
@@ -523,11 +587,15 @@ impl Workspace {
 
     /// English title of the active workspace.
     pub fn active_workspace_title(&self) -> &str {
-        let active = self.workbench.active_workspace();
+        self.workspace_title(self.workbench.active_workspace())
+            .unwrap_or("")
+    }
+
+    pub fn workspace_title(&self, workspace: &str) -> Option<&str> {
         self.workbench
             .workspaces()
-            .find(|(id, _)| *id == active)
-            .map_or("", |(_, p)| p.title.as_str())
+            .find(|(id, _)| *id == workspace)
+            .map(|(_, p)| p.title.as_str())
     }
 
     /// Workspace ids and English titles in bar order (Window menu).
@@ -554,7 +622,8 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
         ui.separator();
     }
     if !status.gpu.is_empty() {
-        ui.label(small(status.gpu.clone()));
+        let adapter = ui.label(small(status.gpu.clone()));
+        bae_ui::a11y::value_source(&adapter, bae_ui::a11y::GPU_STATUS);
         ui.separator();
     }
     ui.label(small(

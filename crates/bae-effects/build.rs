@@ -53,6 +53,9 @@ fn control(effect: &str, id: u32, p: &Value, english: &HashMap<&str, &str>) -> S
             let unit = match p["unitsText"].as_str() {
                 Some("度") => "degrees",
                 Some("像素") => "pixels",
+                Some("百分比") if matches!(effect, "CC PS Classic" | "CC PS LE Classic") => {
+                    "percent"
+                }
                 _ => "none",
             };
             format!("Slider({n:?}, {min:?}, {max:?}, {unit:?})")
@@ -61,10 +64,15 @@ fn control(effect: &str, id: u32, p: &Value, english: &HashMap<&str, &str>) -> S
 }
 
 fn main() {
-    let path = "../../docs/reference/ae/effects/simulation.json";
-    println!("cargo:rerun-if-changed={path}");
+    let paths = [
+        "../../docs/reference/ae/effects/simulation.json",
+        "../../docs/reference/ae/effects/obsolete-hidden.json",
+    ];
     let directory = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let reference: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    let references = paths.map(|path| {
+        println!("cargo:rerun-if-changed={path}");
+        serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap()
+    });
     let names = ["names.tsv", "options.tsv"].map(|file| {
         let path = format!("src/categories/simulation/particles/{file}");
         println!("cargo:rerun-if-changed={path}");
@@ -76,11 +84,16 @@ fn main() {
             .filter_map(|line| line.split_once('\t'))
             .collect::<HashMap<_, _>>()
     });
-    for effect in reference["effects"].as_array().unwrap() {
+    for effect in references
+        .iter()
+        .flat_map(|r| r["effects"].as_array().unwrap())
+    {
         let name = effect["matchName"].as_str().unwrap();
         if !matches!(
             name,
-            "CC Particle World"
+            "CC PS Classic"
+                | "CC PS LE Classic"
+                | "CC Particle World"
                 | "CC Particle Systems II"
                 | "CSRainfall"
                 | "CSSnowfall"

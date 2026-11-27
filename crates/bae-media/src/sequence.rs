@@ -74,6 +74,8 @@ pub struct ImageSequence {
     pub padding: usize,
     /// Frame numbers present on disk, ascending, non-empty.
     pub frames: Vec<i64>,
+    /// Actual paths in playback order for an alphabetical sequence.
+    pub ordered_paths: Vec<PathBuf>,
 }
 
 impl ImageSequence {
@@ -112,6 +114,9 @@ impl ImageSequence {
 
     /// The path of frame `number` (whether or not it exists).
     pub fn path_for(&self, number: i64) -> PathBuf {
+        if let Some(path) = self.ordered_paths.get(number as usize) {
+            return path.clone();
+        }
         let digits = if number < 0 {
             format!("-{:0width$}", -number, width = self.padding)
         } else {
@@ -124,6 +129,9 @@ impl ImageSequence {
     /// Display pattern with one `#` per padded digit (`name_####.png`), or `#`
     /// for unpadded numbers.
     pub fn pattern(&self) -> String {
+        if !self.ordered_paths.is_empty() {
+            return format!("*{}", self.suffix);
+        }
         let hashes = "#".repeat(self.padding.max(1));
         format!("{}{hashes}{}", self.prefix, self.suffix)
     }
@@ -217,12 +225,33 @@ pub fn detect_sequence(path: &Path) -> Result<Option<ImageSequence>, MediaError>
         0
     };
     Ok(Some(ImageSequence {
+        ordered_paths: Vec::new(),
         dir,
         prefix: reference.prefix,
         suffix,
         padding,
         frames,
     }))
+}
+
+/// Alphabetical import treats gaps and unrelated filenames as consecutive frames.
+pub fn alphabetical_sequence(path: &Path) -> Result<ImageSequence, MediaError> {
+    let ordered_paths =
+        bae_model::asset::alphabetical_frames(path).map_err(|e| MediaError::io(path, e))?;
+    if ordered_paths.is_empty() {
+        return Err(MediaError::decode(path, "empty image sequence"));
+    }
+    Ok(ImageSequence {
+        dir: path.parent().unwrap_or(Path::new(".")).into(),
+        prefix: String::new(),
+        suffix: format!(
+            ".{}",
+            path.extension().unwrap_or_default().to_string_lossy()
+        ),
+        padding: 0,
+        frames: (0..ordered_paths.len() as i64).collect(),
+        ordered_paths,
+    })
 }
 
 /// One entry of [`scan_directory`].
@@ -270,6 +299,7 @@ pub fn scan_directory(dir: &Path, extensions: &[&str]) -> Result<Vec<ScannedItem
         if members.len() == 1 {
             let (number, suffix) = &members[0];
             let seq = ImageSequence {
+                ordered_paths: Vec::new(),
                 dir: dir.to_owned(),
                 prefix: key.prefix,
                 suffix: suffix.clone(),
@@ -281,6 +311,7 @@ pub fn scan_directory(dir: &Path, extensions: &[&str]) -> Result<Vec<ScannedItem
         }
         let suffix = members[0].1.clone();
         items.push(ScannedItem::Sequence(ImageSequence {
+            ordered_paths: Vec::new(),
             dir: dir.to_owned(),
             prefix: key.prefix,
             suffix,
@@ -413,6 +444,7 @@ mod tests {
     #[test]
     fn paths_and_pattern() {
         let seq = ImageSequence {
+            ordered_paths: Vec::new(),
             dir: PathBuf::from("/footage"),
             prefix: "name_".into(),
             suffix: ".png".into(),
