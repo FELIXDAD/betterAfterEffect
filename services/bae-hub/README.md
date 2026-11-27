@@ -61,7 +61,7 @@ access = "write"          # write：可编辑、可新建工程；read：只能�
 projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*" 表示全部
 ```
 
-`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。每一项都不能是 0（包括 `max_backlog_mib`：0 会让流量控制只要有一个字节在排队就不发工程数据），填 0 时拒绝启动。几个值要配得上，配不上时拒绝启动：`max_message_mib` 不能超过 256（客户端最多收这么大，超过的消息客户端拒收，重连后又发，永远卡住）；`max_unsent_mib` 不能小于 `max_message_mib + max_backlog_mib`（被流量控制暂停的客户端那里可能合法地排队这么多），不写时跟着另外两个算。`max_message_mib` 调小的话，比它大的工程层就同步不了：Hub 发给客户端时只跳过这个工程层，连接不断，日志里记一条 warn；新版本的客户端从握手知道 Hub 的上限（`x-bae-max-incoming`，见下面的"协议"），也只跳过这个工程层；旧版本的客户端照样发来，连接被断开，重连后又发。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
+`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。每一项都不能是 0（包括 `max_backlog_mib`：0 会让流量控制只要有一个字节在排队就不发工程数据），填 0 时拒绝启动。几个值要配得上，配不上时拒绝启动：`max_message_mib` 不能超过 256（客户端最多收这么大，超过的消息客户端拒收，重连后又发，永远卡住）；`max_unsent_mib` 不能小于 `max_message_mib + max_backlog_mib`（被流量控制暂停的客户端那里可能合法地排队这么多），不写时跟着另外两个算。`max_message_mib` 调小的话，比它大的工程层就同步不了：Hub 发给客户端时只跳过这个工程层，连接不断，日志里记一条 warn；新版本的客户端从握手知道 Hub 的上限（`x-bae-max-incoming`，见下面"WebSocket 同步"里的"接收上限"），也只跳过这个工程层；旧版本的客户端照样发来，连接被断开，重连后又发。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
 
 一个数据目录同时只能被一个 `bae-hub` 使用（靠 `hub.lock` 保证）。
 
