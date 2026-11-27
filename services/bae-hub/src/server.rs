@@ -433,12 +433,14 @@ fn sync(
             return Ok(());
         }
     };
+    let max_incoming = transport.peer_max_incoming();
     let link = PeerLink::new(transport, access, shared.config.peer_timeout);
     let info = PeerInfo {
         token: grant.name.clone(),
         access,
         addr,
         connected: SystemTime::now(),
+        max_incoming,
     };
     if let Err(e) = project.connect(Box::new(link), info) {
         // Unloaded in the meantime; the client reconnects.
