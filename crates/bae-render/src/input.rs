@@ -535,6 +535,7 @@ impl RenderLayer {
                     mat.transparency_rolloff,
                 ]
                 .map(f32::to_bits),
+                mat.shadow_color.map(f32::to_bits),
             )
                 .hash(h);
         }

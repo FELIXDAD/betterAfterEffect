@@ -384,6 +384,7 @@ fn shadow_worst(img: &Image, comp: &RenderComp) -> u8 {
         opacity: 1.0,
         transmission: caster.material.light_transmission,
         pixels: CasterPixels::Solid(color),
+        shadow_color: caster.material.shadow_color,
         footprints: Arc::new([]),
     }];
     let cam = comp.view_camera();
@@ -438,6 +439,16 @@ fn shadows_match_the_reference_model() {
     // Deep in the hard shadow: no light at all.
     let img = render(&mut r, &shadow_scene(0.0, 100.0, 0.0));
     assert_eq!(img.px(185, 185), [0, 0, 0, 255]);
+    // Advanced 3D Shadow Color: the shadow lets that colour through.
+    let mut red = shadow_scene(0.0, 100.0, 0.0);
+    red.layers[0].material.shadow_color = [1.0, 0.0, 0.0];
+    let img = render(&mut r, &red);
+    assert!(shadow_worst(&img, &red) <= 3, "shadow colour vs reference");
+    let px = img.px(185, 185);
+    assert!(
+        px[0] > 100 && px[1] == 0 && px[2] == 0,
+        "a red shadow: {px:?}"
+    );
 }
 
 #[test]
