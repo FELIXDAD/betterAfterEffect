@@ -677,8 +677,18 @@ fn closing_a_threaded_peer_reports_its_last_writes() {
 struct Pipe {
     queue: std::collections::VecDeque<(Instant, bae_sync::Message)>,
     free_at: Option<Instant>,
-    /// `Updates` and `Snapshot`s sent, per document.
-    data_messages: std::collections::BTreeMap<DocKey, usize>,
+    /// `Updates` and `Snapshot`s sent, per document: `(messages, bytes)`.
+    data: std::collections::BTreeMap<DocKey, (usize, usize)>,
+}
+
+impl Pipe {
+    fn messages(&self, doc: &DocKey) -> usize {
+        self.data.get(doc).map_or(0, |d| d.0)
+    }
+
+    fn bytes(&self, doc: &DocKey) -> usize {
+        self.data.get(doc).map_or(0, |d| d.1)
+    }
 }
 
 /// An in-order link that carries `rate` bytes per (simulated) second, like a
@@ -690,6 +700,29 @@ struct Slow {
     rate: f64,
 }
 
+type SharedPipe = std::sync::Arc<std::sync::Mutex<Pipe>>;
+
+/// Both ends of a [`Slow`] link (client, hub) and its pipes (up, down).
+fn slow_link(
+    clock: &std::sync::Arc<std::sync::Mutex<Instant>>,
+    rate: f64,
+) -> (Slow, Slow, SharedPipe, SharedPipe) {
+    let (up, down): (SharedPipe, SharedPipe) = Default::default();
+    let client = Slow {
+        clock: clock.clone(),
+        tx: up.clone(),
+        rx: down.clone(),
+        rate,
+    };
+    let hub = Slow {
+        clock: clock.clone(),
+        tx: down.clone(),
+        rx: up.clone(),
+        rate,
+    };
+    (client, hub, up, down)
+}
+
 impl bae_sync::Transport for Slow {
     fn send(&mut self, msg: bae_sync::Message) -> Result<(), bae_sync::SyncError> {
         let now = *self.clock.lock().unwrap();
@@ -697,10 +730,12 @@ impl bae_sync::Transport for Slow {
         let start = pipe.free_at.map_or(now, |t| t.max(now));
         let arrive = start + Duration::from_secs_f64(msg.encode().len() as f64 / self.rate);
         pipe.free_at = Some(arrive);
-        if let bae_sync::Message::Updates { doc, .. } | bae_sync::Message::Snapshot { doc, .. } =
-            &msg
+        if let bae_sync::Message::Updates { doc, data, .. }
+        | bae_sync::Message::Snapshot { doc, data, .. } = &msg
         {
-            *pipe.data_messages.entry(doc.clone()).or_default() += 1;
+            let d = pipe.data.entry(doc.clone()).or_default();
+            d.0 += 1;
+            d.1 += data.len();
         }
         pipe.queue.push_back((arrive, msg));
         Ok(())
@@ -716,14 +751,439 @@ impl bae_sync::Transport for Slow {
     }
 }
 
-/// [`bae_sync::MemDocs`] without one document (a sublayer a collaborator
-/// created that the app did not add yet): what arrives for it is dropped.
+/// [`bae_sync::MemDocs`] with one document it cannot take: missing (a
+/// sublayer a collaborator created that the app did not add yet: what arrives
+/// for it is dropped) or failing every import.
 struct Without {
     docs: bae_sync::MemDocs,
-    missing: DocKey,
+    missing: Option<DocKey>,
+    failing: Option<DocKey>,
 }
 
 impl DocSet for Without {
+    fn doc_keys(&self) -> Vec<DocKey> {
+        let mut keys = self.docs.doc_keys();
+        keys.retain(|k| Some(k) != self.missing.as_ref());
+        keys
+    }
+    fn version(&self, doc: &DocKey) -> Option<bae_model::loro::VersionVector> {
+        if Some(doc) == self.missing.as_ref() {
+            return None;
+        }
+        self.docs.version(doc)
+    }
+    fn export_updates(
+        &self,
+        doc: &DocKey,
+        since: &bae_model::loro::VersionVector,
+    ) -> Result<Vec<u8>, bae_sync::SyncError> {
+        self.docs.export_updates(doc, since)
+    }
+    fn export_snapshot(&self, doc: &DocKey) -> Result<Vec<u8>, bae_sync::SyncError> {
+        self.docs.export_snapshot(doc)
+    }
+    fn import(
+        &mut self,
+        doc: &DocKey,
+        data: &[u8],
+    ) -> Result<bae_sync::Imported, bae_sync::SyncError> {
+        if Some(doc) == self.missing.as_ref() {
+            return Ok(bae_sync::Imported::UnknownDoc);
+        }
+        if Some(doc) == self.failing.as_ref() {
+            return Err(bae_sync::SyncError::Crdt("cannot import".into()));
+        }
+        self.docs.import(doc, data)
+    }
+}
+
+/// 1 MB of text that does not compress.
+fn big_text() -> String {
+    let mut rng = Rng::new(5);
+    (0..1_000_000)
+        .map(|_| char::from(b'a' + rng.below(26) as u8))
+        .collect()
+}
+
+/// What the client does not take in [`a_large_transfer_over_a_slow_link_is_sent_once`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Fx {
+    /// The app never adds `fx`.
+    Missing,
+    /// The app adds it 3 s in, while the large transfer is on its way
+    /// (spec 2.5).
+    AddedAt3s,
+    /// Every import of it fails.
+    Failing,
+}
+
+/// A large transfer over a slow link (a new client joining a big project
+/// over a VPN, or uploading one) goes out once, although both sides say
+/// `Hello` every 5 s while it is in transit: such a `Hello` was written
+/// before the transfer arrived, and must not make the sender queue it again.
+/// Also while the client cannot take another document: one it does not have
+/// (and adds meanwhile), or one whose imports fail.
+#[test]
+fn a_large_transfer_over_a_slow_link_is_sent_once() {
+    use bae_model::loro::{ExportMode, LoroDoc};
+    use bae_sync::MemDocs;
+    use std::sync::{Arc, Mutex};
+
+    let doc = DocKey::sublayer(&SublayerId::root());
+    let fx = DocKey::sublayer(&sl("fx"));
+    let small = LoroDoc::new();
+    small.get_map("m").insert("k", 1).unwrap();
+    small.commit();
+    let small = small.export(ExportMode::Snapshot).unwrap();
+    let empty = LoroDoc::new().export(ExportMode::Snapshot).unwrap();
+    let big = LoroDoc::new();
+    big.get_text("t").insert(0, &big_text()).unwrap();
+    big.commit();
+    let snapshot = big.export(ExportMode::Snapshot).unwrap();
+    let full = || {
+        let mut docs = MemDocs::new();
+        docs.load(doc.clone(), &snapshot).unwrap();
+        docs
+    };
+
+    for (upload, case) in [
+        (true, Fx::Missing),
+        (false, Fx::Missing),
+        (false, Fx::AddedAt3s),
+        (false, Fx::Failing),
+    ] {
+        let t0 = Instant::now();
+        let clock = Arc::new(Mutex::new(t0));
+        // 50 kB/s: the transfer takes about 20 s.
+        let (mut link, hub_end, up, down) = slow_link(&clock, 50_000.0);
+        let mut relay = if upload {
+            Relay::new(ClientId::new("hub").unwrap())
+        } else {
+            let mut docs = full();
+            docs.load(fx.clone(), &small).unwrap();
+            Relay::with_docs(ClientId::new("hub").unwrap(), docs)
+        };
+        assert_eq!(
+            relay.peer_config().hello_interval,
+            Some(Duration::from_secs(5))
+        );
+        relay.connect(Box::new(hub_end));
+        let mut docs = Without {
+            docs: if upload { full() } else { MemDocs::new() },
+            missing: None,
+            failing: None,
+        };
+        match case {
+            Fx::Missing | Fx::AddedAt3s => docs.missing = Some(fx.clone()),
+            Fx::Failing => {
+                docs.docs.load(fx.clone(), &empty).unwrap();
+                docs.failing = Some(fx.clone());
+            }
+        }
+        let config = SessionConfig::new(ClientId::new("a").unwrap());
+        assert_eq!(config.hello_interval, Some(Duration::from_secs(5)));
+        let mut session = SyncSession::new(config);
+
+        let want = big.oplog_vv();
+        let mut arrived = None;
+        // 50 ms ticks for 60 s of simulated time.
+        for tick in 0..1200u32 {
+            let now = t0 + Duration::from_millis(50) * tick;
+            *clock.lock().unwrap() = now;
+            if case == Fx::AddedAt3s && tick == 60 {
+                docs.missing = None;
+                docs.docs.load(fx.clone(), &empty).unwrap();
+            }
+            session.pump_at(&mut docs, &mut link, now).unwrap();
+            let out = relay.pump_at(now);
+            assert!(out.disconnected.is_empty() && out.errors.is_empty());
+            let have = if upload {
+                relay.docs().version(&doc)
+            } else {
+                docs.version(&doc)
+            };
+            if arrived.is_none() && have.is_some_and(|v| v.includes_vv(&want)) {
+                arrived = Some(now - t0);
+            }
+        }
+        let arrived = arrived.expect("the transfer arrived");
+        assert!(arrived > Duration::from_secs(15), "{arrived:?}");
+        let pipe = if upload { &up } else { &down };
+        assert_eq!(
+            pipe.lock().unwrap().messages(&doc),
+            1,
+            "upload={upload} {case:?}: arrived after {arrived:?}"
+        );
+        assert!(session.unsynced(&docs).is_empty());
+        if upload {
+            continue;
+        }
+        let fx_sent = down.lock().unwrap().messages(&fx);
+        match case {
+            // The client does not take `fx`: the hub keeps offering it.
+            Fx::Missing | Fx::Failing => assert!(fx_sent > 1, "{case:?}"),
+            Fx::AddedAt3s => {
+                assert_eq!(docs.version(&fx), relay.docs().version(&fx));
+                assert_eq!(fx_sent, 2, "dropped once, then sent once more");
+            }
+        }
+    }
+}
+
+/// The client drags (an edit every 50 ms) over the slow link and pastes 1 MB
+/// in the middle of it, around one of its `Hello`s: the paste goes out once.
+/// The hub's `Hello`s acknowledge the client's `Hello` before the paste while
+/// the paste is on its way; what the drag sent before that `Hello` did arrive,
+/// so the paste after it is still on its way, not lost.
+#[test]
+fn a_large_paste_during_a_drag_over_a_slow_link_is_sent_once() {
+    use bae_model::loro::{ExportMode, LoroDoc};
+    use bae_sync::MemDocs;
+    use std::sync::{Arc, Mutex};
+
+    let doc = DocKey::sublayer(&SublayerId::root());
+    let start = LoroDoc::new();
+    start.get_map("m").insert("x", 0).unwrap();
+    start.commit();
+    let start = start.export(ExportMode::Snapshot).unwrap();
+    let text = big_text();
+    // The client says `Hello` at tick 100 (5 s), the hub just after.
+    for paste_at in 98..=102 {
+        let t0 = Instant::now();
+        let clock = Arc::new(Mutex::new(t0));
+        let (mut link, hub_end, up, _down) = slow_link(&clock, 50_000.0);
+        let mut docs = MemDocs::new();
+        docs.load(doc.clone(), &start).unwrap();
+        let mut relay = Relay::new(ClientId::new("hub").unwrap());
+        relay.connect(Box::new(hub_end));
+        let mut session = SyncSession::new(SessionConfig::new(ClientId::new("a").unwrap()));
+        let mut paste = 0;
+        for tick in 0..1600u32 {
+            let now = t0 + Duration::from_millis(50) * tick;
+            *clock.lock().unwrap() = now;
+            let d = docs.get(&doc).unwrap();
+            // The drag goes on for 60 s.
+            if tick < 1200 {
+                d.get_map("m").insert("x", i64::from(tick)).unwrap();
+            }
+            d.commit();
+            if tick == paste_at {
+                let before = d.oplog_vv();
+                d.get_text("t").insert(0, &text).unwrap();
+                d.commit();
+                paste = d.export(ExportMode::updates(&before)).unwrap().len();
+            }
+            session.pump_at(&mut docs, &mut link, now).unwrap();
+            let out = relay.pump_at(now);
+            assert!(out.disconnected.is_empty() && out.errors.is_empty());
+        }
+        assert_eq!(relay.docs().version(&doc), docs.version(&doc));
+        assert!(session.unsynced(&docs).is_empty());
+        let sent = up.lock().unwrap().bytes(&doc);
+        assert!(paste > 900_000, "{paste}");
+        assert!(
+            (paste..paste * 3 / 2).contains(&sent),
+            "pasted at tick {paste_at}: {sent} bytes sent for a paste of {paste}"
+        );
+    }
+}
+
+/// The client creates a sublayer and fills it with 1 MB right after: the hub
+/// creates the document from the first message and lists it in a `Hello`
+/// while the 1 MB is on its way. A document listed for the first time is sent
+/// again at once only if the remote could have dropped what we sent (it does
+/// not have our first message); the hub did not, so the 1 MB goes once.
+#[test]
+fn a_new_document_filled_right_after_it_was_created_is_sent_once() {
+    use bae_model::loro::{ExportMode, LoroDoc};
+    use bae_sync::MemDocs;
+    use std::sync::{Arc, Mutex};
+
+    let root = DocKey::sublayer(&SublayerId::root());
+    let fx = DocKey::sublayer(&sl("fx"));
+    let small = LoroDoc::new();
+    small.get_map("m").insert("k", 1).unwrap();
+    small.commit();
+    let small = small.export(ExportMode::Snapshot).unwrap();
+    let text = big_text();
+    let t0 = Instant::now();
+    let clock = Arc::new(Mutex::new(t0));
+    let (mut link, hub_end, up, _down) = slow_link(&clock, 50_000.0);
+    let mut docs = MemDocs::new();
+    docs.load(root.clone(), &small).unwrap();
+    let mut relay = Relay::new(ClientId::new("hub").unwrap());
+    relay.connect(Box::new(hub_end));
+    let mut session = SyncSession::new(SessionConfig::new(ClientId::new("a").unwrap()));
+    let mut fill = 0;
+    for tick in 0..1200u32 {
+        let now = t0 + Duration::from_millis(50) * tick;
+        *clock.lock().unwrap() = now;
+        if tick == 20 {
+            docs.load(fx.clone(), &small).unwrap();
+        }
+        if tick == 21 {
+            let d = docs.get(&fx).unwrap();
+            let before = d.oplog_vv();
+            d.get_text("t").insert(0, &text).unwrap();
+            d.commit();
+            fill = d.export(ExportMode::updates(&before)).unwrap().len();
+        }
+        session.pump_at(&mut docs, &mut link, now).unwrap();
+        let out = relay.pump_at(now);
+        assert!(out.disconnected.is_empty() && out.errors.is_empty());
+    }
+    assert_eq!(relay.docs().version(&fx), docs.version(&fx));
+    assert!(session.unsynced(&docs).is_empty());
+    let sent = up.lock().unwrap().bytes(&fx);
+    assert!(fill > 900_000, "{fill}");
+    assert!(
+        (fill..fill * 3 / 2).contains(&sent),
+        "{sent} bytes sent for {fill}"
+    );
+}
+
+/// Loses the first `Updates` it is given to send.
+struct LoseFirstUpdates {
+    inner: bae_sync::MemoryTransport,
+    lost: bool,
+}
+
+impl bae_sync::Transport for LoseFirstUpdates {
+    fn send(&mut self, msg: bae_sync::Message) -> Result<(), bae_sync::SyncError> {
+        if !self.lost && matches!(msg, bae_sync::Message::Updates { .. }) {
+            self.lost = true;
+            return Ok(());
+        }
+        self.inner.send(msg)
+    }
+
+    fn recv(&mut self) -> Result<Option<bae_sync::Message>, bae_sync::SyncError> {
+        self.inner.recv()
+    }
+}
+
+/// A message lost on the way is sent again within a few hello intervals,
+/// also while the sender keeps sending that document (a drag: one edit per
+/// 100 ms tick, for 60 s). Its later sends cannot be applied without the
+/// lost one (Loro keeps them pending), so they must not count as covering
+/// it. Directly, through a hub (the hub's message to the other client is
+/// lost), and from a session without periodic `Hello`s, whose remote's
+/// `Hello`s cannot acknowledge a later one of ours.
+#[test]
+fn a_lost_update_is_sent_again_while_the_document_keeps_changing() {
+    use bae_model::loro::{ExportMode, LoroDoc};
+    use bae_sync::{MemDocs, MemoryTransport};
+
+    let d0 = DocKey::parse("d0").unwrap();
+    let base = LoroDoc::new();
+    base.get_map("m").insert("base", 1).unwrap();
+    base.commit();
+    let base = base.export(ExportMode::Snapshot).unwrap();
+    let docs = || {
+        let mut docs = MemDocs::new();
+        docs.load(d0.clone(), &base).unwrap();
+        docs
+    };
+    for (through_hub, sender_hello) in [
+        (false, Some(Duration::from_secs(5))),
+        (true, Some(Duration::from_secs(5))),
+        (false, None),
+    ] {
+        let mut a = docs();
+        let mut b = docs();
+        let mut ca = SessionConfig::new(ClientId::new("a").unwrap());
+        ca.hello_interval = sender_hello;
+        let mut sa = SyncSession::new(ca);
+        let mut sb = SyncSession::new(SessionConfig::new(ClientId::new("b").unwrap()));
+        let (mut la, mut lb): (Box<dyn bae_sync::Transport>, Box<dyn bae_sync::Transport>);
+        let mut relay = None;
+        if through_hub {
+            let mut r = Relay::with_docs(ClientId::new("hub").unwrap(), docs());
+            let (hub_a, a_end) = MemoryTransport::pair();
+            let (hub_b, b_end) = MemoryTransport::pair();
+            r.connect(Box::new(hub_a));
+            r.connect(Box::new(LoseFirstUpdates {
+                inner: hub_b,
+                lost: false,
+            }));
+            (la, lb) = (Box::new(a_end), Box::new(b_end));
+            relay = Some(r);
+        } else {
+            let (a_end, b_end) = MemoryTransport::pair();
+            la = Box::new(LoseFirstUpdates {
+                inner: a_end,
+                lost: false,
+            });
+            lb = Box::new(b_end);
+        }
+        let t0 = Instant::now();
+        let mut first = None;
+        let mut arrived = None;
+        for tick in 0..600u64 {
+            let now = t0 + Duration::from_millis(100) * tick as u32;
+            if tick >= 3 {
+                let d = a.get(&d0).unwrap();
+                d.get_map("m")
+                    .insert(&format!("k{tick}"), tick as i64)
+                    .unwrap();
+                d.commit();
+                first.get_or_insert_with(|| a.version(&d0).unwrap());
+            }
+            sa.pump_at(&mut a, &mut *la, now).unwrap();
+            sb.pump_at(&mut b, &mut *lb, now).unwrap();
+            if let Some(r) = &mut relay {
+                let out = r.pump_at(now);
+                assert!(out.disconnected.is_empty() && out.errors.is_empty());
+            }
+            if let Some(first) = &first
+                && arrived.is_none()
+                && b.version(&d0).unwrap().includes_vv(first)
+            {
+                arrived = Some(tick);
+            }
+        }
+        let case = format!("through_hub={through_hub} sender_hello={sender_hello:?}");
+        let arrived = arrived.unwrap_or_else(|| panic!("{case}: the first edit never arrived"));
+        // Three hello intervals of 50 ticks.
+        assert!(
+            arrived < 3 + 150,
+            "{case}: the first edit arrived at tick {arrived}"
+        );
+    }
+}
+
+/// Documents of the random schedules (`d0` .. `d3`).
+const STRESS_DOCS: usize = 4;
+
+fn stress_doc(i: usize) -> DocKey {
+    DocKey::parse(&format!("d{i}")).unwrap()
+}
+
+/// A node's documents in [`random_schedules_converge_while_edits_go_on`]:
+/// some may not be there yet (a sublayer the app did not add: what arrives
+/// for it is dropped), and imports may fail.
+struct StressDocs {
+    docs: bae_sync::MemDocs,
+    /// Loro peer of this node's edits.
+    peer: u64,
+    hidden: std::collections::BTreeSet<DocKey>,
+    fail_percent: u32,
+    rng: Rng,
+}
+
+impl StressDocs {
+    /// The app adds `doc` (empty: its contents come from the remote).
+    fn add(&mut self, doc: &DocKey) {
+        use bae_model::loro::{ExportMode, LoroDoc};
+        if self.hidden.remove(doc) {
+            let empty = LoroDoc::new().export(ExportMode::Snapshot).unwrap();
+            self.docs.load(doc.clone(), &empty).unwrap();
+            self.docs.get(doc).unwrap().set_peer_id(self.peer).unwrap();
+        }
+    }
+}
+
+impl DocSet for StressDocs {
     fn doc_keys(&self) -> Vec<DocKey> {
         self.docs.doc_keys()
     }
@@ -745,115 +1205,392 @@ impl DocSet for Without {
         doc: &DocKey,
         data: &[u8],
     ) -> Result<bae_sync::Imported, bae_sync::SyncError> {
-        if *doc == self.missing {
+        if self.hidden.contains(doc) {
             return Ok(bae_sync::Imported::UnknownDoc);
+        }
+        if self.rng.chance(self.fail_percent) {
+            return Err(bae_sync::SyncError::Crdt("import failed".into()));
         }
         self.docs.import(doc, data)
     }
 }
 
-/// A large transfer over a slow link (a new client joining a big project
-/// over a VPN, or uploading one) goes out once, although both sides say
-/// `Hello` every 5 s while it is in transit: such a `Hello` was written
-/// before the transfer arrived, and must not make the sender queue it again.
-/// Also while the client drops another document it does not have yet.
-#[test]
-fn a_large_transfer_over_a_slow_link_is_sent_once() {
-    use bae_model::loro::{ExportMode, LoroDoc};
-    use bae_sync::MemDocs;
-    use std::sync::{Arc, Mutex};
+/// One random schedule: who talks to whom, how often each says `Hello`, how
+/// bad the network is, and what the nodes do meanwhile.
+#[derive(Debug)]
+struct Schedule {
+    seed: u64,
+    /// A hub between the nodes, with its hello interval in ticks; `None`:
+    /// two nodes linked directly.
+    hub: Option<u64>,
+    /// Per node, its hello interval in ticks (`None`: no periodic `Hello`).
+    hello: Vec<Option<u64>>,
+    max_messages: Vec<usize>,
+    /// Per node, `min_send_interval` in ticks.
+    min_send: Vec<u64>,
+    /// Per node, the percentage of ticks with an edit.
+    edit: Vec<u32>,
+    /// Per node, the percentage of imports that fail while the network is bad.
+    fail: Vec<u32>,
+    /// Per node, documents it does not have at first and the tick the app
+    /// adds them (while the network is bad).
+    hidden: Vec<Vec<(usize, u64)>>,
+    /// Percentage of ticks a node's link is replaced while the network is bad.
+    reconnect: u32,
+    bad: Conditions,
+    bad_ticks: u64,
+}
 
-    let doc = DocKey::sublayer(&SublayerId::root());
-    let fx = DocKey::sublayer(&sl("fx"));
-    let small = LoroDoc::new();
-    small.get_map("m").insert("k", 1).unwrap();
-    small.commit();
-    let small = small.export(ExportMode::Snapshot).unwrap();
-    // 1 MB that does not compress.
-    let mut rng = Rng::new(5);
-    let text: String = (0..1_000_000)
-        .map(|_| char::from(b'a' + rng.below(26) as u8))
-        .collect();
-    let big = LoroDoc::new();
-    big.get_text("t").insert(0, &text).unwrap();
-    big.commit();
-    let snapshot = big.export(ExportMode::Snapshot).unwrap();
-    let full = || {
-        let mut docs = MemDocs::new();
-        docs.load(doc.clone(), &snapshot).unwrap();
-        docs
-    };
-
-    for upload in [true, false] {
-        let t0 = Instant::now();
-        let clock = Arc::new(Mutex::new(t0));
-        let (up, down) = (Arc::default(), Arc::default());
-        // 50 kB/s: the transfer takes about 20 s.
-        let rate = 50_000.0;
-        let client_end = Slow {
-            clock: clock.clone(),
-            tx: Arc::clone(&up),
-            rx: Arc::clone(&down),
-            rate,
-        };
-        let hub_end = Slow {
-            clock: clock.clone(),
-            tx: Arc::clone(&down),
-            rx: Arc::clone(&up),
-            rate,
-        };
-        let mut relay = if upload {
-            Relay::new(ClientId::new("hub").unwrap())
-        } else {
-            let mut docs = full();
-            docs.load(fx.clone(), &small).unwrap();
-            Relay::with_docs(ClientId::new("hub").unwrap(), docs)
-        };
-        assert_eq!(
-            relay.peer_config().hello_interval,
-            Some(Duration::from_secs(5))
-        );
-        relay.connect(Box::new(hub_end));
-        let mut docs = Without {
-            docs: if upload { full() } else { MemDocs::new() },
-            missing: fx.clone(),
-        };
-        let mut link = client_end;
-        let config = SessionConfig::new(ClientId::new("a").unwrap());
-        assert_eq!(config.hello_interval, Some(Duration::from_secs(5)));
-        let mut session = SyncSession::new(config);
-
-        let want = big.oplog_vv();
-        let mut arrived = None;
-        // 50 ms ticks for 60 s of simulated time.
-        for tick in 0..1200u32 {
-            let now = t0 + Duration::from_millis(50) * tick;
-            *clock.lock().unwrap() = now;
-            session.pump_at(&mut docs, &mut link, now).unwrap();
-            let out = relay.pump_at(now);
-            assert!(out.disconnected.is_empty() && out.errors.is_empty());
-            let have = if upload {
-                relay.docs().version(&doc)
-            } else {
-                docs.version(&doc)
-            };
-            if arrived.is_none() && have.is_some_and(|v| v.includes_vv(&want)) {
-                arrived = Some(now - t0);
+impl Schedule {
+    fn new(seed: u64) -> Self {
+        let mut rng = Rng::new(seed);
+        let hub = rng.chance(75).then(|| 3 + rng.below(28) as u64);
+        let nodes = if hub.is_some() { 2 + rng.below(3) } else { 2 };
+        let bad_ticks = 100 + rng.below(201) as u64;
+        let mut hello: Vec<Option<u64>> = (0..nodes)
+            .map(|_| (!rng.chance(15)).then(|| 3 + rng.below(28) as u64))
+            .collect();
+        if hub.is_none() && hello.iter().all(Option::is_none) {
+            hello[1] = Some(10);
+        }
+        let max_messages = (0..nodes).map(|_| [24, 256][rng.below(2)]).collect();
+        let min_send = (0..nodes)
+            .map(|_| {
+                if rng.chance(50) {
+                    0
+                } else {
+                    1 + rng.below(5) as u64
+                }
+            })
+            .collect();
+        let edit = (0..nodes).map(|_| 40 + rng.below(61) as u32).collect();
+        // A node without periodic `Hello`s never shows the remote what it
+        // dropped (spec 2.4: both sides must say `Hello` periodically), so
+        // its imports do not fail.
+        let fail = hello
+            .iter()
+            .map(|h| if h.is_some() && rng.chance(25) { 10 } else { 0 })
+            .collect();
+        let mut hidden = vec![Vec::new(); nodes];
+        for docs in &mut hidden {
+            for d in 1..STRESS_DOCS {
+                if rng.chance(10) {
+                    docs.push((d, rng.below(bad_ticks as usize) as u64));
+                }
             }
         }
-        let arrived = arrived.expect("the transfer arrived");
-        assert!(arrived > Duration::from_secs(15), "{arrived:?}");
-        let pipe = if upload { &up } else { &down };
-        let copies = pipe.lock().unwrap().data_messages.get(&doc).copied();
-        assert_eq!(
-            copies,
-            Some(1),
-            "upload={upload}: arrived after {arrived:?}"
-        );
-        assert!(session.unsynced(&docs).is_empty());
-        if !upload {
-            // The client did not take `fx`: the hub keeps offering it.
-            assert!(down.lock().unwrap().data_messages[&fx] > 1);
+        let reconnect = [0, 0, 1, 3][rng.below(4)];
+        let bad = Conditions {
+            drop_percent: 5 + rng.below(46) as u32,
+            duplicate_percent: rng.below(51) as u32,
+            max_delay: rng.below(7) as u64,
+        };
+        Schedule {
+            seed,
+            hub,
+            hello,
+            max_messages,
+            min_send,
+            edit,
+            fail,
+            hidden,
+            reconnect,
+            bad,
+            bad_ticks,
         }
     }
+
+    /// Ticks within which everything must get everywhere once the network
+    /// is good: a few hello intervals.
+    fn bound(&self) -> u64 {
+        let hello = self
+            .hello
+            .iter()
+            .chain([&self.hub])
+            .flatten()
+            .max()
+            .unwrap();
+        4 * hello + 2 * self.min_send.iter().max().unwrap() + 40
+    }
+}
+
+struct StressNode {
+    docs: StressDocs,
+    session: SyncSession,
+    link: SimEnd,
+    hub_handle: Option<bae_sync::PeerHandle>,
+    rng: Rng,
+    edits: u64,
+}
+
+/// Runs one schedule: a bad network with edits, reconnects, documents the
+/// app adds late and failing imports; then a good network while the nodes
+/// keep editing, in which everything from the bad part must reach everyone
+/// within [`Schedule::bound`] ticks; then no more edits, and everyone must
+/// agree within the same bound. Returns what went wrong.
+fn run_schedule(s: &Schedule) -> Result<(), String> {
+    use bae_model::loro::{ExportMode, LoroDoc};
+    use bae_sync::MemDocs;
+
+    let net = SimNet::new(s.seed, s.bad);
+    let base: Vec<Vec<u8>> = (0..STRESS_DOCS)
+        .map(|i| {
+            let d = LoroDoc::new();
+            d.set_peer_id(900 + i as u64).unwrap();
+            d.get_map("m").insert("base", 1).unwrap();
+            d.commit();
+            d.export(ExportMode::Snapshot).unwrap()
+        })
+        .collect();
+    let load = |hidden: &[(usize, u64)], peer: Option<u64>| {
+        let mut docs = MemDocs::new();
+        for (i, snapshot) in base.iter().enumerate() {
+            if hidden.iter().any(|(d, _)| *d == i) {
+                continue;
+            }
+            docs.load(stress_doc(i), snapshot).unwrap();
+            if let Some(peer) = peer {
+                docs.get(&stress_doc(i)).unwrap().set_peer_id(peer).unwrap();
+            }
+        }
+        docs
+    };
+    let mut relay = s.hub.map(|every| {
+        let mut r = Relay::with_docs(ClientId::new("hub").unwrap(), load(&[], None));
+        r.set_hello_interval(Some(Duration::from_millis(100 * every)));
+        r
+    });
+    let nodes = s.hello.len();
+    // The ends of a new link for node `i`: its own, and the other side's
+    // (the hub's, or node 1's). A node without periodic `Hello`s cannot
+    // repair what it does not receive, and the remote could not repair
+    // what it sends if its `Hello`s got lost.
+    let new_link = |i: usize| {
+        let (mut mine, mut theirs) = net.link();
+        if s.hello[i].is_none() {
+            mine = mine.keep_hellos();
+            theirs = theirs.lossless();
+        }
+        if s.hub.is_none() && s.hello[1 - i].is_none() {
+            mine = mine.lossless();
+            theirs = theirs.keep_hellos();
+        }
+        (mine, theirs)
+    };
+    let mut ns: Vec<StressNode> = Vec::new();
+    let mut p2p_end = None;
+    for i in 0..nodes {
+        let mut config = SessionConfig::new(ClientId::new(&format!("n{i}")).unwrap());
+        config.hello_interval = s.hello[i].map(|t| Duration::from_millis(100 * t));
+        config.max_messages_per_pump = s.max_messages[i];
+        config.min_send_interval = Duration::from_millis(100 * s.min_send[i]);
+        let link = if let Some(relay) = &mut relay {
+            let (mine, theirs) = new_link(i);
+            let handle = relay.connect(Box::new(theirs));
+            (mine, Some(handle))
+        } else if i == 0 {
+            let (mine, theirs) = new_link(0);
+            p2p_end = Some(theirs);
+            (mine, None)
+        } else {
+            (p2p_end.take().unwrap(), None)
+        };
+        ns.push(StressNode {
+            docs: StressDocs {
+                docs: load(&s.hidden[i], Some(i as u64 + 1)),
+                peer: i as u64 + 1,
+                hidden: s.hidden[i].iter().map(|(d, _)| stress_doc(*d)).collect(),
+                fail_percent: s.fail[i],
+                rng: Rng::new(s.seed * 7919 + i as u64),
+            },
+            session: SyncSession::new(config),
+            link: link.0,
+            hub_handle: link.1,
+            rng: Rng::new(s.seed * 104_729 + i as u64),
+            edits: 0,
+        });
+    }
+
+    let t0 = Instant::now();
+    let mut log = Vec::new();
+    let step = |ns: &mut Vec<StressNode>,
+                relay: &mut Option<Relay>,
+                log: &mut Vec<String>,
+                edits: bool,
+                bad: bool| {
+        let tick = net.now();
+        let now = net.instant(t0);
+        for i in 0..ns.len() {
+            let n = &mut ns[i];
+            for (d, at) in &s.hidden[i] {
+                if *at == tick {
+                    n.docs.add(&stress_doc(*d));
+                    log.push(format!("t{tick}: node {i} adds d{d}"));
+                }
+            }
+            if edits && n.rng.chance(s.edit[i]) {
+                let keys = n.docs.doc_keys();
+                let key = &keys[n.rng.below(keys.len())];
+                let doc = n.docs.docs.get(key).unwrap();
+                doc.get_map("m")
+                    .insert(&format!("n{i}_{}", n.edits), n.edits as i64)
+                    .unwrap();
+                doc.commit();
+                n.edits += 1;
+            }
+            if bad && n.rng.chance(s.reconnect) {
+                log.push(format!("t{tick}: node {i} reconnects"));
+                if let Some(relay) = relay.as_mut() {
+                    relay.disconnect(n.hub_handle.unwrap());
+                    let (mine, theirs) = new_link(i);
+                    n.hub_handle = Some(relay.connect(Box::new(theirs)));
+                    n.link = mine;
+                    n.session.reset();
+                } else {
+                    let (mine, theirs) = new_link(i);
+                    ns[i].link = mine;
+                    ns[1 - i].link = theirs;
+                    ns[0].session.reset();
+                    ns[1].session.reset();
+                }
+            }
+        }
+        for n in ns.iter_mut() {
+            n.session.pump_at(&mut n.docs, &mut n.link, now).unwrap();
+        }
+        if let Some(relay) = relay.as_mut() {
+            let out = relay.pump_at(now);
+            assert!(out.disconnected.is_empty(), "{:?}", out.disconnected);
+        }
+        net.tick();
+    };
+    // Every document's version in every node (and the hub).
+    let versions = |ns: &[StressNode], relay: &Option<Relay>| {
+        let mut all: Vec<(String, Vec<Option<bae_model::loro::VersionVector>>)> = ns
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let vs = (0..STRESS_DOCS)
+                    .map(|d| n.docs.version(&stress_doc(d)))
+                    .collect();
+                (format!("node {i}"), vs)
+            })
+            .collect();
+        if let Some(r) = relay {
+            let vs = (0..STRESS_DOCS)
+                .map(|d| r.docs().version(&stress_doc(d)))
+                .collect();
+            all.push(("hub".into(), vs));
+        }
+        all
+    };
+    let report = |what: &str,
+                  ns: &[StressNode],
+                  relay: &Option<Relay>,
+                  want: &[bae_model::loro::VersionVector],
+                  log: &[String]| {
+        let mut out = format!("{what}\n{s:#?}\n");
+        for (who, vs) in versions(ns, relay) {
+            for (d, v) in vs.iter().enumerate() {
+                if !v.as_ref().is_some_and(|v| v.includes_vv(&want[d])) {
+                    out += &format!("{who} d{d}: has {v:?}, want {:?}\n", want[d]);
+                }
+            }
+        }
+        out += &format!("log: {log:?}\n");
+        for (i, n) in ns.iter().enumerate() {
+            out += &format!("node {i}: {:?}\n", n.session);
+        }
+        out
+    };
+    let has_all =
+        |ns: &[StressNode], relay: &Option<Relay>, want: &[bae_model::loro::VersionVector]| {
+            versions(ns, relay).iter().all(|(_, vs)| {
+                vs.iter()
+                    .zip(want)
+                    .all(|(v, w)| v.as_ref().is_some_and(|v| v.includes_vv(w)))
+            })
+        };
+    let union = |ns: &[StressNode], relay: &Option<Relay>| {
+        let mut want = vec![bae_model::loro::VersionVector::new(); STRESS_DOCS];
+        for (_, vs) in versions(ns, relay) {
+            for (w, v) in want.iter_mut().zip(vs) {
+                if let Some(v) = v {
+                    w.merge(&v);
+                }
+            }
+        }
+        want
+    };
+
+    for _ in 0..s.bad_ticks {
+        step(&mut ns, &mut relay, &mut log, true, true);
+    }
+    // The network is good now; the nodes keep editing.
+    net.set_conditions(Conditions::PERFECT);
+    for n in &mut ns {
+        n.docs.fail_percent = 0;
+    }
+    let want = union(&ns, &relay);
+    let mut ticks = 0;
+    while !has_all(&ns, &relay, &want) {
+        ticks += 1;
+        if ticks > s.bound() {
+            return Err(report(
+                &format!(
+                    "what was there when the network got good still missing after {ticks} ticks of edits"
+                ),
+                &ns,
+                &relay,
+                &want,
+                &log,
+            ));
+        }
+        step(&mut ns, &mut relay, &mut log, true, false);
+    }
+    // No more edits: everyone agrees.
+    let mut ticks = 0;
+    loop {
+        let want = union(&ns, &relay);
+        if has_all(&ns, &relay, &want) {
+            return Ok(());
+        }
+        ticks += 1;
+        if ticks > s.bound() {
+            return Err(report(
+                &format!("no agreement {ticks} ticks after the last edit"),
+                &ns,
+                &relay,
+                &want,
+                &log,
+            ));
+        }
+        step(&mut ns, &mut relay, &mut log, false, false);
+    }
+}
+
+/// Random schedules (hub or direct, 2-4 nodes, loss, duplication, reorder,
+/// reconnects, documents added late, failing imports, nodes without periodic
+/// `Hello`s) converge, and repair what the bad network lost while the nodes
+/// keep editing. `BAE_SYNC_STRESS_SEEDS=n` runs n schedules (default 24),
+/// `BAE_SYNC_STRESS_SEED=s` only schedule s.
+#[test]
+fn random_schedules_converge_while_edits_go_on() {
+    let seeds: Vec<u64> = match std::env::var("BAE_SYNC_STRESS_SEED") {
+        Ok(seed) => vec![seed.parse().unwrap()],
+        Err(_) => {
+            let n = std::env::var("BAE_SYNC_STRESS_SEEDS").map_or(24, |n| n.parse().unwrap());
+            (1..=n).collect()
+        }
+    };
+    let mut failed = Vec::new();
+    for seed in seeds {
+        if let Err(e) = run_schedule(&Schedule::new(seed)) {
+            if failed.is_empty() {
+                eprintln!("=== seed {seed}: {e}");
+            }
+            failed.push(seed);
+        }
+    }
+    assert!(failed.is_empty(), "failed schedules: {failed:?}");
 }

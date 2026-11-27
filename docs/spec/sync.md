@@ -31,7 +31,7 @@
 
 | 消息 | 字段 | 含义 |
 |---|---|---|
-| `Hello` | `protocol`、`client`、`versions: [(DocKey, 版本向量)]`、`seq`、`ack` | "我有这些。" 连接时发，之后定期发。没列出的文档视为空。`seq`：发送方 `Hello` 的编号（从 1 起递增，不编号时为 0）；`ack`：发送方收到的接收方最大的 `seq`（0：还没收到），接收方在那个 `Hello` 之前发的它都已导入；没有 `ack` 时 `versions` 就是全部实情（见 2.4）。 |
+| `Hello` | `protocol`、`client`、`versions: [(DocKey, 版本向量)]`、`seq`、`ack` | "我有这些。" 连接时发，之后定期发。没列出的文档视为空。`seq`：发送方 `Hello` 的编号（从 1 起递增，不编号时为 0）；`ack`：发送方收到的接收方最大的 `seq`（0：还没收到），`versions` 包括接收方在那个 `Hello` 之前发来、发送方导入了的数据；没有 `ack` 时 `versions` 就是全部实情（见 2.4）。 |
 | `Updates` | `doc`、`version`、`data` | 一段 Loro 增量；`version` 是发送方在导出这段增量时的版本。 |
 | `SnapshotRequest` | `doc` | 请对方发一份完整快照（共享目录模式用它压缩自己的日志）。 |
 | `Snapshot` | `doc`、`version`、`data` | 完整 Loro 快照（含历史）。导入方式与 `Updates` 相同。 |
@@ -59,7 +59,10 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 1. 第一次，或距离上次超过 `hello_interval`，或本地出现了新文档：发 `Hello`（列出本地所有文档的版本）。
 2. 处理收到的消息（每次最多 `max_messages_per_pump` 条，避免卡住持有 Stage 的线程）：
-   - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方丢了数据时能重新补发；CRDT 导入是幂等的。只有一个例外：我们在对方 `ack` 的那个 `Hello` 之后发出的数据，对方写这个 `Hello` 时可能还在路上，不退回（会话按文档记下最后一次发送和它之前我们的 `Hello` 编号）。否则慢链路上一次比 `Hello` 间隔还长的大传输（新客户端加入大工程、上传大工程层）每隔 5 秒就被整个重新排一遍队，副本越积越多（`tests/convergence.rs` 的 `a_large_transfer_over_a_slow_link_is_sent_once`：50 kB/s 上传、下载 1 MB 各只发一份，以前上传发了 5 份）。对方收到了却导入不了的数据（本地没有的文档、导入失败）不算在路上：之后的第一个 `Hello` 不带 `ack`，于是整个替换、重新发送。不带 `ack` 的 `Hello`（旧版本、共享目录）照旧整个替换。
+   - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方丢了数据时能重新补发；CRDT 导入是幂等的。只有一个例外：我们在对方 `ack` 的那个 `Hello` 之后发出的数据，对方写这个 `Hello` 时可能还在路上，不退回。否则慢链路上一次比 `Hello` 间隔还长的大传输（新客户端加入大工程、上传大工程层）每隔 5 秒就被整个重新排一遍队，副本越积越多（`tests/convergence.rs` 的 `a_large_transfer_over_a_slow_link_is_sent_once`：50 kB/s 上传、下载 1 MB 各只发一份，以前上传发了 5 份；客户端另有一个文档导入不了、或者传输途中才把它加进来，也只发一份）。
+     - 前提是那个 `Hello` 之前发的都到了。会话按文档、按我们的每个 `Hello` 记下它之后最后一次发送时的本地版本。对方 `ack` 了 `k`：拿我们 `Hello` `k` 之前的最后一次发送和对方的版本比，包含了，就去掉 `k` 之前的记录，`k` 之后的照旧算在路上；没包含，说明丢了（或者导入不了、乱序的链路还没送到），这个文档整个替换，对方缺的全部重发。只记最后一次发送不行：版本向量表示不了空洞，最后一次发送的版本盖住了丢掉的那次，只要一直在发（拖动），丢的部分就永远不会重发，对方因为缺依赖把之后的增量一直挂起，我们这边还报告全部已同步（`a_lost_update_is_sent_again_while_the_document_keeps_changing`：每 100 ms 改一次，一次丢包在 3 个 `Hello` 间隔内补上，直连、经 Hub 都是；`a_large_paste_during_a_drag_over_a_slow_link_is_sent_once`：拖动中、我们的 `Hello` 前后粘贴 1 MB，只发一份）。
+     - 对方第一次列出的文档（应用刚加进层叠的工程层）：它没有这个文档时我们发的被它丢掉了，所以整个替换，马上重发；除非它的版本包含我们对这个文档的第一次发送（Hub 收到时就建了这个文档，之后发的还在路上，`a_new_document_filled_right_after_it_was_created_is_sent_once`：新建工程层后马上放进 1 MB，只发一份）。会话为此单独记下第一次发送。对方导入失败的数据不在它的版本里，下一次比对时重发，只影响这一个文档。
+     - 不带 `ack` 的 `Hello`（旧版本、共享目录）照旧整个替换。`hello_interval = None` 的会话也是：对方的 `Hello` 确认不到我们之后的 `Hello`，丢了的就永远不会重发，所以什么都不算在路上（传输超过对方 `Hello` 间隔就会重发）。
    - `Updates` / `Snapshot`：`remote[doc]` 并入 `version`；本地已经包含 `version` 就跳过，否则导入。本地没有这个文档时不导入，在 `PumpOutcome::unknown_docs` 里报告（见 2.5）。
    - `SnapshotRequest`：导出快照发回去。
 3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。被推迟的部分只有之后的 `pump` 才会发出，所以关闭连接前（最后一次 `pump` 之后）要调用 `SyncSession::flush`：不管 `min_send_interval`，立即把对方缺的发出去（不收消息，也不发 `Hello` 和在线状态）。
@@ -68,7 +71,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 **只读**（`SessionConfig::read_only`）：对方不接受我们的修改（只读令牌、写不了的共享目录，见 7.5）时打开。会话不发任何文档数据（`Updates`、`Snapshot`，也不回答 `SnapshotRequest`，`flush` 什么都不发），`Hello` 和在线状态照发，照常接收。本地修改一直留在 `unsynced` 里。
 
-**丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发（发出之后对方又确认了我们的一个 `Hello` 时，所以两边都要定期发 `Hello`）。断线重连时调用 `SyncSession::reset()`。
+**丢包、重复、乱序、延迟**：重复和乱序由 CRDT 吸收（依赖缺失的操作 Loro 会挂起，等依赖到了再应用）。丢包由定期 `Hello` 修复：对方的 `Hello` 让我们知道它实际有什么，缺的会重新发（发出之后对方又确认了我们的一个 `Hello` 时，所以两边都要定期发 `Hello`）。断线重连时调用 `SyncSession::reset()`。验证：`tests/convergence.rs` 的 `random_schedules_converge_while_edits_go_on`，随机调度（Hub 或直连、2–4 个节点、丢包、重复、乱序、重连、后加进来的文档、导入失败、没有定期 `Hello` 的节点）在网络变好之后，大家继续编辑的同时，坏网络期间丢的在几个 `Hello` 间隔内补齐，停下后一致。默认跑 24 个调度，`BAE_SYNC_STRESS_SEEDS=n` 跑 n 个。
 
 **交给链路的和对方确认的**：`remote` 包含已经交给传输、可能还在路上的部分（决定发什么）。会话另外记一份对方确认过的版本：对方最近一次 `Hello`，加上之后它发来的数据。链路断了，交给它的消息可能没送到：`SyncSession::forget_unconfirmed()` 把 `remote` 退回确认过的那份，`unsynced` 于是包括交出去、但对方没确认的修改（`Connection` 断线时调用，7.4）。
 

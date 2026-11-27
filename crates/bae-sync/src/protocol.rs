@@ -88,12 +88,13 @@ pub enum Message {
         /// that do not count them (older peers, the shared folder).
         seq: u64,
         /// The highest `seq` of the receiver's `Hello`s the sender had taken in
-        /// when it wrote this one (0: none yet), with everything the receiver
-        /// sent before that `Hello` imported. What the receiver sent after it
-        /// may still be on its way, so `versions` cannot show it yet. `None`:
-        /// not said (older peers, the shared folder), or the sender could not
-        /// import some of it (a document it does not have); `versions` is
-        /// then the whole truth.
+        /// when it wrote this one (0: none yet); `versions` include what the
+        /// receiver sent before that `Hello`, as far as it could be imported.
+        /// What the receiver sent after it may still be on its way, so
+        /// `versions` cannot show it yet: the receiver does not send it again
+        /// as long as `versions` show that what it sent before arrived. `None`:
+        /// not said (older peers, the shared folder); `versions` is then the
+        /// whole truth.
         ack: Option<u64>,
     },
     /// Loro updates for one document. `version`: the sender's version after them.

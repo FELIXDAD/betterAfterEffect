@@ -16,13 +16,101 @@ use crate::transport::Transport;
 /// Payloads received in one pump, per document: `(version, data)`.
 type Incoming = BTreeMap<DocKey, Vec<(VersionVector, Vec<u8>)>>;
 
+/// At most this many entries per document in [`InFlight`] (more only pile up
+/// while the remote's `Hello`s do not acknowledge ours); the oldest are merged.
+const MAX_IN_FLIGHT: usize = 64;
+
+/// Our data messages the remote may not have taken in yet, per document: for
+/// each `Hello` of ours they followed (its `seq`, oldest first), our version
+/// after the last of them. The first stays on its own (it shows whether the
+/// remote had the document, see [`on_hello`](Self::on_hello)).
+///
+/// The remote's `Hello` with `ack: Some(k)` cannot show what we sent after our
+/// `Hello` `k` (it may still be on its way), but should show everything we
+/// sent before it: that arrived before our `Hello` `k`. So the last entry
+/// before `k` is checked against its versions. If they do not include it,
+/// something got lost (or could not be imported, or a reordering link has not
+/// delivered it yet): the document is replaced, not kept, and everything it
+/// lacks is sent again. Version vectors cannot describe a hole, so keeping
+/// only the last send (whose version covers a lost one) would never send the
+/// lost ops again as long as the sends go on, and the remote would keep the
+/// later ones pending for want of them.
+#[derive(Debug, Default)]
+struct InFlight(BTreeMap<DocKey, Vec<(u64, VersionVector)>>);
+
+impl InFlight {
+    /// We sent `doc` up to `version` after our `Hello` `after`.
+    fn sent(&mut self, doc: &DocKey, after: u64, version: &VersionVector) {
+        let sends = self.0.entry(doc.clone()).or_default();
+        let first_only = sends.len() == 1;
+        match sends.last_mut() {
+            Some((seq, v)) if *seq == after && !first_only => v.clone_from(version),
+            _ => sends.push((after, version.clone())),
+        }
+        if sends.len() > MAX_IN_FLIGHT {
+            // Merge the two oldest under the older `Hello`: the merged one is
+            // checked against an earlier `ack` than it needs to be, so at
+            // worst what is on its way is sent again.
+            let (seq, _) = sends.remove(0);
+            sends[0].0 = seq;
+        }
+    }
+
+    /// The remote's `Hello` acknowledging our `Hello` `ack`: `remote` holds its
+    /// versions and gets what may still be on its way added. `listed_before`:
+    /// what the remote showed it has before this `Hello` (its last `Hello` and
+    /// what it sent since).
+    fn on_hello(
+        &mut self,
+        ack: u64,
+        listed_before: Option<&BTreeMap<DocKey, VersionVector>>,
+        remote: &mut BTreeMap<DocKey, VersionVector>,
+    ) {
+        self.0.retain(|doc, sends| {
+            // A document it lists for the first time (a sublayer the app just
+            // added) dropped what we sent while it did not have it: send it
+            // again now, unless it took our first message (a hub creates the
+            // document from it; the rest is still on its way).
+            if let Some(have) = remote.get(doc)
+                && !listed_before.is_some_and(|l| l.contains_key(doc))
+                && !have.includes_vv(&sends[0].1)
+            {
+                return false;
+            }
+            let split = sends.partition_point(|(after, _)| *after < ack);
+            if let Some((_, before)) = split.checked_sub(1).map(|i| &sends[i])
+                && !remote.get(doc).is_some_and(|v| v.includes_vv(before))
+            {
+                return false;
+            }
+            sends.drain(..split);
+            match sends.last() {
+                Some((_, version)) => {
+                    remote.entry(doc.clone()).or_default().merge(version);
+                    true
+                }
+                None => false,
+            }
+        });
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 /// Settings of a [`SyncSession`].
 #[derive(Clone, Debug)]
 pub struct SessionConfig {
     pub client: ClientId,
     /// Re-announce our versions this often so the remote can resend anything that
     /// got lost. `None`: only on connect and when a new document appears (enough
-    /// for the shared folder, which never loses data).
+    /// for the shared folder, which never loses data). The remote's `Hello`s
+    /// then cannot acknowledge a later `Hello` of ours, which a lost send
+    /// needs to be sent again, so nothing we send is kept as on its way (see
+    /// [`Message::Hello`]'s `ack`): each of the remote's `Hello`s replaces
+    /// what we think it has, and a transfer that outlasts its hello interval
+    /// is sent again.
     pub hello_interval: Option<Duration>,
     /// At most this many received messages are handled per [`SyncSession::pump`],
     /// so one pump never stalls the thread that owns the stage for long.
@@ -109,20 +197,13 @@ pub struct SyncSession {
     /// What the remote showed it has: its last `Hello`, plus what it sent us
     /// since. [`forget_unconfirmed`](Self::forget_unconfirmed) goes back to it.
     confirmed: Option<BTreeMap<DocKey, VersionVector>>,
-    /// Per document, our last data message: the `seq` of our `Hello` before
-    /// it, and its version. Until the remote acknowledges a later `Hello` of
-    /// ours, it may still be on its way: the remote's `Hello`s do not undo it.
-    in_flight: BTreeMap<DocKey, (u64, VersionVector)>,
+    /// What we sent that may still be on its way: the remote's `Hello`s do
+    /// not undo it.
+    in_flight: InFlight,
     /// The `seq` of our last `Hello` (never reset, so it keeps growing).
     hello_seq: u64,
     /// The highest `seq` of the remote's `Hello`s on this link (our `ack`).
     remote_hello_seq: u64,
-    /// Documents whose data from the remote we could not import (one we do
-    /// not have, a failed import). The first `Hello` once the document is
-    /// there acknowledges nothing, so the remote sends it again; while it is
-    /// missing, our `Hello`s acknowledge as usual (sending it again would be
-    /// dropped too, and the remote's transfers in flight would start over).
-    dropped: BTreeSet<DocKey>,
     remote_client: Option<ClientId>,
     remote_protocol: Option<u32>,
     last_hello: Option<Instant>,
@@ -145,10 +226,9 @@ impl SyncSession {
             config,
             remote: None,
             confirmed: None,
-            in_flight: BTreeMap::new(),
+            in_flight: InFlight::default(),
             hello_seq: 0,
             remote_hello_seq: 0,
-            dropped: BTreeSet::new(),
             remote_client: None,
             remote_protocol: None,
             last_hello: None,
@@ -246,7 +326,6 @@ impl SyncSession {
         self.confirmed = None;
         self.in_flight.clear();
         self.remote_hello_seq = 0;
-        self.dropped.clear();
         self.remote_client = None;
         self.remote_protocol = None;
         self.last_hello = None;
@@ -414,16 +493,15 @@ impl SyncSession {
         self.announced = keys.into_iter().collect();
         self.last_hello = Some(now);
         self.hello_seq += 1;
-        let resend = self.dropped.iter().any(|k| docs.version(k).is_some());
-        self.dropped.retain(|k| docs.version(k).is_none());
         let hello = Message::Hello {
             protocol: PROTOCOL_VERSION,
             client: self.config.client.clone(),
             versions,
             seq: self.hello_seq,
-            // Everything the remote sent before that `Hello` was imported: a
-            // pump imports what it received before it says hello again.
-            ack: (!resend).then_some(self.remote_hello_seq),
+            // `versions` include what the remote sent before that `Hello`: a
+            // pump imports what it received before it says hello again (what
+            // could not be imported is missing, and the remote sees that).
+            ack: Some(self.remote_hello_seq),
         };
         self.send(transport, hello, out)
     }
@@ -455,19 +533,17 @@ impl SyncSession {
                 }
                 // Replace, not merge: if the remote lost something (a message
                 // dropped on the way) we must send it again. Except what we sent
-                // after the `Hello` of ours it acknowledges: that may still be on
-                // its way (a large transfer over a slow link outlasts the hello
-                // interval), and sending it again would only pile up copies.
+                // after the `Hello` of ours it acknowledges, as long as what we
+                // sent before it arrived: that may still be on its way (a large
+                // transfer over a slow link outlasts the hello interval), and
+                // sending it again would only pile up copies.
                 let versions: BTreeMap<DocKey, VersionVector> = versions.into_iter().collect();
-                self.confirmed = Some(versions.clone());
+                let listed_before = self.confirmed.replace(versions.clone());
                 let mut remote = versions;
-                match ack {
-                    Some(ack) => {
-                        self.in_flight.retain(|_, (after, _)| *after >= ack);
-                        for (doc, (_, version)) in &self.in_flight {
-                            remote.entry(doc.clone()).or_default().merge(version);
-                        }
-                    }
+                match ack.filter(|_| self.config.hello_interval.is_some()) {
+                    Some(ack) => self
+                        .in_flight
+                        .on_hello(ack, listed_before.as_ref(), &mut remote),
                     None => self.in_flight.clear(),
                 }
                 self.remote = Some(remote);
@@ -500,8 +576,9 @@ impl SyncSession {
                     Ok(data) => {
                         if let Some(remote) = &mut self.remote {
                             remote.entry(doc.clone()).or_default().merge(&version);
-                            self.in_flight
-                                .insert(doc.clone(), (self.hello_seq, version.clone()));
+                            if self.config.hello_interval.is_some() {
+                                self.in_flight.sent(&doc, self.hello_seq, &version);
+                            }
                         }
                         self.send(transport, Message::Snapshot { doc, version, data }, out)?;
                     }
@@ -570,16 +647,15 @@ impl SyncSession {
                         out.events.push(ev);
                     }
                 }
+                // Dropped: our `Hello`s do not show it, so the remote sends it
+                // again (a document we do not have: at once when our `Hello`
+                // first lists it).
                 Ok(Imported::UnknownDoc) => {
-                    self.dropped.insert(doc.clone());
                     if !out.unknown_docs.contains(&doc) {
                         out.unknown_docs.push(doc);
                     }
                 }
-                Err(e) => {
-                    self.dropped.insert(doc);
-                    out.errors.push(e);
-                }
+                Err(e) => out.errors.push(e),
             }
         }
     }
@@ -613,9 +689,9 @@ impl SyncSession {
             match docs.export_updates(&key, known) {
                 Ok(data) => {
                     known.merge(&local);
-                    // Versions only grow: this one covers the earlier sends.
-                    self.in_flight
-                        .insert(key.clone(), (self.hello_seq, local.clone()));
+                    if self.config.hello_interval.is_some() {
+                        self.in_flight.sent(&key, self.hello_seq, &local);
+                    }
                     batch.push(Message::Updates {
                         doc: key,
                         version: local,
