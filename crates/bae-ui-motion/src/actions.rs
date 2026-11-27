@@ -14,6 +14,7 @@ use crate::common;
 use crate::session::{KeyClipboard, Pending, Reveal, SharedSession};
 
 pub mod ids {
+    pub const CACHE_WHEN_IDLE: &str = "motion.comp.cache_frames_when_idle";
     pub const PLAY: &str = "motion.play";
     pub const GO_START: &str = "motion.go_start";
     pub const GO_END: &str = "motion.go_end";
@@ -48,6 +49,12 @@ pub mod ids {
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
     pub const MINI_FLOW: &str = "motion.comp.composition_mini_flowchart";
+    /// Composition ▸ Composition Flowchart (Ctrl+Shift+F11): the Flowchart
+    /// panel for the active comp.
+    pub const COMP_FLOWCHART: &str = "motion.comp.composition_flowchart";
+    /// Layer ▸ Reveal ▸ Reveal Composition in Project (and the Timeline's
+    /// empty-space menu): the comp selected in the Project panel.
+    pub const REVEAL_COMP_IN_PROJECT: &str = "motion.layer.reveal_composition_in_project";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
@@ -68,6 +75,11 @@ pub mod ids {
     pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > Import > Solid... / Placeholder...: a new solid or placeholder item.
+    pub const IMPORT_SOLID: &str = "motion.file.import_solid";
+    pub const IMPORT_PLACEHOLDER: &str = "motion.file.import_placeholder";
+    /// File > New Comp from Selection... (Alt+\).
+    pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
     pub const REPLACE_FOOTAGE: &str = "motion.file.replace_footage_file";
     /// File > Reload Footage (Cmd/Ctrl+Alt+L).
@@ -140,6 +152,17 @@ pub mod ids {
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
     /// Layer ▸ Track Matte ▸ … (params `{"matte": "alpha", "source": "above"}`).
     pub const TRACK_MATTE: &str = "motion.layer.track_matte";
+    /// ; — zoom in to frames (again: the whole comp); Shift+; — the whole
+    /// comp and back to the last zoom.
+    pub const ZOOM_FRAMES: &str = "motion.timeline.zoom_to_frames";
+    pub const ZOOM_TOGGLE: &str = "motion.timeline.zoom_toggle_full";
+    /// D: scroll the Timeline to the CTI; X: the selected layer to the top.
+    pub const SCROLL_TO_NOW: &str = "motion.timeline.scroll_to_current_time";
+    pub const SCROLL_LAYER_TOP: &str = "motion.timeline.scroll_selected_layer_to_top";
+    /// Ctrl+`: show / hide every property of the selected layers.
+    pub const TWIRL: &str = "motion.timeline.twirl";
+    /// Ctrl+Alt+V: paste layers at the current time.
+    pub const PASTE_AT_TIME: &str = "motion.edit.paste_at_current_time";
     /// Ctrl+Down / Ctrl+Up (Shift adds): the next layer down / up the stack.
     pub const SELECT_NEXT_LAYER: &str = "motion.layer.select_next";
     pub const SELECT_PREV_LAYER: &str = "motion.layer.select_previous";
@@ -224,6 +247,15 @@ pub mod ids {
     /// Layer ▸ Camera ▸ Camera Settings… (and View ▸): the selected camera, else
     /// the comp's active camera.
     pub const CAMERA_SETTINGS: &str = "motion.layer.camera_settings";
+    /// Composition ▸ Crop Comp to Region of Interest / to Selected Layer(s)
+    /// Bounds.
+    pub const CROP_TO_ROI: &str = "motion.comp.crop_comp_to_region_of_interest";
+    pub const CROP_TO_LAYERS: &str = "motion.comp.crop_comp_to_selected_layer_bounds";
+    /// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest / to Layer,
+    /// Set Focus Distance to Layer.
+    pub const FOCUS_TO_POI: &str = "motion.layer.link_focus_distance_to_point_of_interest";
+    pub const LINK_FOCUS_TO_LAYER: &str = "motion.layer.link_focus_distance_to_layer";
+    pub const SET_FOCUS_TO_LAYER: &str = "motion.layer.set_focus_distance_to_layer";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
     pub const RESET_TRANSFORM: &str = "motion.layer.reset_transform";
@@ -304,6 +336,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EXPONENTIAL_SCALE, "Exponential Scale"),
     (ids::SEQUENCE_LAYERS, "Sequence Layers..."),
     (ids::PLAY, "Play/Stop"),
+    (ids::CACHE_WHEN_IDLE, "Cache Frames When Idle"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
     ("motion.file.find", "Find"),
@@ -335,10 +368,15 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::MINI_FLOW, "Composition Mini-Flowchart"),
+    (ids::COMP_FLOWCHART, "Composition Flowchart"),
+    (ids::REVEAL_COMP_IN_PROJECT, "Reveal Composition in Project"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::IMPORT_SOLID, "Solid..."),
+    (ids::IMPORT_PLACEHOLDER, "Placeholder..."),
+    (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
     (ids::REVEAL_IN_EXPLORER, "Reveal in Explorer"),
@@ -359,6 +397,11 @@ pub const ACTIONS: &[(&str, &str)] = &[
         "Toggle Switches / Modes Columns",
     ),
     (ids::TOGGLE_PARENT_COLUMN, "Show / Hide Parent Column"),
+    (ids::ZOOM_FRAMES, "Zoom In to Frames"),
+    (ids::ZOOM_TOGGLE, "Toggle Zoom Level"),
+    (ids::SCROLL_TO_NOW, "Scroll to Current Time"),
+    (ids::SCROLL_LAYER_TOP, "Scroll Selected Layer to Top"),
+    (ids::PASTE_AT_TIME, "Paste Layers at Current Time"),
     (
         ids::WORK_AREA_TO_SELECTION,
         "Set Work Area to Selected Layers",
@@ -425,6 +468,14 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::EDIT_LABEL_COLORS, "Edit Label Colors..."),
     (ids::SEPARATE_DIMENSIONS, "Separate Dimensions"),
     (ids::CAMERA_SETTINGS, "Camera Settings..."),
+    (ids::CROP_TO_ROI, "Crop Comp to Region of Interest"),
+    (ids::CROP_TO_LAYERS, "Crop Comp to Selected Layer(s) Bounds"),
+    (
+        ids::FOCUS_TO_POI,
+        "Link Focus Distance to Point of Interest",
+    ),
+    (ids::LINK_FOCUS_TO_LAYER, "Link Focus Distance to Layer"),
+    (ids::SET_FOCUS_TO_LAYER, "Set Focus Distance to Layer"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
     (ids::CENTER_IN_VIEW, "Center In View"),
@@ -515,6 +566,12 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         r#"{"what":"animated","add":true}"#,
         "Add Animated Properties to Revealed Properties",
     ),
+    (
+        ids::TWIRL,
+        r#"{"explode":true,"preserve_solo":false}"#,
+        "Show or Hide All Properties of Selected Layers",
+    ),
+    (ids::PLAY, r#"{"alternate":true}"#, "Preview (Shift)"),
     (
         ids::MOVE_IN,
         r#"{"relative":true}"#,
@@ -1165,6 +1222,107 @@ fn camera_settings_target(stage: &bae_model::Stage, session: &SharedSession) -> 
     query::comp_layers(stage, &comp).into_iter().find(is_camera)
 }
 
+/// The comp-space box around `layers`' content at `now` ([left, top, right,
+/// bottom]; Crop Comp to Selected Layer(s) Bounds).
+fn layers_bounds(
+    stage: &bae_model::Stage,
+    comp: &PrimPath,
+    now: Time,
+    layers: &[PrimPath],
+) -> Option<[f64; 4]> {
+    use bae_anim::glam::DVec3;
+    let evaluated = bae_anim::Evaluator::new()
+        .evaluate_comp(stage, comp, now)
+        .ok()?;
+    let mut rect: Option<[f64; 4]> = None;
+    for l in evaluated.layers.iter().filter(|l| layers.contains(&l.path)) {
+        let Some((a, b)) = crate::render::layer_bounds(l) else {
+            continue;
+        };
+        for (x, y) in [(a.x, a.y), (b.x, a.y), (a.x, b.y), (b.x, b.y)] {
+            let p = l.world_matrix.transform_point3(DVec3::new(x, y, 0.0));
+            let r = rect.get_or_insert([p.x, p.y, p.x, p.y]);
+            *r = [r[0].min(p.x), r[1].min(p.y), r[2].max(p.x), r[3].max(p.y)];
+        }
+    }
+    rect.filter(|r| r[2] - r[0] >= 1.0 && r[3] - r[1] >= 1.0)
+}
+
+/// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest (each selected
+/// camera), Link Focus Distance to Layer and Set Focus Distance to Layer (a
+/// selected camera and one other selected layer): AE's expressions, or the
+/// distance now along the camera's view.
+fn camera_focus(cx: &mut PanelContext<'_>, session: &SharedSession, id: &str) {
+    use bae_anim::glam::DVec3;
+    let stage = cx.stage;
+    let (selected, comp, now) = {
+        let s = session.lock();
+        let Some(comp) = s.active_comp.clone() else {
+            return;
+        };
+        (s.selected_layers.clone(), comp.clone(), s.time(&comp))
+    };
+    let is_camera = |l: &PrimPath| query::layer_kind(stage, l).as_deref() == Some("camera");
+    let cameras: Vec<PrimPath> = selected
+        .iter()
+        .filter(|l| is_camera(l) && !query::is_locked(stage, l))
+        .cloned()
+        .collect();
+    const ATTR: &str = "camera:focus_distance";
+    if id == ids::FOCUS_TO_POI {
+        let items: Vec<_> = cameras
+            .iter()
+            .map(
+                |c| json!({"path": c, "attr": ATTR, "source": "length(position, pointOfInterest)"}),
+            )
+            .collect();
+        if !items.is_empty() {
+            cx.invoke_with("attr.set_expressions", json!({ "items": items }));
+        }
+        return;
+    }
+    let others: Vec<&PrimPath> = selected.iter().filter(|l| !is_camera(l)).collect();
+    let (Some(camera), [target]) = (cameras.first(), others.as_slice()) else {
+        return;
+    };
+    if id == ids::LINK_FOCUS_TO_LAYER {
+        let name = query::display_name_of(stage, target)
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let source = format!(
+            "m = thisComp.layer(\"{name}\");\nv = sub(m.toWorld(m.anchorPoint), toWorld([0,0,0]));\ndot(v, toWorldVec([0,0,1]))"
+        );
+        cx.invoke_with(
+            "attr.set_expressions",
+            json!({"items": [{"path": camera, "attr": ATTR, "source": source}]}),
+        );
+        return;
+    }
+    let Ok(evaluated) = bae_anim::Evaluator::new().evaluate_comp(stage, &comp, now) else {
+        return;
+    };
+    let find = |p: &PrimPath| evaluated.layers.iter().find(|l| l.path == *p);
+    let (Some(cam), Some(layer)) = (find(camera), find(target)) else {
+        return;
+    };
+    let point = layer
+        .world_matrix
+        .transform_point3(layer.transform.anchor_point);
+    let eye = cam.world_matrix.transform_point3(DVec3::ZERO);
+    let forward = cam
+        .world_matrix
+        .transform_vector3(DVec3::Z)
+        .normalize_or_zero();
+    let distance = (point - eye).dot(forward);
+    if distance > 0.0 {
+        let time = query::to_key_time(stage, camera, now);
+        cx.invoke_with(
+            "attr.set_many",
+            json!({"edits": [{"path": camera, "attr": ATTR, "time": time, "value": bae_model::Value::Float(distance)}]}),
+        );
+    }
+}
+
 /// File ▸ New ▸ New Folder: an “Untitled N” folder in the folder selected in
 /// the Project panel, else at the top level (AE).
 pub(crate) fn new_folder(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -1235,6 +1393,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
     }
+    if id == ids::CACHE_WHEN_IDLE {
+        if let Some(store) = cx.resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
+            let mut prefs = (*store.current()).clone();
+            let key = bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE;
+            prefs.set(key, !prefs.bool(key));
+            if let Err(error) = store.set(prefs) {
+                tracing::warn!(%error, "could not save idle cache setting");
+            }
+        }
+        return true;
+    }
     if id == ids::TRACK_MOTION {
         let layer = session.lock().selected_layers.first().cloned();
         if let Some(layer) = layer
@@ -1287,6 +1456,32 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if let Some(camera) = camera_settings_target(stage, session) {
                 crate::dialogs::layer_settings(cx, session, &camera);
             }
+            return true;
+        }
+        ids::CROP_TO_ROI => {
+            let roi = session.lock().roi.clone();
+            let active = session.lock().active_comp.clone();
+            if let Some((comp, rect)) = roi.filter(|(c, _)| Some(c) == active.as_ref()) {
+                cx.invoke_with("comp.crop", json!({"comp": comp, "rect": rect}));
+                session.lock().roi_cropped = true;
+            }
+            return true;
+        }
+        ids::CROP_TO_LAYERS => {
+            let (comp, now, layers) = {
+                let s = session.lock();
+                let Some(comp) = s.active_comp.clone() else {
+                    return true;
+                };
+                (comp.clone(), s.time(&comp), s.selected_layers.clone())
+            };
+            if let Some(rect) = layers_bounds(stage, &comp, now, &layers) {
+                cx.invoke_with("comp.crop", json!({"comp": comp, "rect": rect}));
+            }
+            return true;
+        }
+        ids::FOCUS_TO_POI | ids::LINK_FOCUS_TO_LAYER | ids::SET_FOCUS_TO_LAYER => {
+            camera_focus(cx, session, id);
             return true;
         }
         ids::OPEN_LAYER | ids::OPEN_LAYER_SOURCE => {
@@ -1355,7 +1550,41 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             return true;
         }
         ids::IMPORT_FILE => {
-            crate::import::import_file(cx, session);
+            if let Some(paths) = inv.params.get("paths") {
+                if let Ok(paths) = serde_json::from_value::<Vec<std::path::PathBuf>>(paths.clone())
+                {
+                    crate::import::import_paths(cx, &paths, None);
+                }
+            } else {
+                crate::import::import_file(cx, session);
+            }
+            return true;
+        }
+        ids::NEW_COMP_FROM_SELECTION => {
+            // Comps, footage and solids selected in the Project panel.
+            let items: Vec<PrimPath> = session
+                .lock()
+                .selected_items
+                .iter()
+                .filter(|i| {
+                    query::comp_info(stage, i).is_some()
+                        || stage
+                            .prim(i)
+                            .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET))
+                })
+                .cloned()
+                .collect();
+            let prefs = crate::prefs::current(cx.resources);
+            let still = crate::import::ImportDefaults::of(&prefs).still_duration;
+            crate::dialogs::comp_from_selection(cx, items, still);
+            return true;
+        }
+        ids::IMPORT_SOLID => {
+            crate::dialogs::import_solid(cx, session);
+            return true;
+        }
+        ids::IMPORT_PLACEHOLDER => {
+            crate::dialogs::import_placeholder(cx);
             return true;
         }
         ids::REPLACE_FOOTAGE => {
@@ -1424,15 +1653,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         // F4 / Shift+F4 with another panel in front: the Timeline toggles its
         // columns on its next frame (AE: they work whatever panel is active).
-        ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN | ids::SELECT_VISIBLE_KEYS => {
-            let id = [
-                ids::TOGGLE_SWITCHES_MODES,
-                ids::TOGGLE_PARENT_COLUMN,
-                ids::SELECT_VISIBLE_KEYS,
-            ]
-            .into_iter()
-            .find(|i| *i == id)
-            .unwrap_or(ids::TOGGLE_PARENT_COLUMN);
+        ids::TOGGLE_SWITCHES_MODES
+        | ids::TOGGLE_PARENT_COLUMN
+        | ids::SELECT_VISIBLE_KEYS
+        | ids::ZOOM_FRAMES
+        | ids::ZOOM_TOGGLE
+        | ids::SCROLL_TO_NOW
+        | ids::SCROLL_LAYER_TOP
+        | ids::TWIRL => {
+            let id = crate::timeline::QUEUED
+                .into_iter()
+                .find(|i| *i == id)
+                .unwrap_or(ids::TOGGLE_PARENT_COLUMN);
             session.lock().timeline_toggles.push(id);
             return true;
         }
@@ -1562,6 +1794,11 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
+        ids::COMP_FLOWCHART => cx.open_panel("flowchart"),
+        ids::REVEAL_COMP_IN_PROJECT => {
+            s.selected_items = vec![info.path.clone()];
+            cx.open_panel("project");
+        }
         ids::MINI_FLOW => {
             s.mini_flow = Some(crate::timeline::navigation::MiniFlow::new(
                 stage, &info.path,
@@ -1639,18 +1876,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
         }
         ids::ADD_TO_RENDER_QUEUE | ids::SAVE_FRAME_AS => {
-            let queue = crate::render_queue::shared(cx.resources);
-            let dir = crate::render_queue::default_output_dir();
-            let mut queue = queue.lock();
-            if id == ids::SAVE_FRAME_AS {
-                queue.add_frame(&info, &dir, info.frame_rate.time_to_frame(now));
-            } else {
-                queue.add(&info, &dir);
-            }
-            queue.assign_output(
-                crate::prefs::current(cx.resources).bool("export.use_default_filename_and_folder"),
-            );
-            drop(queue);
+            let frame = (id == ids::SAVE_FRAME_AS).then(|| info.frame_rate.time_to_frame(now));
+            crate::render_queue::add_to_queue(cx, &info, frame);
             cx.open_panel("render_queue");
         }
         ids::SELECT_NEXT_LAYER | ids::SELECT_PREV_LAYER => {
@@ -2054,22 +2281,34 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     Some(_) => {}
                     None => cx.invoke_with(
                         "marker.add",
-                        json!({"owner": info.path, "time": now, "comment": n.to_string()}),
+                        json!({"owner": info.path, "time": now, "comment": n.to_string(), "label": crate::prefs::marker_label(&crate::prefs::current(cx.resources), false)}),
                     ),
                 }
             }
         }
         ids::ADD_MARKER => {
+            let label = crate::prefs::marker_label(&crate::prefs::current(cx.resources), false);
             if layers.is_empty() {
-                cx.invoke_with("marker.add", json!({"owner": info.path, "time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owner": info.path, "time": now, "label": label}),
+                );
             } else {
-                cx.invoke_with("marker.add", json!({"owners": layers, "comp_time": now}));
+                cx.invoke_with(
+                    "marker.add",
+                    json!({"owners": layers, "comp_time": now, "label": label}),
+                );
             }
         }
         ids::ADD_MARKER_DIALOG => {
             let owner = layers.first().cloned().unwrap_or_else(|| info.path.clone());
             s.key_dialog = Some(crate::timeline::KeyDialog::Marker(Box::new(
-                crate::timeline::MarkerDialog::new_marker(&info, owner, now),
+                crate::timeline::MarkerDialog::new_marker(
+                    &info,
+                    owner,
+                    now,
+                    crate::prefs::marker_label(&crate::prefs::current(cx.resources), false),
+                ),
             )));
         }
         ids::DELETE_ALL_MARKERS if !layers.is_empty() => {
@@ -2627,6 +2866,21 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 cx.invoke_with("attr.set_expressions", json!({"items": items}));
             }
         }
+        ids::PASTE_AT_TIME if !s.layer_clipboard.is_empty() => {
+            let before = query::comp_layers(stage, &info.path);
+            let above = before
+                .iter()
+                .find(|l| s.selected_layers.contains(l))
+                .cloned();
+            cx.invoke_with(
+                "layer.paste",
+                json!({"comp": info.path, "layers": s.layer_clipboard, "above": above, "time": now}),
+            );
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before,
+            });
+        }
         ids::PASTE if !s.layer_clipboard.is_empty() => {
             // Above the topmost selected layer, else on top; named like
             // Duplicate; the pasted layers end up selected.
@@ -2794,6 +3048,18 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Open Layer Source", "打开图层源"),
     ("Add Footage to Comp", "将素材添加到合成"),
     ("Edit Original...", "编辑原稿..."),
+    // AE 2026 zh_CN menus.
+    ("Crop Comp to Region of Interest", "裁剪合成到目标区域"),
+    (
+        "Crop Comp to Selected Layer(s) Bounds",
+        "裁切合成至选定图层边界",
+    ),
+    (
+        "Link Focus Distance to Point of Interest",
+        "将焦距链接到目标点",
+    ),
+    ("Link Focus Distance to Layer", "将焦距链接到图层"),
+    ("Set Focus Distance to Layer", "将焦距设置为图层"),
 ];
 
 /// Registers this module's Chinese strings (`MotionUiModule::build`).

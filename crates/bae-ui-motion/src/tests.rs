@@ -63,8 +63,21 @@ impl Harness {
 
     /// One frame of `panel`; returns its requests.
     fn frame(&self, kind: &str, panel: &mut dyn Panel, events: Vec<Event>) -> PanelRequests {
+        self.frame_mods(kind, panel, events, egui::Modifiers::NONE)
+    }
+
+    /// [`Harness::frame`] with `modifiers` held.
+    fn frame_mods(
+        &self,
+        kind: &str,
+        panel: &mut dyn Panel,
+        events: Vec<Event>,
+        modifiers: egui::Modifiers,
+    ) -> PanelRequests {
         let mut requests = PanelRequests::default();
         let id = PanelId::new(kind);
+        let mut events = events;
+        events.insert(0, Event::ModifiersChanged(modifiers));
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
             events,
@@ -747,6 +760,28 @@ fn gpu_preview_publishes_the_rendered_comp() {
         px[0] >= 250 && px[1] <= 3 && px[2] <= 3 && px[3] >= 250,
         "{px:?}"
     );
+    // #727: the Info panel's pixel reads back asynchronously; while a new
+    // texel is pending the previous reading stands in (no empty RGBA).
+    let ctx = egui::Context::default();
+    let device = bae_gpu::testing::shared_context().expect("context");
+    let mut read = None;
+    for _ in 0..100 {
+        read = preview.pixel([20.0, 20.0], &ctx);
+        if read.is_some() {
+            break;
+        }
+        // Slow adapters (WARP on CI) finish the readback only when waited on.
+        let _ = device
+            .device()
+            .poll(bae_gpu::wgpu::PollType::wait_indefinitely());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let first = read.expect("the first pixel arrives");
+    assert_eq!(
+        preview.pixel([30.0, 30.0], &ctx),
+        Some(first),
+        "pending: last reading"
+    );
     let id = preview.viewport();
     drop(preview);
     assert!(registry.get(id).is_none(), "removed on drop");
@@ -1316,8 +1351,8 @@ fn render_button_activates_with_space_and_enter() {
             let mut q = queue.lock();
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
-            item.set_format(bae_render::ExportFormat::Png);
-            item.output = dir
+            item.outputs[0].set_format(bae_render::ExportFormat::Png);
+            item.outputs[0].output = dir
                 .path()
                 .join(format!("k{n}/f_####.png"))
                 .to_string_lossy()
@@ -1969,7 +2004,7 @@ fn precompose_dialog_options() {
 }
 
 /// A valid 1×1 RGBA PNG.
-const PNG_1X1: &[u8] = &[
+pub(super) const PNG_1X1: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
     0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15, 0, 2,
     135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
@@ -3007,6 +3042,99 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// File ▸ New Comp from Selection…: the dialog opens for the selected items;
+/// one comp with them as layers, in sequence with a cross dissolve, or one comp
+/// per item.
+#[test]
+fn new_comp_from_selection() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let solid_item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    // The dialog asks first.
+    h.session().lock().selected_items = vec![solid_item.clone(), comp.clone()];
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::NEW_COMP_FROM_SELECTION),
+    );
+    assert!(h.dialogs().is_open());
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "comp.create_from_items");
+    let before = query::comps(&h.stage).len();
+    let out = h.run(
+        "comp.create_from_items",
+        json!({
+            "items": [solid_item, comp],
+            "sequence": true,
+            "overlap": Time::from_seconds(1.0),
+            "transition": "cross_dissolve",
+            "still_duration": Time::from_seconds(5.0),
+        }),
+    );
+    let new = PrimPath::new(out["comps"][0].as_str().unwrap()).unwrap();
+    let layers = query::comp_layers(&h.stage, &new);
+    assert_eq!(layers.len(), 2);
+    // The second starts where the first (5 s) ends minus the overlap.
+    let t = query::layer_timing(&h.stage, &layers[1]);
+    assert_eq!(t.in_point, Time::from_seconds(4.0));
+    let fades = |l: &PrimPath| {
+        query::attr_spec(&h.stage, l, "transform:opacity").map_or(0, |s| s.keyframes.len())
+    };
+    assert_eq!((fades(&layers[0]), fades(&layers[1])), (2, 2));
+    // Multiple Compositions: one per item.
+    h.run(
+        "comp.create_from_items",
+        json!({"items": [solid_item, comp], "multiple": true}),
+    );
+    assert_eq!(query::comps(&h.stage).len(), before + 3);
+}
+
+/// File ▸ Import ▸ Solid… and Placeholder…: items in the Project panel, no
+/// layer, one undo step each (AE).
+#[test]
+fn import_solid_and_placeholder_make_items() {
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let assets = |h: &Harness, kind: &str| -> Vec<PrimPath> {
+        h.stage
+            .traverse()
+            .into_iter()
+            .filter(|p| {
+                h.stage.prim(p).is_some_and(|v| {
+                    matches!(query::static_value(&v, "kind"), Some(Value::Enum(k)) if k == kind)
+                })
+            })
+            .collect()
+    };
+    // No comp open: Import ▸ Solid… still works.
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_SOLID),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "item.new");
+    h.apply(r);
+    assert_eq!(assets(&h, "solid").len(), 1);
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_PLACEHOLDER),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    h.apply(r);
+    let p = assets(&h, "placeholder");
+    assert_eq!(p.len(), 1);
+    let v = h.stage.prim(&p[0]).unwrap();
+    assert_eq!(query::static_value(&v, "width"), Some(Value::Int(1920)));
+    assert_eq!(
+        query::static_value(&v, "duration"),
+        Some(Value::Time(Time::from_seconds(60.0)))
+    );
+    assert_eq!(query::display_name_of(&h.stage, &p[0]), "Missing Name");
+}
+
 /// #460: the Window menu names what the viewers show (AE: "Composition: Comp 1").
 #[test]
 fn window_menu_titles_name_the_active_comp() {
@@ -3321,6 +3449,92 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
     assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
+/// Shift-drag continues the previous Brush stroke; Ctrl/Cmd-drag only sizes
+/// the brush (AE).
+#[test]
+fn shift_continues_the_last_stroke_and_command_sizes_the_brush() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::Brush);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = |x: f32, y: f32| pos2(320.0 + x, 195.0 + y);
+    let drag = |h: &mut Harness, panel: &mut crate::layer_panel::LayerPanel, from, to, m| {
+        let mut r = PanelRequests::default();
+        for (i, p) in [from, from, to, to].into_iter().enumerate() {
+            let mut evs = Vec::new();
+            pointer(
+                &mut evs,
+                p,
+                match i {
+                    1 => Some(true),
+                    3 => Some(false),
+                    _ => None,
+                },
+            );
+            r.invocations
+                .extend(h.frame_mods("layer", panel, evs, m).invocations);
+        }
+        let ids: Vec<String> = r.invocations.iter().map(|i| i.id.clone()).collect();
+        h.apply(r);
+        ids
+    };
+    let none = egui::Modifiers::NONE;
+    let r = drag(&mut h, &mut panel, at(10.0, 10.0), at(60.0, 10.0), none);
+    assert!(r.iter().any(|i| i == "paint.add_stroke"), "{r:?}");
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    let strokes = |h: &Harness| bae_motion::paint::strokes_of(&h.stage, &effects[0]);
+    let r = drag(
+        &mut h,
+        &mut panel,
+        at(60.0, 20.0),
+        at(100.0, 20.0),
+        egui::Modifiers::SHIFT,
+    );
+    assert!(r.iter().any(|i| i == "paint.extend_stroke"), "{r:?}");
+    assert_eq!(strokes(&h).len(), 1, "the same stroke, longer");
+    // Ctrl/Cmd-drag 30 points out: a 60 px brush, no stroke.
+    let r = drag(
+        &mut h,
+        &mut panel,
+        at(200.0, 100.0),
+        at(230.0, 100.0),
+        egui::Modifiers::COMMAND,
+    );
+    assert!(r.is_empty(), "{r:?}");
+    let d = tools.lock().options.paint.diameter;
+    assert!((d - 60.0).abs() < 1.0, "{d}");
+}
+
+/// The Paint panel's Clone presets recall their Clone Options.
+#[test]
+fn clone_presets_recall_their_options() {
+    let mut p = crate::tools::PaintOptions {
+        clone_offset: [10.0, 20.0],
+        ..Default::default()
+    };
+    p.choose_clone_preset(2);
+    assert_eq!(p.clone_offset, [0.0, 0.0], "preset 3 starts empty");
+    p.clone_offset = [5.0, 5.0];
+    p.choose_clone_preset(0);
+    assert_eq!(p.clone_offset, [10.0, 20.0]);
+    p.choose_clone_preset(2);
+    assert_eq!(p.clone_offset, [5.0, 5.0]);
+}
+
 /// #599: the Project panel starts renaming the item another panel asks for.
 #[test]
 fn project_panel_renames_the_item_another_panel_asks_for() {
@@ -3397,6 +3611,81 @@ fn new_folder_and_open_layer() {
     assert_eq!(h.session().lock().layer_panel, Some(solid));
 }
 
+/// Camera Options, Light Options (by light type) and a 3D layer's Material
+/// Options sit after Transform, as in AE's timeline.
+#[test]
+fn camera_light_and_material_options_groups() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let layer = |h: &mut Harness, kind: &str| {
+        PrimPath::new(
+            h.run("layer.create", json!({"comp": comp, "kind": kind}))["path"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let camera = layer(&mut h, "camera");
+    let light = layer(&mut h, "light");
+    let groups = |h: &Harness, l: &PrimPath| {
+        crate::props::layer_tree(&h.stage, l)
+            .into_iter()
+            .filter_map(|n| match n {
+                crate::props::Node::Group {
+                    label, children, ..
+                } => Some((label, children.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cam = groups(&h, &camera);
+    assert_eq!(
+        cam.last(),
+        Some(&("Camera Options".to_owned(), 13)),
+        "{cam:?}"
+    );
+    let lit = groups(&h, &light);
+    assert_eq!(lit.last().map(|g| g.0.as_str()), Some("Light Options"));
+    assert_eq!(lit.last().map(|g| g.1), Some(10), "a spot light: {lit:?}");
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("ambient".into())}),
+    );
+    assert_eq!(groups(&h, &light).last().map(|g| g.1), Some(2), "ambient");
+    // An environment light: its picture (Source) and background, then its light.
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("environment".into())}),
+    );
+    assert_eq!(
+        groups(&h, &light).last().map(|g| g.1),
+        Some(6),
+        "environment"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:source", "value": Value::PrimRef(solid.clone())}),
+    );
+    assert_eq!(
+        h.stage
+            .prim(&light)
+            .and_then(|v| bae_motion::query::static_value(&v, "light:source")),
+        Some(Value::PrimRef(solid.clone()))
+    );
+    assert!(
+        groups(&h, &solid).iter().all(|g| g.0 != "Material Options"),
+        "2D layers have none"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "three_d", "value": Value::Bool(true)}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 9))
+    );
+}
+
 /// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label
 /// ▸ Edit Label Colors… and View ▸ Show Layer Controls.
 #[test]
@@ -3445,4 +3734,64 @@ fn add_footage_separate_dimensions_and_layer_controls() {
         &h.resources,
         "motion.view.show_layer_controls"
     ));
+}
+
+/// Composition ▸ Crop Comp to Selected Layer(s) Bounds and Region of Interest;
+/// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest / to Layer, Set
+/// Focus Distance to Layer.
+#[test]
+fn crop_comp_and_camera_focus() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_LAYERS));
+    assert_eq!(r.invocations[0].id, "comp.crop");
+    // The solid fills the 640×360 comp.
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([0.0, 0.0, 640.0, 360.0])
+    );
+    // No region of interest: nothing to crop to.
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().roi = Some((comp.clone(), [10.0, 20.0, 110.0, 220.0]));
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI));
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([10.0, 20.0, 110.0, 220.0])
+    );
+    assert!(h.session().lock().roi_cropped);
+
+    let camera = PrimPath::new(
+        h.run("layer.create", json!({"comp": comp, "kind": "camera"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().selected_layers = vec![camera.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::FOCUS_TO_POI));
+    assert_eq!(r.invocations[0].id, "attr.set_expressions");
+    assert_eq!(
+        r.invocations[0].params["items"][0]["source"],
+        "length(position, pointOfInterest)"
+    );
+    h.session().lock().selected_layers = vec![camera.clone(), solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::LINK_FOCUS_TO_LAYER));
+    let source = r.invocations[0].params["items"][0]["source"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(source.starts_with("m = thisComp.layer(\""), "{source}");
+    let r = h.action(&mut viewer, Invocation::new(ids::SET_FOCUS_TO_LAYER));
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    let d = r.invocations[0].params["edits"][0]["value"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(d > 0.0, "{d}");
 }

@@ -1,14 +1,20 @@
-//! Native font families, PostScript names and rasterized menu samples.
+//! Native font families, PostScript names and menu samples. The list is indexed
+//! once in the background on the Character panel's font system; a page of
+//! samples is drawn there when the menu first shows it, at the row's pixel size
+//! (sharp on Retina), and only its texture is kept.
 use bae_text::{FontFace, FontMatch, FontSystem};
 use egui::{Color32, ColorImage, Context, Id, Rect, TextureHandle, TextureOptions, pos2, vec2};
-use std::collections::HashMap;
-use std::sync::{Arc, Once, OnceLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, MutexGuard, OnceLock, mpsc};
 
-const WIDTH: usize = 72;
-const HEIGHT: usize = 42;
+/// A sample's width over its height.
+const ASPECT: f32 = 72.0 / 42.0;
 const COLUMNS: usize = 8;
 const ROWS: usize = 8;
 const PER_PAGE: usize = COLUMNS * ROWS;
+/// Sample heights in pixels (a page stays within 2048 pixels wide).
+const MIN_PX: u32 = 8;
+const MAX_PX: u32 = 140;
 
 pub(crate) struct Family {
     pub name: String,
@@ -32,15 +38,22 @@ pub(crate) struct Catalog {
     pub families: Vec<Family>,
     by_family: HashMap<String, usize>,
     by_face: OnceLock<HashMap<String, (usize, usize)>>,
-    sheets: Vec<OnceLock<Arc<ColorImage>>>,
+    /// Pages to draw: (page, pixel height).
+    requests: Mutex<mpsc::Sender<(usize, u32)>>,
+    asked: Mutex<HashSet<(usize, u32)>>,
+    /// Drawn pages waiting for their upload, with their pixel height.
+    drawn: Mutex<HashMap<usize, (u32, ColorImage)>>,
 }
 
 pub(crate) static CATALOG: OnceLock<Catalog> = OnceLock::new();
 
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl Catalog {
-    fn names(fonts: &mut FontSystem) -> Self {
-        let families: Vec<_> = fonts
-            .families()
+    fn new(names: Vec<String>, requests: mpsc::Sender<(usize, u32)>) -> Self {
+        let families: Vec<_> = names
             .into_iter()
             .map(|name| Family {
                 name,
@@ -53,14 +66,13 @@ impl Catalog {
             .enumerate()
             .map(|(i, f)| (f.name.to_lowercase(), i))
             .collect();
-        let sheets = (0..families.len().div_ceil(PER_PAGE))
-            .map(|_| OnceLock::new())
-            .collect();
         Self {
             families,
             by_family,
             by_face: OnceLock::new(),
-            sheets,
+            requests: Mutex::new(requests),
+            asked: Mutex::default(),
+            drawn: Mutex::default(),
         }
     }
 
@@ -83,12 +95,20 @@ impl Catalog {
         Some((i, self.families[i].faces().get(j)))
     }
 
-    fn load_faces(&self, fonts: &mut FontSystem) {
+    /// The font system is locked per family: text hit tests never wait long.
+    fn load_faces(&self, fonts: &Mutex<FontSystem>) {
         let mut by_face = HashMap::new();
         for (i, family) in self.families.iter().enumerate() {
-            let faces = fonts.faces(&family.name);
-            if let FontMatch::Found(face) = fonts.resolve(&family.name) {
-                let _ = family.regular.set(face.postscript_name);
+            let (faces, regular) = {
+                let mut fonts = lock(fonts);
+                let regular = match fonts.resolve(&family.name) {
+                    FontMatch::Found(face) => Some(face.postscript_name),
+                    FontMatch::Missing => None,
+                };
+                (fonts.faces(&family.name), regular)
+            };
+            if let Some(regular) = regular {
+                let _ = family.regular.set(regular);
             }
             for (j, face) in faces.iter().enumerate() {
                 by_face
@@ -100,91 +120,96 @@ impl Catalog {
         let _ = self.by_face.set(by_face);
     }
 
-    fn load_samples(&self, fonts: &mut FontSystem) {
-        let size = [COLUMNS * WIDTH, ROWS * HEIGHT];
-        for (slot, families) in self.sheets.iter().zip(self.families.chunks(PER_PAGE)) {
-            let mut sheet = ColorImage::filled(size, Color32::TRANSPARENT);
-            for (i, family) in families.iter().enumerate() {
-                let sample = bae_text::render::font_menu_sample(
-                    fonts,
-                    &family.name,
-                    WIDTH as u16,
-                    HEIGHT as u16,
-                );
-                let x = i % COLUMNS * WIDTH;
-                let y = i / COLUMNS * HEIGHT;
-                for (row, alpha) in sample.as_chunks::<WIDTH>().0.iter().enumerate() {
-                    let start = (y + row) * size[0] + x;
-                    for (pixel, &a) in sheet.pixels[start..start + WIDTH].iter_mut().zip(alpha) {
-                        *pixel = Color32::from_white_alpha(a);
-                    }
+    fn draw(&self, fonts: &Mutex<FontSystem>, page: usize, px: u32) {
+        let (w, h) = (((px as f32) * ASPECT).round() as usize, px as usize);
+        let size = [COLUMNS * w, ROWS * h];
+        let mut sheet = ColorImage::filled(size, Color32::TRANSPARENT);
+        let families = self.families.iter().skip(page * PER_PAGE).take(PER_PAGE);
+        for (i, family) in families.enumerate() {
+            let sample = bae_text::render::font_menu_sample(
+                &mut lock(fonts),
+                &family.name,
+                w as u16,
+                h as u16,
+            );
+            let (x, y) = (i % COLUMNS * w, i / COLUMNS * h);
+            for (row, alpha) in sample.chunks_exact(w).enumerate() {
+                let start = (y + row) * size[0] + x;
+                for (pixel, &a) in sheet.pixels[start..start + w].iter_mut().zip(alpha) {
+                    *pixel = Color32::from_white_alpha(a);
                 }
             }
-            let _ = slot.set(Arc::new(sheet));
-            bae_gpu::warm_up::request_redraw();
+        }
+        lock(&self.drawn).insert(page, (px, sheet));
+        bae_gpu::warm_up::request_redraw();
+    }
+
+    fn request(&self, page: usize, px: u32) {
+        if lock(&self.asked).insert((page, px)) {
+            let _ = lock(&self.requests).send((page, px));
         }
     }
 }
 
-/// The same low-priority CPU job serves headless workspaces and GPU warm-up.
-pub(super) fn start() {
-    static START: Once = Once::new();
-    START.call_once(|| {
-        if let Err(error) = std::thread::Builder::new()
-            .name("bae-font-menu".into())
-            .spawn(|| {
-                bae_gpu::warm_up::lower_priority();
-                let mut fonts = FontSystem::new();
-                let catalog = CATALOG.get_or_init(|| Catalog::names(&mut fonts));
-                bae_gpu::warm_up::request_redraw();
-                catalog.load_faces(&mut fonts);
-                bae_gpu::warm_up::request_redraw();
-                catalog.load_samples(&mut fonts);
-                bae_gpu::warm_up::request_redraw();
-            })
-        {
-            tracing::warn!(%error, "could not start font menu warm-up");
-        }
-    });
-}
-
-pub(crate) struct WarmUp;
-impl bae_gpu::WarmUp for WarmUp {
-    fn name(&self) -> &str {
-        "Character panel font previews"
-    }
-    fn priority(&self) -> u8 {
-        85
-    }
-    fn run(&self, _: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
-        start();
-        Ok(())
+/// Indexes the families on `fonts` (the font scan thread), then draws the
+/// sample pages the menu asks for.
+pub(super) fn index(fonts: &Mutex<FontSystem>) {
+    let (requests, pages) = mpsc::channel();
+    let names = lock(fonts).families();
+    let catalog = CATALOG.get_or_init(|| Catalog::new(names, requests));
+    bae_gpu::warm_up::request_redraw();
+    catalog.load_faces(fonts);
+    bae_gpu::warm_up::request_redraw();
+    for (page, px) in pages {
+        catalog.draw(fonts, page, px);
     }
 }
 
-fn sheets_id() -> Id {
+fn pages_id() -> Id {
     Id::new("bae.character.font-preview-textures")
 }
 
-/// Stage one prepared sheet per redraw, before the user opens the font menu.
-pub(crate) fn upload(ctx: &Context) {
-    let Some(catalog) = CATALOG.get() else { return };
-    let id = sheets_id();
-    let index = ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<TextureHandle>>(id).len());
-    if let Some(sheet) = catalog.sheets.get(index).and_then(OnceLock::get) {
+/// Uploaded sample pages: page → (pixel height, texture).
+type Pages = HashMap<usize, (u32, TextureHandle)>;
+
+/// The texture of `page` at `px` pixels per sample row; an older size is shown
+/// until that one is drawn.
+fn page_texture(ctx: &Context, page: usize, px: u32) -> Option<egui::TextureId> {
+    let catalog = CATALOG.get()?;
+    let id = pages_id();
+    let have = ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<Pages>(id)
+            .get(&page)
+            .map(|(h, t)| (*h, t.id()))
+    });
+    if let Some((h, texture)) = have
+        && h == px
+    {
+        return Some(texture);
+    }
+    let drawn = {
+        let mut drawn = lock(&catalog.drawn);
+        match drawn.get(&page) {
+            Some((h, _)) if *h == px => drawn.remove(&page),
+            _ => None,
+        }
+    };
+    if let Some((_, sheet)) = drawn {
+        lock(&catalog.asked).remove(&(page, px));
         let texture = ctx.load_texture(
-            format!("font previews {index}"),
-            sheet.clone(),
+            format!("font previews {page}"),
+            sheet,
             TextureOptions::LINEAR,
         );
+        let texture_id = texture.id();
         ctx.data_mut(|d| {
-            d.get_temp_mut_or_default::<Vec<TextureHandle>>(id)
-                .push(texture)
+            d.get_temp_mut_or_default::<Pages>(id)
+                .insert(page, (px, texture))
         });
-        if index + 1 < catalog.sheets.len() {
-            ctx.request_repaint();
-        }
+        return Some(texture_id);
     }
+    catalog.request(page, px);
+    have.map(|(_, texture)| texture)
 }
 
 pub(super) fn row(
@@ -202,7 +227,7 @@ pub(super) fn row(
         let visuals = ui.style().interact_selectable(&response, selected);
         ui.painter().rect_filled(row, 3.0, visuals.bg_fill);
     }
-    let size = vec2(height * WIDTH as f32 / HEIGHT as f32, height);
+    let size = vec2(height * ASPECT, height);
     bae_ui::widgets::clipped_text(
         ui.painter(),
         pos2(row.left() + 4.0, row.center().y),
@@ -211,11 +236,8 @@ pub(super) fn row(
         color,
         row.width() - size.x - 12.0,
     );
-    let texture = ui.ctx().data_mut(|d| {
-        d.get_temp_mut_or_default::<Vec<TextureHandle>>(sheets_id())
-            .get(index / PER_PAGE)
-            .map(TextureHandle::id)
-    });
+    let px = ((height * ui.ctx().pixels_per_point()).round() as u32).clamp(MIN_PX, MAX_PX);
+    let texture = page_texture(ui.ctx(), index / PER_PAGE, px);
     if let Some(texture) = texture {
         let x = (index % COLUMNS) as f32 / COLUMNS as f32;
         let y = (index % PER_PAGE / COLUMNS) as f32 / ROWS as f32;

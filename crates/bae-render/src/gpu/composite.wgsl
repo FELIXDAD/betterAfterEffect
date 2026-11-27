@@ -54,6 +54,9 @@ struct Draw {
     clips: array<vec4<f32>, 4>,
     // Clip count, first motion sample, sample count, lighting record (vec4 index).
     extra: vec4<u32>,
+    // FLAG_OCCLUDE: the plane's camera depth a·x + b·y + c at target texel
+    // (x, y); w: 1 perspective (1 / depth), 2 orthographic (depth).
+    occl: vec4<f32>,
 }
 
 // One motion-blur placement: target texel -> input texel (rows of the inverse
@@ -104,6 +107,8 @@ const MODE_SILHOUETTE_LUMA: u32 = 35u;
 const MODE_ALPHA_ADD: u32 = 36u;
 const MODE_LUMINESCENT_PREMUL: u32 = 37u;
 
+const FLAG_DRAFT: u32 = 4096u;
+const FLAG_WIREFRAME: u32 = 8192u;
 const FLAG_TEXTURE: u32 = 1u;
 const FLAG_STRAIGHT: u32 = 2u;
 const FLAG_MATTE: u32 = 4u;
@@ -117,6 +122,10 @@ const FLAG_MOTION: u32 = 512u;
 const FLAG_LIT: u32 = 1024u;
 // Motion blur: a lighting record per sample, back to back from extra.w.
 const FLAG_LIT_SAMPLES: u32 = 2048u;
+// A 3D plane over 3D models: t_matte holds the models' camera depth (hi, lo
+// halves) and alpha (exec/mesh.rs); the plane goes under them where it is
+// farther.
+const FLAG_OCCLUDE: u32 = 16384u;
 
 @group(0) @binding(0) var<storage, read> draws: array<Draw>;
 @group(0) @binding(1) var<storage, read> samples: array<Sample>;
@@ -418,7 +427,12 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
 
     var src: vec4<f32>;
     var light: vec3<f32>;
-    if (flags & FLAG_TEXTURE) != 0u {
+    if (flags & FLAG_WIREFRAME) != 0u {
+        let edge = min((u - d.rect.xy) * kxy, (d.rect.zw - u) * kxy);
+        k *= clamp(1.5 - min(edge.x, edge.y), 0.0, 1.0);
+        src = vec4<f32>(1.0);
+        light = src.rgb;
+    } else if (flags & FLAG_TEXTURE) != 0u {
         // Minified layers average a grid of bilinear samples over the pixel's
         // footprint in the source (a box prefilter, like AE's downsampling);
         // others take one sample.
@@ -428,7 +442,9 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
         let lo = d.rect.xy + 0.5;
         let hi = max(d.rect.zw - 0.5, lo);
         let n = u32(clamp(ceil(max(length(du_dx), length(du_dy))), 1.0, 4.0));
-        if n == 1u {
+        if (flags & FLAG_DRAFT) != 0u {
+            src = textureLoad(t_src, vec2<i32>(floor(clamp(u, lo, hi))), 0);
+        } else if n == 1u {
             src = textureSampleLevel(t_src, s_linear, clamp(u, lo, hi) * d.src.xy, 0.0);
         } else {
             var acc = vec4<f32>(0.0);
@@ -552,6 +568,21 @@ fn finish(d: Draw, p: vec2<f32>, src_in: vec4<f32>, light: vec3<f32>, k_in: f32)
             v = 1.0 - v;
         }
         k = k * clamp(v, 0.0, 1.0);
+    }
+    if (flags & FLAG_OCCLUDE) != 0u {
+        let mt = vec2<i32>(floor(p - d.matte.xy));
+        if all(mt >= vec2<i32>(0)) && all(vec2<f32>(mt) < d.matte.zw) {
+            let m = textureLoad(t_matte, mt, 0);
+            let kz = d.occl.x * p.x + d.occl.y * p.y + d.occl.z;
+            var z = kz;
+            if d.occl.w < 1.5 {
+                z = select(-1.0, 1.0 / kz, kz > 0.0);
+            }
+            let model = m.x + m.y;
+            if m.z > 0.0 && z > model * (1.0 + 1e-4) + 1e-3 {
+                k = k * (1.0 - m.z);
+            }
+        }
     }
     src = src * k;
 

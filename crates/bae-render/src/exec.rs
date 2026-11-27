@@ -30,7 +30,9 @@ use rustc_hash::FxHashMap;
 
 pub(crate) mod adjust;
 pub(crate) mod dof;
+pub(crate) mod env;
 mod masks;
+pub(crate) mod mesh;
 mod shadow;
 pub(crate) mod shadowmap;
 use crate::pool::TexturePool;
@@ -179,6 +181,7 @@ impl ImageAllocator for PoolAllocator<'_> {
 /// Share whole-surface effect outputs between ROI requests in the renderer's
 /// existing byte-limited frame cache. Entries are published after submission.
 pub(crate) struct TileCache<'a> {
+    pub whole_surfaces: bool,
     pub feedback: bool,
     pub frames: &'a mut crate::cache::FrameCache<GpuImage>,
     pub request: u64,
@@ -217,6 +220,8 @@ pub(crate) fn execute(
         .as_deref_mut()
         .is_some_and(|t| t.begin(graph.nodes.len()));
     let mut surfaces = Vec::new();
+    let mut intermediates =
+        crate::FrameCache::new(tiles.as_ref().map_or(0, |c| c.frames.stats().budget));
     let device = gpu.device();
     let total_draws: usize = graph
         .nodes
@@ -267,6 +272,7 @@ pub(crate) fn execute(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("bae-render.frame"),
     });
+    let needed = needed_nodes(graph, &pipelines.mesh());
     let mut uses = graph.use_counts();
     let mut outputs: Vec<Option<GpuImage>> = vec![None; graph.nodes.len()];
     let mut ctx = ExecCtx {
@@ -286,6 +292,7 @@ pub(crate) fn execute(
         passes: 0,
         mask_outs: Vec::new(),
         incomplete: false,
+        mesh_depths: Default::default(),
         skipped_maps: Default::default(),
     };
     // Every mask of the frame at once, in shared atlases (they have no inputs).
@@ -298,9 +305,16 @@ pub(crate) fn execute(
         if gpu_timed && let Some(t) = gpu_timer.as_deref() {
             t.write(&mut encoder, index);
         }
+        if !needed[index] {
+            if let Some(started) = started {
+                node_times.push(started.elapsed());
+            }
+            continue;
+        }
         let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
             NodeKind::Effect(fx)
-                if fx.feedback.is_some() || (!cache.feedback && fx.effect.full_surface()) =>
+                if fx.feedback.is_some()
+                    || (cache.whole_surfaces && !cache.feedback && fx.effect.full_surface()) =>
             {
                 Some(crate::cache::FrameKey {
                     comp: fx.instance.path.clone(),
@@ -321,7 +335,7 @@ pub(crate) fn execute(
                     .then(|| frames.get(key).cloned())
                     .flatten()
             });
-        let image = match (&node.kind, cached) {
+        let mut image = match (&node.kind, cached) {
             (_, Some(image)) => {
                 surface_key = None;
                 image
@@ -369,6 +383,7 @@ pub(crate) fn execute(
                     format,
                     allocator: &mut alloc,
                     effect_inputs: &[],
+                    intermediates: None,
                     effect_masks: &[],
                 };
                 match src.source.render(&mut ectx, &src.request) {
@@ -423,12 +438,27 @@ pub(crate) fn execute(
                     params.history = &samples.history;
                 }
                 let mut alloc = PoolAllocator { pool, device };
+                let image_cache = tiles
+                    .as_mut()
+                    .filter(|c| {
+                        !c.feedback
+                            && c.frames.stats().budget > 0
+                            && !graph.incomplete
+                            && !incomplete
+                            && !ctx.incomplete
+                    })
+                    .map(|c| crate::cache::IntermediateImages {
+                        submitted: c.frames,
+                        pending: &mut intermediates,
+                        request: c.request,
+                    });
                 let mut ectx = EncodeContext {
                     gpu,
                     encoder: &mut encoder,
                     format,
                     allocator: &mut alloc,
                     effect_inputs: &effect_inputs,
+                    intermediates: image_cache,
                     effect_masks: &effect_masks,
                 };
                 match fx.effect.render(&mut ectx, &params, &input, node.rect) {
@@ -459,6 +489,56 @@ pub(crate) fn execute(
                     format,
                     &target,
                     [&images[0], &images[1], &images[2]],
+                );
+                ctx.passes += 1;
+                target
+            }
+            (NodeKind::Mesh(mesh), None) => {
+                let px = node_pixels(node);
+                let target = pool.acquire(device, format, px, node.pixel_scale)?;
+                let depth_out = pool.acquire(device, mesh::DEPTH_OUT, px, node.pixel_scale)?;
+                let environments: Vec<_> = mesh
+                    .models
+                    .iter()
+                    .map(|m| {
+                        m.environment.as_ref().map(|e| {
+                            (
+                                graph.nodes[e.input.index()].key,
+                                outputs[e.input.index()].clone(),
+                            )
+                        })
+                    })
+                    .collect();
+                let pipelines = ctx.pipelines.mesh();
+                ctx.draw_calls += mesh::encode(
+                    &mut pipelines.lock(),
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    format,
+                    mesh,
+                    &environments,
+                    &target,
+                    &depth_out,
+                );
+                ctx.mesh_depths.insert(index, depth_out);
+                ctx.passes += 1;
+                target
+            }
+            (NodeKind::Sky(sky), None) => {
+                let e = &sky.environment;
+                let input = outputs[e.input.index()].clone();
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                let pipelines = ctx.pipelines.mesh();
+                mesh::encode_sky(
+                    &mut pipelines.lock(),
+                    device,
+                    &mut encoder,
+                    format,
+                    sky,
+                    graph.nodes[e.input.index()].key,
+                    input.as_ref(),
+                    &target,
                 );
                 ctx.passes += 1;
                 target
@@ -606,6 +686,18 @@ pub(crate) fn execute(
         if let Some(key) = surface_key {
             surfaces.push((key, node.key, image.clone()));
         }
+        if graph.time_dependent && intermediates.stats().budget > 0 {
+            use std::hash::{Hash, Hasher};
+            let mut identity = rustc_hash::FxHasher::default();
+            node.key.hash(&mut identity);
+            node.kind.for_each_input(|id| {
+                outputs[id.index()]
+                    .as_ref()
+                    .and_then(GpuImage::content_key)
+                    .hash(&mut identity);
+            });
+            image.content_key = Some(identity.finish());
+        }
         outputs[index] = Some(image);
         if let Some(started) = started {
             node_times.push(started.elapsed());
@@ -653,6 +745,7 @@ pub(crate) fn execute(
                 cache.feedback,
             );
         }
+        intermediates.publish(cache.frames, cache.comp);
     }
     Ok(Executed {
         image,
@@ -662,6 +755,59 @@ pub(crate) fn execute(
         node_times,
         output,
     })
+}
+
+/// The nodes to execute: all but an environment light's picture whose maps
+/// are already built (and what only it reads). Only those are left out, so
+/// nodes read in other ways than [`NodeKind::for_each_input`] still run.
+fn needed_nodes(
+    graph: &RenderGraph,
+    mesh: &parking_lot::Mutex<Option<mesh::MeshPipelines>>,
+) -> Vec<bool> {
+    let n = graph.nodes.len();
+    // Read on the way to the output; read only by built environment maps.
+    let mut reached = vec![false; n];
+    let mut env_only = vec![false; n];
+    reached[graph.output.index()] = true;
+    let mut mesh = mesh.lock();
+    if let Some(p) = mesh.as_mut() {
+        p.begin_frame();
+    }
+    for index in (0..n).rev() {
+        let node = &graph.nodes[index];
+        if !reached[index] {
+            if env_only[index] {
+                node.kind.for_each_input(|id| env_only[id.index()] = true);
+            }
+            continue;
+        }
+        let (environments, linear): (Vec<_>, bool) = match &node.kind {
+            NodeKind::Mesh(m) => (
+                m.models
+                    .iter()
+                    .filter_map(|m| m.environment.as_ref())
+                    .collect(),
+                m.linear,
+            ),
+            NodeKind::Sky(s) => (vec![&s.environment], s.linear),
+            _ => {
+                node.kind.for_each_input(|id| reached[id.index()] = true);
+                continue;
+            }
+        };
+        for e in environments {
+            let key = graph.nodes[e.input.index()].key;
+            if mesh
+                .as_mut()
+                .is_some_and(|p| p.has_env(key, e.width, linear))
+            {
+                env_only[e.input.index()] = true;
+            } else {
+                reached[e.input.index()] = true;
+            }
+        }
+    }
+    (0..n).map(|i| reached[i] || !env_only[i]).collect()
 }
 
 struct ExecCtx<'a> {
@@ -683,6 +829,9 @@ struct ExecCtx<'a> {
     mask_outs: Vec<Option<masks::MaskOut>>,
     /// A pipeline was still compiling for the UI thread (incomplete frame).
     incomplete: bool,
+    /// Camera depth of the 3D model passes (by node index), for the planes
+    /// drawn over the models.
+    mesh_depths: rustc_hash::FxHashMap<usize, GpuImage>,
     /// Shadow maps not drawn this frame: their layers test the casters.
     skipped_maps: rustc_hash::FxHashSet<NodeId>,
 }
@@ -772,6 +921,11 @@ impl ExecCtx<'_> {
             if backdrop {
                 fl |= flags::DST;
             }
+            fl |= match op.quality {
+                bae_anim::LayerQuality::Best => 0,
+                bae_anim::LayerQuality::Draft => flags::DRAFT,
+                bae_anim::LayerQuality::Wireframe => flags::WIREFRAME,
+            };
             if op.preserve_transparency {
                 fl |= flags::PRESERVE;
             }
@@ -792,9 +946,36 @@ impl ExecCtx<'_> {
                 OpInput::Image(id) => outputs[id.index()].as_ref().map(|i| &i.view),
                 OpInput::Solid { .. } => None,
             };
-            let matte_view = op
-                .matte
-                .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));
+            // A plane over 3D models reads their depth in the matte slot.
+            let occlusion = op
+                .occlusion
+                .filter(|_| op.matte.is_none())
+                .and_then(|o| Some((o, self.mesh_depths.get(&o.mesh.index())?)));
+            if let Some((o, depth)) = &occlusion {
+                let s = node.pixel_scale;
+                let (x0, y0) = (f64::from(node.rect.x0), f64::from(node.rect.y0));
+                let [a, b, c] = o.depth;
+                data.occlusion = [
+                    (a * s) as f32,
+                    (b * s) as f32,
+                    ((a * x0 + b * y0) * s + c) as f32,
+                    if o.orthographic { 2.0 } else { 1.0 },
+                ];
+                let [dw, dh] = depth.texel_size();
+                data.matte = [
+                    (f64::from(depth.rect.x0) / depth.pixel_scale - x0) as f32,
+                    (f64::from(depth.rect.y0) / depth.pixel_scale - y0) as f32,
+                    dw as f32,
+                    dh as f32,
+                ];
+                data.mode[1] |= flags::OCCLUDE;
+            }
+            let matte_view = match &occlusion {
+                Some((_, depth)) => Some(&depth.view),
+                None => op
+                    .matte
+                    .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view)),
+            };
             let mask_view = op
                 .mask
                 .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));

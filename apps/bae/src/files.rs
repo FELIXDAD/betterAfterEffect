@@ -203,12 +203,22 @@ pub fn run(
             if inv.id == ids::NEW_PROJECT
                 && let Some(path) = new_template
             {
-                return Some(replace_from_disk(
-                    doc,
-                    dialogs,
-                    path,
-                    Document::load_template,
-                ));
+                match Document::load_template(path) {
+                    Ok(opened) => {
+                        if !confirm_discard(doc, dialogs) {
+                            return Some(FileOutcome::Cancelled);
+                        }
+                        doc.replace(opened);
+                        return Some(FileOutcome::Replaced);
+                    }
+                    // A missing or broken template still gives a new project:
+                    // a blank one, after saying why.
+                    Err(error) => dialogs.error(&format!(
+                        "{}\n\n{}",
+                        tr("The project template could not be opened. A blank project is created instead."),
+                        crate::file_error::describe_open(path, &error)
+                    )),
+                }
             }
             // AE: Close Project leaves an empty untitled project.
             if !confirm_discard(doc, dialogs) {
@@ -727,6 +737,25 @@ mod tests {
             run(&mut other, &mut d, &Invocation::new(ids::UNDO), None),
             None
         );
+    }
+
+    /// #677: a missing project template still gives a new project (blank),
+    /// after saying why.
+    #[test]
+    fn a_missing_template_falls_back_to_a_blank_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(None);
+        let mut d = Script::default();
+        edit(&mut doc, "/Old");
+        d.answers.push_back(UnsavedChoice::DontSave);
+        let missing = dir.path().join("Template.bae");
+        let inv = Invocation::new(ids::NEW_PROJECT);
+        assert_eq!(
+            run(&mut doc, &mut d, &inv, Some(&missing)),
+            Some(FileOutcome::Replaced)
+        );
+        assert_eq!(d.errors.len(), 1);
+        assert!(!has(&doc, "/Old") && doc.location().is_none());
     }
 
     #[test]

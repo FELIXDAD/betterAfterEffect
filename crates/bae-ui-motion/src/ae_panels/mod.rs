@@ -6,6 +6,7 @@ pub mod align;
 pub mod character;
 pub mod info;
 pub mod paragraph;
+mod text_menu;
 
 use bae_ui::PanelKind;
 
@@ -131,6 +132,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Show Font Names in English", "显示英文字体名称"),
     ("No Break", "无间断"),
     ("Reset Character", "重置字符"),
+    ("Line Join", "线段连接"),
+    ("Miter Join", "尖角"),
+    ("Round Join", "圆角"),
+    ("Bevel Join", "斜角"),
     // Paragraph ($$$/AE/Paragraph_Palette/*).
     ("Left align text", "左对齐文本"),
     ("Center text", "居中对齐文本"),

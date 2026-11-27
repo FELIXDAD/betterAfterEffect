@@ -124,6 +124,49 @@ pub(crate) fn reference(
     })
 }
 
+/// The expanded form uses the names from the current Timeline language.
+fn pick_reference(
+    stage: &Stage,
+    from: &PrimPath,
+    path: &PrimPath,
+    attr: Option<&str>,
+    compact: bool,
+) -> Option<String> {
+    let short = reference(stage, from, path, attr)?;
+    if compact {
+        return Some(short);
+    }
+    let layer = query::owning_layer(stage, path)?;
+    let Some(attr) = attr else {
+        return Some(short);
+    };
+    if path == &layer {
+        let owner = layer_ref(stage, from, &layer).unwrap_or_else(|| "thisLayer".to_owned());
+        let label = common::attr_label(None, attr, common::is_3d(stage, &layer));
+        let property = js(&label);
+        if attr.starts_with("transform:") {
+            return Some(format!(
+                "{owner}({})({property})",
+                js(bae_ui::tr("Transform"))
+            ));
+        }
+        if attr == "time_remap" {
+            return Some(format!("{owner}({})", js(bae_ui::tr("Time Remap"))));
+        }
+    } else if stage.prim(path).is_some_and(|v| v.is_a(&PrimType::MASK)) {
+        let label = match attr {
+            "path" => "Mask Path",
+            "feather" => "Mask Feather",
+            "opacity" => "Mask Opacity",
+            "expansion" => "Mask Expansion",
+            _ => return Some(short),
+        };
+        let mask = reference(stage, from, path, None)?;
+        return Some(format!("{mask}({})", js(bae_ui::tr(label))));
+    }
+    Some(short)
+}
+
 /// AE's expression for a new expression (Alt+click on the stopwatch, Animation
 /// > Add Expression): the property's own reference.
 pub(crate) fn default_expression(stage: &Stage, path: &PrimPath, attr: &str) -> String {
@@ -193,7 +236,9 @@ pub(crate) fn link(
     let Some(from) = query::owning_layer(stage, &whip.path) else {
         return;
     };
-    let Some(reference) = reference(stage, &from, target, attr) else {
+    let compact = crate::prefs::current(cx.resources)
+        .bool("scripting_expressions.write_expression_pick_whip_in_plain_english");
+    let Some(reference) = pick_reference(stage, &from, target, attr, compact) else {
         return;
     };
     let mut value_dims = |path: &PrimPath, attr: &str| {

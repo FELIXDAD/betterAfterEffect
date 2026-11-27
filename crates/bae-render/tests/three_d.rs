@@ -563,3 +563,301 @@ fn depth_of_field_blurs_layers_away_from_the_focus_plane() {
         soft(&tilted, 0..100)
     );
 }
+
+/// A 3D model layer (an OBJ cube) is drawn through the camera: opaque where
+/// the cube is, lit differently per face, nothing around it.
+#[test]
+fn model_layers_draw_through_the_camera() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-model-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cube.obj");
+    let mut obj = String::new();
+    for z in [-1.0, 1.0] {
+        for y in [-1.0, 1.0] {
+            for x in [-1.0, 1.0] {
+                obj += &format!("v {x} {y} {z}\n");
+            }
+        }
+    }
+    // Faces of the cube (1-based corners: x fastest, then y, then z).
+    for f in [
+        "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+    ] {
+        obj += &format!("f {f}\n");
+    }
+    std::fs::write(&file, obj).unwrap();
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+    let mut layer = RenderLayer::new(
+        p("/comps/main/layers/model"),
+        LayerContent::Model(bae_render::ModelRef {
+            asset: p("/assets/cube"),
+            file: Some(file.clone()),
+        }),
+    );
+    let m = DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+        * bae_render::camera::xyz_rotation(DVec3::new(30.0, 40.0, 0.0));
+    layer.matrix_3d = Some(m);
+    comp.layers = vec![layer];
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(100, 100)[3], 255, "the cube");
+    assert_eq!(img.px(2, 2)[3], 0, "around it");
+    // Lit by a light: the faces facing it differ in brightness.
+    use bae_render::light::{Falloff, Light, LightKind};
+    comp.lights = vec![Light {
+        kind: LightKind::Point,
+        world: DMat4::from_translation(DVec3::new(0.0, 0.0, -300.0)),
+        point_of_interest: DVec3::new(100.0, 100.0, 0.0),
+        color: [1.0, 1.0, 1.0],
+        intensity: 100.0,
+        cone_angle: 90.0,
+        cone_feather: 50.0,
+        falloff: Falloff::None,
+        radius: 500.0,
+        falloff_distance: 500.0,
+        casts_shadows: false,
+        shadow_darkness: 100.0,
+        shadow_diffusion: 0.0,
+        scope_below: None,
+        environment: None,
+    }];
+    let lit = render(&mut r, &comp);
+    let luma: Vec<u32> = [(85, 85), (115, 85), (100, 120)]
+        .into_iter()
+        .map(|(x, y)| lit.px(x, y).iter().take(3).map(|&c| u32::from(c)).sum())
+        .collect();
+    assert!(
+        luma.iter().any(|&l| l != luma[0]),
+        "faces shade differently: {luma:?}"
+    );
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// An environment light with a picture (AE's Advanced 3D): a hidden 2D
+/// layer, white above the horizon and black below, lights a model from
+/// every direction (its top brighter than its bottom) and, with Background
+/// Visible, shows behind the layers through the camera.
+#[test]
+fn environment_light_pictures_light_models_and_show_behind() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-env-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cube.obj");
+    let mut obj = String::new();
+    for z in [-1.0, 1.0] {
+        for y in [-1.0, 1.0] {
+            for x in [-1.0, 1.0] {
+                obj += &format!("v {x} {y} {z}\n");
+            }
+        }
+    }
+    for f in [
+        "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+    ] {
+        obj += &format!("f {f}\n");
+    }
+    std::fs::write(&file, obj).unwrap();
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+    let mut model = RenderLayer::new(
+        p("/comps/main/layers/model"),
+        LayerContent::Model(bae_render::ModelRef {
+            asset: p("/assets/cube"),
+            file: Some(file.clone()),
+        }),
+    );
+    // Tipped toward the camera: the top face shows above the front face.
+    model.matrix_3d = Some(
+        DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+            * bae_render::camera::xyz_rotation(DVec3::new(-35.0, 0.0, 0.0)),
+    );
+    // The picture: a 200 × 100 comp, white in its upper half (the sky).
+    let mut sky = RenderComp::new(p("/comps/sky"), 200, 100);
+    let mut white = solid("white", [1.0; 4], [200, 50]);
+    white.path = p("/comps/sky/layers/white");
+    sky.layers = vec![white];
+    let mut source = RenderLayer::new(
+        p("/comps/main/layers/hdri"),
+        LayerContent::Comp(Arc::new(sky)),
+    );
+    source.visible = false;
+    comp.layers = vec![model, source];
+    use bae_render::light::{EnvironmentSource, Falloff, Light, LightKind};
+    let light = |background| Light {
+        kind: LightKind::Environment,
+        world: DMat4::IDENTITY,
+        point_of_interest: DVec3::ZERO,
+        color: [1.0, 1.0, 1.0],
+        intensity: 100.0,
+        cone_angle: 90.0,
+        cone_feather: 50.0,
+        falloff: Falloff::None,
+        radius: 500.0,
+        falloff_distance: 500.0,
+        casts_shadows: false,
+        shadow_darkness: 100.0,
+        shadow_diffusion: 0.0,
+        scope_below: None,
+        environment: Some(EnvironmentSource {
+            layer: 1,
+            background,
+        }),
+    };
+    comp.lights = vec![light(None)];
+    let img = render(&mut r, &comp);
+    let luma =
+        |img: &Image, x, y| -> u32 { img.px(x, y).iter().take(3).map(|&c| u32::from(c)).sum() };
+    // The face toward the sky is brighter than the face toward the ground.
+    let (top, front) = (luma(&img, 100, 72), luma(&img, 100, 118));
+    assert!(top > front + 30, "top {top} vs front {front}");
+    assert_eq!(img.px(2, 2)[3], 0, "no background");
+    // Background Visible: sky above, ground below, the model in front.
+    comp.lights = vec![light(Some([1.0, 0.0]))];
+    let img = render(&mut r, &comp);
+    assert!(luma(&img, 100, 2) > 700, "sky {:?}", img.px(100, 2));
+    assert!(luma(&img, 100, 197) < 30, "ground {:?}", img.px(100, 197));
+    assert_eq!(img.px(2, 197)[3], 255, "opaque background");
+    assert_eq!(luma(&img, 100, 72), top, "the model draws over it");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A 3D plane through a model cuts it (true intersection): the plane,
+/// tilted through the cube's centre, covers the cube where it is nearer
+/// and goes under it where it is farther. Planes in front of or behind the
+/// whole cube cover it or not at all.
+#[test]
+fn planes_intersect_models() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-intersect-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cube.obj");
+    let mut obj = String::new();
+    for z in [-1.0, 1.0] {
+        for y in [-1.0, 1.0] {
+            for x in [-1.0, 1.0] {
+                obj += &format!("v {x} {y} {z}\n");
+            }
+        }
+    }
+    for f in [
+        "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+    ] {
+        obj += &format!("f {f}\n");
+    }
+    std::fs::write(&file, obj).unwrap();
+    let mut r = Renderer::new(gpu);
+    let mut model = RenderLayer::new(
+        p("/comps/main/layers/model"),
+        LayerContent::Model(bae_render::ModelRef {
+            asset: p("/assets/cube"),
+            file: Some(file.clone()),
+        }),
+    );
+    model.matrix_3d = Some(DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0)));
+    let mut scene = |plane: RenderLayer| {
+        let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+        comp.layers = vec![model.clone(), plane];
+        render(&mut r, &comp)
+    };
+    let red = |px: [u8; 4]| px[0] > 200 && px[1] < 40 && px[2] < 40;
+    // Tilted 60° about x through the cube's centre.
+    let tilted = scene(solid_3d(
+        "plane",
+        RED,
+        [300, 300],
+        DVec3::new(100.0, 100.0, 0.0),
+        DVec3::new(60.0, 0.0, 0.0),
+    ));
+    let (upper, lower) = (tilted.px(100, 50), tilted.px(100, 150));
+    assert!(
+        red(upper) != red(lower),
+        "the plane covers one end: {upper:?} {lower:?}"
+    );
+    // The cut is where the plane meets the front face (z = −50, ~37 px from
+    // the centre), not at the cube's centre.
+    for y in [85, 100, 115] {
+        assert!(!red(tilted.px(100, y)), "y {y}: {:?}", tilted.px(100, y));
+    }
+    // In front of the whole cube: covers it; behind it: under it.
+    let front = scene(solid_3d(
+        "plane",
+        RED,
+        [300, 300],
+        DVec3::new(100.0, 100.0, -80.0),
+        DVec3::ZERO,
+    ));
+    assert!(red(front.px(100, 100)), "{:?}", front.px(100, 100));
+    let behind = scene(solid_3d(
+        "plane",
+        RED,
+        [300, 300],
+        DVec3::new(100.0, 100.0, 80.0),
+        DVec3::ZERO,
+    ));
+    assert!(!red(behind.px(100, 100)), "{:?}", behind.px(100, 100));
+    assert!(red(behind.px(5, 5)), "around the cube");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A collapsed 3D pre-comp joins the comp's 3D scene (AE-CMP-424): its layers
+/// take its place, placed by its matrix and seen by this comp's camera; a
+/// pre-comp that is not collapsed stays one plane.
+#[test]
+fn collapsed_3d_precomp_layers_join_the_scene() {
+    use bae_render::AnimEvaluator;
+    use bae_render::fixture::SceneBuilder;
+    let scene = |collapse: bool| {
+        let mut b = SceneBuilder::new();
+        let rate = bae_model::FrameRate::FPS_30;
+        let main = b.comp("main", 200, 100, rate, Time::ONE_SECOND).unwrap();
+        let inner = b.comp("inner", 200, 100, rate, Time::ONE_SECOND).unwrap();
+        let solid = b
+            .solid_layer(&inner, "s", [1.0, 0.0, 0.0, 1.0], [40, 40], [80.0, 30.0])
+            .unwrap();
+        b.set(&solid, "three_d", Value::Bool(true)).unwrap();
+        b.set(
+            &solid,
+            "transform:position",
+            Value::Vec3([100.0, 50.0, 200.0]),
+        )
+        .unwrap();
+        let pre = b.layer(&main, "pre", "pre_comp", Some(&inner)).unwrap();
+        b.set(&pre, "three_d", Value::Bool(true)).unwrap();
+        b.set(&pre, "collapse_transformation", Value::Bool(collapse))
+            .unwrap();
+        let stage = b.into_stage();
+        let rc = AnimEvaluator::new(None)
+            .evaluate(&stage, &main, Time::ZERO)
+            .unwrap();
+        (rc, pre, solid)
+    };
+    let (rc, pre, _) = scene(false);
+    assert!(
+        matches!(
+            rc.layers.iter().find(|l| l.path == pre).unwrap().content,
+            LayerContent::Comp(_)
+        ),
+        "not collapsed: one plane"
+    );
+    let (rc, pre, solid) = scene(true);
+    assert!(
+        rc.layers.iter().all(|l| l.path != pre),
+        "replaced by its layers"
+    );
+    let s = rc
+        .layers
+        .iter()
+        .find(|l| l.path == solid)
+        .expect("the inner solid");
+    // The pre-comp layer sits at the comp centre with its anchor at the
+    // pre-comp's centre: the inner solid keeps its comp-space placement.
+    let centre = s
+        .matrix_3d
+        .unwrap()
+        .transform_point3(DVec3::new(20.0, 20.0, 0.0));
+    assert!(
+        (centre - DVec3::new(100.0, 50.0, 200.0)).length() < 1e-6,
+        "{centre}"
+    );
+}

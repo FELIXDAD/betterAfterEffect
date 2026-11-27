@@ -106,6 +106,11 @@ impl Effect for PaintEffect {
                     .into_iter()
                     .collect()
             }
+            // Clone Stamp strokes reading another layer or time.
+            Generator::Paint => bae_render::paint::strokes_of(p.effect)
+                .iter()
+                .filter_map(|s| paint_strokes::clone_dependency(p, s))
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -116,10 +121,9 @@ impl Effect for PaintEffect {
         }
         // The Clone Stamp reads the layer elsewhere: the whole layer.
         if matches!(self.kind, Generator::Paint)
-            && p.effect
-                .param(bae_render::paint::STROKES_PARAM)
-                .map(bae_render::paint::unpack)
-                .is_some_and(|s| s.iter().any(|s| s.tool == bae_render::paint::Tool::Clone))
+            && bae_render::paint::strokes_of(p.effect)
+                .iter()
+                .any(|s| s.tool == bae_render::paint::Tool::Clone)
         {
             return roi.union(&crate::effects::image_grid::layer_rect(p));
         }

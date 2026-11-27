@@ -279,3 +279,65 @@ fn in_out_and_work_area_shortcuts() {
     run(&mut h, &mut tl, Invocation::new(ids::STRETCH_OUT));
     assert_eq!(span(&h, &a), (0, 91));
 }
+
+/// #769: Freeze Frame at 2:03 with Time Remapping on shows 0:00:02:03 in the
+/// Time Remap row (the held source time), not 0.
+#[test]
+fn freeze_frame_shows_the_held_source_time() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let inner = path(
+        &h.run(
+            "comp.create",
+            json!({"width": 64, "height": 64, "fps": 30, "duration": 10 * SEC}),
+        )["path"],
+    );
+    h.session().lock().open_comp(&comp);
+    let pre = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "pre_comp", "source": inner}),
+        )["path"],
+    );
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    let at = Time::from_seconds(2.0) + Time(3 * SEC / 30);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.selected_layers = vec![pre.clone()];
+        s.set_time(&info, at);
+        s.reveal.insert(
+            pre.clone(),
+            crate::session::Reveal::Attrs(vec!["time_remap".into()]),
+        );
+    }
+    // Time Remapping already on (the identity), as after Ctrl+Alt+T.
+    h.run(
+        "layer.time_remap",
+        json!({"layers": [pre], "enabled": true}),
+    );
+    let mut tl = TimelinePanel::default();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let r = h.action(&mut tl, Invocation::new(ids::FREEZE_FRAME));
+    h.apply(&r);
+    h.painted_text = Some(Vec::new());
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let texts = h.painted_text.clone().unwrap();
+    let label = texts
+        .iter()
+        .find(|(s, _)| s == bae_ui::tr("Time Remap"))
+        .map(|(_, r)| *r)
+        .expect("Time Remap row");
+    let on_row: Vec<&String> = texts
+        .iter()
+        .filter(|(_, r)| (r.center().y - label.center().y).abs() < 4.0)
+        .map(|(s, _)| s)
+        .collect();
+    assert!(
+        on_row.iter().any(|s| *s == "0:00:02:03"),
+        "row shows {on_row:?}"
+    );
+    let _ = info;
+}

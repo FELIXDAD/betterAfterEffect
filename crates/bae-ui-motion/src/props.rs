@@ -321,7 +321,100 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             .collect(),
     });
     out.extend(crate::layer_styles::node(stage, layer));
+    // Camera Options / Light Options / a 3D layer's Material Options (AE
+    // shows them after Transform).
+    let options = match kind.as_str() {
+        "camera" => Some(("camera_options", "Camera Options", CAMERA_OPTIONS.to_vec())),
+        "light" => Some((
+            "light_options",
+            "Light Options",
+            light_options(stage, layer),
+        )),
+        _ if three_d => Some((
+            "material_options",
+            "Material Options",
+            MATERIAL_OPTIONS.to_vec(),
+        )),
+        _ => None,
+    };
+    if let Some((id, label, attrs)) = options {
+        out.push(Node::Group {
+            id: format!("{layer}#{id}"),
+            label: tr(label).to_owned(),
+            children: attrs
+                .into_iter()
+                .map(|a| prop(stage, layer, a, three_d))
+                .collect(),
+        });
+    }
     out
+}
+
+/// A camera's Camera Options, in AE's order.
+const CAMERA_OPTIONS: [&str; 13] = [
+    "camera:zoom",
+    "camera:depth_of_field",
+    "camera:focus_distance",
+    "camera:aperture",
+    "camera:blur_level",
+    "camera:iris_shape",
+    "camera:iris_rotation",
+    "camera:iris_roundness",
+    "camera:iris_aspect_ratio",
+    "camera:iris_diffraction_fringe",
+    "camera:highlight_gain",
+    "camera:highlight_threshold",
+    "camera:highlight_saturation",
+];
+
+/// A 3D layer's Material Options (Classic 3D), in AE's order.
+const MATERIAL_OPTIONS: [&str; 9] = [
+    "material:casts_shadows",
+    "material:light_transmission",
+    "material:accepts_shadows",
+    "material:accepts_lights",
+    "material:ambient",
+    "material:diffuse",
+    "material:specular_intensity",
+    "material:specular_shininess",
+    "material:metal",
+];
+
+/// A light's Light Options for its type, in AE's order: ambient lights have
+/// only intensity and colour, parallel lights no falloff, spots a cone.
+fn light_options(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
+    let ty = stage
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, "light:type"))
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "spot".into());
+    if ty == "environment" {
+        // AE's order: the picture and how it shows, then its light.
+        return vec![
+            "light:source",
+            "light:background_visible",
+            "light:background_opacity",
+            "light:background_blur",
+            "light:intensity",
+            "light:color",
+        ];
+    }
+    let mut attrs = vec!["light:intensity", "light:color"];
+    if ty == "ambient" {
+        return attrs;
+    }
+    if ty == "spot" {
+        attrs.extend(["light:cone_angle", "light:cone_feather"]);
+    }
+    if ty != "parallel" {
+        attrs.extend(["light:falloff", "light:radius", "light:falloff_distance"]);
+    }
+    attrs.extend([
+        "light:casts_shadows",
+        "light:shadow_darkness",
+        "light:shadow_diffusion",
+    ]);
+    attrs
 }
 
 /// Animator properties in AE's order.
