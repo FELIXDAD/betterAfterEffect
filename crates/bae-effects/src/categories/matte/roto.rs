@@ -165,23 +165,24 @@ impl TargetEffect for Roto {
         u.i32s(96, &image_grid::rect4(roi))
             .f32(128, (v.f(4) / grid) as f32)
             .f32(132, v.f(9) as f32);
-        let frozen = frozen_input(p)
-            .map(|dep| {
-                target
-                    .effect_layer(&dep)
-                    .cloned()
-                    .ok_or_else(|| RenderError::Other("Frozen matte footage unavailable".into()))
-            })
-            .transpose()?;
+        // A frozen matte that does not render (its layer was deleted, the
+        // footage is missing) is computed from the strokes instead.
+        let frozen = frozen_input(p).and_then(|dep| target.effect_layer(&dep).cloned());
         let mut scores = frozen.clone();
         let mut ordinal = 0usize;
         let live_strokes = if frozen.is_some() { &[][..] } else { strokes };
         for group in live_strokes.chunk_by(|a, b| a[0] == b[0]) {
             let dep = source(p, group[0][0]);
             let base = match &dep {
-                Some(d) => target.effect_layer(d).cloned().ok_or_else(|| {
-                    RenderError::Other("Roto Brush source frame is unavailable".into())
-                })?,
+                Some(d) => match target.effect_layer(d) {
+                    Some(image) => image.clone(),
+                    // The seed frame does not render (the layer is inactive
+                    // there, its footage is missing): its strokes are left out.
+                    None => {
+                        ordinal += group.len();
+                        continue;
+                    }
+                },
                 None => input.clone(),
             };
             let field = if let Some(dep) = dep {
@@ -221,6 +222,10 @@ impl TargetEffect for Roto {
                     grid,
                 )?);
             }
+        }
+        // Nothing could be propagated: the layer as it is.
+        if scores.is_none() {
+            return Ok(input.clone());
         }
         let width = if v.b(13) {
             (0.02 + v.f(15) * 0.003) * (1.5 - v.f(16) * 0.01)
