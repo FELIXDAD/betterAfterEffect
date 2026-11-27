@@ -38,6 +38,16 @@ macro_rules! reference {
 
 pub(super) fn builtin(kind: Kind) -> Builtin {
     let (id, name, zh, controls): (_, _, _, &[Control]) = match kind {
+        Kind::Classic => reference!(
+            "CC PS Classic",
+            "CC PS Classic (obsolete)",
+            "CC PS Classic (obsolete)"
+        ),
+        Kind::ClassicLe => reference!(
+            "CC PS LE Classic",
+            "CC PS LE Classic (obsolete)",
+            "CC PS LE Classic (obsolete)"
+        ),
         Kind::World => reference!(
             "CC Particle World",
             "CC Particle World",
@@ -66,7 +76,12 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
         Kind::Shatter => reference!("APC Shatter", "Shatter", "碎片"),
         Kind::Cards => reference!("APC CardDanceCam", "Card Dance", "卡片动画"),
     };
-    let mut builder = DefBuilder::new(id, name, "Simulation");
+    let category = if matches!(kind, Kind::Classic | Kind::ClassicLe) {
+        "Obsolete"
+    } else {
+        "Simulation"
+    };
+    let mut builder = DefBuilder::new(id, name, category);
     let mut localized = Vec::new();
     for c in controls {
         use ControlKind::*;
@@ -126,7 +141,11 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
     {
         stage.default = Some(Value::Int(3));
     }
-    let slug = name.to_ascii_lowercase().replace('.', "").replace(' ', "-");
+    let slug = name
+        .trim_end_matches(" (obsolete)")
+        .to_ascii_lowercase()
+        .replace('.', "")
+        .replace(' ', "-");
     let mut result = rust_builtin(
         (Arc::new(Simulation { def, kind }), names),
         &slug,

@@ -688,6 +688,7 @@ fn compile_layer(
     let kind = layer_kind(setting_str(v, lt, l::KIND).as_deref().unwrap_or("solid"));
     let three_d = setting_bool(v, lt, l::THREE_D);
     let switches = LayerSwitches {
+        quality: crate::LayerQuality::from_token(setting_str(v, lt, "quality").as_deref()),
         enabled: setting(v, lt, l::ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(true),

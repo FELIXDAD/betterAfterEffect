@@ -441,3 +441,59 @@ fn convert_group_and_ungroup_shapes() {
     let names: Vec<String> = h.contents(&layer).iter().map(|p| h.name(p)).collect();
     assert_eq!(names, ["Ellipse 1", "Rectangle 1"]);
 }
+
+/// #733: a shape tool selects the group it draws (AE), so the box shown is the
+/// group's and its corner scales the group around the group's anchor (the
+/// rectangle's center), not the layer around the comp center.
+#[test]
+fn a_drawn_shape_s_group_box_scales_around_the_group_anchor() {
+    let mut h = H::new();
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
+    h.apply(&r);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let group = h.contents(&layer)[0].clone();
+    assert_eq!(
+        h.session().lock().selected_groups,
+        [format!("{layer}#{group}")]
+    );
+    h.tools().lock().set(Tool::Selection);
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(
+        h.viewer.select.group.as_ref(),
+        Some(&group),
+        "the group's box"
+    );
+    // Bottom-right corner (300, 150) out by (50, 25): the half size 100 × 50
+    // around the center (200, 100) grows by half.
+    let r = h.drag((300.0, 150.0), (350.0, 175.0), Modifiers::NONE);
+    one(&r, "attr.set_many");
+    h.apply(&r);
+    assert!(close(
+        vec2v(h.value(&group, "transform:scale")),
+        [150.0, 150.0]
+    ));
+    assert!(close(
+        vec2v(h.value(&group, "transform:position")),
+        [-120.0, -80.0]
+    ));
+    assert!(close3(
+        h.v3(&layer, "transform:scale"),
+        [100.0, 100.0, 100.0]
+    ));
+    // A click away from the box deselects the group in both panels.
+    h.click(600.0, 300.0, Modifiers::NONE);
+    assert!(h.viewer.select.group.is_none());
+    assert!(h.session().lock().selected_groups.is_empty());
+    // Drawing into the selected shape layer selects the new group.
+    h.select(&[&layer]);
+    let r = h.draw(Tool::Ellipse, (400.0, 200.0), (500.0, 300.0));
+    h.apply(&r);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let ellipse = h.contents(&layer)[0].clone();
+    assert_ne!(ellipse, group);
+    assert_eq!(
+        h.session().lock().selected_groups,
+        [format!("{layer}#{ellipse}")]
+    );
+}

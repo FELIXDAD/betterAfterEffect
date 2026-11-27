@@ -22,6 +22,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Exponential Scale", "指数比例"),
+    ("Composition Flowchart", "合成流程图"),
+    ("Reveal Composition in Project", "在项目中显示合成"),
     ("Zoom In to Frames", "放大到帧间隔"),
     ("Toggle Zoom Level", "切换缩放级别"),
     ("Scroll to Current Time", "滚动到当前时间"),

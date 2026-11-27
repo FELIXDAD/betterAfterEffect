@@ -281,6 +281,8 @@ pub struct RenderLayer {
     pub opacity: f32,
     /// Blending mode with the layers below.
     pub blend_mode: BlendMode,
+    /// Layer sampling quality after any nested quality limit.
+    pub quality: bae_anim::LayerQuality,
     /// 保留基础透明度: the layer only shows where the layers below are opaque.
     pub preserve_transparency: bool,
     /// Track matte (AE 23.0+ model: any layer of the same comp).
@@ -360,6 +362,7 @@ impl RenderLayer {
             size: Some(size),
             source_time: Time::ZERO,
             sequence: None,
+            alphabetical: false,
             file_revision: bae_model::asset::file_revision(&view),
             psd_layer: Some(selection),
             blend: None,
@@ -447,6 +450,7 @@ impl RenderLayer {
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
+            quality: bae_anim::LayerQuality::Best,
             preserve_transparency: false,
             track_matte: None,
             visible: true,
@@ -498,6 +502,7 @@ impl RenderLayer {
         }
         self.opacity.to_bits().hash(h);
         self.blend_mode.hash(h);
+        self.quality.hash(h);
         self.preserve_transparency.hash(h);
         self.track_matte.hash(h);
         self.visible.hash(h);
@@ -681,6 +686,8 @@ pub struct FootageRef {
     /// Image sequences: the frame rate of the sequence (its numbered files are
     /// frames from `file` on); `None` opens `file` alone (a still or a movie).
     pub sequence: Option<FrameRate>,
+    /// Sequence uses actual filenames sorted alphabetically.
+    pub alphabetical: bool,
     pub file_revision: i64,
     pub psd_layer: Option<bae_model::psd::LayerImage>,
     /// Frame blending, when the comp and layer switches are on.
@@ -901,6 +908,7 @@ mod tests {
                 size: None,
                 source_time: Time::ZERO,
                 sequence: None,
+                alphabetical: false,
                 psd_layer: None,
                 file_revision: 0,
                 blend: None,
