@@ -368,6 +368,45 @@ pub(crate) fn add_imported_layer(
     Ok(CreateLayer.run(tx, params)?.path)
 }
 
+/// File ▸ Reload Footage, or files changed while the app was in the background:
+/// several items read their files again as one undo step.
+pub struct ReloadFiles;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReloadFilesParams {
+    pub items: Vec<ReloadItem>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ReloadItem {
+    pub item: PrimPath,
+    /// The file probed again (as for `item.replace_file`).
+    pub file: ImportFile,
+}
+
+impl Command for ReloadFiles {
+    type Params = ReloadFilesParams;
+    type Output = ();
+    const ID: &'static str = "item.reload_files";
+    const TITLE: &'static str = "Reload Footage";
+    const DESCRIPTION: &'static str = "Read footage items' files again (AE File > Reload Footage; also run when files changed while BAE was in the background): each item keeps its name and interpretation. One undo step for all items.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        for ReloadItem { item, file } in p.items {
+            ReplaceFile.run(
+                tx,
+                ReplaceFileParams {
+                    item,
+                    file,
+                    keep_name: true,
+                    keep_interpretation: true,
+                },
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// File ▸ Replace Footage ▸ File… (Cmd/Ctrl+H): a footage or placeholder item
 /// takes another file; its layers keep their place and now show the new file.
 pub struct ReplaceFile;
@@ -402,8 +441,14 @@ impl Command for ReplaceFile {
             return Err(fail(format!("{} is not a footage item", p.item)));
         }
         let path = Path::new(&p.file.path);
-        let file = AssetFile::from_path(path, None, false)
+        let mut file = AssetFile::from_path(path, None, false)
             .map_err(|e| fail(format!("cannot use {}: {e}", p.file.path)))?;
+        if p.keep_name
+            && let Some(old) = AssetFile::from_prim(&view)
+            && old.file_name() == file.file_name()
+        {
+            file.relative = old.relative;
+        }
         if let Some(bad) = p.file.attrs.keys().find(|k| !ATTRS.contains(&k.as_str())) {
             return Err(fail(format!("{bad} is not a footage attribute")));
         }
