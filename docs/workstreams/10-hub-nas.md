@@ -116,6 +116,7 @@
 
 - **放不下的工程层不再断开客户端**（spec 2.4 第 3 步）：发给某个客户端的一个工程层超过 `max_message` 时，Relay 的会话只对它跳过这个工程层，连接不断（`PeerLink` 转发 `max_message_size`）。日志里记一条 warn，按情况说怎么办：上限是 Hub 自己的 `max_message_mib`、而它小于 256 时，可以调大（最多 256）；已经是 256（默认值，也是最大值）时，这个工程层通不过 Hub：删掉其中的内容没用（放不下的是客户端缺的全部修改历史，不是现在的大小，删除只会再加修改），只能把内容移到新的、更小的工程层；上限是客户端在握手里说的更小的值时，调 Hub 没用。测试 `a_document_too_large_for_one_client_does_not_drop_its_link`。
   - 审查后改：原来 warn 一律说"调大 `max_message_mib`"。默认配置下照做的话 Hub 拒绝启动（`validate` 不让它超过 256）；上限是客户端自己的时候，调了也没用（`the_too_large_warning_says_what_helps`）。
+  - 第二轮审查后改：默认上限下 warn 原来说工程层"拆小或者变小"之后能同步，可删内容只会再加修改，放不下的是客户端缺的修改历史，现在说删内容没用、要把内容移到新的、更小的工程层（README 同）。warn 里的大小原来一律按 MiB 写，客户端说自己收 5 KiB 以下时显示"0.00 MiB"，现在不到 1 MiB 按 KiB、不到 1 KiB 按字节写（`small_limits_in_the_too_large_warning_are_not_zero`）。`deploy/README.md` 原来说比上限大的工程层"Hub 日志里有 warn"，其实客户端自己的修改放不下时客户端自己跳过、Hub 什么都收不到也不记日志，只有 Hub 已有、发不给某个客户端的工程层才记（`the_hub_warns_only_about_layers_it_cannot_send` 抓 Relay 线程的日志验证两种情况）。
 - **握手时说出接收上限**：101 响应带 `x-bae-max-incoming`（可写连接是 `max_message_mib`，只读连接是 `read_only_max_message_kib`；09 的 `HubTransport::accept_granting` 发出），新版本的客户端不再发 Hub 收不下的消息，`max_message_mib` 配小了也只是那个工程层不同步，不会断开、重连、再断开。客户端的请求也带它，Hub 发给它的消息不超过它说的值。旧版本两边都照旧。`read_only_connections_cannot_send_large_messages` 改为：客户端自己不发、连接不断；手写握手的客户端发来时照样被断开。
 
 ## 请求（其他工作流在这里留言）
