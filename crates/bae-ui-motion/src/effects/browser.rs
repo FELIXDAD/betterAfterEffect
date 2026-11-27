@@ -162,8 +162,15 @@ impl EffectsPanel {
                         self.builtin_folders(ui, group, &format!("{path}/"), query, apply);
                     } else {
                         for r in group.iter().filter(|r| matches(r.name) || r.folder.split('/').any(matches)) {
-                            let resp = ui.selectable_label(matches!(self.selection, Some(Selection::Builtin(n)) if n == r.name), tr(r.name));
+                            let resp = ui
+                                .selectable_label(matches!(self.selection, Some(Selection::Builtin(n)) if n == r.name), tr(r.name))
+                                .interact(egui::Sense::drag());
                             if resp.clicked() { self.selection = Some(Selection::Builtin(r.name)); }
+                            crate::drag_feedback::source(
+                                &resp,
+                                || crate::drag_feedback::Ghost { icon: bae_ui::icons::Icon::Star, label: tr(r.name).to_owned() },
+                                || EffectDrag::Preset(vec![r.build()].into()),
+                            );
                             if resp.double_clicked() { *apply = Some(vec![r.build()].into()); }
                         }
                     }
@@ -389,9 +396,19 @@ impl Panel for EffectsPanel {
                             let (name, path) = (&entry.name, &entry.path);
                             ui.horizontal(|ui| {
                                 ui.add_space(28.0);
-                                let resp = ui.selectable_label(
-                                    matches!(&self.selection,Some(Selection::Preset(p)) if p == path),
-                                    name,
+                                let resp = ui
+                                    .selectable_label(
+                                        matches!(&self.selection,Some(Selection::Preset(p)) if p == path),
+                                        name,
+                                    )
+                                    .interact(egui::Sense::drag());
+                                crate::drag_feedback::source(
+                                    &resp,
+                                    || crate::drag_feedback::Ghost {
+                                        icon: bae_ui::icons::Icon::Star,
+                                        label: name.clone(),
+                                    },
+                                    || EffectDrag::Preset(entry.effects.clone()),
                                 );
                                 if resp.clicked() {
                                     self.selection = Some(Selection::Preset(path.clone()));
@@ -442,7 +459,14 @@ impl Panel for EffectsPanel {
                                 if resp.clicked() {
                                     self.selection = Some(Selection::Effect(e.match_name.clone()));
                                 }
-                                resp.dnd_set_drag_payload(EffectDrag(e.match_name.clone()));
+                                crate::drag_feedback::source(
+                                    &resp,
+                                    || crate::drag_feedback::Ghost {
+                                        icon: bae_ui::icons::Icon::Fx,
+                                        label: e.name.clone(),
+                                    },
+                                    || EffectDrag::Effect(e.match_name.clone()),
+                                );
                                 if resp.double_clicked() {
                                     apply = Some(e.match_name.clone());
                                 }

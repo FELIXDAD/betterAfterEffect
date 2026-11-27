@@ -2009,20 +2009,57 @@ impl Panel for CompositionViewer {
             self.type_tool.editing.is_some(),
         );
 
-        // Items dropped from the project panel become layers.
-        if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
-            item.add_as_layer(
-                cx,
-                &session,
-                DropPlacement::Viewer(pointer.map(|p| view.to_comp(p))),
-            );
+        // Items dragged from the project panel: their box where they land
+        // (centred on the pointer, AE); a drop makes them layers.
+        if let Some(item) = resp.dnd_hover_payload::<ItemDrag>()
+            && let Some(p) = pointer
+        {
+            let items = item.layer_items(cx.stage, &info.path);
+            if !items.is_empty() {
+                crate::drag_feedback::accept(ui.ctx());
+                let at = view.to_comp(p);
+                let clip = ui.painter_at(area);
+                for size in items
+                    .iter()
+                    .filter_map(|i| crate::project::item_size(cx.stage, i))
+                {
+                    let half = DVec2::new(size.0, size.1) / 2.0;
+                    let r =
+                        Rect::from_two_pos(view.to_screen(at - half), view.to_screen(at + half));
+                    clip.rect_stroke(
+                        r,
+                        0.0,
+                        Stroke::new(1.5, color::ACCENT),
+                        egui::StrokeKind::Middle,
+                    );
+                }
+                if resp.dnd_release_payload::<ItemDrag>().is_some() {
+                    item.add_as_layer(cx, &session, DropPlacement::Viewer(Some(at)));
+                }
+            }
         }
-        // An effect dropped on a layer (Effects & Presets) is applied to it.
-        if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
+        // An effect or preset dragged onto a layer (Effects & Presets): the
+        // layer's box lights up; a drop applies it.
+        if let Some(fx) = resp.dnd_hover_payload::<crate::effects::EffectDrag>()
             && let Some(p) = pointer
             && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, p)
         {
-            crate::effects::apply(cx, &[layer], &fx.0);
+            crate::drag_feedback::accept(ui.ctx());
+            if let Some(q) = comp
+                .layer(&layer)
+                .and_then(|l| render::bounds_quad(l, &view, &render::Affine::new(DMat4::IDENTITY)))
+            {
+                ui.painter_at(area).add(egui::Shape::closed_line(
+                    q.to_vec(),
+                    Stroke::new(2.0, color::ACCENT),
+                ));
+            }
+            if resp
+                .dnd_release_payload::<crate::effects::EffectDrag>()
+                .is_some()
+            {
+                fx.apply(cx, &[layer]);
+            }
         }
 
         // 3D Reference Axes: the world axes as the view's camera sees them.

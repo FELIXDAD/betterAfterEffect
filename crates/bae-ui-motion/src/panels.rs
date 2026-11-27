@@ -473,6 +473,23 @@ impl Panel for EffectControlsPanel {
             );
             return;
         };
+        // An effect or preset dragged in from Effects & Presets: the panel
+        // lights up; a drop applies it to the layer shown (AE).
+        let area = ui.max_rect();
+        if let Some(fx) = egui::DragAndDrop::payload::<crate::effects::EffectDrag>(ui.ctx())
+            && ui.rect_contains_pointer(area)
+        {
+            crate::drag_feedback::accept(ui.ctx());
+            ui.painter().rect_stroke(
+                area.shrink(1.0),
+                2.0,
+                egui::Stroke::new(2.0, color::ACCENT),
+                egui::StrokeKind::Inside,
+            );
+            if ui.input(|i| i.pointer.primary_released()) {
+                fx.apply(cx, std::slice::from_ref(&layer));
+            }
+        }
         self.layer_header(ui, stage, &layer);
         let now = session.lock().active_time();
         let effects = props::effect_nodes(stage, &layer);

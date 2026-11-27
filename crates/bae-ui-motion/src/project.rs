@@ -20,9 +20,10 @@ use crate::common;
 use crate::panel_columns::{Column, Columns};
 use crate::session::SharedSession;
 
-/// Drag payload: a project item dragged into a comp.
+/// Drag payload: project items (the selected ones, in list order) dragged into
+/// a comp or onto a folder.
 #[derive(Clone, Debug)]
-pub(crate) struct ItemDrag(pub PrimPath);
+pub(crate) struct ItemDrag(pub Vec<PrimPath>);
 
 pub(crate) enum DropPlacement {
     Viewer(Option<DVec2>),
@@ -30,52 +31,112 @@ pub(crate) enum DropPlacement {
 }
 
 impl ItemDrag {
-    /// Add a project item to the active comp (drag and drop).
+    /// The items that can become layers of `comp` (not folders, not `comp`
+    /// itself or a comp that contains it).
+    pub(crate) fn layer_items(&self, stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
+        self.0
+            .iter()
+            .filter(|item| match item_kind(stage, item) {
+                Some(ItemKind::Comp) => !query::would_nest_recursively(stage, comp, item),
+                Some(ItemKind::Footage | ItemKind::Solid) => true,
+                _ => false,
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Add the items to the active comp as layers, in order (drag and drop).
     pub(crate) fn add_as_layer(
         &self,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         placement: DropPlacement,
     ) {
-        let item = &self.0;
-        let stage = cx.stage;
         let Some(active) = session.lock().active_comp.clone() else {
             return;
         };
-        let kind = if query::comp_info(stage, item).is_some() {
-            if query::would_nest_recursively(stage, &active, item) {
-                return;
-            }
-            LayerKind::PreComp
-        } else {
-            match stage
-                .prim(item)
-                .and_then(|v| query::static_value(&v, "kind"))
+        let items = self.layer_items(cx.stage, &active);
+        for (k, item) in items.iter().enumerate() {
+            let placement = match &placement {
+                DropPlacement::Viewer(p) => DropPlacement::Viewer(*p),
+                DropPlacement::Timeline { index, start } => DropPlacement::Timeline {
+                    index: index + k,
+                    start: *start,
+                },
+            };
+            add_item_layer(cx, session, item, placement);
+        }
+    }
+}
+
+/// Add one project item to the active comp as a layer.
+fn add_item_layer(
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    item: &PrimPath,
+    placement: DropPlacement,
+) {
+    let stage = cx.stage;
+    let kind = if query::comp_info(stage, item).is_some() {
+        LayerKind::PreComp
+    } else {
+        match stage
+            .prim(item)
+            .and_then(|v| query::static_value(&v, "kind"))
+        {
+            Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+            _ if stage.prim(item).is_some_and(|v| {
+                v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                    && v.value("has_video").and_then(Value::as_bool) == Some(false)
+            }) =>
             {
-                Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
-                _ if stage.prim(item).is_some_and(|v| {
-                    v.value("has_audio").and_then(Value::as_bool) == Some(true)
-                        && v.value("has_video").and_then(Value::as_bool) == Some(false)
-                }) =>
-                {
-                    LayerKind::Audio
-                }
-                _ => LayerKind::Footage,
+                LayerKind::Audio
             }
-        };
-        let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
-        match placement {
-            DropPlacement::Viewer(Some(p)) => extra["position"] = json!([p.x, p.y]),
-            DropPlacement::Viewer(None) => {}
-            DropPlacement::Timeline { index, start } => {
-                extra["index"] = json!(index);
-                if let Some(start) = start {
-                    extra["start"] = json!(start);
-                }
+            _ => LayerKind::Footage,
+        }
+    };
+    let mut extra = json!({"source": item, "name": query::display_name_of(stage, item)});
+    match placement {
+        DropPlacement::Viewer(Some(p)) => extra["position"] = json!([p.x, p.y]),
+        DropPlacement::Viewer(None) => {}
+        DropPlacement::Timeline { index, start } => {
+            extra["index"] = json!(index);
+            if let Some(start) = start {
+                extra["start"] = json!(start);
             }
         }
-        common::new_layer(cx, session, kind, extra);
     }
+    common::new_layer(cx, session, kind, extra);
+}
+
+/// The pointer's ghost for dragging `items`: the item's icon and name, or how
+/// many there are.
+fn item_ghost(stage: &Stage, items: &[PrimPath]) -> crate::drag_feedback::Ghost {
+    let icon = |p: &PrimPath| match item_kind(stage, p) {
+        Some(ItemKind::Comp) => Icon::Composition,
+        Some(ItemKind::Folder) => Icon::Folder,
+        _ => Icon::Footage,
+    };
+    match items {
+        [one] => crate::drag_feedback::Ghost {
+            icon: icon(one),
+            label: query::display_name_of(stage, one),
+        },
+        _ => crate::drag_feedback::Ghost {
+            icon: items.first().map_or(Icon::Footage, icon),
+            label: crate::drag_feedback::items_label(items.len()),
+        },
+    }
+}
+
+/// The size (pixels) of a project item that has one: a comp, footage, a solid.
+pub(crate) fn item_size(stage: &Stage, item: &PrimPath) -> Option<(f64, f64)> {
+    if let Some(info) = query::comp_info(stage, item) {
+        return Some((f64::from(info.width), f64::from(info.height)));
+    }
+    let v = stage.prim(item)?;
+    let num = |a: &str| v.value(a).and_then(Value::as_f64);
+    Some((num("width")?, num("height")?))
 }
 
 #[derive(Default)]
@@ -762,9 +823,26 @@ impl Panel for ProjectPanel {
                             _ => {}
                         }
                     }
-                    if row.kind != ItemKind::Folder {
-                        resp.dnd_set_drag_payload(ItemDrag(row.path.clone()));
+                    // A drag takes the selected items (this one when it is not
+                    // selected), in list order.
+                    if resp.drag_started() {
+                        let mut s = session.lock();
+                        if !s.selected_items.contains(&row.path) {
+                            s.selected_items = vec![row.path.clone()];
+                        }
                     }
+                    let dragged = || {
+                        let selected = session.lock().selected_items.clone();
+                        rows.iter()
+                            .filter(|r| selected.contains(&r.path))
+                            .map(|r| r.path.clone())
+                            .collect::<Vec<_>>()
+                    };
+                    crate::drag_feedback::source(
+                        &resp,
+                        || item_ghost(stage, &dragged()),
+                        || ItemDrag(dragged()),
+                    );
                     // AE 26's item menu (the same for comps, footage and folders).
                     common::context_menu(&resp, &mut |ui| {
                         {
@@ -916,6 +994,41 @@ impl Panel for ProjectPanel {
             });
             crate::import::drop_paths(cx, &dropped, folder, None);
         }
+        // Project items dragged onto a folder go into it (the folder lights
+        // up); onto the rest of the panel, to the top of the project (AE).
+        if let Some(drag) = egui::DragAndDrop::payload::<ItemDrag>(ui.ctx())
+            && let Some(p) = pointer.filter(|p| panel_rect.contains(*p))
+        {
+            let target = folder_rows
+                .iter()
+                .find(|(r, _)| r.contains(p))
+                .map(|(r, f)| (*r, f.clone()));
+            let folder = target.as_ref().map(|(_, f)| f.clone());
+            let parent = folder.clone().unwrap_or_else(PrimPath::root);
+            let into_itself = |item: &PrimPath| {
+                folder
+                    .as_ref()
+                    .is_some_and(|f| f == item || f.ancestors().any(|a| a == *item))
+            };
+            let moves = !drag.0.iter().any(into_itself)
+                && drag
+                    .0
+                    .iter()
+                    .any(|item| item.parent().as_ref() != Some(&parent));
+            if moves {
+                crate::drag_feedback::accept(ui.ctx());
+                let mark = target.map_or(panel_rect, |(r, _)| r);
+                ui.painter().rect_stroke(
+                    mark.shrink(1.0),
+                    2.0,
+                    egui::Stroke::new(2.0, color::ACCENT),
+                    egui::StrokeKind::Inside,
+                );
+                if ui.input(|i| i.pointer.primary_released()) {
+                    cx.invoke_with("item.move", json!({"items": drag.0, "folder": folder}));
+                }
+            }
+        }
         // Enter renames the selected item (AE) — unless a focused widget, e.g. a
         // button in another panel, took the Enter.
         if cx.focused
@@ -1005,6 +1118,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Arrange", "排列"),
     ("Edit", "编辑"),
     ("New Folder", "新建文件夹"),
+    // Items dragged onto a folder (`item.move`).
+    ("Move Items", "移动项目"),
     ("Open in Timeline", "在时间轴中打开"),
     ("Rename", "重命名"),
     ("Delete", "删除"),

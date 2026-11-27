@@ -32,6 +32,7 @@ mod context_menu;
 pub mod demo;
 pub mod dialogs;
 pub mod disk_frames;
+mod drag_feedback;
 pub mod effects;
 mod expr;
 mod expr_menu;
@@ -145,6 +146,7 @@ impl AppModule for MotionUiModule {
         app.add_module(bae_motion::MotionModule);
         app.add_module(bae_script::ScriptModule);
         bae_ui::i18n::register(scripts::ZH);
+        bae_ui::i18n::register(drag_feedback::ZH);
         bae_ui::i18n::register(scriptui::ZH);
         // Every module registers its own Chinese strings and panels.
         for register in MODULES {

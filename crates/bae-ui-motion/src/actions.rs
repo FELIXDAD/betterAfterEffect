@@ -1377,7 +1377,7 @@ fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
         .cloned()
         .collect();
     for item in items.into_iter().rev() {
-        ItemDrag(item).add_as_layer(cx, session, DropPlacement::Viewer(None));
+        ItemDrag(vec![item]).add_as_layer(cx, session, DropPlacement::Viewer(None));
     }
 }
 

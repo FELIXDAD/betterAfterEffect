@@ -1310,17 +1310,31 @@ impl TimelinePanel {
             }
         }
 
-        if let Some((item, pointer)) = project_drop {
+        // Project items dragged into the Timeline: the insertion line between
+        // layers and, over the time graph, where in time they start (AE).
+        if let Some((item, pointer)) = project_drop
+            && !item.layer_items(cx.stage, &info.path).is_empty()
+        {
+            crate::drag_feedback::accept(ui.ctx());
             let (index, y) = drop_slot.unwrap_or((comp_layers.len(), last_row_bottom));
-            ui.painter().with_clip_rect(body).hline(
-                body.x_range(),
-                y,
-                Stroke::new(2.0, color::ACCENT),
-            );
+            let painter = ui.painter().with_clip_rect(body);
+            painter.hline(body.x_range(), y, Stroke::new(2.0, color::ACCENT));
+            let start = graph_body
+                .contains(pointer)
+                .then(|| info.snap_visible_time(axis.t(pointer.x)));
+            if let Some(t) = start {
+                let x = axis.x(t);
+                painter.vline(x, graph_body.y_range(), Stroke::new(1.0, color::ACCENT));
+                let text = crate::common::timecode(&info, t);
+                let galley = painter.layout_no_wrap(text, theme::small(), color::TEXT_STRONG);
+                let r = egui::Rect::from_min_size(
+                    egui::pos2(x + 4.0, y - galley.size().y - 4.0),
+                    galley.size() + vec2(6.0, 2.0),
+                );
+                painter.rect_filled(r, 2.0, color::PANEL);
+                painter.galley(r.min + vec2(3.0, 1.0), galley, color::TEXT_STRONG);
+            }
             if ui.input(|i| i.pointer.primary_released()) {
-                let start = graph_body
-                    .contains(pointer)
-                    .then(|| info.snap_visible_time(axis.t(pointer.x)));
                 item.add_as_layer(cx, &session, DropPlacement::Timeline { index, start });
             }
         }
