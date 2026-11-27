@@ -3449,6 +3449,46 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
     assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
+/// A Puppet Position Pin click in the Layer panel adds a pin in layer pixels.
+#[test]
+fn puppet_pins_go_on_in_the_layer_panel() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::PuppetPosition);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = pos2(320.0 + 100.0, 195.0 + 50.0);
+    let mut r = PanelRequests::default();
+    for press in [None, Some(true), Some(false)] {
+        let mut evs = Vec::new();
+        pointer(&mut evs, at, press);
+        let out = h.frame("layer", &mut panel, evs);
+        r.invocations.extend(out.invocations);
+    }
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "puppet.add_pin")
+        .expect("a pin");
+    assert_eq!(inv.params["at"], json!([100.0, 50.0]));
+    h.apply(r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    assert_eq!(bae_motion::puppet::pins_of(&h.stage, &effects[0]).len(), 1);
+}
+
 /// Shift-drag continues the previous Brush stroke; Ctrl/Cmd-drag only sizes
 /// the brush (AE).
 #[test]
