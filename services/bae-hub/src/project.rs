@@ -26,7 +26,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
 use bae_sync::{
-    ClientId, DirConfig, DirTransport, DocSet, PeerHandle, Relay, SessionConfig, SyncError,
+    ClientId, DirConfig, DirTransport, DocKey, DocSet, PeerHandle, Relay, SessionConfig, SyncError,
     ThreadedTransport, Transport,
 };
 
@@ -110,6 +110,10 @@ pub(crate) struct ProjectStatus {
     pub docs: usize,
     /// The project directory is attached (edits are being saved).
     pub store_ok: bool,
+    /// Documents whose edits are relayed but not saved: the hub's own log of
+    /// them in the project directory is of a newer format version (a newer
+    /// bae-hub ran on this data directory, then this older one; spec 4.3).
+    pub not_saved: Vec<String>,
     /// Set while nobody is connected.
     pub idle_since: Option<Instant>,
     pub messages_received: u64,
@@ -292,6 +296,59 @@ fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError>
     }))
 }
 
+/// What the project directory's link works around (`Transport::notes`), as
+/// far as the hub reports it.
+#[derive(Default)]
+struct StoreNotes {
+    /// The link and the `notes_seq` copied last.
+    seen: Option<(PeerHandle, u64)>,
+    /// Documents whose edits are not saved (`LinkNotes::not_written`).
+    not_saved: Vec<DocKey>,
+}
+
+impl StoreNotes {
+    /// Look at the store's notes if they changed; warn about documents it
+    /// newly refuses to write. Such a document's own log is of a newer
+    /// format version (a newer bae-hub ran on this data directory): the hub
+    /// leaves it as it is, relays the document's edits between clients, but
+    /// saves none of them (clients keep theirs and send them again after a
+    /// restart). Refusing to open the project instead would stop every other
+    /// document too; a warning at load (and in `/v1/projects`, `not_saved`)
+    /// tells the admin to run the newer hub again.
+    fn check(&mut self, project: &ProjectId, relay: &Relay, store: Option<PeerHandle>) {
+        let Some(handle) = store else {
+            return;
+        };
+        let Some(seq) = relay.peer_notes_seq(handle) else {
+            return;
+        };
+        if self.seen == Some((handle, seq)) {
+            return;
+        }
+        let Some((seq, notes)) = relay.peer_notes(handle) else {
+            return;
+        };
+        self.seen = Some((handle, seq));
+        let new: Vec<String> = notes
+            .not_written
+            .iter()
+            .filter(|d| !self.not_saved.contains(d))
+            .map(|d| d.to_string())
+            .collect();
+        if !new.is_empty() {
+            tracing::warn!(
+                project = %project,
+                docs = ?new,
+                error = notes.last_error.as_deref().unwrap_or(""),
+                "the hub's own log of these documents is of a newer format version (a newer \
+                 bae-hub ran on this data directory): their edits are relayed but not saved; \
+                 run the newer bae-hub again"
+            );
+        }
+        self.not_saved = notes.not_written;
+    }
+}
+
 /// Session settings for a client connection: flow control at the
 /// connection's `max_backlog` (`HubConfig::limits`).
 fn client_config(relay: &Relay, max_backlog: usize) -> SessionConfig {
@@ -333,13 +390,19 @@ impl RelayThread {
             store_config(&relay, self.store_send_interval),
         );
         let started = Instant::now();
+        let mut store_notes = StoreNotes::default();
         match self.load(&mut relay, store_handle) {
-            Load::Done => tracing::info!(
-                project = %self.id,
-                docs = relay.docs().doc_keys().len(),
-                ms = started.elapsed().as_millis() as u64,
-                "project loaded"
-            ),
+            Load::Done => {
+                tracing::info!(
+                    project = %self.id,
+                    docs = relay.docs().doc_keys().len(),
+                    ms = started.elapsed().as_millis() as u64,
+                    "project loaded"
+                );
+                // The directory's first scan is done: a log it will not
+                // write is known now.
+                store_notes.check(&self.id, &relay, Some(store_handle));
+            }
             Load::TimedOut => tracing::warn!(
                 project = %self.id,
                 "project still loading; accepting connections anyway"
@@ -353,7 +416,7 @@ impl RelayThread {
         if ready.send(Ok(())).is_err() {
             return;
         }
-        self.serve(relay, Some(store_handle));
+        self.serve(relay, Some(store_handle), store_notes);
     }
 
     /// Pump until the project directory has delivered everything it holds (its
@@ -383,7 +446,7 @@ impl RelayThread {
         }
     }
 
-    fn serve(self, mut relay: Relay, mut store: Option<PeerHandle>) {
+    fn serve(self, mut relay: Relay, mut store: Option<PeerHandle>, mut notes: StoreNotes) {
         let mut peers: BTreeMap<PeerHandle, PeerInfo> = BTreeMap::new();
         let mut retry_store_at: Option<Instant> = None;
         let mut idle_since = Some(Instant::now());
@@ -442,6 +505,7 @@ impl RelayThread {
             for (handle, e) in out.errors {
                 tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
             }
+            notes.check(&self.id, &relay, store);
             // Nobody is editing, so holding writes back gains nothing, and the
             // next pump may be a whole empty tick away: write what the store's
             // interval held back (e.g. the last steps of a drag right before the
@@ -489,7 +553,7 @@ impl RelayThread {
             } else {
                 (tick * 2).clamp(self.ticks.active, self.ticks.quiet)
             };
-            self.publish_status(&relay, &peers, store, idle_since, received, sent);
+            self.publish_status(&relay, &peers, store, &notes, idle_since, received, sent);
             if shutdown {
                 break;
             }
@@ -529,11 +593,13 @@ impl RelayThread {
         *retry_at = Some(Instant::now() + STORE_RETRY);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn publish_status(
         &self,
         relay: &Relay,
         peers: &BTreeMap<PeerHandle, PeerInfo>,
         store: Option<PeerHandle>,
+        notes: &StoreNotes,
         idle_since: Option<Instant>,
         received: u64,
         sent: u64,
@@ -559,6 +625,7 @@ impl RelayThread {
                 .collect(),
             docs: relay.docs().doc_keys().len(),
             store_ok: store.is_some(),
+            not_saved: notes.not_saved.iter().map(|d| d.to_string()).collect(),
             idle_since,
             messages_received: received,
             messages_sent: sent,
@@ -569,6 +636,8 @@ impl RelayThread {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
@@ -590,6 +659,47 @@ mod tests {
         );
         assert_eq!(DirConfig::default().inactive_after, None);
         assert!(!config.watch);
+    }
+
+    /// A log record: `len: u32 LE`, the first 8 bytes of its BLAKE3, payload
+    /// (spec 4.2).
+    fn record(payload: &[u8]) -> Vec<u8> {
+        let mut out = (payload.len() as u32).to_le_bytes().to_vec();
+        out.extend_from_slice(&blake3::hash(payload).as_bytes()[..8]);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    /// The hub's own log of a document is of a newer format (a newer bae-hub
+    /// ran on this data directory, then this one): the project opens, the
+    /// log is left as it is, and the status (`/v1/projects`) lists the
+    /// document as not saved; the load logs a warning. Edits to it are taken
+    /// and not written.
+    #[test]
+    fn a_newer_format_own_log_is_reported_at_load() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("film");
+        let doc_dir = dir.join("updates").join("anim").join("a");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let header = format!(
+            r#"{{"format":"{}","version":{},"doc":"anim/a","client":"{HUB_CLIENT}","generation":"x"}}"#,
+            bae_sync::LOG_FORMAT,
+            bae_sync::LOG_VERSION + 1
+        );
+        let log = doc_dir.join(format!("{HUB_CLIENT}.log"));
+        let bytes = [record(header.as_bytes()), b"newer records".to_vec()].concat();
+        fs::write(&log, &bytes).unwrap();
+        let config = HubConfig::new(tmp.path());
+        let project = Project::open(ProjectId::new("film").unwrap(), dir, &config).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while project.status().not_saved.is_empty() {
+            assert!(Instant::now() < deadline, "not reported");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(project.status().not_saved, ["anim/a"]);
+        assert!(project.status().store_ok);
+        project.shutdown();
+        assert_eq!(fs::read(&log).unwrap(), bytes, "left as it is");
     }
 
     /// Client sessions hold back at the configured `max_backlog_mib`, not at

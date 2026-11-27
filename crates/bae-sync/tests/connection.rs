@@ -14,7 +14,7 @@ use bae_model::project::Project;
 use bae_model::{AuthorId, Op, PrimType, Specifier, Stage, SublayerId, Value};
 use bae_sync::{
     Access, Backoff, ClientId, Connection, ConnectionConfig, ConnectionOutcome, ConnectionState,
-    DirConfig, Failure, PresenceState, Target,
+    DirConfig, DocKey, Failure, PresenceState, Target,
 };
 use common::*;
 
@@ -195,6 +195,74 @@ fn closing_writes_the_last_edits_to_the_folder() {
         b.pump();
         b.opacity() == Some(Value::Float(2.0)) && b.conn.presence().is_empty()
     });
+}
+
+/// Our log of a document is of a newer format version (a newer BAE ran as
+/// this client ID, then this one): the link writes nothing for it. The app
+/// sees which documents (`link_notes`), its edits to them count as unsynced
+/// (status and `Closing`), and closing reports it; other documents sync.
+#[test]
+fn a_document_the_folder_does_not_write_is_reported() {
+    let (_tmp, dir) = project_dir();
+    let doc_dir = dir.join("updates").join("root");
+    std::fs::create_dir_all(&doc_dir).unwrap();
+    let header = format!(
+        r#"{{"format":"{}","version":{},"doc":"root","client":"alice","generation":"x"}}"#,
+        bae_sync::LOG_FORMAT,
+        bae_sync::LOG_VERSION + 1
+    );
+    let mut log = (header.len() as u32).to_le_bytes().to_vec();
+    log.extend_from_slice(&blake3::hash(header.as_bytes()).as_bytes()[..8]);
+    log.extend_from_slice(header.as_bytes());
+    let path = doc_dir.join("alice.log");
+    std::fs::write(&path, &log).unwrap();
+
+    let mut a = App::join(&dir, config("alice"));
+    let mut b = App::join(&dir, config("bob"));
+    wait("online", LONG, || {
+        a.pump();
+        b.pump();
+        a.conn.is_online() && b.conn.is_online()
+    });
+    let root = DocKey::sublayer(&SublayerId::root());
+    assert_eq!(a.conn.link_notes().not_written, std::slice::from_ref(&root));
+    assert!(
+        a.conn
+            .link_notes()
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.contains("newer version")),
+        "{:?}",
+        a.conn.link_notes()
+    );
+    assert!(b.conn.link_notes().is_empty(), "{:?}", b.conn.link_notes());
+    assert!(!a.conn.status().unsynced);
+
+    let generation = a.conn.generation();
+    a.set_opacity(3.0);
+    a.create_layer("written");
+    wait("the other document to arrive", LONG, || {
+        a.pump();
+        b.pump();
+        b.has_layer("written")
+    });
+    for _ in 0..20 {
+        a.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(a.conn.status().unsynced);
+    assert!(a.conn.generation() > generation);
+    assert_ne!(b.opacity(), Some(Value::Float(3.0)));
+    assert_eq!(std::fs::read(&path).unwrap(), log, "left as it is");
+    let mut closing = a.conn.close(&mut a.stage);
+    assert_eq!(closing.unsynced(), [root]);
+    let result = closing.wait(LONG).expect("closed in time");
+    assert!(
+        result
+            .as_ref()
+            .is_err_and(|e| e.to_string().contains("newer version")),
+        "{result:?}"
+    );
 }
 
 #[test]

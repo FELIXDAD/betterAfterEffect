@@ -17,7 +17,7 @@ use crate::error::SyncError;
 use crate::presence::PresenceTable;
 use crate::protocol::Message;
 use crate::session::{SessionConfig, SyncSession};
-use crate::transport::Transport;
+use crate::transport::{LinkNotes, Transport};
 
 /// A connected client, as returned by [`Relay::connect`] and
 /// [`Relay::connect_with`].
@@ -170,6 +170,22 @@ impl Relay {
         let closed = peer.transport.close();
         self.disconnect(handle);
         Some(closed)
+    }
+
+    /// A peer's [`Transport::notes`] (the hub: problems its project
+    /// directory works around, documents it does not write) and their
+    /// [`Transport::notes_seq`], to copy them only when that moved. `None`
+    /// if there is no such peer.
+    pub fn peer_notes(&self, handle: PeerHandle) -> Option<(u64, LinkNotes)> {
+        let peer = self.peers.iter().find(|p| p.handle == handle)?;
+        Some((peer.transport.notes_seq(), peer.transport.notes()))
+    }
+
+    /// A peer's [`Transport::notes_seq`]: cheap, call it often, and
+    /// [`peer_notes`](Self::peer_notes) when it moved.
+    pub fn peer_notes_seq(&self, handle: PeerHandle) -> Option<u64> {
+        let peer = self.peers.iter().find(|p| p.handle == handle)?;
+        Some(peer.transport.notes_seq())
     }
 
     /// Connected peers and the client IDs they announced.

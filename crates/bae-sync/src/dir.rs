@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::client::ClientId;
 use crate::error::SyncError;
 use crate::protocol::{DocKey, Message};
-use crate::transport::Transport;
+use crate::transport::{LinkNotes, Transport};
 
 /// `format` of a log header.
 pub const LOG_FORMAT: &str = "bae.sync.log";
@@ -97,9 +97,10 @@ pub struct DirConfig {
     /// our own log holds it and a later pass can delete it.
     pub absorb_departed: bool,
     /// At most this many documents are taken over (`absorb_departed`) per pass:
-    /// the session answers every request of one pump at once, each a whole
-    /// snapshot exported on the thread that owns the stage. The others are
-    /// taken over in later passes.
+    /// each answer is a whole snapshot exported on the thread that owns the
+    /// stage (the session answers only `SessionConfig::max_snapshots_per_pump`
+    /// per pump, but a pass asking for dozens would keep it busy for many).
+    /// The others are taken over in later passes.
     pub absorb_per_pass: usize,
     /// About how long one poll may spend on a cleanup pass. The cleanup runs
     /// inside `recv` (on the transport's thread), and a first pass reads every
@@ -108,6 +109,16 @@ pub struct DirConfig {
     /// more goes on at the next poll where it stopped (what it read is kept in
     /// its summaries). Checked between logs and between chunks of 8 MiB of one
     /// log; every poll reads at least one, so a pass always ends.
+    ///
+    /// Not a hard bound: what is checked is only the reading of logs. Each
+    /// poll that does cleanup work reads at least one chunk (up to 8 MiB, a
+    /// larger record whole) before it looks at the clock, and the start of a
+    /// pass (listing `updates/` and `presence/`, a `stat` per file, removing
+    /// stale temporary files, the server-clock probe) and its end (the lock
+    /// files of departed clients) are not timed at all. All of it runs on the
+    /// transport's own thread (a `ThreadedTransport`'s in the app and the
+    /// hub), never on the UI thread, but on a slow SMB share one poll can
+    /// still take a second or two.
     pub cleanup_budget: Duration,
 }
 
@@ -174,7 +185,9 @@ struct OwnLog {
     vmax: VersionVector,
     /// Holds records this build cannot read (a newer version's message types):
     /// `vmax` may not bound them, so the log is never replaced, only appended
-    /// to.
+    /// to. Every requested snapshot is appended, and the next is asked for
+    /// once the log grew `compact_ratio`-fold since (only after a downgrade:
+    /// a newer build wrote those records as this client).
     foreign: bool,
 }
 
@@ -362,6 +375,8 @@ pub struct DirTransport {
     last_poll: Option<Instant>,
     wake: Arc<AtomicBool>,
     last_error: Option<String>,
+    /// Bumped whenever `last_error` or `newer` changes ([`Transport::notes_seq`]).
+    notes_seq: u64,
     stats: DirStats,
     /// `(len, mtime)` of other clients' presence files when last read.
     presence_seen: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
@@ -531,6 +546,7 @@ impl DirTransport {
             last_poll: None,
             wake: Arc::new(AtomicBool::new(false)),
             last_error: None,
+            notes_seq: 0,
             stats: DirStats::default(),
             presence_seen: BTreeMap::new(),
             last_cleanup: None,
@@ -601,6 +617,21 @@ impl DirTransport {
         self.last_error.as_deref()
     }
 
+    /// Documents this transport refuses to write: our own log of them is of a
+    /// newer format version than this build reads (a newer BAE ran as this
+    /// client ID; spec 4.3). Edits the session sends for them are taken and
+    /// not written ([`close`](Transport::close) then fails). Known once the
+    /// first scan read our logs (the first `recv`), or the first write to the
+    /// document found it. Also in [`Transport::notes`].
+    pub fn not_written(&self) -> Vec<DocKey> {
+        self.newer.keys().cloned().collect()
+    }
+
+    fn set_error(&mut self, error: String) {
+        self.last_error = Some(error);
+        self.notes_seq += 1;
+    }
+
     /// Path of this client's log for `doc`.
     pub fn log_path(&self, doc: &DocKey) -> PathBuf {
         self.doc_dir(doc).join(format!("{}.{LOG_EXT}", self.client))
@@ -635,12 +666,12 @@ impl DirTransport {
                     if dir.is_dir()
                         && let Err(e) = w.watch(&dir, RecursiveMode::Recursive)
                     {
-                        self.last_error = Some(format!("watch {}: {e}", dir.display()));
+                        self.set_error(format!("watch {}: {e}", dir.display()));
                     }
                 }
                 self._watcher = Some(w);
             }
-            Err(e) => self.last_error = Some(format!("file watcher: {e}")),
+            Err(e) => self.set_error(format!("file watcher: {e}")),
         }
     }
 
@@ -721,7 +752,7 @@ impl DirTransport {
 
     fn note(&mut self, r: Result<(), SyncError>) {
         if let Err(e) = r {
-            self.last_error = Some(e.to_string());
+            self.set_error(e.to_string());
         }
     }
 
@@ -1289,7 +1320,7 @@ impl DirTransport {
         self.own.remove(doc);
         self.behind.remove(doc);
         self.newer.insert(doc.clone(), version);
-        self.last_error = Some(format!(
+        self.set_error(format!(
             "{}: {NEWER_LOG} (log format {version}, this build reads up to {LOG_VERSION}); \
              it is left as it is and nothing is written for this document",
             path.display()
@@ -1309,7 +1340,7 @@ impl DirTransport {
         };
         self.refused.insert(doc.clone());
         let path = self.log_path(doc);
-        self.last_error = Some(format!(
+        self.set_error(format!(
             "{}: {NEWER_LOG} (log format {version}, this build reads up to {LOG_VERSION}); \
              edits to this document are not written",
             path.display()
@@ -1840,12 +1871,23 @@ impl DirTransport {
     /// meanwhile (another cleaner, its owner compacting) is not a problem.
     fn note_cleanup_error(&mut self, path: &Path, e: io::Error) {
         if e.kind() != io::ErrorKind::NotFound {
-            self.last_error = Some(format!("cleanup {}: {e}", path.display()));
+            self.set_error(format!("cleanup {}: {e}", path.display()));
         }
     }
 }
 
 impl Transport for DirTransport {
+    fn notes(&self) -> LinkNotes {
+        LinkNotes {
+            last_error: self.last_error.clone(),
+            not_written: self.not_written(),
+        }
+    }
+
+    fn notes_seq(&self) -> u64 {
+        self.notes_seq
+    }
+
     fn send(&mut self, msg: Message) -> Result<(), SyncError> {
         if self.is_read_only() {
             return match &msg {
@@ -3577,6 +3619,8 @@ mod tests {
         let bytes = [newer_header("root"), b"\x01future framing".to_vec()].concat();
         fs::write(&path, &bytes).unwrap();
         let mut t = transport(tmp.path(), "a", quick());
+        assert!(t.not_written().is_empty(), "known after the first scan");
+        let seq = t.notes_seq();
         let read = drain(&mut t);
         assert!(corrupt_files(&dir).is_empty());
         assert_eq!(fs::read(&path).unwrap(), bytes);
@@ -3585,6 +3629,12 @@ mod tests {
             "{:?}",
             t.last_error()
         );
+        // Listed for the hub and the app (`Transport::notes`).
+        assert_eq!(t.not_written(), [DocKey::parse("root").unwrap()]);
+        assert_ne!(t.notes_seq(), seq);
+        let notes = t.notes();
+        assert_eq!(notes.not_written, [DocKey::parse("root").unwrap()]);
+        assert_eq!(notes.last_error.as_deref(), t.last_error());
         assert!(
             !read
                 .iter()

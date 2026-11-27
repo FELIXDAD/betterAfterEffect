@@ -3,7 +3,7 @@
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
 use crate::error::SyncError;
-use crate::protocol::Message;
+use crate::protocol::{DocKey, Message};
 
 /// What this client may do with the project, as the remote grants it (a hub
 /// token's rights, a shared folder's permissions).
@@ -49,6 +49,30 @@ impl Access {
     }
 }
 
+/// What a transport works around without failing the link, for display
+/// ([`Transport::notes`], [`crate::Connection::link_notes`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LinkNotes {
+    /// The most recent problem the transport skipped and went on (an
+    /// unreadable file, a network hiccup, a log it may not write). Kept until
+    /// another one replaces it, so it may be about something that has passed:
+    /// show it as "last problem", not as the state of the link.
+    pub last_error: Option<String>,
+    /// Documents this link takes edits of but never writes: the shared
+    /// folder's own log of them is of a newer format version (a newer BAE ran
+    /// as this client ID, then this older one: a downgrade; spec 4.3). Their
+    /// edits stay local (counted as unsynced by [`crate::Connection`], and
+    /// [`Transport::close`] fails), and other clients do not see them until a
+    /// newer build writes them.
+    pub not_written: Vec<DocKey>,
+}
+
+impl LinkNotes {
+    pub fn is_empty(&self) -> bool {
+        self.last_error.is_none() && self.not_written.is_empty()
+    }
+}
+
 /// Moves [`Message`]s between this client and one remote (the shared folder, the
 /// hub, or a peer). Both calls must not block: [`crate::SyncSession::pump`] runs on
 /// the thread that owns the stage. Transports with slow I/O (SMB, network) do it on
@@ -86,6 +110,18 @@ pub trait Transport {
     fn backlog(&self) -> usize {
         0
     }
+    /// Problems this transport works around without failing the link
+    /// ([`LinkNotes`]). The default: none.
+    fn notes(&self) -> LinkNotes {
+        LinkNotes::default()
+    }
+    /// A counter that changes whenever [`notes`](Self::notes) may have
+    /// changed, so a caller that looks often ([`crate::ThreadedTransport`]'s
+    /// thread looks after every call) copies the notes only when they did.
+    /// The default: 0, never changes.
+    fn notes_seq(&self) -> u64 {
+        0
+    }
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
@@ -100,6 +136,12 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
     fn backlog(&self) -> usize {
         (**self).backlog()
+    }
+    fn notes(&self) -> LinkNotes {
+        (**self).notes()
+    }
+    fn notes_seq(&self) -> u64 {
+        (**self).notes_seq()
     }
 }
 

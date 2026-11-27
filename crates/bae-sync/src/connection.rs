@@ -36,7 +36,7 @@ use crate::presence::{PeerPresence, PresenceState};
 use crate::protocol::{DocKey, Message};
 use crate::session::{SessionConfig, SyncSession};
 use crate::threaded::ThreadedTransport;
-use crate::transport::{Access, Transport};
+use crate::transport::{Access, LinkNotes, Transport};
 
 /// `min_send_interval` of shared-folder sessions (spec 4.5): a drag becomes a
 /// few appends per second on the NAS instead of dozens.
@@ -339,8 +339,9 @@ pub struct ConnectionStatus {
     /// Some local edits are not known to have reached the remote: not sent
     /// yet (offline, read-only, held back by `min_send_interval`), not
     /// confirmed since the last reconnect, handed to a link that failed
-    /// before the remote confirmed them, or waiting on a link whose I/O is
-    /// stuck ([`ConnectionConfig::io_stall`]).
+    /// before the remote confirmed them, waiting on a link whose I/O is
+    /// stuck ([`ConnectionConfig::io_stall`]), or taken by a link that does
+    /// not write them ([`Connection::link_notes`]).
     pub unsynced: bool,
     /// Others online (0 unless online).
     pub peers: usize,
@@ -666,6 +667,8 @@ struct StatusKey {
     access: Access,
     unsynced: bool,
     peers: usize,
+    /// Changes of [`Connection::link_notes`].
+    notes: u64,
 }
 
 /// Calls `wake` at the earliest deadline it was given: pumps that are due
@@ -781,6 +784,11 @@ pub struct Connection {
     lock_denied: u32,
     attempts: u64,
     unsynced: bool,
+    /// The current (or last) link's [`Transport::notes`], copied when its
+    /// `notes_seq` moved (`notes_seen`); `notes_changes` counts the copies.
+    link_notes: LinkNotes,
+    notes_seen: u64,
+    notes_changes: u64,
     generation: u64,
     shown: Option<StatusKey>,
     /// The thread dropping the last dead link; the next connect waits for it.
@@ -830,6 +838,9 @@ impl Connection {
             lock_denied: 0,
             attempts: 0,
             unsynced: false,
+            link_notes: LinkNotes::default(),
+            notes_seen: 0,
+            notes_changes: 0,
             generation: 0,
             shown: None,
             retired: None,
@@ -873,9 +884,74 @@ impl Connection {
         matches!(self.phase, Phase::Linked { since: Some(_), .. })
     }
 
-    /// Increases whenever [`status`](Self::status) changes.
+    /// Increases whenever [`status`](Self::status) or
+    /// [`link_notes`](Self::link_notes) change.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// What the current link works around without failing (the last link's
+    /// while offline; empty before the first): its last skipped problem
+    /// (`last_error`, e.g. a shared-folder log it could not read), and the
+    /// documents it does not write (`not_written`: our shared-folder log of
+    /// them is of a newer format version, after a downgrade; spec 4.3).
+    /// Edits to those count as unsynced ([`ConnectionStatus::unsynced`],
+    /// [`Closing::unsynced`]) and closing the link fails. Show them, e.g.
+    /// "changes to these layers are not saved to the shared folder: open the
+    /// project with the newer BAE". A change bumps
+    /// [`generation`](Self::generation).
+    pub fn link_notes(&self) -> &LinkNotes {
+        &self.link_notes
+    }
+
+    /// Copy the link's notes if they changed.
+    fn take_notes(&mut self) {
+        let fresh = match &self.phase {
+            Phase::Linked { transport, .. } => {
+                let seq = transport.notes_seq();
+                (seq != self.notes_seen).then(|| (seq, transport.notes()))
+            }
+            _ => None,
+        };
+        if let Some((seq, notes)) = fresh {
+            self.notes_seen = seq;
+            if notes != self.link_notes {
+                self.link_notes = notes;
+                self.notes_changes += 1;
+            }
+        }
+    }
+
+    /// The session's unsynced documents and those of
+    /// [`not_written`](Self::not_written).
+    fn unsynced_docs(&self, docs: &dyn DocSet) -> Vec<DocKey> {
+        let mut out = self.session.unsynced(docs);
+        for doc in self.not_written(docs) {
+            if !out.contains(&doc) {
+                out.push(doc);
+            }
+        }
+        out
+    }
+
+    /// Documents of [`LinkNotes::not_written`] with local ops the remote did
+    /// not show it has: the session counted them as delivered when it sent
+    /// them, but they were not written.
+    fn not_written(&self, docs: &dyn DocSet) -> Vec<DocKey> {
+        let confirmed = self.session.remote_versions();
+        self.link_notes
+            .not_written
+            .iter()
+            .filter(|doc| {
+                docs.version(doc).is_some_and(|local| {
+                    !local.is_empty()
+                        && !confirmed
+                            .and_then(|c| c.get(*doc))
+                            .is_some_and(|theirs| theirs.includes_vv(&local))
+                })
+            })
+            .cloned()
+            .collect()
     }
 
     pub fn status(&self) -> ConnectionStatus {
@@ -921,6 +997,9 @@ impl Connection {
         self.advance(now);
         let mut failed = None;
         let mut stuck = false;
+        // Before the pump: notes copied before a message arrived come with
+        // it (the shared folder's first scan, with its `Hello`).
+        self.take_notes();
         if let Phase::Linked {
             transport, since, ..
         } = &mut self.phase
@@ -930,8 +1009,11 @@ impl Connection {
                     if since.is_none() && self.session.is_connected() {
                         *since = Some(now);
                     }
-                    if o.received >= self.session.config().max_messages_per_pump {
-                        // More may be waiting; the link only wakes on news.
+                    if o.received >= self.session.config().max_messages_per_pump
+                        || self.session.pending_snapshot_requests() > 0
+                    {
+                        // More may be waiting (messages, or snapshot requests
+                        // left for later pumps); the link only wakes on news.
                         // Woken from the alarm thread, not from in here.
                         self.alarm.set(now);
                     }
@@ -951,7 +1033,8 @@ impl Connection {
         self.unresponsive = self
             .connecting_since()
             .is_some_and(|t| now.saturating_duration_since(t) >= self.unresponsive_after());
-        self.unsynced = stuck || !self.session.unsynced(docs).is_empty();
+        self.unsynced =
+            stuck || !self.session.unsynced(docs).is_empty() || !self.not_written(docs).is_empty();
         let (changed, presence) = self.refresh(out.presence_changed);
         out.status_changed = changed;
         out.presence_changed |= presence;
@@ -1033,7 +1116,7 @@ impl Connection {
                     self.abandon(rx);
                 }
                 return Closing {
-                    unsynced: self.session.unsynced(docs),
+                    unsynced: self.unsynced_docs(docs),
                     rx: None,
                     result: Some(Ok(())),
                 };
@@ -1052,7 +1135,8 @@ impl Connection {
             // The link is gone: what it did not confirm may not have arrived.
             self.session.forget_unconfirmed();
         }
-        let unsynced = self.session.unsynced(docs);
+        self.take_notes();
+        let unsynced = self.unsynced_docs(docs);
         let pacing = Pacing {
             max_backlog: self.session.config().max_backlog,
             stall: self.close_stall(),
@@ -1132,6 +1216,12 @@ impl Connection {
                     ..
                 } = link;
                 drop(adopted);
+                // The old link's notes go with it.
+                if !self.link_notes.is_empty() {
+                    self.link_notes = LinkNotes::default();
+                    self.notes_changes += 1;
+                }
+                self.notes_seen = 0;
                 self.phase = Phase::Linked {
                     transport,
                     adopted: now,
@@ -1407,6 +1497,7 @@ impl Connection {
             access: self.access,
             unsynced: self.unsynced,
             peers: self.peer_count(),
+            notes: self.notes_changes,
         }
     }
 
@@ -1628,9 +1719,10 @@ impl Closing {
     /// said what it has yet. Also those handed to a link that failed without
     /// the remote confirming them; a shared folder confirms only with its
     /// `Hello`s and what it reads of others, not our writes, so after a lost
-    /// folder link this is every document edited on it (spec 7.4). Known at
-    /// once. Warn before quitting when this is not empty or the link reports
-    /// an error.
+    /// folder link this is every document edited on it (spec 7.4). And
+    /// documents the link took edits of but does not write
+    /// ([`LinkNotes::not_written`]). Known at once. Warn before quitting when
+    /// this is not empty or the link reports an error.
     pub fn unsynced(&self) -> &[DocKey] {
         &self.unsynced
     }
@@ -2278,6 +2370,71 @@ mod tests {
         });
         assert_eq!(inline.load(Ordering::SeqCst), 0, "woken from inside pump");
         wait_for("a wake", || woken.load(Ordering::SeqCst) > before);
+    }
+
+    /// Snapshot requests left for later pumps (`max_snapshots_per_pump`)
+    /// bring the next pump soon, like a full pump: an app that pumps only
+    /// when woken answers them all.
+    #[test]
+    fn snapshot_requests_left_for_later_wake_the_next_pump() {
+        let woken = Arc::new(AtomicUsize::new(0));
+        let w = woken.clone();
+        let mut c = bare(
+            "snapshots",
+            Arc::new(move || {
+                w.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        // No other reason to wake for an hour (`Hello`s, heartbeats).
+        let config = c.session.config_mut();
+        config.hello_interval = Some(Duration::from_secs(3600));
+        config.presence_heartbeat = Duration::from_secs(3600);
+        let (mut remote, near) = MemoryTransport::pair();
+        linked(
+            &mut c,
+            ThreadedTransport::spawn(near, Duration::from_millis(1), || {}),
+        );
+        let mut docs = MemDocs::new();
+        let names = ["a", "b", "c", "d", "e"];
+        for doc in names {
+            let d = bae_model::loro::LoroDoc::new();
+            d.get_map("m").insert("v", doc).unwrap();
+            d.commit();
+            let snapshot = d.export(bae_model::loro::ExportMode::Snapshot).unwrap();
+            docs.load(DocKey::parse(doc).unwrap(), &snapshot).unwrap();
+        }
+        remote
+            .send(Message::hello(ClientId::new("folder").unwrap(), Vec::new()))
+            .unwrap();
+        for doc in names {
+            remote
+                .send(Message::SnapshotRequest {
+                    doc: DocKey::parse(doc).unwrap(),
+                })
+                .unwrap();
+        }
+        // Wakes counted before each pump: the alarm may fire before the pump
+        // returns.
+        let mut before = 0;
+        wait_for("the requests to arrive", || {
+            before = woken.load(Ordering::SeqCst);
+            c.pump(&mut docs);
+            c.session.stats().messages_received >= 6
+        });
+        let mut answered = 0;
+        let mut collect = |remote: &mut MemoryTransport| {
+            while let Ok(Some(m)) = remote.recv() {
+                answered += usize::from(matches!(m, Message::Snapshot { .. }));
+            }
+            answered
+        };
+        // Pump only when woken.
+        while c.session.pending_snapshot_requests() > 0 {
+            wait_for("a wake", || woken.load(Ordering::SeqCst) > before);
+            before = woken.load(Ordering::SeqCst);
+            c.pump(&mut docs);
+        }
+        wait_for("every answer", || collect(&mut remote) == names.len());
     }
 
     #[test]

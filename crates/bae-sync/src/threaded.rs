@@ -1,6 +1,6 @@
 //! [`ThreadedTransport`]: runs a blocking transport on its own thread.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::error::SyncError;
 use crate::protocol::Message;
-use crate::transport::Transport;
+use crate::transport::{LinkNotes, Transport};
 
 type Notify = Box<dyn Fn() + Send>;
 
@@ -48,6 +48,10 @@ struct Backlog {
     /// wakes the stage thread once it all left.
     watched: AtomicBool,
     stall: Mutex<Stall>,
+    /// The inner transport's [`Transport::notes`] as the worker last copied
+    /// them, and how often they changed ([`Transport::notes_seq`]).
+    notes: Mutex<LinkNotes>,
+    notes_seq: AtomicU64,
 }
 
 impl Backlog {
@@ -59,6 +63,27 @@ impl Backlog {
 
     fn stall(&self) -> std::sync::MutexGuard<'_, Stall> {
         self.stall.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn notes(&self) -> std::sync::MutexGuard<'_, LinkNotes> {
+        self.notes.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Copies the inner transport's notes when its [`Transport::notes_seq`]
+/// moved: an integer comparison per call of the inner transport.
+struct NotesCopier {
+    seen: u64,
+}
+
+impl NotesCopier {
+    fn sync<T: Transport>(&mut self, inner: &T, backlog: &Backlog) {
+        let seq = inner.notes_seq();
+        if seq != self.seen {
+            self.seen = seq;
+            *backlog.notes() = inner.notes();
+            backlog.notes_seq.fetch_add(1, Ordering::AcqRel);
+        }
     }
 }
 
@@ -87,6 +112,11 @@ impl Backlog {
 ///
 /// [`stalled`](Self::stalled) tells when the worker is stuck in one call of the
 /// inner transport (a NAS that does not answer) while messages wait.
+///
+/// [`Transport::notes`] are the inner transport's as the worker last saw them:
+/// it copies them whenever they changed, after every call of the inner
+/// transport and before it hands on a message that call received (so notes
+/// from the shared folder's first scan are here once its `Hello` is).
 pub struct ThreadedTransport {
     tx: Option<Sender<Out>>,
     rx: Receiver<Result<Message, SyncError>>,
@@ -169,6 +199,8 @@ fn run<T: Transport>(
     on_receive: Notify,
     backlog: &Backlog,
 ) {
+    let mut notes = NotesCopier { seen: 0 };
+    notes.sync(&inner, backlog);
     loop {
         // Wait for outgoing messages or the next tick.
         let mut outgoing = Vec::new();
@@ -182,6 +214,7 @@ fn run<T: Transport>(
             let r = match m {
                 Out::Msg(m, len) => {
                     let r = inner.send(m);
+                    notes.sync(&inner, backlog);
                     backlog.queued.fetch_sub(len, Ordering::AcqRel);
                     let mut b = backlog.stall();
                     b.handed += 1;
@@ -204,7 +237,9 @@ fn run<T: Transport>(
         }
         let mut got = false;
         loop {
-            match inner.recv() {
+            let r = inner.recv();
+            notes.sync(&inner, backlog);
+            match r {
                 Ok(Some(m)) => {
                     got = true;
                     if in_tx.send(Ok(m)).is_err() {
@@ -276,6 +311,14 @@ impl Transport for ThreadedTransport {
             self.backlog.watched.store(true, Ordering::Release);
         }
         total
+    }
+
+    fn notes(&self) -> LinkNotes {
+        self.backlog.notes().clone()
+    }
+
+    fn notes_seq(&self) -> u64 {
+        self.backlog.notes_seq.load(Ordering::Acquire)
     }
 }
 

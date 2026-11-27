@@ -68,4 +68,4 @@ pub use protocol::{DocKey, Message, PROTOCOL_VERSION};
 pub use relay::{PeerHandle, Relay, RelayOutcome};
 pub use session::{PumpOutcome, SessionConfig, SyncSession, SyncStats};
 pub use threaded::ThreadedTransport;
-pub use transport::{Access, MemoryTransport, Transport};
+pub use transport::{Access, LinkNotes, MemoryTransport, Transport};

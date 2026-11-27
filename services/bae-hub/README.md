@@ -61,7 +61,7 @@ access = "write"          # write：可编辑、可新建工程；read：只能�
 projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*" 表示全部
 ```
 
-`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。几个值要配得上，配不上时拒绝启动：`max_message_mib` 不能超过 256（客户端最多收这么大，超过的消息客户端拒收，重连后又发，永远卡住）；`max_unsent_mib` 不能小于 `max_message_mib + max_backlog_mib`（被流量控制暂停的客户端那里可能合法地排队这么多），不写时跟着另外两个算。`max_message_mib` 调小的话，比它大的工程层就同步不了：可写客户端发来时连接被断开，重连后又发。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
+`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。每一项都不能是 0（包括 `max_backlog_mib`：0 会让流量控制只要有一个字节在排队就不发工程数据），填 0 时拒绝启动。几个值要配得上，配不上时拒绝启动：`max_message_mib` 不能超过 256（客户端最多收这么大，超过的消息客户端拒收，重连后又发，永远卡住）；`max_unsent_mib` 不能小于 `max_message_mib + max_backlog_mib`（被流量控制暂停的客户端那里可能合法地排队这么多），不写时跟着另外两个算。`max_message_mib` 调小的话，比它大的工程层就同步不了：可写客户端发来时连接被断开，重连后又发。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
 
 一个数据目录同时只能被一个 `bae-hub` 使用（靠 `hub.lock` 保证）。
 
@@ -76,7 +76,7 @@ projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*"
 | `/healthz` | 否 | 返回 `ok` |
 | `/v1/info` | 否 | 返回 `{"service": "bae-hub", "version", "protocol": 同步协议版本, "sync_path": "/projects/<project>", "anonymous": null / "read" / "write"}`。客户端连接前用它确认对方是 Hub、协议是否兼容、要不要向用户要令牌 |
 | `/v1/status` | 是 | 运行时间、已加载的工程数、在线客户端数，以及**当前令牌的名字和权限**（`access`）。同步连接自己的权限在握手响应里（见下一节），不需要另外查 |
-| `/v1/projects` | 是 | 这个令牌能看到的工程。每个工程有：`id`、`loaded`、`docs`、`peers`（客户端 ID、令牌名、权限、地址、连接时间）、`disk_bytes`、`saving`、消息计数 |
+| `/v1/projects` | 是 | 这个令牌能看到的工程。每个工程有：`id`、`loaded`、`docs`、`peers`（客户端 ID、令牌名、权限、地址、连接时间）、`disk_bytes`、`saving`、`not_saved`（修改照常转发、但不保存的文档，见下）、消息计数 |
 | `/projects/<工程 ID>` | 是 | WebSocket 同步，见下一节。不带 WebSocket 升级头时返回 426 |
 
 状态码：
@@ -128,6 +128,7 @@ Authorization: Bearer <令牌>
 - **清理**：`bae-sync` 的共享目录模式默认不删任何日志（spec 4.7），Hub 给自己的工程目录打开了清理（3 天）：平时那里只有 Hub 自己的日志，所以只删它崩溃时留下的、3 天以上的临时文件；从共享目录复制进来的工程里别人的日志，等 Hub 的日志包含了它们就删掉。
 - **备份**：复制整个数据目录即可。最好先停服务，或者用 NAS 的快照功能。
 - **意外断电**：Hub 丢了最后一点数据也没关系。客户端重连时双方交换版本，客户端会把 Hub 缺的部分重新上传。
+- **换回旧版本（降级）**：新版本的 bae-hub 写过的日志如果是更新的格式版本，旧版本不读、不改、不覆盖它（spec 4.3），这个文档的修改照常在客户端之间转发，但不保存。Hub 加载工程时打一条警告（`WARN`，带工程 ID 和这些文档），`/v1/projects` 的 `not_saved` 也列出它们。客户端各自留着这些修改，换回新版本的 Hub 之后重连时会补写进去。选择警告而不是拒绝打开工程：拒绝的话其他文档也都不能同步了。
 
 ## 实现
 

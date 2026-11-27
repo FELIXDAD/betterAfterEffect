@@ -289,6 +289,22 @@ impl HubConfig {
     pub fn validate(&self) -> Result<(), HubError> {
         let l = &self.limits;
         let mib = |n: usize| n.div_ceil(1 << 20);
+        for (name, zero) in [
+            ("max_message_mib", l.max_message == 0 || l.max_incoming == 0),
+            // 0 would hold back document data whenever a single byte waits:
+            // it works, but only as a misconfiguration.
+            ("max_backlog_mib", l.max_backlog == 0),
+            ("max_unsent_mib", l.max_unsent == 0),
+            ("stall_timeout_secs", l.stall_timeout.is_zero()),
+            (
+                "read_only_max_message_kib",
+                self.read_only_max_incoming == 0,
+            ),
+        ] {
+            if zero {
+                return Err(HubError::Config(format!("limits: {name} must not be 0")));
+            }
+        }
         // Clients connect with the default limits.
         let clients_take = HubLimits::default().max_incoming;
         if l.max_message > clients_take {
@@ -308,19 +324,6 @@ impl HubConfig {
                 l.max_unsent >> 20,
                 mib(held_back)
             )));
-        }
-        for (name, zero) in [
-            ("max_message_mib", l.max_message == 0 || l.max_incoming == 0),
-            ("max_unsent_mib", l.max_unsent == 0),
-            ("stall_timeout_secs", l.stall_timeout.is_zero()),
-            (
-                "read_only_max_message_kib",
-                self.read_only_max_incoming == 0,
-            ),
-        ] {
-            if zero {
-                return Err(HubError::Config(format!("limits: {name} must not be 0")));
-            }
         }
         for (i, t) in self.tokens.iter().enumerate() {
             if t.name.trim().is_empty() {
@@ -427,7 +430,7 @@ pub fn default_config_text(token: &str) -> String {
 # 工程多久没人连接就从内存里卸载（秒，0 表示不卸载）。数据都在磁盘上，下次连接时重新加载。
 # idle_unload_secs = 600
 
-# 客户端连接的上限（一般不用改）。
+# 客户端连接的上限（一般不用改；都不能是 0）。
 # [limits]
 # 单条消息的上限（MiB）：发给客户端的、可写客户端发来的。一个工程层的快照要放得下。
 # 不能超过 256（客户端最多收这么大）；调小的话，比它大的工程层就同步不了。
@@ -565,6 +568,30 @@ mod tests {
         assert!(FileConfig::parse("[limits]\nmax_mesage_mib = 1").is_err());
         let zero = FileConfig::parse("[limits]\nmax_message_mib = 0").unwrap();
         c.apply_file(zero);
+        assert!(c.validate().is_err());
+    }
+
+    /// No limit may be 0, `max_backlog_mib` included (accepted before,
+    /// although the others were refused).
+    #[test]
+    fn zero_limits_are_refused() {
+        for field in [
+            "max_message_mib",
+            "max_backlog_mib",
+            "max_unsent_mib",
+            "stall_timeout_secs",
+            "read_only_max_message_kib",
+        ] {
+            let mut c = HubConfig::new("/data");
+            c.apply_file(FileConfig::parse(&format!("[limits]\n{field} = 0")).unwrap());
+            let e = c.validate().unwrap_err().to_string();
+            assert!(
+                e.contains(&format!("{field} must not be 0")),
+                "{field}: {e}"
+            );
+        }
+        let mut c = HubConfig::new("/data");
+        c.limits.max_backlog = 0;
         assert!(c.validate().is_err());
     }
 
