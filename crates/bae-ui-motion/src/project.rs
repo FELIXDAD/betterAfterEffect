@@ -814,8 +814,14 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
                 (Some(w), Some(h)) => format!("{w} × {h}"),
                 _ => String::new(),
             };
+            let placeholder = v
+                .as_ref()
+                .and_then(|v| query::static_value(v, "kind"))
+                .is_some_and(|k| matches!(k, Value::Enum(k) if k == "placeholder"));
             let ty = if kind == ItemKind::Solid {
                 "Solid"
+            } else if placeholder {
+                "Placeholder"
             } else {
                 "Footage"
             };
