@@ -351,7 +351,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Dynamic Media", "动态媒体"),
     ("Basic", "基本"),
     ("Fill Target", "填充目标"),
-    ("Alpha Expansion", "Alpha 扩展"),
+    ("Alpha Expansion", "阿尔法扩展"),
     ("Fill Method", "填充方法"),
     ("Object", "对象"),
     ("Lighting Correction", "光照校正"),

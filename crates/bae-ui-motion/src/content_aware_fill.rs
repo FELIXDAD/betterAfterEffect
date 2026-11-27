@@ -42,12 +42,11 @@ pub(super) fn register(app: &mut bae_app::AppBuilder) {
         PanelKind::new("Content-Aware Fill", |_| Box::<FillPanel>::default()),
     );
     bae_ui::i18n::register(&[
-        ("Fill Layer", "填充图层"),
+        ("Fills", "填充"),
         ("Object", "对象"),
         ("Surface", "表面"),
         ("Edge Blend", "边缘混合"),
-        ("Entire Duration", "整个持续时间"),
-        ("Subtle", "轻微"),
+        ("Subtle", "精细"),
         ("Moderate", "中等"),
         ("Strong", "强"),
         ("Select a layer to fill.", "选择要填充的图层。"),
@@ -224,11 +223,18 @@ impl Panel for FillPanel {
                     &["None", "Subtle", "Moderate", "Strong"],
                 )
             });
+            // AE's Content-Aware Fill panel words these differently from the
+            // timeline's shared "Work Area"/"Entire Duration" strings.
+            let zh = bae_ui::i18n::lang() == bae_ui::i18n::Lang::Zh;
             choice(
                 ui,
                 "Range",
                 &mut self.range,
-                &["Work Area", "Entire Duration"],
+                if zh {
+                    &["工作区", "整体持续时间"]
+                } else {
+                    &["Work Area", "Entire Duration"]
+                },
             );
             ui.add_enabled(false, egui::Button::new(tr("Create Reference Frame")));
             if ui

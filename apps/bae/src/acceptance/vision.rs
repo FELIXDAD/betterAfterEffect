@@ -240,6 +240,13 @@ fn content_aware_fill_generates_a_masked_sequence_and_undo_removes_it() {
         .unwrap()
         .clone();
     let footage = h.state().stage().prim(&asset).unwrap();
+    // Like AE: "Fill 1" footage inside a "Fills" project folder.
+    let stage = h.state().stage();
+    assert_eq!(bae_motion::query::display_name_of(stage, &asset), "Fill 1");
+    assert_eq!(
+        bae_motion::query::display_name_of(stage, &asset.parent().unwrap()),
+        "Fills"
+    );
     let file = std::path::Path::new(
         footage
             .value("file:original")

@@ -172,9 +172,14 @@ pub(super) fn start(
     };
     let stop = job.stop.clone();
     let ui = ui.clone();
-    let name = match mode {
-        Mode::Freeze(_) => tr("Frozen Matte").to_owned(),
-        Mode::Fill(..) => tr("Fill Layer").to_owned(),
+    // AE names fills "Fill 1", "Fill 2", ... and imports them into a "Fills"
+    // project folder (zh: 填充 @0, folder 填充).
+    let (name, item_folder) = match mode {
+        Mode::Freeze(_) => (tr("Frozen Matte").to_owned(), None),
+        Mode::Fill(..) => (
+            query::next_numbered_name(cx.stage, &query::layers_folder(&comp), tr("Fill")),
+            Some(tr("Fills").to_owned()),
+        ),
     };
     std::thread::Builder::new()
         .name("vision-bake".into())
@@ -341,7 +346,7 @@ pub(super) fn start(
                 let file = ImportFile {
                     path: first.to_string_lossy().into_owned(),
                     name: Some(name),
-                    folder: None,
+                    folder: item_folder,
                     attrs: media
                         .info()
                         .asset_attributes()
