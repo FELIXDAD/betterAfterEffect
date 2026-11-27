@@ -38,24 +38,19 @@ fn field(ui: &mut Ui, text: &str, width: f32) -> egui::Response {
     let resp = resp.labeled_value(egui::WidgetType::ComboBox, text, text);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
-        let bg = if resp.hovered() {
-            color::FIELD_HOVER
-        } else {
-            color::DROPDOWN
-        };
-        p.rect_filled(rect, 3.0, bg);
+        let ink = bae_ui::widgets::field_frame(p, rect, resp.hovered(), ui.is_enabled());
         p.with_clip_rect(rect.shrink2(vec2(2.0, 0.0))).text(
             pos2(rect.left() + 7.0, rect.center().y),
             Align2::LEFT_CENTER,
             text,
             theme::body(),
-            color::TEXT_STRONG,
+            ink,
         );
         let chev = Rect::from_center_size(
             pos2(rect.right() - 11.0, rect.center().y),
             Vec2::splat(14.0),
         );
-        icons::paint(p, chev, Icon::ChevronDown, color::TEXT_STRONG);
+        icons::paint(p, chev, Icon::ChevronDown, ink);
     }
     resp
 }

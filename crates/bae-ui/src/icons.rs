@@ -336,11 +336,24 @@ pub fn path(painter: &Painter, points: Vec<Pos2>, closed: bool, stroke: Stroke) 
 /// `size` is the clickable square in points; the glyph is drawn at 16pt
 /// or smaller to fit.
 pub fn button(ui: &mut Ui, icon: Icon, size: f32, selected: bool) -> Response {
+    icon_button(ui, icon, size, selected, false)
+}
+
+/// A tool in the Tools panel: blue while it is the current tool (AE 26);
+/// other on/off icon buttons ([`button`]) are gray when on.
+pub fn tool_button(ui: &mut Ui, icon: Icon, size: f32, selected: bool) -> Response {
+    icon_button(ui, icon, size, selected, true)
+}
+
+fn icon_button(ui: &mut Ui, icon: Icon, size: f32, selected: bool, tool: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
-        let bg = if selected {
+        // AE 26: an on toggle is a #4b4b4b box with a #d0 glyph.
+        let bg = if selected && tool {
             Some(color::TOOL_SELECTED)
+        } else if selected {
+            Some(color::ROW_SELECTED)
         } else if response.is_pointer_button_down_on() {
             Some(color::BUTTON_ON)
         } else if response.hovered() {
@@ -351,9 +364,9 @@ pub fn button(ui: &mut Ui, icon: Icon, size: f32, selected: bool) -> Response {
         if let Some(bg) = bg {
             p.rect_filled(rect, 3.0, bg);
         }
-        let fg = if selected {
+        let fg = if selected && tool {
             Color32::WHITE
-        } else if response.hovered() {
+        } else if selected || response.hovered() {
             color::TEXT_STRONG
         } else {
             color::ICON

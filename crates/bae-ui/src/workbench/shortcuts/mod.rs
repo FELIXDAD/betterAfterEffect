@@ -1403,17 +1403,7 @@ fn combo(
     if ui.is_rect_visible(rect) {
         let enabled = ui.is_enabled();
         let p = ui.painter();
-        let bg = if resp.hovered() {
-            color::FIELD_HOVER
-        } else {
-            color::DROPDOWN
-        };
-        p.rect_filled(rect, 3.0, bg);
-        let fg = if enabled {
-            color::TEXT_STRONG
-        } else {
-            color::TEXT_DISABLED
-        };
+        let fg = crate::widgets::field_frame(p, rect, resp.hovered(), enabled);
         clipped(
             p,
             Rect::from_min_max(rect.min + vec2(8.0, 0.0), rect.max - vec2(24.0, 0.0)),
