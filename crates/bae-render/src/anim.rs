@@ -432,6 +432,11 @@ impl AnimEvaluator {
                         params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
                         params.extend(crate::paint::source_params(&strokes));
                     }
+                    // The Puppet effect's pins at this frame.
+                    if e.match_name == crate::puppet::PUPPET_EFFECT {
+                        let pins = crate::puppet::pins(&e.children);
+                        params.push((crate::puppet::PINS_PARAM, crate::puppet::pack(&pins)));
+                    }
                     RenderEffect {
                         path: e.path.clone(),
                         effect: e.match_name.clone(),
@@ -1062,6 +1067,13 @@ fn material(m: &bae_anim::MaterialState) -> Material {
         specular_intensity: percent(m.specular_intensity),
         specular_shininess: percent(m.specular_shininess),
         metal: percent(m.metal),
+        transparency: percent(m.transparency),
+        transparency_rolloff: percent(m.transparency_rolloff),
+        shadow_color: [
+            m.shadow_color[0] as f32,
+            m.shadow_color[1] as f32,
+            m.shadow_color[2] as f32,
+        ],
     }
 }
 

@@ -531,8 +531,11 @@ impl RenderLayer {
                     mat.specular_intensity,
                     mat.specular_shininess,
                     mat.metal,
+                    mat.transparency,
+                    mat.transparency_rolloff,
                 ]
                 .map(f32::to_bits),
+                mat.shadow_color.map(f32::to_bits),
             )
                 .hash(h);
         }

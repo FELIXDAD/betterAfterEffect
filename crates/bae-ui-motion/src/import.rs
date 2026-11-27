@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+pub(crate) mod auto_reload;
 mod verify;
 pub(crate) use verify::FrameChecks;
 
@@ -531,10 +532,37 @@ fn selected_footage(cx: &PanelContext<'_>, session: &SharedSession) -> Vec<PrimP
         .collect()
 }
 
+/// How a footage item's file is read again.
+fn sequence_mode(item: &bae_model::PrimView<'_>) -> SequenceMode {
+    if item.value("kind").and_then(|v| v.as_str()) != Some("sequence") {
+        SequenceMode::Single
+    } else if item
+        .value("sequence:pattern")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s.starts_with("*."))
+    {
+        SequenceMode::Alphabetical
+    } else {
+        SequenceMode::Sequence
+    }
+}
+
+/// The items read their files again, as one undo step.
+fn apply_reloads(cx: &mut PanelContext<'_>, items: Vec<bae_motion::ReloadItem>) {
+    if items.is_empty() {
+        return;
+    }
+    for r in &items {
+        auto_reload::invalidate(cx.resources, &r.file.path);
+    }
+    cx.invoke_with("item.reload_files", json!({ "items": items }));
+}
+
 /// File > Reload Footage (Cmd/Ctrl+Alt+L): the selected items read their
 /// files again (a file changed on disk); they keep their names.
 pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession) {
     let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    let mut reloads = Vec::new();
     for item in selected_footage(cx, session) {
         let Some(path) = footage_file(cx.stage, &item) else {
             continue;
@@ -545,26 +573,14 @@ pub(crate) fn reload_footage(cx: &mut PanelContext<'_>, session: &SharedSession)
         let Some(view) = cx.stage.prim(&item) else {
             continue;
         };
-        let sequence = if view.value("kind").and_then(|v| v.as_str()) != Some("sequence") {
-            SequenceMode::Single
-        } else if view
-            .value("sequence:pattern")
-            .and_then(|v| v.as_str())
-            .is_some_and(|s| s.starts_with("*."))
-        {
-            SequenceMode::Alphabetical
-        } else {
-            SequenceMode::Sequence
-        };
+        let sequence = sequence_mode(&view);
         let mut probed = probe_selected(&[path], &defaults, sequence);
         if let Some(file) = probed.files.pop() {
-            cx.invoke_with(
-                "item.replace_file",
-                json!({ "item": item, "file": file, "keep_name": true, "keep_interpretation": true }),
-            );
+            reloads.push(bae_motion::ReloadItem { item, file });
         }
         verify::report(cx, tr("Reload Footage"), probed);
     }
+    apply_reloads(cx, reloads);
 }
 
 /// File / Layer ▸ Reveal in Explorer (Finder on macOS): the file of the
@@ -606,6 +622,7 @@ pub(crate) fn replace_footage(cx: &mut PanelContext<'_>, session: &SharedSession
     }
     let mut probed = probe(&[path], &defaults);
     if let Some(file) = probed.files.pop() {
+        auto_reload::invalidate(cx.resources, &file.path);
         let keep = crate::prefs::current(cx.resources)
             .str("import.footage_interpretation_on_replace")
             == "remember";
@@ -689,6 +706,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
 /// Registers this module's Chinese strings (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    let watcher = Arc::new(auto_reload::FocusReload::default());
+    app.insert_resource(watcher.clone());
+    let _ = app.register_arc::<dyn bae_gpu::WarmUp>("bae.media/focus-reload", watcher);
     let _ = app.register_arc::<dyn bae_gpu::WarmUp>(
         "bae.media/import-formats",
         Arc::new(verify::FormatWarmUp),

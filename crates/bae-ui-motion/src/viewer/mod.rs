@@ -43,6 +43,7 @@ mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+pub(crate) mod puppet_tool;
 mod scene_icons;
 mod select_tool;
 mod shape_tool;
@@ -54,6 +55,7 @@ pub(crate) mod view3d;
 pub(crate) mod view_options;
 
 pub(crate) use overlay::{mask_color, path_shapes};
+pub(crate) use puppet_tool::record_options_ui as puppet_record_options_ui;
 pub(crate) use transform::nudge_layers;
 
 /// The magnification popup (AE 26): `(magnification, label)`.
@@ -305,6 +307,8 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    /// Puppet tools: the pin being dragged.
+    puppet: puppet_tool::PuppetState,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
     /// menu): Esc goes to it instead of switching to the last 3D view.
     esc_taken: bool,
@@ -815,6 +819,10 @@ impl Panel for CompositionViewer {
                     None => false,
                 }
             }
+            crate::actions::ids::DELETE if self.puppet.has_selection() => {
+                self.puppet.delete_selected(cx);
+                true
+            }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
                     self.delete_vertices(cx, &session, &info);
@@ -1107,13 +1115,27 @@ impl Panel for CompositionViewer {
         if self.nudge.is_some() && !ui.input(|i| arrows.iter().any(|k| i.key_down(*k))) {
             self.finish_nudge(cx, &session, &info);
         }
-        // Ctrl+T knows a path is selected (Free Transform Points).
-        session.lock().vertex_path = self
-            .select
-            .vertices
-            .prim
-            .clone()
-            .filter(|_| !self.select.vertices.is_empty());
+        // Ctrl+T and Layer ▸ Mask and Shape Path know which vertices are
+        // selected.
+        {
+            let mut s = session.lock();
+            if let Some(indices) = s.vertex_request.take()
+                && self.select.vertices.prim.is_some()
+            {
+                self.select.vertices.indices = indices;
+            }
+            s.vertex_path = self
+                .select
+                .vertices
+                .prim
+                .clone()
+                .filter(|_| !self.select.vertices.is_empty());
+            s.vertex_indices = if s.vertex_path.is_some() {
+                self.select.vertices.indices.clone()
+            } else {
+                Vec::new()
+            };
+        }
         let scrub = session.lock().scrub.clone();
         let editing = scrub.is_some()
             || self.nudge.is_some()
@@ -1761,6 +1783,21 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
+        // Puppet tools: pins added and dragged.
+        let selected_layers = session.lock().selected_layers.clone();
+        let puppet = puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+            effective,
+            &painter,
+            time,
+            &selected_layers,
+        );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.
@@ -1798,7 +1835,9 @@ impl Panel for CompositionViewer {
             &opts,
             effective == Tool::Selection && !path.owns && !points.owns,
         );
-        let select_cursor = if points.owns {
+        let select_cursor = if puppet.owns {
+            puppet.cursor
+        } else if points.owns {
             points.cursor
         } else if path.owns || sketching || guide_busy {
             path.cursor
@@ -1866,6 +1905,7 @@ impl Panel for CompositionViewer {
             &session,
             &comp,
             &view,
+            self.type_tool.editing.is_some(),
         );
 
         // Items dropped from the project panel become layers.
