@@ -19,7 +19,7 @@ pub(super) fn switch_name(icon: Icon) -> &'static str {
         Icon::FrameBlend => "Frame Blending",
         Icon::MotionBlur => "Motion Blur",
         Icon::Adjustment => "Adjustment Layer",
-        Icon::Cube => "3D Layer",
+        Icon::Cube | Icon::AxisLocal => "3D Layer",
         _ => "Switch",
     }
 }
@@ -116,10 +116,7 @@ impl TimelinePanel {
                     if !cols.visible(Column::Av) {
                         break;
                     }
-                    let kind = query::layer_kind(stage, layer).unwrap_or_default();
-                    if attr == "audio_enabled"
-                        && !matches!(kind.as_str(), "footage" | "audio" | "pre_comp")
-                    {
+                    if !switches::has_switch(stage, layer, attr) {
                         continue;
                     }
                     let on = bool_attr(stage, layer, attr);
@@ -326,14 +323,39 @@ impl TimelinePanel {
                             locked,
                         )
                     };
+                    let kind = query::layer_kind(stage, layer);
+                    // AE: a 3D layer without pixels of its own (a null) shows the
+                    // axis icon instead of the cube.
+                    let three_d = if kind.as_deref() == Some("null") {
+                        Icon::AxisLocal
+                    } else {
+                        Icon::Cube
+                    };
                     for (i, attr, icon) in [
                         (0, "shy", Icon::Shy),
                         (1, "collapse_transformation", Icon::Collapse),
                         (5, "motion_blur", Icon::MotionBlur),
                         (6, "adjustment_layer", Icon::Adjustment),
-                        (7, "three_d", Icon::Cube),
+                        (7, "three_d", three_d),
                     ] {
-                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr).into());
+                        if switches::has_switch(stage, layer, attr) {
+                            cell(sw(i), attr, icon, bool_attr(stage, layer, attr).into());
+                        }
+                    }
+                    // Cameras and lights are always 3D: a fixed axis icon, no switch.
+                    if switches::is_camera_or_light(kind.as_deref()) {
+                        let r = sw(7);
+                        ui.interact(r, rid("three_d"), Sense::hover()).labeled(
+                            egui::WidgetType::Label,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("3D Layer")]),
+                        );
+                        widgets::paint_switch(
+                            ui.painter(),
+                            r.shrink2(vec2(1.0, 2.0)),
+                            true,
+                            Icon::AxisLocal,
+                            false,
+                        );
                     }
                     if let Some(mode) = footage_frame_blending(stage, layer) {
                         cell(
@@ -352,14 +374,16 @@ impl TimelinePanel {
                             .unwrap_or(true);
                         cell(sw(3), "effects_enabled", Icon::Fx, on.into());
                     }
-                    let draft = stage
-                        .prim(layer)
-                        .and_then(|v| query::static_value(&v, "quality"))
-                        .is_some_and(|v| v.as_str() == Some("draft"));
-                    cell(sw(2), "quality", Icon::Quality, (!draft).into());
+                    if switches::has_switch(stage, layer, "quality") {
+                        let draft = stage
+                            .prim(layer)
+                            .and_then(|v| query::static_value(&v, "quality"))
+                            .is_some_and(|v| v.as_str() == Some("draft"));
+                        cell(sw(2), "quality", Icon::Quality, (!draft).into());
+                    }
                 }
-                // Modes: Mode, T, Track Matte.
-                if cols.visible(Column::Modes) {
+                // Modes: Mode, T, Track Matte (empty for cameras and lights, as in AE).
+                if cols.visible(Column::Modes) && switches::has_switch(stage, layer, "blend_mode") {
                     self.modes_cells(
                         ui,
                         cx,

@@ -64,6 +64,7 @@ pub(crate) use menus::{
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
+pub(crate) use switches::has_switch;
 
 // Registration contract of the footage optical-flow backend.
 const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
