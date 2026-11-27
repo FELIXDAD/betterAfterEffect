@@ -301,6 +301,62 @@ fn footage_replacement_reuses_or_resets_interpretation_and_ntsc_display() {
 }
 
 #[test]
+fn media_cache_folders_and_clean_button_use_the_disk_page_draft() {
+    use egui_kittest::kittest::Queryable as _;
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = gui();
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page":"disk"}),
+    ));
+    settle(&mut h);
+    for (button, key, folder) in [
+        (
+            "Database: Choose Folder...",
+            "disk.media_cache_database_folder",
+            "index",
+        ),
+        (
+            "Cache: Choose Folder...",
+            "disk.media_cache_folder",
+            "audio",
+        ),
+    ] {
+        h.get_by_label(button).click();
+        settle(&mut h);
+        assert_eq!(
+            h.state_mut().workspace.take_settings_requests(),
+            [format!("choose:{key}")]
+        );
+        h.state_mut()
+            .workspace
+            .set_setting(key, dir.path().join(folder).to_string_lossy().into_owned());
+        settle(&mut h);
+    }
+    h.get_by_label("Clean Database & Cache").click();
+    settle(&mut h);
+    assert_eq!(
+        h.state_mut().workspace.take_settings_requests(),
+        ["disk.clean_database_and_cache"]
+    );
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    assert_eq!(
+        Path::new(h.state().prefs.current().str("disk.media_cache_folder")),
+        dir.path().join("audio")
+    );
+    assert_eq!(
+        Path::new(
+            h.state()
+                .prefs
+                .current()
+                .str("disk.media_cache_database_folder")
+        ),
+        dir.path().join("index")
+    );
+}
+
+#[test]
 fn returning_to_the_app_reloads_only_the_selected_footage_types() {
     use std::io::Write;
     use std::time::{Duration, Instant};

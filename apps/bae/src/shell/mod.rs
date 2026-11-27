@@ -155,6 +155,23 @@ impl From<egui_winit::accesskit_winit::Event> for UserEvent {
     }
 }
 
+fn media_folders(
+    p: &bae_prefs::Preferences,
+    root: &std::path::Path,
+) -> bae_media::conform::CacheFolders {
+    let folder = |key| {
+        if p.str(key).is_empty() {
+            root.to_owned()
+        } else {
+            std::path::PathBuf::from(p.str(key))
+        }
+    };
+    bae_media::conform::CacheFolders::new(
+        &folder("disk.media_cache_database_folder"),
+        &folder("disk.media_cache_folder"),
+    )
+}
+
 fn measure_cache_volume(proxy: EventLoopProxy<UserEvent>, dir: std::path::PathBuf) {
     let _ = std::thread::Builder::new()
         .name("bae-cache-volume".into())
@@ -331,6 +348,18 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     prefs.update_capacity(bae_platform::memory::total_bytes(), None);
     app.insert_resource(prefs.clone());
     if let Some(dirs) = dirs.as_ref().filter(|_| global.smoke_test.is_none()) {
+        let root = dirs.cache.clone();
+        let cache = Arc::new(bae_media::conform::ConformedAudio::new(media_folders(
+            &prefs.current(),
+            &root,
+        )));
+        let weak = Arc::downgrade(&cache);
+        prefs.subscribe(move |p| {
+            if let Some(cache) = weak.upgrade() {
+                cache.configure(media_folders(p, &root));
+            }
+        });
+        app.insert_resource(cache);
         measure_cache_volume(
             proxy.clone(),
             prefs.current().preview_cache_dir(&dirs.cache),
@@ -574,6 +603,12 @@ impl Shell {
                 .get_registry::<dyn bae_gpu::WarmUp>()
                 .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
                 .unwrap_or_default();
+            if let Some(cache) = self
+                .app
+                .resource::<Arc<bae_media::conform::ConformedAudio>>()
+            {
+                tasks.push(cache.clone());
+            }
             if let Some(disk) = self
                 .app
                 .resource::<Arc<bae_ui_motion::disk_frames::DiskFrames>>()
@@ -901,6 +936,16 @@ impl Shell {
     /// Buttons of the Preferences window that need the system.
     fn run_settings_requests(&mut self, event_loop: &ActiveEventLoop) {
         for request in self.workspace.take_settings_requests() {
+            if request == "disk.clean_database_and_cache" {
+                if let (Some(cache), Some(dirs)) = (
+                    self.app
+                        .resource::<Arc<bae_media::conform::ConformedAudio>>(),
+                    self.app.resource::<AppDirs>(),
+                ) {
+                    cache.clean(media_folders(self.workspace.settings_draft(), &dirs.cache));
+                }
+                continue;
+            }
             if request == "disk.measure_free_space" {
                 if let Some(dirs) = self.app.resource::<AppDirs>() {
                     measure_cache_volume(
@@ -965,6 +1010,18 @@ impl Shell {
                     let mut dialog = rfd::FileDialog::new();
                     if let Some(view) = &self.view {
                         dialog = dialog.set_parent(&*view.window);
+                    }
+                    if matches!(
+                        key,
+                        "disk.media_cache_database_folder" | "disk.media_cache_folder"
+                    ) && let Some(dirs) = self.app.resource::<AppDirs>()
+                    {
+                        let chosen = self.workspace.settings_draft().str(key);
+                        dialog = dialog.set_directory(if chosen.is_empty() {
+                            dirs.cache.as_path()
+                        } else {
+                            std::path::Path::new(chosen)
+                        });
                     }
                     dialog.pick_folder()
                 };
