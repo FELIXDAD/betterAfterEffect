@@ -70,6 +70,18 @@ pub fn run(mut app: App, dirs: AppDirs) -> ExitCode {
     if !is_subcommand {
         bae_ui_motion::register_preset_index(&mut app, dirs.data.join("Presets"));
     }
+    let prefs = if global.smoke_test.is_some() {
+        bae_prefs::PrefsStore::default()
+    } else {
+        bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
+    };
+    #[cfg(windows)]
+    bae_media::media_foundation::set_hardware_decoding(
+        prefs
+            .current()
+            .bool("import.enable_hardware_accelerated_decoding"),
+    );
+
     // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
     if !global.safe_mode {
         bae_plugin::load_installed(&app);
@@ -98,6 +110,6 @@ pub fn run(mut app: App, dirs: AppDirs) -> ExitCode {
             global,
         } => cli::dispatch(&mut app, &name, &matches, &global),
         Invocation::Headless(global) => crate::headless::run(&mut app, &global),
-        Invocation::Gui(global) => crate::shell::run(app, &global),
+        Invocation::Gui(global) => crate::shell::run(app, &global, prefs),
     }
 }

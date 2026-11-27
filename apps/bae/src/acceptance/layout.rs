@@ -587,8 +587,8 @@ fn render_queue_content_is_inset_from_the_panel_edges() {
             "{size:?}: panel {:?}, within {pad} pt of an edge: {touching:#?}",
             area.rect
         );
-        // A frame-range field below the fold must be reachable with the wheel.
-        let frames_end = |h: &Ui| queue_control(h, 1, "Frames · End").unwrap().rect();
+        // The last row's Output To below the fold must be reachable with the wheel.
+        let frames_end = |h: &Ui| queue_control(h, 1, "Output To").unwrap().rect();
         if !area.rect.contains_rect(frames_end(&h)) {
             send(&mut h, Event::PointerMoved(area.rect.center()));
             send(

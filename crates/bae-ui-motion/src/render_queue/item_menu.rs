@@ -24,21 +24,30 @@ pub(super) enum ItemAction {
     DuplicateWithName,
     AddOutput,
     Reveal,
+    /// Reveal the rendered file in Explorer / Finder.
+    RevealOutput,
+    RenderAgain,
+    Remove,
 }
 
 impl ItemAction {
-    pub const ALL: [(Self, &'static str); 4] = [
+    pub const ALL: [(Self, &'static str); 7] = [
         (Self::Duplicate, "Duplicate (Render Item)"),
         (Self::DuplicateWithName, "Duplicate With File Name"),
         (Self::AddOutput, "Add Output Module"),
         (Self::Reveal, "Reveal Composition in Project"),
+        (Self::RevealOutput, ""),
+        (Self::RenderAgain, "Render Again"),
+        (Self::Remove, "Remove"),
     ];
 
+    /// The app action for the actions other panels handle.
     pub fn action_id(self) -> &'static str {
         match self {
             Self::Duplicate | Self::DuplicateWithName => crate::actions::ids::DUPLICATE,
             Self::AddOutput => "motion.comp.add_output_module",
             Self::Reveal => "motion.layer.reveal_composition_in_project",
+            Self::RevealOutput | Self::RenderAgain | Self::Remove => "",
         }
     }
 
@@ -49,13 +58,22 @@ impl ItemAction {
         }
     }
 
-    pub fn menu(ui: &mut egui::Ui, rendering: bool, has_comp: bool) -> Option<Self> {
+    /// The item's right-click menu (AE keeps Reveal, Render Again and Remove
+    /// here rather than as buttons in the queue).
+    pub fn menu(ui: &mut egui::Ui, enabled: impl Fn(Self) -> bool) -> Option<Self> {
         let mut chosen = None;
         for (action, title) in Self::ALL {
-            let enabled = action.enabled(rendering, has_comp);
+            if action == Self::RevealOutput {
+                ui.separator();
+            }
+            let title = if action == Self::RevealOutput {
+                reveal_label()
+            } else {
+                title
+            };
             if ui
                 .add_enabled(
-                    enabled,
+                    enabled(action),
                     egui::Button::new(tr(title).trim_end_matches(" (Render Item)")),
                 )
                 .clicked()
@@ -170,17 +188,23 @@ mod tests {
         bae_ui::i18n::register(super::super::ZH);
         let zh = |key| bae_ui::i18n::translation(key).unwrap();
         assert_eq!(
-            ItemAction::ALL.map(|(a, key)| (
-                zh(key),
-                a.enabled(false, true),
-                a.enabled(true, false)
-            )),
+            ItemAction::ALL[..4]
+                .iter()
+                .map(|&(a, key)| (zh(key), a.enabled(false, true), a.enabled(true, false)))
+                .collect::<Vec<_>>(),
             [
                 ("复制", true, false),
                 ("与文件名一起复制", true, false),
                 ("添加输出模块", true, false),
                 ("在项目中显示合成", true, false)
             ]
+        );
+        assert_eq!(
+            ItemAction::ALL[5..]
+                .iter()
+                .map(|&(_, key)| zh(key))
+                .collect::<Vec<_>>(),
+            ["重新渲染", "移除"]
         );
         assert!(ItemAction::Reveal.enabled(true, true));
         assert_eq!(

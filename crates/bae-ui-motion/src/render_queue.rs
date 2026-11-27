@@ -28,6 +28,7 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 use crate::panel_columns::{Column, Columns};
 
+mod chrome;
 mod filenames;
 mod item_menu;
 pub(crate) use filenames::add as add_to_queue;
@@ -143,9 +144,7 @@ fn template_menu(
     selected: Option<&str>,
     can_save: bool,
 ) -> Option<TemplatePick> {
-    let resp = ui
-        .add(egui::Button::new("▾").frame(false).small())
-        .labeled(egui::WidgetType::Button, label);
+    let resp = chrome::chevron_box(ui, label);
     let mut picked = None;
     egui::Popup::menu(&resp).id(id).show(|ui| {
         let current = items.iter().find(|(name, _)| Some(*name) == selected);
@@ -1351,6 +1350,10 @@ const COLUMNS: &[Column] = &[
 #[derive(Debug, Default)]
 pub struct RenderQueuePanel {
     columns: Columns,
+    /// Twirl state of each render item.
+    views: std::collections::HashMap<u64, ItemView>,
+    /// The Current Render twirl / Info.
+    details: bool,
     error: Option<String>,
     naming: Option<(u64, Option<usize>, NameDialog)>,
     file_editor: Option<filenames::Editor>,
@@ -1389,6 +1392,8 @@ impl Panel for RenderQueuePanel {
                             vec![item.comp.clone()];
                         cx.open_panel("project");
                     }
+                    // The panel runs these itself.
+                    ItemAction::RevealOutput | ItemAction::RenderAgain | ItemAction::Remove => {}
                 }
             }
             return true;
@@ -1501,87 +1506,98 @@ impl RenderQueuePanel {
             }
             self.naming = None;
         }
-        let mut render = false;
-        ui.horizontal(|ui| {
-            render = ui
-                .add_enabled(!running && queued > 0, egui::Button::new(tr("Render")))
-                .clicked();
-            if running {
-                ui.spinner();
-                ui.label(tr("Rendering"));
-            }
-        });
-        if render {
+        let current = {
+            let q = queue.lock();
+            q.items.iter().find_map(|i| match i.status {
+                ItemStatus::Rendering { done, total } => Some((
+                    i.comp_name.clone(),
+                    i.started,
+                    (
+                        done,
+                        total,
+                        i.started
+                            .and_then(|t| t.elapsed().ok())
+                            .map_or(0.0, |d| d.as_secs_f64()),
+                    ),
+                )),
+                _ => None,
+            })
+        };
+        let progress = chrome::Progress {
+            running,
+            current: current.as_ref().map(|c| c.2),
+            queued,
+        };
+        match chrome::current_render(ui, &progress, &mut self.details) {
             // `start` locks the queue itself.
-            self.error = start(&queue, cx.stage, cx.resources).err();
+            Some(chrome::BarAction::Render) => {
+                self.error = start(&queue, cx.stage, cx.resources).err();
+            }
+            Some(chrome::BarAction::Stop) => {
+                let mut q = queue.lock();
+                let rendering: Vec<u64> = q
+                    .items
+                    .iter()
+                    .filter(|i| matches!(i.status, ItemStatus::Rendering { .. }))
+                    .map(|i| i.id)
+                    .collect();
+                for id in rendering {
+                    q.cancel(id);
+                }
+            }
+            None => {}
+        }
+        if self.details
+            && let Some((comp, _, (done, total, _))) = &current
+        {
+            ui.label(format!("{comp}  ·  {done} / {total}"));
         }
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
-        ui.separator();
         let mut open = None;
         let mut q = queue.lock();
         let panel_width = ui.available_width();
+        let visible: Vec<&Column> = COLUMNS.iter().filter(|c| self.columns.visible(c)).collect();
         egui::ScrollArea::horizontal()
             .id_salt("queue_columns")
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.set_min_width(panel_width);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    for col in COLUMNS {
-                        if !self.columns.visible(col) {
-                            continue;
-                        }
-                        let resp = ui.add_sized(
-                            [col.width, 19.0],
-                            egui::Label::new(tr(col.title)).sense(egui::Sense::click()),
-                        );
-                        crate::common::context_menu(&resp, &mut |ui| {
-                            self.columns.header_menu(ui, COLUMNS, col)
-                        });
-                    }
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let columns = &mut self.columns;
+                chrome::header(ui, &visible, |resp, col| {
+                    crate::common::context_menu(resp, &mut |ui| {
+                        columns.header_menu(ui, COLUMNS, col)
+                    });
                 });
                 if q.items.is_empty() {
+                    ui.add_space(6.0);
                     ui.weak(tr(
                         "Add a composition with Composition > Add to Render Queue.",
                     ));
                     return;
                 }
-                let mut remove = None;
-                let mut cancel = None;
-                let mut requeue = None;
                 let mut command = None;
                 // No scroll area of its own: the dock scrolls a panel that does not fit
                 // (AE opens the Render Queue in the short Timeline frame).
                 for (i, item) in q.items.iter_mut().enumerate() {
                     let comp = bae_motion::query::comp_info(cx.stage, &item.comp);
+                    let view = self.views.entry(item.id).or_default();
                     ui.push_id(item.id, |ui| {
                         item_ui(
                             ui,
                             i + 1,
                             item,
                             comp.as_ref(),
-                            &self.columns,
+                            &visible,
                             library.as_deref(),
                             project.as_deref(),
-                            &mut remove,
-                            &mut cancel,
-                            &mut requeue,
+                            view,
                             &mut command,
                             &mut open,
                         );
                     });
-                    ui.separator();
-                }
-                if let Some(id) = remove {
-                    q.remove(id);
-                }
-                if let Some(id) = cancel {
-                    q.cancel(id);
-                }
-                if let Some(id) = requeue {
-                    q.requeue(id);
                 }
                 if let Some((id, action)) = command {
                     match action {
@@ -1590,17 +1606,46 @@ impl RenderQueuePanel {
                         ItemAction::Duplicate | ItemAction::DuplicateWithName => {
                             q.duplicate(id, action == ItemAction::DuplicateWithName)
                         }
-                        _ => cx.invoke_with(
+                        ItemAction::Remove => {
+                            q.remove(id);
+                        }
+                        ItemAction::RenderAgain => q.requeue(id),
+                        ItemAction::RevealOutput => {
+                            if let Some(file) =
+                                q.items.iter().find(|i| i.id == id).and_then(rendered_file)
+                            {
+                                reveal(file);
+                            }
+                        }
+                        ItemAction::AddOutput | ItemAction::Reveal => cx.invoke_with(
                             action.action_id(),
                             serde_json::json!({ "queue_item": id }),
                         ),
                     }
                 }
             });
+        let live: std::collections::HashSet<u64> = q.items.iter().map(|i| i.id).collect();
+        self.views.retain(|id, _| live.contains(id));
         if q.running {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         }
+        // AE's batch footer, at the bottom of the panel.
+        let rest = ui.available_height();
+        if rest.is_finite() && rest > 30.0 {
+            ui.add_space(rest - 24.0);
+        }
+        chrome::rule(ui);
+        let started = current
+            .as_ref()
+            .and_then(|c| c.1)
+            .map(bae_platform::utc_label);
+        chrome::footer(
+            ui,
+            if q.running { tr("Rendering") } else { "" },
+            started.as_deref(),
+            current.as_ref().map(|c| c.2.2),
+        );
         drop(q);
         // The item's settings links (the dialogs read the queue themselves).
         match open {
@@ -1637,22 +1682,102 @@ enum QueueLink {
 
 const CHOOSE_OUTPUT: &str = "motion.render_queue.choose_output";
 
+/// Twirl state of a render item's rows.
+#[derive(Debug, Default)]
+struct ItemView {
+    /// The item's twirl is closed (AE adds items open).
+    collapsed: bool,
+    /// The Render Settings row's twirl is open.
+    settings: bool,
+    /// Output modules whose twirl is open.
+    modules: std::collections::HashSet<usize>,
+}
+
+/// The file a finished (or stopped) render wrote first.
+fn rendered_file(item: &QueueItem) -> Option<&Path> {
+    match &item.status {
+        ItemStatus::Done { first, .. } => Some(first),
+        ItemStatus::Stopped { first, .. } => first.as_deref(),
+        _ => None,
+    }
+}
+
+/// Left edge (from the row's left) of the Log / Output To group, as in AE.
+const SECOND_GROUP: f32 = 440.0;
+
+/// Width of the widest of `titles` (row titles are right-aligned to it).
+fn title_width(ui: &egui::Ui, titles: &[&str]) -> f32 {
+    titles
+        .iter()
+        .map(|t| {
+            ui.painter()
+                .layout_no_wrap((*t).to_owned(), bae_ui::theme::body(), egui::Color32::WHITE)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max)
+        + 2.0
+}
+
+/// A Render Settings / Output Module row: 16 pt, a rule under it.
+fn sub_row<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui, f32) -> R) -> R {
+    let width = ui.available_width();
+    let left = ui.cursor().left();
+    let inner = ui
+        .allocate_ui_with_layout(
+            egui::vec2(width, chrome::ROW_H),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_size(egui::vec2(width, chrome::ROW_H));
+                ui.spacing_mut().item_spacing.x = 4.0;
+                add(ui, left)
+            },
+        )
+        .inner;
+    chrome::rule(ui);
+    inner
+}
+
+/// A right-aligned row title ("Render Settings:").
+fn row_title(ui: &mut egui::Ui, text: &str, width: f32) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, chrome::ROW_H),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| ui.label(text),
+    );
+}
+
+/// Moves the row's cursor to `x` (at least `gap` after what is there).
+fn skip_to(ui: &mut egui::Ui, x: f32, gap: f32) {
+    let at = ui.cursor().left();
+    ui.add_space((x - at).max(gap));
+}
+
+/// A twirled-open row's details, dim and indented under the row title.
+fn details(ui: &mut egui::Ui, indent: f32, text: &str) {
+    sub_row(ui, |ui, _| {
+        ui.add_space(indent);
+        ui.add(
+            egui::Label::new(egui::RichText::new(text).color(bae_ui::theme::color::TEXT_DIM))
+                .truncate(),
+        );
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn item_ui(
     ui: &mut egui::Ui,
     number: usize,
     item: &mut QueueItem,
     comp: Option<&CompInfo>,
-    columns: &Columns,
+    columns: &[&Column],
     library: Option<&Library>,
     project: Option<&Path>,
-    remove: &mut Option<u64>,
-    cancel: &mut Option<u64>,
-    requeue: &mut Option<u64>,
+    view: &mut ItemView,
     command: &mut Option<(u64, ItemAction)>,
     open: &mut Option<(u64, QueueLink)>,
 ) {
-    let last = comp.map(|c| c.frame_count() - 1);
+    let rendering = matches!(item.status, ItemStatus::Rendering { .. });
     let editable = matches!(
         item.status,
         ItemStatus::Queued | ItemStatus::Failed(_) | ItemStatus::Stopped { .. }
@@ -1663,200 +1788,183 @@ fn item_ui(
         .replace("{n}", &number.to_string())
         .replace("{comp}", &item.comp_name);
     let name = |what: &str| bae_ui::a11y::context(&[&item_ctx, tr(what)]);
-    // AE's columns, the row a right click opens the item menu on.
-    let row = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            for col in COLUMNS.iter().filter(|col| columns.visible(col)) {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(col.width, 20.0),
-                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                    |ui| {
-                        let text = match col.title {
-                            "Render" => {
-                                ui.add_enabled_ui(
-                                    !matches!(item.status, ItemStatus::Rendering { .. }),
-                                    |ui| {
-                                        let mut render = item.render;
-                                        if bae_ui::widgets::checkbox(ui, &mut render, "")
-                                            .labeled_toggle(
-                                                egui::WidgetType::Checkbox,
-                                                &name("Render"),
-                                                render,
-                                            )
-                                            .changed()
-                                        {
-                                            item.render = render;
-                                        }
-                                    },
-                                );
-                                return;
-                            }
-                            "Label" => {
-                                let (r, resp) = ui.allocate_exact_size(
-                                    egui::vec2(15.0, 15.0),
-                                    egui::Sense::click(),
-                                );
-                                bae_ui::icons::swatch(
-                                    ui.painter(),
-                                    r.center(),
-                                    10.0,
-                                    bae_ui::theme::label_color(item.label),
-                                );
-                                egui::Popup::menu(&resp).show(|ui| {
-                                    for i in 0..bae_ui::theme::LABELS.len() {
-                                        if ui
-                                            .selectable_value(
-                                                &mut item.label,
-                                                i,
-                                                bae_ui::theme::label_name(i),
-                                            )
-                                            .clicked()
-                                        {
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                                return;
-                            }
-                            "#" => number.to_string(),
-                            "Comp Name" => item.comp_name.clone(),
-                            "Status" => match &item.status {
-                                ItemStatus::Queued => {
-                                    tr(if item.render { "Queued" } else { "Unqueued" }).to_owned()
-                                }
-                                ItemStatus::Rendering { done, total } => {
-                                    format!("{} {done}/{total}", tr("Rendering"))
-                                }
-                                ItemStatus::Done { .. } => tr("Done").to_owned(),
-                                ItemStatus::Failed(_) => tr("Failed").to_owned(),
-                                ItemStatus::Stopped { done, total, .. } => {
-                                    tr("Stopped ({done}/{total} frames)")
-                                        .replace("{done}", &done.to_string())
-                                        .replace("{total}", &total.to_string())
-                                }
-                            },
-                            "Started" => item
-                                .started
-                                .map(bae_platform::utc_label)
-                                .unwrap_or_default(),
-                            "Render Time" => {
-                                let secs = match item.status {
-                                    ItemStatus::Done { seconds, .. } => Some(seconds),
-                                    ItemStatus::Rendering { .. } => item
-                                        .started
-                                        .and_then(|t| t.elapsed().ok())
-                                        .map(|t| t.as_secs_f64()),
-                                    _ => None,
-                                };
-                                secs.map(|s| format!("{s:.1} s")).unwrap_or_default()
-                            }
-                            "Estimated Time" => match item.status {
-                                ItemStatus::Rendering { done, total } if done > 0 => item
-                                    .started
-                                    .and_then(|t| t.elapsed().ok())
-                                    .map(|t| {
-                                        format!(
-                                            "{:.1} s",
-                                            t.as_secs_f64() * (total - done) as f64 / done as f64
-                                        )
-                                    })
-                                    .unwrap_or_default(),
-                                _ => String::new(),
-                            },
-                            "Comment" => {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut item.comment)
-                                        .desired_width(col.width),
-                                );
-                                return;
-                            }
-                            "Notify" => {
-                                ui.checkbox(&mut item.notify, "");
-                                return;
-                            }
-                            "Comp Size" => comp
-                                .map(|c| format!("{} × {}", c.width, c.height))
-                                .unwrap_or_default(),
-                            "Frames" => item.frame_count().to_string(),
-                            "Duration" => bae_ui::widgets::timecode(
-                                item.frame_count() as i64,
-                                item.rate.as_f64(),
-                            ),
-                            _ => unreachable!(),
-                        };
-                        ui.add(egui::Label::new(text).truncate());
-                    },
-                );
+    // Row titles: right-aligned, the left ones after the twirl, the right ones
+    // ending where the Log / Output To fields start.
+    let title_w = title_width(ui, &[tr("Render Settings:"), tr("Output Module:")]);
+    let right_w = title_width(ui, &[tr("Log:"), tr("Output To:")]);
+    let indent = 18.0 + 14.0 + 4.0 + title_w + 4.0;
+
+    // AE's columns on a gray row; a right click opens the item menu.
+    let width = columns
+        .iter()
+        .map(|c| c.width)
+        .sum::<f32>()
+        .max(ui.available_width());
+    let (row, row_resp) =
+        ui.allocate_exact_size(egui::vec2(width, chrome::ROW_H), egui::Sense::click());
+    let row_resp = row_resp.labeled(egui::WidgetType::Other, &item_ctx);
+    ui.painter().rect_filled(row, 0.0, chrome::ITEM_ROW);
+    let mut x = row.left();
+    for col in columns {
+        let cell = egui::Rect::from_min_size(
+            egui::pos2(x, row.top()),
+            egui::vec2(col.width, chrome::ROW_H),
+        );
+        x += col.width;
+        let mut cell_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(cell)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        cell_ui.set_clip_rect(cell.intersect(ui.clip_rect()));
+        let ui = &mut cell_ui;
+        let text = match col.title {
+            "Render" => {
+                let mut expanded = !view.collapsed;
+                ui.add_space(1.0);
+                if chrome::twirl(
+                    ui,
+                    &mut expanded,
+                    &bae_ui::a11y::context(&[&item_ctx, tr("Expand")]),
+                )
+                .changed()
+                {
+                    view.collapsed = !expanded;
+                }
+                ui.add_space((col.width / 2.0 - 21.0).max(4.0));
+                ui.add_enabled_ui(!rendering, |ui| {
+                    let mut render = item.render;
+                    if bae_ui::widgets::checkbox(ui, &mut render, "")
+                        .labeled_toggle(egui::WidgetType::Checkbox, &name("Render"), render)
+                        .changed()
+                    {
+                        item.render = render;
+                    }
+                });
+                continue;
             }
-        });
-    });
-    crate::common::context_menu(&row.response, &mut |ui| {
-        if let Some(action) = ItemAction::menu(
-            ui,
-            matches!(item.status, ItemStatus::Rendering { .. }),
-            last.is_some(),
-        ) {
+            "Label" => {
+                ui.add_space(4.0);
+                let (r, resp) =
+                    ui.allocate_exact_size(egui::vec2(13.0, 13.0), egui::Sense::click());
+                bae_ui::icons::swatch(
+                    ui.painter(),
+                    r.center(),
+                    10.0,
+                    bae_ui::theme::label_color(item.label),
+                );
+                egui::Popup::menu(&resp).show(|ui| {
+                    for i in 0..bae_ui::theme::LABELS.len() {
+                        if ui
+                            .selectable_value(&mut item.label, i, bae_ui::theme::label_name(i))
+                            .clicked()
+                        {
+                            ui.close();
+                        }
+                    }
+                });
+                continue;
+            }
+            "#" => number.to_string(),
+            "Comp Name" => item.comp_name.clone(),
+            "Status" => match &item.status {
+                ItemStatus::Queued if item.outputs.iter().any(|o| o.output.trim().is_empty()) => {
+                    tr("Needs Output").to_owned()
+                }
+                ItemStatus::Queued => {
+                    tr(if item.render { "Queued" } else { "Unqueued" }).to_owned()
+                }
+                ItemStatus::Rendering { done, total } => {
+                    format!("{} {done}/{total}", tr("Rendering"))
+                }
+                ItemStatus::Done { .. } => tr("Done").to_owned(),
+                ItemStatus::Failed(_) => tr("Failed").to_owned(),
+                ItemStatus::Stopped { done, total, .. } => tr("Stopped ({done}/{total} frames)")
+                    .replace("{done}", &done.to_string())
+                    .replace("{total}", &total.to_string()),
+            },
+            "Started" => item
+                .started
+                .map(bae_platform::utc_label)
+                .unwrap_or_else(|| "-".to_owned()),
+            "Render Time" => {
+                let secs = match item.status {
+                    ItemStatus::Done { seconds, .. } => Some(seconds),
+                    ItemStatus::Rendering { .. } => item
+                        .started
+                        .and_then(|t| t.elapsed().ok())
+                        .map(|t| t.as_secs_f64()),
+                    _ => None,
+                };
+                secs.map_or_else(|| "-".to_owned(), |s| format!("{s:.1} s"))
+            }
+            "Estimated Time" => match item.status {
+                ItemStatus::Rendering { done, total } if done > 0 => item
+                    .started
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|t| {
+                        format!(
+                            "{:.1} s",
+                            t.as_secs_f64() * (total - done) as f64 / done as f64
+                        )
+                    })
+                    .unwrap_or_default(),
+                _ => String::new(),
+            },
+            "Comment" => {
+                ui.add_space(4.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut item.comment)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(col.width - 8.0),
+                );
+                continue;
+            }
+            "Notify" => {
+                ui.add_space((col.width / 2.0 - 6.0).max(4.0));
+                bae_ui::widgets::checkbox(ui, &mut item.notify, "");
+                continue;
+            }
+            "Comp Size" => comp
+                .map(|c| format!("{} × {}", c.width, c.height))
+                .unwrap_or_default(),
+            "Frames" => item.frame_count().to_string(),
+            "Duration" => bae_ui::widgets::timecode(item.frame_count() as i64, item.rate.as_f64()),
+            _ => unreachable!(),
+        };
+        ui.add_space(7.0);
+        ui.add(egui::Label::new(text).truncate());
+    }
+    chrome::rule(ui);
+    let has_comp = comp.is_some();
+    let rendered = rendered_file(item).is_some();
+    crate::common::context_menu(&row_resp, &mut |ui| {
+        if let Some(action) = ItemAction::menu(ui, |action| match action {
+            ItemAction::Reveal => has_comp,
+            ItemAction::RevealOutput => rendered,
+            ItemAction::RenderAgain => !rendering && !matches!(item.status, ItemStatus::Queued),
+            _ => !rendering,
+        }) {
             *command = Some((item.id, action));
         }
     });
     if let ItemStatus::Failed(message) = &item.status {
         ui.colored_label(ui.visuals().error_fg_color, message);
     }
-    ui.horizontal_wrapped(|ui| {
-        match &item.status {
-            ItemStatus::Queued | ItemStatus::Failed(_) => {}
-            ItemStatus::Rendering { .. } => {
-                if ui
-                    .button(tr("Stop"))
-                    .labeled(egui::WidgetType::Button, &name("Stop"))
-                    .clicked()
-                {
-                    *cancel = Some(item.id);
-                }
-            }
-            ItemStatus::Done { first, .. } => {
-                if ui
-                    .button(tr(reveal_label()))
-                    .labeled(egui::WidgetType::Button, &name(reveal_label()))
-                    .clicked()
-                {
-                    reveal(first);
-                }
-            }
-            ItemStatus::Stopped { first, .. } => {
-                if let Some(first) = first
-                    && ui
-                        .button(tr(reveal_label()))
-                        .labeled(egui::WidgetType::Button, &name(reveal_label()))
-                        .clicked()
-                {
-                    reveal(first);
-                }
-            }
-        }
-        if !matches!(
-            item.status,
-            ItemStatus::Rendering { .. } | ItemStatus::Queued
-        ) && ui
-            .button(tr("Render Again"))
-            .labeled(egui::WidgetType::Button, &name("Render Again"))
-            .clicked()
-        {
-            *requeue = Some(item.id);
-        }
-        if !matches!(item.status, ItemStatus::Rendering { .. })
-            && ui
-                .button(tr("Remove"))
-                .labeled(egui::WidgetType::Button, &name("Remove"))
-                .clicked()
-        {
-            *remove = Some(item.id);
-        }
-    });
-    // Render Settings and Log (AE's templates; BAE renders at Best Settings).
+    if view.collapsed {
+        return;
+    }
+
+    // Render Settings: template arrow, link; Log.
     ui.add_enabled_ui(editable, |ui| {
-        ui.horizontal_wrapped(|ui| {
+        sub_row(ui, |ui, left| {
+            ui.add_space(18.0);
+            chrome::twirl(
+                ui,
+                &mut view.settings,
+                &bae_ui::a11y::context(&[&item_ctx, tr("Render Settings"), tr("Expand")]),
+            );
+            row_title(ui, tr("Render Settings:"), title_w);
             let render = comp.map(|comp| templates::Render::capture(item, comp));
             let mut rs: Vec<_> = RS_TEMPLATES
                 .iter()
@@ -1917,27 +2025,31 @@ fn item_ui(
                 }
                 None => {}
             }
-            ui.label(tr("Render Settings:"));
             if bae_ui::widgets::link(ui, &render_label)
                 .labeled(egui::WidgetType::Link, &name("Render Settings"))
                 .clicked()
             {
                 *open = Some((item.id, QueueLink::RenderSettings));
             }
-            ui.add_space(12.0);
-            ui.label(tr("Log:"));
-            let label = LogMode::ALL.iter().find(|(m, _)| *m == item.log).unwrap().1;
-            bae_ui::widgets::menu_button(ui, tr(label), |ui| {
+            skip_to(ui, left + SECOND_GROUP - right_w - 4.0, 16.0);
+            row_title(ui, tr("Log:"), right_w);
+            let label = tr(LogMode::ALL.iter().find(|(m, _)| *m == item.log).unwrap().1);
+            chrome::field_menu(ui, 134.0, label, &name("Log"), |ui| {
                 for (mode, title) in LogMode::ALL {
                     if ui.radio_value(&mut item.log, mode, tr(title)).clicked() {
                         ui.close();
                     }
                 }
-            })
-            .response
-            .labeled_value(egui::WidgetType::Button, &name("Log"), tr(label));
+            });
         });
     });
+    if view.settings {
+        details(
+            ui,
+            indent,
+            &format!("{} {} – {}", tr("Time Span:"), item.start, item.end),
+        );
+    }
     if let Some(path) = &item.log_file {
         let link = ui.link(path.display().to_string());
         bae_ui::a11y::value_source(&link, bae_ui::a11y::VERBATIM_VALUE);
@@ -1945,8 +2057,11 @@ fn item_ui(
             reveal(path);
         }
     }
+
+    // Output Modules: template arrow, link; + −, Output To.
     let id = item.id;
     let multiple = item.outputs.len() > 1;
+    let count = item.outputs.len();
     let mut remove_output = None;
     for (index, module) in item.outputs.iter_mut().enumerate() {
         ui.push_id(("output_module", index), |ui| {
@@ -1956,8 +2071,25 @@ fn item_ui(
                 Some(module) => bae_ui::a11y::context(&[&item_ctx, module, tr(what)]),
                 None => name(what),
             };
+            let mut twirled = view.modules.contains(&index);
+            let follows = extension_follows_format(&module.output, module.format);
             ui.add_enabled_ui(editable, |ui| {
-                ui.horizontal_wrapped(|ui| {
+                sub_row(ui, |ui, left| {
+                    ui.add_space(18.0);
+                    if chrome::twirl(
+                        ui,
+                        &mut twirled,
+                        &bae_ui::a11y::context(&[&name("Output Module"), tr("Expand")]),
+                    )
+                    .changed()
+                    {
+                        if twirled {
+                            view.modules.insert(index);
+                        } else {
+                            view.modules.remove(&index);
+                        }
+                    }
+                    row_title(ui, tr("Output Module:"), title_w);
                     let mut om: Vec<_> = OM_TEMPLATES
                         .iter()
                         .map(|(n, t)| (tr(n), t.is_some_and(|(f, ..)| ui_format_available(f))))
@@ -2032,7 +2164,6 @@ fn item_ui(
                         }
                         None => {}
                     }
-                    ui.label(tr("Output Module:"));
                     let header = bae_ui::widgets::link(ui, &output_label)
                         .labeled(egui::WidgetType::Link, &name("Output Module"));
                     if header.clicked() {
@@ -2043,7 +2174,7 @@ fn item_ui(
                     crate::common::context_menu(&header, &mut |ui| {
                         let file = Path::new(&module.output);
                         if ui
-                            .add_enabled(file.exists(), egui::Button::new(tr("Reveal in Explorer")))
+                            .add_enabled(file.exists(), egui::Button::new(tr(reveal_label())))
                             .clicked()
                         {
                             bae_platform::reveal(file);
@@ -2054,158 +2185,75 @@ fn item_ui(
                             ui.close();
                         }
                     });
-                });
-            });
-            ui.add_enabled_ui(editable, |ui| {
-                egui::Grid::new("output").num_columns(2).show(ui, |ui| {
-                    // Fields are named after the label in front of them and the item
-                    // (screen readers read "… · Format: PNG", issue #128).
-                    ui.label(tr("Format"));
-                    let mut format = module.format;
-                    // As wide as the column allows; long names are shortened rather
-                    // than widening a narrow panel.
-                    let combo_w = ui.available_width().clamp(60.0, 220.0);
-                    egui::ComboBox::from_id_salt("format")
-                        .width(combo_w)
-                        .truncate()
-                        .selected_text(tr(format_label(format)))
-                        .show_ui(ui, |ui| {
-                            for &f in FORMATS {
-                                let available = ui_format_available(f);
-                                let r = ui.add_enabled(
-                                    available,
-                                    egui::Button::selectable(format == f, tr(format_label(f))),
-                                );
-                                if r.clicked() {
-                                    format = f;
-                                }
-                                if !available {
-                                    let reason = match f {
-                                        ExportFormat::ProRes | ExportFormat::ProRes4444 => {
-                                            "ProRes export requires macOS."
-                                        }
-                                        ExportFormat::Hevc => {
-                                            "A hardware HEVC encoder is required."
-                                        }
-                                        _ => "The system H.264 encoder is unavailable.",
-                                    };
-                                    r.on_disabled_hover_text(tr(reason));
-                                }
-                            }
-                        })
-                        .response
-                        .labeled_value(
-                            egui::WidgetType::ComboBox,
-                            &name("Format"),
-                            tr(format_label(module.format)),
-                        );
-                    if format != module.format {
-                        module.set_format(format);
-                    }
-                    ui.end_row();
-                    // AE: Channels RGB / RGB + Alpha (RGB + Alpha only where the
-                    // codec has alpha).
-                    if module.format == ExportFormat::Wav {
-                        ui.label(tr("Audio"));
-                        ui.label(tr("Stereo, 48 kHz, 24-bit PCM"));
-                        ui.end_row();
-                    } else {
-                        ui.label(tr("Channels"));
-                        let mut channels = module.channels;
-                        egui::ComboBox::from_id_salt("channels")
-                            .width(combo_w)
-                            .truncate()
-                            .selected_text(channels_label(channels))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut channels,
-                                    Channels::Rgb,
-                                    channels_label(Channels::Rgb),
-                                );
-                                let alpha = supports_alpha(module.format);
-                                let r = ui.add_enabled(
-                                    alpha,
-                                    egui::Button::selectable(
-                                        channels == Channels::RgbAlpha,
-                                        channels_label(Channels::RgbAlpha),
-                                    ),
-                                );
-                                if r.clicked() {
-                                    channels = Channels::RgbAlpha;
-                                }
-                                if !alpha {
-                                    r.on_disabled_hover_text(tr(
-                                        "This format has no alpha channel.",
-                                    ));
-                                }
-                            })
-                            .response
-                            .labeled_value(
-                                egui::WidgetType::ComboBox,
-                                &name("Channels"),
-                                channels_label(module.channels),
-                            );
-                        module.channels = channels;
-                        ui.end_row();
-                    }
-                    if has_bit_rate(module.format) {
-                        // AE's H.264 format options: VBR, target bitrate.
-                        ui.label(tr("Target Bitrate"));
-                        let value = format!("{} Mbps", module.bit_rate_mbps);
-                        ui.add(
-                            egui::DragValue::new(&mut module.bit_rate_mbps)
-                                .range(1.0..=800.0)
-                                .speed(0.5)
-                                .suffix(" Mbps"),
+                    // AE: + after the last module adds one, − removes this one.
+                    skip_to(ui, left + SECOND_GROUP - right_w - 48.0, 12.0);
+                    ui.spacing_mut().item_spacing.x = 1.0;
+                    if ui
+                        .add_enabled(
+                            index + 1 == count,
+                            egui::Button::new("+").min_size(egui::vec2(18.0, 15.0)),
                         )
-                        .labeled_value(
-                            egui::WidgetType::DragValue,
-                            &name("Target Bitrate"),
-                            &value,
-                        );
-                        ui.end_row();
+                        .labeled(egui::WidgetType::Button, &name("Add Output Module"))
+                        .clicked()
+                    {
+                        *command = Some((id, ItemAction::AddOutput));
                     }
-                    ui.horizontal(|ui| {
-                        ui.label(tr("Output To"));
-                        if let Some(comp) = comp {
-                            let button =
-                                ui.add(egui::Button::new("▾").frame(false).small()).labeled(
-                                    egui::WidgetType::Button,
-                                    &name("File Name and Location Templates"),
-                                );
-                            filenames::menu(
-                                &button,
-                                id,
-                                index,
-                                module,
-                                &filenames::Context {
-                                    comp,
-                                    start: item.start,
-                                    end: item.end,
-                                    project,
-                                },
-                                library,
-                                open,
-                            );
-                        }
-                    });
+                    if ui
+                        .add_enabled(
+                            multiple,
+                            egui::Button::new("−").min_size(egui::vec2(18.0, 15.0)),
+                        )
+                        .labeled(egui::WidgetType::Button, &name("Remove Output Module"))
+                        .on_hover_text(tr("Remove Output Module"))
+                        .clicked()
+                    {
+                        remove_output = Some(index);
+                    }
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    skip_to(ui, left + SECOND_GROUP - right_w - 4.0, 4.0);
+                    row_title(ui, tr("Output To:"), right_w);
+                    if let Some(comp) = comp {
+                        let button =
+                            chrome::chevron_box(ui, &name("File Name and Location Templates"));
+                        filenames::menu(
+                            &button,
+                            id,
+                            index,
+                            module,
+                            &filenames::Context {
+                                comp,
+                                start: item.start,
+                                end: item.end,
+                                project,
+                            },
+                            library,
+                            open,
+                        );
+                    }
                     let target = Path::new(&module.output)
                         .file_name()
                         .map(|p| p.to_string_lossy())
                         .unwrap_or_default();
-                    let label = if target.is_empty() {
-                        tr("Not yet specified")
+                    let file_link = if target.is_empty() {
+                        // AE: "Not yet specified" in italics.
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(tr("Not yet specified"))
+                                    .italics()
+                                    .color(bae_ui::theme::color::ACCENT),
+                            )
+                            .sense(egui::Sense::click()),
+                        )
                     } else {
-                        target.as_ref()
-                    };
-                    let file_link = bae_ui::widgets::link(ui, label).labeled_value(
+                        bae_ui::widgets::link(ui, target.as_ref())
+                    }
+                    .labeled_value(
                         egui::WidgetType::Link,
                         &name("Output To"),
                         &module.output,
                     );
                     // The path is the user's, not UI text to translate.
                     bae_ui::a11y::value_source(&file_link, bae_ui::a11y::FILE_NAME_VALUE);
-                    let follows = extension_follows_format(&module.output, module.format);
                     if let Some(extension) = follows {
                         file_link.clone().on_hover_text(
                             Path::new(&module.output)
@@ -2217,70 +2265,39 @@ fn item_ui(
                     if file_link.clicked() {
                         *open = Some((id, QueueLink::File(index)));
                     }
-                    if multiple
-                        && ui
-                            .small_button("−")
-                            .labeled(egui::WidgetType::Button, &name("Remove Output Module"))
-                            .on_hover_text(tr("Remove Output Module"))
-                            .clicked()
-                    {
-                        remove_output = Some(index);
-                    }
-                    ui.end_row();
-                    // AE: the format decides the extension.
-                    if let Some(extension) = follows {
-                        ui.label("");
-                        ui.weak(
-                            tr("The file will be saved as .{ext} to match the format.")
-                                .replace("{ext}", extension),
-                        );
-                        ui.end_row();
-                    }
                 });
             });
+            if twirled {
+                let mut text = format!(
+                    "{} {}  ·  {} {}",
+                    tr("Format:"),
+                    tr(format_label(module.format)),
+                    tr("Channels:"),
+                    channels_label(module.channels)
+                );
+                if has_bit_rate(module.format) {
+                    text += &format!(
+                        "  ·  {} {} Mbps",
+                        tr("Target Bitrate:"),
+                        module.bit_rate_mbps
+                    );
+                }
+                details(ui, indent, &text);
+            }
+            // AE: the format decides the extension.
+            if let Some(extension) = follows {
+                details(
+                    ui,
+                    indent,
+                    &tr("The file will be saved as .{ext} to match the format.")
+                        .replace("{ext}", extension),
+                );
+            }
         });
     }
     if let Some(i) = remove_output {
         item.outputs.remove(i);
     }
-    ui.add_enabled_ui(editable, |ui| {
-        egui::Grid::new("render_range")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label(tr("Frames"));
-                // Typed and dragged values stay inside the comp (AE); a range set
-                // otherwise (or a comp shortened later) is limited, or refused when
-                // entirely outside, at render time.
-                let last = last.unwrap_or(i64::MAX).max(0);
-                // Start – end wrap in a narrow panel instead of widening it.
-                ui.horizontal_wrapped(|ui| {
-                    let start = item.start.to_string();
-                    ui.add(
-                        egui::DragValue::new(&mut item.start)
-                            .range(0..=item.end.clamp(0, last))
-                            .clamp_existing_to_range(false),
-                    )
-                    .labeled_value(
-                        egui::WidgetType::DragValue,
-                        &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("Start")]),
-                        &start,
-                    );
-                    ui.label("–");
-                    let end = item.end.to_string();
-                    ui.add(
-                        egui::DragValue::new(&mut item.end)
-                            .range(item.start.clamp(0, last)..=last)
-                            .clamp_existing_to_range(false),
-                    )
-                    .labeled_value(
-                        egui::WidgetType::DragValue,
-                        &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("End")]),
-                        &end,
-                    );
-                });
-                ui.end_row();
-            });
-    });
 }
 
 /// The format's name in AE's output module (translated with `tr`).
@@ -2326,6 +2343,17 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("24-bit PCM", "24 位 PCM"),
     ("Save Frame As File", "帧另存为文件"),
     // AE 26's Render Queue (渲染队列) terms.
+    ("Needs Output", "需要输出"),
+    ("Current Render", "当前渲染"),
+    ("(-- of --)", "(--/--)"),
+    ("({done} of {total})", "({done}/{total})"),
+    ("Message:", "消息:"),
+    ("Elapsed:", "已用时间:"),
+    ("Remaining:", "剩余时间:"),
+    ("Renders Started:", "渲染已开始:"),
+    ("Total Time Elapsed:", "已用总时间:"),
+    ("Output To:", "输出到:"),
+    ("Target Bitrate:", "目标比特率:"),
     ("Unqueued", "未加入队列"),
     ("Comp Name", "合成名称"),
     ("Estimated Time", "估计时间"),

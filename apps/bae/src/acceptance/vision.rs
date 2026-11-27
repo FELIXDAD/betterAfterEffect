@@ -142,3 +142,157 @@ fn freeze_bakes_frames_and_unfreeze_keeps_the_seed_stroke() {
             .is_some()
     );
 }
+
+#[test]
+fn content_aware_fill_generates_a_masked_sequence_and_undo_removes_it() {
+    use bae_model::Value;
+    use serde_json::json;
+    let Some(gpu) = gpu() else { return };
+    let mut app = crate::app_builder().build();
+    let dir = tempfile::tempdir().unwrap();
+    let project = bae_ui::files::ProjectFile::default();
+    project.set(Some(dir.path().join("fill.bae")));
+    app.insert_resource(project);
+    app.get_registry::<dyn bae_gpu::WarmUp>()
+        .unwrap()
+        .get("vision.sequence")
+        .unwrap()
+        .run(&gpu)
+        .unwrap();
+    let mut h = gui_with(Gui::with_app(app));
+    let run =
+        |h: &mut Ui, id: &str, args| h.state_mut().dispatch(Invocation::with_params(id, args));
+    run(
+        &mut h,
+        "comp.create",
+        json!({"name":"Fill","width":64,"height":32,"fps":25.,"duration":56448000}),
+    );
+    let comp = bae_motion::query::comps(h.state().stage())[0].clone();
+    h.state().session().lock().open_comp(&comp);
+    run(
+        &mut h,
+        "layer.create",
+        json!({"comp":comp,"kind":"solid","color":[1.,0.,0.,1.]}),
+    );
+    let layer = h.state().layers()[0].clone();
+    run(
+        &mut h,
+        "mask.create",
+        json!({"layer":layer,"kind":"rect","mode":"subtract","position":[32,16],"size":[14,10]}),
+    );
+    h.state().session().lock().selected_layers = vec![layer.clone()];
+    h.state_mut().invoke(Invocation::with_params(
+        "window.panel",
+        json!({"id":"content_aware_fill"}),
+    ));
+    settle(&mut h);
+    let number = h
+        .query_all_by_label("Alpha Expansion")
+        .map(|node| node.rect())
+        .max_by(|a, b| a.right().total_cmp(&b.right()))
+        .expect("alpha expansion control")
+        .center();
+    let end = number + egui::vec2(24., 0.);
+    send(&mut h, Event::PointerMoved(number));
+    send(
+        &mut h,
+        Event::PointerButton {
+            pos: number,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    send(&mut h, Event::PointerMoved(end));
+    let live = h
+        .state()
+        .session()
+        .lock()
+        .scrub
+        .as_ref()
+        .filter(|edit| edit.path == layer && edit.attr == "vision:fill_expansion")
+        .and_then(|edit| edit.value.as_f64())
+        .expect("live expansion during drag");
+    assert!(live > 0.);
+    send(
+        &mut h,
+        Event::PointerButton {
+            pos: end,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    settle(&mut h);
+    let expansion = |h: &Ui| {
+        h.state()
+            .stage()
+            .prim(&layer)
+            .and_then(|p| p.value("vision:fill_expansion").and_then(Value::as_f64))
+            .unwrap_or(0.)
+    };
+    assert_eq!(expansion(&h), live);
+    let (modifiers, z) = cmd(Key::Z);
+    key(&mut h, modifiers, z);
+    assert_eq!(expansion(&h), 0.);
+    h.get_by_label("Generate Fill Layer").click();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(40);
+    loop {
+        settle(&mut h);
+        if h.state().layers().len() == 2 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "fill: {:?}",
+            painted_texts(&h)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    let output = h.state().layers()[0].clone();
+    let prim = h.state().stage().prim(&output).unwrap();
+    assert_eq!(
+        prim.value("parent").and_then(Value::as_prim_ref),
+        Some(&layer)
+    );
+    let asset = prim
+        .value("source")
+        .and_then(Value::as_prim_ref)
+        .unwrap()
+        .clone();
+    let footage = h.state().stage().prim(&asset).unwrap();
+    // Like AE: "Fill 1" footage inside a "Fills" project folder.
+    let stage = h.state().stage();
+    assert_eq!(bae_motion::query::display_name_of(stage, &asset), "Fill 1");
+    assert_eq!(
+        bae_motion::query::display_name_of(stage, &asset.parent().unwrap()),
+        "Fills"
+    );
+    let file = std::path::Path::new(
+        footage
+            .value("file:original")
+            .and_then(Value::as_str)
+            .unwrap(),
+    );
+    for name in ["frame_00000000.png", "frame_00000001.png"] {
+        let mut png = png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(file.with_file_name(name)).unwrap(),
+        ))
+        .read_info()
+        .unwrap();
+        let mut buf = vec![0; png.output_buffer_size().unwrap()];
+        let f = png.next_frame(&mut buf).unwrap();
+        assert_eq!((f.width, f.height), (64, 32));
+        let i = (16 * 64 + 32) * 4;
+        assert!(
+            buf[i] > 245 && buf[i + 3] > 245,
+            "hole filled from red layer, got {:?}",
+            &buf[i..i + 4]
+        );
+        assert_eq!(buf[3], 0, "original outside the mask stays clear");
+    }
+    let (modifiers, z) = cmd(Key::Z);
+    key(&mut h, modifiers, z);
+    assert_eq!(h.state().layers(), vec![layer]);
+    assert!(!h.state().stage().has_prim(&asset));
+}

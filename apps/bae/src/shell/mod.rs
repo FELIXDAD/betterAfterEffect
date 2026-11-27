@@ -193,7 +193,8 @@ const COMMIT_WAIT: Duration = Duration::from_millis(300);
 const MAX_DEVICE_RECOVERIES: u32 = 3;
 
 /// Runs the GUI until the window closes. Returns the process exit code.
-pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
+pub fn run(mut app: App, global: &GlobalOptions, prefs: bae_prefs::PrefsStore) -> ExitCode {
+    let prefs = Arc::new(prefs);
     // The UI's system fonts load while the window and GPU are being set up.
     bae_ui::theme::prefetch_system_ui_fonts();
     crate::i18n::init_from_env();
@@ -284,12 +285,6 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     let workbench_state = loaded.map(|l| l.value.0).unwrap_or_default();
     let mut document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
     document.add_module_commands(&app);
-    let prefs = Arc::new(match &dirs {
-        Some(dirs) if global.smoke_test.is_none() => {
-            bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
-        }
-        _ => bae_prefs::PrefsStore::default(),
-    });
     // `bae <project>`: open it now. One project at a time, like AE.
     let mut startup_error = None;
     let settings = prefs.current();

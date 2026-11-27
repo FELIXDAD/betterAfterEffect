@@ -45,6 +45,13 @@ impl AppModule for MediaModule {
         {
             tracing::warn!("PSD decoder warm-up not registered: {error}");
         }
+        #[cfg(windows)]
+        if let Err(error) = app.register_arc::<dyn bae_gpu::WarmUp>(
+            "bae.media.windows.decoders",
+            Arc::new(crate::media_foundation::DecoderWarmUp),
+        ) {
+            tracing::warn!("Windows decoder warm-up not registered: {error}");
+        }
         for format in crate::builtin_formats() {
             let id = format!("bae.media.{}", format.id());
             if let Err(error) = app.register_arc::<dyn MediaFormat>(id, format) {

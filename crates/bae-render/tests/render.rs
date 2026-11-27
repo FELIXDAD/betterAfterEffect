@@ -772,3 +772,61 @@ fn float_arithmetic_preserves_hdr_and_negative_values() {
         }
     }
 }
+
+/// Viewer display colour management: a linear-light working space's 0.5 is
+/// shown display-encoded (≈ 188 on an sRGB display); without a transform the
+/// numbers are shown as they are. The pipeline compiles in the background
+/// the first time, so the frame is unconverted until it is ready.
+#[test]
+fn viewers_apply_the_display_transform() {
+    use bae_color::{ColorContext, WorkingSpace, builtin};
+    let Some(gpu) = gpu() else { return };
+    let mut renderer = Renderer::with_config(
+        gpu.clone(),
+        bae_render::RendererConfig {
+            frame_cache_bytes: 0,
+            ..Default::default()
+        },
+    );
+    let mut comp = RenderComp::new(p("/comps/main"), 16, 16);
+    comp.layers = vec![bae_render::RenderLayer::new(
+        p("/comps/main/layers/grey"),
+        bae_render::LayerContent::Solid {
+            color: [0.5, 0.5, 0.5, 1.0],
+            width: 16,
+            height: 16,
+        },
+    )];
+    let shown = |renderer: &mut Renderer| {
+        let (_, target) = renderer
+            .render_frame_output(
+                &comp,
+                &RenderRequest::full(),
+                None,
+                OutputAlpha::Premultiplied,
+                None,
+            )
+            .unwrap();
+        let pixels = bae_gpu::transfer::read_texture(&gpu, target.view().texture()).unwrap();
+        let px: [u8; 4] = pixels.pixel(8, 8).try_into().unwrap();
+        px
+    };
+    let raw = shown(&mut renderer);
+    assert!((i32::from(raw[0]) - 128).abs() <= 1, "{raw:?}");
+    let linear = ColorContext::new(WorkingSpace::managed(builtin::SRGB).linearized(true))
+        .display_transform()
+        .unwrap();
+    renderer.set_display_transform(Some(&linear));
+    let start = std::time::Instant::now();
+    let mut px = shown(&mut renderer);
+    while px == raw && start.elapsed().as_secs() < 10 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        px = shown(&mut renderer);
+    }
+    assert!(
+        (i32::from(px[0]) - 188).abs() <= 2 && px[0] == px[2],
+        "{px:?}"
+    );
+    renderer.set_display_transform(None);
+    assert_eq!(shown(&mut renderer), raw);
+}

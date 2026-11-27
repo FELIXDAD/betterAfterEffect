@@ -125,6 +125,7 @@ pub(crate) struct PlaybackStats {
     next_source: u64,
     sample: Option<Instant>,
     frames: u32,
+    slow: bool,
 }
 
 /// Preview panel ▸ Range (AE's choices for the Spacebar shortcut).
@@ -468,6 +469,7 @@ pub struct Session {
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
+    mute_slow_preview: bool,
     last_scrub: Option<Time>,
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
@@ -517,6 +519,9 @@ pub struct Session {
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    /// The project revision and selection sizes [`Session::sync`] last
+    /// checked the selections against (each panel syncs every frame).
+    validated: Option<(u64, [usize; 7])>,
     pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
     /// A keyframe drag in progress (Graph Editor, layer bars): the dragged
@@ -1091,6 +1096,23 @@ impl Session {
         {
             self.text_selection = None;
         }
+        // The checks below only drop entries the project no longer has (or
+        // locked): nothing to redo while neither changed.
+        let fingerprint = |s: &Self| {
+            [
+                s.selected_layers.len(),
+                s.selected_items.len(),
+                s.selected_keys.len(),
+                s.reveal.len(),
+                s.selected_props.len(),
+                s.graph_set.len(),
+                s.selected_effects.len(),
+            ]
+        };
+        if self.pending.is_empty() && self.validated == Some((stage.revision(), fingerprint(self)))
+        {
+            return;
+        }
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));
@@ -1117,6 +1139,7 @@ impl Session {
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
         self.selected_effects.retain(|e| stage.has_prim(e));
+        self.validated = Some((stage.revision(), fingerprint(self)));
     }
 
     /// Keep the meters moving through the last audible scrub sample.
@@ -1305,6 +1328,7 @@ impl Session {
         if self.mix_has_audio
             && let Some(output) = &self.output
         {
+            output.set_muted(false);
             output.seek(at, range, repeat);
             return true;
         }
@@ -1313,6 +1337,8 @@ impl Session {
 
     pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
         self.footage_sound = false;
+        self.mute_slow_preview =
+            crate::prefs::current(cx.resources).bool("previews.mute_audio_when_not_realtime");
         self.prepare_mix(cx, info);
         self.play(info);
         let options = self.preview_options().clone();
@@ -1357,15 +1383,13 @@ impl Session {
             && let Some(output) = &self.output
         {
             output.stop();
+            output.set_muted(false);
         }
         self.playback = None;
         self.last_scrub = None;
         self.audio_clock = false;
     }
 
-    /// Keep the audio mix current (once per composition edit). While playing,
-    /// a new mix restarts the device and the clock at the current frame: a late
-    /// device or a live layer edit. The shell ticks the clock.
     /// Play `asset`'s own sound from `from` over `0..duration` (the Footage
     /// panel's preview). The composition's mix is prepared again when it plays.
     pub(crate) fn sound_footage(
@@ -1389,6 +1413,7 @@ impl Session {
             output.stop();
             return;
         }
+        output.set_muted(false);
         output.prepare(mix);
         output.seek(from, TimeRange::new(Time::ZERO, duration), repeat);
         self.footage_sound = true;
@@ -1403,12 +1428,22 @@ impl Session {
         }
     }
 
+    /// Keep the audio mix current while playing (once per composition edit):
+    /// a new mix restarts the device and the clock at the current frame (a
+    /// late device or a live layer edit). The shell ticks the clock. Stopped,
+    /// edits do not rebuild the mix on the UI thread: starting playback and
+    /// audio scrubbing prepare it when they need it.
     pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
-        // The Footage panel's sound plays until that preview stops.
-        if self.footage_sound && self.playback.is_none() {
-            return;
+        let mute =
+            crate::prefs::current(cx.resources).bool("previews.mute_audio_when_not_realtime");
+        if self.mute_slow_preview != mute
+            && let Some(output) = &self.output
+        {
+            output.set_muted(mute && self.audio_clock && self.playback_stats.slow);
         }
-        if self.prepare_mix(cx, info)
+        self.mute_slow_preview = mute;
+        if self.playback.is_some()
+            && self.prepare_mix(cx, info)
             && let Some(pb) = &self.playback
             && pb.caching.is_none()
         {
@@ -1566,6 +1601,7 @@ impl Session {
     /// Count only frames submitted to the native presentation surface.
     pub fn frame_presented(&mut self, now: Instant) {
         let Some(pb) = &self.playback else { return };
+        let skip = self.preview_options().skip;
         let stats = &mut self.playback_stats;
         if let Some(time) = stats.drawn.take() {
             let (first, last) = pb.frame_range();
@@ -1582,6 +1618,16 @@ impl Session {
         }
         let elapsed = now.duration_since(*stats.sample.get_or_insert(now));
         if elapsed >= Duration::from_millis(500) {
+            // Deliberately skipped frames still play in real time. Allow one
+            // presentation boundary per sample window before declaring a drop.
+            let requested = pb.fps / f64::from(skip.saturating_add(1));
+            stats.slow = f64::from(stats.frames + 1) < requested * elapsed.as_secs_f64();
+            if self.mute_slow_preview
+                && self.audio_clock
+                && let Some(output) = &self.output
+            {
+                output.set_muted(stats.slow);
+            }
             stats.fps = f64::from(stats.frames) / elapsed.as_secs_f64();
             stats.frames = 0;
             stats.sample = Some(now);
@@ -1649,6 +1695,26 @@ mod tests {
         assert_eq!(s.time(&i.path), FrameRate::FPS_30.frame_to_time(59));
         s.set_time(&i, Time(-5));
         assert_eq!(s.time(&i.path), Time::ZERO);
+    }
+
+    #[test]
+    fn preview_recovers_from_a_slow_presentation_window() {
+        let i = info();
+        let mut session = Session::default();
+        session.preview.selected = PreviewShortcut::ShiftNumpad;
+        session.play(&i);
+        // Editing another shortcut does not change the running preview's skip.
+        session.preview.selected = PreviewShortcut::Space;
+        let start = session.playback.as_ref().unwrap().started;
+        session.frame_presented(start + Duration::from_millis(500));
+        assert!(session.playback_stats.slow);
+        for n in (16..=30).step_by(2) {
+            let now = start + Duration::from_secs_f64(f64::from(n) / 30.0 + 0.001);
+            session.tick(now);
+            session.drew_preview(session.time(&i.path));
+            session.frame_presented(now);
+        }
+        assert!(!session.playback_stats.slow);
     }
 
     #[test]

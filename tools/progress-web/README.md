@@ -2,7 +2,9 @@
 
 看板使用 Python 3 标准库、SQLite 和浏览器原生 SSE。代码与 Rust 工作区独立。可用 Python 3.8 或更新版本。
 
-动态流返回最近 200 条记录，SQLite 保留完整历史。里程碑版本和分项 issue 定义在 board.json，能力清单及默认负责人在 milestones.tsv。
+动态流返回最近 200 条记录，SQLite 保留完整历史。里程碑版本和分项 issue 定义在 board.json，各版本的能力清单及默认负责人在 `releases` 列出的文件里（0.1.0 为 milestones.tsv，0.2.0 为 milestones-0.2.0.tsv）。
+
+里程碑按版本计：board.json 的 `milestone` 是当前版本，顶部总体完成度和“里程碑”页只算当前版本，以前的版本放在“历史版本”页，各自计算完成率。每次启动时，当前版本的清单会把已经汇报过的同 ID 能力归入对应分组，同时改名、设为当前版本，状态、PR 和汇报都保留；旧版本清单只补缺失项。新汇报的 ID 归入当前版本：以 `bug-` 或 `perf-` 开头的放进“用户实测 bug”（见 board.json 的 `new_item_groups`），其余放进“新增能力”。旧数据库启动时自动加上版本列，原有能力都记为 0.1.0。
 
 ## 本机启动
 
@@ -75,7 +77,7 @@ macOS/Linux 的 shell 脚本需要 Bash、Python 3、Git。Windows 脚本使用�
 ## AWS / systemd 部署
 
 1. 用 EC2 Instance Connect 或 SSM 连接选定的 Linux 实例。确认 8787 可用，且独立目录和同名服务未被其他应用使用。
-2. 将 server.py、index.html、board.json、milestones.tsv 和 legacy-effects.tsv 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
+2. 将 server.py、index.html、board.json、milestones.tsv、milestones-0.2.0.tsv 和 legacy-effects.tsv 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
 3. 将 bae-progress-web.service 安装至 `/etc/systemd/system/`，运行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now bae-progress-web`。通过 `systemctl is-enabled bae-progress-web`、`systemctl is-active bae-progress-web` 和实际带认证的状态请求核验。服务无需管理员权限。
 4. 有域名时在 HTTPS 入口转发到本服务，将该虚拟主机请求体上限设为 2 MiB，关闭 SSE 响应缓冲，保持长连接，服务单元默认仅监听 127.0.0.1。临时 IP 模式需单独调整监听地址，并按来源 IP 限制安全组 TCP 8787 的访问。HTTP Basic 和 Bearer 在 HTTP 链路上以明文传递。
 5. 将各汇报机 env 的 BAE_BOARD_URL 改为已验证的 AWS 地址。用两个浏览器窗口验证汇报动态与实时更新。

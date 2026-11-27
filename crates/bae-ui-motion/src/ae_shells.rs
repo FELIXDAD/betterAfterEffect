@@ -61,20 +61,6 @@ const SHELLS: &[(&str, &str, &[Row])] = &[
         ],
     ),
     (
-        "content_aware_fill",
-        "Content-Aware Fill",
-        &[
-            Title("Fill Target"),
-            Area(""),
-            Pair("Alpha Expansion", Value("0")),
-            Pair("Fill Method", Dropdown("Object")),
-            Pair("Lighting Correction", Dropdown("None")),
-            Pair("Range", Dropdown("Work Area")),
-            Line(&[Button("Create Reference Frame")]),
-            Line(&[Button("Generate Fill Layer")]),
-        ],
-    ),
-    (
         "motion_sketch",
         "Motion Sketch",
         &[
@@ -365,7 +351,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Dynamic Media", "动态媒体"),
     ("Basic", "基本"),
     ("Fill Target", "填充目标"),
-    ("Alpha Expansion", "Alpha 扩展"),
+    ("Alpha Expansion", "阿尔法扩展"),
     ("Fill Method", "填充方法"),
     ("Object", "对象"),
     ("Lighting Correction", "光照校正"),
@@ -466,6 +452,7 @@ mod tests {
                     | "character"
                     | "align"
                     | "tracker"
+                    | "content_aware_fill"
                     | "create_nulls_from_paths"
                     | "vr_comp_editor"
                     | "paragraph"

@@ -56,6 +56,7 @@ mod panel_parity;
 mod preference_controls;
 mod preview_preferences;
 mod preview_properties;
+mod preview_switches;
 mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
@@ -63,6 +64,8 @@ mod render_autosave;
 #[cfg(target_os = "macos")]
 mod render_queue;
 mod render_templates;
+#[cfg(target_os = "macos")]
+mod responsiveness;
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;
@@ -737,6 +740,36 @@ pub(crate) fn queue_control<'a>(
         n.label()
             .is_some_and(|l| l.starts_with(&prefix) && l.ends_with(&suffix))
     })
+}
+
+/// Chooses `what` ("Remove", "Render Again", "Show in Finder" …) from the
+/// right-click menu of Render Queue item `number` (1-based); `false` when the
+/// entry is missing or disabled (the menu is closed again).
+pub(crate) fn queue_menu(h: &mut Ui, number: usize, what: &str) -> bool {
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    let row = format!("Render Item {number} “");
+    h.query_by(|n| {
+        n.label()
+            .is_some_and(|l| l.starts_with(&row) && l.ends_with('”') && !l.contains(" · "))
+    })
+    .unwrap_or_else(|| panic!("no Render Item {number} row"))
+    .click_secondary();
+    settle(h);
+    let entry = h
+        .query_all_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr(what))
+        .rfind(|n| !n.accesskit_node().is_disabled());
+    let found = match entry {
+        Some(entry) => {
+            entry.click();
+            true
+        }
+        None => false,
+    };
+    if !found {
+        key(h, Modifiers::NONE, Key::Escape);
+    }
+    settle(h);
+    found
 }
 
 /// Where the text `text` was painted in the last frame (first match, inside its

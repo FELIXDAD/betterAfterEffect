@@ -44,6 +44,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Solve Camera", "解算摄像机"),
     ("Track Camera", "跟踪摄像机"),
     ("Track Motion", "跟踪运动"),
+    ("Warp Stabilizer VFX", "变形稳定器 VFX"),
+    ("Analyze Stabilization", "分析稳定运动"),
     ("Apply Motion Tracker", "应用动态跟踪器"),
     ("Edit Motion Tracker", "编辑动态跟踪器"),
     ("Analyze Motion", "分析运动"),
