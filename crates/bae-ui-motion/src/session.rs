@@ -401,6 +401,8 @@ pub struct Session {
     /// Layer ▸ Reveal ▸ … in Project: the item the Project panel selects and
     /// scrolls to next frame.
     pub(crate) reveal_in_project: Option<PrimPath>,
+    /// Text the Project panel's search takes next frame (Find Missing Footage).
+    pub(crate) project_search: Option<String>,
     /// File ▸ Interpret Footage ▸ Remember Interpretation: `footage.interpret`
     /// parameters (without `items`) for Apply Interpretation.
     pub(crate) remembered_interpretation: Option<serde_json::Value>,
