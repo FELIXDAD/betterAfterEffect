@@ -113,24 +113,31 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     let _ = app.register(ACTION, bindings);
 }
 
+/// The displayed swatch for a label in this palette.
+pub fn label_color(prefs: &Preferences, index: usize) -> Color32 {
+    if index == 0 || prefs.label_color_is_default(index) {
+        crate::theme::LABELS
+            .get(index)
+            .unwrap_or(&crate::theme::LABELS[0])
+            .1
+    } else {
+        let [r, g, b] = prefs.label_color(index);
+        Color32::from_rgb(r, g, b)
+    }
+}
+
 /// Applies the preferences the UI shell draws with: label colors and names
 /// (Labels page) and the color theme (Appearance). Call at startup and after OK.
 /// A label color left at AE's value is drawn as measured on screen in AE
 /// (`theme::LABELS`); a changed one is drawn as chosen.
 pub fn apply(prefs: &Preferences) {
     use bae_prefs::keys;
-    crate::theme::set_label_colors(std::array::from_fn(|i| {
-        if i == 0 || prefs.label_color_is_default(i) {
-            crate::theme::LABELS[i].1
-        } else {
-            let [r, g, b] = prefs.label_color(i);
-            Color32::from_rgb(r, g, b)
-        }
-    }));
+    crate::theme::set_label_colors(std::array::from_fn(|i| label_color(prefs, i)));
     crate::theme::set_label_names(std::array::from_fn(|i| {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
+    crate::theme::set_gradients(prefs.bool("appearance.use_gradients"));
     crate::theme::set_accessible_contrast(prefs.bool("appearance.accessibility_color_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
