@@ -45,7 +45,7 @@ pub const INSTALL_SCRIPT_FILE: &str = "motion.file.install_script_file";
 /// An installed script, `{"path": …}` (catalog action of the Scripts list).
 pub const RUN_INSTALLED: &str = "motion.file.run_script";
 /// Shows the report of the script that just ran.
-const REPORT: &str = "motion.file.script_report";
+pub(super) const REPORT: &str = "motion.file.script_report";
 
 pub(crate) const ZH: &[(&str, &str)] = &[
     ("Run Script", "运行脚本"),
@@ -135,6 +135,7 @@ impl ScriptActions {
             let s = session.lock();
             json!({
                 "source": source,
+                "interactive": true,
                 "name": path.file_name().map(|n| n.to_string_lossy().into_owned()),
                 "active_comp": s.active_comp,
                 "selected_layers": s.selected_layers,

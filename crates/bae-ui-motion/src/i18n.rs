@@ -42,6 +42,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
+    ("Crop Comp", "裁剪合成"),
     ("Delete Keyframes", "删除关键帧"),
     ("Move Keyframes", "移动关键帧"),
     ("Paste Keyframes", "粘贴关键帧"),
