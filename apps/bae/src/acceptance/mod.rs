@@ -55,6 +55,7 @@ mod preview_preferences;
 mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
+mod render_autosave;
 #[cfg(target_os = "macos")]
 mod render_queue;
 mod settings;
@@ -191,6 +192,7 @@ pub(crate) struct Gui {
     /// Preferences (in memory) and the generation last applied.
     pub prefs: Arc<bae_prefs::PrefsStore>,
     prefs_generation: u64,
+    autosave: crate::autosave::AutoSave,
 }
 
 impl Gui {
@@ -210,6 +212,7 @@ impl Gui {
         workspace.set_extra_commands(doc.command_titles());
         Gui {
             prefs_generation: prefs.generation(),
+            autosave: crate::autosave::AutoSave::default(),
             prefs,
             app,
             workspace,
@@ -254,6 +257,15 @@ impl Gui {
             .workspace
             .ui(ui, &self.status, &self.doc, self.app.resources());
         self.pending.extend(invocations);
+        let queue = self.app.resource::<bae_ui_motion::SharedRenderQueue>();
+        if let Some(result) = self.autosave.tick(
+            std::time::Instant::now(),
+            &self.prefs.current(),
+            &self.doc,
+            queue,
+        ) {
+            result.expect("workbench auto-save");
+        }
         self.passes += 1;
         // As `Shell::sync_prefs`.
         let prefs = self.prefs.clone();
@@ -455,6 +467,18 @@ pub(crate) struct MenuItemView {
 }
 
 pub(crate) type Ui = Harness<'static, Gui>;
+
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
 
 /// A harness around a fresh [`Gui`].
 pub(crate) fn gui() -> Ui {
