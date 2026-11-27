@@ -14,6 +14,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Missing effect", "缺失效果"),
     ("BAE built-in effect", "BAE 内置效果"),
     ("Not available in BAE yet", "BAE 暂不支持"),
+    // AE 26 zh_CN ($$$/AE/EGG/LStr/1926).
+    (
+        "Effects cannot be applied to lights or cameras.",
+        "无法将效果应用于灯或摄像机。",
+    ),
     ("Effect", "效果"),
     ("Effects & Presets", "效果和预设"),
     ("Search", "搜索"),
@@ -37,6 +42,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Effect commands (bae-motion `effect.*`).
     ("Apply Effect", "应用效果"),
     ("Paint Stroke", "绘画描边"),
+    ("Add Puppet Pin", "添加操控点"),
+    ("Remove Selected Puppet Parameters", "移除所选操控参数"),
+    ("Create Puppet Mesh", "创建操控网格"),
     ("Remove Effect", "移除效果"),
     ("Reorder Effects", "排列效果"),
     ("Effect On/Off", "效果开关"),

@@ -68,6 +68,13 @@ pub fn capture(app: &App) -> Option<ViewState> {
 /// project). The session object stays (with its open audio device).
 pub fn restore(app: &mut App, doc: &Document) {
     let stage = doc.stage();
+    if let Some(dialogs) = app.resource::<bae_ui_motion::SharedDialogs>() {
+        let warn = doc.location().is_some()
+            && !app
+                .resource::<std::sync::Arc<bae_prefs::PrefsStore>>()
+                .is_some_and(|prefs| prefs.current().bool("type.do_not_warn_missing_fonts"));
+        dialogs.check_project_fonts(stage, warn);
+    }
     let saved = doc
         .manifest_field(MANIFEST_KEY)
         .and_then(|v| serde_json::from_value::<ViewState>(v.clone()).ok());
@@ -127,6 +134,7 @@ pub fn run_file_command(
         prefs.as_deref().and_then(files::template_path),
     );
     if outcome == Some(FileOutcome::Replaced) {
+        workspace.dismiss_home();
         restore(app, doc);
         workspace.restore_project_workspace(doc);
         // The render queue belongs to the project (AE, #231).
@@ -226,7 +234,7 @@ mod tests {
 
         let (mut app, mut doc) = app_and_doc();
         let held = app.resource::<SharedSession>().unwrap().clone();
-        held.lock().loop_playback = false;
+        held.lock().preview.profiles[0].repeat = false;
         doc.open(&path).unwrap();
         restore(&mut app, &doc);
         let s = held.lock();
@@ -234,7 +242,7 @@ mod tests {
             s.active_comp.as_ref().map(ToString::to_string).as_deref(),
             Some("/comps/Main")
         );
-        assert!(!s.loop_playback, "loop is the user's setting");
+        assert!(!s.preview.profiles[0].repeat, "loop is the user's setting");
         drop(s);
         assert_eq!(active(&app).as_deref(), Some("/comps/Main"));
     }

@@ -42,11 +42,38 @@ impl Span {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct Render {
+    pub span: Span,
+    pub resolution: QueueResolution,
+}
+
+impl Render {
+    pub fn capture(item: &QueueItem, comp: &CompInfo) -> Self {
+        Self {
+            span: Span::capture(item, comp),
+            resolution: item.resolution,
+        }
+    }
+
+    pub fn apply(&self, item: &mut QueueItem, comp: &CompInfo) {
+        (item.start, item.end) = self.span.range(comp);
+        item.resolution = self.resolution;
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Output {
     format: String,
     alpha: bool,
     mbps: f64,
+    /// Templates saved before it was stored wrote PCM, like new modules.
+    #[serde(default = "pcm_by_default")]
+    pub pcm_audio: bool,
+}
+
+fn pcm_by_default() -> bool {
+    true
 }
 
 impl Output {
@@ -55,6 +82,7 @@ impl Output {
             format: module.format.name().into(),
             alpha: module.channels == Channels::RgbAlpha,
             mbps: module.bit_rate_mbps,
+            pcm_audio: module.pcm_audio,
         }
     }
 
@@ -71,7 +99,7 @@ impl Output {
 
 #[derive(Debug)]
 pub(super) enum Template {
-    Render(Span),
+    Render(Render),
     Output(Output),
     Filename(String),
     DefaultFilename(String),
@@ -80,7 +108,7 @@ pub(super) enum Template {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Library {
-    pub render: BTreeMap<String, Span>,
+    pub render: BTreeMap<String, Render>,
     pub outputs: BTreeMap<String, Output>,
     pub names: BTreeMap<String, String>,
     pub default_name: Option<String>,
@@ -88,7 +116,23 @@ pub(super) struct Library {
 
 impl VersionedSettings for Library {
     const KIND: &'static str = "render-queue-templates";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
+
+    /// Version 1 stored a render template as its time span only: it rendered
+    /// at full resolution.
+    fn migrate(from: u32, mut data: serde_json::Value) -> Result<serde_json::Value, String> {
+        if from == 1
+            && let Some(render) = data.get_mut("render").and_then(|r| r.as_object_mut())
+        {
+            for template in render.values_mut() {
+                *template = serde_json::json!({
+                    "span": template.take(),
+                    "resolution": QueueResolution::Full,
+                });
+            }
+        }
+        Ok(data)
+    }
 }
 
 #[derive(Debug)]
@@ -202,7 +246,7 @@ impl NameDialog {
                     match &self.value {
                         Template::Filename(_) | Template::DefaultFilename(_) => false,
                         Template::Render(_) => {
-                            !RS_TEMPLATES.iter().any(|s| reserved(s))
+                            !RS_TEMPLATES.iter().any(|(s, _)| reserved(s))
                                 && !library.render.keys().any(|s| taken(s))
                         }
                         Template::Output(_) => {

@@ -129,6 +129,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Crop", "裁剪"),
     ("Audio Output", "音频输出"),
     ("Audio Output Auto", "自动音频输出"),
+    (
+        "Image sequences do not contain audio.",
+        "图像序列不包含音频。",
+    ),
     // Dialogs (`dialogs`): Composition Settings. Terms follow the AE 26 Simplified
     // Chinese UI (docs/glossary.md §十).
     ("Composition Settings", "合成设置"),
@@ -146,6 +150,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Solid Settings", "纯色设置"),
     ("Solid Settings...", "纯色设置..."),
     ("Solid...", "纯色..."),
+    ("Placeholder...", "占位符..."),
     ("Layer Settings", "图层设置"),
     ("Layer Settings...", "图层设置..."),
     ("Name:", "名称:"),
@@ -338,6 +343,21 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Cineon Full", "Cineon 完整"),
     ("Film (2K)", "胶片 (2K)"),
     ("Film (4K)", "胶片 (4K)"),
+    // File ▸ Import ▸ Placeholder… (AE 26's Chinese).
+    ("New Placeholder", "新占位符"),
+    ("Missing Name", "缺少名称"),
+    ("fps", "fps"),
+    // File ▸ New Comp from Selection… (AE 26's Chinese).
+    ("New Composition from Selection", "基于所选项新建合成"),
+    ("New Comp from Selection...", "基于所选项新建合成..."),
+    ("Create", "创建"),
+    ("Single Composition", "单个合成"),
+    ("Multiple Compositions", "多个合成"),
+    ("Use Dimensions From:", "使用尺寸来自 -"),
+    ("Use Dimensions From", "使用尺寸来自"),
+    ("Still Duration:", "静止持续时间 -"),
+    ("Still Duration", "静止持续时间"),
+    ("Transition", "过渡"),
     // The 3D Renderer and Advanced tabs' texts (AE 26's Chinese).
     (
         super::comp_settings::MOTION_BLUR_HELP,

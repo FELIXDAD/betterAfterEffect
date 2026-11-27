@@ -21,11 +21,14 @@
 // both platforms, so off macOS most helpers are unused.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+mod appearance_colors;
 mod appearance_preferences;
 mod audio_preferences;
 #[cfg(target_os = "windows")]
 mod builtin_scripts;
 mod camera_preferences;
+mod camera_tracker;
+mod classic_effects;
 mod comp_navigation;
 #[cfg(target_os = "macos")]
 mod dialogs;
@@ -43,15 +46,26 @@ mod layer_creation_preferences;
 mod layers;
 #[cfg(target_os = "macos")]
 mod layout;
+mod liquify;
+mod marker_label_preferences;
+mod media_panels;
 mod memory_preferences;
 #[cfg(target_os = "macos")]
 mod menus;
+mod panel_parity;
 mod preference_controls;
+mod preview_preferences;
+mod preview_properties;
+mod preview_switches;
 mod project_preferences;
 #[cfg(target_os = "macos")]
 mod release_001;
+mod render_autosave;
 #[cfg(target_os = "macos")]
 mod render_queue;
+mod render_templates;
+#[cfg(target_os = "macos")]
+mod responsiveness;
 mod settings;
 mod shape_anchor;
 mod shortcut_sweep;
@@ -61,10 +75,13 @@ mod shortcuts_dialog;
 mod startup;
 #[cfg(target_os = "macos")]
 mod stress;
+mod text_orientation;
 #[cfg(target_os = "macos")]
 mod timeline;
 #[cfg(target_os = "macos")]
 mod tools;
+mod type_preferences;
+mod vision;
 mod window_workspaces;
 
 use std::collections::VecDeque;
@@ -95,6 +112,7 @@ pub(crate) fn build_app() -> App {
         .add_module(crate::mcp_cli::McpCliModule)
         .add_module(crate::pack_cli::PackCliModule)
         .add_module(bae_render::RenderModule)
+        .add_module(bae_effects::EffectsModule)
         .add_module(bae_motion::MotionModule)
         .add_module(bae_plugin::PluginModule)
         .add_module(crate::shell::ShellModule)
@@ -186,6 +204,7 @@ pub(crate) struct Gui {
     /// Preferences (in memory) and the generation last applied.
     pub prefs: Arc<bae_prefs::PrefsStore>,
     prefs_generation: u64,
+    autosave: crate::autosave::AutoSave,
 }
 
 impl Gui {
@@ -205,6 +224,7 @@ impl Gui {
         workspace.set_extra_commands(doc.command_titles());
         Gui {
             prefs_generation: prefs.generation(),
+            autosave: crate::autosave::AutoSave::default(),
             prefs,
             app,
             workspace,
@@ -249,6 +269,15 @@ impl Gui {
             .workspace
             .ui(ui, &self.status, &self.doc, self.app.resources());
         self.pending.extend(invocations);
+        let queue = self.app.resource::<bae_ui_motion::SharedRenderQueue>();
+        if let Some(result) = self.autosave.tick(
+            std::time::Instant::now(),
+            &self.prefs.current(),
+            &self.doc,
+            queue,
+        ) {
+            result.expect("workbench auto-save");
+        }
         self.passes += 1;
         // As `Shell::sync_prefs`.
         let prefs = self.prefs.clone();
@@ -292,6 +321,13 @@ impl Gui {
                 );
             }
             ids::HELP => {}
+            // As `Shell::purge`, without the disk cache's question.
+            "motion.edit.purge" => {
+                let what = inv.params.get("what").and_then(|w| w.as_str());
+                if matches!(what, Some("undo" | "all_memory" | "memory_and_disk_cache")) {
+                    self.doc.clear_undo();
+                }
+            }
             _ => {
                 // As `Shell::dispatch`: a failure is explained in the status bar
                 // until the next change.
@@ -313,11 +349,15 @@ impl Gui {
     }
 
     /// A native menu click on the contributed item `registry_id` (e.g.
-    /// `motion.layer.new.solid`): queued like `UserEvent::Menu`. Returns `false`
-    /// (and does nothing) when the item is disabled, as a greyed-out menu item.
+    /// `motion.layer.new.solid`), queued like `UserEvent::Menu`. Disabled items
+    /// and commands blocked by a modal dialog return `false`.
     pub fn menu(&mut self, registry_id: &str) -> bool {
         let item = self.menu_item(registry_id);
-        if !item.enabled {
+        if !item.enabled
+            || !self
+                .workspace
+                .accepts_native_menu(self.app.resources(), &item.invocation)
+        {
             return false;
         }
         self.pending.push(item.invocation);
@@ -446,6 +486,18 @@ pub(crate) struct MenuItemView {
 }
 
 pub(crate) type Ui = Harness<'static, Gui>;
+
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
 
 /// A harness around a fresh [`Gui`].
 pub(crate) fn gui() -> Ui {
@@ -690,6 +742,36 @@ pub(crate) fn queue_control<'a>(
     })
 }
 
+/// Chooses `what` ("Remove", "Render Again", "Show in Finder" …) from the
+/// right-click menu of Render Queue item `number` (1-based); `false` when the
+/// entry is missing or disabled (the menu is closed again).
+pub(crate) fn queue_menu(h: &mut Ui, number: usize, what: &str) -> bool {
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    let row = format!("Render Item {number} “");
+    h.query_by(|n| {
+        n.label()
+            .is_some_and(|l| l.starts_with(&row) && l.ends_with('”') && !l.contains(" · "))
+    })
+    .unwrap_or_else(|| panic!("no Render Item {number} row"))
+    .click_secondary();
+    settle(h);
+    let entry = h
+        .query_all_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr(what))
+        .rfind(|n| !n.accesskit_node().is_disabled());
+    let found = match entry {
+        Some(entry) => {
+            entry.click();
+            true
+        }
+        None => false,
+    };
+    if !found {
+        key(h, Modifiers::NONE, Key::Escape);
+    }
+    settle(h);
+    found
+}
+
 /// Where the text `text` was painted in the last frame (first match, inside its
 /// clip rect). Finds rows the panels paint themselves (timeline layer names).
 /// The Timeline's name column header: "Source Name" (AE's default) or
@@ -701,6 +783,20 @@ pub(crate) fn timeline_header(h: &Ui) -> Option<Rect> {
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
     find_texts(h, |t| t == text).into_iter().next()
 }
+
+/// A panel's anchor text: [`FITTED`] finds the Composition viewer's fitted
+/// magnification ("(50%)"), anything else is [`find_text`].
+pub(crate) fn find_anchor(h: &Ui, anchor: &str) -> Option<Rect> {
+    if anchor == FITTED {
+        return find_texts(h, |t| t.starts_with('(') && t.ends_with("%)"))
+            .into_iter()
+            .next();
+    }
+    find_text(h, anchor)
+}
+
+/// The Composition viewer's anchor: its magnification popup while fitted.
+pub(crate) const FITTED: &str = "(%)";
 
 /// Every painted text matching `pred`, as visible rects.
 pub(crate) fn find_texts(h: &Ui, pred: impl Fn(&str) -> bool) -> Vec<Rect> {

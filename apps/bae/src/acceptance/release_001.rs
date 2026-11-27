@@ -109,7 +109,7 @@ fn rich() -> Ui {
 }
 
 const TIMELINE: (&str, egui::Vec2) = ("Source Name", egui::vec2(700.0, 120.0));
-const VIEWER: (&str, egui::Vec2) = ("Fit", egui::vec2(300.0, -250.0));
+const VIEWER: (&str, egui::Vec2) = (FITTED, egui::vec2(300.0, -250.0));
 
 /// Enabled menu items that do nothing in the state of [`rich`] (a layer
 /// selected, no keyframe selected), with their issue. Remove when fixed.
@@ -118,7 +118,7 @@ const KNOWN_NOOPS: &[(&str, &str)] = &[];
 /// Clicks an empty part of the panel whose header shows `anchor`.
 fn focus(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
     let at =
-        find_text(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
+        find_anchor(h, anchor).unwrap_or_else(|| panic!("no {anchor:?}: {:?}", painted_texts(h)));
     click_at(h, at.center() + offset);
 }
 
@@ -252,6 +252,14 @@ fn menus_show_the_ae_shortcuts() {
 /// (the document answers "unknown"), and none may panic.
 #[test]
 fn every_enabled_menu_item_does_something() {
+    // Last Effect remembers effects applied across projects in the same process.
+    // Start this fresh-launch menu check without another test's effect history.
+    if !in_child(
+        "acceptance::release_001::every_enabled_menu_item_does_something",
+        &[],
+    ) {
+        return;
+    }
     let items = rich().state().menu_items();
     let mut problems = Vec::new();
     let mut ran = 0;
@@ -280,14 +288,25 @@ fn every_enabled_menu_item_does_something() {
     }
     println!("enabled menu items run: {ran} of {}", items.len());
     // The layer has no effects: the Effect menu greys what needs one (Last
-    // Effect, Remove All). Effect Controls opens the panel and Manage
-    // Effects… its window, enabled in AE as well.
+    // Effect, Remove All). The effects of each category apply to the selected
+    // layer, Effect Controls opens the panel and Manage Effects… its window,
+    // all enabled in AE as well.
     let effect = bae_ui::tr("Effect");
+    assert!(
+        items
+            .iter()
+            .any(|i| i.enabled && i.invocation.id == "motion.effect.apply"),
+        "effects apply to the selected layer"
+    );
     for item in items
         .iter()
         .filter(|i| i.path.first().is_some_and(|p| p == "Effect" || p == effect))
     {
-        let always = ["window.panel", "motion.effect.manage_effects"];
+        let always = [
+            "window.panel",
+            "motion.effect.manage_effects",
+            "motion.effect.apply",
+        ];
         if item.enabled && !always.contains(&item.invocation.id.as_str()) {
             problems.push(format!(
                 "Effect menu item enabled: {} ({})",
@@ -524,8 +543,7 @@ fn type_into(h: &mut Ui, label: &str, text: &str) {
     key(h, Modifiers::NONE, Key::Tab);
 }
 
-/// Cmd+N, `field` set to `text`, Enter straight from the field (OK): the new
-/// comp's settings (Tab then Enter: `enter_is_ok_after_tab_to_a_swatch`).
+/// Edit a numeric field, commit it, then accept the composition settings.
 fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::CompInfo {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
@@ -538,6 +556,8 @@ fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::Comp
     } else {
         type_text(h, text);
     }
+    key(h, Modifiers::NONE, Key::Enter);
+    assert!(dialog_open(h), "{field} should commit before closing");
     key(h, Modifiers::NONE, Key::Enter);
     assert!(
         !dialog_open(h),

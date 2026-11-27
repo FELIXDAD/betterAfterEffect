@@ -18,7 +18,10 @@ use crate::EffectTarget;
 use crate::gpu::{self, Binding, Kernel, KernelKey, KernelSource, Resource, UniformWriter};
 
 const LABEL: &str = "bae.effects.flow";
-const SHADER: &str = include_str!("flow.wgsl");
+const SHADER: &str = concat!(
+    include_str!("flow_sampling.wgsl"),
+    include_str!("flow.wgsl")
+);
 const BYTES: u32 = 224;
 const ENTRIES: [&str; 7] = [
     "luma_base",
@@ -81,7 +84,7 @@ pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<
 
 /// Parameters that affect vector estimation, shared by both optical-flow effects.
 #[derive(Clone, Copy)]
-pub(super) struct Analysis {
+pub(crate) struct Analysis {
     weights: [f32; 3],
     global: f32,
     local: f32,
@@ -208,10 +211,22 @@ struct Pyramid {
 
 /// A flow field: render-pixel motion per texel of the finest level.
 pub(crate) struct Field {
-    image: GpuImage,
+    pub(crate) image: GpuImage,
     size: [u32; 2],
-    scale: f32,
-    region: IRect,
+    pub(crate) scale: f32,
+    pub(crate) region: IRect,
+}
+
+impl Field {
+    /// Reuse the flow texture in render-grid coordinates. Its two channels are
+    /// displacements in render pixels, including at reduced preview resolution.
+    pub(crate) fn grid_image(&self, grid: f64) -> GpuImage {
+        let mut image = self.image.clone();
+        image.rect = image_grid::pixel_rect(self.region, grid);
+        image.pixel_scale = grid * f64::from(self.scale);
+        image.alpha = bae_render::ImageAlpha::Straight;
+        image
+    }
 }
 
 fn patches(n: u32, block: u32) -> u32 {
@@ -434,7 +449,7 @@ impl Pair<'_> {
 }
 
 /// One source-frame pair. The two directions can share the luma pyramid on a miss.
-pub(super) struct Pair<'a> {
+pub(crate) struct Pair<'a> {
     pub images: [&'a GpuImage; 2],
     pub times: [Time; 2],
     pub layer: &'a PrimPath,
@@ -504,7 +519,7 @@ impl Pair<'_> {
         Ok(field)
     }
 
-    pub(super) fn forward(&self, target: &mut dyn EffectTarget) -> Result<Field, RenderError> {
+    pub(crate) fn forward(&self, target: &mut dyn EffectTarget) -> Result<Field, RenderError> {
         self.field(target, false, &mut None)
     }
 

@@ -183,6 +183,7 @@ impl OutputTarget {
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -193,6 +194,8 @@ impl OutputTarget {
 pub(crate) struct DisplayOutput {
     available: Option<OutputTarget>,
     uniform: wgpu::Buffer,
+    /// Viewer display colour management ([`Renderer::set_display_transform`]).
+    color: Option<Arc<crate::display_color::DisplayColor>>,
 }
 
 impl DisplayOutput {
@@ -223,9 +226,17 @@ impl DisplayOutput {
             target.view(),
             wgpu::TextureFormat::Rgba8Unorm,
             &self.uniform,
+            self.color.as_deref(),
         );
         target
     }
+}
+
+/// [`Renderer::set_display_transform`]'s transform and its prepared form.
+struct DisplayColorState {
+    hash: u64,
+    transform: bae_color::ColorTransform,
+    prepared: Option<Arc<crate::display_color::DisplayColor>>,
 }
 
 /// The GPU compositor.
@@ -235,6 +246,9 @@ pub struct Renderer {
     pool: TexturePool,
     draws: DrawBuffer,
     output_uniform: Option<([u8; OUTPUT_PARAMS_SIZE as usize], wgpu::Buffer)>,
+    /// Viewer display colour management: the transform (by content hash) and,
+    /// once its pipeline is ready, its bound values.
+    display_color: Option<DisplayColorState>,
     /// Receiver-space shadow maps kept across frames.
     shadow_maps: crate::exec::shadowmap::ShadowMapCache,
     readback_target: Option<OutputTarget>,
@@ -282,6 +296,7 @@ impl SourceResolver for Resolver<'_> {
             &footage.asset,
             footage.file_revision,
             footage.sequence,
+            footage.alphabetical,
             footage.psd_layer,
         ) {
             Ok(source) => Ok(Some(source)),
@@ -294,6 +309,10 @@ impl SourceResolver for Resolver<'_> {
 
     fn custom(&mut self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
         self.providers.resolve(content)
+    }
+
+    fn outlines(&mut self, content: &CustomContent) -> Option<Arc<crate::source::Outlines>> {
+        self.providers.get(&content.provider)?.outlines(content)
     }
 }
 
@@ -311,6 +330,7 @@ impl Renderer {
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
             output_uniform: None,
+            display_color: None,
             shadow_maps: Default::default(),
             readback_target: None,
             mask_buffers: MaskBuffers::default(),
@@ -529,7 +549,6 @@ impl Renderer {
         let feedback = graph.nodes.iter().any(|node|matches!(&node.kind, crate::graph::NodeKind::Effect(fx) if fx.feedback.is_some()));
         let tiles = (self.frames.stats().budget > 0 || feedback).then(|| crate::exec::TileCache {
             whole_surfaces: request.roi.is_some(),
-            feedback,
             frames: &mut self.frames,
             request: RenderRequest {
                 roi: None,
@@ -815,6 +834,24 @@ impl Renderer {
         Ok(pixels?)
     }
 
+    /// Viewer display colour management (AE's Use Display Color Management,
+    /// Simulate Output): buffer values → what the display shows, applied by
+    /// the viewer conversions ([`Self::output_texture_display`],
+    /// [`Self::render_frame_output`]) on RGB views; `None` (or an identity)
+    /// shows the values as they are. Exports and read-backs never apply it.
+    pub fn set_display_transform(&mut self, transform: Option<&bae_color::ColorTransform>) {
+        let transform = transform.filter(|t| !t.is_identity());
+        let hash = transform.map(|t| t.content_hash());
+        if self.display_color.as_ref().map(|s| s.hash) == hash {
+            return;
+        }
+        self.display_color = transform.map(|t| DisplayColorState {
+            hash: t.content_hash(),
+            transform: t.clone(),
+            prepared: None,
+        });
+    }
+
     /// Converts to RGBA8. Return the display target here only after its consumers have released it.
     pub fn output_texture(
         &mut self,
@@ -876,9 +913,30 @@ impl Renderer {
             self.gpu.queue().write_buffer(uniform, 0, &params);
             *previous = params;
         }
+        // Display colour management (its pipeline may still compile: the
+        // frame is shown unconverted until then).
+        let color = match &mut self.display_color {
+            Some(state) => {
+                if state.prepared.is_none() {
+                    state.prepared = self
+                        .pipelines
+                        .display_color()
+                        .prepare(
+                            device,
+                            self.gpu.queue(),
+                            &self.pipelines.output_layout,
+                            &state.transform,
+                        )
+                        .map(Arc::new);
+                }
+                state.prepared.clone()
+            }
+            None => None,
+        };
         DisplayOutput {
             available,
             uniform: uniform.clone(),
+            color,
         }
     }
 
@@ -901,6 +959,7 @@ impl Renderer {
             target,
             format,
             uniform,
+            None,
         );
     }
 

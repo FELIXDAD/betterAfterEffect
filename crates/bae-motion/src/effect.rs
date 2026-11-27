@@ -50,7 +50,7 @@ pub fn layer_of_effect(effect: &PrimPath) -> Option<PrimPath> {
 }
 
 /// The definition of `match_name` in `defs`.
-fn find_def(defs: &Registry<EffectDef>, match_name: &str) -> Option<Arc<EffectDef>> {
+pub(crate) fn find_def(defs: &Registry<EffectDef>, match_name: &str) -> Option<Arc<EffectDef>> {
     defs.snapshot()
         .iter()
         .find(|e| e.item().match_name == match_name)
@@ -153,6 +153,9 @@ pub struct PresetEffect {
     /// `param:<id>` → value.
     #[serde(default)]
     pub values: std::collections::BTreeMap<String, Value>,
+    /// Keys relative to the playhead, in composition time.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub keys: std::collections::BTreeMap<String, Vec<(Time, Keyframe)>>,
 }
 
 /// Animation ▸ Apply Animation Preset (and double-click in Effects & Presets):
@@ -171,6 +174,8 @@ impl ApplyPreset {
 pub struct ApplyPresetParams {
     pub layers: Vec<PrimPath>,
     pub effects: Vec<PresetEffect>,
+    #[serde(default)]
+    pub time: Time,
 }
 
 impl bae_model::Command for ApplyPreset {
@@ -211,6 +216,21 @@ impl bae_model::Command for ApplyPreset {
                 for (attr, value) in &e.values {
                     if attr.starts_with("param:") {
                         set(tx, &effect, attr, value.clone())?;
+                    }
+                }
+                for (attr, keys) in &e.keys {
+                    if bae_model::effect::param_id(attr).is_none() {
+                        return Err(fail("expected an effect parameter for the preset keys"));
+                    }
+                    for (offset, keyframe) in keys {
+                        let time =
+                            query::to_key_time(tx.stage(), &effect, p.time.saturating_add(*offset));
+                        tx.apply(Op::SetKeyframe {
+                            path: effect.clone(),
+                            attr: attr.clone(),
+                            time,
+                            keyframe: keyframe.clone(),
+                        })?;
                     }
                 }
                 out.push(effect);
@@ -256,7 +276,7 @@ pub fn instance_default(
     }
 }
 
-fn add_instance(
+pub(crate) fn add_instance(
     tx: &mut Transaction<'_>,
     layer: &PrimPath,
     def: &EffectDef,
@@ -661,6 +681,7 @@ pub fn effect_commands(defs: Arc<Registry<EffectDef>>) -> Vec<Arc<dyn DynCommand
 pub fn register_effect_commands(r: &mut CommandRegistry, defs: Arc<Registry<EffectDef>>) {
     let results = [
         r.register(ApplyEffect::new(defs.clone())),
+        r.register(crate::roto::Stroke(defs.clone())),
         r.register(ApplyPreset::new(defs.clone())),
         r.register(crate::tracker::ApplyTrack(defs.clone())),
         r.register(RemoveEffects),

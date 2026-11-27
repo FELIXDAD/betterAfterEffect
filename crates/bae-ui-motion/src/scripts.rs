@@ -8,7 +8,8 @@
 //! reads the report `script.run` left in [`ScriptConsole`].
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use bae_app::{Owner, Registry};
 use bae_script::{RUN_SCRIPT, ScriptConsole};
@@ -45,9 +46,15 @@ pub const INSTALL_SCRIPT_FILE: &str = "motion.file.install_script_file";
 /// An installed script, `{"path": …}` (catalog action of the Scripts list).
 pub const RUN_INSTALLED: &str = "motion.file.run_script";
 /// Shows the report of the script that just ran.
-const REPORT: &str = "motion.file.script_report";
+pub(super) const REPORT: &str = "motion.file.script_report";
+const EDITOR: &str = "motion.file.script_editor";
+const EDITOR_PANEL: &str = "script_editor";
+const RECENT_LIMIT: usize = 10;
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Open Script Editor...", "打开脚本编辑器..."),
+    ("Script Editor", "脚本编辑器"),
+    ("Script Source", "脚本源码"),
     ("Run Script", "运行脚本"),
     ("Scripts", "脚本"),
     ("Script error", "脚本错误"),
@@ -92,7 +99,14 @@ fn menu_item(path: &Path, order: i32) -> (String, MenuItemSpec) {
             MenuPos::new(i32::MAX, i32::MAX),
             MenuPos::new(1, 1000 + order),
         ]);
-    (format!("motion.file.script.{title}"), spec)
+    // Use the filename itself whenever it is a valid registry ID. Encoded
+    // names contain no extension separator, so they cannot collide with it.
+    let id = if title.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        title.bytes().map(|b| format!("{b:02x}")).collect()
+    } else {
+        title
+    };
+    (format!("motion.file.script.{id}"), spec)
 }
 
 /// Registers the installed scripts of `dir` under File ▸ Scripts.
@@ -107,8 +121,167 @@ pub fn register_menu(menu: &Registry<MenuItemSpec>, owner: &Owner, dir: &Path) {
     });
 }
 
+#[derive(Default)]
+pub(crate) struct RecentScripts {
+    entries: Vec<RecentScript>,
+    file: Option<PathBuf>,
+}
+
+#[derive(Clone)]
+struct RecentScript {
+    path: PathBuf,
+    available: Arc<AtomicBool>,
+}
+
+impl RecentScript {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            available: Arc::new(AtomicBool::new(true)),
+        }
+    }
+}
+
+impl RecentScripts {
+    pub(crate) fn load(file: Option<PathBuf>) -> Self {
+        let mut paths: Vec<PathBuf> = file
+            .as_ref()
+            .and_then(|f| std::fs::read(f).ok())
+            .and_then(|data| serde_json::from_slice(&data).ok())
+            .unwrap_or_default();
+        paths.retain(|p| is_script(p));
+        paths.truncate(RECENT_LIMIT);
+        Self {
+            entries: paths.into_iter().map(RecentScript::new).collect(),
+            file,
+        }
+    }
+
+    pub(crate) fn check_files(&self) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let entries = self.entries.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("bae-recent-scripts".into())
+            .spawn(move || {
+                for entry in entries {
+                    if !entry.path.is_file() {
+                        entry.available.store(false, Ordering::Relaxed);
+                        bae_gpu::warm_up::request_redraw();
+                    }
+                }
+            })
+        {
+            tracing::warn!("checking recent scripts: {error}");
+        }
+    }
+
+    pub(crate) fn publish(&self, menu: &Registry<MenuItemSpec>, owner: &Owner) {
+        menu.batch(|tx| {
+            for i in 0..RECENT_LIMIT {
+                let id = format!("motion.file.recent_script.{i}");
+                if let Some(entry) = self.entries.get(i) {
+                    let path = &entry.path;
+                    let available = entry.available.clone();
+                    let spec = MenuItemSpec::new(
+                        &["File", "Scripts", "Recent Script Files"],
+                        path.display().to_string(),
+                        RUN_INSTALLED,
+                    )
+                    .params(json!({"path": path}))
+                    .enabled_when(move |_| available.load(Ordering::Relaxed))
+                    .workspace(crate::menus::WORKSPACE)
+                    .at(vec![
+                        MenuPos::new(i32::MAX, i32::MAX),
+                        MenuPos::new(i32::MAX, i32::MAX),
+                        MenuPos::new(0, i as i32),
+                    ]);
+                    let _ = tx.replace(owner.clone(), id, Arc::new(spec));
+                } else {
+                    tx.unregister(&id);
+                }
+            }
+        });
+    }
+
+    fn record(&mut self, path: &Path) {
+        self.entries.retain(|entry| entry.path != path);
+        // A successful open supersedes any pending startup check for this path.
+        self.entries.insert(0, RecentScript::new(path.to_owned()));
+        self.entries.truncate(RECENT_LIMIT);
+        let paths: Vec<_> = self.entries.iter().map(|entry| &entry.path).collect();
+        if let Some(file) = &self.file
+            && let Err(error) = bae_platform::settings::write_atomic(
+                file,
+                &serde_json::to_vec(&paths).expect("script paths"),
+            )
+        {
+            tracing::warn!("saving recent scripts: {error}");
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ScriptEditor(String);
+
+impl bae_ui::Panel for ScriptEditor {
+    fn ui(&mut self, ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
+        use bae_ui::Accessible as _;
+        if ui
+            .add_enabled(
+                !self.0.trim().is_empty(),
+                egui::Button::new(tr("Run Script")),
+            )
+            .clicked()
+        {
+            run_source(cx, &self.0, tr("Script Editor"));
+        }
+        egui::ScrollArea::both().show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::multiline(&mut self.0)
+                    .code_editor()
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(16),
+            )
+            .labeled(egui::WidgetType::TextEdit, tr("Script Source"));
+        });
+    }
+    fn save_state(&self) -> Option<serde_json::Value> {
+        Some(json!(self.0))
+    }
+}
+
+pub(crate) fn editor_panel() -> bae_ui::PanelKind {
+    bae_ui::PanelKind::new("Script Editor", |spawn| {
+        Box::new(ScriptEditor(
+            spawn
+                .state
+                .as_ref()
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .into(),
+        ))
+    })
+    .hidden_from_window_menu()
+}
+
+fn run_source(cx: &mut PanelContext<'_>, source: &str, name: &str) {
+    let session = common::session(cx.resources);
+    let s = session.lock();
+    let params = json!({"source": source, "interactive": true, "name": name, "active_comp": s.active_comp,
+        "selected_layers": s.selected_layers, "time": s.active_time().as_seconds()});
+    drop(s);
+    if let Some(console) = cx.resources.get::<ScriptConsole>() {
+        console.take();
+    }
+    cx.invoke_with(RUN_SCRIPT, params);
+    cx.invoke(REPORT);
+}
+
 /// The File ▸ Scripts actions.
 pub struct ScriptActions {
+    pub(crate) recent: Mutex<RecentScripts>,
     /// `<app data>/Scripts`, when known.
     pub dir: Option<PathBuf>,
     /// For scripts installed while the app runs.
@@ -130,22 +303,14 @@ impl ScriptActions {
                 return;
             }
         };
-        let session = common::session(cx.resources);
-        let params = {
-            let s = session.lock();
-            json!({
-                "source": source,
-                "name": path.file_name().map(|n| n.to_string_lossy().into_owned()),
-                "active_comp": s.active_comp,
-                "selected_layers": s.selected_layers,
-                "time": s.active_time().as_seconds(),
-            })
-        };
-        if let Some(console) = cx.resources.get::<ScriptConsole>() {
-            console.take();
-        }
-        cx.invoke_with(RUN_SCRIPT, params);
-        cx.invoke(REPORT);
+        let mut recent = self.recent.lock().unwrap_or_else(|e| e.into_inner());
+        recent.record(path);
+        recent.publish(&self.menu, &self.owner);
+        run_source(
+            cx,
+            &source,
+            &path.file_name().unwrap_or_default().to_string_lossy(),
+        );
     }
 
     fn install(&self, cx: &PanelContext<'_>, file: &Path) {
@@ -194,6 +359,7 @@ fn pick(cx: &PanelContext<'_>, title: &str) -> Option<PathBuf> {
 impl ActionHandler for ScriptActions {
     fn actions(&self) -> Vec<String> {
         let mut out = vec![
+            EDITOR.to_owned(),
             RUN_SCRIPT_FILE.to_owned(),
             RUN_INSTALLED.to_owned(),
             REPORT.to_owned(),
@@ -210,6 +376,7 @@ impl ActionHandler for ScriptActions {
 
     fn handle(&self, inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         match inv.id.as_str() {
+            EDITOR => cx.open_panel(bae_ui::PanelId::new(EDITOR_PANEL)),
             RUN_SCRIPT_FILE => {
                 if let Some(path) = pick(cx, "Run Script File...") {
                     self.run_file(cx, &path);
@@ -260,9 +427,35 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(found, ["a.js", "b.jsx"]);
-        let (_, spec) = menu_item(&dir.join("a.js"), 0);
+        let (id, spec) = menu_item(&dir.join("a.js"), 0);
+        assert_eq!(id, "motion.file.script.a.js");
         assert_eq!(spec.path, ["File", "Scripts"]);
         assert_eq!(spec.action, RUN_INSTALLED);
+        let odd = dir.join("A B.jsx");
+        std::fs::write(&odd, "1").unwrap();
+        let menu = Registry::new();
+        register_menu(&menu, &Owner::Core, &dir);
+        assert!(menu.get(&menu_item(&odd, 0).0).is_some());
+        let config = dir.join("recent.json");
+        let mut recent = RecentScripts::load(Some(config.clone()));
+        recent.record(&odd);
+        recent.record(&dir.join("a.js"));
+        recent.record(&odd);
+        std::fs::remove_file(&odd).unwrap();
+        RecentScripts::load(Some(config)).publish(&menu, &Owner::Core);
+        let stage = bae_model::Stage::new();
+        let resources = bae_app::Resources::new();
+        let context = bae_ui::menu::MenuContext::new(&stage, &resources, crate::menus::WORKSPACE);
+        assert!(
+            menu.get("motion.file.recent_script.0")
+                .unwrap()
+                .is_enabled(&context)
+        );
+        assert_eq!(
+            menu.get("motion.file.recent_script.0").unwrap().params["path"],
+            json!(odd)
+        );
+        assert!(menu.get("motion.file.recent_script.2").is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -306,6 +499,7 @@ mod tests {
         )
         .unwrap();
         let actions = ScriptActions {
+            recent: Default::default(),
             dir: Some(dir.clone()),
             menu: Arc::new(Registry::new()),
             owner: Owner::Core,

@@ -37,6 +37,7 @@ mod categories;
 pub use categories::channel_3d::settings as exr_controls;
 mod common;
 pub mod effects;
+pub use categories::matte::fill::content_aware_fill;
 mod gpu;
 mod module;
 mod obsolete;
@@ -389,6 +390,11 @@ fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
                 .or_else(|| {
                     (m == effects::liquify::MATCH_NAME)
                         .then(|| effects::liquify::options_zh(p.id))
+                        .flatten()
+                })
+                .or_else(|| {
+                    (m == effects::puppet::MATCH_NAME)
+                        .then(|| effects::puppet::options_zh(p.id))
                         .flatten()
                 })
                 .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;

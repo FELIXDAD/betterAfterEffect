@@ -113,24 +113,32 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     let _ = app.register(ACTION, bindings);
 }
 
+/// The displayed swatch for a label in this palette.
+pub fn label_color(prefs: &Preferences, index: usize) -> Color32 {
+    if index == 0 || prefs.label_color_is_default(index) {
+        crate::theme::LABELS
+            .get(index)
+            .unwrap_or(&crate::theme::LABELS[0])
+            .1
+    } else {
+        let [r, g, b] = prefs.label_color(index);
+        Color32::from_rgb(r, g, b)
+    }
+}
+
 /// Applies the preferences the UI shell draws with: label colors and names
 /// (Labels page) and the color theme (Appearance). Call at startup and after OK.
 /// A label color left at AE's value is drawn as measured on screen in AE
 /// (`theme::LABELS`); a changed one is drawn as chosen.
 pub fn apply(prefs: &Preferences) {
     use bae_prefs::keys;
-    crate::theme::set_label_colors(std::array::from_fn(|i| {
-        if i == 0 || prefs.label_color_is_default(i) {
-            crate::theme::LABELS[i].1
-        } else {
-            let [r, g, b] = prefs.label_color(i);
-            Color32::from_rgb(r, g, b)
-        }
-    }));
+    crate::theme::set_label_colors(std::array::from_fn(|i| label_color(prefs, i)));
     crate::theme::set_label_names(std::array::from_fn(|i| {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
+    crate::theme::set_gradients(prefs.bool("appearance.use_gradients"));
+    crate::theme::set_accessible_contrast(prefs.bool("appearance.use_accessible_contrast"));
     crate::theme::set_appearance(crate::theme::Appearance::from_id(
         prefs.str(keys::COLOR_THEME),
     ));
@@ -317,8 +325,10 @@ pub type Request = String;
 #[derive(Default)]
 pub struct SettingsDialog {
     installed_ram: Option<u64>,
+    cache_root: Option<std::path::PathBuf>,
     open: bool,
     confirm_reset: bool,
+    save_theme_name: Option<String>,
     display_changed: bool,
     page: usize,
     draft: Preferences,
@@ -366,6 +376,11 @@ impl SettingsDialog {
         self
     }
 
+    pub fn with_cache_root(mut self, root: Option<std::path::PathBuf>) -> Self {
+        self.cache_root = root;
+        self
+    }
+
     pub fn with_installed_ram(mut self, bytes: Option<u64>) -> Self {
         self.installed_ram = bytes;
         self
@@ -378,8 +393,12 @@ impl SettingsDialog {
             .and_then(|id| PAGES.iter().position(|p| p.id == id))
             .unwrap_or(0);
         self.draft = current.clone();
+        if let Some(total) = self.installed_ram {
+            self.draft.set_installed_ram(total);
+        }
         self.open = true;
         self.confirm_reset = false;
+        self.save_theme_name = None;
         self.display_changed = false;
         self.lang_at_open = Some((
             crate::i18n::lang(),
@@ -403,7 +422,27 @@ impl SettingsDialog {
 
     /// Sets a draft value (host answers to Choose…, tests).
     pub fn set(&mut self, key: &str, value: impl Into<Value>) {
-        self.display_changed |= self.draft.set(key, value) && visual_setting(key);
+        if self.draft.set(key, value) {
+            self.display_changed |= visual_setting(key);
+            if key == "disk.disk_cache_folder" {
+                self.request_disk_measurement();
+            }
+        }
+    }
+
+    fn request_disk_measurement(&mut self) {
+        self.requests.push("disk.measure_free_space".into());
+    }
+
+    pub fn set_cache_free_space(&mut self, folder: &std::path::Path, free: u64) {
+        if self.open
+            && self
+                .cache_root
+                .as_ref()
+                .is_some_and(|root| self.draft.preview_cache_dir(root) == folder)
+        {
+            self.draft.set_cache_free_space(free);
+        }
     }
 
     /// New display values from this frame, including an in-progress number drag.
@@ -442,12 +481,43 @@ impl SettingsDialog {
             .fixed_size(SIZE)
             .default_pos(screen.center() - SIZE / 2.0)
             .show(ctx, |ui| outcome = self.contents(ui));
+        if let Some(name) = &mut self.save_theme_name {
+            let mut closed = false;
+            egui::Modal::new(egui::Id::new("save-expression-theme")).show(ctx, |ui| {
+                ui.heading(tr("Save Theme"));
+                let label = ui.label(tr("Theme name"));
+                let input = ui.text_edit_singleline(name).labelled_by(label.id);
+                if !input.has_focus() && ui.ctx().memory(|m| m.focused().is_none()) {
+                    input.request_focus();
+                }
+                ui.horizontal(|ui| {
+                    let available = self.draft.can_save_expression_theme(name);
+                    if ui
+                        .add_enabled(available, egui::Button::new(tr("Save")))
+                        .clicked()
+                        || available && ui.input(|i| i.key_pressed(Key::Enter))
+                    {
+                        self.draft.save_expression_theme(name);
+                        closed = true;
+                    }
+                    if ui.button(tr("Cancel")).clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                    {
+                        closed = true;
+                    }
+                });
+            });
+            if closed {
+                self.save_theme_name = None;
+            }
+            return Outcome::None;
+        }
         if self.confirm_reset {
             egui::Modal::new(egui::Id::new("reset-all-preferences")).show(ctx, |ui| {
                 ui.label(tr("Reset All Preferences to Default..."));
                 ui.horizontal(|ui| {
                     if ui.button(tr("OK")).clicked() || enter {
-                        self.draft = Preferences::default();
+                        self.draft = self.draft.factory_defaults();
+                        self.request_disk_measurement();
                         self.display_changed = true;
                         self.confirm_reset = false;
                     }
@@ -591,6 +661,24 @@ impl SettingsDialog {
                 ui.add_space(4.0);
             }
             Item::Button(id, label) => {
+                if *id == "scripting_expressions.expr_save_theme" {
+                    if ui.button(tr(label)).clicked() {
+                        self.save_theme_name = Some(String::new());
+                    }
+                    return;
+                }
+                if *id == "scripting_expressions.expr_delete_theme" {
+                    if ui
+                        .add_enabled(
+                            self.draft.selected_expression_theme().is_some(),
+                            egui::Button::new(tr(label)),
+                        )
+                        .clicked()
+                    {
+                        self.draft.delete_selected_expression_theme();
+                    }
+                    return;
+                }
                 if *id == "startup_repair.reset_all_preferences" {
                     if ui.button(tr(label)).clicked() {
                         self.confirm_reset = true;
@@ -709,11 +797,22 @@ impl SettingsDialog {
                 } else {
                     draft.bool(p.key)
                 };
-                if widgets::checkbox(ui, &mut v, label).changed() && !p.unsupported {
+                // AE 26 draws Accessibility Color Contrast as a switch.
+                let r = if p.key == "appearance.use_accessible_contrast" {
+                    widgets::switch(ui, &mut v, label)
+                } else {
+                    widgets::checkbox(ui, &mut v, label)
+                };
+                if r.changed() && !p.unsupported {
                     self.set(p.key, v);
                 }
             }
             Kind::Int { min, max } => {
+                let max = if p.key == bae_prefs::keys::RAM_RESERVED_GB {
+                    draft.ram_reserve_max()
+                } else {
+                    max
+                };
                 field_label(ui, shown);
                 let mut v = draft.int(p.key) as f64;
                 let r = ui.add(
@@ -799,6 +898,26 @@ impl SettingsDialog {
             Kind::Choice { options, style } => {
                 let current = draft.str(p.key).to_owned();
                 match style {
+                    Style::Dropdown if p.key == bae_prefs::keys::EXPR_THEME => {
+                        field_label(ui, shown);
+                        let built_in = options.iter().map(|o| tr(o.label));
+                        let names: Vec<_> =
+                            built_in.chain(draft.saved_expression_themes()).collect();
+                        let mut selected = draft
+                            .selected_expression_theme()
+                            .and_then(|name| names[options.len()..].iter().position(|&n| n == name))
+                            .map(|i| i + options.len())
+                            .or_else(|| options.iter().position(|o| o.value == current))
+                            .unwrap_or(0);
+                        if widgets::dropdown(ui, p.key, &mut selected, &names, 220.0).changed() {
+                            if let Some(o) = options.get(selected) {
+                                self.set(p.key, o.value);
+                            } else {
+                                let name = names[selected].to_owned();
+                                self.draft.select_expression_theme(&name);
+                            }
+                        }
+                    }
                     Style::Dropdown => {
                         field_label(ui, shown);
                         if matches!(p.key, "audio.audio_map_left" | "audio.audio_map_right") {
@@ -930,10 +1049,26 @@ impl SettingsDialog {
                 }
             }
             Kind::Path => {
-                let path = draft.str(p.key);
-                let path = if path.is_empty() { "—" } else { path };
+                let value = draft.str(p.key);
+                let resolved;
+                let path = if p.key == "disk.disk_cache_folder"
+                    && let Some(root) = &self.cache_root
+                {
+                    resolved = draft.preview_cache_dir(root);
+                    resolved.to_string_lossy()
+                } else if value.is_empty()
+                    && matches!(
+                        p.key,
+                        "disk.media_cache_folder" | "disk.media_cache_database_folder"
+                    )
+                    && let Some(root) = &self.cache_root
+                {
+                    root.to_string_lossy()
+                } else {
+                    std::borrow::Cow::Borrowed(if value.is_empty() { "—" } else { value })
+                };
                 let response = ui
-                    .label(RichText::new(path).color(color::TEXT_DIM))
+                    .label(RichText::new(path.as_ref()).color(color::TEXT_DIM))
                     .on_hover_text(label);
                 crate::a11y::value_source(&response, crate::a11y::VERBATIM_VALUE);
             }
@@ -1014,7 +1149,7 @@ fn label_index(key: &str) -> usize {
 }
 
 /// A label's name as shown: the user's name, or the translated default.
-fn label_name(p: &Preferences, i: usize) -> String {
+pub fn label_name(p: &Preferences, i: usize) -> String {
     let name = p.label_name(i);
     if i == 0 || name.is_empty() || name == schema::LABEL_NAMES[i] {
         tr(schema::LABEL_NAMES[i]).to_owned()

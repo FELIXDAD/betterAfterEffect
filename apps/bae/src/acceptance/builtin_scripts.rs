@@ -4,6 +4,102 @@ use bae_motion::query;
 use egui_kittest::kittest::Queryable as _;
 use serde_json::json;
 
+#[test]
+fn recent_script_menu_disables_missing_files_and_runs_installed_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let dirs = bae_platform::AppDirs::under_root(dir.path());
+    let scripts = dirs.data.join("Scripts");
+    std::fs::create_dir_all(&scripts).unwrap();
+    let installed = scripts.join("Caption.jsx");
+    std::fs::write(
+        &installed,
+        include_str!("../../../../crates/bae-script/tests/compat/editor-title.jsx"),
+    )
+    .unwrap();
+    let missing = scripts.join("Removed.jsx");
+    let config = dirs.config_file("recent-scripts.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(config, serde_json::to_vec(&[&missing, &installed]).unwrap()).unwrap();
+    let mut builder = AppBuilder::new();
+    builder.insert_resource(dirs);
+    let mut h = gui_with(Gui::with_app(crate::assemble_modules(builder).build()));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.state().menu_item("motion.file.recent_script.0").enabled {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "missing script remained enabled"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        h.state()
+            .menu_item("motion.file.recent_script.0")
+            .invocation
+            .params["path"],
+        json!(missing)
+    );
+    assert!(!h.state_mut().menu("motion.file.recent_script.0"));
+    assert!(h.state_mut().menu("motion.file.recent_script.1"));
+    settle(&mut h);
+    assert!(h.state_mut().menu("motion.file.script.Caption.jsx"));
+    settle(&mut h);
+    assert_eq!(query::comps(h.state().stage()).len(), 2);
+    assert!(!h.state().menu_item("motion.file.recent_script.1").enabled);
+}
+
+#[test]
+fn script_editor_runs_typed_jsx_through_the_file_menu() {
+    let mut h = gui();
+    assert!(h.state_mut().menu("motion.file.script_editor"));
+    settle(&mut h);
+    let source = h.get_by_label(bae_ui::tr("Script Source")).rect().center();
+    click_at(&mut h, source);
+    type_text(
+        &mut h,
+        include_str!("../../../../crates/bae-script/tests/compat/editor-title.jsx"),
+    );
+    let run = h.get_by_label(bae_ui::tr("Run Script")).rect().center();
+    click_at(&mut h, run);
+    settle(&mut h);
+    let stage = h.state().stage();
+    let comp = query::comps(stage)
+        .into_iter()
+        .find(|p| query::display_name_of(stage, p) == "Caption")
+        .unwrap();
+    assert_eq!(query::comp_layers(stage, &comp).len(), 1);
+}
+
+#[test]
+fn scriptui_dialog_resumes_the_original_script_after_click() {
+    let mut h = gui();
+    h.state_mut().dispatch(Invocation::with_params(bae_script::RUN_SCRIPT, json!({
+        "source": include_str!("../../../../crates/bae-script/tests/compat/scriptui-dialog.jsx"),
+        "interactive": true
+    })));
+    settle(&mut h);
+    let button = h.get_by_label("Create caption").rect().center();
+    click_at(&mut h, button);
+    settle(&mut h);
+    let stage = h.state().stage();
+    let comp = query::comps(stage)
+        .into_iter()
+        .find(|p| query::display_name_of(stage, p) == "Caption 1")
+        .unwrap_or_else(|| {
+            panic!(
+                "script actions: {:?}, outcomes: {:?}, dialog: {:?}",
+                h.state().dispatched,
+                h.state().outcomes,
+                h.state()
+                    .app
+                    .resource::<bae_ui_motion::dialogs::SharedDialogs>()
+                    .unwrap()
+                    .lock()
+                    .open
+            )
+        });
+    assert_eq!(query::comp_layers(stage, &comp).len(), 1);
+}
+
 fn panel_gui() -> Ui {
     let app = crate::app_builder().build();
     assert!(
@@ -15,6 +111,41 @@ fn panel_gui() -> Ui {
     crate::shell::builtin_scripts::load(app.resource::<bae_plugin::PluginRuntime>().unwrap())
         .unwrap();
     gui_with(Gui::with_app(app))
+}
+
+#[test]
+fn scriptui_panels_folder_opens_a_docked_script_with_live_callbacks() {
+    let dir = tempfile::tempdir().unwrap();
+    let dirs = bae_platform::AppDirs::under_root(dir.path());
+    let folder = dirs.data.join("Scripts/ScriptUI Panels");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("Count comps.jsx"),
+        include_str!("../../../../crates/bae-script/tests/compat/scriptui-panel.jsx"),
+    )
+    .unwrap();
+    let mut builder = AppBuilder::new();
+    builder.insert_resource(dirs);
+    let mut h = gui_with(Gui::with_app(crate::assemble_modules(builder).build()));
+    let id = h
+        .state()
+        .menu_items()
+        .into_iter()
+        .find(|i| i.title == "Count comps.jsx")
+        .unwrap()
+        .id;
+    assert!(h.state_mut().menu(&id));
+    settle(&mut h);
+    for _ in 0..2 {
+        let button = h.get_by_label("Add numbered comp").rect().center();
+        click_at(&mut h, button);
+        settle(&mut h);
+    }
+    assert!(
+        query::comps(h.state().stage())
+            .iter()
+            .any(|p| query::display_name_of(h.state().stage(), p) == "Pass 2")
+    );
 }
 
 fn click_button(h: &mut Ui, title: &str) {

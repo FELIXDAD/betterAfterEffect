@@ -19,7 +19,7 @@ pub(super) fn switch_name(icon: Icon) -> &'static str {
         Icon::FrameBlend => "Frame Blending",
         Icon::MotionBlur => "Motion Blur",
         Icon::Adjustment => "Adjustment Layer",
-        Icon::Cube => "3D Layer",
+        Icon::Cube | Icon::AxisLocal => "3D Layer",
         _ => "Switch",
     }
 }
@@ -116,10 +116,7 @@ impl TimelinePanel {
                     if !cols.visible(Column::Av) {
                         break;
                     }
-                    let kind = query::layer_kind(stage, layer).unwrap_or_default();
-                    if attr == "audio_enabled"
-                        && !matches!(kind.as_str(), "footage" | "audio" | "pre_comp")
-                    {
+                    if !switches::has_switch(stage, layer, attr) {
                         continue;
                     }
                     let on = bool_attr(stage, layer, attr);
@@ -326,14 +323,39 @@ impl TimelinePanel {
                             locked,
                         )
                     };
+                    let kind = query::layer_kind(stage, layer);
+                    // AE: a 3D layer without pixels of its own (a null) shows the
+                    // axis icon instead of the cube.
+                    let three_d = if kind.as_deref() == Some("null") {
+                        Icon::AxisLocal
+                    } else {
+                        Icon::Cube
+                    };
                     for (i, attr, icon) in [
                         (0, "shy", Icon::Shy),
                         (1, "collapse_transformation", Icon::Collapse),
                         (5, "motion_blur", Icon::MotionBlur),
                         (6, "adjustment_layer", Icon::Adjustment),
-                        (7, "three_d", Icon::Cube),
+                        (7, "three_d", three_d),
                     ] {
-                        cell(sw(i), attr, icon, bool_attr(stage, layer, attr).into());
+                        if switches::has_switch(stage, layer, attr) {
+                            cell(sw(i), attr, icon, bool_attr(stage, layer, attr).into());
+                        }
+                    }
+                    // Cameras and lights are always 3D: a fixed axis icon, no switch.
+                    if switches::is_camera_or_light(kind.as_deref()) {
+                        let r = sw(7);
+                        ui.interact(r, rid("three_d"), Sense::hover()).labeled(
+                            egui::WidgetType::Label,
+                            &bae_ui::a11y::context(&[&layer_ctx, tr("3D Layer")]),
+                        );
+                        widgets::paint_switch(
+                            ui.painter(),
+                            r.shrink2(vec2(1.0, 2.0)),
+                            true,
+                            Icon::AxisLocal,
+                            false,
+                        );
                     }
                     if let Some(mode) = footage_frame_blending(stage, layer) {
                         cell(
@@ -352,14 +374,16 @@ impl TimelinePanel {
                             .unwrap_or(true);
                         cell(sw(3), "effects_enabled", Icon::Fx, on.into());
                     }
-                    let draft = stage
-                        .prim(layer)
-                        .and_then(|v| query::static_value(&v, "quality"))
-                        .is_some_and(|v| v.as_str() == Some("draft"));
-                    cell(sw(2), "quality", Icon::Quality, (!draft).into());
+                    if switches::has_switch(stage, layer, "quality") {
+                        let draft = stage
+                            .prim(layer)
+                            .and_then(|v| query::static_value(&v, "quality"))
+                            .is_some_and(|v| v.as_str() == Some("draft"));
+                        cell(sw(2), "quality", Icon::Quality, (!draft).into());
+                    }
                 }
-                // Modes: Mode, T, Track Matte.
-                if cols.visible(Column::Modes) {
+                // Modes: Mode, T, Track Matte (empty for cameras and lights, as in AE).
+                if cols.visible(Column::Modes) && switches::has_switch(stage, layer, "blend_mode") {
                     self.modes_cells(
                         ui,
                         cx,
@@ -929,6 +953,19 @@ impl TimelinePanel {
                     .id_salt(id.with("val")),
             );
             common::text_path_picker(&mut child, cx, path, id.with("path"));
+        } else if attr == "light:source" {
+            // Environment light Source: a popup of the comp's 2D layers.
+            let vr = Rect::from_min_max(
+                pos2(l + cols.x(Column::Switches), rect.top()),
+                pos2(l + cols.end - 2.0, rect.bottom()),
+            );
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(vr)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .id_salt(id.with("val")),
+            );
+            common::light_source_picker(&mut child, cx, path, id.with("source"));
         } else if let Some(value) = value {
             let vr = Rect::from_min_max(
                 pos2(l + cols.x(Column::Switches), rect.top()),
@@ -955,6 +992,23 @@ impl TimelinePanel {
             let style_edit = crate::layer_styles::edit(&mut child, id, path, attr, &value);
             let edit = if let Some(edit) = style_edit {
                 edit
+            } else if let Some(choices) = common::int_choices(attr) {
+                // AE's dropdowns stored as numbers (Off / On / Only, Iris
+                // Shape); older projects stored the shadow switches as booleans.
+                let cur = match &value {
+                    bae_model::Value::Bool(on) => i64::from(*on),
+                    v => v.as_f64().map_or(0, |n| n.round() as i64),
+                };
+                let names: Vec<&str> = choices.iter().map(|(_, n)| tr(n)).collect();
+                let mut sel = choices.iter().position(|(v, _)| *v == cur).unwrap_or(0);
+                let before = sel;
+                widgets::dropdown(&mut child, id.with("int_choice"), &mut sel, &names, 160.0)
+                    .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
+                if sel != before {
+                    common::Edit::Commit(bae_model::Value::Int(choices[sel].0))
+                } else {
+                    common::Edit::None
+                }
             } else if let bae_model::Value::Bool(on) = value {
                 // AE's timeline switches On/Off with hot text, not a checkbox.
                 let text = tr(if on { "On" } else { "Off" });
@@ -1204,7 +1258,7 @@ impl TimelinePanel {
         let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
         let top = rect.top() - line as f32 * ROW_H;
-        let field = Rect::from_min_max(
+        let mut field = Rect::from_min_max(
             pos2(axis.left + 4.0, top),
             pos2(rect.right() - 4.0, top + lines as f32 * ROW_H),
         );
@@ -1212,6 +1266,17 @@ impl TimelinePanel {
             Some((p, a, b, base)) if p == path && a == attr && *base == expr.source => b.clone(),
             _ => expr.source.clone(),
         };
+        let mut editor_rows = lines;
+        if expr.enabled
+            && let Some(error) =
+                crate::expr_menu::inline_error(ui, cx.resources, path, attr, &buf, &expr.source)
+        {
+            let annotation =
+                Rect::from_min_max(pos2(field.left(), field.bottom() - ROW_H), field.max);
+            field.max.y = annotation.top();
+            editor_rows = editor_rows.saturating_sub(1).max(1);
+            crate::expr_menu::error_line(ui, annotation, &error);
+        }
         // Just added: the field takes the focus with the whole text selected.
         let focus = {
             let mut s = session.lock();
@@ -1246,7 +1311,7 @@ impl TimelinePanel {
             field,
             field_id,
             &mut buf,
-            Some(lines),
+            Some(editor_rows),
         );
         let r = shown.response.response.labeled(
             egui::WidgetType::TextEdit,
@@ -1317,7 +1382,7 @@ fn insert_expression(
 /// these words read differently elsewhere in AE's Chinese UI (a text selector's
 /// Intersect is 相交, a mask's 交集; its Add is 相加, the shape tools' 添加).
 fn option_label(token: &str) -> &'static str {
-    const NAMES: [(&str, &str, &str); 18] = [
+    const NAMES: [(&str, &str, &str); 20] = [
         ("percentage", "Percentage", "百分比"),
         ("index", "Index", "索引"),
         ("characters", "Characters", "字符"),
@@ -1340,6 +1405,12 @@ fn option_label(token: &str) -> &'static str {
         ("triangle", "Triangle", "三角形"),
         ("round", "Round", "圆形"),
         ("smooth", "Smooth", "平滑"),
+        ("none", "None", "无"),
+        (
+            "inverse_square_clamped",
+            "Inverse Square Clamped",
+            "反向平方限制",
+        ),
     ];
     let zh = bae_ui::i18n::lang() == bae_ui::i18n::Lang::Zh;
     NAMES

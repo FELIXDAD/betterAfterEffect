@@ -160,6 +160,11 @@ impl RenderComp {
                     }));
             any_blur |= !layer.motion_samples.is_empty();
         }
+        // An environment light's image can show behind every layer.
+        scene_used |= self
+            .lights
+            .iter()
+            .any(|l| l.environment.is_some_and(|e| e.background.is_some()));
         if scene_used {
             hash_camera(&self.camera, h);
             self.lights.len().hash(h);
@@ -213,9 +218,15 @@ impl RenderComp {
             });
             match &layer.content {
                 LayerContent::Comp(nested) => nested.collect_dependencies(out),
+                // A proxy depends on the item it stands in for (its Use Proxy
+                // switch; the proxy is a child of the item, so it is covered).
                 LayerContent::Footage(f) => out.push(Dependency {
-                    path: f.asset.clone(),
+                    path: f.proxy_of.as_ref().unwrap_or(&f.asset).clone(),
                     time: f.source_time,
+                }),
+                LayerContent::Model(m) => out.push(Dependency {
+                    path: m.asset.clone(),
+                    time: Time::ZERO,
                 }),
                 LayerContent::Custom(c) if c.prim != layer.path => out.push(Dependency {
                     path: c.prim.clone(),
@@ -281,6 +292,13 @@ pub struct RenderLayer {
     pub opacity: f32,
     /// Blending mode with the layers below.
     pub blend_mode: BlendMode,
+    /// Layer sampling quality after any nested quality limit.
+    pub quality: bae_anim::LayerQuality,
+    /// Advanced 3D Extrusion Depth of a 3D text or shape layer, in layer
+    /// pixels (0: flat): drawn as a solid ([`crate::model::extrude`]).
+    pub extrusion: f64,
+    /// Its bevel (Geometry Options), when extruded.
+    pub bevel: Option<crate::model::extrude::Bevel>,
     /// 保留基础透明度: the layer only shows where the layers below are opaque.
     pub preserve_transparency: bool,
     /// Track matte (AE 23.0+ model: any layer of the same comp).
@@ -360,9 +378,11 @@ impl RenderLayer {
             size: Some(size),
             source_time: Time::ZERO,
             sequence: None,
+            alphabetical: false,
             file_revision: bae_model::asset::file_revision(&view),
             psd_layer: Some(selection),
             blend: None,
+            proxy_of: None,
         };
         let mut stencil = Self::new(mask.path, LayerContent::Footage(footage));
         stencil.blend_mode = BlendMode::StencilAlpha;
@@ -447,6 +467,9 @@ impl RenderLayer {
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
+            quality: bae_anim::LayerQuality::Best,
+            extrusion: 0.0,
+            bevel: None,
             preserve_transparency: false,
             track_matte: None,
             visible: true,
@@ -498,6 +521,12 @@ impl RenderLayer {
         }
         self.opacity.to_bits().hash(h);
         self.blend_mode.hash(h);
+        self.quality.hash(h);
+        self.extrusion.to_bits().hash(h);
+        if let Some(b) = &self.bevel {
+            (b.style, b.inward).hash(h);
+            [b.depth, b.hole_scale].map(f64::to_bits).hash(h);
+        }
         self.preserve_transparency.hash(h);
         self.track_matte.hash(h);
         self.visible.hash(h);
@@ -517,8 +546,14 @@ impl RenderLayer {
                     mat.specular_intensity,
                     mat.specular_shininess,
                     mat.metal,
+                    mat.transparency,
+                    mat.transparency_rolloff,
+                    mat.reflection_intensity,
+                    mat.reflection_sharpness,
+                    mat.reflection_rolloff,
                 ]
                 .map(f32::to_bits),
+                mat.shadow_color.map(f32::to_bits),
             )
                 .hash(h);
         }
@@ -542,6 +577,10 @@ fn hash_mat4(m: &DMat4, h: &mut impl Hasher) {
 
 pub(crate) fn hash_light(l: &Light, h: &mut impl Hasher) {
     (l.kind, l.falloff, l.casts_shadows, l.scope_below).hash(h);
+    if let Some(e) = &l.environment {
+        e.layer.hash(h);
+        e.background.map(|b| b.map(f32::to_bits)).hash(h);
+    }
     hash_mat4(&l.world, h);
     l.point_of_interest.to_array().map(f64::to_bits).hash(h);
     l.color.map(f32::to_bits).hash(h);
@@ -620,6 +659,18 @@ pub enum LayerContent {
     /// Content drawn by a registered [`crate::source::SourceProvider`] (shapes and
     /// text from 05, plugin generators …).
     Custom(CustomContent),
+    /// A 3D model (glTF / GLB / OBJ, [`crate::model`]), drawn through the
+    /// camera with a depth buffer.
+    Model(ModelRef),
+}
+
+/// A 3D model layer's source.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ModelRef {
+    /// The `Asset` prim.
+    pub asset: PrimPath,
+    /// The resolved file (`None` when missing; renders nothing and warns).
+    pub file: Option<PathBuf>,
 }
 
 impl LayerContent {
@@ -631,6 +682,7 @@ impl LayerContent {
             LayerContent::Footage(f) => f.size,
             LayerContent::Comp(c) => Some([c.width, c.height]),
             LayerContent::Custom(c) => c.size,
+            LayerContent::Model(_) => None,
         }
     }
 
@@ -655,6 +707,9 @@ impl LayerContent {
                 f.psd_layer.hash(h);
                 f.file_revision.hash(h);
                 f.blend.hash(h);
+                if f.proxy_of.is_some() {
+                    f.size.hash(h);
+                }
             }
             LayerContent::Comp(c) => c.hash_content(h, effects),
             LayerContent::Custom(c) => {
@@ -662,6 +717,7 @@ impl LayerContent {
                 c.prim.hash(h);
                 c.hash.hash(h);
             }
+            LayerContent::Model(m) => m.hash(h),
         }
     }
 }
@@ -681,10 +737,16 @@ pub struct FootageRef {
     /// Image sequences: the frame rate of the sequence (its numbered files are
     /// frames from `file` on); `None` opens `file` alone (a still or a movie).
     pub sequence: Option<FrameRate>,
+    /// Sequence uses actual filenames sorted alphabetically.
+    pub alphabetical: bool,
     pub file_revision: i64,
     pub psd_layer: Option<bae_model::psd::LayerImage>,
     /// Frame blending, when the comp and layer switches are on.
     pub blend: Option<FrameBlend>,
+    /// The footage item or comp this proxy stands in for (AE File ▸ Set
+    /// Proxy): `file` is the proxy, drawn at `size`, the item's own size,
+    /// whatever the proxy's resolution.
+    pub proxy_of: Option<PrimPath>,
 }
 
 /// Frame blending of a footage layer (AE-CMP-065): the source frames one comp
@@ -901,9 +963,11 @@ mod tests {
                 size: None,
                 source_time: Time::ZERO,
                 sequence: None,
+                alphabetical: false,
                 psd_layer: None,
                 file_revision: 0,
                 blend: None,
+                proxy_of: None,
             }),
         ));
         let deps = comp.dependencies();

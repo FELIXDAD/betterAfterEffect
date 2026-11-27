@@ -239,6 +239,21 @@ pub struct EncodeSettings {
 }
 
 impl EncodeSettings {
+    /// The keyframe distance the long-GOP encoders use: the setting, or a
+    /// keyframe every two seconds (Adobe Media Encoder's H.264 / HEVC
+    /// default range). Encoder defaults can be a single keyframe, which
+    /// makes every seek decode from the start of the file.
+    pub fn effective_keyframe_interval(&self) -> Option<u32> {
+        match self.codec {
+            VideoCodec::H264 | VideoCodec::Hevc => {
+                Some(self.keyframe_interval.unwrap_or_else(|| {
+                    (2.0 * self.frame_rate.as_f64()).round().clamp(1.0, 600.0) as u32
+                }))
+            }
+            _ => self.keyframe_interval,
+        }
+    }
+
     /// Settings with defaults: opaque, 8 bit (16 for EXR); tags sRGB (PNG),
     /// linear BT.709 (EXR), or AE's video tags (BT.709, or BT.601 below 720
     /// lines).
@@ -429,6 +444,12 @@ pub trait Encoder: Send {
     fn push_audio(&mut self, audio: &AudioBuffer) -> Result<(), MediaError> {
         let _ = audio;
         Err(MediaError::Unsupported("audio in this encoder".into()))
+    }
+
+    /// No more audio follows (the movie's frames may still come): an
+    /// interleaving writer stops waiting for audio past its end.
+    fn end_audio(&mut self) -> Result<(), MediaError> {
+        Ok(())
     }
 
     /// Frames written so far.
@@ -1841,6 +1862,19 @@ mod tests {
         assert_eq!((p.prefix.as_str(), p.padding), ("beauty_", 4));
         let p = SequencePattern::parse(Path::new("/out/render.png"));
         assert_eq!(p.path_for(3), PathBuf::from("/out/render_00003.png"));
+    }
+
+    #[test]
+    fn long_gop_codecs_default_to_a_keyframe_every_two_seconds() {
+        let h264 = EncodeSettings::new("a.mp4", VideoCodec::H264, 1920, 1080, FrameRate::FPS_30);
+        assert_eq!(h264.effective_keyframe_interval(), Some(60));
+        let set = EncodeSettings {
+            keyframe_interval: Some(10),
+            ..h264
+        };
+        assert_eq!(set.effective_keyframe_interval(), Some(10));
+        let png = EncodeSettings::new("a.png", VideoCodec::Png, 64, 64, FrameRate::FPS_30);
+        assert_eq!(png.effective_keyframe_interval(), None);
     }
 
     #[test]

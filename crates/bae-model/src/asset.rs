@@ -342,6 +342,55 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     (rest.is_empty() || rest.starts_with('/')).then_some(rest)
 }
 
+/// Files in the selected image's directory with the same extension, in filename order.
+pub fn alphabetical_frames(file: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let dir = file
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path
+            .extension()
+            .zip(file.extension())
+            .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+            && !path
+                .file_name()
+                .is_some_and(|s| s.to_string_lossy().starts_with('.'))
+            && path.is_file()
+        {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+/// AE proxies (File ▸ Set Proxy): the stand-in file of a footage item or comp
+/// is an `Asset` prim with this name under the item.
+pub const PROXY_PRIM: &str = "proxy";
+/// Item attribute: its proxy is used where proxies are on.
+pub const PROXY_ENABLED: &str = "proxy:enabled";
+
+/// The proxy prim of `item`, if it has one.
+pub fn proxy_of(stage: &crate::Stage, item: &PrimPath) -> Option<PrimPath> {
+    let path = item.child(PROXY_PRIM).ok()?;
+    stage
+        .prim(&path)
+        .is_some_and(|v| v.is_a(&crate::PrimType::ASSET))
+        .then_some(path)
+}
+
+/// The proxy of `item` when it has one and it is on.
+pub fn proxy_in_use(stage: &crate::Stage, item: &PrimPath) -> Option<PrimPath> {
+    let on = stage
+        .prim(item)
+        .and_then(|v| v.value(PROXY_ENABLED).and_then(crate::Value::as_bool))
+        == Some(true);
+    on.then(|| proxy_of(stage, item)).flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

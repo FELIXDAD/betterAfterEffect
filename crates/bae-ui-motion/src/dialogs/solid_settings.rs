@@ -114,6 +114,11 @@ pub struct SolidSettingsMemory {
 #[derive(Clone, Debug, PartialEq)]
 enum Target {
     New,
+    /// File ▸ Import ▸ Solid…: a solid item, no layer.
+    NewItem,
+    /// File ▸ Replace Footage ▸ Solid…: a new solid item takes this item's
+    /// place (its layers show the solid).
+    Replace(PrimPath),
     Edit {
         /// The layer or the solid item that was asked for.
         target: PrimPath,
@@ -184,6 +189,55 @@ impl SolidSettings {
         Some(s)
     }
 
+    /// File ▸ Replace Footage ▸ Solid…: Solid Settings for the solid that
+    /// takes `item`'s place.
+    pub(crate) fn replace_item(
+        stage: &Stage,
+        session: &SharedSession,
+        memory: &SolidSettingsMemory,
+        item: PrimPath,
+    ) -> Self {
+        let mut s = Self::new_item(stage, session, memory);
+        s.target = Target::Replace(item);
+        s
+    }
+
+    /// File ▸ Import ▸ Solid…: a solid item in the Project panel. Without an
+    /// open comp it starts from the last solid's size (or 1920 × 1080).
+    pub(crate) fn new_item(
+        stage: &Stage,
+        session: &SharedSession,
+        memory: &SolidSettingsMemory,
+    ) -> Self {
+        if let Some(mut s) = Self::new_solid(stage, session, memory) {
+            s.target = Target::NewItem;
+            return s;
+        }
+        let color = memory.color.unwrap_or(DEFAULT_COLOR);
+        let (width, height, pixel_aspect) = memory.size.unwrap_or((1920, 1080, 1.0));
+        SolidSettings {
+            target: Target::NewItem,
+            values: SolidValues {
+                name: default_name(stage, color),
+                width,
+                height,
+                pixel_aspect,
+                color,
+            },
+            comp: None,
+            units: match memory.units {
+                Units::PercentOfComp => Units::Pixels,
+                u => u,
+            },
+            lock_aspect: memory.lock_aspect,
+            aspect: f64::from(width) / f64::from(height.max(1)),
+            name_edited: false,
+            name_focused: false,
+            affect_all: false,
+            preview: false,
+        }
+    }
+
     /// Solid Settings of a layer that uses a solid, or of a solid item.
     pub(crate) fn edit(
         stage: &Stage,
@@ -221,7 +275,10 @@ impl SolidSettings {
     }
 
     pub fn is_new(&self) -> bool {
-        matches!(self.target, Target::New)
+        matches!(
+            self.target,
+            Target::New | Target::NewItem | Target::Replace(_)
+        )
     }
 
     /// Draw the dialog; returns whether it stays open.
@@ -259,6 +316,26 @@ impl SolidSettings {
         let v = &self.values;
         let name = v.name.trim().to_owned();
         match &self.target {
+            Target::NewItem | Target::Replace(_) => {
+                let mut params = json!({
+                    "kind": "solid",
+                    "name": name,
+                    "width": v.width,
+                    "height": v.height,
+                    "pixel_aspect": v.pixel_aspect,
+                    "color": v.color,
+                });
+                if let Target::Replace(old) = &self.target {
+                    params["replace"] = json!(old);
+                }
+                cx.invoke_with("item.new", params);
+                let mut d = dialogs.lock();
+                d.solid.color = Some(v.color);
+                d.solid.lock_aspect = self.lock_aspect;
+                d.solid.units = self.units;
+                d.solid.size = Some((v.width, v.height, v.pixel_aspect));
+                super::memory::save(&d);
+            }
             Target::New => {
                 crate::common::new_layer(
                     cx,

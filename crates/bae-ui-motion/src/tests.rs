@@ -512,7 +512,7 @@ fn panels_render_a_project() {
     let mut viewer = CompositionViewer::new(None);
     let mut props = crate::PropertiesPanel::default();
     let mut fx = crate::EffectControlsPanel::default();
-    let mut preview = crate::PreviewPanel;
+    let mut preview = crate::PreviewPanel::default();
     h.session().lock().selected_layers = vec![shape.clone()];
     for _ in 0..2 {
         assert!(
@@ -624,6 +624,54 @@ fn gpu_preview_renders_a_value_drag_in_the_background() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     h.session().lock().scrub = None;
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    assert_eq!(shown(&registry, &preview), own);
+}
+
+/// A viewer edit (a drag, a nudge, typing) renders on the live thread too:
+/// the UI thread neither converts nor renders the comp while it lasts.
+#[test]
+fn gpu_preview_renders_viewer_edits_in_the_background() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
+    };
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    let shown = |registry: &ViewportTextureRegistry, preview: &crate::gpu_preview::GpuPreview| {
+        registry
+            .get(preview.viewport())
+            .expect("published")
+            .view
+            .texture()
+            .clone()
+    };
+    preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
+    let own = shown(&registry, &preview);
+    // The dragged layer, as the viewer applies the drag to the evaluated comp.
+    let mut dragged = evaluated.clone();
+    dragged
+        .layers
+        .iter_mut()
+        .find(|l| l.path == solid)
+        .unwrap()
+        .opacity = 0.0;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut input = true;
+    while shown(&registry, &preview) == own {
+        assert!(std::time::Instant::now() < deadline, "no live frame");
+        preview.live_edit = Some(std::mem::take(&mut input));
+        let image = preview.frame(&h.resources, &h.stage, &dragged, 1, None, false);
+        assert!(
+            image.is_some(),
+            "the last frame stays while the edit renders"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     preview.frame(&h.resources, &h.stage, &evaluated, 1, None, false);
     assert_eq!(shown(&registry, &preview), own);
 }
@@ -760,6 +808,60 @@ fn gpu_preview_publishes_the_rendered_comp() {
         px[0] >= 250 && px[1] <= 3 && px[2] <= 3 && px[3] >= 250,
         "{px:?}"
     );
+    // #727: the Info panel's pixel reads back asynchronously; while a new
+    // texel is pending the previous reading stands in (no empty RGBA).
+    let ctx = egui::Context::default();
+    let device = bae_gpu::testing::shared_context().expect("context");
+    let mut read = None;
+    for _ in 0..100 {
+        read = preview.pixel([20.0, 20.0], &ctx);
+        if read.is_some() {
+            break;
+        }
+        // Slow adapters (WARP on CI) finish the readback only when waited on.
+        let _ = device
+            .device()
+            .poll(bae_gpu::wgpu::PollType::wait_indefinitely());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let first = read.expect("the first pixel arrives");
+    assert_eq!(
+        preview.pixel([30.0, 30.0], &ctx),
+        Some(first),
+        "pending: last reading"
+    );
+    // Playback recycles textures: a new frame in the texture of the one shown
+    // before is read again, not answered from the old reading.
+    let target = bae_render::OutputTarget::new(device.device(), [4, 4]);
+    let texture = target.view().texture().clone();
+    let rect = bae_render::IRect::new(0, 0, 4, 4);
+    let fill = |rgba: [u8; 4]| {
+        let region = bae_gpu::transfer::TextureRegion::full(&texture);
+        bae_gpu::transfer::upload_texture(&device, &texture, region, &rgba.repeat(16)).unwrap();
+    };
+    let wait = |preview: &mut crate::gpu_preview::GpuPreview, want: [u8; 4]| {
+        let mut got = None;
+        for _ in 0..200 {
+            got = preview.pixel([1.0, 1.0], &ctx);
+            if got == Some(want) {
+                break;
+            }
+            let _ = device
+                .device()
+                .poll(bae_gpu::wgpu::PollType::wait_indefinitely());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        got
+    };
+    for (n, colour) in [[0, 255, 0, 255], [0, 0, 255, 255]].into_iter().enumerate() {
+        fill(colour);
+        preview.show_cached(crate::playback::ShownFrame {
+            texture: texture.clone(),
+            rect,
+            hold: std::sync::Arc::new(n),
+        });
+        assert_eq!(wait(&mut preview, colour), Some(colour), "frame {n}");
+    }
     let id = preview.viewport();
     drop(preview);
     assert!(registry.get(id).is_none(), "removed on drop");
@@ -938,7 +1040,12 @@ fn menu_bar_follows_the_ae_catalog() {
     }
     assert_eq!(tops, expect);
     let built = menu_lines(&tree);
-    let wanted = catalog_lines();
+    let mut wanted = catalog_lines();
+    let install = wanted
+        .iter()
+        .position(|line| line == "File > Scripts > Install ScriptUI Panel...")
+        .unwrap();
+    wanted.insert(install, "File > Scripts > Open Script Editor...".to_owned());
     let first_diff = built
         .iter()
         .zip(&wanted)
@@ -1069,12 +1176,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.animation.ease",
         "menu.edit.copy",
         "menu.layer.markers.lock_markers",
+        "menu.layer.markers.update_markers_from_source",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
     let handled: std::collections::HashSet<String> =
-        ["motion.layer.lock_markers".to_owned()].into();
+        ["motion.layer.update_markers_from_source".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -1102,7 +1210,8 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Lock Markers once handled.
+    // A selected layer: layer commands too (Lock Markers among them); Update
+    // Markers From Source once a module handles it.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -1111,11 +1220,12 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.edit.duplicate",
         "motion.layer.arrange.front",
         "menu.edit.copy",
+        "menu.layer.markers.lock_markers",
         "shell.file.save",
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(6, "menu.layer.markers.lock_markers");
+    with_fit.insert(7, "menu.layer.markers.update_markers_from_source");
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();
@@ -1982,7 +2092,7 @@ fn precompose_dialog_options() {
 }
 
 /// A valid 1×1 RGBA PNG.
-const PNG_1X1: &[u8] = &[
+pub(super) const PNG_1X1: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
     0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15, 0, 2,
     135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
@@ -3020,6 +3130,99 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     assert!(h.session().lock().expr_errors.is_empty());
 }
 
+/// File ▸ New Comp from Selection…: the dialog opens for the selected items;
+/// one comp with them as layers, in sequence with a cross dissolve, or one comp
+/// per item.
+#[test]
+fn new_comp_from_selection() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let solid_item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    // The dialog asks first.
+    h.session().lock().selected_items = vec![solid_item.clone(), comp.clone()];
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::NEW_COMP_FROM_SELECTION),
+    );
+    assert!(h.dialogs().is_open());
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "comp.create_from_items");
+    let before = query::comps(&h.stage).len();
+    let out = h.run(
+        "comp.create_from_items",
+        json!({
+            "items": [solid_item, comp],
+            "sequence": true,
+            "overlap": Time::from_seconds(1.0),
+            "transition": "cross_dissolve",
+            "still_duration": Time::from_seconds(5.0),
+        }),
+    );
+    let new = PrimPath::new(out["comps"][0].as_str().unwrap()).unwrap();
+    let layers = query::comp_layers(&h.stage, &new);
+    assert_eq!(layers.len(), 2);
+    // The second starts where the first (5 s) ends minus the overlap.
+    let t = query::layer_timing(&h.stage, &layers[1]);
+    assert_eq!(t.in_point, Time::from_seconds(4.0));
+    let fades = |l: &PrimPath| {
+        query::attr_spec(&h.stage, l, "transform:opacity").map_or(0, |s| s.keyframes.len())
+    };
+    assert_eq!((fades(&layers[0]), fades(&layers[1])), (2, 2));
+    // Multiple Compositions: one per item.
+    h.run(
+        "comp.create_from_items",
+        json!({"items": [solid_item, comp], "multiple": true}),
+    );
+    assert_eq!(query::comps(&h.stage).len(), before + 3);
+}
+
+/// File ▸ Import ▸ Solid… and Placeholder…: items in the Project panel, no
+/// layer, one undo step each (AE).
+#[test]
+fn import_solid_and_placeholder_make_items() {
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let assets = |h: &Harness, kind: &str| -> Vec<PrimPath> {
+        h.stage
+            .traverse()
+            .into_iter()
+            .filter(|p| {
+                h.stage.prim(p).is_some_and(|v| {
+                    matches!(query::static_value(&v, "kind"), Some(Value::Enum(k)) if k == kind)
+                })
+            })
+            .collect()
+    };
+    // No comp open: Import ▸ Solid… still works.
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_SOLID),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "item.new");
+    h.apply(r);
+    assert_eq!(assets(&h, "solid").len(), 1);
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_PLACEHOLDER),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    h.apply(r);
+    let p = assets(&h, "placeholder");
+    assert_eq!(p.len(), 1);
+    let v = h.stage.prim(&p[0]).unwrap();
+    assert_eq!(query::static_value(&v, "width"), Some(Value::Int(1920)));
+    assert_eq!(
+        query::static_value(&v, "duration"),
+        Some(Value::Time(Time::from_seconds(60.0)))
+    );
+    assert_eq!(query::display_name_of(&h.stage, &p[0]), "Missing Name");
+}
+
 /// #460: the Window menu names what the viewers show (AE: "Composition: Comp 1").
 #[test]
 fn window_menu_titles_name_the_active_comp() {
@@ -3334,6 +3537,46 @@ fn brush_drag_in_the_layer_panel_paints_one_stroke() {
     assert_eq!(label(&parts[1]).1.len(), 11, "Start … Flow");
 }
 
+/// A Puppet Position Pin click in the Layer panel adds a pin in layer pixels.
+#[test]
+fn puppet_pins_go_on_in_the_layer_panel() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::PuppetPosition);
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = pos2(320.0 + 100.0, 195.0 + 50.0);
+    let mut r = PanelRequests::default();
+    for press in [None, Some(true), Some(false)] {
+        let mut evs = Vec::new();
+        pointer(&mut evs, at, press);
+        let out = h.frame("layer", &mut panel, evs);
+        r.invocations.extend(out.invocations);
+    }
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "puppet.add_pin")
+        .expect("a pin");
+    assert_eq!(inv.params["at"], json!([100.0, 50.0]));
+    h.apply(r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    assert_eq!(bae_motion::puppet::pins_of(&h.stage, &effects[0]).len(), 1);
+}
+
 /// Shift-drag continues the previous Brush stroke; Ctrl/Cmd-drag only sizes
 /// the brush (AE).
 #[test]
@@ -3496,6 +3739,90 @@ fn new_folder_and_open_layer() {
     assert_eq!(h.session().lock().layer_panel, Some(solid));
 }
 
+/// Camera Options, Light Options (by light type) and a 3D layer's Material
+/// Options sit after Transform, as in AE's timeline.
+#[test]
+fn camera_light_and_material_options_groups() {
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let layer = |h: &mut Harness, kind: &str| {
+        PrimPath::new(
+            h.run("layer.create", json!({"comp": comp, "kind": kind}))["path"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let camera = layer(&mut h, "camera");
+    let light = layer(&mut h, "light");
+    let groups = |h: &Harness, l: &PrimPath| {
+        crate::props::layer_tree(&h.stage, l)
+            .into_iter()
+            .filter_map(|n| match n {
+                crate::props::Node::Group {
+                    label, children, ..
+                } => Some((label, children.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cam = groups(&h, &camera);
+    assert_eq!(
+        cam.last(),
+        Some(&("Camera Options".to_owned(), 13)),
+        "{cam:?}"
+    );
+    let lit = groups(&h, &light);
+    assert_eq!(lit.last().map(|g| g.0.as_str()), Some("Light Options"));
+    assert_eq!(lit.last().map(|g| g.1), Some(10), "a spot light: {lit:?}");
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("ambient".into())}),
+    );
+    assert_eq!(groups(&h, &light).last().map(|g| g.1), Some(2), "ambient");
+    // An environment light: its picture (Source) and background, then its light.
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:type", "value": Value::Enum("environment".into())}),
+    );
+    assert_eq!(
+        groups(&h, &light).last().map(|g| g.1),
+        Some(6),
+        "environment"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": light, "attr": "light:source", "value": Value::PrimRef(solid.clone())}),
+    );
+    assert_eq!(
+        h.stage
+            .prim(&light)
+            .and_then(|v| bae_motion::query::static_value(&v, "light:source")),
+        Some(Value::PrimRef(solid.clone()))
+    );
+    assert!(
+        groups(&h, &solid).iter().all(|g| g.0 != "Material Options"),
+        "2D layers have none"
+    );
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "three_d", "value": Value::Bool(true)}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 9))
+    );
+    // The Advanced 3D renderer adds reflections, transparency and more.
+    h.run(
+        "attr.set",
+        json!({"path": comp, "attr": "renderer", "value": Value::Enum("advanced_3d".into())}),
+    );
+    assert_eq!(
+        groups(&h, &solid).last(),
+        Some(&("Material Options".to_owned(), 17))
+    );
+}
+
 /// File ▸ Add Footage to Comp, Animation ▸ Separate Dimensions, Edit ▸ Label
 /// ▸ Edit Label Colors… and View ▸ Show Layer Controls.
 #[test]
@@ -3544,4 +3871,339 @@ fn add_footage_separate_dimensions_and_layer_controls() {
         &h.resources,
         "motion.view.show_layer_controls"
     ));
+}
+
+/// Layer ▸ Reveal ▸ Reveal Layer Source in Project selects the source in the
+/// Project panel; File ▸ Interpret Footage ▸ Remember / Apply Interpretation
+/// copy one item's interpretation to others.
+#[test]
+fn reveal_in_project_and_remember_interpretation() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (_, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::REVEAL_SOURCE_IN_PROJECT));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    assert_eq!(h.session().lock().reveal_in_project, Some(item.clone()));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    assert_eq!(h.session().lock().selected_items, vec![item]);
+    assert!(h.session().lock().reveal_in_project.is_none());
+
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<_> = ["a.mov", "b.mov"]
+        .iter()
+        .map(|n| {
+            let p = dir.path().join(n);
+            std::fs::write(&p, b"clip").unwrap();
+            json!({"path": p})
+        })
+        .collect();
+    let out = h.run("item.import", json!({ "files": files }));
+    let items: Vec<PrimPath> = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| PrimPath::new(v.as_str().unwrap()).unwrap())
+        .collect();
+    h.run(
+        "footage.interpret",
+        json!({"items": [items[0]], "alpha_mode": "premultiplied", "loop_count": 3}),
+    );
+    h.session().lock().selected_items = vec![items[0].clone()];
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::REMEMBER_INTERPRETATION))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().selected_items = vec![items[1].clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::APPLY_INTERPRETATION));
+    assert_eq!(r.invocations[0].id, "footage.interpret");
+    let p = &r.invocations[0].params;
+    assert_eq!(p["items"], json!([items[1]]));
+    assert_eq!(
+        (p["alpha_mode"].as_str(), p["loop_count"].as_i64()),
+        (Some("premultiplied"), Some(3))
+    );
+}
+
+/// Composition ▸ Crop Comp to Selected Layer(s) Bounds and Region of Interest;
+/// Layer ▸ Camera ▸ Link Focus Distance to Point of Interest / to Layer, Set
+/// Focus Distance to Layer.
+#[test]
+fn crop_comp_and_camera_focus() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_LAYERS));
+    assert_eq!(r.invocations[0].id, "comp.crop");
+    // The solid fills the 640×360 comp.
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([0.0, 0.0, 640.0, 360.0])
+    );
+    // No region of interest: nothing to crop to.
+    assert!(
+        h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI))
+            .invocations
+            .is_empty()
+    );
+    h.session().lock().roi = Some((comp.clone(), [10.0, 20.0, 110.0, 220.0]));
+    let r = h.action(&mut viewer, Invocation::new(ids::CROP_TO_ROI));
+    assert_eq!(
+        r.invocations[0].params["rect"],
+        json!([10.0, 20.0, 110.0, 220.0])
+    );
+    assert!(h.session().lock().roi_cropped);
+
+    let camera = PrimPath::new(
+        h.run("layer.create", json!({"comp": comp, "kind": "camera"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().selected_layers = vec![camera.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::FOCUS_TO_POI));
+    assert_eq!(r.invocations[0].id, "attr.set_expressions");
+    assert_eq!(
+        r.invocations[0].params["items"][0]["source"],
+        "length(position, pointOfInterest)"
+    );
+    h.session().lock().selected_layers = vec![camera.clone(), solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::LINK_FOCUS_TO_LAYER));
+    let source = r.invocations[0].params["items"][0]["source"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(source.starts_with("m = thisComp.layer(\""), "{source}");
+    let r = h.action(&mut viewer, Invocation::new(ids::SET_FOCUS_TO_LAYER));
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    let d = r.invocations[0].params["edits"][0]["value"]["value"]
+        .as_f64()
+        .unwrap();
+    assert!(d > 0.0, "{d}");
+}
+
+/// File ▸ Replace Footage ▸ Solid… / Placeholder…: the dialog opens for the
+/// selected footage and OK makes the new item replace it in one step.
+#[test]
+fn replace_footage_with_solid_or_placeholder() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (_, solid, _) = h.comp_with_layers();
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_items = vec![item.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::REPLACE_WITH_PLACEHOLDER));
+    assert!(r.invocations.is_empty(), "the dialog comes first");
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "item.new");
+    assert_eq!(r.invocations[0].params["kind"], "placeholder");
+    assert_eq!(r.invocations[0].params["replace"], json!(item));
+    h.apply(r);
+    assert!(!h.stage.has_prim(&item));
+    let source = h
+        .stage
+        .prim(&solid)
+        .unwrap()
+        .value("source")
+        .and_then(|v| v.as_prim_ref())
+        .cloned();
+    assert!(source.is_some_and(|s| h.stage.has_prim(&s)));
+}
+
+/// File ▸ Dependencies ▸ Find Missing Footage: the Project panel searches for
+/// "Missing Footage" and lists only footage whose file is gone.
+#[test]
+fn find_missing_footage_lists_footage_without_a_file() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let dir = tempfile::tempdir().unwrap();
+    let here = dir.path().join("here.mov");
+    let gone = dir.path().join("gone.mov");
+    std::fs::write(&here, b"clip").unwrap();
+    std::fs::write(&gone, b"clip").unwrap();
+    let out = h.run(
+        "item.import",
+        json!({"files": [{"path": here}, {"path": gone}]}),
+    );
+    let gone_item = PrimPath::new(out["items"][1].as_str().unwrap()).unwrap();
+    std::fs::remove_file(&gone).unwrap();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::FIND_MISSING_FOOTAGE));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    let shown = project.shown_items(&h.stage, None);
+    assert!(shown.contains(&gone_item), "{shown:?}");
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|p| h
+                .stage
+                .prim(p)
+                .is_some_and(|v| v.is_a(&bae_model::PrimType::ASSET)))
+            .count(),
+        1
+    );
+}
+
+/// Edit ▸ Purge: the memory caches here (the viewers' frames through
+/// `Session::purge`); Undo and the disk cache go on to the shell.
+#[test]
+fn purge_memory_here_undo_and_disk_in_the_shell() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let purge = |what: &str| Invocation::with_params(ids::PURGE, json!({ "what": what }));
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("timeline");
+    let mut cx = PanelContext::new(
+        &id,
+        "Timeline",
+        &h.stage,
+        &h.author,
+        &h.resources,
+        &mut requests,
+    );
+    let session = h.session();
+    assert!(crate::actions::handle(
+        &purge("image_cache_memory"),
+        &mut cx,
+        &session
+    ));
+    assert_eq!(session.lock().purge, 1);
+    assert!(
+        !crate::actions::handle(&purge("all_memory"), &mut cx, &session),
+        "undo: the shell"
+    );
+    assert_eq!(session.lock().purge, 2);
+    assert!(!crate::actions::handle(&purge("undo"), &mut cx, &session));
+    assert!(!crate::actions::handle(
+        &purge("disk_cache"),
+        &mut cx,
+        &session
+    ));
+    assert_eq!(session.lock().purge, 2);
+}
+
+/// File ▸ Dependencies ▸ Find Missing Effects: the Project panel lists the
+/// comps with an effect the app has no definition for.
+#[test]
+fn find_missing_effects_lists_the_comps_using_them() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, _) = h.comp_with_layers();
+    let other = PrimPath::new(
+        h.run("comp.create", json!({"name": "Clean"}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let fx = solid.child("missing_fx").unwrap();
+    h.run("prim.create", json!({"path": fx, "prim_type": "Effect"}));
+    h.run(
+        "attr.set",
+        json!({"path": fx, "attr": "match_name", "value": {"type": "string", "value": "Vendor Gone"}}),
+    );
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let r = h.action(&mut viewer, Invocation::new(ids::FIND_MISSING_EFFECTS));
+    assert!(r.open.iter().any(|p| p.as_str() == "project"));
+    let mut project = crate::project::ProjectPanel::default();
+    h.frame("project", &mut project, Vec::new());
+    let effects = crate::effects::EffectRegistries {
+        defs: std::sync::Arc::new(bae_app::Registry::new()),
+        infos: std::sync::Arc::new(bae_app::Registry::new()),
+    };
+    let shown = project.shown_items(&h.stage, Some(&effects));
+    assert!(shown.contains(&comp), "{shown:?}");
+    assert!(!shown.contains(&other), "{shown:?}");
+}
+
+/// Previews draw an item's proxy that is on, at the item's size; renders
+/// (no proxies by default), a proxy that is off or whose file is gone use the
+/// original.
+#[test]
+fn previews_draw_proxies_at_the_item_size() {
+    use bae_render::{AnimEvaluator, CompEvaluator, LayerContent, ProxyUse, RenderPurpose};
+    let mut h = Harness::new();
+    let dir = tempfile::tempdir().unwrap();
+    let (clip, small) = (dir.path().join("clip.mov"), dir.path().join("small.mov"));
+    std::fs::write(&clip, b"clip").unwrap();
+    std::fs::write(&small, b"proxy").unwrap();
+    let out = h.run(
+        "item.import",
+        json!({"files": [{"path": clip, "attrs": {
+            "width": {"type": "int", "value": 1920}, "height": {"type": "int", "value": 1080}}}]}),
+    );
+    let item = PrimPath::new(out["items"][0].as_str().unwrap()).unwrap();
+    let comp = PrimPath::new(
+        h.run("comp.create", json!({"width": 1920, "height": 1080}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.run(
+        "layer.create",
+        json!({"comp": comp, "kind": "footage", "source": item}),
+    );
+    h.run(
+        "item.set_proxy",
+        json!({"items": [item], "file": {"path": small}}),
+    );
+    let footage = |eval: &mut AnimEvaluator, stage: &bae_model::Stage| {
+        let rc = eval.evaluate(stage, &comp, bae_model::Time::ZERO).unwrap();
+        match &rc.layers[0].content {
+            LayerContent::Footage(f) => (f.file.clone(), f.proxy_of.is_some(), f.size),
+            other => panic!("{other:?}"),
+        }
+    };
+    let mut preview = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+    let (file, scaled, size) = footage(&mut preview, &h.stage);
+    assert_eq!(
+        file.as_deref().and_then(|f| f.file_name()),
+        small.file_name()
+    );
+    assert!(scaled);
+    assert_eq!(size, Some([1920, 1080]), "drawn at the item's size");
+    // Cached frames drawn with the proxy depend on the item: turning its proxy
+    // off (an attribute of the item) redraws them.
+    let rc = preview
+        .evaluate(&h.stage, &comp, bae_model::Time::ZERO)
+        .unwrap();
+    assert!(rc.dependencies().iter().any(|d| d.path == item));
+    let mut render = AnimEvaluator::new(None);
+    assert!(
+        !footage(&mut render, &h.stage).1,
+        "renders use no proxies by default"
+    );
+    render.set_proxy_use(ProxyUse::All);
+    assert!(footage(&mut render, &h.stage).1);
+    h.run(
+        "item.set_proxy_enabled",
+        json!({"items": [item], "enabled": false}),
+    );
+    assert!(!footage(&mut preview, &h.stage).1, "a proxy that is off");
+    h.run(
+        "item.set_proxy_enabled",
+        json!({"items": [item], "enabled": true}),
+    );
+    std::fs::remove_file(&small).unwrap();
+    let mut fresh = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+    assert!(
+        !footage(&mut fresh, &h.stage).1,
+        "a missing proxy falls back"
+    );
+    assert!(fresh.take_warnings().iter().any(|w| w.contains("proxy")));
 }

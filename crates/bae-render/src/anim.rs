@@ -44,6 +44,39 @@ pub fn prewarm_audio_analysis() {
     bae_media::visual_audio::SpectrumPlans::prewarm();
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct NestedSwitches {
+    quality: bae_anim::LayerQuality,
+    effects_off: bool,
+    frame_blending_off: bool,
+    motion_blur_off: bool,
+}
+
+impl NestedSwitches {
+    fn through(self, comp: &EvaluatedComp, layer: &EvaluatedLayer) -> Self {
+        Self {
+            quality: self.quality.min(layer.switches.quality),
+            effects_off: self.effects_off || !layer.switches.effects,
+            frame_blending_off: self.frame_blending_off || !comp.frame_blending,
+            motion_blur_off: self.motion_blur_off
+                || !comp.motion_blur.enabled
+                || !layer.switches.motion_blur,
+        }
+    }
+}
+
+/// Which proxies a conversion draws (AE Render Settings ▸ Proxy Use).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProxyUse {
+    /// Use No Proxies (renders, unless their settings say otherwise).
+    #[default]
+    None,
+    /// Use Comp Proxies Only.
+    CompsOnly,
+    /// Use All Proxies / Current Settings: every proxy that is on (previews).
+    All,
+}
+
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
 /// frames; forward [`StageEvent`]s to [`CompEvaluator::invalidate`]).
 #[derive(Debug)]
@@ -56,8 +89,11 @@ pub struct AnimEvaluator {
     preview_audio: Option<preview_audio::PreviewAudio>,
     inner: Evaluator,
     scalar_tracks: crate::parameter_track::TrackCache,
+    attributes: AttributeCache,
     assets: AssetFiles,
     purpose: RenderPurpose,
+    propagate_switches: bool,
+    proxies: ProxyUse,
     warnings: Vec<String>,
     /// Shape and text layers' content of the previous conversion, by layer:
     /// reused while what the provider draws is unchanged, so a layer that only
@@ -79,8 +115,11 @@ impl AnimEvaluator {
             preview_audio: None,
             inner: Evaluator::new(),
             scalar_tracks: Default::default(),
+            attributes: AttributeCache::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
+            propagate_switches: true,
+            proxies: ProxyUse::None,
             warnings: Vec::new(),
             customs: rustc_hash::FxHashMap::default(),
         }
@@ -103,12 +142,94 @@ impl AnimEvaluator {
     #[must_use]
     pub fn with_purpose(mut self, purpose: RenderPurpose) -> Self {
         self.purpose = purpose;
+        // AE previews draw every proxy that is on; renders none by default.
+        if purpose == RenderPurpose::Preview {
+            self.proxies = ProxyUse::All;
+        }
         self
+    }
+
+    /// Which proxies to draw (Render Settings ▸ Proxy Use).
+    pub fn set_proxy_use(&mut self, proxies: ProxyUse) {
+        self.proxies = proxies;
+    }
+
+    /// The proxy of `item` to draw and its file, when proxies of its kind are
+    /// used, it has one that is on and the file is there (else the original
+    /// is drawn, with a warning).
+    fn proxy_for(
+        &mut self,
+        stage: &Stage,
+        item: &PrimPath,
+        comp: bool,
+    ) -> Option<(PrimPath, Option<PathBuf>)> {
+        let used = match self.proxies {
+            ProxyUse::All => true,
+            ProxyUse::CompsOnly => comp,
+            ProxyUse::None => false,
+        };
+        if !used {
+            return None;
+        }
+        let proxy = bae_model::asset::proxy_in_use(stage, item)?;
+        let view = stage.prim(&proxy)?;
+        match self.assets.file(&view) {
+            Ok(Some(file)) => Some((proxy, Some(file))),
+            _ => {
+                self.warn(format!(
+                    "{item}: the proxy file is missing; the original is used"
+                ));
+                None
+            }
+        }
+    }
+
+    /// Footage drawing `proxy` (with `file`) for `item` at `size` from
+    /// `source_time`.
+    fn proxy_footage(
+        stage: &Stage,
+        item: &PrimPath,
+        proxy: PrimPath,
+        file: Option<PathBuf>,
+        size: [u32; 2],
+        source_time: Time,
+    ) -> FootageRef {
+        let view = stage.prim(&proxy);
+        let kind = view
+            .as_ref()
+            .and_then(|v| v.value("kind").and_then(|k| k.as_str().map(str::to_owned)));
+        FootageRef {
+            file_revision: view.as_ref().map_or(0, bae_model::asset::file_revision),
+            psd_layer: None,
+            file,
+            size: (size[0] > 0 && size[1] > 0).then_some(size),
+            source_time,
+            alphabetical: view.as_ref().is_some_and(|v| {
+                v.value("sequence:pattern")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s.starts_with("*."))
+            }),
+            sequence: (kind.as_deref() == Some("sequence")).then(|| {
+                match view.as_ref().and_then(|v| v.value("frame_rate")) {
+                    Some(bae_model::Value::FrameRate(rate)) => *rate,
+                    _ => bae_model::FrameRate::FPS_30,
+                }
+            }),
+            blend: None,
+            proxy_of: Some(item.clone()),
+            asset: proxy,
+        }
+    }
+
+    /// Apply composition switches recursively when rendering nested comp instances.
+    pub fn set_nested_switches(&mut self, enabled: bool) {
+        self.propagate_switches = enabled;
     }
 
     /// Drops compiled animation when the caller observed edits without individual stage events.
     pub fn clear_compiled(&mut self) {
         self.inner.clear();
+        self.attributes = AttributeCache::default();
         #[cfg(feature = "media")]
         if let Some(preview) = &mut self.preview_audio {
             preview.composition = None;
@@ -175,6 +296,16 @@ impl AnimEvaluator {
         ec: &EvaluatedComp,
         depth: usize,
     ) -> Result<RenderComp, RenderError> {
+        self.convert_nested(stage, ec, depth, NestedSwitches::default())
+    }
+
+    fn convert_nested(
+        &mut self,
+        stage: &Stage,
+        ec: &EvaluatedComp,
+        depth: usize,
+        inherited: NestedSwitches,
+    ) -> Result<RenderComp, RenderError> {
         #[cfg(feature = "media")]
         if depth == 0
             && let Some(preview) = &mut self.preview_audio
@@ -198,7 +329,11 @@ impl AnimEvaluator {
             lights: comp_lights(ec).to_vec(),
             motion_blur: None,
         };
-        let mut samples = match self.motion_samples(stage, ec)? {
+        let mut samples = match if inherited.motion_blur_off {
+            None
+        } else {
+            self.motion_samples(stage, ec)?
+        } {
             Some((mb, samples)) => {
                 rc.motion_blur = Some(Arc::new(mb));
                 samples
@@ -206,7 +341,7 @@ impl AnimEvaluator {
             None => Vec::new(),
         };
         for (i, layer) in ec.layers.iter().enumerate() {
-            let mut out = self.layer(stage, ec, layer, depth)?;
+            let mut out = self.layer(stage, ec, layer, depth, inherited)?;
             if let Some(s) = samples.get_mut(i) {
                 out.motion_samples = std::mem::take(s).into();
             }
@@ -217,15 +352,18 @@ impl AnimEvaluator {
         // hidden, not a parent or an active layer's matte): the frame does not
         // depend on their content (cache invalidation, `RenderLayer::inert`).
         let parents: Vec<usize> = ec.layers.iter().filter_map(|l| l.parent).collect();
-        let mattes: Vec<usize> = rc
+        let mut mattes: Vec<usize> = rc
             .layers
             .iter()
             .filter(|l| l.active)
             .filter_map(|l| l.track_matte.map(|m| m.layer))
             .collect();
+        // Environment lights read their source layer even when it is hidden.
+        mattes.extend(rc.lights.iter().filter_map(|l| Some(l.environment?.layer)));
         for (i, l) in rc.layers.iter_mut().enumerate() {
             l.inert = !(l.active && l.visible) && !parents.contains(&i) && !mattes.contains(&i);
         }
+        collapse_3d_precomps(ec, &mut rc);
         if depth == 0 {
             self.customs.retain(|_, (_, used)| std::mem::take(used));
         }
@@ -303,9 +441,40 @@ impl AnimEvaluator {
         ec: &EvaluatedComp,
         l: &EvaluatedLayer,
         depth: usize,
+        inherited: NestedSwitches,
     ) -> Result<RenderLayer, RenderError> {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
+        // The render queue renders at Best Settings (every layer, nested
+        // ones too, at Best); the Quality switches only change previews.
+        // Advanced 3D extrudes 3D text and shape layers.
+        out.extrusion = match (&l.geometry, ec.advanced_3d, l.switches.three_d) {
+            (Some(g), true, true) => g.extrusion_depth,
+            _ => 0.0,
+        };
+        out.bevel = l
+            .geometry
+            .as_ref()
+            .filter(|_| out.extrusion > 0.0)
+            .and_then(|g| {
+                use crate::model::extrude::{Bevel, BevelStyle};
+                let style = match g.bevel_style {
+                    2 => BevelStyle::Angular,
+                    3 => BevelStyle::Concave,
+                    4 => BevelStyle::Convex,
+                    _ => return None,
+                };
+                (g.bevel_depth > 0.0).then_some(Bevel {
+                    style,
+                    depth: g.bevel_depth,
+                    hole_scale: g.hole_bevel_depth / 100.0,
+                    inward: g.bevel_direction == 2,
+                })
+            });
+        out.quality = match self.purpose {
+            RenderPurpose::Final => bae_anim::LayerQuality::Best,
+            _ => inherited.quality.min(l.switches.quality),
+        };
         out.time = l.layer_time;
         out.start_time = l.timing.start_time;
         out.time_scale = l.timing.stretch_percent() / 100.;
@@ -329,7 +498,7 @@ impl AnimEvaluator {
         out.track_matte = matte_mode(l.track_matte)
             .and_then(|mode| l.track_matte_layer.map(|layer| TrackMatte { layer, mode }));
         if out.active {
-            out.content = self.content(stage, ec, l, depth)?;
+            out.content = self.content(stage, ec, l, depth, inherited)?;
             // A mask a text layer uses as its path does not mask (AE).
             let text_path = l.text_path.as_ref().map(|t| &t.mask);
             out.masks = l
@@ -364,7 +533,7 @@ impl AnimEvaluator {
             out.effects = l
                 .effects
                 .iter()
-                .filter(|_| l.switches.effects)
+                .filter(|_| l.switches.effects && !inherited.effects_off)
                 .map(|e| {
                     let mut params: Vec<(u32, bae_model::Value)> = e
                         .params
@@ -376,6 +545,11 @@ impl AnimEvaluator {
                         let strokes = crate::paint::strokes(&e.children, l.layer_time);
                         params.push((crate::paint::STROKES_PARAM, crate::paint::pack(&strokes)));
                         params.extend(crate::paint::source_params(&strokes));
+                    }
+                    // The Puppet effect's pins at this frame.
+                    if e.match_name == crate::puppet::PUPPET_EFFECT {
+                        let pins = crate::puppet::pins(&e.children);
+                        params.push((crate::puppet::PINS_PARAM, crate::puppet::pack(&pins)));
                     }
                     RenderEffect {
                         path: e.path.clone(),
@@ -526,9 +700,10 @@ impl AnimEvaluator {
     fn content(
         &mut self,
         stage: &Stage,
-        _ec: &EvaluatedComp,
+        ec: &EvaluatedComp,
         l: &EvaluatedLayer,
         depth: usize,
+        inherited: NestedSwitches,
     ) -> Result<LayerContent, RenderError> {
         if matches!(
             l.kind,
@@ -564,10 +739,30 @@ impl AnimEvaluator {
                 })
             })),
             LayerSource::None => Ok(LayerContent::None),
+            LayerSource::Comp { comp, time, .. }
+                if let Some((proxy, file)) = self.proxy_for(stage, comp, true) =>
+            {
+                // A comp proxy stands in for the whole nested comp.
+                let dim = |a: &str| {
+                    stage
+                        .prim(comp)
+                        .and_then(|v| v.value(a).and_then(|v| v.as_f64()))
+                        .map_or(0, |v| v.max(0.0) as u32)
+                };
+                let size = [dim("width"), dim("height")];
+                Ok(LayerContent::Footage(Self::proxy_footage(
+                    stage, comp, proxy, file, size, *time,
+                )))
+            }
             LayerSource::Comp { comp, nested, .. } => match nested {
                 // bae-anim evaluates nested comps itself (at the mapped time).
                 Some(nested) => {
-                    let rc = self.convert(stage, nested, depth + 1)?;
+                    let switches = if self.propagate_switches {
+                        inherited.through(ec, l)
+                    } else {
+                        NestedSwitches::default()
+                    };
+                    let rc = self.convert_nested(stage, nested, depth + 1, switches)?;
                     Ok(LayerContent::Comp(Arc::new(rc)))
                 }
                 None => {
@@ -584,6 +779,18 @@ impl AnimEvaluator {
                     width: info.width,
                     height: info.height,
                 },
+                "footage" | "sequence"
+                    if let Some((proxy, file)) = self.proxy_for(stage, asset, false) =>
+                {
+                    LayerContent::Footage(Self::proxy_footage(
+                        stage,
+                        asset,
+                        proxy,
+                        file,
+                        [info.width, info.height],
+                        *time,
+                    ))
+                }
                 "footage" | "sequence" => LayerContent::Footage(FootageRef {
                     asset: asset.clone(),
                     file_revision: stage
@@ -602,12 +809,32 @@ impl AnimEvaluator {
                     },
                     size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
                     source_time: *time,
+                    alphabetical: stage.prim(asset).is_some_and(|view| {
+                        view.value("sequence:pattern")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| s.starts_with("*."))
+                    }),
                     sequence: (info.kind == "sequence")
                         .then(|| info.frame_rate.unwrap_or(bae_model::FrameRate::FPS_30)),
-                    blend: l.frame_blend_span.map(|span| FrameBlend {
-                        span,
-                        pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
-                    }),
+                    blend: l
+                        .frame_blend_span
+                        .filter(|_| !inherited.frame_blending_off)
+                        .map(|span| FrameBlend {
+                            span,
+                            pixel_motion: l.switches.frame_blending == FrameBlending::PixelMotion,
+                        }),
+                    proxy_of: None,
+                }),
+                "model" => LayerContent::Model(crate::input::ModelRef {
+                    asset: asset.clone(),
+                    file: match stage.prim(asset).map(|view| self.assets.file(&view)) {
+                        Some(Ok(file)) => file,
+                        Some(Err(message)) => {
+                            self.warn(format!("{}: {message}", l.path));
+                            None
+                        }
+                        None => None,
+                    },
                 }),
                 _ => LayerContent::None,
             }),
@@ -632,7 +859,31 @@ impl CompEvaluator for AnimEvaluator {
         name: &str,
         time: Time,
     ) -> Option<bae_model::Value> {
-        self.inner.evaluate_attribute(stage, path, name, time).ok()
+        let cache = &mut self.attributes;
+        if cache.revision != stage.revision() || cache.len > ATTRIBUTE_CACHE_LIMIT {
+            *cache = AttributeCache {
+                revision: stage.revision(),
+                ..AttributeCache::default()
+            };
+        }
+        if let Some(value) = cache
+            .values
+            .get(path)
+            .and_then(|attrs| attrs.get(name))
+            .and_then(|times| times.get(&time))
+        {
+            return value.clone();
+        }
+        let value = self.inner.evaluate_attribute(stage, path, name, time).ok();
+        cache
+            .values
+            .entry(path.clone())
+            .or_default()
+            .entry(name.to_owned())
+            .or_default()
+            .insert(time, value.clone());
+        cache.len += 1;
+        value
     }
 
     fn integral(
@@ -654,6 +905,7 @@ impl CompEvaluator for AnimEvaluator {
     }
 
     fn invalidate(&mut self, event: &StageEvent) {
+        self.attributes = AttributeCache::default();
         self.inner.invalidate(event);
         #[cfg(feature = "media")]
         {
@@ -679,6 +931,22 @@ impl CompEvaluator for AnimEvaluator {
         std::mem::take(&mut self.warnings)
     }
 }
+
+/// Effect controls evaluated at other times (expressions of generate-mode
+/// effects sampled at every birth, the same births each frame), for one stage
+/// revision: an expression runs once per (control, time).
+#[derive(Debug, Default)]
+struct AttributeCache {
+    revision: u64,
+    len: usize,
+    values: rustc_hash::FxHashMap<
+        PrimPath,
+        rustc_hash::FxHashMap<String, rustc_hash::FxHashMap<Time, Option<bae_model::Value>>>,
+    >,
+}
+
+/// Entries before the cache starts over (a long scrub).
+const ATTRIBUTE_CACHE_LIMIT: usize = 16_384;
 
 /// Provider ID of shape layers (05's `bae_vector::SHAPE_PROVIDER`).
 pub const SHAPE_PROVIDER: &str = "bae.shape";
@@ -778,17 +1046,108 @@ fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
     })
 }
 
+/// Collapsed 3D pre-comps (AE-CMP-424): a 3D pre-comp layer with Collapse
+/// Transformations on and no effects, masks or track matte joins the comp's
+/// 3D scene. Its layers take its place in the stack, placed by its matrix and
+/// faded by its opacity, and are seen by this comp's camera and lit by its
+/// lights (the pre-comp's own cameras and lights are ignored); its 2D layers
+/// lie on its plane.
+fn collapse_3d_precomps(ec: &EvaluatedComp, rc: &mut RenderComp) {
+    let mut i = 0;
+    while i < rc.layers.len() {
+        let collapsed = ec
+            .layers
+            .iter()
+            .find(|l| l.path == rc.layers[i].path)
+            .is_some_and(|l| l.switches.collapse_transformation && l.switches.three_d);
+        let outer = &rc.layers[i];
+        let (Some(m), LayerContent::Comp(nested)) = (outer.matrix_3d, &outer.content) else {
+            i += 1;
+            continue;
+        };
+        if !collapsed
+            || outer.effects.iter().any(|e| e.enabled)
+            || outer.masks.iter().any(|m| m.mode != MaskMode::None)
+            || outer.track_matte.is_some()
+        {
+            i += 1;
+            continue;
+        }
+        let nested = nested.clone();
+        let (opacity, active, visible) = (outer.opacity, outer.active, outer.visible);
+        let inner: Vec<RenderLayer> = nested
+            .layers
+            .iter()
+            .map(|l| {
+                let mut l = l.clone();
+                let world = m * l.matrix_3d.unwrap_or_else(|| embed_2d(&l.transform));
+                l.matrix_3d = Some(world);
+                l.transform = affine_2d(&world);
+                l.motion_samples = l
+                    .motion_samples
+                    .iter()
+                    .map(|s| LayerSample {
+                        transform: affine_2d(
+                            &(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                        ),
+                        matrix_3d: Some(m * s.matrix_3d.unwrap_or_else(|| embed_2d(&s.transform))),
+                    })
+                    .collect();
+                l.opacity *= opacity;
+                l.active &= active;
+                l.visible &= visible;
+                if let Some(t) = &mut l.track_matte {
+                    t.layer += i;
+                }
+                l
+            })
+            .collect();
+        let n = inner.len();
+        // Indices past the pre-comp move by the layers it adds.
+        let shift = |index: &mut usize| {
+            if *index > i {
+                *index = *index + n - 1;
+            }
+        };
+        for l in rc.layers.iter_mut() {
+            if let Some(t) = &mut l.track_matte {
+                shift(&mut t.layer);
+            }
+        }
+        for light in rc.lights.iter_mut() {
+            if let Some(index) = &mut light.scope_below {
+                shift(index);
+            }
+            if let Some(e) = &mut light.environment {
+                shift(&mut e.layer);
+            }
+        }
+        rc.layers.splice(i..=i, inner);
+        i += n.max(1);
+    }
+}
+
+/// A 2D layer's transform as a 3D placement on the z = 0 plane.
+fn embed_2d(t: &DAffine2) -> DMat4 {
+    DMat4::from_cols(
+        glam::DVec4::new(t.matrix2.x_axis.x, t.matrix2.x_axis.y, 0.0, 0.0),
+        glam::DVec4::new(t.matrix2.y_axis.x, t.matrix2.y_axis.y, 0.0, 0.0),
+        glam::DVec4::new(0.0, 0.0, 1.0, 0.0),
+        glam::DVec4::new(t.translation.x, t.translation.y, 0.0, 1.0),
+    )
+}
+
 /// The lights of `ec` that light its layers.
 fn comp_lights(ec: &EvaluatedComp) -> Arc<[Light]> {
     ec.layers
         .iter()
         .enumerate()
         .filter(|(_, l)| l.switches.enabled && l.active)
-        .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
+        .filter_map(|(i, l)| Some(light(ec, i, l, l.light.as_ref()?)))
         .collect()
 }
 
-fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
+fn light(ec: &EvaluatedComp, index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
     use bae_anim::{LightFalloff, LightType};
     Light {
         kind: match s.light_type {
@@ -815,6 +1174,20 @@ fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
         shadow_darkness: s.shadow_darkness as f32,
         shadow_diffusion: s.shadow_diffusion as f32,
         scope_below: l.switches.adjustment.then_some(index),
+        // The source is a 2D layer of the same comp (AE refuses 3D layers).
+        environment: (s.light_type == LightType::Environment)
+            .then_some(s.source)
+            .flatten()
+            .filter(|&src| ec.layers.get(src).is_some_and(|l| !l.switches.three_d))
+            .map(|layer| crate::light::EnvironmentSource {
+                layer,
+                background: s.background_visible.then(|| {
+                    [
+                        (s.background_opacity / 100.0).clamp(0.0, 1.0) as f32,
+                        (s.background_blur / 100.0).clamp(0.0, 1.0) as f32,
+                    ]
+                }),
+            }),
     }
 }
 
@@ -836,6 +1209,16 @@ fn material(m: &bae_anim::MaterialState) -> Material {
         specular_intensity: percent(m.specular_intensity),
         specular_shininess: percent(m.specular_shininess),
         metal: percent(m.metal),
+        transparency: percent(m.transparency),
+        transparency_rolloff: percent(m.transparency_rolloff),
+        reflection_intensity: percent(m.reflection_intensity),
+        reflection_sharpness: percent(m.reflection_sharpness),
+        reflection_rolloff: percent(m.reflection_rolloff),
+        shadow_color: [
+            m.shadow_color[0] as f32,
+            m.shadow_color[1] as f32,
+            m.shadow_color[2] as f32,
+        ],
     }
 }
 

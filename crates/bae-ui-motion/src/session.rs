@@ -73,6 +73,8 @@ pub(crate) fn shape_groups(stage: &Stage, layer: &PrimPath) -> Vec<PrimPath> {
 #[derive(Clone, Debug)]
 pub struct Playback {
     pub comp: PrimPath,
+    pub(crate) shortcut: PreviewShortcut,
+    pub(crate) caching: Option<CachePass>,
     started: Instant,
     /// The frame shown and the frame this run started from (comp frames).
     frame: i64,
@@ -89,7 +91,12 @@ pub struct Playback {
     /// The current time before playing (kept on stop when Move Time To
     /// Preview Time is off).
     before: Time,
+    /// When playback was asked for: the pre-roll waits a little at most.
+    requested: Instant,
 }
+
+/// Longest the clock waits for playback's first frame (a cold start).
+const PREROLL_MAX: Duration = Duration::from_millis(250);
 
 impl Playback {
     fn ordinal_at(&self, now: Instant) -> u64 {
@@ -118,10 +125,11 @@ pub(crate) struct PlaybackStats {
     next_source: u64,
     sample: Option<Instant>,
     frames: u32,
+    slow: bool,
 }
 
 /// Preview panel ▸ Range (AE's choices for the Spacebar shortcut).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PreviewRange {
     WorkArea,
     #[default]
@@ -129,11 +137,125 @@ pub enum PreviewRange {
     EntireDuration,
 }
 
-/// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
-#[derive(Clone, Debug, PartialEq)]
-pub struct PreviewOptions {
+impl PreviewRange {
+    pub(crate) fn bounds(self, info: &CompInfo, now: Time) -> TimeRange {
+        let wa = info.work_area;
+        match self {
+            PreviewRange::WorkArea => wa,
+            // The work area, grown to take in the current time (AE).
+            PreviewRange::WorkAreaExtended => {
+                let end = (info.duration).max(info.frame_duration());
+                let start = wa.start.min(now);
+                let stop = if now >= wa.end {
+                    (now + info.frame_duration()).min(end)
+                } else {
+                    wa.end
+                };
+                TimeRange::new(start, stop)
+            }
+            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
+        }
+    }
+}
+
+/// The three independently configurable Preview panel shortcuts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PreviewShortcut {
+    #[default]
+    Space,
+    Numpad,
+    ShiftNumpad,
+}
+
+impl PreviewShortcut {
+    pub(crate) const ALL: [Self; 3] = [Self::Space, Self::Numpad, Self::ShiftNumpad];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Space => "Spacebar",
+            Self::Numpad => "Numpad 0",
+            Self::ShiftNumpad => "Shift + Numpad 0",
+        }
+    }
+
+    pub(crate) fn defaults(self) -> PreviewOptions {
+        let mut options = PreviewOptions::default();
+        if self != Self::Space {
+            options.range = PreviewRange::WorkArea;
+            options.from_current = false;
+            options.cache_before = true;
+        }
+        if self == Self::ShiftNumpad {
+            options.skip = 1;
+        }
+        options
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CachePass {
+    /// Frame numbers in composition time. The last cached frame is next - step.
+    pub first: i64,
+    pub next: i64,
+    pub step: i64,
+    pub base: i64,
+    pub frames: i64,
+}
+
+impl CachePass {
+    fn new(pb: &Playback, options: &PreviewOptions) -> Self {
+        let first = if options.cache_from_current && pb.range.contains(pb.before) {
+            pb.rate.time_to_frame(pb.before)
+        } else {
+            pb.rate.time_to_frame(pb.range.start)
+        };
+        let base = pb.rate.time_to_frame(pb.range.start);
+        let step = i64::from(options.skip) + 1;
+        let first = first - (first - base).rem_euclid(step);
+        let count = pb.rate.time_to_frame(Time(pb.range.end.0 - 1)) - base + 1;
+        let frames = ((count.max(1) - 1) / step + 1) * step;
+        Self {
+            first,
+            next: first,
+            step,
+            base,
+            frames,
+        }
+    }
+
+    pub fn frame(&self, cursor: i64) -> i64 {
+        self.base + (cursor - self.base).rem_euclid(self.frames)
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PreviewProfiles {
+    pub selected: PreviewShortcut,
     /// Prefer an open Active Camera view when previewing a 3D composition.
     pub favor_active_camera: bool,
+    pub profiles: [PreviewOptions; 3],
+}
+
+impl Default for PreviewProfiles {
+    fn default() -> Self {
+        Self {
+            selected: PreviewShortcut::Space,
+            favor_active_camera: true,
+            profiles: PreviewShortcut::ALL.map(PreviewShortcut::defaults),
+        }
+    }
+}
+
+/// Settings applied when this shortcut starts a preview.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PreviewOptions {
+    pub video: bool,
+    pub audio: bool,
+    pub cache_before: bool,
+    pub cache_from_current: bool,
+    pub play_cached: bool,
+    pub fullscreen: bool,
+    pub repeat: bool,
     pub range: PreviewRange,
     /// Play From: the current time (else the start of the range).
     pub from_current: bool,
@@ -151,7 +273,13 @@ pub struct PreviewOptions {
 impl Default for PreviewOptions {
     fn default() -> Self {
         PreviewOptions {
-            favor_active_camera: true,
+            video: true,
+            audio: true,
+            cache_before: false,
+            cache_from_current: false,
+            play_cached: true,
+            fullscreen: false,
+            repeat: true,
             range: PreviewRange::default(),
             from_current: true,
             fps: None,
@@ -215,6 +343,18 @@ impl Scrub {
     }
 }
 
+/// The properties a keyframe drag changes, as they will be when it ends.
+#[derive(Clone, Debug)]
+pub struct KeyPreview {
+    /// The panel mode dragging ("graph", "bars"): only it clears an
+    /// unfinished preview.
+    pub owner: &'static str,
+    pub specs: Vec<bae_anim::AttrOverride>,
+    /// The drag ended and its command was sent (stage revision then): shown
+    /// until it has run, like [`Scrub::committed`].
+    pub committed: Option<(u64, Instant)>,
+}
+
 /// Copied keyframes (one attribute at a time, like AE's paste target).
 #[derive(Clone, Debug)]
 pub struct KeyClipboard {
@@ -245,6 +385,9 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Open the comps a command creates (those not in `before`; New Comp
+    /// from Selection) and, with `queue`, add them to the Render Queue.
+    NewComps { before: Vec<PrimPath>, queue: bool },
     /// Select the shape group a command adds to a shape layer (AE: a shape
     /// tool's new group is selected, its box shown): the first of `layer`'s
     /// groups not in `before`.
@@ -284,6 +427,17 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// The mask or shape path whose vertices the Composition viewer has
+    /// selected (Ctrl+T then runs Free Transform Points, AE).
+    pub(crate) vertex_path: Option<PrimPath>,
+    /// Composition viewers opened locked to a comp (View > Split with New
+    /// Locked Viewer), by panel id, until they take it.
+    pub(crate) viewer_pins: HashMap<String, PrimPath>,
+    /// Their indices.
+    pub(crate) vertex_indices: Vec<usize>,
+    /// Vertices of `vertex_path` the viewer selects next (after Set First
+    /// Vertex renumbers them).
+    pub(crate) vertex_request: Option<Vec<usize>>,
     /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
     /// mask, effect or text animator; [`group_prim`] gives the prim).
     pub selected_groups: Vec<String>,
@@ -293,6 +447,9 @@ pub struct Session {
     pub selected_effects: Vec<PrimPath>,
     /// Latest request to re-evaluate a generated source without editing project data.
     pub(crate) solid_reload: Option<(u64, PrimPath)>,
+    /// Edit ▸ Purge generation: viewers drop their rendered frames when it
+    /// changes.
+    pub(crate) purge: u64,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
@@ -312,13 +469,12 @@ pub struct Session {
     retry_audio_after: Option<Instant>,
     opening_audio: bool,
     audio_clock: bool,
+    mute_slow_preview: bool,
     last_scrub: Option<Time>,
     mix_revision: Option<(PrimPath, u64)>,
     mix_has_audio: bool,
-    /// Loop playback (Preview panel).
-    pub loop_playback: bool,
     /// Preview panel options (range, play from, frame rate, skip …).
-    pub preview: PreviewOptions,
+    pub preview: PreviewProfiles,
     /// The viewer's resolution is on Auto: it follows the magnification. The
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
@@ -331,10 +487,17 @@ pub struct Session {
     pub(crate) view_shortcuts: crate::viewer::view3d::Shortcuts,
     /// View ▸ View Options: the layer controls the viewers draw.
     pub(crate) layer_controls: crate::viewer::view_options::LayerControls,
+    /// The region of interest a viewer shows and its comp ([left, top, right,
+    /// bottom], comp pixels), for Composition ▸ Crop Comp to Region of Interest.
+    pub(crate) roi: Option<(PrimPath, [f64; 4])>,
+    /// The comp was cropped to its region of interest: viewers turn it off.
+    pub(crate) roi_cropped: bool,
     /// View ▸ Panel Background Color.
     pub(crate) panel_background: crate::viewer::view_options::PanelBackground,
     /// The layer the Layer panel shows (opened from the Timeline).
     pub(crate) layer_panel: Option<PrimPath>,
+    pub(crate) open_liquify: Option<PrimPath>,
+    pub(crate) liquify_tool: usize,
     /// An expression just added (Alt+click on the stopwatch, Animation ▸ Add
     /// Expression): the Timeline focuses its field with the text selected, so
     /// typing replaces it (AE). Dropped after a second if never shown.
@@ -342,12 +505,27 @@ pub struct Session {
     /// A project item to rename in the Project panel (the Timeline's Rename
     /// on empty space renames its comp there, AE 26).
     pub(crate) rename_item: Option<PrimPath>,
+    /// Layer ▸ Reveal ▸ … in Project: the item the Project panel selects and
+    /// scrolls to next frame.
+    pub(crate) reveal_in_project: Option<PrimPath>,
+    /// Text the Project panel's search takes next frame (Find Missing Footage).
+    pub(crate) project_search: Option<String>,
+    /// File ▸ Interpret Footage ▸ Remember Interpretation: `footage.interpret`
+    /// parameters (without `items`) for Apply Interpretation.
+    pub(crate) remembered_interpretation: Option<serde_json::Value>,
     /// Frames in the GPU preview cache (the timeline's green bar): comp,
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    /// The project revision and selection sizes [`Session::sync`] last
+    /// checked the selections against (each panel syncs every frame).
+    validated: Option<(u64, [usize; 7])>,
     pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
+    /// A keyframe drag in progress (Graph Editor, layer bars): the dragged
+    /// properties as the release will leave them, evaluated live like a value
+    /// drag (#593).
+    pub key_preview: Option<KeyPreview>,
     pub clipboard: Option<KeyClipboard>,
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
     /// copy wins over [`Session::clipboard`].
@@ -359,6 +537,8 @@ pub struct Session {
     /// properties (AE).
     pub(crate) expression_clipboard: Option<String>,
     pending: Vec<(Pending, u32)>,
+    /// New comps to add to the Render Queue (the dialogs host takes them).
+    pub(crate) queue_comps: Vec<PrimPath>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
     reserved: Vec<(PrimPath, String)>,
@@ -386,27 +566,22 @@ pub struct Session {
     /// The Character panel's settings for new text (set while no text layer is
     /// selected, as in AE; `None`: the defaults).
     pub text_defaults: Option<bae_model::TextDocument>,
+    /// Character panel menu ▸ Use Smart Quotes turned off.
+    pub(crate) straight_quotes: bool,
     /// Viewer selection at a specific source-text frame, retained across panel focus changes.
     pub(crate) text_selection: Option<(PrimPath, Time, std::ops::Range<usize>)>,
     /// The footage item the Footage panel shows.
     pub footage_view: Option<PrimPath>,
+    /// Composition displayed at the root of the Flowchart panel.
+    pub flowchart_root: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
 }
 
 /// The session as an app resource (`Resources::get::<SharedSession>()`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SharedSession(Arc<Mutex<Session>>);
-
-impl Default for SharedSession {
-    fn default() -> Self {
-        SharedSession(Arc::new(Mutex::new(Session {
-            loop_playback: true,
-            ..Session::default()
-        })))
-    }
-}
 
 impl SharedSession {
     pub fn lock(&self) -> MutexGuard<'_, Session> {
@@ -428,7 +603,7 @@ impl SharedSession {
             audio_mapping: s.audio_mapping,
             retry_audio_after: s.retry_audio_after.take(),
             opening_audio: s.opening_audio,
-            loop_playback: s.loop_playback,
+            preview: s.preview.clone(),
             ..Session::default()
         };
         *s = fresh;
@@ -587,6 +762,32 @@ impl bae_gpu::WarmUp for SharedSession {
 const PENDING_FRAMES: u32 = 30;
 
 impl Session {
+    /// Cached preview spans displayed on the timeline for this composition revision.
+    pub fn cached_frames(&self, comp: &PrimPath, revision: u64) -> &[TimeRange] {
+        match &self.cached_preview {
+            Some((path, rev, spans)) if path == comp && *rev == revision => spans,
+            _ => &[],
+        }
+    }
+
+    /// What panels evaluate in place of the stage while something is dragged:
+    /// the value drag ([`Scrub`]) and the keyframe drag ([`KeyPreview`]).
+    pub fn live_overrides(&self, stage: &Stage) -> Vec<bae_anim::AttrOverride> {
+        let mut out: Vec<bae_anim::AttrOverride> = self
+            .key_preview
+            .iter()
+            .flat_map(|k| k.specs.iter().cloned())
+            .filter(|o| stage.has_prim(&o.prim))
+            .collect();
+        if let Some(s) = &self.scrub {
+            for o in s.overrides(stage) {
+                out.retain(|x| !(x.prim == o.prim && x.attr == o.attr));
+                out.push(o);
+            }
+        }
+        out
+    }
+
     /// The latest background enumeration for the audio preferences.
     pub fn output_devices(&self) -> &bae_media::playback::OutputDevices {
         &self.output_devices
@@ -647,7 +848,7 @@ impl Session {
             Some(range) if range.contains(at) => {
                 self.restart_clock(at);
                 if self.audio_clock {
-                    self.audio_clock = self.sound(at, range, self.loop_playback);
+                    self.audio_clock = self.sound(at, range, self.preview_options().repeat);
                 }
             }
             Some(_) => self.stop(),
@@ -656,6 +857,23 @@ impl Session {
     }
 
     /// Restart the frame clock at `t`: playback continues from there.
+    /// Pre-roll: while playback has not left its first frame and the viewer
+    /// cannot show that frame yet (a cold start right after a seek), the
+    /// clock waits for it ([`PREROLL_MAX`] at most) instead of skipping it.
+    /// Sound drives its own clock and is not held.
+    pub(crate) fn hold_first_frame(&mut self, ready: bool) {
+        if self.audio_clock {
+            return;
+        }
+        if let Some(pb) = &mut self.playback
+            && !ready
+            && pb.ordinal == 0
+            && pb.requested.elapsed() < PREROLL_MAX
+        {
+            pb.started = Instant::now();
+        }
+    }
+
     fn restart_clock(&mut self, t: Time) {
         if let Some(pb) = &mut self.playback {
             pb.frame = pb.rate.time_to_frame(t);
@@ -739,6 +957,11 @@ impl Session {
     /// Drop references to prims that no longer exist and resolve pending items.
     /// Called once per frame by the panels (cheap).
     pub fn sync(&mut self, stage: &Stage) {
+        if let Some((revision, at)) = self.key_preview.as_ref().and_then(|k| k.committed)
+            && (stage.revision() != revision || at.elapsed() > Duration::from_millis(500))
+        {
+            self.key_preview = None;
+        }
         if let Some((revision, at)) = self.scrub.as_ref().and_then(|s| s.committed)
             && (stage.revision() != revision
                 || at.elapsed() > std::time::Duration::from_millis(500))
@@ -747,6 +970,21 @@ impl Session {
         }
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewComps { before, queue } = &what {
+                let added: Vec<PrimPath> = query::comps(stage)
+                    .into_iter()
+                    .filter(|c| !before.contains(c))
+                    .collect();
+                if let Some(first) = added.first() {
+                    self.open_comp(first);
+                    if *queue {
+                        self.queue_comps.extend(added);
+                    }
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::Keys(keys) = &what {
                 let landed = keys.iter().all(|k| {
                     query::attr_spec(stage, &k.path, &k.attr)
@@ -799,7 +1037,8 @@ impl Session {
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
                 | Pending::NewGroup { .. }
-                | Pending::Keys(_) => {
+                | Pending::Keys(_)
+                | Pending::NewComps { .. } => {
                     unreachable!("handled above")
                 }
             };
@@ -816,7 +1055,8 @@ impl Session {
                     Pending::NewLayers { .. }
                     | Pending::NewEffects { .. }
                     | Pending::NewGroup { .. }
-                    | Pending::Keys(_) => {}
+                    | Pending::Keys(_)
+                    | Pending::NewComps { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -831,7 +1071,8 @@ impl Session {
                 Pending::NewLayers { .. }
                 | Pending::NewEffects { .. }
                 | Pending::NewGroup { .. }
-                | Pending::Keys(_) => None,
+                | Pending::Keys(_)
+                | Pending::NewComps { .. } => None,
             })
             .collect();
         self.reserved
@@ -852,6 +1093,23 @@ impl Session {
                 || *time != self.active_time())
         {
             self.text_selection = None;
+        }
+        // The checks below only drop entries the project no longer has (or
+        // locked): nothing to redo while neither changed.
+        let fingerprint = |s: &Self| {
+            [
+                s.selected_layers.len(),
+                s.selected_items.len(),
+                s.selected_keys.len(),
+                s.reveal.len(),
+                s.selected_props.len(),
+                s.graph_set.len(),
+                s.selected_effects.len(),
+            ]
+        };
+        if self.pending.is_empty() && self.validated == Some((stage.revision(), fingerprint(self)))
+        {
+            return;
         }
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
@@ -879,6 +1137,7 @@ impl Session {
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
         self.selected_effects.retain(|e| stage.has_prim(e));
+        self.validated = Some((stage.revision(), fingerprint(self)));
     }
 
     /// Keep the meters moving through the last audible scrub sample.
@@ -888,6 +1147,69 @@ impl Session {
                 .output
                 .as_ref()
                 .is_some_and(|output| !output.finished())
+    }
+
+    pub(crate) fn apply_preview_options(
+        &mut self,
+        shortcut: PreviewShortcut,
+        options: PreviewOptions,
+        info: Option<&CompInfo>,
+    ) {
+        let old = std::mem::replace(
+            &mut self.preview.profiles[shortcut as usize],
+            options.clone(),
+        );
+        let Some(info) = info else { return };
+        let now = self.time(&info.path);
+        let range = self.preview_range(info, now);
+        let Some(pb) = self.playback.as_mut().filter(|pb| pb.shortcut == shortcut) else {
+            return;
+        };
+        let range_changed = old.range != options.range;
+        if range_changed {
+            pb.range = range;
+        }
+        pb.fps = options
+            .fps
+            .unwrap_or_else(|| info.frame_rate.as_f64())
+            .max(1e-3);
+        if pb.caching.is_some() {
+            if !options.video || !options.cache_before {
+                self.finish_cache(info, false);
+            } else if range_changed
+                || old.skip != options.skip
+                || old.resolution != options.resolution
+                || old.cache_from_current != options.cache_from_current
+            {
+                pb.caching = Some(CachePass::new(pb, &options));
+            }
+        } else if range_changed || old.audio != options.audio || old.fps != options.fps {
+            let range = pb.range;
+            let at = if range.contains(now) {
+                now
+            } else {
+                range.start
+            };
+            self.update_time(info, at);
+            self.restart_clock(at);
+            let use_audio = self.sound_clocks(info);
+            if !use_audio && let Some(output) = &self.output {
+                output.stop();
+            }
+            self.audio_clock = use_audio && self.sound(at, range, options.repeat);
+        }
+    }
+
+    pub fn preview_options(&self) -> &PreviewOptions {
+        let shortcut = self
+            .playback
+            .as_ref()
+            .map_or(self.preview.selected, |p| p.shortcut);
+        &self.preview.profiles[shortcut as usize]
+    }
+
+    pub fn fullscreen_preview(&self) -> bool {
+        self.is_playing() && self.preview_options().fullscreen && self.preview_options().video
     }
 
     pub fn is_playing(&self) -> bool {
@@ -908,22 +1230,7 @@ impl Session {
 
     /// The range Preview ▸ Range plays for the current time `now`.
     pub fn preview_range(&self, info: &CompInfo, now: Time) -> TimeRange {
-        let wa = info.work_area;
-        match self.preview.range {
-            PreviewRange::WorkArea => wa,
-            // The work area, grown to take in the current time (AE).
-            PreviewRange::WorkAreaExtended => {
-                let end = (info.duration).max(info.frame_duration());
-                let start = wa.start.min(now);
-                let stop = if now >= wa.end {
-                    (now + info.frame_duration()).min(end)
-                } else {
-                    wa.end
-                };
-                TimeRange::new(start, stop)
-            }
-            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
-        }
+        self.preview_options().range.bounds(info, now)
     }
 
     /// Where playback of `info` would start and the range it plays (Preview
@@ -932,7 +1239,7 @@ impl Session {
     pub fn play_start(&self, info: &CompInfo) -> (Time, TimeRange) {
         let now = self.time(&info.path);
         let range = self.preview_range(info, now);
-        let from = if self.preview.from_current
+        let from = if self.preview_options().from_current
             && range.contains(now)
             && now + info.frame_duration() < range.end
         {
@@ -952,13 +1259,15 @@ impl Session {
         self.times.insert(info.path.clone(), from);
         let frame = info.frame_rate.time_to_frame(from);
         self.playback = Some(Playback {
+            shortcut: self.preview.selected,
+            caching: None,
             comp: info.path.clone(),
             started,
             frame,
             start: frame,
             rate: info.frame_rate,
             fps: self
-                .preview
+                .preview_options()
                 .fps
                 .unwrap_or_else(|| info.frame_rate.as_f64())
                 .max(1e-3),
@@ -967,6 +1276,7 @@ impl Session {
             revision: None,
             range,
             before: now,
+            requested: started,
         });
         self.playback_stats = PlaybackStats {
             sample: Some(started),
@@ -977,9 +1287,11 @@ impl Session {
     /// Another preview frame rate plays at another speed: the sound does not
     /// drive the clock then (AE plays it only at the comp's rate).
     fn sound_clocks(&self, info: &CompInfo) -> bool {
-        self.preview
-            .fps
-            .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3)
+        self.preview_options().audio
+            && self
+                .preview_options()
+                .fps
+                .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3)
     }
 
     /// Refresh the producer's snapshot once per composition edit. Timeline seeks
@@ -999,7 +1311,11 @@ impl Session {
         {
             return false;
         }
-        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path);
+        let mix = bae_media::mix::AudioMix::from_stage(cx.stage, &info.path).with_cache(
+            cx.resources
+                .get::<Arc<bae_media::conform::ConformedAudio>>()
+                .cloned(),
+        );
         self.mix_has_audio = !mix.is_empty();
         output.prepare(mix);
         self.mix_revision = Some((info.path.clone(), revision));
@@ -1010,6 +1326,7 @@ impl Session {
         if self.mix_has_audio
             && let Some(output) = &self.output
         {
+            output.set_muted(false);
             output.seek(at, range, repeat);
             return true;
         }
@@ -1017,11 +1334,24 @@ impl Session {
     }
 
     pub(crate) fn preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
+        self.mute_slow_preview =
+            crate::prefs::current(cx.resources).bool("previews.mute_audio_when_not_realtime");
         self.prepare_mix(cx, info);
         self.play(info);
+        let options = self.preview_options().clone();
+        if options.video
+            && options.cache_before
+            && cx.resources.get::<Arc<bae_gpu::GpuContext>>().is_some()
+        {
+            let pb = self.playback.as_mut().unwrap();
+            pb.caching = Some(CachePass::new(pb, &options));
+            self.audio_clock = false;
+            return;
+        }
         let pb = self.playback.as_ref().unwrap();
         let at = pb.rate.frame_to_time(pb.frame);
-        self.audio_clock = self.sound_clocks(info) && self.sound(at, pb.range, self.loop_playback);
+        self.audio_clock =
+            self.sound_clocks(info) && self.sound(at, pb.range, self.preview_options().repeat);
     }
 
     pub(crate) fn scrub_to(
@@ -1050,35 +1380,84 @@ impl Session {
             && let Some(output) = &self.output
         {
             output.stop();
+            output.set_muted(false);
         }
         self.playback = None;
         self.last_scrub = None;
         self.audio_clock = false;
     }
 
-    /// Keep the audio mix current (once per composition edit). While playing,
-    /// a new mix restarts the device and the clock at the current frame: a late
-    /// device or a live layer edit. The shell ticks the clock.
+    /// Keep the audio mix current while playing (once per composition edit):
+    /// a new mix restarts the device and the clock at the current frame (a
+    /// late device or a live layer edit). The shell ticks the clock. Stopped,
+    /// edits do not rebuild the mix on the UI thread: starting playback and
+    /// audio scrubbing prepare it when they need it.
     pub(crate) fn update_preview(&mut self, cx: &bae_ui::PanelContext<'_>, info: &CompInfo) {
-        if self.prepare_mix(cx, info)
+        let mute =
+            crate::prefs::current(cx.resources).bool("previews.mute_audio_when_not_realtime");
+        if self.mute_slow_preview != mute
+            && let Some(output) = &self.output
+        {
+            output.set_muted(mute && self.audio_clock && self.playback_stats.slow);
+        }
+        self.mute_slow_preview = mute;
+        if self.playback.is_some()
+            && self.prepare_mix(cx, info)
             && let Some(pb) = &self.playback
+            && pb.caching.is_none()
         {
             let (from, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
             self.restart_clock(from);
             self.audio_clock =
-                self.sound_clocks(info) && self.sound(from, range, self.loop_playback);
+                self.sound_clocks(info) && self.sound(from, range, self.preview_options().repeat);
         }
     }
 
     /// Stop playing (Spacebar): the current time stays on the last frame shown,
     /// or goes back when Move Time To Preview Time is off.
     pub fn stop_preview(&mut self, info: &CompInfo) {
-        if let Some(pb) = self.playback.take()
-            && !self.preview.move_time
-            && pb.comp == info.path
+        let move_time = self.preview_options().move_time;
+        if self.preview_options().play_cached
+            && self
+                .playback
+                .as_ref()
+                .and_then(|p| p.caching.as_ref())
+                .is_some_and(|pass| pass.next > pass.first)
         {
-            self.set_time(info, pb.before);
+            self.finish_cache(info, true);
+            return;
         }
+        let before = self
+            .playback
+            .as_ref()
+            .filter(|p| p.comp == info.path)
+            .map(|p| p.before);
+        self.stop();
+        if !move_time && let Some(time) = before {
+            self.set_time(info, time);
+        }
+    }
+
+    pub(crate) fn finish_cache(&mut self, info: &CompInfo, limit_to_cached: bool) {
+        let repeat = self.preview_options().repeat;
+        let Some(pb) = self.playback.as_mut() else {
+            return;
+        };
+        let Some(pass) = pb.caching.take() else {
+            return;
+        };
+        if limit_to_cached && pass.next > pass.first && pass.next - pass.first < pass.frames {
+            pb.range = TimeRange::new(
+                pb.rate.frame_to_time(pass.first),
+                pb.rate.frame_to_time(pass.next).min(pb.range.end),
+            );
+        }
+        let range = pb.range;
+        let at = pb.rate.frame_to_time(pb.start);
+        let at = if range.contains(at) { at } else { range.start };
+        self.times.insert(info.path.clone(), at);
+        self.restart_clock(at);
+        self.audio_clock = self.sound_clocks(info) && self.sound(at, range, repeat);
     }
 
     /// Edits to the work area or frame rate take effect without restarting the
@@ -1090,25 +1469,38 @@ impl Session {
         if pb.revision == Some(stage.revision()) {
             return;
         }
+        if pb.revision.is_some()
+            && let Some(pass) = &mut pb.caching
+        {
+            pass.next = pass.first;
+        }
         pb.revision = Some(stage.revision());
         let Some(info) = query::comp_info(stage, &pb.comp) else {
             self.stop();
             return;
         };
         if pb.work_area != info.work_area || pb.rate != info.frame_rate {
+            let shortcut = pb.shortcut;
+            let editing = self.preview.selected;
+            self.preview.selected = shortcut;
+            self.playback = None;
             self.play(&info);
+            self.preview.selected = editing;
             if let Some(pb) = self.playback.as_mut() {
                 pb.revision = Some(stage.revision());
                 let (at, range) = (pb.rate.frame_to_time(pb.frame), pb.range);
                 if self.audio_clock {
-                    self.audio_clock = self.sound(at, range, self.loop_playback);
+                    self.audio_clock = self.sound(at, range, self.preview_options().repeat);
                 }
             }
         }
     }
 
     pub fn playback_deadline(&self) -> Option<Instant> {
-        self.playback.as_ref().map(Playback::deadline)
+        self.playback
+            .as_ref()
+            .filter(|p| p.caching.is_none())
+            .map(Playback::deadline)
     }
 
     /// Advance once before building the workspace. Ordinals count scheduled
@@ -1116,12 +1508,17 @@ impl Session {
     /// While the device plays the mix it is the clock: the wall clock start is
     /// re-anchored to its elapsed time, so deadlines follow the audio too.
     pub fn tick(&mut self, now: Instant) {
+        let repeat = self.preview_options().repeat;
+        let skip = self.preview_options().skip;
         let Some(pb) = self.playback.as_mut() else {
             return;
         };
+        if pb.caching.is_some() {
+            return;
+        }
         let mut finished = false;
         if let Some(output) = self.output.as_ref().filter(|_| self.audio_clock) {
-            output.set_loop(self.loop_playback);
+            output.set_loop(repeat);
             finished = output.finished();
             let elapsed = Duration::from_secs_f64(output.elapsed().as_seconds().max(0.));
             pb.started = now.checked_sub(elapsed).unwrap_or(now);
@@ -1138,14 +1535,14 @@ impl Session {
         let previous_ordinal = pb.ordinal;
         pb.ordinal = ordinal;
         // The device stops by itself at the end of a range it does not loop.
-        let ended = finished || (!self.loop_playback && delta >= until_end);
+        let ended = finished || (!repeat && delta >= until_end);
         pb.frame = if ended {
             last
         } else {
             first + (pb.frame - first + delta as i64).rem_euclid(last - first + 1)
         };
         // Skip: only every (skip + 1)th frame is shown.
-        let step = i64::from(self.preview.skip) + 1;
+        let step = i64::from(skip) + 1;
         let shown = pb.frame - (pb.frame - pb.start).rem_euclid(step);
         self.times
             .insert(pb.comp.clone(), pb.rate.frame_to_time(shown.max(first)));
@@ -1163,6 +1560,7 @@ impl Session {
     /// Count only frames submitted to the native presentation surface.
     pub fn frame_presented(&mut self, now: Instant) {
         let Some(pb) = &self.playback else { return };
+        let skip = self.preview_options().skip;
         let stats = &mut self.playback_stats;
         if let Some(time) = stats.drawn.take() {
             let (first, last) = pb.frame_range();
@@ -1179,6 +1577,16 @@ impl Session {
         }
         let elapsed = now.duration_since(*stats.sample.get_or_insert(now));
         if elapsed >= Duration::from_millis(500) {
+            // Deliberately skipped frames still play in real time. Allow one
+            // presentation boundary per sample window before declaring a drop.
+            let requested = pb.fps / f64::from(skip.saturating_add(1));
+            stats.slow = f64::from(stats.frames + 1) < requested * elapsed.as_secs_f64();
+            if self.mute_slow_preview
+                && self.audio_clock
+                && let Some(output) = &self.output
+            {
+                output.set_muted(stats.slow);
+            }
             stats.fps = f64::from(stats.frames) / elapsed.as_secs_f64();
             stats.frames = 0;
             stats.sample = Some(now);
@@ -1216,18 +1624,18 @@ mod tests {
         let r = s.preview_range(&info, now);
         assert_eq!(r.start, Time::from_seconds(0.5));
         assert!(r.end > now);
-        s.preview.range = PreviewRange::WorkArea;
+        s.preview.profiles[0].range = PreviewRange::WorkArea;
         assert_eq!(s.preview_range(&info, now), info.work_area);
-        s.preview.range = PreviewRange::EntireDuration;
+        s.preview.profiles[0].range = PreviewRange::EntireDuration;
         assert_eq!(s.preview_range(&info, now).end, info.duration);
         // Play From: Start of Range.
-        s.preview.range = PreviewRange::WorkArea;
-        s.preview.from_current = false;
+        s.preview.profiles[0].range = PreviewRange::WorkArea;
+        s.preview.profiles[0].from_current = false;
         s.set_time(&info, Time::from_seconds(0.7));
         s.play(&info);
         assert_eq!(s.time(&info.path), Time::from_seconds(0.5));
         // Move time to preview time off: Spacebar goes back to where it was.
-        s.preview.move_time = false;
+        s.preview.profiles[0].move_time = false;
         s.stop_preview(&info);
         assert!(!s.is_playing());
         assert_eq!(
@@ -1249,11 +1657,31 @@ mod tests {
     }
 
     #[test]
+    fn preview_recovers_from_a_slow_presentation_window() {
+        let i = info();
+        let mut session = Session::default();
+        session.preview.selected = PreviewShortcut::ShiftNumpad;
+        session.play(&i);
+        // Editing another shortcut does not change the running preview's skip.
+        session.preview.selected = PreviewShortcut::Space;
+        let start = session.playback.as_ref().unwrap().started;
+        session.frame_presented(start + Duration::from_millis(500));
+        assert!(session.playback_stats.slow);
+        for n in (16..=30).step_by(2) {
+            let now = start + Duration::from_secs_f64(f64::from(n) / 30.0 + 0.001);
+            session.tick(now);
+            session.drew_preview(session.time(&i.path));
+            session.frame_presented(now);
+        }
+        assert!(!session.playback_stats.slow);
+    }
+
+    #[test]
     fn playback_starts_in_work_area() {
         let mut s = Session::default();
         let mut i = info();
         i.work_area = TimeRange::new(Time::from_seconds(1.0), Time::from_seconds(2.0));
-        s.preview.range = PreviewRange::WorkArea;
+        s.preview.profiles[0].range = PreviewRange::WorkArea;
         s.play(&i);
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
@@ -1271,7 +1699,6 @@ mod tests {
         let time = |f| i.frame_rate.frame_to_time(f);
         i.work_area = TimeRange::new(Time::ZERO, time(3));
         let mut s = Session {
-            loop_playback: true,
             ..Default::default()
         };
         s.play(&i);
@@ -1296,7 +1723,7 @@ mod tests {
         s.drew_preview(time(1));
         s.frame_presented(seek);
         assert_eq!((s.playback_stats.frames, s.playback_stats.dropped), (1, 0));
-        s.loop_playback = false;
+        s.preview.profiles[0].repeat = false;
         s.tick(seek + Duration::from_secs(1));
         assert!(!s.is_playing());
         assert_eq!(s.time(&i.path), time(2));

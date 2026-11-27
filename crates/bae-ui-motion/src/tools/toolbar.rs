@@ -346,15 +346,38 @@ impl AeToolbar {
                 widgets::checkbox(ui, &mut o.auto_open_panels, tr("Auto-Open Panels"));
             }
             Group::Puppet => {
-                ui.add_enabled_ui(false, |ui| {
-                    ui.label(small(tr("Mesh:")));
-                    widgets::checkbox(ui, &mut o.puppet_show_mesh, tr("Show"));
-                    ui.label(small(tr("Expansion")));
-                    ui.label(small(&format!("{}", o.puppet_expansion)));
-                    ui.label(small(tr("Density")));
-                    ui.label(small(&format!("{}", o.puppet_density)));
-                    widgets::link(ui, tr("Record Options..."));
-                });
+                // Mesh: Show draws the selected layers' meshes; Expansion and
+                // Density are the new Puppet effect's.
+                ui.label(small(tr("Mesh:")));
+                widgets::checkbox(ui, &mut o.puppet_show_mesh, tr("Show"));
+                for (value, label, range) in [
+                    (&mut o.puppet_expansion, "Expansion", 0.0..=100.0),
+                    (&mut o.puppet_density, "Density", 1.0..=100.0),
+                ] {
+                    ui.label(small(tr(label)));
+                    ui.add(
+                        egui::DragValue::new(value)
+                            .range(range)
+                            .speed(0.25)
+                            .max_decimals(0),
+                    )
+                    .labeled(egui::WidgetType::DragValue, tr(label))
+                    .on_hover_text(tr(label));
+                }
+                let tip = if cfg!(target_os = "macos") {
+                    "To record pin motion, Command-click and drag pins"
+                } else {
+                    "To record pin motion, Ctrl-click and drag pins"
+                };
+                if widgets::link(ui, tr("Record Options..."))
+                    .on_hover_text(tr(tip))
+                    .clicked()
+                {
+                    crate::dialogs::open(
+                        cx.resources,
+                        crate::dialogs::Dialog::PuppetRecordOptions(o.puppet_record),
+                    );
+                }
             }
             Group::Hand | Group::Zoom | Group::Mesh | Group::Roto => {}
         }
@@ -415,7 +438,7 @@ fn add_targets(stage: &bae_model::Stage, session: &crate::session::SharedSession
 }
 
 /// The Add link and its menu (AE): one `shape.add_item` per pick.
-fn add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, o: &ToolOptions) {
+pub(crate) fn add_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, o: &ToolOptions) {
     let session = common::session(cx.resources);
     let targets = add_targets(cx.stage, &session);
     let mut picked = None;
@@ -696,7 +719,7 @@ fn paint_swatch(ui: &Ui, rect: Rect, paint: &Paint, stroke: bool, hovered: bool)
     let border = if hovered {
         color::TEXT_STRONG
     } else {
-        color::FIELD_BORDER
+        theme::field_border()
     };
     p.rect_stroke(
         rect,

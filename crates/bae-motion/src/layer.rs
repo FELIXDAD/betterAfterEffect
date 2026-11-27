@@ -361,12 +361,33 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::PreComp | LayerKind::Footage | LayerKind::Audio => {
-                let src = p.source.clone().expect("checked above");
+                let src = p.source.as_ref().expect("checked above");
                 let (size, duration) = source_info.expect("checked above");
-                set(tx, &path, "source", Value::PrimRef(src))?;
-                anchor = [size[0] / 2.0, size[1] / 2.0];
+                // A 3D model (AE's model layers): 3D, centred on its origin.
+                let model = matches!(
+                    tx.stage().prim(src).and_then(|v| query::static_value(&v, "kind")),
+                    Some(Value::Enum(k)) if k == "model"
+                );
+                set(tx, &path, "source", Value::PrimRef(src.clone()))?;
+                anchor = if model {
+                    [0.0, 0.0]
+                } else {
+                    [size[0] / 2.0, size[1] / 2.0]
+                };
+                if model {
+                    set(tx, &path, "three_d", Value::Bool(true))?;
+                }
                 if let Some(d) = duration {
-                    set(tx, &path, "out_point", Value::Time(start + d))?;
+                    let (first, end) = if matches!(kind, LayerKind::Footage | LayerKind::Audio) {
+                        query::footage_range(tx.stage(), src, d)
+                    } else {
+                        (Time::ZERO, d)
+                    };
+                    if first != Time::ZERO {
+                        set(tx, &path, "start_time", Value::Time(start - first))?;
+                        set(tx, &path, "in_point", Value::Time(start))?;
+                    }
+                    set(tx, &path, "out_point", Value::Time(start + (end - first)))?;
                 }
             }
             LayerKind::Null => {
@@ -1498,6 +1519,10 @@ pub struct SetLayerAttrParams {
     /// (AE's 38 modes, `multiply` …).
     pub attr: String,
     pub value: Value,
+    /// Also enable the owning composition's master switch when turning on layer
+    /// motion blur or a frame blending mode (the Previews preference).
+    #[serde(default)]
+    pub enable_comp_switch: bool,
 }
 
 impl Command for SetLayerAttr {
@@ -1514,9 +1539,18 @@ impl Command for SetLayerAttr {
                 p.attr
             )));
         }
+        let enable_master = p.enable_comp_switch
+            && match p.attr.as_str() {
+                "motion_blur" => p.value.as_bool() == Some(true),
+                "frame_blending" => matches!(p.value.as_str(), Some("frame_mix" | "pixel_motion")),
+                _ => false,
+            };
         for l in &p.layers {
             tx.stage().require_prim(l)?;
             set(tx, l, &p.attr, p.value.clone())?;
+            if enable_master && let Some(comp) = query::owning_comp(tx.stage(), l) {
+                set(tx, &comp, &p.attr, Value::Bool(true))?;
+            }
         }
         Ok(())
     }

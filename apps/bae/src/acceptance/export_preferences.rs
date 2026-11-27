@@ -98,3 +98,77 @@ fn output_preferences_apply_to_new_items_and_segment_image_sequences() {
     );
     eprintln!("Rendered frames 7–11 into three folders and verified unique queue output names.");
 }
+
+#[test]
+fn wav_queue_respects_frame_ranges_with_short_and_long_audio_blocks() {
+    let mut app = Gui::new();
+    if !app.with_gpu() {
+        return;
+    }
+    let mut h = gui_with(app);
+    new_comp(&mut h);
+    let dir = tempfile::tempdir().unwrap();
+    let mut outputs = Vec::new();
+    for (i, duration) in ["0:00:00:01", "0:00:01:00"].into_iter().enumerate() {
+        let mut prefs = (*h.state().prefs.current()).clone();
+        prefs.set("audio.audio_block_duration", duration);
+        h.state().prefs.set(prefs).unwrap();
+        let path = dir.path().join(format!("clip{i}.wav"));
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+        let queue = h.state().render_queue();
+        let id = queue.lock().items().last().unwrap().id;
+        {
+            let mut q = queue.lock();
+            let item = q.item_mut(id).unwrap();
+            item.outputs[0].set_format(bae_render::ExportFormat::Wav);
+            item.outputs[0].output = path.to_string_lossy().into_owned();
+            item.start = 2;
+            item.end = 7;
+        }
+        h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Render"))
+            .click();
+        settle(&mut h);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while queue.lock().is_running() {
+            assert!(std::time::Instant::now() < deadline);
+            frame(&mut h);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(matches!(
+            queue.lock().item_mut(id).unwrap().status,
+            ItemStatus::Done { .. }
+        ));
+        let wav = std::fs::read(path).unwrap();
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(wav.len(), 44 + 6 * 1600 * 6);
+        outputs.push(wav);
+    }
+    assert_eq!(outputs[0], outputs[1]);
+}
+
+#[test]
+fn info_and_flowchart_show_the_active_render_when_enabled() {
+    let mut h = gui();
+    new_comp(&mut h);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
+    let queue = h.state().render_queue();
+    {
+        let mut q = queue.lock();
+        let id = q.items()[0].id;
+        q.item_mut(id).unwrap().status = ItemStatus::Rendering { done: 2, total: 12 };
+    }
+    for panel in ["info", "flowchart"] {
+        to_front(&mut h, panel);
+        for show in [true, false] {
+            let mut prefs = (*h.state().prefs.current()).clone();
+            prefs.set("appearance.show_rendering_progress_in_info_flowchart", show);
+            h.state().prefs.set(prefs).unwrap();
+            settle(&mut h);
+            assert_eq!(
+                find_text(&h, "Rendering Comp 1  2/12").is_some(),
+                show,
+                "{panel}"
+            );
+        }
+    }
+}

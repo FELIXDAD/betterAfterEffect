@@ -204,11 +204,16 @@ pub struct PanelRequests {
     pub invocations: Vec<Invocation>,
     pub open: Vec<PanelId>,
     pub close: Vec<PanelId>,
+    /// New panels to dock to the right of another one's frame (new, beside).
+    pub split: Vec<(PanelId, PanelId)>,
 }
 
 impl PanelRequests {
     pub fn is_empty(&self) -> bool {
-        self.invocations.is_empty() && self.open.is_empty() && self.close.is_empty()
+        self.invocations.is_empty()
+            && self.open.is_empty()
+            && self.close.is_empty()
+            && self.split.is_empty()
     }
 }
 
@@ -220,6 +225,8 @@ pub struct PanelContext<'a> {
     pub kind_title: &'a str,
     /// Whether this panel is the active panel of the focused frame (AE's blue box).
     pub focused: bool,
+    /// The focused dock panel while drawing the workbench.
+    pub focused_panel: Option<&'a PanelId>,
     /// The open project's composed stage (read-only; change it with [`Self::invoke`]).
     pub stage: &'a Stage,
     /// The local user; undo/redo and new commands are attributed to it.
@@ -243,6 +250,7 @@ impl<'a> PanelContext<'a> {
             panel,
             kind_title,
             focused: false,
+            focused_panel: None,
             stage,
             author,
             resources,
@@ -267,6 +275,12 @@ impl<'a> PanelContext<'a> {
         self.requests.open.push(id.into());
     }
 
+    /// Open a new panel to the right of `beside`, splitting its frame, after
+    /// this frame (AE's View > Split with New Locked Viewer).
+    pub fn split_open(&mut self, id: impl Into<PanelId>, beside: impl Into<PanelId>) {
+        self.requests.split.push((id.into(), beside.into()));
+    }
+
     /// Close this panel after this frame.
     pub fn close(&mut self) {
         self.requests.close.push(self.panel.clone());
@@ -278,6 +292,7 @@ impl<'a> PanelContext<'a> {
             panel: self.panel,
             kind_title: self.kind_title,
             focused: self.focused,
+            focused_panel: self.focused_panel,
             stage: self.stage,
             author: self.author,
             resources: self.resources,

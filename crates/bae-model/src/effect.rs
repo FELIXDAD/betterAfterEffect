@@ -11,6 +11,8 @@
 //! reported as placeholders ([`EffectStatus`]) until the plugin comes back or the
 //! project goes back to AE.
 
+pub mod camera_tracks;
+pub mod stabilizer;
 use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

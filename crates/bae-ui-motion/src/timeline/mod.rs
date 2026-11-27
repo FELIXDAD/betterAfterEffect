@@ -64,6 +64,7 @@ pub(crate) use menus::{
 };
 #[cfg(test)]
 pub(crate) use modes::flip_matte;
+pub(crate) use switches::has_switch;
 
 // Registration contract of the footage optical-flow backend.
 const FRAME_INTERPOLATOR_ID: &str = "bae.render/frame-interpolator";
@@ -114,6 +115,19 @@ struct Row {
     kind: RowKind,
     layer_index: usize,
     depth: usize,
+}
+
+/// The outline's rows and what they were built from. Building them walks
+/// every layer's property tree, so they are rebuilt only when the project,
+/// the comp, the revealed or twirled-open properties or the search change,
+/// not on every frame.
+struct RowsCache {
+    revision: u64,
+    comp: PrimPath,
+    reveal: HashMap<PrimPath, Reveal>,
+    expanded: HashSet<String>,
+    search: String,
+    rows: Vec<Row>,
 }
 
 #[derive(Clone, Debug)]
@@ -222,6 +236,7 @@ pub struct TimelinePanel {
     /// The property whose language menu is open and its field's selection then.
     lang_press: Option<(PrimPath, String, Option<crate::expr::Selection>)>,
     layers: Option<Arc<TimelineLayers>>,
+    rows: Option<RowsCache>,
     /// Graph Editor mode state (shown when the session's `graph_editor` is on).
     graph: GraphEditor,
     /// This frame shows the Graph Editor.
@@ -584,7 +599,31 @@ impl TimelinePanel {
         layers
     }
 
-    fn rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
+    fn rows(&mut self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
+        let fresh = self.rows.as_ref().is_some_and(|c| {
+            c.revision == stage.revision()
+                && c.comp == layers.comp
+                && c.reveal == s.reveal
+                && c.expanded == self.expanded
+                && c.search == self.search
+        });
+        if !fresh {
+            self.rows = Some(RowsCache {
+                revision: stage.revision(),
+                comp: layers.comp.clone(),
+                reveal: s.reveal.clone(),
+                expanded: self.expanded.clone(),
+                search: self.search.clone(),
+                rows: self.build_rows(stage, layers, s),
+            });
+        }
+        self.rows
+            .as_ref()
+            .map(|c| c.rows.clone())
+            .unwrap_or_default()
+    }
+
+    fn build_rows(&self, stage: &Stage, layers: &TimelineLayers, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
         let hide_shy = bool_attr(stage, &layers.comp, "hide_shy_layers");
         let needle = self.search.trim().to_lowercase();
@@ -746,6 +785,12 @@ impl TimelinePanel {
             let lines = ((height / ROW_H).ceil() as usize)
                 .max(hard_lines)
                 .min(MAX_EXPR_LINES);
+            let error_line = stored.is_some_and(|e| {
+                e.enabled
+                    && crate::expr_menu::inline_error(ui, resources, path, attr, source, &e.source)
+                        .is_some()
+            });
+            let lines = lines + usize::from(error_line);
             for line in 0..lines {
                 out.push(Row {
                     kind: RowKind::Expression {
@@ -942,6 +987,10 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        self.waveforms.cache = cx
+            .resources
+            .get::<std::sync::Arc<bae_media::conform::ConformedAudio>>()
+            .cloned();
         // F4 / Shift+F4 pressed with another panel in front.
         let toggles = std::mem::take(&mut common::session(cx.resources).lock().timeline_toggles);
         for id in toggles {
@@ -1108,6 +1157,29 @@ impl TimelinePanel {
             pointer_x,
             shift,
         );
+        // The comp follows a keyframe drag (#593).
+        {
+            let preview = self
+                .key_plan
+                .as_ref()
+                .map(|p| p.preview(stage))
+                .unwrap_or_default();
+            let mut s = session.lock();
+            let mine = |s: &crate::session::Session| {
+                s.key_preview
+                    .as_ref()
+                    .is_some_and(|k| k.owner == "bars" && k.committed.is_none())
+            };
+            if !preview.is_empty() {
+                s.key_preview = Some(crate::session::KeyPreview {
+                    owner: "bars",
+                    specs: preview,
+                    committed: None,
+                });
+            } else if mine(&s) {
+                s.key_preview = None;
+            }
+        }
         // Background of the graph body: marquee selection and deselect (the Graph
         // Editor has its own).
         if !self.graph_mode {

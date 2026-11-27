@@ -170,3 +170,203 @@ fn gpu_finds_translated_feature_in_all_channels() {
         }
     }
 }
+
+#[test]
+fn warp_analysis_records_pan_and_reuses_it_after_a_smoothing_edit() {
+    use bae_model::{
+        AuthorId, CommandRegistry, FrameRate, Time, Value,
+        effect::{
+            param_attr,
+            stabilizer::{MATCH_NAME, MOTION},
+        },
+    };
+    use bae_ui::{PanelContext, PanelId, PanelRequests};
+    use serde_json::json;
+    use std::sync::Arc;
+    let Some(gpu) = shared_context() else {
+        return;
+    };
+    let fps = FrameRate::FPS_30;
+    let dt = fps.frame_duration();
+    let end = Time(dt.0 * 3);
+    let mut scene = bae_render::fixture::SceneBuilder::new();
+    let nested = scene.comp("source", 96, 72, fps, end).unwrap();
+    let dot = scene
+        .solid_layer(&nested, "dot", [1., 1., 1., 1.], [8, 8], [48., 36.])
+        .unwrap();
+    for i in 0..3 {
+        scene
+            .key(
+                &dot,
+                "transform:position",
+                Time(dt.0 * i),
+                Value::Vec3([48. + i as f64 * 2., 36., 0.]),
+            )
+            .unwrap();
+    }
+    let comp = scene.comp("main", 96, 72, fps, end).unwrap();
+    let layer = scene
+        .layer(&comp, "plate", "pre_comp", Some(&nested))
+        .unwrap();
+    let folder = layer.child("effects").unwrap();
+    let effect = folder.child("warp").unwrap();
+    let mut stage = scene.into_stage();
+    let mut registry = CommandRegistry::with_builtins();
+    bae_motion::register_commands(&mut registry);
+    let author = AuthorId::new("user:stabilizer").unwrap();
+    for (p, ty) in [(&folder, "Scope"), (&effect, "Effect")] {
+        registry
+            .execute(
+                &mut stage,
+                &author,
+                "prim.create",
+                json!({"path":p,"prim_type":ty}),
+            )
+            .unwrap();
+    }
+    registry.execute(&mut stage,&author,"attr.set_at",json!({"path":effect,"attr":"match_name","time":0,"value":Value::String(MATCH_NAME.into())})).unwrap();
+    let cache = Arc::new(super::gpu::TrackingGpu::default());
+    cache.run(&gpu).unwrap();
+    let mut resources = bae_app::Resources::new();
+    resources.insert(gpu);
+    resources.insert(cache);
+    let id = PanelId::new("tracker");
+    let mut requests = PanelRequests::default();
+    let cx = PanelContext::new(&id, "Tracker", &stage, &author, &resources, &mut requests);
+    let job = super::worker::launch(
+        &cx,
+        &egui::Context::default(),
+        &effect,
+        super::worker::Mode::Stabilize(2),
+    )
+    .unwrap();
+    let mut frames = Vec::new();
+    loop {
+        match job
+            .updates
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .unwrap()
+        {
+            super::worker::Update::Frame(frame) => frames.push(frame),
+            super::worker::Update::End(result) => {
+                result.unwrap();
+                break;
+            }
+        }
+    }
+    assert_eq!(frames.len(), 3);
+    assert!(
+        (frames[2].points[4].center[0] - 4.).abs() < 0.4,
+        "{:?}",
+        frames[2].points[4]
+    );
+    registry
+        .execute(
+            &mut stage,
+            &author,
+            "tracker.record_stabilization",
+            json!({"effect":effect,"quality":2,"frames":frames}),
+        )
+        .unwrap();
+    let attr = param_attr(MOTION);
+    let read = |stage: &bae_model::Stage| stage.prim(&effect).unwrap().attr(&attr).unwrap().clone();
+    let saved = read(&stage);
+    assert_eq!(saved.keyframes.len(), 3);
+    registry
+        .execute(
+            &mut stage,
+            &author,
+            "attr.set_at",
+            json!({"path":effect,"attr":"param:0020","time":0,"value":Value::Float(75.)}),
+        )
+        .unwrap();
+    assert_eq!(read(&stage.snapshot_reader()().unwrap()), saved);
+}
+
+#[test]
+fn camera_features_follow_a_textured_plate_and_reject_a_blank_one() {
+    let Some(gpu) = shared_context() else {
+        return;
+    };
+    let tracker = super::features::Features::new(gpu.device());
+    let texture = |dx: u32, blank: bool| {
+        let mut pixels = Vec::new();
+        for y in 0..96u32 {
+            for x in 0..128u32 {
+                let x = x.wrapping_sub(dx);
+                let seed = x.wrapping_mul(747796405) ^ y.wrapping_mul(2891336453);
+                let gray = if blank {
+                    0
+                } else {
+                    ((seed ^ (seed >> 15)).wrapping_mul(2246822519) >> 24) as u8
+                };
+                pixels.extend_from_slice(&[gray, gray, gray, 255]);
+            }
+        }
+        create_texture_with_data(
+            &gpu,
+            &wgpu::TextureDescriptor {
+                label: Some("Camera plate"),
+                size: wgpu::Extent3d {
+                    width: 128,
+                    height: 96,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            &pixels,
+        )
+        .unwrap()
+    };
+    let (a, b, blank) = (texture(0, false), texture(3, false), texture(0, true));
+    let mut ids = vec![];
+    let seeds = tracker.measure(&gpu, &a, &a, 0, false, &mut ids).unwrap();
+    let moved = tracker.measure(&gpu, &a, &b, 1, false, &mut ids).unwrap();
+    let hits = moved
+        .iter()
+        .filter(|p| {
+            seeds.iter().find(|s| s.id == p.id).is_some_and(|s| {
+                (p.pixel[0] - s.pixel[0] - 3.).hypot(p.pixel[1] - s.pixel[1]) < 0.35
+            })
+        })
+        .count();
+    assert!(hits > 100, "{hits} of {} seeds", seeds.len());
+    let c = texture(6, false);
+    let last = tracker.measure(&gpu, &b, &c, 2, false, &mut ids).unwrap();
+    use bae_motion::camera_track::{Measurements, Settings, solve};
+    let frames = [seeds, moved, last]
+        .into_iter()
+        .enumerate()
+        .map(|(i, samples)| Measurements {
+            time: bae_model::Time(i as i64),
+            samples,
+            layer_from_comp: bae_anim::glam::DAffine2::IDENTITY.to_cols_array(),
+        })
+        .collect();
+    let solution = solve(
+        [128, 96],
+        frames,
+        Settings {
+            shot: 4,
+            angle: 60.,
+            method: 4,
+            detailed: false,
+        },
+        || false,
+    )
+    .unwrap();
+    assert_eq!(solution.frames.len(), 3);
+    assert!(solution.points.len() > 100 && solution.error < 0.75);
+    assert!(solution.frames[2].camera.position().length() > 1.);
+    assert!(
+        tracker
+            .measure(&gpu, &blank, &blank, 0, false, &mut ids)
+            .unwrap()
+            .is_empty()
+    );
+}

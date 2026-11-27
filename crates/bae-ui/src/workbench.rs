@@ -142,6 +142,8 @@ pub struct Workbench {
     /// Workspaces sorted by order, rebuilt when the registry changes.
     workspaces: Vec<(String, Arc<WorkspacePreset>)>,
     presets_gen: u64,
+    #[cfg(target_os = "macos")]
+    standard_system_shortcuts: bool,
     keymaps_gen: u64,
     extensions_gen: u64,
     active: String,
@@ -334,6 +336,8 @@ impl Workbench {
             dialogs: workspaces::Dialogs::default(),
             workspaces: Vec::new(),
             presets_gen: u64::MAX,
+            #[cfg(target_os = "macos")]
+            standard_system_shortcuts: true,
             keymaps_gen: u64::MAX,
             extensions_gen: u64::MAX,
             active: String::new(),
@@ -588,6 +592,42 @@ impl Workbench {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn set_standard_system_shortcuts(&mut self, standard: bool) {
+        if self.standard_system_shortcuts != standard {
+            self.standard_system_shortcuts = standard;
+            self.rebuild_keymap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_system_shortcuts(&self, base: &mut Keymap) {
+        if !self.standard_system_shortcuts {
+            for b in &mut base.bindings {
+                let c = &mut b.chord;
+                if matches!(
+                    b.action.as_str(),
+                    crate::action::ids::MINIMIZE | "app.hide" | "app.hide_others"
+                ) {
+                    c.mac_ctrl = true;
+                    continue;
+                }
+                if c.mac_ctrl
+                    && c.command
+                    && !c.shift
+                    && matches!(
+                        (b.action.as_str(), c.key, c.alt),
+                        ("motion.file.replace_footage_file", egui::Key::H, false)
+                            | ("motion.toggle_hold", egui::Key::H, true)
+                            | ("motion.add_to_render_queue", egui::Key::M, false)
+                    )
+                {
+                    c.mac_ctrl = false;
+                }
+            }
+        }
+    }
+
     fn rebuild_keymap(&mut self) {
         let id = self.keymap_id();
         let base = self.extended_keymap_logged(&id);
@@ -607,6 +647,8 @@ impl Workbench {
         for (_, _, k) in self.keymap_extensions_for(id) {
             base.bindings.extend(k.bindings.iter().cloned());
         }
+        #[cfg(target_os = "macos")]
+        self.apply_system_shortcuts(&mut base);
         base
     }
 
@@ -655,6 +697,8 @@ impl Workbench {
         for (_, _, k) in &ext {
             base.bindings.extend(k.bindings.iter().cloned());
         }
+        #[cfg(target_os = "macos")]
+        self.apply_system_shortcuts(&mut base);
         base
     }
 
@@ -670,6 +714,7 @@ impl Workbench {
     ) -> Vec<Invocation> {
         self.refresh_registries();
         crate::a11y::install(ui.ctx());
+        crate::theme::sync_contrast(ui);
         ime_undo_before(ui.ctx());
         // A modal dialog (the welcome / role picker, an external window such as
         // Preferences, a module dialog) owns the keyboard: no shortcuts and no
@@ -750,6 +795,31 @@ impl Workbench {
         ime_follows_caret(ui.ctx());
         ime_undo_after(ui.ctx());
         self.focus_before = KeyFocus::of(ui.ctx());
+        std::mem::take(&mut self.requests.invocations)
+    }
+
+    /// Draw an existing panel across the window without changing the dock.
+    /// The ordinary shortcuts still reach the workbench during presentation.
+    pub fn present_panel(
+        &mut self,
+        ui: &mut Ui,
+        cx: &WorkbenchContext<'_>,
+        panel: PanelId,
+    ) -> Vec<Invocation> {
+        self.collect_shortcuts(ui.ctx());
+        let kinds = self.kinds.snapshot();
+        let mut host = Host {
+            dismissed_coachmarks: None,
+            save_requested: &mut self.save_requested,
+            panels: &mut self.panels,
+            kinds: &kinds,
+            saved: &mut self.state.panels,
+            cx,
+            requests: &mut self.requests,
+            focused: Some(panel.clone()),
+        };
+        host.ui(ui, &panel);
+        self.apply_panel_requests(cx);
         std::mem::take(&mut self.requests.invocations)
     }
 
@@ -938,6 +1008,15 @@ impl Workbench {
         }
         for id in std::mem::take(&mut self.requests.open) {
             self.open_panel(id);
+        }
+        for (id, beside) in std::mem::take(&mut self.requests.split) {
+            self.dock
+                .open_near(id.clone(), std::slice::from_ref(&beside));
+            if let Some(frame) = self.dock.frame_of(&beside) {
+                self.dock
+                    .move_panel(&id, frame, crate::dock::DropZone::Right, None);
+            }
+            self.dock.focus_panel(&id);
         }
     }
 
@@ -1344,6 +1423,7 @@ impl Host<'_, '_> {
             self.requests,
         );
         cx.focused = focused;
+        cx.focused_panel = self.focused.as_ref();
         f(panel.as_mut(), &mut cx)
     }
 }

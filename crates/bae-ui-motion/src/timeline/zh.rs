@@ -22,6 +22,14 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Reveal Expression Errors", "显示表达式错误"),
     ("Convert Expression to Keyframes", "将表达式转换为关键帧"),
     ("Exponential Scale", "指数比例"),
+    ("Create Intro", "创建开场"),
+    ("Create Outro", "创建结尾"),
+    (
+        "Create Protected Region from Work Area",
+        "通过工作区域创建受保护区域",
+    ),
+    ("Composition Flowchart", "合成流程图"),
+    ("Reveal Composition in Project", "在项目中显示合成"),
     ("Zoom In to Frames", "放大到帧间隔"),
     ("Toggle Zoom Level", "切换缩放级别"),
     ("Scroll to Current Time", "滚动到当前时间"),
@@ -364,6 +372,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Animator", "动画制作工具"),
     ("Based On", "依据"),
     ("Amount", "数量"),
+    // The Puppet effect's Mesh 1 group (`props::puppet_mesh`, AE 26's words).
+    ("Mesh", "网格"),
+    ("Deform", "变形"),
+    ("Puppet Pin", "操控点"),
+    ("Starch", "扑粉"),
+    ("In Front", "前面"),
+    ("Extent", "程度"),
     // A Paint effect's strokes (`props::paint_strokes`, AE 26's words).
     ("Brush", "画笔"),
     ("Clone", "仿制"),

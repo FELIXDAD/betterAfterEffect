@@ -2333,3 +2333,158 @@ fn exponential_scale_and_sequence_layers() {
     assert_eq!(span(&fx, &a), (7 * SEC, 10 * SEC));
     assert_eq!(fx.keys(&a, opacity), vec![2 * SEC, 3 * SEC]);
 }
+
+#[test]
+fn crop_comp_resizes_and_keeps_the_kept_part_in_place() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let world = fx.world_pos(&comp, &solid);
+    fx.run(
+        "comp.crop",
+        json!({"comp": comp, "rect": [100.4, 50.0, 740.0, 410.2]}),
+    );
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    // Rounded outward: 100..740 × 50..411.
+    assert_eq!((info.width, info.height), (640, 361));
+    let moved = fx.world_pos(&comp, &solid);
+    assert!((moved.x - (world.x - 100.0)).abs() < 1e-6, "{moved:?}");
+    assert!((moved.y - (world.y - 50.0)).abs() < 1e-6, "{moved:?}");
+    assert!(
+        fx.try_run(
+            "comp.crop",
+            json!({"comp": comp, "rect": [10.0, 0.0, 10.0, 10.0]})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn remove_unused_consolidate_and_reduce_project() {
+    let dir = std::env::temp_dir().join(format!("bae-cleanup-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let other = dir.join("other.mov");
+    std::fs::write(&other, b"other").unwrap();
+    let mut fx = Fx::new();
+    let import = |fx: &mut Fx, path: &std::path::Path| {
+        let out = fx.run("item.import", json!({"files": [{"path": path}]}));
+        p(out["items"][0].as_str().unwrap())
+    };
+    // The same file twice, another file, and a comp using them.
+    let a = import(&mut fx, &clip);
+    let b = import(&mut fx, &clip);
+    let c = import(&mut fx, &other);
+    let main = fx.comp();
+    let la = fx.layer(&main, "footage", json!({"source": a}));
+    let lb = fx.layer(&main, "footage", json!({"source": b}));
+    let out = fx.run("item.consolidate", json!({}));
+    assert_eq!(out["removed"], 1);
+    let src = |fx: &Fx, l: &PrimPath| fx.value(l, "source");
+    assert_eq!(src(&fx, &la), Some(Value::PrimRef(a.clone())));
+    assert_eq!(src(&fx, &lb), Some(Value::PrimRef(a.clone())));
+    assert!(!fx.stage.has_prim(&b));
+    // `other.mov` is used by no layer.
+    let out = fx.run("item.remove_unused", json!({}));
+    assert_eq!(out["removed"], 1);
+    assert!(!fx.stage.has_prim(&c) && fx.stage.has_prim(&a));
+    // Reduce to another comp: the main comp and its footage go.
+    let side = fx.comp();
+    let out = fx.run("item.reduce", json!({"items": [side]}));
+    assert_eq!(out["removed"], 2);
+    assert!(fx.stage.has_prim(&side) && !fx.stage.has_prim(&main) && !fx.stage.has_prim(&a));
+    assert!(fx.try_run("item.reduce", json!({"items": []})).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn locked_markers_cannot_be_moved_edited_or_deleted() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.layer(&comp, "solid", json!({}));
+    let m = p(
+        fx.run("marker.add", json!({"owner": layer, "time": SEC}))["path"]
+            .as_str()
+            .unwrap(),
+    );
+    fx.run("marker.lock", json!({"owners": [layer], "locked": true}));
+    assert!(bae_motion::markers::markers_locked(&fx.stage, &layer));
+    assert!(
+        fx.try_run("marker.move", json!({"markers": [m], "delta": SEC}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("marker.edit", json!({"path": m, "comment": "x"}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("marker.delete", json!({"markers": [m]}))
+            .is_err()
+    );
+    // Adding stays possible; the comp's own markers are separate.
+    fx.run("marker.add", json!({"owner": layer, "time": 2 * SEC}));
+    fx.run("marker.add", json!({"owner": comp, "time": SEC}));
+    fx.run("marker.lock", json!({"owners": [layer], "locked": false}));
+    fx.run("marker.move", json!({"markers": [m], "delta": SEC}));
+    assert_eq!(
+        bae_motion::markers::marker_time(&fx.stage, &m),
+        Time(2 * SEC)
+    );
+}
+
+#[test]
+fn new_item_replaces_footage_and_keeps_its_layers() {
+    let dir = std::env::temp_dir().join(format!("bae-replace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run("item.import", json!({"files": [{"path": clip}]}));
+    let old = p(out["items"][0].as_str().unwrap());
+    let comp = fx.comp();
+    let layer = fx.layer(&comp, "footage", json!({"source": old}));
+    let out = fx.run(
+        "item.new",
+        json!({"kind": "solid", "name": "Backdrop", "width": 640, "height": 360,
+               "color": [1.0, 0.0, 0.0, 1.0], "replace": old}),
+    );
+    let new = p(out["item"].as_str().unwrap());
+    assert!(!fx.stage.has_prim(&old));
+    assert_eq!(new.parent(), old.parent(), "in the replaced item's folder");
+    assert_eq!(fx.value(&layer, "source"), Some(Value::PrimRef(new)));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn set_proxy_toggle_and_remove() {
+    let dir = std::env::temp_dir().join(format!("bae-proxy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    let small = dir.join("clip_proxy.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    std::fs::write(&small, b"proxy").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run("item.import", json!({"files": [{"path": clip}]}));
+    let item = p(out["items"][0].as_str().unwrap());
+    fx.run(
+        "item.set_proxy",
+        json!({"items": [item], "file": {"path": small, "attrs": {
+            "width": {"type": "int", "value": 960}, "height": {"type": "int", "value": 540}}}}),
+    );
+    let proxy = bae_motion::proxy::proxy_of(&fx.stage, &item).expect("a proxy");
+    assert!(bae_motion::proxy::proxy_enabled(&fx.stage, &item));
+    assert_eq!(fx.value(&proxy, "width"), Some(Value::Int(960)));
+    // The Project panel's square toggles it.
+    fx.run("item.set_proxy_enabled", json!({"items": [item]}));
+    assert!(!bae_motion::proxy::proxy_enabled(&fx.stage, &item));
+    // Remove Unused Footage leaves proxies alone (they are not items).
+    let comp = fx.comp();
+    fx.layer(&comp, "footage", json!({"source": item}));
+    fx.run("item.remove_unused", json!({}));
+    assert!(fx.stage.has_prim(&proxy));
+    // Set Proxy ▸ None.
+    fx.run("item.set_proxy", json!({"items": [item]}));
+    assert!(bae_motion::proxy::proxy_of(&fx.stage, &item).is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}

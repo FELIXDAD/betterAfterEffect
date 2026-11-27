@@ -84,6 +84,26 @@
   - 写缓冲上限
   - 按连接设置 `SessionConfig`
 
+### 2026-11-26（zjzcoder，C 多人协作）
+
+- 上面前三条已在 09 侧解决（`collab/sync-hub-requests`）：会话出错前先导入；`HubLimits` 默认单条消息 256 MiB；对方不再读时断开（积压超过 16 MiB、并且 30 秒内一个字节都没发出去），读得慢的不断开。`PeerLink` 的"晚一次报错"绕行已去掉，`idle_projects_are_unloaded_and_reloaded` 照常通过。
+- 第 4 条也已解决：工程目录用 `Relay::connect_with` 接上，`min_send_interval` 默认 300 ms（`HubConfig::store_send_interval`）、`hello_interval = None`；客户端之间照常立即转发。最后一个客户端断开时立即 `Relay::flush()`（否则要等 500 ms 的空闲轮询）。关闭工程（卸载、退出）时先最后 `pump` 一次，再 `flush`，再 `Relay::close_peer` 等存盘线程写完；最后几次写盘失败会记进日志。
+  - 新测试：拖动 100 步，`hub.log` 只有 3 条记录（不设间隔时 101 条）。另外三个测试把写盘间隔设成 1 分钟，拖动只能靠 `flush` 写出：拖动后立即退出 Hub（客户端还连着）、最后一个客户端断开（工程不卸载）、工程被卸载，重新加载后每一步都在。去掉退出时的 `flush`，第一个失败；去掉客户端走光时的 `flush`，第二个失败；两个都去掉，卸载的测试也失败。
+  - 评审后还修了 09 侧的一个老问题：`DirTransport` 写日志失败后不再接着追加（否则日志里有空洞而目录的 `Hello` 不承认，重新挂上的存盘连接不会补写），改为请求快照重写（spec 4.3）。
+
+- 多进程测试（`tests/multiprocess.rs`，epic #737 子任务 7 第一部分）：用真实的 `bae-hub` 程序（命令行参数加 `BAE_HUB_TOKEN`，和部署时一样），编辑中途杀掉后在同一个数据目录和端口重启，客户端重连后收敛、不丢修改；客户端进程被杀后重启；经故障代理断线、延迟。默认 4 个测试并行约 2.5 秒，长时间测试在 `--ignored` 里（spec 3.1）。Hub 被杀时压缩到一半留下的 `hub.tmp-*` 现在下次打开工程时删掉（09 的修复，spec 4.3）。评审后：客户端都退出后再杀一次 Hub、重启，新客户端只能从 Hub 的磁盘拿到全部修改（原来清空数据目录也能通过）；`bae-hub` 由一个随测试进程退出的子进程启动，测试进程被强行杀掉时不再留下占着端口和数据目录的 Hub。
+
+### 2026-11-27（zjzcoder，C 多人协作，#782 评审的跟进）
+
+- **连接的上限可以配置**：`hub.toml` 新增 `[limits]`（`HubConfig::limits`、`HubConfig::read_only_max_incoming`）：单条消息、流量控制、每个客户端最多排队多少、停滞超时、只读连接发来的单条消息上限。都有默认值，一般不用改。
+- **只读连接只收不太大的消息**（默认 16 MiB）：原来所有连接都接受 256 MiB 的消息，只读连接的修改要整条收完、解码后才丢掉。现在接入时就用小一些的接收上限，超过的读到帧头就断开；发给只读连接的消息照样可以很大。
+  - 起初是 1 MiB。评审发现两个问题：`Hello` 随文档数 × Loro peer 数增长（约 11 字节一对，1 MiB 约 9.5 万对）；会话不知道自己只读，查看者本地的修改会在 Hub 每个 `Hello` 之后、每次重连之后再发，一个文档里超过 1 MiB 的查看者每次连上都被断开（实测 4 秒断开几百次），以前 Hub 只是丢掉这些修改。
+  - 现在默认 16 MiB，客户端知道令牌只读时（`/v1/status` 的 `access`）设 `SessionConfig::send_data = false`（09，spec 2.4 第 5 步），什么数据都不发（`viewers_with_large_local_edits_stay_connected`）。
+- **`[limits]` 要配得上**（评审后）：不写 `max_unsent_mib` 时按 `2 × max_message_mib + max_backlog_mib` 算（原来固定 528，调大 `max_message_mib` 后合法的发送也会让连接失败）；`max_unsent_mib` 小于 `max_message_mib + max_backlog_mib`、`max_message_mib` 超过客户端能收的 256 MiB 时拒绝启动（`limits_fit_together`）。部署文档里"NAS 内存很小"改为调小 `max_backlog_mib`。
+- **内存上限**：Relay 按每个连接的 `max_backlog` 做流量控制（`PeerLink` 把 WebSocket 的积压报告给会话），读得慢的客户端那里正常最多排队 16 MiB 加一条消息；排队超过 `max_unsent`（默认 528 MiB）就断开（09 侧，spec 3.1）。
+- **工程目录的清理**：09 的清理（spec 4.7）改为默认关闭，Hub 明确打开，理由见 README"数据目录"。
+- 评审后补了测试：工程目录的 `DirConfig` 打开了清理（`the_project_directory_is_cleaned_up`），客户端会话的 `max_backlog` 来自 `[limits]`（`client_sessions_use_the_configured_backlog`）。以前去掉这两行整个测试集照样通过。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 09 collab/sync（2026-11-20）

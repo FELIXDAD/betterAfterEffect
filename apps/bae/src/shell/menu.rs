@@ -193,6 +193,9 @@ pub struct AppMenu {
     actions: HashSet<String>,
     /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
     generation: u64,
+    /// The keymap the shown accelerators were looked up in: they are looked
+    /// up again (a search of every binding per item) only when it changes.
+    chords_of: Option<Vec<bae_ui::keymap::Binding>>,
 }
 
 impl AppMenu {
@@ -250,6 +253,7 @@ impl AppMenu {
             assign_slots,
             actions,
             generation: 0,
+            chords_of: None,
         };
         menu.set_undo_state((None, None));
         Ok(menu)
@@ -281,6 +285,10 @@ impl AppMenu {
             .with_actions(&self.actions);
         let undo = self.undo_state.0.is_some();
         let redo = self.undo_state.1.is_some();
+        let keys_changed = self.chords_of.as_deref() != Some(keymap.bindings.as_slice());
+        if keys_changed {
+            self.chords_of = Some(keymap.bindings.clone());
+        }
         for (id, c) in &mut self.contributed {
             let enabled = if Some(id) == self.undo.as_ref() {
                 undo || text_focus
@@ -308,10 +316,12 @@ impl AppMenu {
                     .set_text(&native_text(label.as_deref().unwrap_or_default()));
                 c.label = label;
             }
-            let chord = shell_chord(keymap, &c.spec.invocation());
-            if chord != c.chord {
-                c.item.set_accelerator(chord.as_ref().and_then(accelerator));
-                c.chord = chord;
+            if keys_changed {
+                let chord = shell_chord(keymap, &c.spec.invocation());
+                if chord != c.chord {
+                    c.item.set_accelerator(chord.as_ref().and_then(accelerator));
+                    c.chord = chord;
+                }
             }
         }
     }
@@ -641,6 +651,9 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         K::Enter => Code::Enter,
         K::Escape => Code::Escape,
         K::Tab => Code::Tab,
+        #[cfg(target_os = "macos")]
+        key => mac_extended_key(key)?,
+        #[cfg(not(target_os = "macos"))]
         _ => return None,
     };
     let mut mods = Modifiers::empty();
@@ -661,6 +674,38 @@ fn accelerator(chord: &Chord) -> Option<Accelerator> {
         mods |= Modifiers::SHIFT;
     }
     Some(Accelerator::new(mods, code))
+}
+
+/// NumericPad is part of an AppKit key equivalent, so the main digits stay distinct.
+#[cfg(target_os = "macos")]
+fn mac_extended_key(key: egui::Key) -> Option<Code> {
+    use egui::Key as K;
+    Some(match key {
+        K::F13 => Code::F13,
+        K::F14 => Code::F14,
+        K::F15 => Code::F15,
+        K::F16 => Code::F16,
+        K::F17 => Code::F17,
+        K::F18 => Code::F18,
+        K::F19 => Code::F19,
+        K::F20 => Code::F20,
+        K::F21 => Code::NumpadMultiply,
+        K::F22 => Code::NumpadDivide,
+        K::F23 => Code::NumpadAdd,
+        K::F24 => Code::NumpadSubtract,
+        K::F25 => Code::NumpadDecimal,
+        K::F26 => Code::Numpad0,
+        K::F27 => Code::Numpad1,
+        K::F28 => Code::Numpad2,
+        K::F29 => Code::Numpad3,
+        K::F30 => Code::Numpad4,
+        K::F31 => Code::Numpad5,
+        K::F32 => Code::Numpad6,
+        K::F33 => Code::Numpad7,
+        K::F34 => Code::Numpad8,
+        K::F35 => Code::Numpad9,
+        _ => return None,
+    })
 }
 
 #[cfg(target_os = "macos")]

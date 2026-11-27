@@ -427,6 +427,21 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        actions::ids::TRACK_CAMERA => spec.enabled_when(|cx| {
+            let session = common::session(cx.resources);
+            let s = session.lock();
+            !s.selected_layers.is_empty()
+                && s.selected_layers.iter().all(|l| {
+                    !bae_motion::query::is_locked(cx.stage, l)
+                        && matches!(
+                            bae_motion::query::layer_kind(cx.stage, l).as_deref(),
+                            Some("footage" | "solid" | "pre_comp" | "shape" | "text")
+                        )
+                })
+        }),
+        actions::ids::CACHE_WHEN_IDLE => spec.checked_when(|cx| {
+            crate::prefs::current(cx.resources).bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
+        }),
         crate::effects::LAST_EFFECT => spec.enabled_when(crate::effects::last_effect_enabled),
         crate::effects::REMOVE_ALL => spec.enabled_when(crate::effects::remove_all_enabled),
         actions::ids::LAYER_SWITCH => {
@@ -453,6 +468,7 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 crate::viewer::view_options::background_checked(cx.resources, &key)
             })
         }
+        actions::ids::ENABLE_LOGGING => spec.checked_when(|_| bae_platform::logging::verbose()),
         actions::ids::SEPARATE_DIMENSIONS => spec.checked_when(|cx| {
             let session = common::session(cx.resources);
             let layers = session.lock().selected_layers.clone();
@@ -462,12 +478,41 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
         }
 
+        crate::viewer::guides::SIMULATE_OUTPUT => {
+            let profile = spec_param(item.params, "profile")
+                .unwrap_or_default()
+                .to_owned();
+            spec.checked_when(move |cx| {
+                crate::viewer::guides::simulate_checked(cx.resources, &profile)
+            })
+        }
         id if crate::viewer::guides::ACTIONS.iter().any(|(a, _)| *a == id)
-            && id != "motion.view.clear_guides" =>
+            && !matches!(
+                id,
+                "motion.view.clear_guides"
+                    | "motion.view.import_guides"
+                    | "motion.view.export_guides"
+            ) =>
         {
             spec.checked_when(move |cx| crate::viewer::guides::checked(cx.resources, id))
         }
 
+        crate::path_menu::ROTOBEZIER => spec
+            .enabled_when(crate::path_menu::any_target)
+            .checked_when(crate::path_menu::all_roto),
+        crate::path_menu::CLOSED => spec
+            .enabled_when(crate::path_menu::any_open)
+            .checked_when(crate::path_menu::all_closed),
+        crate::path_menu::SET_FIRST_VERTEX => spec.enabled_when(crate::path_menu::one_vertex),
+        crate::path_menu::CONVERT => spec.enabled_when(crate::path_menu::can_convert),
+        crate::tools::ids::FREE_TRANSFORM => {
+            spec.enabled_when(|cx| crate::path_menu::can_free_transform(cx.stage, cx.resources))
+        }
+        crate::path_menu::GROUP => spec.enabled_when(crate::path_menu::can_group),
+        crate::path_menu::UNGROUP => spec.enabled_when(crate::path_menu::can_ungroup),
+        crate::viewer::view3d::ids::SHARE => {
+            spec.checked_when(|cx| crate::viewer::view3d::shares_options(cx.resources))
+        }
         crate::viewer::view3d::ids::LAYOUT => {
             let n = item
                 .params
@@ -508,6 +553,14 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 })
             })
         }
+        actions::ids::LOCK_MARKERS => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let layers = session.lock().selected_layers.clone();
+            !layers.is_empty()
+                && layers
+                    .iter()
+                    .all(|l| bae_motion::markers::markers_locked(cx.stage, l))
+        }),
         actions::ids::TIME_REMAP => spec.checked_when(|cx| {
             let session = common::session(cx.resources);
             let first = session.lock().selected_layers.first().cloned();
@@ -540,6 +593,16 @@ fn panel_label(cx: &MenuContext<'_>, title: &str, panel: &str) -> String {
     let session = common::session(cx.resources);
     let shown = match panel {
         "composition" | "timeline" => common::active_comp(cx.stage, &session).map(|c| c.name),
+        "footage" | "flowchart" => {
+            let s = session.lock();
+            let path = if panel == "footage" {
+                s.footage_view.as_ref()
+            } else {
+                s.flowchart_root.as_ref().or(s.active_comp.as_ref())
+            };
+            path.filter(|p| cx.stage.has_prim(p))
+                .map(|p| bae_motion::query::display_name_of(cx.stage, p))
+        }
         "effect_controls" | "layer" => session
             .lock()
             .selected_layers
@@ -603,6 +666,7 @@ impl ActionHandler for MotionActions {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Text Orientation", "文字方向"),
     // New layer menu
     ("New", "新建"),
     ("Text", "文本"),

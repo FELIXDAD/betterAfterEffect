@@ -321,7 +321,159 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             .collect(),
     });
     out.extend(crate::layer_styles::node(stage, layer));
+    // Camera Options / Light Options / a 3D layer's Material Options (AE
+    // shows them after Transform).
+    let options = match kind.as_str() {
+        "camera" => Some(("camera_options", "Camera Options", CAMERA_OPTIONS.to_vec())),
+        "light" => Some((
+            "light_options",
+            "Light Options",
+            light_options(stage, layer),
+        )),
+        _ if three_d => Some((
+            "material_options",
+            "Material Options",
+            material_options(stage, layer),
+        )),
+        _ => None,
+    };
+    // Advanced 3D: text and shape layers' Geometry Options, before their
+    // Material Options.
+    if three_d && matches!(kind.as_str(), "text" | "shape") && advanced_3d(stage, layer) {
+        out.push(Node::Group {
+            id: format!("{layer}#geometry_options"),
+            label: tr("Geometry Options").to_owned(),
+            children: GEOMETRY_OPTIONS
+                .into_iter()
+                .map(|a| prop(stage, layer, a, three_d))
+                .collect(),
+        });
+    }
+    if let Some((id, label, attrs)) = options {
+        out.push(Node::Group {
+            id: format!("{layer}#{id}"),
+            label: tr(label).to_owned(),
+            children: attrs
+                .into_iter()
+                .map(|a| prop(stage, layer, a, three_d))
+                .collect(),
+        });
+    }
     out
+}
+
+/// A camera's Camera Options, in AE's order.
+const CAMERA_OPTIONS: [&str; 13] = [
+    "camera:zoom",
+    "camera:depth_of_field",
+    "camera:focus_distance",
+    "camera:aperture",
+    "camera:blur_level",
+    "camera:iris_shape",
+    "camera:iris_rotation",
+    "camera:iris_roundness",
+    "camera:iris_aspect_ratio",
+    "camera:iris_diffraction_fringe",
+    "camera:highlight_gain",
+    "camera:highlight_threshold",
+    "camera:highlight_saturation",
+];
+
+/// A 3D layer's Material Options (Classic 3D), in AE's order.
+const MATERIAL_OPTIONS: [&str; 9] = [
+    "material:casts_shadows",
+    "material:light_transmission",
+    "material:accepts_shadows",
+    "material:accepts_lights",
+    "material:ambient",
+    "material:diffuse",
+    "material:specular_intensity",
+    "material:specular_shininess",
+    "material:metal",
+];
+
+/// The Advanced 3D renderer's Material Options, in AE's order (its comp
+/// renderer decides which a layer shows).
+const ADVANCED_3D_MATERIAL_OPTIONS: [&str; 17] = [
+    "material:casts_shadows",
+    "material:light_transmission",
+    "material:accepts_shadows",
+    "material:accepts_lights",
+    "material:shadow_color",
+    "material:appears_in_reflections",
+    "material:ambient",
+    "material:diffuse",
+    "material:specular_intensity",
+    "material:specular_shininess",
+    "material:metal",
+    "material:reflection_intensity",
+    "material:reflection_sharpness",
+    "material:reflection_rolloff",
+    "material:transparency",
+    "material:transparency_rolloff",
+    "material:index_of_refraction",
+];
+
+/// Advanced 3D Geometry Options of text and shape layers, in AE's order.
+const GEOMETRY_OPTIONS: [&str; 5] = [
+    "geometry:bevel_style",
+    "geometry:bevel_direction",
+    "geometry:bevel_depth",
+    "geometry:hole_bevel_depth",
+    "geometry:extrusion_depth",
+];
+
+/// Whether `layer`'s comp renders 3D with Advanced 3D.
+fn advanced_3d(stage: &Stage, layer: &PrimPath) -> bool {
+    query::owning_comp(stage, layer)
+        .and_then(|c| stage.prim(&c))
+        .and_then(|v| query::static_value(&v, "renderer"))
+        .is_some_and(|v| v.as_str() == Some("advanced_3d"))
+}
+
+fn material_options(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
+    if advanced_3d(stage, layer) {
+        ADVANCED_3D_MATERIAL_OPTIONS.to_vec()
+    } else {
+        MATERIAL_OPTIONS.to_vec()
+    }
+}
+
+/// A light's Light Options for its type, in AE's order: ambient lights have
+/// only intensity and colour, parallel lights no falloff, spots a cone.
+fn light_options(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
+    let ty = stage
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, "light:type"))
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "spot".into());
+    if ty == "environment" {
+        // AE's order: the picture and how it shows, then its light.
+        return vec![
+            "light:source",
+            "light:background_visible",
+            "light:background_opacity",
+            "light:background_blur",
+            "light:intensity",
+            "light:color",
+        ];
+    }
+    let mut attrs = vec!["light:intensity", "light:color"];
+    if ty == "ambient" {
+        return attrs;
+    }
+    if ty == "spot" {
+        attrs.extend(["light:cone_angle", "light:cone_feather"]);
+    }
+    if ty != "parallel" {
+        attrs.extend(["light:falloff", "light:radius", "light:falloff_distance"]);
+    }
+    attrs.extend([
+        "light:casts_shadows",
+        "light:shadow_darkness",
+        "light:shadow_diffusion",
+    ]);
+    attrs
 }
 
 /// Animator properties in AE's order.
@@ -408,10 +560,16 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             if !v.is_a(&PrimType::EFFECT) {
                 return None;
             }
+            let match_name_of = query::static_value(&v, "match_name")
+                .and_then(|m| m.as_str().map(str::to_owned))
+                .unwrap_or_default();
             let mut params: Vec<&str> = v
                 .attr_names()
                 .into_iter()
                 .filter(|n| n.starts_with("param:"))
+                // The Puppet effect's traced outline is data, shown as its
+                // Mesh group (AE's Auto-traced Shapes has no value).
+                .filter(|n| !(match_name_of == bae_motion::puppet::PUPPET && *n == "param:0006"))
                 .collect();
             params.sort_unstable();
             let match_name = query::static_value(&v, "match_name")
@@ -429,6 +587,9 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
                         }),
                 })
                 .collect();
+            if match_name == bae_motion::puppet::PUPPET {
+                children.extend(puppet_mesh(stage, layer, &e));
+            }
             if match_name == bae_motion::paint::PAINT {
                 children.extend(paint_strokes(stage, layer, &e));
             }
@@ -441,6 +602,18 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
         .collect()
 }
 
+/// A pin's name as AE shows it in the UI language ("Puppet Pin 1" → "操控点 1").
+fn pin_label(stage: &Stage, pin: &PrimPath) -> String {
+    let name = query::display_name_of(stage, pin);
+    ["Puppet Pin", "Overlap", "Starch"]
+        .into_iter()
+        .find_map(|base| {
+            let n = name.strip_prefix(base)?.strip_prefix(' ')?;
+            n.parse::<u32>().ok().map(|n| format!("{} {n}", tr(base)))
+        })
+        .unwrap_or(name)
+}
+
 /// A stroke's name as AE shows it in the UI language ("Brush 1" → "画笔 1").
 fn stroke_label(stage: &Stage, stroke: &PrimPath) -> String {
     let name = query::display_name_of(stage, stroke);
@@ -451,6 +624,91 @@ fn stroke_label(stage: &Stage, stroke: &PrimPath) -> String {
             n.parse::<u32>().ok().map(|n| format!("{} {n}", tr(base)))
         })
         .unwrap_or(name)
+}
+
+/// The Puppet effect's Mesh 1 group (AE): Deform with the Position, Bend and
+/// Advanced pins, then Overlap and Starch with theirs.
+fn puppet_mesh(stage: &Stage, layer: &PrimPath, effect: &PrimPath) -> Option<Node> {
+    let pins = bae_motion::puppet::pins_of(stage, effect);
+    if pins.is_empty() {
+        return None;
+    }
+    let kind = |p: &PrimPath| {
+        stage
+            .prim(p)
+            .and_then(|v| query::static_value(&v, "pin_type"))
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "position".to_owned())
+    };
+    let pin_node = |p: &PrimPath, attrs: &[(&str, &str)]| Node::Group {
+        id: format!("{layer}#{p}"),
+        label: pin_label(stage, p),
+        children: attrs
+            .iter()
+            .map(|(attr, label)| Node::Prop {
+                path: p.clone(),
+                attr: (*attr).to_owned(),
+                label: tr(label).to_owned(),
+            })
+            .collect(),
+    };
+    // Bend and Advanced pins also turn and scale.
+    const TURNED: &[(&str, &str)] = &[
+        ("position", "Position"),
+        ("scale", "Scale"),
+        ("rotation", "Rotation"),
+    ];
+    let group = |id: &str, label: &str, kinds: &[&str], attrs: &[(&str, &str)]| {
+        let children: Vec<Node> = pins
+            .iter()
+            .filter(|p| kinds.contains(&kind(p).as_str()))
+            .map(|p| match kind(p).as_str() {
+                "bend" | "advanced" => pin_node(p, TURNED),
+                _ => pin_node(p, attrs),
+            })
+            .collect();
+        (!children.is_empty()).then(|| Node::Group {
+            id: format!("{layer}#{effect}#{id}"),
+            label: tr(label).to_owned(),
+            children,
+        })
+    };
+    let children: Vec<Node> = [
+        group(
+            "deform",
+            "Deform",
+            &["position", "bend", "advanced"],
+            &[("position", "Position")],
+        ),
+        group(
+            "overlap",
+            "Overlap",
+            &["overlap"],
+            &[
+                ("position", "Position"),
+                ("in_front", "In Front"),
+                ("extent", "Extent"),
+            ],
+        ),
+        group(
+            "starch",
+            "Starch",
+            &["starch"],
+            &[
+                ("position", "Position"),
+                ("amount", "Amount"),
+                ("extent", "Extent"),
+            ],
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Some(Node::Group {
+        id: format!("{layer}#{effect}#mesh"),
+        label: format!("{} 1", tr("Mesh")),
+        children,
+    })
 }
 
 /// The Paint effect's strokes, newest first (AE): each with its Path, Stroke
@@ -553,6 +811,17 @@ pub(crate) fn revealed_mask_attrs(list: &[String]) -> Vec<&'static str> {
 }
 
 pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<Node> {
+    // Groups the timeline opens itself (E, M, MM, F, LL): no layer property.
+    if let Reveal::Attrs(list) = reveal
+        && list.iter().all(|a| {
+            matches!(
+                a.as_str(),
+                "effects" | "masks" | "mask_path" | "mask_feather" | "audio:waveform"
+            )
+        })
+    {
+        return Vec::new();
+    }
     let mut all = Vec::new();
     flatten_props(&layer_tree(stage, layer), &mut all);
     all.into_iter()
@@ -560,10 +829,12 @@ pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<
             let Node::Prop { path, attr, .. } = n else {
                 return false;
             };
-            let spec = query::attr_spec(stage, path, attr);
+            let spec = || query::attr_spec(stage, path, attr);
             match reveal {
-                Reveal::Animated => spec.is_some_and(|s| s.is_animated() || s.expression.is_some()),
-                Reveal::Modified => spec.is_some_and(|s| !s.is_empty()),
+                Reveal::Animated => {
+                    spec().is_some_and(|s| s.is_animated() || s.expression.is_some())
+                }
+                Reveal::Modified => spec().is_some_and(|s| !s.is_empty()),
                 Reveal::Props(list) => list.iter().any(|(p, a)| p == path && a == attr),
                 Reveal::Attrs(list) => {
                     path == layer

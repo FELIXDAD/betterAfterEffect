@@ -15,6 +15,9 @@
 //! the layer's Paint effect (`paint.add_stroke`, one undo step) with the Paint
 //! and Brushes panels' settings; Alt/Option-click sets the Clone Stamp source.
 
+mod liquify;
+mod roto;
+
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2};
 use bae_model::{PrimPath, Time, Value};
@@ -41,6 +44,7 @@ pub(crate) enum Show {
 
 #[derive(Default)]
 pub struct LayerPanel {
+    roto: roto::Brush,
     display: crate::source_view_menu::SourceView,
     tracks: crate::tracker::overlay::Overlay,
     eval: EvalCache,
@@ -51,6 +55,8 @@ pub struct LayerPanel {
     pub(crate) render: bool,
     /// The stroke being painted: layer pixels, when it started.
     stroke: Option<(Vec<DVec2>, std::time::Instant)>,
+    /// Puppet tools: pins added, selected and dragged here too (AE).
+    puppet: crate::viewer::puppet_tool::PuppetState,
     /// Clone Stamp: the source point (Alt/Option-click), layer pixels.
     clone_point: Option<DVec2>,
     /// The stroke being painted continues the previous one (Shift-drag).
@@ -63,7 +69,7 @@ pub struct LayerPanel {
     picture_drawn: Option<(egui::TextureId, Rect)>,
     /// Liquify: the mesh being brushed, the pointer's last position (layer
     /// pixels).
-    liquify: Option<(bae_effects::effects::liquify::Mesh, DVec2)>,
+    liquify: liquify::Editor,
     /// An end of the layer being dragged on the ruler: the in point (`true`)
     /// or the out point, and where it would go.
     trim: Option<(bool, Time)>,
@@ -109,6 +115,12 @@ pub(crate) fn open_clicked(
     tool: crate::tools::Tool,
     eval: &mut EvalCache,
 ) {
+    // AE: a camera or light has no Layer panel; double-clicking it opens its
+    // Camera Settings or Light Settings.
+    if camera_or_light(cx.stage, layer) {
+        crate::dialogs::layer_settings(cx, session, layer);
+        return;
+    }
     let prefs = crate::prefs::current(cx.resources);
     let paint =
         tool.is_layer_paint() && prefs.bool("composition.double_click_paint_roto_opens_layer");
@@ -174,6 +186,13 @@ pub(crate) fn open_clicked(
     cx.open_panel("layer");
 }
 
+fn camera_or_light(stage: &bae_model::Stage, layer: &PrimPath) -> bool {
+    matches!(
+        query::layer_kind(stage, layer).as_deref(),
+        Some("camera" | "light")
+    )
+}
+
 /// The layer the panel shows: the one opened last, or the selected one.
 fn shown_layer(session: &SharedSession) -> Option<PrimPath> {
     let s = session.lock();
@@ -212,7 +231,18 @@ pub(crate) fn alone(
     let mut out = comp.clone();
     out.width = size.x.ceil() as u32;
     out.height = size.y.ceil() as u32;
+    let baked: Vec<_> = l
+        .effects
+        .iter()
+        .filter_map(|e| e.param(bae_vision::FROZEN)?.as_prim_ref())
+        .filter_map(|path| comp.layer(path).cloned())
+        .map(|mut matte| {
+            matte.visible = false;
+            matte
+        })
+        .collect();
     out.layers = vec![l];
+    out.layers.extend(baked);
     out.camera = None;
     out.bg_color = [0.0, 0.0, 0.0, 0.0];
     Some((out, min))
@@ -239,13 +269,18 @@ impl Panel for LayerPanel {
         let full = ui.available_rect_before_wrap();
         let bar_h = 28.0;
         let ruler_h = 22.0;
+        let roto_tool = matches!(
+            crate::tools::shared(cx.resources).current(),
+            crate::tools::Tool::RotoBrush | crate::tools::Tool::RefineEdge
+        );
+        let span_h = if roto_tool { 24.0 } else { 0.0 };
         let area = Rect::from_min_max(
             full.min,
-            pos2(full.right(), full.bottom() - bar_h - ruler_h),
+            pos2(full.right(), full.bottom() - bar_h - ruler_h - span_h),
         );
         let ruler = Rect::from_min_max(
-            pos2(full.left(), area.bottom()),
-            pos2(full.right(), area.bottom() + ruler_h),
+            pos2(full.left(), area.bottom() + span_h),
+            pos2(full.right(), area.bottom() + span_h + ruler_h),
         );
         let bar = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
         ui.allocate_rect(full, Sense::hover());
@@ -264,6 +299,7 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
+
         let eval = crate::viewer::live_evaluator(&mut self.eval, cx, &session);
         if let Some(g) = &self.gpu
             && !eval
@@ -278,11 +314,29 @@ impl Panel for LayerPanel {
         let Some(evaluated) = comp.layer(&layer) else {
             return;
         };
+        let roto_index = evaluated
+            .effects
+            .iter()
+            .position(|e| e.match_name == bae_vision::ROTO);
+        if roto_tool && let Some(i) = roto_index {
+            self.show = Show::Effect(i);
+        }
+        if let Some(effect) = session.lock().open_liquify.take()
+            && let Some(index) = evaluated.effects.iter().position(|e| e.path == effect)
+        {
+            self.show = Show::Effect(index);
+            self.render = true;
+        }
         let effects = match (self.show, self.render) {
             (Show::Effect(i), true) => i + 1,
             _ => 0,
         };
-        if let Some((one, min)) = alone(&comp, &layer, effects) {
+        if let Some((mut one, min)) = alone(&comp, &layer, effects) {
+            if let (Show::Effect(index), true) = (self.show, self.render)
+                && let Some(e) = one.layers[0].effects.get_mut(index)
+            {
+                liquify::Editor::preview_overlay(e);
+            }
             let source = cx
                 .stage
                 .prim(&evaluated.path)
@@ -292,12 +346,50 @@ impl Panel for LayerPanel {
             let panning = self.navigate(ui, cx, area, size);
             let (mut view, _) = self.view(area, size, ui.ctx().pixels_per_point());
             view.aspect = aspect;
-            self.picture(ui, cx, area, &one, min, evaluated, &view);
-            // Space pans whatever the tool (AE); a paint tool paints,
-            // otherwise a shown Liquify effect brushes.
-            if !panning && !self.paint(ui, cx, area, &view, min, evaluated) {
-                self.liquify(ui, cx, &session, area, &view, min, evaluated, time);
+            if !panning && roto_tool {
+                let tool = crate::tools::shared(cx.resources);
+                self.roto.paint(
+                    ui,
+                    cx,
+                    area,
+                    &view,
+                    min,
+                    evaluated,
+                    &mut one.layers[0],
+                    tool.current(),
+                );
+            } else {
+                self.roto.cancel_stroke();
             }
+            self.picture(ui, cx, area, &one, min, evaluated, &view);
+            self.roto.cursor(ui, area);
+            // Space pans whatever the tool (AE); a paint tool paints, a
+            // Puppet tool places pins, otherwise a shown Liquify effect brushes.
+            if !roto_tool
+                && !panning
+                && !self.paint(ui, cx, area, &view, min, evaluated)
+                && !self.puppet(ui, cx, &session, area, &view, &comp, &layer, time)
+                && let Show::Effect(index) = self.show
+                && let Some(fx) = evaluated.effects.get(index)
+                && fx.match_name == bae_effects::effects::liquify::MATCH_NAME
+            {
+                self.liquify
+                    .show(ui, cx, &session, area, &view, min, evaluated, fx, time);
+            }
+        }
+        self.liquify.update(ui, cx, &session);
+        self.roto.poll(cx);
+        if roto_tool && let Some(i) = roto_index {
+            self.roto.span(
+                ui,
+                cx,
+                &session,
+                Rect::from_min_max(area.left_bottom(), ruler.right_top()),
+                evaluated,
+                &evaluated.effects[i],
+                &info,
+                time,
+            );
         }
         let in_out = (evaluated.timing.in_point, evaluated.timing.out_point);
         if let Some(edit) = self.time_ruler(ui, &session, &info, ruler, time, in_out) {
@@ -540,6 +632,48 @@ impl LayerPanel {
         }
     }
 
+    /// The Puppet tools on the shown layer: its pins in layer space (the
+    /// picture's), added, selected and dragged as in the Composition viewer;
+    /// `false` when no Puppet tool is active.
+    #[allow(clippy::too_many_arguments)]
+    fn puppet(
+        &mut self,
+        ui: &Ui,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        area: Rect,
+        view: &View,
+        comp: &EvaluatedComp,
+        layer: &PrimPath,
+        time: Time,
+    ) -> bool {
+        let tool = crate::tools::shared(cx.resources).lock().current();
+        if crate::viewer::puppet_tool::pin_type(tool).is_none() {
+            return false;
+        }
+        // The layer alone with all its effects (the pins), placed as in the
+        // picture.
+        let Some((with_pins, _)) = alone(comp, layer, usize::MAX) else {
+            return true;
+        };
+        let resp = ui.interact(area, ui.id().with("puppet"), Sense::click_and_drag());
+        let painter = ui.painter_at(area);
+        crate::viewer::puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            session,
+            &with_pins,
+            view,
+            tool,
+            &painter,
+            time,
+            std::slice::from_ref(layer),
+        );
+        true
+    }
+
     /// The paint tools: drag to paint a stroke; Alt/Option-click with the
     /// Clone Stamp sets its source. `false` when no paint tool is active.
     fn paint(
@@ -748,74 +882,6 @@ impl LayerPanel {
             self.show = Show::Effect(paint);
         }
         true
-    }
-
-    /// The Liquify brush: with a Liquify effect in the View popup, dragging
-    /// applies its tool to the Distortion Mesh (previewed live, one undo step).
-    #[allow(clippy::too_many_arguments)]
-    fn liquify(
-        &mut self,
-        ui: &Ui,
-        cx: &mut PanelContext<'_>,
-        session: &SharedSession,
-        area: Rect,
-        view: &View,
-        min: DVec2,
-        layer: &bae_anim::EvaluatedLayer,
-        time: Time,
-    ) {
-        use bae_effects::effects::liquify::{self as lq, Mesh};
-        let Show::Effect(i) = self.show else {
-            return;
-        };
-        let Some(fx) = layer
-            .effects
-            .get(i)
-            .filter(|e| e.match_name == lq::MATCH_NAME)
-        else {
-            return;
-        };
-        let num = |id: u32, d: f64| fx.param(id).and_then(Value::as_f64).unwrap_or(d);
-        let tool = (num(lq::TOOL, 1.0).round() as usize).saturating_sub(1);
-        let radius = num(lq::BRUSH_SIZE, 64.0) / 2.0;
-        let pressure = num(lq::BRUSH_PRESSURE, 50.0) / 100.0;
-        let resp = ui.interact(area, ui.id().with("liquify"), Sense::click_and_drag());
-        let to_layer = |p: egui::Pos2| view.to_comp(p) + min;
-        if let Some(pos) = resp.hover_pos() {
-            ui.painter_at(area).circle_stroke(
-                pos,
-                (radius as f32 * view.scale).max(1.0),
-                Stroke::new(1.0, Color32::from_gray(220)),
-            );
-        }
-        let attr = format!("param:{:04}", lq::MESH);
-        if resp.drag_started_by(egui::PointerButton::Primary)
-            && let Some(pos) = ui.input(|i| i.pointer.press_origin())
-        {
-            let mesh = fx.param(lq::MESH).and_then(Mesh::from_value).or_else(|| {
-                let (a, b) = render::layer_bounds(layer)?;
-                Some(Mesh::new(a, b - a))
-            });
-            self.liquify = mesh.map(|m| (m, to_layer(pos)));
-        }
-        let Some((mesh, last)) = &mut self.liquify else {
-            return;
-        };
-        if let Some(pos) = resp.interact_pointer_pos() {
-            let at = to_layer(pos);
-            mesh.brush(tool, at, radius, pressure, at - *last);
-            *last = at;
-            ui.ctx().request_repaint();
-        }
-        let value = mesh.to_value();
-        let done = !ui.input(|i| i.pointer.primary_down());
-        let edit = if done {
-            self.liquify = None;
-            common::Edit::Commit(value)
-        } else {
-            common::Edit::Live(value)
-        };
-        common::apply_edit(cx, session, &fx.path, &attr, time, edit);
     }
 
     /// The bar under the ruler; returns a trim the { or } button asked for.
@@ -1065,6 +1131,7 @@ impl LayerPanel {
 /// Registers this module's panel (`MotionUiModule::build`).
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
+    crate::vision_bake::register(app);
     crate::register_panel(
         app,
         "layer",
@@ -1074,6 +1141,12 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
 
 /// Chinese (AE's zh_CN dictionary).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Refine Edge Canvas", "调整边缘画布"),
+    ("Roto Brush Canvas", "Roto 笔刷画布"),
+    ("Freeze", "冻结"),
+    ("Unfreeze", "解除冻结"),
+    ("Propagation Span", "传播范围"),
+    ("Frozen Matte", "冻结遮罩"),
     ("Set In Point to Current Time", "将入点设置为当前时间"),
     ("Set Out Point to Current Time", "将出点设置为当前时间"),
 ];

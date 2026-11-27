@@ -37,6 +37,7 @@ mod assets;
 pub mod blend;
 pub mod cache;
 pub mod camera;
+mod display_color;
 pub mod effect;
 mod error;
 pub mod eval;
@@ -52,12 +53,14 @@ pub mod graph;
 pub mod input;
 pub mod light;
 pub mod mask;
+pub mod model;
 mod module;
 pub mod motion;
 pub mod paint;
 mod parameter_track;
 pub mod png_out;
 pub mod pool;
+pub mod puppet;
 mod renderer;
 pub mod request;
 mod sample;
@@ -65,7 +68,7 @@ pub mod source;
 pub mod testing;
 pub mod three_d;
 
-pub use anim::AnimEvaluator;
+pub use anim::{AnimEvaluator, ProxyUse};
 pub use assets::AssetFiles;
 pub use blend::{BlendMode, MaskMode, TrackMatteMode};
 pub use cache::{CacheStats, FrameCache, FrameKey};
@@ -83,8 +86,8 @@ pub use gpu::CompositorWarmUp;
 pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{
-    CustomContent, Dependency, FootageRef, FrameBlend, LayerContent, RenderComp, RenderEffect,
-    RenderLayer, RenderMask, TrackMatte,
+    CustomContent, Dependency, FootageRef, FrameBlend, LayerContent, ModelRef, RenderComp,
+    RenderEffect, RenderLayer, RenderMask, TrackMatte,
 };
 pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;

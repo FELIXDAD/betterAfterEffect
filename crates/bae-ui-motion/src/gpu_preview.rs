@@ -45,6 +45,7 @@ impl std::fmt::Debug for PreviewEffects {
 /// What the viewer draws: an egui user texture covering `rect` (comp pixels).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PreviewImage {
+    pub viewport: ViewportTextureId,
     pub handle: u64,
     pub rect: IRect,
 }
@@ -90,6 +91,8 @@ pub(super) struct RenderEngine {
         bae_model::PrimPath,
         Vec<(bae_model::PrimPath, std::time::Duration)>,
     )>,
+    /// The display transform set on the renderer (its key).
+    color: u64,
 }
 
 impl RenderEngine {
@@ -105,6 +108,7 @@ impl RenderEngine {
             ),
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
             layer_times: None,
+            color: 0,
         }
     }
 
@@ -142,6 +146,13 @@ impl RenderEngine {
         roi: Option<IRect>,
         reuse: Option<OutputTarget>,
     ) -> Result<(OutputTarget, Option<bae_render::GpuImage>, bool), bae_render::RenderError> {
+        // Display colour management (View ▸ Use Display Color Management,
+        // Simulate Output): the viewers' current transform.
+        let (color, transform) = crate::display_color::current();
+        if color != self.color {
+            self.renderer.set_display_transform(transform.as_deref());
+            self.color = color;
+        }
         let request = RenderRequest {
             resolution: match resolution {
                 0 | 1 => Resolution::Full,
@@ -208,6 +219,9 @@ impl bae_render::graph::CompFrames for SampledFrames<'_> {
     }
 }
 
+/// Keeps a background renderer's frame (and its texture) alive.
+type Hold = Arc<dyn Send + Sync>;
+
 pub(crate) struct GpuPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
@@ -217,6 +231,8 @@ pub(crate) struct GpuPreview {
     changes: StageChanges,
     sources_gen: Option<u64>,
     solid_reload: u64,
+    /// Edit ▸ Purge generation last applied (`Session::purge`).
+    purged: u64,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
@@ -224,20 +240,23 @@ pub(crate) struct GpuPreview {
     /// pixel read: (texel, value).
     target: Option<OutputTarget>,
     direct_source: Option<bae_render::GpuImage>,
-    sampled: Option<((u32, u32, u64), [u8; 4])>,
+    sampled: Option<(PixelKey, [u8; 4])>,
+    pending_pixel: Option<(PixelKey, bae_gpu::transfer::PendingReadback)>,
     /// How the viewer shows the frame (Show Channel, Exposure).
     pub display: bae_render::Display,
     /// Region of interest (comp pixels): only it is rendered.
     pub roi: Option<IRect>,
     /// The display and region of the published frame.
     last_view: Option<(bae_render::Display, Option<IRect>)>,
+    /// The display transform of the published frame (its key).
+    color: u64,
     /// Snapshots 1–4 (AE's Take Snapshot): a published frame.
-    snapshots: [Option<(wgpu::Texture, IRect)>; 4],
+    snapshots: [Option<(wgpu::Texture, IRect, Option<Hold>)>; 4],
     /// The registry shows `target`'s view (not a snapshot).
     target_shown: bool,
     /// A frame of the background renderer or its cache the viewer shows
     /// instead (the Info panel and snapshots read it).
-    cached: Option<(wgpu::Texture, IRect)>,
+    cached: Option<(wgpu::Texture, IRect, Hold)>,
     /// The newest frame was incomplete (something still warming up): the
     /// viewer keeps showing the last complete frame with a "Preparing…" hint
     /// until it is redrawn complete.
@@ -246,8 +265,13 @@ pub(crate) struct GpuPreview {
     live: crate::live_preview::LivePreview,
     /// The project version live frames render with.
     live_scene: Option<Arc<crate::live_preview::LiveScene>>,
-    /// The key and view of the last live request.
-    live_sent: Option<LiveKey>,
+    /// What the last live request was made from.
+    live_sent: Option<LiveRequest>,
+    /// The viewer is editing (a drag, a nudge, text being typed): frames
+    /// render on the live thread like value drags. `Some(true)`: this frame
+    /// had input, so the edit may have changed. Set before each
+    /// [`Self::frame`].
+    pub live_edit: Option<bool>,
     /// The live target the registry shows.
     live_texture: Option<wgpu::Texture>,
     live_generation: u64,
@@ -258,7 +282,19 @@ pub(crate) struct GpuPreview {
     waiting: bool,
 }
 
-type LiveKey = ((u64, Time, u32), (bae_render::Display, Option<IRect>));
+type PixelKey = (u32, u32, u64);
+
+/// A live frame request; a new one goes when it changes (or on input while
+/// the viewer edits).
+#[derive(PartialEq)]
+struct LiveRequest {
+    revision: u64,
+    time: Time,
+    resolution: u32,
+    camera: Option<bae_render::Camera>,
+    view: (bae_render::Display, Option<IRect>),
+    overrides: Vec<bae_anim::AttrOverride>,
+}
 
 impl GpuPreview {
     /// A preview on the app's GPU context, if the app has one (the headless test
@@ -291,14 +327,17 @@ impl GpuPreview {
             changes: StageChanges::default(),
             sources_gen: None,
             solid_reload: 0,
+            purged: 0,
             last: None,
             rect: None,
             target: None,
             direct_source: None,
             sampled: None,
+            pending_pixel: None,
             display: bae_render::Display::default(),
             roi: None,
             last_view: None,
+            color: 0,
             snapshots: Default::default(),
             target_shown: false,
             cached: None,
@@ -306,6 +345,7 @@ impl GpuPreview {
             live,
             live_scene: None,
             live_sent: None,
+            live_edit: None,
             live_texture: None,
             live_generation: 0,
             samples,
@@ -358,6 +398,18 @@ impl GpuPreview {
         }
     }
 
+    /// Edit ▸ Purge ▸ Image Cache Memory / All Memory: drop the rendered frames
+    /// (and reopen the footage) once per purge `generation`.
+    pub(super) fn purge(&mut self, generation: u64) {
+        if self.purged == generation {
+            return;
+        }
+        self.engine.renderer.reload_footage();
+        self.engine.anim.clear_compiled();
+        self.last = None;
+        self.purged = generation;
+    }
+
     pub(super) fn reload_solid(&mut self, generation: u64, item: &bae_model::PrimPath) {
         if self.solid_reload == generation {
             return;
@@ -389,16 +441,21 @@ impl GpuPreview {
     ) -> Option<PreviewImage> {
         if self.cached.take().is_some() {
             self.sampled = None;
+            self.pending_pixel = None;
         }
         self.sync_sources(resources);
         self.sync_effects(resources);
-        // A value drag in a panel: motion blur samples and effects reading other
-        // frames evaluate the uncommitted value too (#593).
+        // A value or keyframe drag in a panel: motion blur samples and effects
+        // reading other frames evaluate the uncommitted values too (#593).
         let overrides = resources
             .get::<crate::session::SharedSession>()
-            .and_then(|s| s.lock().scrub.as_ref().map(|s| s.overrides(stage)))
+            .map(|s| s.lock().live_overrides(stage))
             .unwrap_or_default();
-        let live = (!overrides.is_empty()).then(|| overrides.clone());
+        let live_edit = self.live_edit.take();
+        let live = (!overrides.is_empty() || live_edit.is_some()).then(|| overrides.clone());
+        self.engine.anim.set_nested_switches(
+            crate::prefs::current(resources).bool("composition.switches_affect_nested_comps"),
+        );
         self.engine.anim.set_overrides(overrides);
         if self.changes.sync(stage, |event| match event {
             Some(event) => bae_render::CompEvaluator::invalidate(&mut self.engine.anim, event),
@@ -406,7 +463,31 @@ impl GpuPreview {
         }) {
             self.last = None;
         }
-        let mut rc = match self.engine.anim.convert(stage, comp, 0) {
+        // A value drag or a viewer edit: the newest state renders in the
+        // background (converted there too).
+        if let Some(overrides) = live {
+            let arrived = self.engine.renderer.poll_samples(&self.samples);
+            self.waiting = arrived || self.samples.is_waiting();
+            let request = LiveRequest {
+                revision: stage.revision(),
+                time: comp.time,
+                resolution,
+                camera,
+                view: (self.display, self.roi),
+                overrides: overrides.clone(),
+            };
+            let input = live_edit == Some(true);
+            return self.live_frame(
+                resources,
+                stage,
+                comp,
+                (request, input),
+                resolution,
+                measure_layer_times,
+                overrides,
+            );
+        }
+        let rc = match self.engine.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
                 tracing_warn(&format!("preview: {e}"));
@@ -416,46 +497,33 @@ impl GpuPreview {
         if self.engine.anim.audio_preparation_pending() {
             return self.image();
         }
-        // A 3D view other than Active Camera (the output never changes).
-        if let Some(camera) = camera {
-            rc.camera = Some(camera);
-            if let Some(blur) = &mut rc.motion_blur {
-                let blur = std::sync::Arc::make_mut(blur);
-                blur.cameras.fill(Some(camera));
-            }
-        }
+        let rc = crate::live_preview::with_camera(rc, camera);
         // sampleImage: the layers expressions sampled are drawn and read back
         // without waiting (during a value drag on the live renderer's thread).
         // A frame evaluated before its samples arrived is not shown: the
         // previous image stays up and the viewer evaluates again.
-        if live.is_none()
-            && self.samples.has_requests()
+        if self.samples.has_requests()
             && let Err(e) = self.engine.read_samples(stage, &rc, &self.samples)
         {
             tracing_warn(&format!("preview: sampleImage: {e}"));
         }
         let arrived = self.engine.renderer.poll_samples(&self.samples);
         self.waiting = arrived || self.samples.is_waiting();
-        if self.waiting && live.is_none() && self.rect.is_some() {
+        if self.waiting && self.rect.is_some() {
             return Some(PreviewImage {
+                viewport: self.id,
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
             });
         }
+        // Another display transform redraws the frame.
+        let color = crate::display_color::current().0;
+        if color != self.color {
+            self.color = color;
+            self.last = None;
+        }
         let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         let view = (self.display, self.roi);
-        // A value drag: the newest value renders in the background.
-        if let Some(overrides) = live {
-            return self.live_frame(
-                resources,
-                stage,
-                rc,
-                (key, view),
-                resolution,
-                measure_layer_times,
-                overrides,
-            );
-        }
         self.live_sent = None;
         if self.last != Some(key) || self.last_view != Some(view) {
             self.last_view = Some(view);
@@ -496,6 +564,7 @@ impl GpuPreview {
                     self.target = Some(target);
                 }
                 return Some(PreviewImage {
+                    viewport: self.id,
                     handle: self.registry.display_handle(self.id)?,
                     rect: self.rect?,
                 });
@@ -525,6 +594,7 @@ impl GpuPreview {
             self.target_shown = true;
             self.live_texture = None;
             self.sampled = None;
+            self.pending_pixel = None;
         }
         self.image()
     }
@@ -548,6 +618,7 @@ impl GpuPreview {
             self.live_texture = None;
         }
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,
         })
@@ -558,9 +629,10 @@ impl GpuPreview {
     /// one.
     pub fn output(&self) -> Option<(wgpu::Texture, u64)> {
         use std::hash::{Hash, Hasher};
-        if let Some((t, _)) = &self.cached {
+        if let Some((t, _, hold)) = &self.cached {
+            // The frame, not the texture: a recycled texture shows new frames.
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            t.hash(&mut h);
+            (Arc::as_ptr(hold) as *const () as usize).hash(&mut h);
             return Some((t.clone(), h.finish()));
         }
         if let Some(texture) = &self.live_texture {
@@ -587,11 +659,17 @@ impl GpuPreview {
     /// The viewer shows `texture` (a frame of the background renderer or
     /// its cache): the Info panel and snapshots read it until the next
     /// [`Self::frame`].
-    pub fn show_cached(&mut self, texture: wgpu::Texture, rect: IRect) {
-        if self.cached.as_ref().map(|c| &c.0) != Some(&texture) {
+    pub(crate) fn show_cached(&mut self, frame: crate::playback::ShownFrame) {
+        // Told apart by frame, not by texture: playback recycles textures.
+        if self
+            .cached
+            .as_ref()
+            .is_none_or(|c| !Arc::ptr_eq(&c.2, &frame.hold))
+        {
             self.direct_source = None;
-            self.cached = Some((texture, rect));
+            self.cached = Some((frame.texture, frame.rect, frame.hold));
             self.sampled = None;
+            self.pending_pixel = None;
         }
     }
 
@@ -600,9 +678,10 @@ impl GpuPreview {
         let Some(s) = self.snapshots.get_mut(slot) else {
             return false;
         };
-        // A cached frame's texture is never rendered into again.
-        if let Some(cached) = &self.cached {
-            *s = Some(cached.clone());
+        // A cached frame's texture is not rendered into again while the
+        // snapshot holds the frame.
+        if let Some((t, rect, hold)) = &self.cached {
+            *s = Some((t.clone(), *rect, Some(hold.clone())));
             return true;
         }
         let Some(r) = self.rect else {
@@ -613,7 +692,7 @@ impl GpuPreview {
         let Some(target) = self.target.take() else {
             return false;
         };
-        *s = Some((target.view().texture().clone(), r));
+        *s = Some((target.view().texture().clone(), r, None));
         self.last = None;
         true
     }
@@ -639,11 +718,16 @@ impl GpuPreview {
             sources.map(|s| s.0.generation()),
             effects.map(|e| e.0.generation()),
         );
+        let nested_switches =
+            crate::prefs::current(resources).bool("composition.switches_affect_nested_comps");
         match &self.live_scene {
-            Some(scene) if scene.key == scene_key => scene.clone(),
+            Some(scene) if scene.key == scene_key && scene.nested_switches == nested_switches => {
+                scene.clone()
+            }
             _ => {
                 let scene = Arc::new(crate::live_preview::LiveScene {
                     key: scene_key,
+                    nested_switches,
                     snapshot: crate::preview_snapshot::PreviewSnapshot::take(stage),
                     sources: sources.cloned(),
                     effects: effects.cloned(),
@@ -662,8 +746,8 @@ impl GpuPreview {
         &mut self,
         resources: &Resources,
         stage: &Stage,
-        rc: bae_render::RenderComp,
-        sent: LiveKey,
+        comp: &EvaluatedComp,
+        (request, input): (LiveRequest, bool),
         resolution: u32,
         measure_layer_times: bool,
         overrides: Vec<bae_anim::AttrOverride>,
@@ -679,7 +763,8 @@ impl GpuPreview {
                 let scene = self.live_scene(resources, stage);
                 self.live.submit(LiveJob {
                     scene,
-                    rc,
+                    comp: Box::new(comp.clone()),
+                    camera: request.camera,
                     overrides,
                     resolution,
                     display: self.display,
@@ -690,15 +775,17 @@ impl GpuPreview {
                 });
             }
             return Some(PreviewImage {
+                viewport: self.id,
                 handle: self.registry.display_handle(self.id)?,
                 rect: self.rect?,
             });
         }
-        if self.live_sent != Some(sent) {
+        if input || self.live_sent.as_ref() != Some(&request) {
             let scene = self.live_scene(resources, stage);
             self.live.submit(LiveJob {
                 scene,
-                rc,
+                comp: Box::new(comp.clone()),
+                camera: request.camera,
                 overrides,
                 resolution,
                 display: self.display,
@@ -707,7 +794,7 @@ impl GpuPreview {
                 samples: Some(self.samples.clone()),
                 render: true,
             });
-            self.live_sent = Some(sent);
+            self.live_sent = Some(request);
         }
         if let Some(frame) = self.live.take() {
             self.preparing = frame.source.is_none();
@@ -730,6 +817,7 @@ impl GpuPreview {
                 self.direct_source = Some(source);
                 self.live_generation = self.live_generation.wrapping_add(1);
                 self.sampled = None;
+                self.pending_pixel = None;
             }
             if measure_layer_times
                 && let Some((comp, times)) = frame.layer_times
@@ -741,31 +829,33 @@ impl GpuPreview {
             }
         }
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,
         })
     }
 
     pub fn show_snapshot(&mut self, slot: usize) -> Option<PreviewImage> {
-        let (t, rect) = self.snapshots.get(slot)?.clone()?;
+        let (t, rect, _) = self.snapshots.get(slot)?.clone()?;
         self.registry
             .publish(self.id, &t, wgpu::FilterMode::Linear)
             .ok()?;
         self.target_shown = false;
         self.live_texture = None;
         Some(PreviewImage {
+            viewport: self.id,
             handle: self.registry.display_handle(self.id)?,
             rect,
         })
     }
 
     /// Straight (unpremultiplied) 8-bit RGBA of the published frame at comp
-    /// point `p`, as shown (display-encoded); `None` outside the frame. Reads
-    /// one texel back from the GPU (blocking, only when the pointer moved to
-    /// another texel or the frame changed).
-    pub fn pixel(&mut self, p: [f64; 2]) -> Option<[u8; 4]> {
+    /// point `p`, transparent outside the image. Starts at most one readback
+    /// at a time and requests a redraw when the requested texel is pending;
+    /// until it arrives, the previous reading.
+    pub fn pixel(&mut self, p: [f64; 2], repaint: &egui::Context) -> Option<[u8; 4]> {
         let (texture, rect) = match &self.cached {
-            Some((texture, rect)) => (texture, *rect),
+            Some((texture, rect, _)) => (texture, *rect),
             None => (self.target.as_ref()?.view().texture(), self.rect?),
         };
         let (w, h) = (texture.width(), texture.height());
@@ -776,17 +866,42 @@ impl GpuPreview {
         let u = (p[0] - f64::from(rect.x0)) / rw;
         let v = (p[1] - f64::from(rect.y0)) / rh;
         if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
-            return None;
+            return Some([0; 4]);
         }
         let texel = (
             ((u * f64::from(w)) as u32).min(w - 1),
             ((v * f64::from(h)) as u32).min(h - 1),
             self.last.map_or(0, |k| k.0 ^ u64::from(k.2)),
         );
+        if let Some((key, pending)) = &self.pending_pixel {
+            self.gpu.poll();
+            if let Some(result) = pending.try_finish() {
+                if let Ok(image) = result {
+                    let px = image.pixel(0, 0);
+                    let a = px[3];
+                    let straight = |c: u8| {
+                        (u32::from(c) * 255 + u32::from(a) / 2)
+                            .checked_div(u32::from(a))
+                            .unwrap_or(0)
+                            .min(255) as u8
+                    };
+                    self.sampled =
+                        Some((*key, [straight(px[0]), straight(px[1]), straight(px[2]), a]));
+                }
+                self.pending_pixel = None;
+            }
+        }
         if let Some((t, c)) = self.sampled
             && t == texel
         {
             return Some(c);
+        }
+        repaint.request_repaint_after(std::time::Duration::from_millis(8));
+        // While the new texel is read back, the last reading stands in (the
+        // Info panel and the pen's mask colour follow the moving pointer).
+        let last = self.sampled.map(|(_, c)| c);
+        if self.pending_pixel.is_some() {
+            return last;
         }
         let region = bae_gpu::transfer::TextureRegion {
             mip_level: 0,
@@ -811,19 +926,8 @@ impl GpuPreview {
             bae_gpu::transfer::TextureReadback::record(&self.gpu, &mut encoder, texture, region)
                 .ok()?;
         self.gpu.queue().submit([encoder.finish()]);
-        let image = readback.map().wait(&self.gpu).ok()?;
-        let px = image.pixel(0, 0);
-        let a = px[3];
-        let straight = |c: u8| {
-            if a == 0 {
-                0
-            } else {
-                ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
-            }
-        };
-        let c = [straight(px[0]), straight(px[1]), straight(px[2]), a];
-        self.sampled = Some((texel, c));
-        Some(c)
+        self.pending_pixel = Some((texel, readback.map()));
+        last
     }
 
     #[cfg(test)]

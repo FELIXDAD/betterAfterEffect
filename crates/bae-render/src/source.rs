@@ -294,6 +294,47 @@ pub trait LayerSource: Send + Sync {
     ) -> Result<GpuImage, RenderError>;
 }
 
+/// A proxy's frames drawn at the size of the item it stands in for (AE File ▸
+/// Set Proxy): the layer keeps its size, the texels cover more layer pixels.
+pub(crate) struct ScaledSource {
+    pub inner: Arc<dyn LayerSource>,
+    /// The item's size, layer pixels.
+    pub size: [u32; 2],
+}
+
+impl LayerSource for ScaledSource {
+    fn size(&self) -> [u32; 2] {
+        self.size
+    }
+
+    fn content_hash(&self, time: Time) -> u64 {
+        let mut h = rustc_hash::FxHasher::default();
+        std::hash::Hash::hash(&(self.inner.content_hash(time), self.size), &mut h);
+        std::hash::Hasher::finish(&h)
+    }
+
+    fn frame_rate(&self) -> Option<bae_model::FrameRate> {
+        self.inner.frame_rate()
+    }
+
+    fn render(
+        &self,
+        ctx: &mut EncodeContext<'_>,
+        request: &SourceRequest,
+    ) -> Result<GpuImage, RenderError> {
+        let [w, h] = self.inner.size();
+        let full = SourceRequest {
+            roi: IRect::from_size(w, h),
+            ..*request
+        };
+        let mut image = self.inner.render(ctx, &full)?;
+        let scale = f64::from(self.size[0].max(1)) / f64::from(image.texture.width().max(1));
+        image.pixel_scale = scale;
+        image.rect = IRect::from_size(self.size[0], self.size[1]);
+        Ok(image)
+    }
+}
+
 impl fmt::Debug for dyn LayerSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LayerSource")
@@ -309,6 +350,28 @@ pub trait SourceProvider: Send + Sync {
 
     /// The source for `content`. Providers may cache by `content.hash`.
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError>;
+
+    /// The filled outlines of `content` in layer pixels, for 3D extrusion
+    /// (AE's Advanced 3D Geometry Options); `None` when the provider has
+    /// none. Read-only: drawing does not depend on it.
+    fn outlines(&self, _content: &CustomContent) -> Option<Arc<Outlines>> {
+        None
+    }
+}
+
+/// The filled outlines of a source (layer pixels), by fill.
+#[derive(Clone, Debug, Default)]
+pub struct Outlines {
+    pub fills: Vec<OutlineFill>,
+}
+
+/// One fill's outlines.
+#[derive(Clone, Debug)]
+pub struct OutlineFill {
+    /// Straight RGBA (display-encoded, like solid colours).
+    pub color: [f32; 4],
+    /// Closed polylines (the last point joins the first), nonzero winding.
+    pub contours: Vec<Vec<[f64; 2]>>,
 }
 
 /// Source providers by ID (built-in and plugin providers alike).

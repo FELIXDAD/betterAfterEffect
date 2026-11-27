@@ -540,6 +540,7 @@ dependencies = [
  "bae-app",
  "bae-effects",
  "bae-gpu",
+ "bae-media",
  "bae-model",
  "bae-motion",
  "bae-package",
@@ -552,6 +553,7 @@ dependencies = [
  "bae-ui",
  "bae-ui-motion",
  "bae-vector",
+ "cc",
  "clap",
  "egui",
  "egui-wgpu",
@@ -560,6 +562,7 @@ dependencies = [
  "muda",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+ "png",
  "rfd",
  "serde",
  "serde_json",
@@ -662,6 +665,7 @@ dependencies = [
  "bae-plugin",
  "bae-render",
  "bae-text",
+ "bae-vision",
  "chrono",
  "exr",
  "glam",
@@ -808,6 +812,7 @@ dependencies = [
  "bae-interop-psd",
  "bae-model",
  "bae-vector",
+ "bae-vision",
  "schemars",
  "serde",
  "serde_json",
@@ -901,6 +906,7 @@ dependencies = [
  "anyhow",
  "bae-anim",
  "bae-app",
+ "bae-color",
  "bae-gpu",
  "bae-media",
  "bae-model",
@@ -910,6 +916,7 @@ dependencies = [
  "clap",
  "glam",
  "half",
+ "image",
  "kurbo",
  "parking_lot",
  "png",
@@ -1015,10 +1022,13 @@ dependencies = [
  "bae-text",
  "bae-ui",
  "bae-vector",
+ "bae-vision",
  "chrono",
  "egui",
  "egui-wgpu",
  "flate2",
+ "png",
+ "roxmltree",
  "serde",
  "serde_json",
  "tempfile",
@@ -1045,6 +1055,13 @@ dependencies = [
  "tracing",
  "vello",
  "vello_cpu",
+]
+
+[[package]]
+name = "bae-vision"
+version = "0.1.0"
+dependencies = [
+ "bae-model",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 //! #133 / #134: the default workspace and the Keyboard Shortcuts window at
 //! common screens and display scales. Sizes are window client areas in
-//! logical points (physical pixels / scale): every widget of a panel must lie
-//! inside the panel, and no panel may need more room than it gets.
+//! logical points (physical pixels / scale). Panel contents fit their frame,
+//! including the scrollable contents of an expanded Render Queue.
 
 use bae_ui::dock::{Dock, PanelArea, panel_areas};
 use bae_ui_motion::render_queue::ItemStatus;
@@ -70,7 +70,22 @@ fn layout_problems(h: &Ui) -> Vec<String> {
     let mut out = Vec::new();
     for a in &areas {
         let panel = a.panel.as_str();
-        if a.overflows() {
+        let Some(pane) = find_pane(root.accesskit_node(), panel) else {
+            out.push(format!("{panel}: no accessibility pane"));
+            continue;
+        };
+        let mut nodes = Vec::new();
+        widgets(pane, &mut nodes);
+        let ppp = h.ctx.pixels_per_point();
+        // Expanded output modules can be taller than the Timeline frame. Only
+        // a vertical scrollbar inside the queue makes that extra height reachable.
+        let inside = a.rect.expand(1.0);
+        let queue_scrolls = panel == "render_queue"
+            && nodes.iter().any(|n| {
+                let r = rect_of(n, ppp);
+                n.role() == Role::ScrollBar && r.height() > r.width() && inside.contains_rect(r)
+            });
+        if a.overflows() && (!queue_scrolls || a.content.x > a.rect.width() + 0.5) {
             out.push(format!(
                 "{panel}: needs {:.0}×{:.0}, has {:.0}×{:.0}",
                 a.content.x,
@@ -79,16 +94,17 @@ fn layout_problems(h: &Ui) -> Vec<String> {
                 a.rect.height()
             ));
         }
-        let Some(pane) = find_pane(root.accesskit_node(), panel) else {
-            out.push(format!("{panel}: no accessibility pane"));
-            continue;
-        };
-        let mut nodes = Vec::new();
-        widgets(pane, &mut nodes);
-        let inside = a.rect.expand(1.0);
         for n in nodes {
-            let r = rect_of(&n, h.ctx.pixels_per_point());
-            if r.width() <= 0.0 || r.height() <= 0.0 || inside.contains_rect(r) {
+            let r = rect_of(&n, ppp);
+            let mut bounds = inside;
+            if queue_scrolls
+                && std::iter::successors(n.parent(), |p| p.parent())
+                    .take_while(|p| p.role() != Role::Pane)
+                    .any(|p| p.role() == Role::ScrollView)
+            {
+                bounds.max.y = bounds.max.y.max(a.rect.top() + a.content.y + 1.0);
+            }
+            if r.width() <= 0.0 || r.height() <= 0.0 || bounds.contains_rect(r) {
                 continue;
             }
             out.push(format!(
@@ -552,7 +568,8 @@ fn render_queue_content_is_inset_from_the_panel_edges() {
         let mut touching = Vec::new();
         for n in &nodes {
             let r = rect_of(n, ppp);
-            if r.width() <= 0.0 {
+            // Scrollbars belong at the viewport edge. Padding is for content.
+            if n.role() == Role::ScrollBar || r.width() <= 0.0 {
                 continue;
             }
             if r.left() < area.rect.left() + pad - 0.5 || r.right() > area.rect.right() - pad + 0.5
@@ -570,5 +587,24 @@ fn render_queue_content_is_inset_from_the_panel_edges() {
             "{size:?}: panel {:?}, within {pad} pt of an edge: {touching:#?}",
             area.rect
         );
+        // The last row's Output To below the fold must be reachable with the wheel.
+        let frames_end = |h: &Ui| queue_control(h, 1, "Output To").unwrap().rect();
+        if !area.rect.contains_rect(frames_end(&h)) {
+            send(&mut h, Event::PointerMoved(area.rect.center()));
+            send(
+                &mut h,
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(0.0, -area.content.y),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                },
+            );
+            settle(&mut h);
+            assert!(
+                area.rect.contains_rect(frames_end(&h)),
+                "{size:?}: frame end unreachable"
+            );
+        }
     }
 }

@@ -39,34 +39,29 @@ use crate::request::RenderRequest;
 const MAX_SAMPLE_ROUNDS: usize = 4;
 
 #[cfg(feature = "media")]
+mod audio_blocks;
+#[cfg(feature = "media")]
+use audio_blocks::ExportAudio;
+
+#[cfg(feature = "media")]
 fn export_wav(
     job: &ExportJob<'_>,
     cancel: Option<&AtomicBool>,
     on_frame: &mut dyn FnMut(&ExportedFrame),
 ) -> Result<ExportReport, RenderError> {
-    use bae_media::audio::time_to_sample;
-    const RATE: u32 = 48_000;
     let started = Instant::now();
     let mut report = ExportReport::default();
-    let mut mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
+    let mut audio = ExportAudio::new(job);
     let io_error =
         |e: std::io::Error| RenderError::Other(format!("{}: {e}", job.settings.path.display()));
-    let mut wav = bae_media::wav::WavWriter::create(&job.settings.path, RATE).map_err(io_error)?;
-    let mut buffer = [[0.0; 2]; 512];
+    let mut wav = bae_media::wav::WavWriter::create(&job.settings.path, ExportAudio::RATE)
+        .map_err(io_error)?;
     for (index, &(frame, time)) in job.times.iter().enumerate() {
         if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
             report.stopped = true;
             return Ok(report);
         }
-        let mut start = time_to_sample(time, RATE);
-        let end = time_to_sample(time + job.rate.frame_duration(), RATE);
-        while start < end {
-            let count = (end - start).min(buffer.len() as i64) as usize;
-            mix.render(start, RATE, &mut buffer[..count])
-                .map_err(media_error)?;
-            wav.write(&buffer[..count]).map_err(io_error)?;
-            start += count as i64;
-        }
+        audio.frame(index, |samples| wav.write(samples).map_err(io_error))?;
         let entry = ExportedFrame {
             index,
             frame,
@@ -553,51 +548,6 @@ pub(crate) struct EncoderThread {
     handle: Option<std::thread::JoinHandle<Result<EncoderOutput, RenderError>>>,
 }
 
-#[cfg(feature = "media")]
-struct MovieAudio {
-    mix: bae_media::mix::AudioMix,
-    times: Vec<Time>,
-    frame_duration: Time,
-    scratch: Vec<[f32; 2]>,
-}
-
-#[cfg(feature = "media")]
-impl MovieAudio {
-    fn new(job: &ExportJob<'_>) -> Option<Self> {
-        let mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
-        if mix.is_empty() {
-            return None;
-        }
-        Some(Self {
-            mix,
-            times: job.times.iter().map(|&(_, t)| t).collect(),
-            frame_duration: job.rate.frame_duration(),
-            scratch: Vec::new(),
-        })
-    }
-    fn push(
-        &mut self,
-        index: usize,
-        encoder: &mut dyn bae_media::Encoder,
-    ) -> Result<(), RenderError> {
-        use bae_media::audio::time_to_sample;
-        const RATE: u32 = 48_000;
-        let t = self.times[index];
-        let first = time_to_sample(t, RATE);
-        let count = time_to_sample(t + self.frame_duration, RATE) - first;
-        self.scratch.resize(count as usize, [0.0; 2]);
-        self.mix
-            .render(first, RATE, &mut self.scratch)
-            .map_err(media_error)?;
-        let block = bae_media::AudioBuffer {
-            sample_rate: RATE,
-            channels: 2,
-            samples: self.scratch.as_flattened().to_vec(),
-        };
-        encoder.push_audio(&block).map_err(media_error)
-    }
-}
-
 /// What the encoder thread did.
 #[cfg(feature = "media")]
 pub(crate) struct EncoderOutput {
@@ -614,20 +564,20 @@ impl EncoderThread {
     /// Frames that were written stay written when the export stops or fails
     /// (AE keeps the frames rendered before Stop): on an error the encoder is
     /// finished, not aborted, so complete files are kept.
-    fn spawn(mut encoder: Box<dyn bae_media::Encoder>, mut audio: Option<MovieAudio>) -> Self {
+    fn spawn(mut encoder: Box<dyn bae_media::Encoder>, mut audio: Option<ExportAudio>) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel::<MappedFrame>(Self::QUEUE);
         let handle = std::thread::Builder::new()
             .name("bae-render.encode".into())
             .spawn(move || {
                 let mut copy = Duration::ZERO;
                 for (index, mapped) in receiver.iter().enumerate() {
-                    let pushed = mapped.write_to(&mut *encoder).and_then(|elapsed| {
-                        copy += elapsed;
-                        if let Some(track) = &mut audio {
-                            track.push(index, &mut *encoder)?;
-                        }
-                        Ok(())
-                    });
+                    // The audio leads the video it accompanies (#793).
+                    let pushed = match &mut audio {
+                        Some(track) => track.push_ahead_of(index, &mut *encoder),
+                        None => Ok(()),
+                    }
+                    .and_then(|()| mapped.write_to(&mut *encoder))
+                    .map(|elapsed| copy += elapsed);
                     if let Err(error) = pushed {
                         // Wait for the frames before this one; keep them.
                         let _ = encoder.finish();
@@ -870,6 +820,8 @@ pub struct ExportSettings {
     pub bit_rate: Option<u64>,
     /// Write uncompressed 24-bit audio to QuickTime instead of AAC.
     pub pcm_audio: bool,
+    /// Duration mixed at a time for movie sound and standalone WAV.
+    pub audio_block: Time,
 }
 
 impl ExportSettings {
@@ -885,6 +837,7 @@ impl ExportSettings {
             alpha: ExportAlpha::default(),
             bit_rate: None,
             pcm_audio: format.is_quicktime(),
+            audio_block: Time::ONE_SECOND,
         }
     }
 
@@ -1208,7 +1161,8 @@ impl Sink {
             let audio = if settings.format.is_image() {
                 None
             } else {
-                MovieAudio::new(job)
+                let track = ExportAudio::new(job);
+                (!track.is_empty()).then_some(track)
             };
             if audio.is_some() {
                 let mut track = bae_media::export::AudioEncodeSettings::aac_stereo();

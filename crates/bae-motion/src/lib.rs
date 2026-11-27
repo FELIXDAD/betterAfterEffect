@@ -69,11 +69,15 @@
 //! (id = command id), from which the application builds its command registry.
 
 pub mod camera;
+pub mod camera_track;
+pub mod cleanup;
 pub mod comp;
+pub mod comp_from_items;
 pub mod content;
 pub mod dimensions;
 pub mod effect;
 pub mod expressions;
+mod fill;
 pub mod import;
 pub mod interpret;
 pub mod keys;
@@ -88,7 +92,10 @@ pub mod path;
 pub mod photoshop;
 pub mod precompose;
 pub mod project_settings;
+pub mod proxy;
+pub mod puppet;
 pub mod query;
+mod roto;
 pub mod shape;
 pub mod solid;
 pub mod text;
@@ -105,13 +112,19 @@ use bae_model::{CommandRegistry, DynCommand};
 
 pub use camera::{CameraSettings, LightSettings, SetCameraSettings, SetLightSettings};
 pub use comp::{
-    CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
+    CompOutput, CreateComp, CreateFolder, CropComp, ResizeAnchor, SetCompSettings, SetWorkArea,
     TrimCompToWorkArea,
 };
-pub use content::{CopiedContent, DeleteContent, DuplicateContent, PasteContent, copy_content};
+pub use content::{
+    CopiedContent, DeleteContent, DuplicateContent, GroupShapes, PasteContent, UngroupShapes,
+    copy_content,
+};
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
-pub use import::{ImportFile, ImportItems, ImportOutput, ReplaceFile};
+pub use import::{
+    ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind, ReloadFiles, ReloadItem,
+    ReplaceFile,
+};
 pub use interpret::InterpretFootage;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, ExponentialScale, KeyEdit, KeyRef,
@@ -124,15 +137,17 @@ pub use layer::{
     SetLayerAttr, SetParent, ShapePreset, ShiftLayers, SlipLayers, SplitLayers, TrimLayers,
     copy_layers,
 };
-pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
+pub use markers::{
+    AddMarker, DeleteMarkers, EditMarker, LockMarkers, MarkerFields, MarkerOutput, MoveMarkers,
+};
 pub use matte::SetTrackMatte;
 pub use orient::AutoOrient;
-pub use path::{DeleteVertex, InsertVertex, SetVertices};
+pub use path::{DeleteVertex, EditWhole, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use project_settings::SetProjectSettings;
 pub use shape::{AddShape, AddShapeItem, CreateMask, Geometry, ShapeKind, add_item_ids};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
-pub use text::{CreateText, SetText, SetTextStyle, TextStyleChange};
+pub use text::{ConvertTextOrientation, CreateText, SetText, SetTextStyle, TextStyleChange};
 pub use text_animators::{AddTextSelector, AnimateText, RemoveTextAnimators};
 pub use text_path::SetTextPath;
 pub use time::{
@@ -143,20 +158,37 @@ pub use time::{
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
+        r.register(roto::Freeze),
+        r.register(fill::AddFillLayer),
+        r.register(puppet::AddPin),
+        r.register(puppet::DeletePins),
+        r.register(puppet::SetMesh),
         r.register(paint::ExtendStroke),
         r.register(tracker::CreateTracker),
+        r.register(camera_track::Record),
+        r.register(camera_track::attach::Attach),
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
+        r.register(tracker::RecordStabilization),
         r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
+        r.register(CropComp),
+        r.register(cleanup::RemoveUnusedFootage),
+        r.register(cleanup::ConsolidateFootage),
+        r.register(cleanup::ReduceProject),
+        r.register(proxy::SetProxy),
+        r.register(proxy::SetProxyEnabled),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(NewItem),
         r.register(photoshop::ImportPhotoshop),
         r.register(ReplaceFile),
+        r.register(ReloadFiles),
         r.register(CreateLayer),
         r.register(Precompose),
         r.register(precompose::ReplaceWithPrecomp),
@@ -193,22 +225,29 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(EditMarker),
         r.register(MoveMarkers),
         r.register(DeleteMarkers),
+        r.register(LockMarkers),
         r.register(AddShape),
         r.register(AddShapeItem),
         r.register(CreateMask),
         r.register(SetVertices),
         r.register(InsertVertex),
         r.register(DeleteVertex),
+        r.register(EditWhole),
         r.register(CreateText),
+        r.register(ConvertTextOrientation),
         r.register(InterpretFootage),
         r.register(AutoOrient),
         r.register(SetProjectSettings),
+        r.register(project_settings::SetMetadata),
         r.register(SetText),
         r.register(SetTextStyle),
         r.register(SetExpressions),
         r.register(DuplicateContent),
         r.register(PasteContent),
         r.register(DeleteContent),
+        r.register(GroupShapes),
+        r.register(UngroupShapes),
+        r.register(shape::ConvertToPath),
         r.register(BakeExpression),
         r.register(AnimateText),
         r.register(AddTextSelector),

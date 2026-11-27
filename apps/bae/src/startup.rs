@@ -10,7 +10,7 @@ use bae_platform::logging::{self, LogOptions};
 use bae_platform::{AppDirs, console};
 
 /// Runs the assembled application and returns the process exit code.
-pub fn run(mut app: App) -> ExitCode {
+pub fn run(mut app: App, dirs: AppDirs) -> ExitCode {
     // Windows GUI-subsystem binary started from a terminal: reconnect stdio.
     console::attach_parent_console();
 
@@ -36,13 +36,6 @@ pub fn run(mut app: App) -> ExitCode {
     let global = invocation.global().clone();
     let is_subcommand = matches!(invocation, Invocation::Subcommand { .. });
 
-    let dirs = match AppDirs::resolve() {
-        Ok(dirs) => dirs,
-        Err(error) => {
-            eprintln!("{}: {error}", bae_platform::BINARY_NAME);
-            return ExitCode::FAILURE;
-        }
-    };
     let dirs_ok = dirs.create_all();
 
     // Subcommands print results on stdout; keep stderr quiet unless asked, and do
@@ -77,9 +70,22 @@ pub fn run(mut app: App) -> ExitCode {
     if !is_subcommand {
         bae_ui_motion::register_preset_index(&mut app, dirs.data.join("Presets"));
     }
-    app.insert_resource(dirs);
+    let prefs = if global.smoke_test.is_some() {
+        bae_prefs::PrefsStore::default()
+    } else {
+        bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
+    };
+    #[cfg(windows)]
+    bae_media::media_foundation::set_hardware_decoding(
+        prefs
+            .current()
+            .bool("import.enable_hardware_accelerated_decoding"),
+    );
+
     // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
-    bae_plugin::load_installed(&app);
+    if !global.safe_mode {
+        bae_plugin::load_installed(&app);
+    }
     let packages = app
         .resource::<bae_plugin::PluginRuntime>()
         .map(|runtime| {
@@ -104,6 +110,6 @@ pub fn run(mut app: App) -> ExitCode {
             global,
         } => cli::dispatch(&mut app, &name, &matches, &global),
         Invocation::Headless(global) => crate::headless::run(&mut app, &global),
-        Invocation::Gui(global) => crate::shell::run(app, &global),
+        Invocation::Gui(global) => crate::shell::run(app, &global, prefs),
     }
 }

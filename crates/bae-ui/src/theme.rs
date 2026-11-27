@@ -183,7 +183,67 @@ impl Appearance {
     }
 }
 
+static GRADIENTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub(crate) fn set_gradients(enabled: bool) {
+    GRADIENTS.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Surface of a panel header or title bar. Uses the ordinary egui vertex-color pipeline.
+pub(crate) fn bar_fill(painter: &egui::Painter, rect: egui::Rect, base: Color32) {
+    if !GRADIENTS.load(std::sync::atomic::Ordering::Relaxed) {
+        painter.rect_filled(rect, 0.0, base);
+        return;
+    }
+    let top = brighten(base, 3);
+    let bottom = brighten(base, -3);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), top);
+    mesh.colored_vertex(rect.right_top(), top);
+    mesh.colored_vertex(rect.left_bottom(), bottom);
+    mesh.colored_vertex(rect.right_bottom(), bottom);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(2, 1, 3);
+    painter.add(mesh);
+}
+
 static APPEARANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Preferences > Appearance > Accessibility Color Contrast (AE 26: off by default).
+static ACCESSIBLE_CONTRAST: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Turns Accessibility Color Contrast on or off from the next frame on.
+pub fn set_accessible_contrast(enabled: bool) {
+    ACCESSIBLE_CONTRAST.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether Accessibility Color Contrast is on.
+pub fn accessible_contrast() -> bool {
+    ACCESSIBLE_CONTRAST.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Border of fields, dropdowns and buttons: AE's dim #303030, or #8d8d8d with
+/// Accessibility Color Contrast on (measured in AE 26.2).
+pub fn field_border() -> Color32 {
+    if accessible_contrast() {
+        rgb(0x8d, 0x8d, 0x8d)
+    } else {
+        color::FIELD_BORDER
+    }
+}
+
+/// Keeps egui's own widgets (buttons, text fields, combo boxes) on
+/// [`field_border`]. Call once per frame before drawing.
+pub fn sync_contrast(ui: &mut egui::Ui) {
+    let border = field_border();
+    if ui.visuals().widgets.inactive.bg_stroke.color == border {
+        return;
+    }
+    ui.ctx()
+        .all_styles_mut(|style| style.visuals.widgets.inactive.bg_stroke.color = border);
+    ui.visuals_mut().widgets.inactive.bg_stroke.color = border;
+}
 
 /// Uses `a` from the next frame on.
 pub fn set_appearance(a: Appearance) {
@@ -202,8 +262,38 @@ pub fn appearance() -> Appearance {
 /// `c` (premultiplied) as drawn with appearance `a`: only grays change; accent,
 /// label and image colors keep their values.
 pub fn adjust(c: Color32, a: Appearance) -> Color32 {
+    map_gray(c, |v| theme_gray(v, a))
+}
+
+/// A Darkest gray as drawn with appearance `a`.
+fn theme_gray(v: f32, a: Appearance) -> f32 {
+    match a {
+        Appearance::Darkest => v,
+        Appearance::Dark => v + (255.0 - v) * 0.09,
+        Appearance::Light => 240.0 - v * 0.8,
+    }
+}
+
+/// Text gray with Accessibility Color Contrast on, as AE 26 draws it: body
+/// text #b0 becomes #eb, strong text #d0 white; dim and disabled text (#6a
+/// and below) stay.
+fn contrast_text_gray(v: f32) -> f32 {
+    const DIM: f32 = 106.0;
+    const BODY: (f32, f32) = (176.0, 235.0);
+    const STRONG: f32 = 208.0;
+    if v <= DIM {
+        v
+    } else if v <= BODY.0 {
+        DIM + (v - DIM) * (BODY.1 - DIM) / (BODY.0 - DIM)
+    } else {
+        (BODY.1 + (v - BODY.0) * (255.0 - BODY.1) / (STRONG - BODY.0)).min(255.0)
+    }
+}
+
+/// Applies `f` to `c` (premultiplied) when it is a gray; other colors stay.
+fn map_gray(c: Color32, f: impl Fn(f32) -> f32) -> Color32 {
     let alpha = c.a();
-    if alpha == 0 || a == Appearance::Darkest {
+    if alpha == 0 {
         return c;
     }
     let un = |v: u8| (f32::from(v) * 255.0 / f32::from(alpha)).min(255.0);
@@ -211,24 +301,18 @@ pub fn adjust(c: Color32, a: Appearance) -> Color32 {
     if r.max(g).max(b) - r.min(g).min(b) > 6.0 {
         return c;
     }
-    let map = |v: f32| match a {
-        Appearance::Dark => v + (255.0 - v) * 0.09,
-        _ => 240.0 - v * 0.8,
-    };
-    let q = |v: f32| {
-        (map(v) * f32::from(alpha) / 255.0)
-            .round()
-            .clamp(0.0, 255.0) as u8
-    };
+    let q = |v: f32| (f(v) * f32::from(alpha) / 255.0).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgba_premultiplied(q(r), q(g), q(b), alpha)
 }
 
-/// Applies the current [`Appearance`] to a tessellated frame. Only meshes drawn
-/// with egui's own texture (shapes and text) change; images and the viewer are
-/// left alone. Does nothing for Darkest (the default).
+/// Applies the current [`Appearance`] and Accessibility Color Contrast to a
+/// tessellated frame. Only meshes drawn with egui's own texture (shapes and
+/// text) change; images and the viewer are left alone. Darkest without
+/// accessible contrast (AE's default) is drawn as measured.
 pub fn apply_appearance(prims: &mut [egui::ClippedPrimitive]) {
     let a = appearance();
-    if a == Appearance::Darkest {
+    let accessible = accessible_contrast();
+    if a == Appearance::Darkest && !accessible {
         return;
     }
     for prim in prims {
@@ -236,7 +320,11 @@ pub fn apply_appearance(prims: &mut [egui::ClippedPrimitive]) {
             && mesh.texture_id == egui::TextureId::default()
         {
             for v in &mut mesh.vertices {
-                v.color = adjust(v.color, a);
+                // Glyphs sample the font atlas; shapes use its white texel.
+                let text = accessible && v.uv != egui::epaint::WHITE_UV;
+                v.color = map_gray(v.color, |g| {
+                    theme_gray(if text { contrast_text_gray(g) } else { g }, a)
+                });
             }
         }
     }
@@ -501,4 +589,29 @@ pub fn apply(ctx: &Context) {
             s.corner_radius = egui::CornerRadius::same(3);
         }
     });
+}
+
+#[cfg(test)]
+#[test]
+fn accessible_contrast_brightens_text_like_ae() {
+    let gray = |v: f32| contrast_text_gray(v).round() as u8;
+    // AE 26.2 with Accessibility Color Contrast on: body text #b0 -> #eb,
+    // strong text #d0 -> #ff, dim text #6a unchanged.
+    assert_eq!(gray(176.0), 0xeb);
+    assert_eq!(gray(208.0), 0xff);
+    assert_eq!(gray(106.0), 0x6a);
+    assert_eq!(gray(29.0), 29);
+    for theme in [Appearance::Darkest, Appearance::Dark, Appearance::Light] {
+        let difference = |accessible| {
+            let text = if accessible {
+                contrast_text_gray(177.0)
+            } else {
+                177.0
+            };
+            (theme_gray(text, theme) - theme_gray(29.0, theme)).abs()
+        };
+        assert!(difference(true) > difference(false), "{theme:?}");
+        assert_eq!(adjust(Color32::RED, theme), Color32::RED);
+    }
+    assert_eq!(adjust(color::PANEL, Appearance::Darkest), color::PANEL);
 }

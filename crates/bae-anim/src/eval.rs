@@ -312,6 +312,7 @@ pub(crate) struct CompiledComp {
     pub(crate) bg_color: [f64; 4],
     pub(crate) motion_blur: MotionBlur,
     pub(crate) frame_blending: bool,
+    pub(crate) advanced_3d: bool,
     pub(crate) layers: Vec<CompiledLayer>,
     /// Comp markers, by time (expressions' `thisComp.marker`).
     pub(crate) markers: Vec<CompiledMarker>,
@@ -504,6 +505,11 @@ pub(crate) struct CompiledLight {
     pub(crate) casts_shadows: bool,
     pub(crate) shadow_darkness: Prop,
     pub(crate) shadow_diffusion: Prop,
+    /// Environment light source layer (resolved with the comp's layers).
+    pub(crate) source: Option<usize>,
+    pub(crate) background_visible: bool,
+    pub(crate) background_opacity: Prop,
+    pub(crate) background_blur: Prop,
 }
 
 #[derive(Debug)]
@@ -617,36 +623,12 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
     };
 
     let paths = comp_layers(stage, path);
-    let index_of = |p: &PrimPath| paths.iter().position(|q| q == p);
-    let mut deps = vec![path.clone()];
     let mut layers = Vec::with_capacity(paths.len());
-    for (i, lp) in paths.iter().enumerate() {
-        let lv = stage.prim(lp).expect("listed layer exists");
-        let mut layer = compile_layer(stage, &lv, duration)?;
-        layer.parent = setting_ref(&lv, l::PARENT)
-            .and_then(|p| index_of(&p))
-            .filter(|&p| p != i);
-        if layer.track_matte != TrackMatte::None {
-            layer.track_matte_layer = match setting_ref(&lv, l::TRACK_MATTE_LAYER) {
-                Some(p) => index_of(&p),
-                None => i.checked_sub(1),
-            };
-        }
-        // Source items too: their settings (solid color, size, footage
-        // interpretation) are compiled into the layer.
-        if let CompiledSource::Comp { path, .. } | CompiledSource::Asset(path, _) = &layer.source
-            && !deps.contains(path)
-        {
-            deps.push(path.clone());
-        }
-        layers.push(layer);
+    for i in 0..paths.len() {
+        layers.push(compile_layer_at(stage, &paths, i, duration)?);
     }
-
-    let has_expressions = layers.iter().any(CompiledLayer::has_expressions);
-    let has_js_expressions = has_expressions
-        && layers
-            .iter()
-            .any(|l| l.expr_props().iter().any(|e| e.fast.is_none()));
+    let deps = comp_deps(path, &layers);
+    let (has_expressions, has_js_expressions) = expression_flags(&layers);
     Ok(CompiledComp {
         name: view
             .value(schema::layer::NAME)
@@ -672,10 +654,140 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         bg_color,
         motion_blur,
         frame_blending: setting_bool(&view, ct, c::FRAME_BLENDING),
+        advanced_3d: setting_str(&view, ct, "renderer").as_deref() == Some("advanced_3d"),
         markers: compile_markers(stage, path),
         layers,
         deps,
     })
+}
+
+/// Layer `i` of a comp whose layers are `paths` (top first), with its parent,
+/// light source and track matte resolved to layer indices.
+fn compile_layer_at(
+    stage: &Stage,
+    paths: &[PrimPath],
+    i: usize,
+    duration: Time,
+) -> Result<CompiledLayer, EvalError> {
+    let index_of = |p: &PrimPath| paths.iter().position(|q| q == p);
+    let lv = stage
+        .prim(&paths[i])
+        .ok_or_else(|| EvalError::NoSuchPrim(paths[i].clone()))?;
+    let mut layer = compile_layer(stage, &lv, duration)?;
+    layer.parent = setting_ref(&lv, l::PARENT)
+        .and_then(|p| index_of(&p))
+        .filter(|&p| p != i);
+    if let Some(light) = &mut layer.light {
+        light.source = setting_ref(&lv, li::SOURCE)
+            .and_then(|p| index_of(&p))
+            .filter(|&p| p != i);
+    }
+    if layer.track_matte != TrackMatte::None {
+        layer.track_matte_layer = match setting_ref(&lv, l::TRACK_MATTE_LAYER) {
+            Some(p) => index_of(&p),
+            None => i.checked_sub(1),
+        };
+    }
+    Ok(layer)
+}
+
+/// What invalidates a compiled comp: the comp, and its layers' source items
+/// (their settings, such as solid color, size and footage interpretation,
+/// are compiled into the layers).
+fn comp_deps(comp: &PrimPath, layers: &[CompiledLayer]) -> Vec<PrimPath> {
+    let mut deps = vec![comp.clone()];
+    for layer in layers {
+        if let CompiledSource::Comp { path, .. } | CompiledSource::Asset(path, _) = &layer.source
+            && !deps.contains(path)
+        {
+            deps.push(path.clone());
+        }
+    }
+    deps
+}
+
+/// (some layer has an enabled expression, some of them need JavaScript).
+fn expression_flags(layers: &[CompiledLayer]) -> (bool, bool) {
+    let any = layers.iter().any(CompiledLayer::has_expressions);
+    let js = any
+        && layers
+            .iter()
+            .any(|l| l.expr_props().iter().any(|e| e.fast.is_none()));
+    (any, js)
+}
+
+/// `comp` with the layers `dirty` compiled again from `stage`, the others
+/// kept. `None` when its layer list changed (or a layer fails to compile):
+/// the caller compiles the whole comp.
+fn recompile_layers(
+    stage: &Stage,
+    mut comp: CompiledComp,
+    dirty: &[PrimPath],
+) -> Option<CompiledComp> {
+    let paths: Vec<PrimPath> = comp.layers.iter().map(|l| l.path.clone()).collect();
+    if comp_layers(stage, &comp.path) != paths {
+        return None;
+    }
+    for layer in dirty {
+        let i = paths.iter().position(|p| p == layer)?;
+        comp.layers[i] = compile_layer_at(stage, &paths, i, comp.duration).ok()?;
+    }
+    comp.deps = comp_deps(&comp.path, &comp.layers);
+    (comp.has_expressions, comp.has_js_expressions) = expression_flags(&comp.layers);
+    Some(comp)
+}
+
+/// The layer of `comp` that a change at `path` stays inside: `path` is the
+/// layer or below it. `whole` changes (the prim created, removed, moved or
+/// resynced) count only strictly below the layer; at the layer itself they
+/// change the comp's layer list.
+fn layer_holding<'a>(comp: &'a CompiledComp, path: &PrimPath, whole: bool) -> Option<&'a PrimPath> {
+    comp.layers
+        .iter()
+        .map(|l| &l.path)
+        .find(|l| l.is_prefix_of(path) && (!whole || *l != path))
+}
+
+/// [`StageEvent::touches`] for one change.
+fn change_touches(change: &bae_model::Change, path: &PrimPath) -> bool {
+    use bae_model::Change;
+    match change {
+        Change::PrimMoved { from, to } => {
+            path.is_prefix_of(from)
+                || path.is_prefix_of(to)
+                || from.is_prefix_of(path)
+                || to.is_prefix_of(path)
+        }
+        Change::PrimRemoved { path: p } | Change::Resynced { path: p } => {
+            path.is_prefix_of(p) || p.is_prefix_of(path)
+        }
+        other => path.is_prefix_of(other.path()),
+    }
+}
+
+/// The layers of `comp` that `changes` changed, when they changed nothing else
+/// of it (comp settings, its layer list, markers, source items); `None`
+/// when the whole comp must be compiled again.
+fn dirty_layers(comp: &CompiledComp, changes: &[bae_model::Change]) -> Option<Vec<PrimPath>> {
+    let mut dirty = Vec::new();
+    for change in changes {
+        if !comp.deps.iter().any(|d| change_touches(change, d)) {
+            continue;
+        }
+        let layer = match change {
+            bae_model::Change::AttrChanged { path, .. }
+            | bae_model::Change::PrimChanged { path } => layer_holding(comp, path, false),
+            bae_model::Change::PrimCreated { path }
+            | bae_model::Change::PrimRemoved { path }
+            | bae_model::Change::Resynced { path } => layer_holding(comp, path, true),
+            bae_model::Change::PrimMoved { from, to } => layer_holding(comp, from, true)
+                .filter(|l| layer_holding(comp, to, true) == Some(*l)),
+        }?;
+        if !dirty.contains(layer) {
+            dirty.push(layer.clone());
+        }
+    }
+    Some(dirty)
 }
 
 fn compile_layer(
@@ -688,6 +800,7 @@ fn compile_layer(
     let kind = layer_kind(setting_str(v, lt, l::KIND).as_deref().unwrap_or("solid"));
     let three_d = setting_bool(v, lt, l::THREE_D);
     let switches = LayerSwitches {
+        quality: crate::LayerQuality::from_token(setting_str(v, lt, "quality").as_deref()),
         enabled: setting(v, lt, l::ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(true),
@@ -822,10 +935,29 @@ fn compile_layer(
         ("material:specular_shininess", Value::Float(5.0)),
         ("material:metal", Value::Float(100.0)),
         ("material:light_transmission", Value::Float(0.0)),
+        ("material:shadow_color", Value::Color([0.0, 0.0, 0.0, 1.0])),
+        ("material:appears_in_reflections", Value::Int(1)),
+        ("material:reflection_intensity", Value::Float(0.0)),
+        ("material:reflection_sharpness", Value::Float(100.0)),
+        ("material:reflection_rolloff", Value::Float(0.0)),
+        ("material:transparency", Value::Float(0.0)),
+        ("material:transparency_rolloff", Value::Float(0.0)),
+        ("material:index_of_refraction", Value::Float(1.0)),
     ]
     .into_iter()
     .map(|(a, d)| (a, p(a, d)))
     .collect();
+    if matches!(kind, LayerKind::Text | LayerKind::Shape) {
+        for (a, d) in [
+            ("geometry:bevel_style", Value::Int(1)),
+            ("geometry:bevel_direction", Value::Int(1)),
+            ("geometry:bevel_depth", Value::Float(2.0)),
+            ("geometry:hole_bevel_depth", Value::Float(100.0)),
+            ("geometry:extrusion_depth", Value::Float(0.0)),
+        ] {
+            options.push((a, p(a, d)));
+        }
+    }
     match kind {
         LayerKind::Camera => options.push((
             cam::DEPTH_OF_FIELD,
@@ -858,6 +990,10 @@ fn compile_layer(
         casts_shadows: setting_bool(v, lt, li::CASTS_SHADOWS),
         shadow_darkness: p(li::SHADOW_DARKNESS, Value::Float(100.0)),
         shadow_diffusion: p(li::SHADOW_DIFFUSION, Value::Float(0.0)),
+        source: None,
+        background_visible: setting_bool(v, lt, li::BACKGROUND_VISIBLE),
+        background_opacity: p(li::BACKGROUND_OPACITY, Value::Float(100.0)),
+        background_blur: p(li::BACKGROUND_BLUR, Value::Float(0.0)),
     });
 
     let lpath = v.path().clone();
@@ -1252,6 +1388,7 @@ impl CompiledComp {
                     camera: None,
                     light: None,
                     material: None,
+                    geometry: None,
                     depends_on: Vec::new(),
                 }
             })
@@ -1315,7 +1452,32 @@ impl CompiledComp {
                     specular_intensity: percent("material:specular_intensity", 50.0),
                     specular_shininess: percent("material:specular_shininess", 5.0),
                     metal: percent("material:metal", 100.0),
+                    shadow_color: match opt("material:shadow_color") {
+                        Some(Value::Color(c)) => c,
+                        _ => [0.0, 0.0, 0.0, 1.0],
+                    },
+                    appears_in_reflections: mode("material:appears_in_reflections", 1),
+                    reflection_intensity: percent("material:reflection_intensity", 0.0),
+                    reflection_sharpness: percent("material:reflection_sharpness", 100.0),
+                    reflection_rolloff: percent("material:reflection_rolloff", 0.0),
+                    transparency: percent("material:transparency", 0.0),
+                    transparency_rolloff: percent("material:transparency_rolloff", 0.0),
+                    index_of_refraction: percent("material:index_of_refraction", 1.0),
                 });
+                if matches!(layer.kind, LayerKind::Text | LayerKind::Shape) {
+                    let int = |attr: &str, default: u8| {
+                        opt(attr)
+                            .and_then(|v| v.as_f64())
+                            .map_or(default, |n| n.round().clamp(0.0, 255.0) as u8)
+                    };
+                    out[i].geometry = Some(crate::evaluated::GeometryState {
+                        bevel_style: int("geometry:bevel_style", 1),
+                        bevel_direction: int("geometry:bevel_direction", 1),
+                        bevel_depth: percent("geometry:bevel_depth", 2.0),
+                        hole_bevel_depth: percent("geometry:hole_bevel_depth", 100.0),
+                        extrusion_depth: percent("geometry:extrusion_depth", 0.0).max(0.0),
+                    });
+                }
             }
             if let Some(cm) = &layer.camera {
                 out[i].camera = Some(CameraState {
@@ -1357,6 +1519,10 @@ impl CompiledComp {
                     shadow_diffusion: lg.shadow_diffusion.f64(&cx),
                     point_of_interest: poi,
                     world_matrix: wm,
+                    source: lg.source,
+                    background_visible: lg.background_visible,
+                    background_opacity: lg.background_opacity.f64(&cx),
+                    background_blur: lg.background_blur.f64(&cx),
                 });
             }
         }
@@ -1372,6 +1538,7 @@ impl CompiledComp {
             bg_color: self.bg_color,
             motion_blur: self.motion_blur,
             frame_blending: self.frame_blending,
+            advanced_3d: self.advanced_3d,
             layers: out,
             camera,
             errors: Vec::new(),
@@ -1703,6 +1870,9 @@ const MAX_NESTING: usize = 64;
 #[derive(Debug, Default)]
 pub struct Evaluator {
     comps: HashMap<PrimPath, Arc<CompiledComp>>,
+    /// Compiled comps of which only some layers changed since (those
+    /// layers): on next use only they are compiled again.
+    stale: HashMap<PrimPath, (Arc<CompiledComp>, Vec<PrimPath>)>,
     /// Project settings and items for expressions (`colorDepth`, `footage()`);
     /// rebuilt after any edit.
     project: Option<Arc<expr::ProjectInfo>>,
@@ -1739,20 +1909,51 @@ impl Evaluator {
         if *self.overrides == overrides[..] {
             return;
         }
-        let touched: Vec<PrimPath> = self
+        let changes: Vec<bae_model::Change> = self
             .overrides
             .iter()
             .chain(&overrides)
-            .map(|o| o.prim.clone())
-            .collect();
-        self.comps.retain(|_, c| {
-            !c.deps.iter().any(|d| {
-                touched
-                    .iter()
-                    .any(|p| d.is_prefix_of(p) || p.is_prefix_of(d))
+            .map(|o| bae_model::Change::AttrChanged {
+                path: o.prim.clone(),
+                attr: o.attr.clone(),
+                range: bae_model::TimeRange::ALL,
             })
-        });
+            .collect();
+        self.mark_stale(&changes);
         self.overrides = overrides.into();
+    }
+
+    /// Moves the compiled comps `changes` touch to [`Self::stale`] (when they
+    /// stay inside some of their layers) or drops them.
+    fn mark_stale(&mut self, changes: &[bae_model::Change]) {
+        let touched: Vec<PrimPath> = self
+            .comps
+            .iter()
+            .filter(|(_, c)| {
+                c.deps
+                    .iter()
+                    .any(|d| changes.iter().any(|ch| change_touches(ch, d)))
+            })
+            .map(|(p, _)| p.clone())
+            .collect();
+        for path in touched {
+            let c = self.comps.remove(&path).expect("listed");
+            if let Some(dirty) = dirty_layers(&c, changes) {
+                self.stale.insert(path, (c, dirty));
+            }
+        }
+        self.stale
+            .retain(|_, (c, dirty)| match dirty_layers(c, changes) {
+                Some(more) => {
+                    for l in more {
+                        if !dirty.contains(&l) {
+                            dirty.push(l);
+                        }
+                    }
+                    true
+                }
+                None => false,
+            });
     }
 
     /// Evaluate `comp` at comp time `time`.
@@ -1799,6 +2000,16 @@ impl Evaluator {
     fn compiled(&mut self, stage: &Stage, comp: &PrimPath) -> Result<Arc<CompiledComp>, EvalError> {
         if let Some(c) = self.comps.get(comp) {
             return Ok(c.clone());
+        }
+        // Only some layers changed: compile those again, keep the others.
+        if let Some((old, dirty)) = self.stale.remove(comp)
+            && let Ok(old) = Arc::try_unwrap(old)
+            && let Some(c) =
+                with_overrides(&self.overrides, || recompile_layers(stage, old, &dirty))
+        {
+            let c = Arc::new(c);
+            self.comps.insert(comp.clone(), c.clone());
+            return Ok(c);
         }
         let c = Arc::new(with_overrides(&self.overrides, || {
             compile_comp(stage, comp)
@@ -2015,8 +2226,7 @@ impl Evaluator {
 
     /// Drop compiled comps that `event` may have changed.
     pub fn invalidate(&mut self, event: &StageEvent) {
-        self.comps
-            .retain(|_, c| !c.deps.iter().any(|d| event.touches(d)));
+        self.mark_stale(&event.changes);
         let structural = event.changes.iter().any(|c| match c {
             bae_model::Change::AttrChanged { attr, .. } => attr == l::NAME,
             _ => true,
@@ -2033,6 +2243,7 @@ impl Evaluator {
     /// Drop every compiled comp.
     pub fn clear(&mut self) {
         self.comps.clear();
+        self.stale.clear();
         self.comp_list = None;
         self.project = None;
         if let Some(s) = &self.samples {
@@ -2165,6 +2376,8 @@ impl CompiledLayer {
                 li::FALLOFF_DISTANCE => self.light.as_ref().map(|c| &c.falloff_distance),
                 li::SHADOW_DARKNESS => self.light.as_ref().map(|c| &c.shadow_darkness),
                 li::SHADOW_DIFFUSION => self.light.as_ref().map(|c| &c.shadow_diffusion),
+                li::BACKGROUND_OPACITY => self.light.as_ref().map(|c| &c.background_opacity),
+                li::BACKGROUND_BLUR => self.light.as_ref().map(|c| &c.background_blur),
                 _ => self
                     .options
                     .iter()
@@ -2248,6 +2461,8 @@ impl CompiledLayer {
                 &l.falloff_distance,
                 &l.shadow_darkness,
                 &l.shadow_diffusion,
+                &l.background_opacity,
+                &l.background_blur,
             ]);
         }
         all.into_iter()
@@ -2308,6 +2523,8 @@ impl CompiledLayer {
                     &l.falloff_distance,
                     &l.shadow_darkness,
                     &l.shadow_diffusion,
+                    &l.background_opacity,
+                    &l.background_blur,
                 ]
                 .iter()
                 .any(|p| p.has_expression())

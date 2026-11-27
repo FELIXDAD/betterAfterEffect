@@ -19,6 +19,7 @@ pub const FILE_NAME: &str = "dialogs.json";
 pub struct Remembered {
     pub comp: CompSettingsMemory,
     pub solid: SolidSettingsMemory,
+    pub recent_fonts: Vec<String>,
 }
 
 impl VersionedSettings for Remembered {
@@ -31,12 +32,14 @@ impl Remembered {
         Remembered {
             comp: d.comp.clone(),
             solid: d.solid.clone(),
+            recent_fonts: d.recent_fonts.clone(),
         }
     }
 
     pub(crate) fn apply(self, d: &mut Dialogs) {
         d.comp = self.comp;
         d.solid = self.solid;
+        d.recent_fonts = self.recent_fonts;
     }
 }
 

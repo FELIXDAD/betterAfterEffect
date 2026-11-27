@@ -303,7 +303,7 @@ impl Editor {
 }
 
 pub(super) fn menu(
-    ui: &mut egui::Ui,
+    button: &egui::Response,
     id: u64,
     index: usize,
     module: &mut QueueOutput,
@@ -311,14 +311,10 @@ pub(super) fn menu(
     library: Option<&Library>,
     open: &mut Option<(u64, QueueLink)>,
 ) {
-    let button = ui.add(egui::Button::new("▾").frame(false).small()).labeled(
-        egui::WidgetType::Button,
-        tr("File Name and Location Templates"),
-    );
     // As AE lays it out: the current template first, a separator, the others
     // in AE's order (user templates after the built-ins), a separator and
     // Custom.... No check marks; all enabled, as in AE.
-    egui::Popup::menu(&button).show(|ui| {
+    egui::Popup::menu(button).show(|ui| {
         let items: Vec<_> = PRESETS
             .iter()
             .map(|(n, p)| (tr(n), *p))

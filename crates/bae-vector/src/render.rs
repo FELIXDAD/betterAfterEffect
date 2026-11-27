@@ -842,6 +842,14 @@ impl SourceProvider for ShapeProvider {
         crate::SHAPE_PROVIDER
     }
 
+    /// The fills' outlines in layer pixels, for Advanced 3D extrusion (04).
+    fn outlines(&self, content: &CustomContent) -> Option<Arc<bae_render::source::Outlines>> {
+        let scene = self.scene_of(content).ok()?;
+        let mut out = bae_render::source::Outlines::default();
+        collect_outlines(&scene.items, &mut out);
+        Some(Arc::new(out))
+    }
+
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
         if let Some(hit) = self.cache.lock().get(content.hash) {
             return Ok(hit);
@@ -872,5 +880,41 @@ impl bae_gpu::WarmUp for VectorWarmUp {
 
     fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
         VelloRenderer::warm(gpu).map_err(|e| e.to_string())
+    }
+}
+
+/// Flattened fill outlines of `items` (layer pixels): a gradient fill takes
+/// its average stop colour.
+fn collect_outlines(items: &[DrawItem], out: &mut bae_render::source::Outlines) {
+    for item in items {
+        match item {
+            DrawItem::Fill(f) => {
+                let mut color = match &f.brush {
+                    Brush::Solid(c) => *c,
+                    Brush::Gradient(g) if !g.stops.is_empty() => {
+                        let n = g.stops.len() as f32;
+                        g.stops.iter().fold([0.0; 4], |a, s| {
+                            std::array::from_fn(|k| a[k] + s.color[k] / n)
+                        })
+                    }
+                    Brush::Gradient(_) => [0.0; 4],
+                };
+                color[3] *= f.opacity;
+                let mut contours: Vec<Vec<[f64; 2]>> = Vec::new();
+                kurbo::flatten(f.transform * &f.path, 0.25, |el| match el {
+                    kurbo::PathEl::MoveTo(p) => contours.push(vec![[p.x, p.y]]),
+                    kurbo::PathEl::LineTo(p) => {
+                        if let Some(c) = contours.last_mut() {
+                            c.push([p.x, p.y]);
+                        }
+                    }
+                    _ => {}
+                });
+                out.fills
+                    .push(bae_render::source::OutlineFill { color, contours });
+            }
+            DrawItem::Layer(l) => collect_outlines(&l.items, out),
+            DrawItem::Stroke(_) => {}
+        }
     }
 }

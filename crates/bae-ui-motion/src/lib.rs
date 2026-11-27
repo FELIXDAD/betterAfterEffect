@@ -28,9 +28,12 @@ mod assist;
 mod audio_analysis;
 pub mod catalog;
 mod common;
+mod content_aware_fill;
 mod context_menu;
 pub mod demo;
 pub mod dialogs;
+pub mod disk_frames;
+mod display_color;
 pub mod effects;
 mod expr;
 mod expr_menu;
@@ -49,10 +52,12 @@ pub mod menus;
 mod paint_panels;
 mod panel_columns;
 mod panels;
+mod path_menu;
 mod path_nulls;
 mod playback;
 mod prefs;
 mod presets;
+mod vision_bake;
 pub use presets::register_preset_index;
 mod preview_snapshot;
 pub mod progress_metadata;
@@ -62,6 +67,7 @@ mod render;
 pub mod render_queue;
 pub mod scopes;
 pub mod scripts;
+mod scriptui;
 pub mod session;
 mod source_view_menu;
 mod timeline;
@@ -97,6 +103,7 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     effects::register,
     render_queue::register,
     layer_panel::register,
+    content_aware_fill::register,
     tracker::register,
     ae_panels::register,
     presets::register,
@@ -141,6 +148,7 @@ impl AppModule for MotionUiModule {
         app.add_module(bae_motion::MotionModule);
         app.add_module(bae_script::ScriptModule);
         bae_ui::i18n::register(scripts::ZH);
+        bae_ui::i18n::register(scriptui::ZH);
         // Every module registers its own Chinese strings and panels.
         for register in MODULES {
             register(app);
@@ -237,12 +245,32 @@ impl AppModule for MotionUiModule {
         let scripts_dir = app
             .resource::<bae_platform::AppDirs>()
             .map(|d| d.data.join("Scripts"));
+        scriptui::install(app, scripts_dir.as_deref());
         let menu = app.registry::<MenuItemSpec>();
         if let Some(dir) = &scripts_dir {
             scripts::register_menu(&menu, &owner, dir);
         }
+        let _ = app.register("script_editor", scripts::editor_panel());
+        let editor = MenuItemSpec::new(
+            &["File", "Scripts"],
+            "Open Script Editor...",
+            "motion.file.script_editor",
+        )
+        .workspace(menus::WORKSPACE)
+        .at(vec![
+            bae_ui::menu::MenuPos::new(i32::MAX, i32::MAX),
+            bae_ui::menu::MenuPos::new(0, 3),
+        ]);
+        let _ = app.register("motion.file.script_editor", editor);
+        let recent = scripts::RecentScripts::load(
+            app.resource::<bae_platform::AppDirs>()
+                .map(|d| d.config_file("recent-scripts.json")),
+        );
+        recent.publish(&menu, &owner);
+        recent.check_files();
         let script_actions: std::sync::Arc<dyn ActionHandler> =
             std::sync::Arc::new(scripts::ScriptActions {
+                recent: std::sync::Mutex::new(recent),
                 dir: scripts_dir,
                 menu,
                 owner: owner.clone(),
