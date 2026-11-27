@@ -84,7 +84,10 @@ pub struct DirConfig {
     /// logs, no presence heartbeat, lock not held) count as departed: their logs
     /// are deleted once another log holds everything in them (§4.7). Temporary
     /// files this old are leftovers of crashed writers and are deleted too.
-    /// `None`: never delete anything.
+    /// `None` (the default): never delete anything. Turn it on explicitly, with
+    /// [`DirConfig::RECOMMENDED_INACTIVE_AFTER`]: the hub does for its own
+    /// project directories; the app should once the cleanup has been tried on
+    /// real NAS shares (spec 4.8: how their file locks behave).
     pub inactive_after: Option<Duration>,
     /// How often to look for departed clients' files. The first pass runs this
     /// long after the first scan.
@@ -108,6 +111,11 @@ pub struct DirConfig {
     pub cleanup_budget: Duration,
 }
 
+impl DirConfig {
+    /// The `inactive_after` to use when turning the cleanup on: three days.
+    pub const RECOMMENDED_INACTIVE_AFTER: Duration = Duration::from_secs(3 * 24 * 3600);
+}
+
 impl Default for DirConfig {
     fn default() -> Self {
         DirConfig {
@@ -116,7 +124,7 @@ impl Default for DirConfig {
             compact_ratio: 4,
             full_check_every: 30,
             watch: true,
-            inactive_after: Some(Duration::from_secs(3 * 24 * 3600)),
+            inactive_after: None,
             cleanup_interval: Duration::from_secs(10 * 60),
             absorb_departed: true,
             absorb_per_pass: 1,
@@ -385,6 +393,12 @@ impl DirTransport {
     /// Takes an advisory lock on `updates/<client>.lock` so two sessions on one
     /// machine cannot share a client ID ([`SyncError::ClientIdInUse`]). File
     /// systems without locking are accepted as they are.
+    ///
+    /// Blocks: besides creating directories on the share, a lock that is held
+    /// is retried for up to 2 seconds before `ClientIdInUse` (another client's
+    /// cleanup pass holds it for a moment while it deletes one of our files,
+    /// §4.7). Call it off the UI thread, e.g. on the thread that then hands the
+    /// transport to [`crate::ThreadedTransport::spawn`].
     pub fn open(
         project: impl AsRef<Path>,
         client: ClientId,

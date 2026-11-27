@@ -270,6 +270,15 @@ fn open_store(dir: &Path, waker: &Waker) -> Result<ThreadedTransport, SyncError>
     let config = DirConfig {
         poll_interval: STORE_POLL,
         watch: false,
+        // The cleanup of departed clients (spec 4.7) is off by default. A
+        // project directory of the hub normally holds only the hub's own logs,
+        // so here it only removes temporary files its crashes left; a
+        // shared-folder project copied in has other clients' logs, which
+        // nobody writes to any more and which go once the hub's logs hold
+        // them. The open question that keeps it off elsewhere, how file locks
+        // behave on NAS shares, does not arise: no other client runs on this
+        // directory.
+        inactive_after: Some(DirConfig::RECOMMENDED_INACTIVE_AFTER),
         ..DirConfig::default()
     };
     let store = DirTransport::open(dir, hub_client(), config)?;

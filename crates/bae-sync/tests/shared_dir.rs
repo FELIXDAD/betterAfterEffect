@@ -1259,10 +1259,61 @@ fn leftover_temporary_and_lock_files_are_removed() {
     DirTransport::open(&dir, ClientId::new("g").unwrap(), fast()).unwrap();
 }
 
+/// Deleting other clients' logs is off unless asked for: the app turns it on
+/// once it has been tried on real NAS shares (spec 4.8), the hub does for its
+/// own directories.
+#[test]
+fn the_cleanup_is_off_unless_asked_for() {
+    assert_eq!(DirConfig::default().inactive_after, None);
+    let (_tmp, dir) = project_dir();
+    let mut clients = vec![
+        Client::open(&dir, "x", fast(), 1),
+        Client::open(&dir, "c", fast(), 2),
+    ];
+    work(&mut clients, 10);
+    // c's logs hold everything x wrote; x left days ago.
+    edit_each(&mut clients[1]);
+    clients[1].pump();
+    compact(&mut clients[1]);
+    drop(clients);
+    let days_ago = SystemTime::now() - 2 * DirConfig::RECOMMENDED_INACTIVE_AFTER;
+    for doc in DOCS {
+        set_mtime(&log(&dir, doc, "x"), days_ago);
+    }
+    let often = DirConfig {
+        cleanup_interval: Duration::ZERO,
+        ..fast()
+    };
+    let mut a = Client::open(&dir, "a", often.clone(), 3);
+    for _ in 0..3 {
+        a.pump();
+    }
+    assert_eq!(has_logs(&dir, "x"), [true, true]);
+    assert_eq!(a.dir.stats().cleanups, 0);
+    drop(a);
+    // Asked for with the recommended setting: they go.
+    let config = DirConfig {
+        inactive_after: Some(DirConfig::RECOMMENDED_INACTIVE_AFTER),
+        cleanup_budget: Duration::MAX,
+        ..often
+    };
+    let mut a = Client::open(&dir, "a", config, 4);
+    for _ in 0..3 {
+        a.pump();
+    }
+    assert_eq!(has_logs(&dir, "x"), [false, false]);
+}
+
 /// Clients join, edit, compact and leave in waves while every live one cleans
 /// up: whatever got deleted, a newcomer still gets every op. (No two clients
 /// create the same name here: how the mirror names such twins can depend on
 /// import order, which is the doc model's business, not the folder's.)
+//
+// TODO(#737): back to colliding names (`collide: true`) once the doc-model
+// issue reported on #737 is fixed: prims of the same name created
+// concurrently end up named differently in the mirrors (`to_trees`) of two
+// clients whose Loro version vectors are identical (`shared` on one,
+// `shared_<peer>_<counter>` on the other), in about one run in five.
 #[test]
 fn clients_coming_and_going_lose_nothing() {
     let (_tmp, dir) = project_dir();
@@ -1280,6 +1331,7 @@ fn clients_coming_and_going_lose_nothing() {
                 ..cleaner()
             };
             let mut c = Client::open(&dir, &format!("k{next}"), config, 100 + next);
+            // TODO(#737): see above.
             c.collide = false;
             live.push(c);
             next += 1;
@@ -1317,6 +1369,7 @@ fn clients_coming_and_going_lose_nothing() {
         },
         7,
     );
+    // TODO(#737): see above.
     last.collide = false;
     last.pump();
     last.pump();
