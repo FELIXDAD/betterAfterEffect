@@ -469,6 +469,55 @@ fn a_folder_we_cannot_write_is_joined_read_only() {
     assert!(!dir.join("presence/reader.presence").exists());
 }
 
+/// Our own lock file cannot be opened for writing (copied read-only, made by
+/// another user) while `updates/` can be written: after a few attempts the
+/// folder is joined read-only (our earlier edits are read like anyone's),
+/// not left offline for good; and the write check, which tries the lock file
+/// too, does not reconnect while it stays so.
+#[cfg(unix)]
+#[test]
+fn a_lock_file_we_cannot_open_joins_read_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_tmp, dir) = project_dir();
+    let mut w = App::join(&dir, config("locked"));
+    wait("online", LONG, || {
+        w.pump();
+        w.conn.is_online()
+    });
+    w.set_opacity(5.0);
+    let r = w.conn.close(&mut w.stage).wait(LONG).map(|r| r.is_ok());
+    assert_eq!(r, Some(true));
+
+    let lock = dir.join("updates/locked.lock");
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().write(true).open(&lock).is_ok() {
+        // Permissions do not apply (running as root): nothing to test here.
+        return;
+    }
+    let mut cfg = config("locked");
+    cfg.backoff.failed_retry = Some(Duration::from_millis(200));
+    let mut a = App::join(&dir, cfg);
+    let mut offline = false;
+    wait("online read-only", LONG, || {
+        a.pump();
+        offline |= matches!(a.conn.status().state, ConnectionState::Offline { .. });
+        a.conn.is_online() && a.opacity() == Some(Value::Float(5.0))
+    });
+    assert!(offline, "the denied attempts went offline first");
+    assert_eq!(a.conn.access(), Access::Read);
+    let attempts = a.conn.connect_attempts();
+    assert!(attempts > 1, "{attempts}");
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(1) {
+        a.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(a.conn.is_online());
+    assert_eq!(a.conn.access(), Access::Read);
+    assert_eq!(a.conn.connect_attempts(), attempts);
+}
+
 /// A session configured not to send data (a viewer) keeps it off on a
 /// folder it could write: the access is reported, the edits stay unsynced.
 #[test]
@@ -537,6 +586,150 @@ fn pump_never_waits_for_a_hanging_connect() {
     // Never connected: every document counts as not sent.
     assert!(!closing.unsynced().is_empty());
     drop(listener);
+}
+
+/// A hub that does not answer (here the handshake never comes) is reported
+/// offline each time the connect times out, never "not responding" for a
+/// moment before that, also with `unresponsive_after` as short as
+/// `hub_timeout`: the attempt ends on its own timeouts.
+#[cfg(feature = "hub")]
+#[test]
+fn a_hub_connect_that_times_out_is_offline_not_unresponsive() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("ws://{}/projects/film", listener.local_addr().unwrap());
+    let mut cfg = config("waiting");
+    cfg.hub_timeout = Duration::from_millis(300);
+    cfg.unresponsive_after = Duration::from_millis(300);
+    let mut conn = Connection::start(Target::Hub { url, token: None }, cfg);
+    let mut stage = client_stage(&base_snapshots());
+    let kind = |s: &ConnectionState| match s {
+        ConnectionState::Connecting => "connecting",
+        ConnectionState::Unresponsive { .. } => "unresponsive",
+        ConnectionState::Online { .. } => "online",
+        ConnectionState::Offline { .. } => "offline",
+        ConnectionState::Failed { .. } => "failed",
+    };
+    let mut seen: Vec<&str> = Vec::new();
+    wait("three timed-out attempts", LONG, || {
+        conn.pump(&mut stage);
+        let now = kind(&conn.status().state);
+        if seen.last() != Some(&now) {
+            seen.push(now);
+        }
+        seen.iter().filter(|k| **k == "offline").count() >= 3
+    });
+    assert!(!seen.contains(&"unresponsive"), "{seen:?}");
+    assert!(conn.connect_attempts() >= 3);
+    drop(listener);
+}
+
+/// `n` pseudo-random letters (Loro does not get them much smaller).
+#[cfg(feature = "hub")]
+fn text(seed: u64, n: usize) -> String {
+    let mut x = seed | 1;
+    (0..n)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            char::from(b'a' + (x % 26) as u8)
+        })
+        .collect()
+}
+
+/// Closing right after sharing a large project with a hub that reads slowly
+/// (one message per 100 ms): most of it is still held back by flow control.
+/// The rest goes out on the closing thread as the link takes it; all of it
+/// at once went over the link's `max_unsent` (here as the defaults are made,
+/// scaled down), the link failed and the hub got a few layers and a reset.
+#[cfg(feature = "hub")]
+#[test]
+fn closing_after_a_large_held_back_share_delivers_it() {
+    use bae_model::loro::{ExportMode, LoroDoc};
+    use bae_sync::Transport;
+    use bae_sync::{DocKey, HubLimits, HubTransport, MemDocs, Message, PROTOCOL_VERSION};
+
+    const MIB: usize = 1 << 20;
+    const LAYERS: usize = 8;
+    let limits = HubLimits {
+        max_message: 8 * MIB,
+        max_incoming: 8 * MIB,
+        max_backlog: MIB,
+        max_unsent: HubLimits::max_unsent_for(8 * MIB, MIB),
+        stall_timeout: Duration::from_secs(30),
+    };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("ws://{}/projects/film", listener.local_addr().unwrap());
+    let (got_tx, got) = std::sync::mpsc::channel::<Result<String, String>>();
+    let hub = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut link = HubTransport::accept_granting(stream, None, limits, Access::Write).unwrap();
+        link.send(Message::Hello {
+            protocol: PROTOCOL_VERSION,
+            client: ClientId::new("hub").unwrap(),
+            versions: Vec::new(),
+            seq: 1,
+            ack: Some(0),
+        })
+        .unwrap();
+        let deadline = Instant::now() + LONG;
+        while Instant::now() < deadline {
+            match link.recv() {
+                Ok(Some(Message::Updates { doc, .. })) => {
+                    let _ = got_tx.send(Ok(doc.to_string()));
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+                Err(e) => {
+                    let _ = got_tx.send(Err(e.to_string()));
+                    return;
+                }
+            }
+        }
+    });
+
+    let mut docs = MemDocs::new();
+    for i in 0..LAYERS {
+        let d = LoroDoc::new();
+        d.get_map("m")
+            .insert("v", text(i as u64 + 7, 5 * MIB))
+            .unwrap();
+        d.commit();
+        docs.load(
+            DocKey::parse(&format!("layer{i}")).unwrap(),
+            &d.export(ExportMode::Snapshot).unwrap(),
+        )
+        .unwrap();
+    }
+    let mut cfg = config("app");
+    cfg.hub_limits = limits;
+    let target = Target::Hub { url, token: None };
+    let mut session = target.session_config(cfg.client.clone());
+    session.max_backlog = Some(limits.max_backlog);
+    cfg.session = Some(session);
+    let mut conn = Connection::start(target, cfg);
+    wait("online", LONG, || {
+        conn.pump(&mut docs);
+        conn.is_online()
+    });
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(300) {
+        conn.pump(&mut docs);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(conn.session().stats().held_back > 0);
+    let mut closing = conn.close(&mut docs);
+    assert!(closing.unsynced().is_empty(), "{:?}", closing.unsynced());
+    let result = closing
+        .wait(LONG)
+        .map(|r| r.as_ref().map_err(ToString::to_string).copied());
+    assert_eq!(result, Some(Ok(())));
+    hub.join().unwrap();
+    let mut layers: Vec<String> = got.try_iter().filter_map(Result::ok).collect();
+    layers.sort();
+    layers.dedup();
+    assert_eq!(layers.len(), LAYERS, "{layers:?}");
 }
 
 /// A hub stand-in for links that fail in ways a real hub does not show on

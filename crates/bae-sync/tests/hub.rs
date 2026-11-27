@@ -595,9 +595,12 @@ fn text(seed: u64, n: usize) -> String {
 /// A newcomer on a slow link says hello every 100 ms while the relay's first
 /// sends are still on their way. Each of those `Hello`s says it lacks most of
 /// the project; the relay used to queue all of that again for every one of
-/// them (a NAS sending a 200 MB project over a VPN ran out of memory). Now it
-/// holds document data back while more than `max_backlog` waits, so at most
-/// that plus one message waits, and the reader still gets everything.
+/// them (a NAS sending a 200 MB project over a VPN ran out of memory). Two
+/// things keep that from happening: the `Hello`s acknowledge the relay's, so
+/// what is on its way is not queued again (the in-flight records, spec 2.4
+/// step 2), and the relay holds document data back while more than
+/// `max_backlog` waits (flow control, step 4), so at most that plus one
+/// message waits. The reader still gets everything.
 #[test]
 fn a_slow_reader_is_not_flooded_by_its_own_hellos() {
     use bae_model::loro::{ExportMode, LoroDoc};
@@ -683,14 +686,15 @@ fn a_slow_reader_is_not_flooded_by_its_own_hellos() {
         (DOCS * SIZE) >> 10
     );
     // `max_backlog`, one message over it, and a few `Hello`s. (Without flow
-    // control: tens of MiB.)
+    // control: the project less what the kernel's socket buffers take, about
+    // 16 MiB here.)
     assert!(peak <= limits.max_backlog + SIZE + (256 << 10), "{peak}");
-    // Without flow control each `Hello` made the relay send everything the
-    // reader lacked again: five to six times the project here. A stale `Hello`
-    // still costs one more copy of what was on its way when the backlog
-    // drained, but not one per `Hello`. Flow control cannot see what the
-    // kernel's socket buffers hold, so how much that is depends on the
-    // platform (1.4 times the project on Linux; larger loopback buffers, as
-    // Windows and macOS autotuning may give, send more).
-    assert!(data < 3 * DOCS * SIZE, "{data}");
+    // Sent once, with or without flow control: the in-flight records keep
+    // the reader's `Hello`s from queuing again what is on its way. Without
+    // them each `Hello` made the relay queue everything the reader lacked
+    // again: five to six times the project without flow control; with it
+    // one more copy of what the socket buffers held whenever the backlog
+    // drained (1.4 times the project on Linux, more where loopback buffers
+    // are larger).
+    assert!(data < DOCS * SIZE * 5 / 4, "{data}");
 }

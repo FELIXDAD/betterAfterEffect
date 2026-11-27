@@ -149,11 +149,15 @@ pub struct SessionConfig {
     /// of any size goes out when the backlog is below this (a newcomer's
     /// first sync of a large sublayer): at most this plus one message waits.
     ///
-    /// Without it, every `Hello` of a peer that has not read everything yet
-    /// (it says hello every few seconds, and on a slow link a large transfer
-    /// takes longer) made us queue everything it lacks once more. Some of
-    /// that still happens (a `Hello` cannot tell what is on its way), but at
-    /// most once per drained backlog instead of once per `Hello`.
+    /// It bounds memory: without it, everything the peer lacks is queued at
+    /// once (a newcomer joining a large project over a VPN). Resends are
+    /// another matter: a peer's `Hello` that acknowledges ours does not make
+    /// us queue again what is on its way (the in-flight records, see
+    /// [`Message::Hello`]'s `ack`). One that does not (an older peer, or our
+    /// `hello_interval` is `None`) makes us queue everything the peer lacks
+    /// once more; flow control limits that to once per drained backlog
+    /// instead of once per `Hello`. `crate::Connection::close` sends what it
+    /// flushes with this flow control, on its closing thread.
     ///
     /// [`SyncSession::flush`] ignores it. `None`: no flow control. Default
     /// 16 MiB, the hub link's default `HubLimits::max_backlog`.

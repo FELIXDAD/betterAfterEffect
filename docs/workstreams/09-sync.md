@@ -89,6 +89,7 @@
   - 合并 dev（#789、#808）：#808 的 `SessionConfig::send_data` 和本分支的 `read_only` 意思相同，只留 `send_data`（已经在 dev 里发布）。`Connection` 在对方只给 `Read` 时关掉它，配置里设成 `false` 的一直不发。不发的数据、被流量控制挡下的文档都没交给传输，不记为"在路上"（`documents_held_back_are_not_on_their_way`）。`ThreadedTransport` 的积压（#808）和本分支的 `stalled()` 合在一个 `Backlog` 里。Hub 握手按权限给上限（`client_limits`）并带 `x-bae-access`；只读令牌的 `Connection` 在 Hub 只读上限 64 KiB、本地改了 256 KiB 时也不被断开。
   - #798 评审跟进 1（spec 7.5）：`DirTransport::open` 报 `PermissionDenied` 不再直接算只读（Windows/SMB 上"等待删除"的锁文件也是这个错误）：再在 `updates/` 里建、删一个探测文件，建不了才只读，建得了就当普通失败重试。只读的共享目录链路每隔 `Backoff::failed_retry` 再探测一次，能写了就重新连接（可写）。
   - #798 评审跟进 2（spec 7.3、7.4）：连接超过 `ConnectionConfig::unresponsive_after`（默认 10 秒）还没在线时，状态是新的 `ConnectionState::Unresponsive { since }`（NAS 卡在打开、扫描或等旧链路放开时不再一直显示"连接中"）；连接线程照样等，闹钟按时唤醒一次。
+  - 合并 #808 后的评审跟进（spec 2.4、3.1、4.1、7.4、7.5、7.7、7.8）：`close` 把 `flush` 导出的数据交给关闭线程按 `max_backlog` 发（一次全交给链路时，大工程刚分享就关闭会超过 Hub 链路的 `max_unsent`，关闭失败）；Hub 的连接超过 2 × `hub_timeout` 加 1 秒才算 `Unresponsive`（以前每次超时重试都在 `Offline` 前闪一下）；锁文件连续 3 次被拒而目录能写时改为只读加入，只读链路的定期探测也看锁文件能不能打开（以前只读的锁文件让连接一直离线）；可写打开时删掉自己留下的探测文件（清理默认关闭，以前说"清理会删"不对）；规格 2.4 第 4 步和 3.1 改成：重发由"在路上"记录挡住，流量控制管积压，`a_slow_reader_is_not_flooded_by_its_own_hellos` 要求发出不到 1.25 倍；Hub README 写明握手用 `client_limits`。
 
 ### 2026-11-27（#782、#783 评审的跟进）
 

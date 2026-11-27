@@ -416,6 +416,7 @@ impl DirTransport {
         let presence = root.join(PRESENCE);
         fs::create_dir_all(&presence).map_err(SyncError::io(&presence))?;
         let lock = lock_client(&updates.join(format!("{client}.{LOCK_EXT}")), &client)?;
+        remove_own_probes(&updates, &client);
         Ok(Self::new(root, client, config, Some(lock)))
     }
 
@@ -444,8 +445,10 @@ impl DirTransport {
     }
 
     /// Whether `client` may write in the `updates/` folder of `project`:
-    /// creates and deletes a file of its own there (`<client>.tmp-<random>`,
-    /// which the cleanup of §4.7 removes if the delete fails). `Ok(false)`:
+    /// creates and deletes a file of its own there (`<client>.tmp-<random>`;
+    /// if the delete fails, the next [`open`](Self::open) of this client
+    /// removes it, holding the lock, and so does the cleanup of §4.7 where it
+    /// is turned on, `DirConfig::inactive_after`). `Ok(false)`:
     /// creating it was refused (`PermissionDenied`, `ReadOnlyFilesystem`), or
     /// `updates/` does not exist (so [`open`](Self::open) could not create
     /// it). Other errors are returned as they are.
@@ -471,6 +474,29 @@ impl DirTransport {
                     io::ErrorKind::PermissionDenied
                         | io::ErrorKind::ReadOnlyFilesystem
                         | io::ErrorKind::NotFound
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Whether [`open`](Self::open) can open `client`'s lock file in
+    /// `project` for writing: `Ok(true)` also when there is none (whether it
+    /// can be created is what [`probe_writable`](Self::probe_writable)
+    /// says), `Ok(false)` when opening it is refused (`PermissionDenied`,
+    /// `ReadOnlyFilesystem`: a read-only file, another user's, or on Windows
+    /// one being deleted). Opens it without locking or changing it. Blocks.
+    pub(crate) fn probe_lock(project: &Path, client: &ClientId) -> io::Result<bool> {
+        let path = project.join(UPDATES).join(format!("{client}.{LOCK_EXT}"));
+        match OpenOptions::new().write(true).open(&path) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
                 ) =>
             {
                 Ok(false)
@@ -1995,6 +2021,30 @@ fn lock_client(path: &Path, client: &ClientId) -> Result<File, SyncError> {
     }
 }
 
+/// Delete `updates/<client>.tmp-*`: probe files of ours whose delete failed
+/// (the write probe, [`DirTransport::probe_writable`]; the clock probe of the
+/// cleanup) or that a crash left behind. Called by `open` once it holds our
+/// lock, so no session of ours is writing one for itself; a write probe of
+/// another session of ours that is going on just then only creates and
+/// deletes its file, and does not mind that it is gone. Without this they
+/// stayed unless the cleanup of §4.7 is on (off by default). Errors are
+/// ignored: they are left for the next open.
+fn remove_own_probes(updates: &Path, client: &ClientId) {
+    let prefix = format!("{client}{TMP_MARK}");
+    let Ok(entries) = fs::read_dir(updates) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(&prefix))
+        {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Every record of the log at `path`, decoded.
 fn read_all_records(path: &Path) -> Result<Vec<Message>, SyncError> {
     let mut f = File::open(path).map_err(SyncError::io(path))?;
@@ -2672,6 +2722,47 @@ mod tests {
         let tmp = path.with_extension("tmp-test");
         fs::write(&tmp, bytes).unwrap();
         fs::rename(&tmp, path).unwrap();
+    }
+
+    /// Probe files of ours whose delete failed (`probe_writable`, the clock
+    /// probe) are removed when we open the folder writable, also with the
+    /// cleanup off (the default); others' files and the temporary files in
+    /// document folders are left alone. `probe_lock` tells a lock file we can
+    /// open, or none, from one we cannot.
+    #[test]
+    fn our_leftover_probe_files_are_removed_on_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let updates = tmp.path().join(UPDATES);
+        fs::create_dir_all(updates.join("root")).unwrap();
+        for name in ["a.tmp-1", "a.tmp-2", "b.tmp-3", "root/a.tmp-4", "ab.tmp-5"] {
+            fs::write(updates.join(name), b"").unwrap();
+        }
+        assert_eq!(DirConfig::default().inactive_after, None);
+        let a = ClientId::new("a").unwrap();
+        assert!(
+            DirTransport::probe_lock(tmp.path(), &a).unwrap(),
+            "no lock file"
+        );
+        let t = transport(tmp.path(), "a", DirConfig::default());
+        for gone in ["a.tmp-1", "a.tmp-2"] {
+            assert!(!updates.join(gone).exists(), "{gone}");
+        }
+        for kept in ["b.tmp-3", "root/a.tmp-4", "ab.tmp-5", "a.lock"] {
+            assert!(updates.join(kept).exists(), "{kept}");
+        }
+        // Held by `t`: still opens (the lock is advisory).
+        assert!(DirTransport::probe_lock(tmp.path(), &a).unwrap());
+        drop(t);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let lock = updates.join("a.lock");
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o444)).unwrap();
+            // Permissions do not apply to root.
+            if OpenOptions::new().write(true).open(&lock).is_err() {
+                assert!(!DirTransport::probe_lock(tmp.path(), &a).unwrap());
+            }
+        }
     }
 
     #[test]

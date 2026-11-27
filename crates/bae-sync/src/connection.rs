@@ -33,7 +33,7 @@ use crate::error::SyncError;
 #[cfg(feature = "hub")]
 use crate::hub::{HubLimits, HubTransport};
 use crate::presence::{PeerPresence, PresenceState};
-use crate::protocol::DocKey;
+use crate::protocol::{DocKey, Message};
 use crate::session::{SessionConfig, SyncSession};
 use crate::threaded::ThreadedTransport;
 use crate::transport::{Access, Transport};
@@ -49,9 +49,23 @@ const FOLDER_TICK: Duration = Duration::from_millis(10);
 /// are waited for, see [`Releasing`]): [`Failure::ClientIdInUse`] only once it
 /// lasted this long.
 const CLIENT_ID_GRACE: Duration = Duration::from_secs(2);
+/// Connect attempts in a row that may fail on our own lock file in a shared
+/// folder we can write ([`DirTransport::open`] denied, the write probe not)
+/// before the next one joins it read-only after all. A lock file that is
+/// being deleted (spec 7.5) is gone by then (each attempt already waits
+/// [`crate::dir::LOCK_WAIT`] for it); one that stays unopenable (a read-only
+/// copy, another user's file) would keep the connection offline for good.
+const LOCK_DENIED_ATTEMPTS: u32 = 3;
+/// How often the closing thread looks whether the link took what waits
+/// ([`send_paced`]).
+const CLOSE_POLL: Duration = Duration::from_millis(2);
 /// How often the I/O thread of a hub link reads the socket.
 #[cfg(feature = "hub")]
 const HUB_TICK: Duration = Duration::from_millis(2);
+/// Hubs: what a connect attempt may take beyond its own timeouts (starting
+/// its thread, looking up the name) before it counts as unresponsive.
+#[cfg(feature = "hub")]
+const HUB_CONNECT_SLACK: Duration = Duration::from_secs(1);
 
 /// Where the project is shared.
 #[derive(Clone, PartialEq, Eq)]
@@ -211,7 +225,11 @@ pub struct ConnectionConfig {
     /// as unsynced ([`ConnectionStatus::unsynced`]).
     pub io_stall: Duration,
     /// A connect attempt still not online after this long is reported as
-    /// [`ConnectionState::Unresponsive`] (it keeps waiting).
+    /// [`ConnectionState::Unresponsive`] (it keeps waiting). Hubs: not before
+    /// `2 × hub_timeout` plus a second either, because until then the
+    /// attempt ends on its own timeouts (a hub that does not answer is
+    /// reported [`ConnectionState::Offline`] with the reason, not "not
+    /// responding" for a moment before that).
     pub unresponsive_after: Duration,
     /// Hubs: timeout of each connect step (TCP connect, handshake).
     #[cfg(feature = "hub")]
@@ -293,7 +311,8 @@ pub enum ConnectionState {
     /// Still connecting after [`ConnectionConfig::unresponsive_after`] (since
     /// `since`): the shared folder or the hub does not answer, e.g. a NAS
     /// that hangs while the folder is opened or scanned, or while our
-    /// previous link to it lets go. Show "not responding"; the attempt keeps
+    /// previous link to it lets go (for hubs only past the connect's own
+    /// timeouts, see there). Show "not responding"; the attempt keeps
     /// waiting (nothing is lost, local edits stay unsynced), never on the
     /// thread that pumps, and the state moves on once it is done.
     /// [`Connection::retry`] does nothing meanwhile (another attempt would
@@ -418,6 +437,10 @@ impl Drop for Releasing {
 struct Worker {
     client: ClientId,
     folder: DirConfig,
+    /// Shared folders: join read-only when our lock file is denied, even if
+    /// `updates/` can be written (it was denied [`LOCK_DENIED_ATTEMPTS`]
+    /// times in a row).
+    read_only_if_denied: bool,
     io_tick: Option<Duration>,
     #[cfg(feature = "hub")]
     hub_timeout: Duration,
@@ -466,9 +489,28 @@ fn folder_writable(path: &Path, client: &ClientId) -> std::io::Result<bool> {
     DirTransport::probe_writable(path, client)
 }
 
+/// Whether a folder linked read-only can be linked writable now (blocks):
+/// a file of our own can be created in `updates/`, and our lock file, if
+/// there is one, can be opened for writing. The second is what failed when
+/// the folder was joined read-only after [`LOCK_DENIED_ATTEMPTS`]; without
+/// it such a link would be found writable, connect again, fail on the lock
+/// and scan the folder again every [`Backoff::failed_retry`].
+fn folder_writable_again(path: &Path, client: &ClientId) -> bool {
+    if !matches!(folder_writable(path, client), Ok(true)) {
+        return false;
+    }
+    #[cfg(test)]
+    if fault::deny_lock(path) {
+        return false;
+    }
+    matches!(DirTransport::probe_lock(path, client), Ok(true))
+}
+
 /// Test faults of shared folders, by path: [`DirTransport::open`] failing
-/// with access denied (a lock file that stays delete pending), and creating
-/// any file in `updates/` failing too (a folder this user cannot write).
+/// with access denied (a lock file that stays delete pending, or cannot be
+/// opened at all), creating any file in `updates/` failing too (a folder
+/// this user cannot write), and our lock file failing to open for writing
+/// when the write check tries it.
 #[cfg(test)]
 mod fault {
     use std::path::{Path, PathBuf};
@@ -480,6 +522,8 @@ mod fault {
         pub open: u32,
         /// The write probe fails.
         pub probe: bool,
+        /// The write check finds our lock file cannot be opened.
+        pub lock: bool,
     }
 
     static FOLDERS: Mutex<Vec<(PathBuf, Denied)>> = Mutex::new(Vec::new());
@@ -511,6 +555,10 @@ mod fault {
     pub(super) fn deny_probe(path: &Path) -> bool {
         folders().iter().any(|(p, d)| p == path && d.probe)
     }
+
+    pub(super) fn deny_lock(path: &Path) -> bool {
+        folders().iter().any(|(p, d)| p == path && d.lock)
+    }
 }
 
 impl Worker {
@@ -527,13 +575,17 @@ impl Worker {
                 // Write access = we can create our lock file in `updates/`.
                 // Denied: read-only only if we cannot create another file
                 // there either; otherwise it was the lock file (one being
-                // deleted), and a later attempt gets it.
+                // deleted), and a later attempt gets it. Unless it was
+                // denied a few times in a row already: then it stays so.
                 let (dir, access) = match open_folder(path, &client, &self.folder) {
                     Ok(dir) => (dir, Access::Write),
                     Err(e) => {
                         let denied =
                             matches!(&e, SyncError::Io { source, .. } if read_only_error(source));
-                        if !denied || !matches!(folder_writable(path, &client), Ok(false)) {
+                        let read_only = denied
+                            && (self.read_only_if_denied
+                                || matches!(folder_writable(path, &client), Ok(false)));
+                        if !read_only {
                             return Err(e);
                         }
                         let dir = DirTransport::open_read_only(path, client, self.folder.clone())?;
@@ -724,6 +776,9 @@ pub struct Connection {
     failures: u32,
     /// First of the current run of "client ID in use" failures.
     in_use_since: Option<Instant>,
+    /// Connect attempts in a row that failed on our own lock file in a
+    /// shared folder we can write ([`LOCK_DENIED_ATTEMPTS`]).
+    lock_denied: u32,
     attempts: u64,
     unsynced: bool,
     generation: u64,
@@ -772,6 +827,7 @@ impl Connection {
             access: Access::Unknown,
             failures: 0,
             in_use_since: None,
+            lock_denied: 0,
             attempts: 0,
             unsynced: false,
             generation: 0,
@@ -894,7 +950,7 @@ impl Connection {
         self.check_writable(now);
         self.unresponsive = self
             .connecting_since()
-            .is_some_and(|t| now.saturating_duration_since(t) >= self.config.unresponsive_after);
+            .is_some_and(|t| now.saturating_duration_since(t) >= self.unresponsive_after());
         self.unsynced = stuck || !self.session.unsynced(docs).is_empty();
         let (changed, presence) = self.refresh(out.presence_changed);
         out.status_changed = changed;
@@ -955,9 +1011,13 @@ impl Connection {
     }
 
     /// End the connection cleanly without blocking: while online, say we
-    /// left, import what arrived, send every local edit the remote lacks
-    /// (`flush`, ignoring `min_send_interval`), then close the link on a
-    /// background thread, which may take until the hub confirmed it read
+    /// left, import what arrived, and hand every local edit the remote lacks
+    /// to a background thread (`flush`, ignoring `min_send_interval`; the
+    /// data is exported here). That thread sends it with the session's flow
+    /// control ([`SessionConfig::max_backlog`]), as the link takes it: all
+    /// at once, a large upload held back by flow control could go over a hub
+    /// link's `max_unsent` and fail although the hub was reading. Then it
+    /// closes the link, which may take until the hub confirmed it read
     /// everything (up to `HubLimits::stall_timeout` without progress).
     /// [`Closing`] tells which documents had edits that could not be sent,
     /// and later whether the link delivered the rest.
@@ -980,28 +1040,36 @@ impl Connection {
             }
         };
         self.session.clear_presence();
+        // The last pump sends as usual (flow control included); what it held
+        // back is collected here and sent by the closing thread.
+        let mut rest = Collect::default();
         let sent = self
             .session
             .pump(docs, &mut transport)
-            .and_then(|_| self.session.flush(docs, &mut transport))
+            .and_then(|_| self.session.flush(docs, &mut rest))
             .map(|_| ());
         if sent.is_err() {
             // The link is gone: what it did not confirm may not have arrived.
             self.session.forget_unconfirmed();
         }
         let unsynced = self.session.unsynced(docs);
+        let pacing = Pacing {
+            max_backlog: self.session.config().max_backlog,
+            stall: self.close_stall(),
+        };
         let (tx, rx) = mpsc::channel();
         let wake = self.config.wake.clone();
         let releasing = Releasing::new(&self.target, &self.config.client);
         let spawned = std::thread::Builder::new()
             .name("bae-sync-close".into())
             .spawn(move || {
+                let paced = sent.and_then(|()| send_paced(&mut transport, rest.0, pacing));
                 let closed = transport.close();
                 drop(transport);
                 drop(releasing);
                 // The first error: a failed last pump means the link was
                 // already gone.
-                let _ = tx.send(sent.and(closed));
+                let _ = tx.send(paced.and(closed));
                 wake();
             });
         match spawned {
@@ -1056,6 +1124,7 @@ impl Connection {
                     _ => WriteCheck::Idle,
                 };
                 self.in_use_since = None;
+                self.lock_denied = 0;
                 // Ours now: no longer counts as being let go.
                 let Link {
                     transport,
@@ -1069,9 +1138,24 @@ impl Connection {
                     since: None,
                 };
             }
-            Some(Err(e)) => self.attempt_failed(e, now),
+            Some(Err(e)) => {
+                self.lock_denied = if self.lock_was_denied(&e) {
+                    self.lock_denied.saturating_add(1)
+                } else {
+                    0
+                };
+                self.attempt_failed(e, now);
+            }
             None => {}
         }
+    }
+
+    /// A connect attempt to a shared folder failed on our own lock file
+    /// although `updates/` can be written: the worker reports access denied
+    /// only then (otherwise it joins read-only).
+    fn lock_was_denied(&self, e: &SyncError) -> bool {
+        matches!(self.target, Target::Folder(_))
+            && matches!(e, SyncError::Io { source, .. } if read_only_error(source))
     }
 
     fn connect_now(&mut self, now: Instant) {
@@ -1090,6 +1174,7 @@ impl Connection {
         let worker = Worker {
             client: self.config.client.clone(),
             folder: self.config.folder.clone(),
+            read_only_if_denied: self.lock_denied >= LOCK_DENIED_ATTEMPTS,
             io_tick: self.config.io_tick,
             #[cfg(feature = "hub")]
             hub_timeout: self.config.hub_timeout,
@@ -1176,9 +1261,10 @@ impl Connection {
 
     /// While linked read-only to a shared folder: every
     /// [`Backoff::failed_retry`], check on a background thread whether the
-    /// folder can be written now (its permissions changed, or the link was
-    /// made read-only when it should not have been); if so, connect again,
-    /// writable. The edits made meanwhile then go out.
+    /// folder can be written now (its permissions changed, our lock file can
+    /// be opened again, or the link was made read-only when it should not
+    /// have been; [`folder_writable_again`]); if so, connect again, writable.
+    /// The edits made meanwhile then go out.
     fn check_writable(&mut self, now: Instant) {
         let path = match &self.target {
             Target::Folder(path) => path.clone(),
@@ -1199,7 +1285,7 @@ impl Connection {
                 let spawned = std::thread::Builder::new()
                     .name("bae-sync-probe".into())
                     .spawn(move || {
-                        let writable = folder_writable(&path, &client).unwrap_or(false);
+                        let writable = folder_writable_again(&path, &client);
                         if tx.send(writable).is_ok() {
                             wake();
                         }
@@ -1349,13 +1435,45 @@ impl Connection {
         }
     }
 
+    /// How long an attempt may go on before it counts as unresponsive
+    /// ([`ConnectionConfig::unresponsive_after`]). A hub's attempt ends on
+    /// its own timeouts (the TCP connect within `hub_timeout`, then each read
+    /// and write of the handshake), so it counts only once it took longer
+    /// than those allow; before, a hub that dropped our packets showed "not
+    /// responding" for a few milliseconds right before every "offline".
+    fn unresponsive_after(&self) -> Duration {
+        match &self.target {
+            Target::Folder(_) => self.config.unresponsive_after,
+            #[cfg(feature = "hub")]
+            Target::Hub { .. } => self.config.unresponsive_after.max(
+                self.config
+                    .hub_timeout
+                    .saturating_mul(2)
+                    .saturating_add(HUB_CONNECT_SLACK),
+            ),
+        }
+    }
+
     /// When a connection that is still connecting becomes unresponsive, if
     /// that is still to come.
     fn unresponsive_at(&self, now: Instant) -> Option<Instant> {
         let at = self
             .connecting_since()?
-            .checked_add(self.config.unresponsive_after)?;
+            .checked_add(self.unresponsive_after())?;
         (at > now).then_some(at)
+    }
+
+    /// How long the closing thread waits for a backlog that does not go down
+    /// ([`send_paced`]): a hub link's `stall_timeout` (its own check only
+    /// counts what waits beyond its `max_backlog`, which may be larger than
+    /// the session's); shared folders: as long as it takes, like their
+    /// `close`.
+    fn close_stall(&self) -> Option<Duration> {
+        match &self.target {
+            Target::Folder(_) => None,
+            #[cfg(feature = "hub")]
+            Target::Hub { .. } => Some(self.config.hub_limits.stall_timeout),
+        }
     }
 
     /// Arm the alarm for the next pump that is due on its own.
@@ -1431,6 +1549,70 @@ fn classify(e: &SyncError) -> Option<Failure> {
     }
 }
 
+/// What a session sends, kept instead of sent: [`Connection::close`] flushes
+/// into it on the thread that owns the documents, the closing thread sends it.
+#[derive(Default)]
+struct Collect(Vec<Message>);
+
+impl Transport for Collect {
+    fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+        self.0.push(msg);
+        Ok(())
+    }
+
+    fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+        Ok(None)
+    }
+}
+
+/// How the closing thread sends what [`Connection::close`] flushed.
+#[derive(Clone, Copy, Debug)]
+struct Pacing {
+    /// The session's flow control ([`SessionConfig::max_backlog`]).
+    max_backlog: Option<usize>,
+    /// Give up once the backlog did not go down for this long.
+    stall: Option<Duration>,
+}
+
+/// Send `msgs` as the session would: before each, wait while more than
+/// `max_backlog` waits in the link ([`Transport::backlog`]), so a link that
+/// caps what may wait (a hub link's `max_unsent`) takes them all as long as
+/// the peer reads. What arrives meanwhile is dropped (the session is gone);
+/// a link that failed says so there, and the error is returned.
+fn send_paced(
+    transport: &mut ThreadedTransport,
+    msgs: Vec<Message>,
+    pacing: Pacing,
+) -> Result<(), SyncError> {
+    for msg in msgs {
+        if let Some(max) = pacing.max_backlog {
+            let mut lowest = usize::MAX;
+            let mut since = Instant::now();
+            loop {
+                while transport.recv()?.is_some() {}
+                let backlog = transport.backlog();
+                if backlog <= max {
+                    break;
+                }
+                if backlog < lowest {
+                    (lowest, since) = (backlog, Instant::now());
+                } else if let Some(stall) = pacing.stall
+                    && since.elapsed() >= stall
+                {
+                    return Err(SyncError::Hub(format!(
+                        "the peer took nothing of our last edits for {:.0} s ({} KiB waiting)",
+                        stall.as_secs_f32(),
+                        backlog >> 10
+                    )));
+                }
+                std::thread::sleep(CLOSE_POLL);
+            }
+        }
+        transport.send(msg)?;
+    }
+    Ok(())
+}
+
 /// A connection being closed ([`Connection::close`]).
 #[derive(Debug)]
 pub struct Closing {
@@ -1440,7 +1622,8 @@ pub struct Closing {
 }
 
 impl Closing {
-    /// Documents with local edits that were not handed to the link: closed
+    /// Documents with local edits that were not handed to the link (or to
+    /// the closing thread, which sends what flow control held back): closed
     /// while offline or connecting, read-only access, or the remote had not
     /// said what it has yet. Also those handed to a link that failed without
     /// the remote confirming them; a shared folder confirms only with its
@@ -1480,7 +1663,6 @@ mod tests {
     use super::*;
     use crate::dir::LOCK_WAIT;
     use crate::docs::{DocSet, MemDocs};
-    use crate::protocol::Message;
     use crate::transport::MemoryTransport;
     use bae_model::SublayerId;
     use bae_model::loro::{ExportMode, LoroDoc};
@@ -1701,7 +1883,7 @@ mod tests {
             &dir,
             fault::Denied {
                 open: 1,
-                probe: false,
+                ..fault::Denied::default()
             },
         );
         let mut c = Connection::start(Target::Folder(dir.clone()), config);
@@ -1738,6 +1920,7 @@ mod tests {
             fault::Denied {
                 open: u32::MAX,
                 probe: true,
+                lock: false,
             },
         );
         let mut c = Connection::start(Target::Folder(dir.clone()), config);
@@ -1771,6 +1954,174 @@ mod tests {
             c.pump(&mut docs);
             dir.join("updates/root/upgrade.log").is_file()
         });
+    }
+
+    /// Our own lock file cannot be opened although `updates/` can be written
+    /// (a lock file copied read-only or made by another user, a Windows
+    /// folder marked read-only in Explorer): after [`LOCK_DENIED_ATTEMPTS`]
+    /// offline attempts the folder is joined read-only instead of staying
+    /// offline for good. The write check tries the lock file too, so the
+    /// link stays as long as it cannot be opened (no reconnect and rescan
+    /// every check), and becomes writable once it can.
+    #[test]
+    fn a_lock_file_denied_for_good_joins_read_only() {
+        let (_tmp, dir, mut config) = folder_fixture("locked");
+        config.backoff.failed_retry = Some(Duration::from_millis(100));
+        fault::set(
+            &dir,
+            fault::Denied {
+                open: u32::MAX,
+                probe: false,
+                lock: true,
+            },
+        );
+        let mut c = Connection::start(Target::Folder(dir.clone()), config);
+        let mut docs = MemDocs::new();
+        let mut offline = 0;
+        let mut was_offline = false;
+        wait_for("online read-only", || {
+            c.pump(&mut docs);
+            let now_offline = matches!(c.status().state, ConnectionState::Offline { .. });
+            offline += u32::from(now_offline && !was_offline);
+            was_offline = now_offline;
+            c.is_online()
+        });
+        assert_eq!(c.access(), Access::Read);
+        assert_eq!(offline, LOCK_DENIED_ATTEMPTS);
+        let attempts = u64::from(LOCK_DENIED_ATTEMPTS) + 1;
+        assert_eq!(c.connect_attempts(), attempts);
+        // Checked a few times, still denied: the link stays.
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(400) {
+            c.pump(&mut docs);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(c.is_online());
+        assert_eq!(c.access(), Access::Read);
+        assert_eq!(c.connect_attempts(), attempts);
+        // The lock file can be opened again.
+        fault::set(&dir, fault::Denied::default());
+        wait_for("online writable", || {
+            c.pump(&mut docs);
+            c.is_online() && c.access() == Access::Write
+        });
+        assert_eq!(c.connect_attempts(), attempts + 1);
+    }
+
+    /// `n` pseudo-random letters (Loro does not get them much smaller).
+    fn text(seed: u64, n: usize) -> String {
+        let mut x = seed | 1;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                char::from(b'a' + (x % 26) as u8)
+            })
+            .collect()
+    }
+
+    /// A link that lets at most `cap` bytes wait, like a hub link's
+    /// `max_unsent`: a send that would make more wait fails, and so does
+    /// every later one. `drain` bytes leave per `recv` (a peer that reads
+    /// slowly). Records the documents of the data it took.
+    struct Capped {
+        hello: Option<Message>,
+        unsent: usize,
+        cap: usize,
+        drain: usize,
+        over: bool,
+        took: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Transport for Capped {
+        fn send(&mut self, msg: Message) -> Result<(), SyncError> {
+            let len = msg.approx_len();
+            if self.over || (self.unsent > 0 && self.unsent + len > self.cap) {
+                self.over = true;
+                return Err(SyncError::Hub(format!(
+                    "{} bytes would wait, over {}",
+                    self.unsent + len,
+                    self.cap
+                )));
+            }
+            self.unsent += len;
+            if let Message::Updates { doc, .. } = msg {
+                self.took.lock().unwrap().push(doc.to_string());
+            }
+            Ok(())
+        }
+
+        fn recv(&mut self) -> Result<Option<Message>, SyncError> {
+            self.unsent = self.unsent.saturating_sub(self.drain);
+            Ok(self.hello.take())
+        }
+
+        fn backlog(&self) -> usize {
+            self.unsent
+        }
+    }
+
+    /// Closing while flow control holds back most of an upload (a first
+    /// share of large sublayers over a slow link): the rest goes out on the
+    /// closing thread with the session's flow control, as the link takes it,
+    /// and everything arrives. It used to go out all at once, over the link's
+    /// cap (a hub link's `max_unsent`): the link failed and closing reported
+    /// an error although the peer kept reading.
+    #[test]
+    fn closing_sends_what_flow_control_held_back_as_the_link_takes_it() {
+        let mut docs = MemDocs::new();
+        let keys: Vec<DocKey> = (0..8)
+            .map(|i| DocKey::parse(&format!("layer{i}")).unwrap())
+            .collect();
+        for (i, key) in keys.iter().enumerate() {
+            let d = LoroDoc::new();
+            d.get_map("m")
+                .insert("v", text(i as u64 + 1, 4000))
+                .unwrap();
+            d.commit();
+            docs.load(key.clone(), &d.export(ExportMode::Snapshot).unwrap())
+                .unwrap();
+        }
+        // As the hub link's default is made (`HubLimits::max_unsent_for`):
+        // two of the largest messages and `max_backlog`.
+        let max_backlog = 1000;
+        let largest = keys
+            .iter()
+            .map(|k| docs.export_updates(k, &Default::default()).unwrap().len() + 64)
+            .max()
+            .unwrap();
+        let took = Arc::new(Mutex::new(Vec::new()));
+        let link = Capped {
+            hello: Some(Message::hello(ClientId::new("hub").unwrap(), Vec::new())),
+            unsent: 0,
+            cap: 2 * largest + max_backlog,
+            drain: 500,
+            over: false,
+            took: took.clone(),
+        };
+        let mut c = bare("closing", quiet());
+        c.session.config_mut().max_backlog = Some(max_backlog);
+        linked(
+            &mut c,
+            ThreadedTransport::spawn(link, Duration::from_millis(1), || {}),
+        );
+        wait_for("online", || {
+            c.pump(&mut docs);
+            c.is_online()
+        });
+        assert!(c.session.stats().held_back > 0, "{:?}", c.session.stats());
+        let mut closing = c.close(&mut docs);
+        assert!(closing.unsynced().is_empty(), "{:?}", closing.unsynced());
+        let result = closing
+            .wait(Duration::from_secs(20))
+            .map(|r| r.as_ref().map_err(ToString::to_string).copied());
+        assert_eq!(result, Some(Ok(())));
+        let mut got = took.lock().unwrap().clone();
+        got.sort();
+        got.dedup();
+        let want: Vec<String> = keys.iter().map(ToString::to_string).collect();
+        assert_eq!(got, want);
     }
 
     /// A connect attempt that hangs on the NAS (here: it waits for our old
@@ -2143,6 +2494,61 @@ mod tests {
                 c.status()
             );
         }
+    }
+
+    /// A hub's connect attempt is bounded by its own timeouts: it counts as
+    /// unresponsive only once it took longer than they allow (two
+    /// `hub_timeout`s and [`HUB_CONNECT_SLACK`]), however short
+    /// `unresponsive_after` is; a folder's at `unresponsive_after`. The same
+    /// for a link that is up while the remote has not said hello.
+    #[cfg(feature = "hub")]
+    #[test]
+    fn a_hub_attempt_is_unresponsive_only_past_its_own_timeouts() {
+        let mut config = ConnectionConfig::new(ClientId::new("u").unwrap(), quiet());
+        config.hub_timeout = Duration::from_millis(200);
+        config.unresponsive_after = Duration::from_millis(50);
+        let bound = Duration::from_millis(400) + HUB_CONNECT_SLACK;
+        let mut c = Connection::start(
+            Target::Hub {
+                url: "ws://127.0.0.1:9/projects/a".into(),
+                token: None,
+            },
+            config,
+        );
+        assert_eq!(c.unresponsive_after(), bound);
+        // An attempt that never finishes.
+        let (_worker, rx) = mpsc::sync_channel(1);
+        c.phase = Phase::Connecting { rx };
+        let mut docs = MemDocs::new();
+        let ago = |d: Duration| Instant::now().checked_sub(d).unwrap();
+        c.attempt_started = ago(Duration::from_millis(300));
+        c.pump(&mut docs);
+        assert_eq!(c.status().state, ConnectionState::Connecting);
+        c.attempt_started = ago(bound + Duration::from_millis(100));
+        c.pump(&mut docs);
+        assert!(
+            matches!(c.status().state, ConnectionState::Unresponsive { .. }),
+            "{:?}",
+            c.status()
+        );
+        // Linked, no `Hello` yet.
+        let (_remote, near) = MemoryTransport::pair();
+        linked(
+            &mut c,
+            ThreadedTransport::spawn(near, Duration::from_millis(1), || {}),
+        );
+        c.attempt_started = ago(Duration::from_millis(300));
+        c.pump(&mut docs);
+        assert_eq!(c.status().state, ConnectionState::Connecting);
+        // A folder: at `unresponsive_after`.
+        c.target = Target::Folder(PathBuf::from("/nonexistent/bae/connection/test"));
+        assert_eq!(c.unresponsive_after(), Duration::from_millis(50));
+        c.pump(&mut docs);
+        assert!(
+            matches!(c.status().state, ConnectionState::Unresponsive { .. }),
+            "{:?}",
+            c.status()
+        );
     }
 
     /// Pressing Retry on an unusable URL does not start a retry loop.
