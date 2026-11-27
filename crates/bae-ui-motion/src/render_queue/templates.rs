@@ -67,7 +67,13 @@ pub(super) struct Output {
     format: String,
     alpha: bool,
     mbps: f64,
+    /// Templates saved before it was stored wrote PCM, like new modules.
+    #[serde(default = "pcm_by_default")]
     pub pcm_audio: bool,
+}
+
+fn pcm_by_default() -> bool {
+    true
 }
 
 impl Output {
@@ -111,6 +117,22 @@ pub(super) struct Library {
 impl VersionedSettings for Library {
     const KIND: &'static str = "render-queue-templates";
     const VERSION: u32 = 2;
+
+    /// Version 1 stored a render template as its time span only: it rendered
+    /// at full resolution.
+    fn migrate(from: u32, mut data: serde_json::Value) -> Result<serde_json::Value, String> {
+        if from == 1
+            && let Some(render) = data.get_mut("render").and_then(|r| r.as_object_mut())
+        {
+            for template in render.values_mut() {
+                *template = serde_json::json!({
+                    "span": template.take(),
+                    "resolution": QueueResolution::Full,
+                });
+            }
+        }
+        Ok(data)
+    }
 }
 
 #[derive(Debug)]

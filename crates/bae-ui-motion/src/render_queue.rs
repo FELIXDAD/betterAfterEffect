@@ -2515,6 +2515,28 @@ mod tests {
         assert_eq!(item.outputs[0].output, first);
     }
 
+    /// Templates saved by the previous version are kept, not reset.
+    #[test]
+    fn version_1_templates_load() {
+        use bae_platform::{SettingsFile, settings::LoadStatus};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("render-templates.json");
+        std::fs::write(
+            &file,
+            r#"{"kind":"render-queue-templates","version":1,"data":{
+                "render":{"Half":{"Custom":[0,352800000]}},
+                "outputs":{"Mov":{"format":"prores","alpha":false,"mbps":20.0}},
+                "names":{},"default_name":null}}"#,
+        )
+        .unwrap();
+        let loaded = SettingsFile::<Library>::new(&file).load();
+        assert_eq!(loaded.status, LoadStatus::Migrated { from: 1 });
+        let render = &loaded.value.render["Half"];
+        assert_eq!(render.span, Span::Custom(Time(0), Time(352_800_000)));
+        assert_eq!(render.resolution, QueueResolution::Full);
+        assert!(loaded.value.outputs["Mov"].pcm_audio);
+    }
+
     #[test]
     fn user_templates_round_trip_and_apply_to_another_composition() {
         let source = comp_info("/comps/a", "A");
