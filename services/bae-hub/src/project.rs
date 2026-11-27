@@ -26,8 +26,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
 use bae_sync::{
-    ClientId, DirConfig, DirTransport, DocKey, DocSet, PeerHandle, Relay, SessionConfig, SyncError,
-    ThreadedTransport, Transport,
+    ClientId, DirConfig, DirTransport, DocKey, DocSet, HubLimits, PeerHandle, Relay, SessionConfig,
+    SyncError, ThreadedTransport, Transport,
 };
 
 use crate::config::{Access, HubConfig};
@@ -242,6 +242,9 @@ struct RelayThread {
     store_send_interval: Duration,
     /// Flow control of client sessions (`HubConfig::limits`).
     client_backlog: usize,
+    /// The largest message sent to clients (`HubConfig::limits`), for the
+    /// warning about a document that does not fit ([`too_large_hint`]).
+    max_message: usize,
     rx: mpsc::Receiver<Event>,
     waker: Waker,
     status: Arc<Mutex<ProjectStatus>>,
@@ -330,6 +333,48 @@ impl StoreNotes {
     }
 }
 
+/// What helps with a document that does not fit in one message to a client,
+/// for the hub's warning: `max` is the limit it was over
+/// (`SyncError::MessageTooLarge`), `hub_max` the hub's own `max_message`
+/// (`max_message_mib`). A link sends at most the smaller of `hub_max` and
+/// what the client said it takes (`x-bae-max-incoming`), so a smaller `max`
+/// is the client's own limit, which the hub's settings do not change. At
+/// `hub_max` it is the hub's, and raising it helps only below what clients
+/// take (the default `max_incoming`, 256 MiB; `HubConfig::validate` refuses
+/// more, and it is the default): at that limit the layer cannot go through
+/// the hub at all.
+fn too_large_hint(max: usize, hub_max: usize) -> String {
+    let clients_take = HubLimits::default().max_incoming;
+    if max < hub_max {
+        format!(
+            "the client takes at most {} per message, which is its own setting; \
+             raising max_message_mib does not help",
+            mib(max)
+        )
+    } else if hub_max < clients_take {
+        format!(
+            "max_message_mib in [limits] is {}; raising it, up to {}, may let it sync",
+            mib(hub_max),
+            mib(clients_take)
+        )
+    } else {
+        format!(
+            "{} is the most clients take in one message, so the layer cannot sync through \
+             the hub until it is split or made smaller",
+            mib(clients_take)
+        )
+    }
+}
+
+/// `n` bytes in MiB, for logs.
+fn mib(n: usize) -> String {
+    if n.is_multiple_of(1 << 20) {
+        format!("{} MiB", n >> 20)
+    } else {
+        format!("{:.2} MiB", n as f64 / f64::from(1 << 20))
+    }
+}
+
 /// Session settings for a client connection: flow control at the
 /// connection's `max_backlog` (`HubConfig::limits`).
 fn client_config(relay: &Relay, max_backlog: usize) -> SessionConfig {
@@ -388,6 +433,7 @@ impl RelayThread {
             },
             store_send_interval: config.store_send_interval,
             client_backlog: config.limits.max_backlog,
+            max_message: config.limits.max_message,
             rx,
             waker,
             status: status.clone(),
@@ -532,7 +578,7 @@ impl RelayThread {
                 }
             }
             for (handle, e) in out.errors {
-                if matches!(e, SyncError::MessageTooLarge { .. }) {
+                if let SyncError::MessageTooLarge { max, .. } = e {
                     // Reported once per client connection (spec 2.4).
                     let addr = peers.get(&handle).map(|i| i.addr);
                     tracing::warn!(
@@ -541,7 +587,8 @@ impl RelayThread {
                         addr = ?addr,
                         error = %e,
                         "a document does not fit in one message to this client; it is not sent \
-                         to it on this connection (raise max_message_mib in [limits] to sync it)"
+                         to it on this connection ({})",
+                        too_large_hint(max, self.max_message)
                     );
                 } else {
                     tracing::warn!(project = %self.id, peer = ?handle, error = %e, "skipped a message");
@@ -795,6 +842,50 @@ mod tests {
         assert!(project.status().store_ok);
         project.shutdown();
         assert_eq!(fs::read(&log).unwrap(), bytes, "left as it is");
+    }
+
+    /// The warning about a document that does not fit in one message to a
+    /// client says what helps. It used to tell the admin to raise
+    /// `max_message_mib` in every case: at the default (256 MiB) the hub then
+    /// refuses to start, and when the client's own limit is the smaller one
+    /// the hub's setting changes nothing.
+    #[test]
+    fn the_too_large_warning_says_what_helps() {
+        let check = |hub_max_mib: u64| {
+            let mut c = HubConfig::new(".");
+            c.apply_file(
+                crate::config::FileConfig::parse(&format!(
+                    "[limits]\nmax_message_mib = {hub_max_mib}"
+                ))
+                .unwrap(),
+            );
+            c.validate().is_ok()
+        };
+        let clients_take = HubLimits::default().max_incoming;
+        let default = HubConfig::new(".").limits.max_message;
+        assert_eq!(default, clients_take);
+        // The default: the most there is, raising it is refused.
+        let hint = too_large_hint(default, default);
+        assert!(!check((default >> 20) as u64 + 1));
+        assert!(!hint.contains("raising"), "{hint}");
+        assert!(hint.contains("256 MiB") && hint.contains("split"), "{hint}");
+        // A hub configured below that: raising it may help, as far as the
+        // hub takes it.
+        let hint = too_large_hint(64 << 20, 64 << 20);
+        assert!(check((clients_take >> 20) as u64));
+        assert!(
+            hint.contains("max_message_mib in [limits] is 64 MiB")
+                && hint.contains("up to 256 MiB"),
+            "{hint}"
+        );
+        // The client's own limit is the smaller one: the hub cannot help.
+        for hub_max in [default, 64 << 20] {
+            let hint = too_large_hint(256 << 10, hub_max);
+            assert!(
+                hint.contains("0.25 MiB") && hint.contains("does not help"),
+                "{hint}"
+            );
+        }
     }
 
     /// Client sessions hold back at the configured `max_backlog_mib`, not at
