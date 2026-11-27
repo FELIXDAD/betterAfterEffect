@@ -45,6 +45,11 @@ bae-hub healthcheck                   # 本机的服务正常就返回 0（Docke
 | 额外的可写令牌 | — | `BAE_HUB_TOKEN` | — | — |
 | 额外的只读令牌 | — | `BAE_HUB_READ_TOKEN` | — | — |
 | 空闲卸载（秒，0 不卸载） | `idle_unload_secs` | — | — | 600 |
+| 单条消息上限（MiB）：发给客户端的、可写客户端发来的 | `[limits]` `max_message_mib` | — | — | 256 |
+| 流量控制（MiB）：给某个客户端排队的数据超过这么多时先不发工程数据 | `[limits]` `max_backlog_mib` | — | — | 16 |
+| 给一个客户端排队的数据最多这么多（MiB），超过就断开 | `[limits]` `max_unsent_mib` | — | — | 528 |
+| 排队超过 `max_backlog_mib` 又一直不读的客户端几秒后断开 | `[limits]` `stall_timeout_secs` | — | — | 30 |
+| 只读连接发来的单条消息上限（KiB） | `[limits]` `read_only_max_message_kib` | — | — | 1024 |
 
 令牌：
 
@@ -55,6 +60,8 @@ token = "…至少 16 个字符…"
 access = "write"          # write：可编辑、可新建工程；read：只能看
 projects = ["film-a"]     # 可选：只能打开这些工程；不写或含 "*" 表示全部
 ```
+
+`[limits]` 一般不用改（含义见下面的"消息大小与内存"）。在代码里是 `HubConfig::limits`（`bae_sync::HubLimits`）和 `HubConfig::read_only_max_incoming`。
 
 一个数据目录同时只能被一个 `bae-hub` 使用（靠 `hub.lock` 保证）。
 
@@ -96,7 +103,7 @@ Authorization: Bearer <令牌>
 - **帧**：每条同步协议消息是一个二进制帧，编码见 `docs/spec/sync.md` 第 2.3 节。
 - **Hub 侧会话**：每个连接一个会话，`hello_interval` 为 5 秒，收到修改立即转发。
 - **在线状态**（`Presence`）由 `Relay` 转发：新连接马上收到所有人的状态；连接断开时，Hub 替它向其他人发"离开"。
-- **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。
+- **只读连接**：可以发 `Hello`、`SnapshotRequest`、`Presence`。发来的 `Updates`、`Snapshot` 会被丢弃，并在日志里记一次。只读连接发来的单条消息最大 1 MiB（`read_only_max_message_kib`），更大的读到帧头就断开连接，不会先收进内存；发给它们的消息照样可以很大。
 - **超时**：Hub 60 秒没有收到某个客户端的任何消息，就断开这个连接。正常客户端每 5 秒发一次 `Hello`，所以只有死掉的链路（比如合上盖子的笔记本）才会被断开。
 - **重连**：断线后重新 `connect`，再调用 `SyncSession::reset()`。双方交换 `Hello` 后各自补发对方缺的部分，什么都不会丢。
 - **延迟**：
@@ -124,14 +131,19 @@ Authorization: Bearer <令牌>
 |---|---|
 | `src/server.rs` | 一个线程阻塞地 `accept`。每个新连接交给一个短命线程：先 `peek` 请求头（不读走），普通 HTTP 请求直接回答；同步请求先做鉴权和路由，再把原封不动的套接字交给 `HubTransport::accept(stream, None)` 完成握手，然后挂到工程的 Relay 上。 |
 | `src/project.rs` | 一个工程 = 一个线程上的 `Relay`。工程目录通过 `DirTransport`（放在 `ThreadedTransport` 后台线程里）作为 Relay 的一个对端接上，所以读盘、写盘、压缩、修复都是 `bae-sync` 的代码。打开工程时一直 pump，直到目录发来 `Hello`（它排在所有记录之后），才开始接受连接。目录这个对端单独设置（`Relay::connect_with`）：最多每 300 ms 写一次（`HubConfig::store_send_interval`），拖动时不会每秒追加几十次。最后一个客户端断开时立即 `Relay::flush()` 把还没写的写出去；关闭工程（卸载、退出）前再 `flush` 一次，然后 `Relay::close_peer` 等存盘线程写完，写盘失败记进日志。 |
-| `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开。 |
+| `src/link.rs` | 包在 `HubTransport` 外面：丢弃只读连接的修改；60 秒无消息就断开；把 WebSocket 的积压报告给会话（流量控制）。 |
 | `src/registry.rs` | 工程按需加载；10 分钟没人连接就卸载（数据都在磁盘上）。 |
 | `src/auth.rs` | 令牌只保存 BLAKE3 哈希，比较用常数时间。 |
 | `src/config.rs` | `hub.toml`、环境变量。 |
 
 **链路出错时不丢修改。** 客户端发完最后的修改马上断开时，`SyncSession::pump` 先导入这一轮已经收到的修改，再报告传输错误（spec 2.4），`Relay` 再多转一轮，把它们转给其他连接和工程目录。所以 `PeerLink` 出错时直接报告，不需要绕行。
 
-**消息大小**：`HubTransport` 默认单条消息（也是单帧）最大 256 MiB。对方不再读时断开：积压超过 16 MiB、并且 30 秒内一个字节都没发出去；读得慢的客户端（比如第一次同步大工程）积压再多也不断开（`bae_sync::HubLimits`，spec 3.1）。
+**消息大小与内存**（`bae_sync::HubLimits`，spec 3.1）：
+
+- 单条消息（也是单帧）默认最大 256 MiB，一个工程层的快照要放得下。
+- **流量控制**：给某个客户端排队、等它读的数据超过 16 MiB 时，Relay 先不给它发工程数据（照常收它的消息、回 `Hello`、转发在线状态），等它读下去再接着发。客户端每 5 秒一个 `Hello`，读得慢的客户端（比如经 VPN 第一次同步大工程）还没收完时，以前每个 `Hello` 都会让 Relay 把它缺的全部再排一份，NAS 很快内存不够。现在每个连接最多排队 16 MiB 加一条消息。
+- 不管怎样，给一个客户端排队的数据不超过 528 MiB，超过就断开它（守流量控制的会话到不了这里）。
+- 排队超过 16 MiB、并且 30 秒内一个字节都没读的客户端被断开；还在读的不断开，读得再慢也能收完。
 
 ## 测试
 
@@ -143,7 +155,7 @@ Authorization: Bearer <令牌>
   - 不带 WebSocket 升级头访问同步地址：426。
   - `?token=` 可以代替请求头。
   - `/v1/projects` 只列出令牌能看到的工程。
-- **只读**：只读客户端收得到别人的修改，自己的修改不会传出去；状态接口里显示它是只读。
+- **只读**：只读客户端收得到别人的修改，自己的修改不会传出去；状态接口里显示它是只读。只读客户端发来超过上限的消息时连接被断开，它照样收得到 1 MiB 的修改，可写客户端不受影响（`read_only_connections_cannot_send_large_messages`）。
 - **匿名只读**：打开匿名只读后，不带令牌也能连接，但不能新建工程。
 - **在线状态和建议性锁**：经 Hub 转发；只读客户端也能发布在线状态；断开连接后其他人立刻看到离开。
 - **空闲卸载**：空闲的工程被卸载，再次连接时从磁盘重新加载，内容一致。

@@ -177,6 +177,7 @@ impl Project {
                 empty: config.empty_tick,
             },
             store_send_interval: config.store_send_interval,
+            client_backlog: config.limits.max_backlog,
             rx,
             waker,
             status: status.clone(),
@@ -254,6 +255,8 @@ struct RelayThread {
     dir: PathBuf,
     ticks: Ticks,
     store_send_interval: Duration,
+    /// Flow control of client sessions (`HubConfig::limits`).
+    client_backlog: usize,
     rx: mpsc::Receiver<Event>,
     waker: Waker,
     status: Arc<Mutex<ProjectStatus>>,
@@ -387,7 +390,9 @@ impl RelayThread {
                         info,
                         reply,
                     } => {
-                        let handle = relay.connect(transport);
+                        let mut config = relay.peer_config();
+                        config.max_backlog = Some(self.client_backlog);
+                        let handle = relay.connect_with(transport, config);
                         tracing::info!(
                             project = %self.id,
                             peer = ?handle,

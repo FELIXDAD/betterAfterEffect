@@ -170,6 +170,79 @@ fn read_only_clients_see_but_cannot_edit() {
     assert_eq!(viewer["token"], "viewer");
 }
 
+/// Read-only connections only send `Hello`, presence and snapshot requests, so
+/// the hub takes at most `read_only_max_incoming` from them: a read-only token
+/// cannot make it take in large messages (it used to take 256 MiB from anyone
+/// and drop the edits only once decoded). They are still sent large ones.
+#[test]
+fn read_only_connections_cannot_send_large_messages() {
+    use bae_sync::{Message, Transport};
+    let data = tempfile::tempdir().unwrap();
+    let mut cfg = config(data.path());
+    cfg.read_only_max_incoming = 256 << 10;
+    let hub = start(cfg);
+    let addr = hub.local_addr();
+    let base = base_snapshots();
+    let mut clients = vec![
+        Client::join(addr, PROJECT, WRITE, "editor", &base),
+        Client::join(addr, PROJECT, READ, "viewer", &base),
+    ];
+    // A writer may send a message of 1 MiB, and the viewer gets it.
+    let mut rng = Rng::new(5);
+    let big: String = (0..1 << 20)
+        .map(|_| char::from(b'a' + rng.below(26) as u8))
+        .collect();
+    let editor = &mut clients[0];
+    editor.stage.set_edit_target(&SublayerId::root()).unwrap();
+    editor
+        .stage
+        .transact(&editor.who, "note", |tx| {
+            tx.apply(Op::SetValue {
+                path: p("/comps/main"),
+                attr: "note".into(),
+                value: Some(Value::String(big)),
+            })
+        })
+        .unwrap();
+    pump_until(&mut clients, Duration::from_secs(20), converged);
+    let viewer = &mut clients[1];
+    assert!(viewer.session.stats().bytes_received >= 1 << 20);
+
+    // The viewer sends one over its limit: the hub drops the connection as
+    // soon as the frame header arrives.
+    viewer
+        .link
+        .send(Message::Updates {
+            doc: DocKey::sublayer(&SublayerId::root()),
+            version: Default::default(),
+            data: vec![0; 512 << 10],
+        })
+        .unwrap();
+    let start = Instant::now();
+    loop {
+        if viewer
+            .session
+            .pump(&mut viewer.stage, &mut viewer.link)
+            .is_err()
+        {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the hub took a large message from a read-only connection"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // Writers are not affected.
+    let mut editor = clients.remove(0);
+    for _ in 0..3 {
+        editor.edit(&mut rng);
+    }
+    editor.pump();
+    let mut late = vec![editor, Client::join(addr, PROJECT, WRITE, "late", &base)];
+    pump_until(&mut late, Duration::from_secs(20), converged);
+}
+
 #[test]
 fn anonymous_access_when_enabled() {
     let data = tempfile::tempdir().unwrap();
