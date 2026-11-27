@@ -83,6 +83,10 @@ pub mod ids {
     /// placeholder takes the selected footage item's place.
     pub const REPLACE_WITH_SOLID: &str = "motion.file.replace_footage_solid";
     pub const REPLACE_WITH_PLACEHOLDER: &str = "motion.file.replace_footage_placeholder";
+    /// File ▸ Set Proxy ▸ File… (Cmd/Ctrl+Alt+P) / None: the selected footage
+    /// items' or comps' proxy.
+    pub const SET_PROXY_FILE: &str = "motion.file.set_proxy_file";
+    pub const SET_PROXY_NONE: &str = "motion.file.set_proxy_none";
     /// File > New Comp from Selection... (Alt+\).
     pub const NEW_COMP_FROM_SELECTION: &str = "motion.file.new_comp_from_selection";
     /// File > Replace Footage > File... (Cmd/Ctrl+H).
@@ -441,6 +445,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
         ids::REPLACE_WITH_PLACEHOLDER,
         "Replace Footage: Placeholder...",
     ),
+    (ids::SET_PROXY_FILE, "Set Proxy: File..."),
+    (ids::SET_PROXY_NONE, "Set Proxy: None"),
     (ids::NEW_COMP_FROM_SELECTION, "New Comp from Selection..."),
     (ids::REPLACE_FOOTAGE, "Replace Footage File"),
     (ids::RELOAD_FOOTAGE, "Reload Footage"),
@@ -1900,6 +1906,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             let prefs = crate::prefs::current(cx.resources);
             let still = crate::import::ImportDefaults::of(&prefs).still_duration;
             crate::dialogs::comp_from_selection(cx, items, still);
+            return true;
+        }
+        ids::SET_PROXY_FILE => {
+            crate::import::set_proxy_file(cx, session);
+            return true;
+        }
+        ids::SET_PROXY_NONE => {
+            let items = crate::import::proxy_targets(cx, session);
+            if !items.is_empty() {
+                cx.invoke_with("item.set_proxy", json!({ "items": items }));
+            }
             return true;
         }
         ids::REPLACE_WITH_SOLID | ids::REPLACE_WITH_PLACEHOLDER => {
@@ -3431,6 +3448,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Edit Original...", "编辑原稿..."),
     ("Replace Footage: Solid...", "替换素材：纯色..."),
     ("Replace Footage: Placeholder...", "替换素材：占位符..."),
+    ("Set Proxy: File...", "设置代理：文件..."),
+    ("Set Proxy: None", "设置代理：无"),
+    ("Set Proxy File", "设置代理文件"),
+    // Model commands (Undo, History).
+    ("Set Proxy", "设置代理"),
+    ("Use Proxy", "使用代理"),
     ("Reveal Layer Source in Project", "在项目中显示图层源"),
     ("Remember Interpretation", "记住解释"),
     ("Apply Interpretation", "应用解释"),

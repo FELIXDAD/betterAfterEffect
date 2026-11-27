@@ -2455,3 +2455,36 @@ fn new_item_replaces_footage_and_keeps_its_layers() {
     assert_eq!(fx.value(&layer, "source"), Some(Value::PrimRef(new)));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn set_proxy_toggle_and_remove() {
+    let dir = std::env::temp_dir().join(format!("bae-proxy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("clip.mov");
+    let small = dir.join("clip_proxy.mov");
+    std::fs::write(&clip, b"clip").unwrap();
+    std::fs::write(&small, b"proxy").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run("item.import", json!({"files": [{"path": clip}]}));
+    let item = p(out["items"][0].as_str().unwrap());
+    fx.run(
+        "item.set_proxy",
+        json!({"items": [item], "file": {"path": small, "attrs": {
+            "width": {"type": "int", "value": 960}, "height": {"type": "int", "value": 540}}}}),
+    );
+    let proxy = bae_motion::proxy::proxy_of(&fx.stage, &item).expect("a proxy");
+    assert!(bae_motion::proxy::proxy_enabled(&fx.stage, &item));
+    assert_eq!(fx.value(&proxy, "width"), Some(Value::Int(960)));
+    // The Project panel's square toggles it.
+    fx.run("item.set_proxy_enabled", json!({"items": [item]}));
+    assert!(!bae_motion::proxy::proxy_enabled(&fx.stage, &item));
+    // Remove Unused Footage leaves proxies alone (they are not items).
+    let comp = fx.comp();
+    fx.layer(&comp, "footage", json!({"source": item}));
+    fx.run("item.remove_unused", json!({}));
+    assert!(fx.stage.has_prim(&proxy));
+    // Set Proxy ▸ None.
+    fx.run("item.set_proxy", json!({"items": [item]}));
+    assert!(bae_motion::proxy::proxy_of(&fx.stage, &item).is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}

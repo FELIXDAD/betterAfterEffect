@@ -489,6 +489,7 @@ impl<'a> MockPass<'a> {
                         .and_then(|v| v.as_str())
                         .is_some_and(|s| s.starts_with("*.")),
                     blend: None,
+                    proxy_of: None,
                 }))
             }
             _ => Ok(LayerContent::None),

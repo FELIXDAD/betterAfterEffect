@@ -127,6 +127,8 @@ pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     "Gizmo",
     // AE: 预览（Shift+数字小键盘 0）.
     "Shift",
+    // AE: 变形稳定器 VFX.
+    "VFX",
 ];
 
 #[test]
