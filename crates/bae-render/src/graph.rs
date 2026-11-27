@@ -869,6 +869,32 @@ pub(crate) fn plane_depth(
     }
 }
 
+/// Advanced 3D's Transparency of a 3D layer: the share of it that stays
+/// (1 − transparency), Transparency Rolloff taking transparency away where
+/// the layer is seen at a glancing angle (from the camera, at the centre of
+/// `rect`, its drawn rectangle in layer pixels).
+fn transparency_keep(comp: &RenderComp, layer: &RenderLayer, rect: &Rect) -> f32 {
+    let m = &layer.material;
+    let Some(matrix) = layer.matrix_3d.filter(|_| m.transparency > 0.0) else {
+        return 1.0;
+    };
+    let centre = matrix.transform_point3(glam::DVec3::new(
+        (rect.x0 + rect.x1) / 2.0,
+        (rect.y0 + rect.y1) / 2.0,
+        0.0,
+    ));
+    let normal = matrix
+        .x_axis
+        .truncate()
+        .cross(matrix.y_axis.truncate())
+        .normalize_or_zero();
+    let facing = normal
+        .dot((comp.view_camera().eye() - centre).normalize_or_zero())
+        .abs() as f32;
+    let t = m.transparency / 100.0 * (1.0 - m.transparency_rolloff / 100.0 * (1.0 - facing));
+    (1.0 - t).clamp(0.0, 1.0)
+}
+
 /// Converts a rectangle in space pixels to texel units at `pixel_scale`.
 pub fn units(rect: &Rect, pixel_scale: f64) -> IRect {
     Rect::new(
@@ -2280,7 +2306,7 @@ impl Builder<'_, '_> {
             layer: layer.path.clone(),
             input,
             transform,
-            opacity: layer.opacity.clamp(0.0, 1.0),
+            opacity: layer.opacity.clamp(0.0, 1.0) * transparency_keep(comp, layer, &content_rect),
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
             quality: layer.quality,
