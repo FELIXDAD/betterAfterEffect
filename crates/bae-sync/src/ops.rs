@@ -13,7 +13,7 @@ use bae_model::loro::{
     LoroDoc, LoroValue, PeerID, TreeID, TreeParentId,
 };
 use bae_model::{AuthorId, Time};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::conflicts::Element;
 
@@ -356,4 +356,12 @@ pub(crate) fn last_change_start(doc: &LoroDoc, peer: PeerID, end: i32) -> i32 {
     }
     doc.get_change(ID::new(peer, end - 1))
         .map_or(end, |c| c.id.counter)
+}
+
+/// Whether `node` or one of its ancestors is in `roots` (deleted subtrees
+/// included).
+pub(crate) fn in_subtrees(doc: &LoroDoc, node: TreeID, roots: &FxHashSet<TreeID>) -> bool {
+    let mut found = false;
+    for_each_ancestor(doc, node, |a| found |= roots.contains(&a));
+    found
 }

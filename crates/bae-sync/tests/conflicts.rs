@@ -731,9 +731,15 @@ fn project_dir() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn folder_client(dir: &std::path::Path, name: &str) -> Client {
+    folder_client_polling(dir, name, Duration::ZERO)
+}
+
+/// A folder client whose transport polls at most every `poll_interval` (real
+/// time) on its own.
+fn folder_client_polling(dir: &std::path::Path, name: &str, poll_interval: Duration) -> Client {
     let mut c = Client::new(Project::open(dir).unwrap().stage, name);
     let config = DirConfig {
-        poll_interval: Duration::ZERO,
+        poll_interval,
         watch: false,
         ..DirConfig::default()
     };
@@ -809,4 +815,497 @@ fn offline_summary_through_a_shared_folder() {
     assert_eq!(nb.len(), 1, "{nb:#?}");
     assert_eq!(nb[0].outcome, ConflictOutcome::Kept);
     assert_eq!(nb[0].theirs, value(50.0));
+}
+
+// ---- timing of observe, reconnects and catch-up ----
+
+/// Import into `to` what `from` has and it lacks, and observe the event.
+fn import_from(to: &mut Client, from: &Client, now: Instant) {
+    let root = SublayerId::root();
+    let bytes = from.root().export_updates(&to.root().version()).unwrap();
+    let event = to.stage.import_updates(&root, &bytes).unwrap();
+    to.observe(&event, now);
+}
+
+#[test]
+fn a_local_edit_observed_after_a_same_frame_import_is_still_checked() {
+    let (_relay, mut a, mut b, t0) = online();
+    let (_, local) = a
+        .stage
+        .transact(&a.who, "edit", |tx| {
+            tx.apply(set(&title(), "opacity", 50.0))
+        })
+        .unwrap();
+    b.bump(t0, 3);
+    b.apply(t0, set(&title(), "opacity", 80.0));
+    // A pump imports Bob's change before the app hands the frame's events
+    // to the tracker, in order.
+    let bytes = b.root().export_updates(&a.root().version()).unwrap();
+    let remote = a.stage.import_updates(&SublayerId::root(), &bytes).unwrap();
+    a.observe(&local, t0 + S);
+    a.observe(&remote, t0 + S);
+    let n = a.tracker.check_at(&a.stage, t0 + S);
+    a.notices.extend(n);
+    let na = a.take_notices();
+    assert_eq!(na.len(), 1, "{na:#?}");
+    assert_eq!(na[0].outcome, ConflictOutcome::Overridden);
+    assert_eq!(na[0].ours, value(50.0));
+    assert_eq!(na[0].result, value(80.0));
+    assert!(na[0].concurrent);
+    assert_eq!(a.tracker.stats().remote_events, 1);
+
+    // Also when a check ran between the import and the observe.
+    let (_, local) = a
+        .stage
+        .transact(&a.who, "edit", |tx| tx.apply(set(&title(), "scale", 2.0)))
+        .unwrap();
+    b.bump(t0 + 3 * S, 5);
+    b.apply(t0 + 3 * S, set(&title(), "scale", 3.0));
+    let bytes = b.root().export_updates(&a.root().version()).unwrap();
+    let remote = a.stage.import_updates(&SublayerId::root(), &bytes).unwrap();
+    a.observe(&remote, t0 + 3 * S);
+    assert!(a.take_notices().is_empty());
+    a.observe(&local, t0 + 3 * S);
+    let n = a.tracker.check_at(&a.stage, t0 + 3 * S);
+    assert_eq!(n.len(), 1, "{n:#?}");
+    assert_eq!(
+        (n[0].attr.as_str(), n[0].result.clone()),
+        ("scale", value(3.0))
+    );
+}
+
+#[test]
+fn an_edit_the_dropped_link_never_delivered_is_reported_after_reconnecting() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    // Alice's last edit never leaves: the link is already dead, and the app
+    // notices a second later.
+    a.apply(t1, set(&title(), "opacity", 50.0));
+    a.tracker.connection_lost_at(&a.stage, t1 + S);
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    b.bump(t1, 5);
+    b.apply(t1, set(&title(), "opacity", 80.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
+
+    // Back a minute later: the edit is as old as it was when the link went.
+    let t2 = t1 + 60 * S;
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t2);
+    assert!(a.session.is_caught_up(&a.stage));
+    assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
+    let na = a.take_notices();
+    assert_eq!(na.len(), 1, "{na:#?}");
+    assert_eq!(na[0].outcome, ConflictOutcome::Overridden);
+    assert_eq!(
+        (na[0].ours.clone(), na[0].result.clone()),
+        (value(50.0), value(80.0))
+    );
+    assert_eq!(na[0].winner, Some(b.who.clone()));
+    assert!(na[0].concurrent);
+    assert_eq!((na[0].edited_at, na[0].at), (t1, t2));
+    // Made before the mark: not an offline edit.
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    assert!(s.overridden.is_empty() && s.kept.is_empty(), "{s:#?}");
+    assert!(b.take_notices().is_empty());
+}
+
+#[test]
+fn a_delivered_edit_changed_later_by_someone_who_saw_it_is_not_reported_on_reconnect() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.apply(t1, set(&title(), "opacity", 50.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t1);
+    a.tracker.connection_lost_at(&a.stage, t1 + S);
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    // Half a minute later Bob changes it, knowing Alice's value.
+    b.apply(t1 + 30 * S, set(&title(), "opacity", 80.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + 30 * S);
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + 60 * S);
+    assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
+    assert!(a.take_notices().is_empty());
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    assert_eq!(s.merged.len(), 1, "{s:#?}");
+    assert_eq!(s.merged[0].attrs, ["opacity"]);
+}
+
+#[test]
+fn others_changes_imported_before_an_edit_during_catch_up_are_merged() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.tracker.connection_lost_at(&a.stage, t1);
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    a.apply(t1 + S, set(&title(), "opacity", 50.0));
+    // The catch-up arrives in two parts; Alice edits in between.
+    b.apply(t1 + S, create(&layer("b1")));
+    import_from(&mut a, &b, t1 + 2 * S);
+    a.apply(t1 + 2 * S, set(&title(), "scale", 2.0));
+    b.apply(t1 + 2 * S, create(&layer("b2")));
+    import_from(&mut a, &b, t1 + 3 * S);
+    assert!(a.take_notices().is_empty());
+
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    let merged: Vec<_> = s
+        .merged
+        .iter()
+        .map(|d| (d.path.clone(), d.change.clone(), d.authors.clone()))
+        .collect();
+    assert_eq!(
+        merged,
+        [
+            (layer("b1"), PrimChange::Added, vec![b.who.clone()]),
+            (layer("b2"), PrimChange::Added, vec![b.who.clone()]),
+        ]
+    );
+    // Both were made while the reconnect was pending.
+    let kept: Vec<_> = s.kept.iter().map(|e| e.attr.as_str()).collect();
+    assert_eq!(kept, ["opacity", "scale"]);
+    assert!(s.overridden.is_empty());
+}
+
+#[test]
+fn a_folder_reconnect_rereads_the_folder_before_it_is_caught_up() {
+    let (_tmp, dir) = project_dir();
+    // Alice's own polling is never due again: only the reconnect reads.
+    let mut a = folder_client_polling(&dir, "alice", Duration::from_secs(3600));
+    let mut b = folder_client(&dir, "bob");
+    let t0 = Instant::now();
+    for _ in 0..3 {
+        a.pump(t0);
+        b.pump(t0);
+    }
+    let t1 = t0 + 60 * S;
+    a.tracker.connection_lost_at(&a.stage, t1);
+    let link = a.link.take();
+    a.apply(t1 + S, set(&title(), "opacity", 50.0));
+    b.bump(t1 + S, 5);
+    b.apply(t1 + S, set(&title(), "opacity", 80.0));
+    b.pump(t1 + S);
+
+    a.link = link;
+    a.session.reset();
+    let t2 = t1 + 60 * S;
+    a.pump(t2);
+    assert!(a.session.is_caught_up(&a.stage));
+    assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    assert!(s.kept.is_empty(), "{s:#?}");
+    assert_eq!(s.overridden.len(), 1, "{s:#?}");
+    assert_eq!(s.overridden[0].result, value(80.0));
+    assert_eq!(s.overridden[0].winner, Some(b.who.clone()));
+}
+
+#[test]
+fn a_folder_catch_up_spanning_several_pumps_is_not_cut_short() {
+    let (_tmp, dir) = project_dir();
+    let mut a = folder_client(&dir, "alice");
+    let mut b = folder_client(&dir, "bob");
+    a.session.config_mut().max_messages_per_pump = 4;
+    let t0 = Instant::now();
+    for _ in 0..3 {
+        a.pump(t0);
+        b.pump(t0);
+    }
+    let t1 = t0 + 60 * S;
+    a.tracker.connection_lost_at(&a.stage, t1);
+    let link = a.link.take();
+    a.apply(t1 + S, set(&title(), "opacity", 50.0));
+    // Bob writes a record per pump, the last one overrides Alice.
+    for i in 0..10 {
+        b.apply(t1 + S, set(&p("/comps/main"), "step", f64::from(i)));
+        b.pump(t1 + S);
+    }
+    b.apply(t1 + S, set(&title(), "opacity", 80.0));
+    b.pump(t1 + S);
+
+    a.link = link;
+    a.session.reset();
+    let t2 = t1 + 60 * S;
+    let mut pumps = 0;
+    while !a.session.is_caught_up(&a.stage) {
+        assert!(pumps < 20, "never caught up");
+        a.pump(t2);
+        pumps += 1;
+    }
+    assert!(pumps > 1, "{pumps}");
+    assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    assert!(s.kept.is_empty(), "{s:#?}");
+    assert_eq!(s.overridden.len(), 1, "{s:#?}");
+    assert_eq!(s.overridden[0].result, value(80.0));
+}
+
+#[test]
+fn is_caught_up_waits_for_the_updates_after_the_hello() {
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    b.apply(t1, set(&title(), "opacity", 80.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t1);
+
+    connect(&mut relay, &mut a);
+    a.session.config_mut().max_messages_per_pump = 1;
+    assert!(a.session.remote_versions().is_none());
+    a.pump(t1);
+    relay.pump_at(t1);
+    // Only the hub's hello so far: it has Bob's change, Alice not yet.
+    a.pump(t1);
+    let root = bae_sync::DocKey::Sublayer(SublayerId::root());
+    let theirs = a.session.remote_versions().expect("hello")[&root].clone();
+    assert!(!a.root().version().includes_vv(&theirs));
+    assert!(!a.session.is_caught_up(&a.stage));
+    for _ in 0..10 {
+        if a.session.is_caught_up(&a.stage) {
+            break;
+        }
+        a.pump(t1);
+    }
+    assert!(a.session.is_caught_up(&a.stage));
+    assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(80.0)));
+}
+
+// ---- what is and is not an edit of ours, or theirs ----
+
+#[test]
+fn a_rollback_that_overwrote_ours_is_reported_and_a_losing_one_is_not() {
+    let fail = |c: &mut Client, v: f64| {
+        let r = c.stage.transact(&c.who, "script", |tx| {
+            tx.apply(set(&title(), "opacity", v))?;
+            Err::<(), _>(ModelError::NoSuchPrim(p("/nope")))
+        });
+        assert!(r.is_err());
+    };
+    let (mut relay, mut a, mut b, t0) = online();
+    b.apply(t0, set(&title(), "opacity", 10.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t0);
+
+    // Bob changes it while Alice's script fails: its rollback writes 10 back
+    // and wins by Loro order.
+    b.apply(t0 + S, set(&title(), "opacity", 80.0));
+    a.bump(t0 + S, 5);
+    fail(&mut a, 99.0);
+    settle(&mut relay, &mut [&mut a, &mut b], t0 + 2 * S);
+    assert_eq!(b.value(&title(), "opacity"), Some(Value::Float(10.0)));
+    let nb = b.take_notices();
+    assert_eq!(nb.len(), 1, "{nb:#?}");
+    assert_eq!(nb[0].outcome, ConflictOutcome::Overridden);
+    assert_eq!(nb[0].result, value(10.0));
+    assert_eq!(nb[0].winner, Some(a.who.clone()));
+    // A failed transaction is no edit of Alice's to protect.
+    assert!(a.take_notices().is_empty());
+
+    // Bob's value wins over a failed script: nothing to report.
+    b.bump(t0 + 3 * S, 10);
+    b.apply(t0 + 3 * S, set(&title(), "opacity", 70.0));
+    fail(&mut a, 98.0);
+    settle(&mut relay, &mut [&mut a, &mut b], t0 + 4 * S);
+    assert_eq!(a.value(&title(), "opacity"), Some(Value::Float(70.0)));
+    assert!(a.take_notices().is_empty());
+    assert!(b.take_notices().is_empty());
+}
+
+#[test]
+fn a_failed_transaction_of_ours_is_not_remembered() {
+    let (mut relay, mut a, mut b, t0) = online();
+    let r = a.stage.transact(&a.who, "script", |tx| {
+        tx.apply(set(&title(), "opacity", 99.0))?;
+        Err::<(), _>(ModelError::NoSuchPrim(p("/nope")))
+    });
+    assert!(r.is_err());
+    // The next local event covers the rollback commit too.
+    a.apply(t0 + S, set(&title(), "scale", 2.0));
+    assert_eq!(a.tracker.remembered(), 1);
+    b.bump(t0 + S, 5);
+    b.apply(t0 + S, set(&title(), "opacity", 80.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t0 + 2 * S);
+    assert!(a.take_notices().is_empty());
+}
+
+#[test]
+fn a_prim_we_removed_ourselves_is_not_reported_as_removed_by_another() {
+    let (mut relay, mut a, mut b, t0) = online();
+    a.apply(t0, create(&layer("x")));
+    settle(&mut relay, &mut [&mut a, &mut b], t0);
+    a.apply(t0 + S, set(&layer("x"), "opacity", 50.0));
+    a.apply(t0 + S, delete(&layer("x")));
+    // Bob removes it too, and his delete wins.
+    b.bump(t0 + S, 3);
+    b.apply(t0 + S, delete(&layer("x")));
+    settle(&mut relay, &mut [&mut a, &mut b], t0 + 2 * S);
+    assert!(a.take_notices().is_empty());
+    assert!(b.take_notices().is_empty());
+
+    // Offline, the same.
+    let (mut relay, mut a, mut b, _, t1) = shared_layers();
+    a.tracker.connection_lost_at(&a.stage, t1);
+    relay.disconnect(relay.peers()[0].0);
+    a.link = None;
+    a.apply(t1 + S, set(&layer("x"), "opacity", 50.0));
+    a.apply(t1 + S, delete(&layer("x")));
+    b.bump(t1 + S, 5);
+    b.apply(t1 + S, delete(&layer("x")));
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + S);
+    connect(&mut relay, &mut a);
+    settle(&mut relay, &mut [&mut a, &mut b], t1 + 2 * S);
+    let s = a.tracker.caught_up(&a.stage).unwrap().unwrap();
+    assert!(s.overridden.is_empty(), "{s:#?}");
+    let prims: Vec<_> = s.prims.iter().map(|p| (p.path.clone(), p.change)).collect();
+    assert_eq!(prims, [(layer("x"), OfflinePrimChange::Removed)]);
+    assert_eq!(s.conflicts(), 0);
+}
+
+#[test]
+fn the_same_value_set_by_both_is_not_reported() {
+    let (mut relay, mut a, mut b, t0) = online();
+    a.apply(t0 + S, set(&title(), "opacity", 50.0));
+    b.bump(t0 + S, 3);
+    b.apply(t0 + S, set(&title(), "opacity", 50.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t0 + 2 * S);
+    // Bob's op won (Alice's "overridden" case), Alice's lost (Bob's "kept").
+    assert!(a.take_notices().is_empty());
+    assert!(b.take_notices().is_empty());
+    assert_eq!(a.tracker.stats().elements_checked, 1);
+    assert_eq!(b.tracker.stats().elements_checked, 1);
+}
+
+#[test]
+fn a_shared_drag_is_reported_once_not_every_frame() {
+    let (mut relay, mut a, mut b, t0) = online();
+    let frame = Duration::from_millis(16);
+    for i in 0..60u32 {
+        let now = t0 + frame * i;
+        a.apply(now, set(&title(), "opacity", f64::from(i)));
+        b.apply(now, set(&title(), "opacity", 100.0 + f64::from(i)));
+        settle(&mut relay, &mut [&mut a, &mut b], now);
+    }
+    // Equal Lamports every frame: the same side wins each time.
+    let (na, nb) = (a.take_notices(), b.take_notices());
+    assert_eq!((na.len(), nb.len()), (1, 1), "{na:#?} {nb:#?}");
+    let held = a.tracker.stats().held_back + b.tracker.stats().held_back;
+    assert_eq!(held, 2 * 59);
+    let mut outcomes = [na[0].outcome, nb[0].outcome];
+    outcomes.sort_by_key(|o| *o == ConflictOutcome::Kept);
+    assert_eq!(
+        outcomes,
+        [ConflictOutcome::Overridden, ConflictOutcome::Kept]
+    );
+
+    // After a pause, a new conflict on it is reported again.
+    let later = t0 + frame * 60 + 5 * S;
+    a.apply(later, set(&title(), "opacity", 1.0));
+    b.apply(later, set(&title(), "opacity", 2.0));
+    settle(&mut relay, &mut [&mut a, &mut b], later);
+    assert_eq!(a.take_notices().len() + b.take_notices().len(), 2);
+}
+
+// ---- bounds ----
+
+#[test]
+fn bulk_edits_are_not_remembered() {
+    let (mut relay, mut a, mut b, t0) = online();
+    a.tracker.config_mut().max_ops_per_edit = 10;
+    a.stage
+        .transact(&a.who, "paste", |tx| {
+            for i in 0..20 {
+                tx.apply(key(&title(), "position", i, f64::from(i as i32)))?;
+            }
+            Ok::<_, ModelError>(())
+        })
+        .map(|(_, e)| a.observe(&e, t0 + S))
+        .unwrap();
+    assert_eq!(a.tracker.stats().bulk_edits, 1);
+    assert_eq!(a.tracker.remembered(), 0);
+    b.bump(t0 + S, 5);
+    b.apply(t0 + S, key(&title(), "position", 3, 99.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t0 + 2 * S);
+    assert!(a.take_notices().is_empty());
+}
+
+#[test]
+fn remembered_edits_are_bounded() {
+    let (_relay, mut a, _b, t0) = online();
+    a.tracker.config_mut().max_recent = 8;
+    // All at one instant: the bound does not depend on the clock moving.
+    for i in 0..20 {
+        a.apply(t0, key(&title(), "position", i, 1.0));
+        assert!(a.tracker.remembered() <= 8, "{}", a.tracker.remembered());
+    }
+    // The newest are kept.
+    let (mut relay, mut a, mut b, t0) = online();
+    a.tracker.config_mut().max_recent = 8;
+    for i in 0..20 {
+        a.apply(t0, key(&title(), "position", i, 1.0));
+    }
+    b.bump(t0, 30);
+    b.apply(t0, key(&title(), "position", 0, 5.0));
+    b.apply(t0, key(&title(), "position", 19, 5.0));
+    settle(&mut relay, &mut [&mut a, &mut b], t0 + S);
+    let na = a.take_notices();
+    assert_eq!(na.len(), 1, "{na:#?}");
+    assert_eq!(na[0].element, Element::Keyframe(sec(19)));
+}
+
+#[test]
+fn an_idle_check_costs_neither_per_remembered_edit_nor_per_peer() {
+    let base = base_snapshots();
+    let root = SublayerId::root();
+    let mut a = Client::new(client_stage(&base), "alice");
+    let t0 = Instant::now();
+    // Every session that ever edited a sublayer is a peer in its history.
+    let import = |a: &mut Client, i: usize, now: Instant| {
+        let mut other = client_stage(&base);
+        other
+            .transact(&author("user:other"), "edit", |tx| {
+                tx.apply(set(&p("/comps/main"), &format!("p{i}"), 1.0))
+            })
+            .unwrap();
+        let have = a.root().version();
+        let bytes = other
+            .sublayer(&root)
+            .unwrap()
+            .export_updates(&have)
+            .unwrap();
+        let event = a.stage.import_updates(&root, &bytes).unwrap();
+        a.observe(&event, now);
+    };
+    for i in 0..40 {
+        import(&mut a, i, t0);
+    }
+    // One step that remembers a thousand keyframes.
+    let (_, event) = a
+        .stage
+        .transact(&a.who, "keys", |tx| {
+            for i in 0..1000 {
+                tx.apply(key(&title(), "position", i, 1.0))?;
+            }
+            Ok::<_, ModelError>(())
+        })
+        .unwrap();
+    a.observe(&event, t0);
+    assert_eq!(a.tracker.remembered(), 1000);
+    assert!(a.tracker.check_at(&a.stage, t0).is_empty());
+
+    // Nothing committed or imported: a frontiers comparison per check.
+    let before = a.tracker.stats().clone();
+    for i in 0..200 {
+        let now = t0 + Duration::from_millis(i);
+        assert!(a.tracker.check_at(&a.stage, now).is_empty());
+    }
+    let idle = a.tracker.stats().clone();
+    assert_eq!(idle.quick_checks - before.quick_checks, 200);
+    assert_eq!(idle.versions_compared, before.versions_compared);
+
+    // Others' ops on what we did not touch: a few comparisons per check (the
+    // edits share one version), nothing decoded.
+    for i in 0..20 {
+        import(&mut a, 100 + i, t0 + S);
+        assert!(a.tracker.check_at(&a.stage, t0 + S).is_empty());
+    }
+    let busy = a.tracker.stats();
+    assert!(
+        busy.versions_compared - idle.versions_compared <= 20 * 2,
+        "{busy:?}"
+    );
+    assert_eq!((busy.elements_checked, busy.remote_ops), (0, 0));
+    assert_eq!(busy.remote_events, 60);
 }

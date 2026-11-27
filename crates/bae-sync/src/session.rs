@@ -225,9 +225,11 @@ impl SyncSession {
     ///
     /// After a reconnect (`reset`, then pumps), the first time this holds is when
     /// to call `ConflictTracker::caught_up`. Hub: its `Hello` lists everything it
-    /// has. Shared folder: the folder's `Hello` lists what this client's
-    /// transport has read from it so far, so check after a pump in which the
-    /// transport polled the folder again.
+    /// has and comes before the updates, so this waits for them. Shared folder:
+    /// `DirTransport` answers our `Hello` by reading the folder again and queues
+    /// its own after the records it read, so this holds once everything the
+    /// folder had at that moment has been received, however many pumps that
+    /// takes.
     pub fn is_caught_up(&self, docs: &dyn DocSet) -> bool {
         let Some(remote) = &self.remote else {
             return false;

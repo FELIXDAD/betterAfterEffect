@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bae_model::loro::{
-    ContainerID, ID, IdSpan, Lamport, LoroDoc, LoroValue, TreeID, VersionVector,
+    ContainerID, Frontiers, ID, IdSpan, Lamport, LoroDoc, LoroValue, PeerID, TreeID, VersionVector,
 };
 use bae_model::{
     AttrSpec, AuthorId, EventOrigin, Expression, Keyframe, PrimPath, Stage, StageEvent, Sublayer,
@@ -87,13 +87,17 @@ pub struct ConflictConfig {
     /// A remote change of an element arriving within this long after our own
     /// change of it (local clock) is reported.
     pub window: Duration,
-    /// Local element edits remembered at most (oldest dropped first). One edit
-    /// can exceed it by at most `max_ops_per_edit`.
+    /// Local element edits remembered at most (oldest dropped first).
     pub max_recent: usize,
     /// Local commits with more ops than this (a paste, an import) are not
     /// remembered element by element: they mostly create new prims, which
     /// nobody else can have edited.
     pub max_ops_per_edit: usize,
+    /// A notice for an element and outcome that comes less than this after
+    /// the previous one for it (reported or held back) is held back: two
+    /// people dragging the same slider get one notice each, not one per
+    /// frame. Zero reports every one.
+    pub repeat_quiet: Duration,
 }
 
 impl Default for ConflictConfig {
@@ -102,12 +106,13 @@ impl Default for ConflictConfig {
             window: Duration::from_secs(10),
             max_recent: 1024,
             max_ops_per_edit: 2048,
+            repeat_quiet: Duration::from_secs(1),
         }
     }
 }
 
 /// What happened to our edit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ConflictOutcome {
     /// Another author's value won; ours is gone (the history keeps it).
     Overridden,
@@ -162,10 +167,19 @@ pub struct ConflictStats {
     pub bulk_edits: u64,
     /// Remote events observed.
     pub remote_events: u64,
+    /// Sublayer checks that ended at the quick test: the document's frontiers
+    /// are unchanged and nothing was remembered since its last check.
+    pub quick_checks: u64,
+    /// Version-vector comparisons of the other checks: one per distinct
+    /// version the remembered edits were last compared with (most share one),
+    /// plus one per check; never one per remembered edit.
+    pub versions_compared: u64,
     /// Remembered elements an import touched and that were analysed.
     pub elements_checked: u64,
     /// Ops of remote commits decoded (only commits that wrote a candidate's map).
     pub remote_ops: u64,
+    /// Notices held back as repeats ([`ConflictConfig::repeat_quiet`]).
+    pub held_back: u64,
 }
 
 /// One remembered local element edit.
@@ -182,7 +196,11 @@ struct Recent {
     op: ID,
     author: Option<AuthorId>,
     edited_at: Instant,
-    /// Remote ops in this version have already been looked at.
+    /// Order of remembering (breaks ties of `edited_at`).
+    seq: u64,
+    /// Remote ops in this version have been compared with this edit: at first
+    /// what our op knew (its causal past), after a check the version checked,
+    /// shared by all edits of the sublayer.
     checked: Arc<VersionVector>,
 }
 
@@ -193,6 +211,9 @@ struct RemoteOp {
     lamport: Lamport,
     author: Option<AuthorId>,
     value: Option<LoroValue>,
+    /// Written by the automatic rollback of a failed transaction: it competes
+    /// for the element like any write, but is no change anyone asked for.
+    rollback: bool,
 }
 
 impl RemoteOp {
@@ -203,32 +224,56 @@ impl RemoteOp {
 
 type ElementKey = (ContainerID, String);
 
+/// An element and outcome, for holding back repeated notices.
+type NoticeKey = (SublayerId, TreeID, String, Element, ConflictOutcome);
+
 #[derive(Debug)]
 struct Offline {
     since: ProjectVersion,
     at: Instant,
 }
 
+/// Where the checks of one sublayer stand.
+#[derive(Debug)]
+struct Seen {
+    /// The document's frontiers at the last check. Unchanged, with nothing
+    /// remembered since: nothing to look at.
+    frontiers: Frontiers,
+    /// The version of the last check, shared by the edits compared up to it.
+    version: Arc<VersionVector>,
+    /// Edits were remembered since the last check.
+    new_edits: bool,
+}
+
 /// Turns stage events into [`ConcurrentEdit`] notices and, around a
 /// disconnection, a [`MergeSummary`]. One per open stage, on the thread that
 /// owns it.
 ///
-/// Feed it every local event, in order (`Stage::transact`, `Stage::undo`,
-/// `Stage::redo`, ...), and call [`check`](Self::check) after every
+/// Feed it every local event (`Stage::transact`, `Stage::undo`,
+/// `Stage::redo`, ...) in order, and call [`check`](Self::check) after every
 /// `SyncSession::pump` (remote events may also be passed to
-/// [`observe`](Self::observe)). A local event costs its own ops. A check
-/// costs nothing when no remote op arrived; otherwise it finds which of the
-/// newly arrived ops wrote the maps of remembered edits without decoding
-/// them, and decodes only around those. The whole project is never scanned.
+/// [`observe`](Self::observe)). Local events need not be observed before the
+/// next import: an edit is compared with every remote op its commit did not
+/// know. A local event costs its own ops. A check of a sublayer where nothing
+/// was committed or imported since the last one compares frontiers and stops;
+/// otherwise it costs a pass over that sublayer's remembered edits plus a
+/// version-vector comparison per distinct version they were last compared
+/// with (usually one), finds which newly arrived ops wrote the maps of
+/// remembered edits without decoding them, and decodes only around those.
+/// The whole project is never scanned.
 #[derive(Debug)]
 pub struct ConflictTracker {
     config: ConflictConfig,
     /// Remembered local edits by sublayer and prim.
     recent: FxHashMap<SublayerId, FxHashMap<TreeID, Vec<Recent>>>,
     len: usize,
+    next_seq: u64,
     last_prune: Option<Instant>,
     /// Our op counter per sublayer at the last local event.
     local_seen: FxHashMap<SublayerId, (u64, i32)>,
+    seen: FxHashMap<SublayerId, Seen>,
+    /// Last notice (reported or held back) per element and outcome.
+    last_notice: FxHashMap<NoticeKey, Instant>,
     offline: Option<Offline>,
     stats: ConflictStats,
 }
@@ -242,8 +287,11 @@ impl ConflictTracker {
             config,
             recent: FxHashMap::default(),
             len: 0,
+            next_seq: 0,
             last_prune: None,
             local_seen: FxHashMap::default(),
+            seen: FxHashMap::default(),
+            last_notice: FxHashMap::default(),
             offline: None,
             stats: ConflictStats::default(),
         };
@@ -285,9 +333,11 @@ impl ConflictTracker {
         self.observe_at(stage, event, Instant::now())
     }
 
-    /// Look at one event right after it happened (`stage` as it is now).
-    /// Local events update what is remembered; a remote import is checked
-    /// like [`check_at`](Self::check_at) for its sublayers and returns the
+    /// Look at one event (`stage` as it is now). Local events update what is
+    /// remembered: `now` is taken as the time of the edit, so pass the event
+    /// within the frame it happened in. Remote ops imported in between are
+    /// still compared with it. A remote import is checked like
+    /// [`check_at`](Self::check_at) for its sublayers and returns the
     /// notices. While a reconnect is pending
     /// ([`connection_lost`](Self::connection_lost)), edits made after it are
     /// left to the [`MergeSummary`].
@@ -302,10 +352,15 @@ impl ConflictTracker {
                 self.record_local(stage, event, now);
                 Vec::new()
             }
-            EventOrigin::Remote => self.check_sublayers(stage, &event.sublayers, now),
+            EventOrigin::Remote => {
+                self.stats.remote_events += 1;
+                self.check_sublayers(stage, &event.sublayers, now)
+            }
             EventOrigin::Stack => {
                 self.recent.retain(|id, _| stage.sublayer(id).is_some());
                 self.local_seen.retain(|id, _| stage.sublayer(id).is_some());
+                // A sublayer may have been replaced: look at everything again.
+                self.seen.clear();
                 self.note_sublayers(stage);
                 self.recount();
                 Vec::new()
@@ -322,8 +377,7 @@ impl ConflictTracker {
             };
             let doc = layer.doc();
             let peer = doc.peer_id();
-            let version = doc.oplog_vv();
-            let end = version.get(&peer).copied().unwrap_or(0);
+            let end = doc.oplog_vv().get(&peer).copied().unwrap_or(0);
             // The ops since the last local event (for a sublayer not seen
             // yet, the last commit).
             let start = match self.local_seen.insert(id.clone(), (peer, end)) {
@@ -337,46 +391,77 @@ impl ConflictTracker {
                 self.stats.bulk_edits += 1;
                 continue;
             }
-            let checked = Arc::new(version);
             let mut edits: Vec<(TreeID, Recent)> = Vec::new();
+            let mut removed: Vec<TreeID> = Vec::new();
             let mut walker = Walker::new(doc);
-            walker.walk(IdSpan::new(peer, start, end), |op| {
-                let (
-                    Target::Element {
+            let mut at = start;
+            while at < end {
+                // One Loro change at a time. What our op knew is its change's
+                // deps, not what has arrived by the time we observe it: Loro
+                // never merges a commit made after an import into the change
+                // before it.
+                let (upto, checked) = match doc.get_change(ID::new(peer, at)) {
+                    Some(c) => {
+                        let len = i32::try_from(c.len).unwrap_or(i32::MAX);
+                        let past = doc
+                            .frontiers_to_vv(&c.deps)
+                            .unwrap_or_else(|| doc.oplog_vv());
+                        (c.id.counter.saturating_add(len).clamp(at + 1, end), past)
+                    }
+                    None => (end, doc.oplog_vv()),
+                };
+                let checked = Arc::new(checked);
+                walker.walk(IdSpan::new(peer, at, upto), |op| {
+                    if op.rollback {
+                        return;
+                    }
+                    let (
+                        Target::Element {
+                            node,
+                            attr,
+                            element,
+                            value,
+                        },
+                        Some((container, key)),
+                    ) = (op.target, op.key)
+                    else {
+                        if let Target::Delete(n) = op.target {
+                            removed.push(n);
+                        }
+                        return;
+                    };
+                    // Gone again within the same step: nothing to protect.
+                    let Some(path) = layer.node_path(node) else {
+                        return;
+                    };
+                    edits.push((
                         node,
-                        attr,
-                        element,
-                        value,
-                    },
-                    Some((container, key)),
-                ) = (op.target, op.key)
-                else {
-                    return;
-                };
-                if op.rollback {
-                    return;
-                }
-                // Gone again within the same step: nothing to protect.
-                let Some(path) = layer.node_path(node) else {
-                    return;
-                };
-                edits.push((
-                    node,
-                    Recent {
-                        attr: attr.to_owned(),
-                        element,
-                        container: container.clone(),
-                        key: key.to_owned(),
-                        path: path.clone(),
-                        ours: element.decode(value),
-                        op: op.id,
-                        author: op.author.cloned().or_else(|| event.author.clone()),
-                        edited_at: now,
-                        checked: checked.clone(),
-                    },
-                ));
-            });
+                        Recent {
+                            attr: attr.to_owned(),
+                            element,
+                            container: container.clone(),
+                            key: key.to_owned(),
+                            path: path.clone(),
+                            ours: element.decode(value),
+                            op: op.id,
+                            author: op.author.cloned().or_else(|| event.author.clone()),
+                            edited_at: now,
+                            seq: 0,
+                            checked: checked.clone(),
+                        },
+                    ));
+                });
+                at = upto;
+            }
             self.stats.local_ops += walker.ops;
+            if !removed.is_empty() {
+                self.forget_removed(id, doc, &removed);
+            }
+            if !edits.is_empty()
+                && let Some(s) = self.seen.get_mut(id)
+            {
+                s.new_edits = true;
+            }
             for (node, r) in edits {
                 self.remember(id, node, r);
             }
@@ -384,7 +469,9 @@ impl ConflictTracker {
         self.enforce_capacity(now);
     }
 
-    fn remember(&mut self, id: &SublayerId, node: TreeID, r: Recent) {
+    fn remember(&mut self, id: &SublayerId, node: TreeID, mut r: Recent) {
+        r.seq = self.next_seq;
+        self.next_seq += 1;
         let list = self
             .recent
             .entry(id.clone())
@@ -401,6 +488,20 @@ impl ConflictTracker {
                 self.len += 1;
             }
         }
+    }
+
+    /// Forget edits on prims we removed (or below them): whoever else removed
+    /// them too, that is no conflict of ours.
+    fn forget_removed(&mut self, id: &SublayerId, doc: &LoroDoc, removed: &[TreeID]) {
+        let Some(nodes) = self.recent.get_mut(id) else {
+            return;
+        };
+        let removed: FxHashSet<TreeID> = removed.iter().copied().collect();
+        nodes.retain(|&n, _| !ops::in_subtrees(doc, n, &removed));
+        if nodes.is_empty() {
+            self.recent.remove(id);
+        }
+        self.recount();
     }
 
     fn retain(&mut self, mut keep: impl FnMut(&Recent) -> bool) {
@@ -423,17 +524,25 @@ impl ConflictTracker {
             .sum();
     }
 
-    /// Forget edits older than the window (at most once per window).
+    /// Forget edits older than the window and notices older than
+    /// `repeat_quiet` (at most once per window unless forced).
     fn prune(&mut self, now: Instant, force: bool) {
         let due = self
             .last_prune
             .is_none_or(|t| now.saturating_duration_since(t) >= self.config.window);
-        if self.len == 0 || !(due || force) {
+        if !(due || force) {
             return;
         }
         self.last_prune = Some(now);
+        let quiet = self.config.repeat_quiet;
+        self.last_notice
+            .retain(|_, t| now.saturating_duration_since(*t) < quiet);
+        if self.len == 0 {
+            return;
+        }
         let window = self.config.window;
-        self.retain(|r| now.saturating_duration_since(r.edited_at) <= window);
+        let mark = self.offline.as_ref().map(|o| o.at);
+        self.retain(|r| age(r, mark, now) <= window);
     }
 
     fn enforce_capacity(&mut self, now: Instant) {
@@ -451,16 +560,16 @@ impl ConflictTracker {
             self.len = 0;
             return;
         }
-        let mut times: Vec<Instant> = self
+        let mut order: Vec<(Instant, u64)> = self
             .recent
             .values()
             .flat_map(|n| n.values())
             .flatten()
-            .map(|r| r.edited_at)
+            .map(|r| (r.edited_at, r.seq))
             .collect();
-        times.sort_unstable();
-        let cutoff = times[times.len() - keep];
-        self.retain(|r| r.edited_at >= cutoff);
+        order.sort_unstable();
+        let cutoff = order[order.len() - keep];
+        self.retain(|r| (r.edited_at, r.seq) >= cutoff);
     }
 
     // ---- remote imports ----
@@ -474,8 +583,9 @@ impl ConflictTracker {
     /// changed recently, in every sublayer. Call it after every
     /// `SyncSession::pump` that received something: an import that changes
     /// nothing visible (our value won) emits no event, but the other side's
-    /// change of the element still deserves a hint. Cheap when nothing arrived
-    /// (a version-vector comparison per sublayer with remembered edits).
+    /// change of the element still deserves a hint. Where nothing was
+    /// committed or imported since the last check, it compares frontiers and
+    /// stops.
     pub fn check_at(&mut self, stage: &Stage, now: Instant) -> Vec<ConcurrentEdit> {
         let ids: Vec<SublayerId> = self.recent.keys().cloned().collect();
         self.check_sublayers(stage, &ids, now)
@@ -487,7 +597,8 @@ impl ConflictTracker {
         ids: &[SublayerId],
         now: Instant,
     ) -> Vec<ConcurrentEdit> {
-        self.prune(now, false);
+        let crowded = self.last_notice.len() > self.config.max_recent.max(64) * 4;
+        self.prune(now, crowded);
         let mut out = Vec::new();
         for id in ids {
             if let Some(layer) = stage.sublayer(id) {
@@ -507,21 +618,29 @@ impl ConflictTracker {
         let Some(nodes) = self.recent.get(id) else {
             return;
         };
-        let pending = self.offline.as_ref().map(|o| o.at);
-        let window = self.config.window;
-        // Edits made while a reconnect is pending belong to the merge summary.
-        let live = |r: &Recent| {
-            now.saturating_duration_since(r.edited_at) <= window
-                && pending.is_none_or(|t| r.edited_at < t)
-        };
         let doc = layer.doc();
+        let frontiers = doc.oplog_frontiers();
+        if self
+            .seen
+            .get(id)
+            .is_some_and(|s| !s.new_edits && s.frontiers == frontiers)
+        {
+            self.stats.quick_checks += 1;
+            return;
+        }
         let ours = doc.peer_id();
         let version = doc.oplog_vv();
-        // Remote ops nobody has looked at yet, per peer.
-        let arrived = |r: &Recent| {
-            version
-                .iter()
-                .any(|(p, &end)| *p != ours && r.checked.get(p).copied().unwrap_or(0) < end)
+        let mark = self.offline.as_ref().map(|o| o.at);
+        let window = self.config.window;
+        // Edits made while a reconnect is pending belong to the merge summary.
+        let live = |r: &Recent| mark.is_none_or(|t| r.edited_at < t) && age(r, mark, now) <= window;
+        // Remote ops nobody has compared an edit with yet: one comparison per
+        // distinct version, as most edits share one.
+        let mut arrived_since: FxHashMap<*const VersionVector, bool> = FxHashMap::default();
+        let mut arrived = |r: &Recent| {
+            *arrived_since
+                .entry(Arc::as_ptr(&r.checked))
+                .or_insert_with(|| remote_ahead(&version, &r.checked, ours))
         };
         let mut picked: Vec<(TreeID, usize, &Recent)> = Vec::new();
         let mut gone: Vec<TreeID> = Vec::new();
@@ -538,7 +657,9 @@ impl ConflictTracker {
                 }
             }
         }
+        self.stats.versions_compared += arrived_since.len() as u64 + 1;
         if picked.is_empty() && gone.is_empty() {
+            self.mark_checked(id, frontiers, version, ours);
             return;
         }
         picked.sort_by_key(|&(n, i, _)| (n, i));
@@ -552,6 +673,11 @@ impl ConflictTracker {
         } else {
             remote_ops(doc, ours, &version, &picked)
         };
+        // Waiting for a reconnect, an edit made before the link was lost only
+        // meets ops made without knowing it: the ones it raced with, or that
+        // the dead link never delivered. A later change by someone who saw it
+        // is no concurrent edit, and when it was made is unknown here.
+        let racing_only = mark.is_some();
         for &(node, i, r) in &picked {
             let ops = remote
                 .get(&(r.container.clone(), r.key.clone()))
@@ -560,7 +686,7 @@ impl ConflictTracker {
                 continue;
             }
             checked_elements += 1;
-            if let Some((n, overridden)) = judge(layer, doc, ours, node, r, ops, now) {
+            if let Some((n, overridden)) = judge(layer, node, r, ops, racing_only, now) {
                 notices.push(n);
                 if overridden {
                     drop.insert((node, i));
@@ -576,6 +702,10 @@ impl ConflictTracker {
             }
             let (author, _) = deletion.map_or((None, 0), |d| ops::author_of(doc, d));
             for r in nodes[node].iter().filter(|r| live(r)) {
+                let concurrent = deletion.is_some_and(|d| ops::concurrent_with(doc, d, r.op));
+                if racing_only && !concurrent {
+                    continue;
+                }
                 checked_elements += 1;
                 notices.push(ConcurrentEdit {
                     sublayer: id.clone(),
@@ -589,7 +719,7 @@ impl ConflictTracker {
                     theirs: None,
                     winner: author.clone(),
                     others: author.iter().cloned().collect(),
-                    concurrent: deletion.is_some_and(|d| ops::concurrent_with(doc, d, r.op)),
+                    concurrent,
                     edited_at: r.edited_at,
                     at: now,
                 });
@@ -598,14 +728,8 @@ impl ConflictTracker {
 
         self.stats.elements_checked += checked_elements;
         self.stats.remote_ops += decoded;
-        // Remember how far we looked; forget what was overridden or removed.
-        let checked = Arc::new(version);
+        // Forget what was overridden or removed; remember how far we looked.
         let nodes = self.recent.get_mut(id).expect("looked up above");
-        for list in nodes.values_mut() {
-            for r in list.iter_mut() {
-                r.checked = checked.clone();
-            }
-        }
         for (node, list) in nodes.iter_mut() {
             let mut i = 0;
             list.retain(|_| {
@@ -620,11 +744,56 @@ impl ConflictTracker {
         nodes.retain(|_, l| !l.is_empty());
         self.recent.retain(|_, n| !n.is_empty());
         self.recount();
+        self.mark_checked(id, frontiers, version, ours);
 
         notices.sort_by(|a, b| {
             (&a.path, &a.attr, a.element, a.node).cmp(&(&b.path, &b.attr, b.element, b.node))
         });
-        out.extend(notices);
+        let quiet = self.config.repeat_quiet;
+        for n in notices {
+            let key = (id.clone(), n.node, n.attr.clone(), n.element, n.outcome);
+            let repeat = self
+                .last_notice
+                .insert(key, now)
+                .is_some_and(|t| now.saturating_duration_since(t) < quiet);
+            if repeat {
+                self.stats.held_back += 1;
+            } else {
+                out.push(n);
+            }
+        }
+    }
+
+    /// Every remembered edit of `id` has been compared with the remote ops in
+    /// `version`: let them share it, and note where the checks stand.
+    fn mark_checked(
+        &mut self,
+        id: &SublayerId,
+        frontiers: Frontiers,
+        version: VersionVector,
+        ours: PeerID,
+    ) {
+        // Nobody else's ops arrived since the last check: keep its version
+        // (the edits holding it need no update; ours do not matter).
+        let shared = match self.seen.get(id) {
+            Some(s) if !remote_ahead(&version, &s.version, ours) => s.version.clone(),
+            _ => Arc::new(version),
+        };
+        if let Some(nodes) = self.recent.get_mut(id) {
+            for r in nodes.values_mut().flatten() {
+                if !Arc::ptr_eq(&r.checked, &shared) {
+                    r.checked = shared.clone();
+                }
+            }
+        }
+        self.seen.insert(
+            id.clone(),
+            Seen {
+                frontiers,
+                version: shared,
+                new_edits: false,
+            },
+        );
     }
 
     // ---- offline ----
@@ -638,6 +807,11 @@ impl ConflictTracker {
     /// shared folder unreachable, or the app goes offline on purpose): remember
     /// the version we had. A second call before [`caught_up`](Self::caught_up)
     /// keeps the first mark.
+    ///
+    /// Edits made before the mark may not have reached anyone (made after the
+    /// link really dropped, or held back by `min_send_interval`). Until
+    /// `caught_up` they stay as old as they were at the mark, so the catch-up
+    /// still reports the ops that raced with them.
     pub fn connection_lost_at(&mut self, stage: &Stage, now: Instant) {
         if self.offline.is_none() {
             self.offline = Some(Offline {
@@ -653,7 +827,8 @@ impl ConflictTracker {
         self.offline.as_ref().map(|o| &o.since)
     }
 
-    /// Reconnected and caught up (see `SyncSession::is_caught_up`): what the
+    /// Reconnected and caught up (see `SyncSession::is_caught_up`; call it
+    /// after the [`check`](Self::check) of the pump that caught up): what the
     /// merge did, from the version remembered by
     /// [`connection_lost`](Self::connection_lost) to now ([`merge_summary`]).
     /// `None` if no reconnect was pending. On an error the mark is kept.
@@ -663,13 +838,18 @@ impl ConflictTracker {
         };
         match merge_summary(stage, &off.since) {
             Ok(summary) => {
-                // Remote ops merged so far are in the summary.
-                for (id, nodes) in &mut self.recent {
-                    if let Some(layer) = stage.sublayer(id) {
-                        let v = Arc::new(layer.version());
-                        for r in nodes.values_mut().flatten() {
-                            r.checked = v.clone();
-                        }
+                // Remote ops merged so far are in the summary (or were checked
+                // against the edits made before the mark).
+                let ids: Vec<SublayerId> = self.recent.keys().cloned().collect();
+                for id in ids {
+                    if let Some(layer) = stage.sublayer(&id) {
+                        let doc = layer.doc();
+                        self.mark_checked(
+                            &id,
+                            doc.oplog_frontiers(),
+                            doc.oplog_vv(),
+                            doc.peer_id(),
+                        );
                     }
                 }
                 Ok(Some(summary))
@@ -682,6 +862,23 @@ impl ConflictTracker {
     }
 }
 
+/// How old `r` counts for the window: while a reconnect is pending (`mark`),
+/// an edit made before the link was lost is as old as it was then.
+fn age(r: &Recent, mark: Option<Instant>, now: Instant) -> Duration {
+    match mark {
+        Some(t) if r.edited_at < t => t.saturating_duration_since(r.edited_at),
+        _ => now.saturating_duration_since(r.edited_at),
+    }
+}
+
+/// Whether `version` holds ops of a peer other than `ours` that `known` does
+/// not.
+fn remote_ahead(version: &VersionVector, known: &VersionVector, ours: PeerID) -> bool {
+    version
+        .iter()
+        .any(|(p, &end)| *p != ours && known.get(p).copied().unwrap_or(0) < end)
+}
+
 /// Remote ops (other peers, not yet looked at by some candidate) on the maps of
 /// `picked`, by element; and how many ops were decoded. Only spans around ops
 /// that wrote one of those maps are decoded.
@@ -692,15 +889,22 @@ fn remote_ops(
     picked: &[(TreeID, usize, &Recent)],
 ) -> (FxHashMap<ElementKey, Vec<RemoteOp>>, u64) {
     let interest: FxHashSet<&ContainerID> = picked.iter().map(|(_, _, r)| &r.container).collect();
+    // The versions the candidates were last compared with (most share one).
+    let mut distinct = FxHashSet::default();
+    let compared: Vec<&VersionVector> = picked
+        .iter()
+        .filter(|(_, _, r)| distinct.insert(Arc::as_ptr(&r.checked)))
+        .map(|(_, _, r)| &*r.checked)
+        .collect();
     let mut found: FxHashMap<ElementKey, Vec<RemoteOp>> = FxHashMap::default();
     let mut walker = Walker::new(doc);
     for (&peer, &end) in version.iter() {
         if peer == ours {
             continue;
         }
-        let start = picked
+        let start = compared
             .iter()
-            .map(|(_, _, r)| r.checked.get(&peer).copied().unwrap_or(0))
+            .map(|v| v.get(&peer).copied().unwrap_or(0))
             .min()
             .unwrap_or(end);
         each_span_writing(doc, peer, start, end, &interest, &mut |span| {
@@ -708,7 +912,7 @@ fn remote_ops(
                 let (Target::Element { value, .. }, Some((c, k))) = (op.target, op.key) else {
                     return;
                 };
-                if op.rollback || !interest.contains(c) {
+                if !interest.contains(c) {
                     return;
                 }
                 found
@@ -719,6 +923,7 @@ fn remote_ops(
                         lamport: op.lamport,
                         author: op.author.cloned(),
                         value: value.cloned(),
+                        rollback: op.rollback,
                     });
             });
         });
@@ -764,21 +969,24 @@ fn each_span_writing(
 }
 
 /// The notice for one remembered element an import touched, and whether our
-/// value was overridden (then it is forgotten).
+/// value was overridden (then it is forgotten). `racing_only`: only ops made
+/// without knowing ours count as new.
 fn judge(
     layer: &Sublayer,
-    doc: &LoroDoc,
-    ours: u64,
     node: TreeID,
     r: &Recent,
     ops: &[RemoteOp],
+    racing_only: bool,
     now: Instant,
 ) -> Option<(ConcurrentEdit, bool)> {
+    let doc = layer.doc();
+    let ours = doc.peer_id();
     // Ops this edit has not been compared with yet (the scan started at the
-    // oldest of all candidates).
+    // oldest version of all candidates).
     let fresh: Vec<&RemoteOp> = ops
         .iter()
         .filter(|o| o.id.counter >= r.checked.get(&o.id.peer).copied().unwrap_or(0))
+        .filter(|o| !racing_only || ops::concurrent_with(doc, o.id, r.op))
         .collect();
     if fresh.is_empty() {
         return None;
@@ -804,21 +1012,23 @@ fn judge(
     };
     if winner_peer == Some(ours) {
         // Our value stands. Report the other changes of it that lost, unless
-        // they set the same.
+        // they set the same or were a failed transaction's rollback.
         let lost: Vec<&RemoteOp> = fresh
             .into_iter()
-            .filter(|o| r.element.decode(o.value.as_ref()) != r.ours)
+            .filter(|o| !o.rollback && r.element.decode(o.value.as_ref()) != r.ours)
             .collect();
         let last = lost.iter().max_by_key(|o| o.order())?;
         let theirs = r.element.decode(last.value.as_ref());
-        // An op that knew ours would have won, so every loser was concurrent.
+        // An op that knew ours wins over it, unless a later op of ours (a
+        // rollback's write) holds the element now.
+        let concurrent = lost.iter().any(|o| ops::concurrent_with(doc, o.id, r.op));
         return Some((
             notice(
                 ConflictOutcome::Kept,
                 theirs,
                 r.author.clone(),
                 authors(&lost),
-                true,
+                concurrent,
             ),
             false,
         ));
@@ -826,6 +1036,7 @@ fn judge(
     if result == r.ours {
         return None;
     }
+    // The winner may be a rollback's write: it replaced our value all the same.
     let win = ops
         .iter()
         .filter(|o| winner_peer.is_none_or(|p| o.id.peer == p))
@@ -871,9 +1082,11 @@ pub struct MergeSummary {
     pub overridden: Vec<OfflineEdit>,
     /// Prims we added or removed, and where they stand.
     pub prims: Vec<OfflinePrim>,
-    /// What the others changed meanwhile, by prim: `history::diff` from our
-    /// version (what we had right before merging) to now, so only their
-    /// changes (including where they won over ours).
+    /// What the others changed meanwhile, by prim: `history::diff` from what
+    /// we had right before merging (`since` plus our ops made before any of
+    /// theirs arrived) to that plus all of their ops, so only their changes
+    /// (including where they won over ours), also when we kept editing while
+    /// the catch-up came in.
     pub merged: Vec<PrimDiff>,
 }
 
@@ -968,13 +1181,15 @@ struct MyEdit {
 /// any author on this client); everything else after `since` is the others'.
 /// Works the same for hub and shared-folder sessions: it only reads version
 /// vectors and history. Costs like `history::diff` (read-only snapshots of the
-/// version we had), so call it once per reconnect, not per frame.
+/// versions involved), so call it once per reconnect, not per frame.
 ///
 /// The stage's peers change when the project is reopened, so `since` must
 /// come from this stage, not from before a restart.
 pub fn merge_summary(stage: &Stage, since: &ProjectVersion) -> Result<MergeSummary, SyncError> {
     let now = ProjectVersion::current(stage);
-    let mut mine_version = ProjectVersion::default();
+    // What we had right before merging, and that plus all of the others' ops.
+    let mut before = ProjectVersion::default();
+    let mut after = ProjectVersion::default();
     let mut out = MergeSummary {
         since: since.clone(),
         ..MergeSummary::default()
@@ -984,56 +1199,116 @@ pub fn merge_summary(stage: &Stage, since: &ProjectVersion) -> Result<MergeSumma
         let (from, to) = (since.get(id), now.get(id));
         if !to.includes_vv(&from) {
             // Not the document we had then (replaced or reloaded).
-            mine_version.sublayers.insert(id.clone(), to);
+            before.sublayers.insert(id.clone(), to.clone());
+            after.sublayers.insert(id.clone(), to);
             continue;
         }
-        let peer = layer.doc().peer_id();
-        let mut mine = from.clone();
-        if let Some(&c) = to.get(&peer)
-            && c > from.get(&peer).copied().unwrap_or(0)
-        {
-            mine.insert(peer, c);
+        let doc = layer.doc();
+        let peer = doc.peer_id();
+        let start = from.get(&peer).copied().unwrap_or(0);
+        let end = to.get(&peer).copied().unwrap_or(0).max(start);
+        let with_own = |upto: i32| {
+            let mut v = from.clone();
+            if upto > start {
+                v.insert(peer, upto);
+            }
+            v
+        };
+        // All our ops; and those made before any of theirs arrived (later
+        // ones depend on theirs, so a version with them would bring theirs).
+        let mine = with_own(end);
+        let base = with_own(first_op_knowing_theirs(doc, peer, &from, start, end));
+        let mut merged = base.clone();
+        for (&p, &c) in to.iter() {
+            if p != peer {
+                merged.insert(p, c);
+            }
         }
         if from != to {
-            summarize_layer(id, layer, &from, &mine, &to, &mut out)?;
+            summarize_layer(id, layer, [&from, &base, &mine], &to, &mut out)?;
         }
-        mine_version.sublayers.insert(id.clone(), mine);
+        before.sublayers.insert(id.clone(), base);
+        after.sublayers.insert(id.clone(), merged);
     }
-    out.merged = history::diff(stage, &mine_version, &now)?;
+    out.merged = history::diff(stage, &before, &after)?;
     Ok(out)
+}
+
+/// The first of `peer`'s ops in `start..end` that was made after an op of
+/// another peer beyond `since` had arrived (`end` if none). Once one change
+/// knows such an op every later one does, so this halves the range over
+/// whole changes: a few lookups per reconnect.
+fn first_op_knowing_theirs(
+    doc: &LoroDoc,
+    peer: PeerID,
+    since: &VersionVector,
+    start: i32,
+    end: i32,
+) -> i32 {
+    let (mut lo, mut hi) = (start, end);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let Some(change) = doc.get_change(ID::new(peer, mid)) else {
+            return lo;
+        };
+        let knows = doc
+            .frontiers_to_vv(&change.deps)
+            .is_some_and(|past| remote_ahead(&past, since, peer));
+        if knows {
+            hi = change.id.counter.max(lo);
+        } else {
+            let len = i32::try_from(change.len).unwrap_or(i32::MAX);
+            lo = change.id.counter.saturating_add(len).clamp(mid + 1, hi);
+        }
+    }
+    lo
 }
 
 /// Paths of prims that are gone, from read-only snapshots built on demand
 /// (at most one per version).
 struct PastPaths<'a> {
     live: &'a Sublayer,
-    versions: [&'a VersionVector; 2],
-    layers: [Option<history::LayerAt<'a>>; 2],
+    /// `since`, what we had right before merging, all our ops.
+    versions: [&'a VersionVector; 3],
+    layers: [Option<history::LayerAt<'a>>; 3],
 }
 
 impl PastPaths<'_> {
-    /// Path of `node` at version 0 (`since`) or 1 (ours).
-    fn path(&mut self, which: usize, node: TreeID) -> Result<PrimPath, SyncError> {
+    fn at(&mut self, which: usize, node: TreeID) -> Result<Option<PrimPath>, SyncError> {
         let layer = match &mut self.layers[which] {
             Some(l) => l,
             slot => slot.insert(history::layer_at(self.live, self.versions[which])?),
         };
-        Ok(layer
-            .get()
-            .node_path(node)
-            .cloned()
-            .unwrap_or_else(PrimPath::root))
+        Ok(layer.get().node_path(node).cloned())
+    }
+
+    /// Path of `node` at `since`.
+    fn before(&mut self, node: TreeID) -> Result<PrimPath, SyncError> {
+        Ok(self.at(0, node)?.unwrap_or_else(PrimPath::root))
+    }
+
+    /// Path of `node` in our version: right before merging or, for a prim we
+    /// added while the catch-up came in, with all our ops.
+    fn ours(&mut self, node: TreeID) -> Result<PrimPath, SyncError> {
+        if let Some(path) = self.at(1, node)? {
+            return Ok(path);
+        }
+        if self.versions[2] == self.versions[1] {
+            return Ok(PrimPath::root());
+        }
+        Ok(self.at(2, node)?.unwrap_or_else(PrimPath::root))
     }
 }
 
+/// `versions`: `since`, what we had right before merging, all our ops.
 fn summarize_layer(
     id: &SublayerId,
     layer: &Sublayer,
-    from: &VersionVector,
-    mine: &VersionVector,
+    versions: [&VersionVector; 3],
     to: &VersionVector,
     out: &mut MergeSummary,
 ) -> Result<(), SyncError> {
+    let [from, _, mine] = versions;
     let doc = layer.doc();
     let peer = doc.peer_id();
     let mut walker = Walker::new(doc);
@@ -1076,6 +1351,9 @@ fn summarize_layer(
         });
     }
     let created_set: FxHashSet<TreeID> = created.iter().map(|(n, _)| *n).collect();
+    let deleted_set: FxHashSet<TreeID> = deleted.iter().copied().collect();
+    // We removed it, or something above it, ourselves: whoever else did too.
+    let removed_by_us = |n: TreeID| ops::in_subtrees(doc, n, &deleted_set);
 
     // Their ops: changes of the elements we edited, and (if we deleted
     // prims) who touched which prim. Without deletions only the ops around
@@ -1091,14 +1369,13 @@ fn summarize_layer(
         }
         let mut read = |span: IdSpan| {
             walker.walk(span, |op| {
-                if op.rollback {
-                    return;
-                }
-                // Removing a prim we removed too is no conflict.
-                if all && !matches!(op.target, Target::Delete(_)) {
+                // Removing a prim we removed too is no conflict, and a failed
+                // transaction's rollback changed nothing anyone asked for.
+                if all && !op.rollback && !matches!(op.target, Target::Delete(_)) {
                     let t = touched.entry(op.target.node()).or_default();
                     t.extend(op.author.cloned());
                 }
+                // A rollback's writes still compete for the element.
                 if let (Target::Element { value, .. }, Some((c, k))) = (op.target, op.key)
                     && containers.contains(c)
                 {
@@ -1110,6 +1387,7 @@ fn summarize_layer(
                             lamport: op.lamport,
                             author: op.author.cloned(),
                             value: value.cloned(),
+                            rollback: op.rollback,
                         });
                 }
             });
@@ -1123,8 +1401,8 @@ fn summarize_layer(
 
     let mut past = PastPaths {
         live: layer,
-        versions: [from, mine],
-        layers: [None, None],
+        versions,
+        layers: [None, None, None],
     };
     // The op that removed `n`, if someone else did.
     let removed_by_others = |n: TreeID| ops::deletion_of(doc, n).filter(|d| d.peer != peer);
@@ -1138,7 +1416,7 @@ fn summarize_layer(
         let ops = theirs.get(&key).map_or(&[][..], Vec::as_slice);
         let differing: Vec<&RemoteOp> = ops
             .iter()
-            .filter(|o| e.element.decode(o.value.as_ref()) != e.ours)
+            .filter(|o| !o.rollback && e.element.decode(o.value.as_ref()) != e.ours)
             .collect();
         let mut edit = OfflineEdit {
             sublayer: id.clone(),
@@ -1154,7 +1432,11 @@ fn summarize_layer(
             prim_removed: false,
         };
         let Some(path) = layer.node_path(e.node) else {
-            // The prim is gone: by someone else, or by us later on.
+            // The prim is gone: by us (reported with the prim), or by someone
+            // else.
+            if removed_by_us(e.node) {
+                continue;
+            }
             let Some(d) = removed_by_others(e.node) else {
                 continue;
             };
@@ -1165,7 +1447,7 @@ fn summarize_layer(
                 edit.others.push(w.clone());
                 edit.others.sort();
             }
-            edit.path = past.path(1, e.node)?;
+            edit.path = past.ours(e.node)?;
             edit.prim_removed = true;
             overridden.push(edit);
             continue;
@@ -1178,6 +1460,7 @@ fn summarize_layer(
         if winner_peer == Some(peer) || edit.result == edit.ours {
             kept.push(edit);
         } else {
+            // Possibly a rollback's write: it replaced ours all the same.
             edit.winner = ops
                 .iter()
                 .filter(|o| winner_peer.is_none_or(|p| o.id.peer == p))
@@ -1188,7 +1471,6 @@ fn summarize_layer(
     }
 
     // Who else touched each prim we deleted, or anything below it.
-    let deleted_set: FxHashSet<TreeID> = deleted.iter().copied().collect();
     let mut changed_below: FxHashMap<TreeID, BTreeSet<AuthorId>> = FxHashMap::default();
     if !deleted_set.is_empty() {
         for (n, who) in &touched {
@@ -1219,11 +1501,14 @@ fn summarize_layer(
         match layer.node_path(n) {
             Some(path) => prims.push(entry(path.clone(), OfflinePrimChange::Added, Vec::new())),
             None => {
+                if removed_by_us(n) {
+                    continue;
+                }
                 let Some(d) = removed_by_others(n) else {
                     continue;
                 };
                 let by = ops::author_of(doc, d).0.into_iter().collect();
-                let path = past.path(1, n)?;
+                let path = past.ours(n)?;
                 prims.push(entry(path, OfflinePrimChange::AddedButRemoved, by));
             }
         }
@@ -1254,7 +1539,7 @@ fn summarize_layer(
                 } else {
                     OfflinePrimChange::RemovedButChanged
                 };
-                let path = past.path(0, n)?;
+                let path = past.before(n)?;
                 (path, change, by)
             }
         };
