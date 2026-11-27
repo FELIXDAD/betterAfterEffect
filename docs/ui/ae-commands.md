@@ -81,8 +81,8 @@
 | Dependencies ▸ Consolidate All Footage | 22806531 | `motion.file.consolidate_all_footage` |  |  |  | B | ✅ |
 | Dependencies ▸ Remove Unused Footage | 22806532 | `motion.file.remove_unused_footage` |  |  |  | B | ✅ |
 | Dependencies ▸ Reduce Project | 22806533 | `motion.file.reduce_project` |  |  |  | B | ✅ |
-| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ⏸ |
-| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ⏸ |
+| Dependencies ▸ Find Missing Effects | 22806535 | `motion.file.find_missing_effects` |  |  |  | E | ✅ |
+| Dependencies ▸ Find Missing Fonts | 22806536 | `motion.file.find_missing_fonts` |  |  |  | E | ✅ |
 | Dependencies ▸ Find Missing Footage | 22806537 | `motion.file.find_missing_footage` |  |  |  | E | ✅ |
 | Watch Folder... | 131099 | `motion.file.watch_folder` |  |  |  | B | Ⓐ |
 | Scripts ▸ Run Script File... | 917505 | `motion.file.run_script_file` |  |  |  | B | ⏸ |
@@ -111,8 +111,8 @@
 | Interpret Footage ▸ Apply Interpretation | 10420229 | `motion.file.apply_interpretation` |  | Ctrl+Alt+V | Cmd+Opt+V | E | ✅ |
 | Replace Footage ▸ File... | 11141121 | `motion.file.replace_footage_file` |  | Ctrl+H | Control+Cmd+H | E | ✅ |
 | Replace Footage ▸ With Layered Comp | 11141122 | `motion.file.replace_footage_with_layered_comp` |  |  |  | B | Ⓐ |
-| Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ⏸ |
-| Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ⏸ |
+| Replace Footage ▸ Placeholder... | 11141124 | `motion.file.replace_footage_placeholder` |  |  |  | E | ✅ |
+| Replace Footage ▸ Solid... | 11141125 | `motion.file.replace_footage_solid` |  |  |  | E | ✅ |
 | Reload Footage | 131107 | `motion.file.reload_footage` |  | Ctrl+Alt+L | Cmd+Opt+L | E | ✅ |
 | License... | 131108 | `motion.file.license` |  |  |  | B | Ⓐ |
 | Reveal in Explorer | 131109 | `motion.file.reveal_in_explorer` |  |  |  | B | ✅ |
@@ -490,7 +490,7 @@
 | Remove All Text Animators | 851984 | `motion.anim.remove_all_text_animators` |  |  |  | A | ✅ |
 | Add Expression | 851986 | `motion.anim.add_expression` |  | Alt+Shift+= | Opt+Shift+= | C | ☐ |
 | Separate Dimensions | 851987 | `motion.anim.separate_dimensions` |  |  |  | B | ✅ |
-| Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ⏸ |
+| Track Camera | 851988 | `motion.anim.track_camera` |  |  |  | B | ✅ |
 | Warp Stabilizer VFX | 851989 | `motion.anim.warp_stabilizer_vfx` |  |  |  | B | ⏸ |
 | Track Motion | 851990 | `motion.anim.track_motion` |  |  |  | B | ✅ |
 | Track Mask | 851991 | `motion.anim.track_mask` |  |  |  | B | ⏸ |

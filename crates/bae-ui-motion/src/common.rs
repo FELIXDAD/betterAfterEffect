@@ -143,6 +143,10 @@ pub(crate) fn int_choices(attr: &str) -> Option<&'static [(i64, &'static str)]> 
         "material:casts_shadows"
         | "material:accepts_shadows"
         | "material:appears_in_reflections" => Some(&[(0, "Off"), (1, "On"), (2, "Only")]),
+        "geometry:bevel_style" => {
+            Some(&[(1, "None"), (2, "Angular"), (3, "Concave"), (4, "Convex")])
+        }
+        "geometry:bevel_direction" => Some(&[(1, "Outward"), (2, "Inward")]),
         "camera:iris_shape" => Some(&[
             (1, "Fast Rectangle"),
             (3, "Triangle"),
@@ -271,6 +275,11 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "material:transparency" => "Transparency",
         "material:transparency_rolloff" => "Transparency Rolloff",
         "material:index_of_refraction" => "Index of Refraction",
+        "geometry:bevel_style" => "Bevel Style",
+        "geometry:bevel_direction" => "Bevel Direction",
+        "geometry:bevel_depth" => "Bevel Depth",
+        "geometry:hole_bevel_depth" => "Hole Bevel Depth",
+        "geometry:extrusion_depth" => "Extrusion Depth",
         // AE's Chinese UI calls the material's Ambient 周围 (the light type is 环境).
         "material:ambient" => {
             return match bae_ui::i18n::lang() {
