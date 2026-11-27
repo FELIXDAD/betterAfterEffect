@@ -68,6 +68,7 @@ objc2-foundation = { workspace = true, features = ["NSArray", "NSGeometry", "obj
 cc.workspace = true
 
 [dev-dependencies]
+png.workspace = true
 # Glyph coverage test (ui_text.rs) reads font character maps; already linked through
 # egui's epaint, so no new code.
 skrifa.workspace = true

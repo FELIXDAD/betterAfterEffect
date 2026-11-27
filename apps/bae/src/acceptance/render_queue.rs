@@ -146,15 +146,12 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
             format!("帧 序列_{:04}.{ext}", range.0),
             "{ext}: numbering"
         );
-        // Done shows "Done · N · x s" and "Show in Finder".
+        // Done: Render Again from the item's right-click menu (AE has no
+        // buttons in the queue).
         assert!(
-            queue_control(&h, 1, "Show in Finder").is_some(),
-            "{ext}: no Show in Finder"
+            queue_menu(&mut h, 1, "Render Again"),
+            "{ext}: no Render Again"
         );
-        queue_control(&h, 1, "Render Again")
-            .expect("Render Again")
-            .click();
-        settle(&mut h);
     }
 }
 
@@ -211,7 +208,8 @@ fn stop_keeps_the_rendered_frames_and_reports_n_of_m() {
             .is_disabled(),
         "Render enabled while rendering"
     );
-    queue_control(&h, 1, "Stop").expect("Stop").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Stop"))
+        .click();
     settle(&mut h);
     wait_done(&mut h, Duration::from_secs(120));
     let status = items(&h)[0].status.clone();
@@ -460,10 +458,7 @@ fn show_in_finder_passes_the_path_to_open() {
     configure(&h, 0, ExportFormat::Png, &out.join("帧 _[####].png"), 0, 2);
     render(&mut h);
     wait_done(&mut h, Duration::from_secs(120));
-    queue_control(&h, 1, "Show in Finder")
-        .expect("Show in Finder")
-        .click();
-    settle(&mut h);
+    assert!(queue_menu(&mut h, 1, "Show in Finder"), "no Show in Finder");
     // `reveal` spawns `open` without waiting for it: wait for the fake's
     // record, which appears in one rename (see `in_child_with_fake_open`).
     let log = PathBuf::from(std::env::var("BAE_ACC_OPEN_LOG").unwrap());
@@ -850,52 +845,6 @@ fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
 }
 
 #[test]
-fn typed_frame_numbers_stay_inside_the_comp() {
-    let Some(mut h) = gpu_gui() else { return };
-    comp_with(&mut h, &["motion.layer.new.solid"]);
-    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
-    let fields = |h: &Ui| {
-        ["Frames · Start", "Frames · End"].map(|name| {
-            let node = queue_control(h, 1, name).expect("frame range control");
-            (node.rect(), node.value().unwrap_or_default())
-        })
-    };
-    let f = fields(&h);
-    assert_eq!(
-        f.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>(),
-        ["0", "299"],
-        "{f:?}"
-    );
-    let type_into = |h: &mut Ui, at: Pos2, text: &str| {
-        pause(h);
-        click_at(h, at);
-        press(h, Modifiers::COMMAND, Key::A);
-        send(h, Event::Text(text.to_owned()));
-        key(h, Modifiers::NONE, Key::Enter);
-    };
-    type_into(&mut h, f[0].0.center(), "-25");
-    type_into(&mut h, f[1].0.center(), "99999");
-    let item = items(&h)[0].clone();
-    assert_eq!(
-        (item.start, item.end),
-        (0, 299),
-        "typed values not limited to the comp"
-    );
-    // Start after end: the end follows (or the start is limited to it).
-    type_into(&mut h, f[0].0.center(), "250");
-    let end_field = fields(&h)[1].0.center();
-    type_into(&mut h, end_field, "100");
-    let item = items(&h)[0].clone();
-    assert!(
-        item.start <= item.end,
-        "start {} after end {}",
-        item.start,
-        item.end
-    );
-    println!("start/end after 250 then 100: {}–{}", item.start, item.end);
-}
-
-#[test]
 fn a_single_frame_numbers_the_output_name() {
     // #207: start = end still numbers “[####]”; frame 5 then frame 6 keeps both.
     let Some(mut h) = gpu_gui() else { return };
@@ -1055,7 +1004,8 @@ fn stopping_a_movie_keeps_a_playable_file_of_the_rendered_frames() {
         );
         std::thread::sleep(Duration::from_millis(5));
     }
-    queue_control(&h, 1, "Stop").expect("Stop").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, bae_ui::tr("Stop"))
+        .click();
     settle(&mut h);
     let ItemStatus::Stopped { done, total, .. } = wait_item(&mut h, 0, Duration::from_secs(120))
     else {

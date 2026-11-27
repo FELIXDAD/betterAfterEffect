@@ -37,6 +37,7 @@ mod categories;
 pub use categories::channel_3d::settings as exr_controls;
 mod common;
 pub mod effects;
+pub use categories::matte::fill::content_aware_fill;
 mod gpu;
 mod module;
 mod obsolete;

@@ -77,6 +77,7 @@ pub mod content;
 pub mod dimensions;
 pub mod effect;
 pub mod expressions;
+mod fill;
 pub mod import;
 pub mod interpret;
 pub mod keys;
@@ -135,7 +136,9 @@ pub use layer::{
     SetLayerAttr, SetParent, ShapePreset, ShiftLayers, SlipLayers, SplitLayers, TrimLayers,
     copy_layers,
 };
-pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
+pub use markers::{
+    AddMarker, DeleteMarkers, EditMarker, LockMarkers, MarkerFields, MarkerOutput, MoveMarkers,
+};
 pub use matte::SetTrackMatte;
 pub use orient::AutoOrient;
 pub use path::{DeleteVertex, EditWhole, InsertVertex, SetVertices};
@@ -157,6 +160,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(comp_from_items::CompFromItems),
         r.register(paint::AddStroke),
         r.register(roto::Freeze),
+        r.register(fill::AddFillLayer),
         r.register(puppet::AddPin),
         r.register(puppet::DeletePins),
         r.register(puppet::SetMesh),
@@ -167,6 +171,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(tracker::AddPoint),
         r.register(tracker::ConfigureTracker),
         r.register(tracker::RecordTrack),
+        r.register(tracker::RecordStabilization),
         r.register(tracker::ResetTracker),
         r.register(SetCompSettings),
         r.register(CropComp),
@@ -218,6 +223,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(EditMarker),
         r.register(MoveMarkers),
         r.register(DeleteMarkers),
+        r.register(LockMarkers),
         r.register(AddShape),
         r.register(AddShapeItem),
         r.register(CreateMask),

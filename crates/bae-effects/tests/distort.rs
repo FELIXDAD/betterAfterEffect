@@ -341,3 +341,85 @@ fn blobbylize_requests_scene_data_only_for_comp_lights() {
         );
     }
 }
+
+#[test]
+fn measured_translation_cancels_camera_pan_in_every_warp_method() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let r = IRect::from_size(32, 24);
+    let input = Pixels::new(r, |x, y| [x as f32 / 32., y as f32 / 24., 0., 1.]);
+    let expected = Pixels::new(r, |x, y| input.get(x + 3, y - 2));
+    for method in 1..=4 {
+        let image = run(
+            &gpu,
+            F32,
+            builtin("ADBE SubspaceStabilizer"),
+            vec![
+                (19, Value::Int(2)),
+                (22, Value::Int(1)),
+                (28, Value::Int(method)),
+                (
+                    bae_model::effect::stabilizer::MOTION,
+                    Value::FloatList([3., -2.].repeat(9)),
+                ),
+            ],
+            &input,
+            r,
+            1.,
+        );
+        assert_close(
+            &image,
+            &expected,
+            IRect::new(2, 3, 27, 22),
+            0.0001,
+            "inverse camera motion",
+        );
+    }
+}
+
+#[test]
+fn rolling_shutter_reverses_readout_for_opposite_scan_directions() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(96, 80);
+    let current = test_image(rect);
+    let previous = Pixels::new(rect, |x, y| current.get_clamped(x + 3, y));
+    let fx = builtin("ADBE Rolling Shutter");
+    let corrected = |direction| {
+        let inst = instance(
+            &fx.info.match_name,
+            vec![
+                (1, Value::Float(100.)),
+                (2, Value::Int(direction)),
+                (4, Value::Int(2)),
+                (6, Value::Float(100.)),
+            ],
+        );
+        let mut p = EffectParams::new(&inst);
+        p.layer_bounds = rect;
+        p.comp_time = p.time_step;
+        p.time = p.comp_time;
+        let dep = fx.effect().layer_dependencies(&p).remove(0);
+        let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+        target.set_effect_inputs(vec![(dep, previous.upload(&gpu, F32))], vec![]);
+        let out = fx
+            .render(&mut target, &p, &current.upload(&gpu, F32), rect)
+            .unwrap();
+        target.finish().unwrap();
+        Pixels::download(&gpu, &out)
+    };
+    let top_down = corrected(1);
+    let bottom_up = corrected(2);
+    let mut forward = 0.;
+    let mut reverse = 0.;
+    for y in 8..24 {
+        for x in 12..84 {
+            let want = current.get(x - 1, y)[2];
+            forward += (top_down.get(x, y)[2] - want).abs();
+            reverse += (bottom_up.get(x, y)[2] - want).abs();
+        }
+    }
+    assert!(forward < reverse, "forward {forward}, reverse {reverse}");
+}

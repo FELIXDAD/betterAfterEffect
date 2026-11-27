@@ -1475,6 +1475,8 @@ impl Panel for CompositionViewer {
         if let Some(g) = self.gpu.as_mut() {
             g.display = self.display.render();
             g.roi = self.display.roi();
+            // Edits render on the live thread, never on this one.
+            g.live_edit = editing.then(|| ui.input(|i| !i.raw.events.is_empty()));
         }
         // Display colour management for every preview (stills, playback,
         // value drags).
@@ -1662,6 +1664,8 @@ impl Panel for CompositionViewer {
             );
             clip.extend(shapes);
         }
+        crate::tracker::stabilizer::points(cx, ui, &clip, &comp, &view);
+        crate::tracker::stabilizer::banner(cx, &info.path, &painter, comp_rect.intersect(area));
         if preparing {
             painter.text(
                 area.right_bottom() + vec2(-8.0, -8.0),

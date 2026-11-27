@@ -18,7 +18,10 @@ use crate::EffectTarget;
 use crate::gpu::{self, Binding, Kernel, KernelKey, KernelSource, Resource, UniformWriter};
 
 const LABEL: &str = "bae.effects.flow";
-const SHADER: &str = include_str!("flow.wgsl");
+const SHADER: &str = concat!(
+    include_str!("flow_sampling.wgsl"),
+    include_str!("flow.wgsl")
+);
 const BYTES: u32 = 224;
 const ENTRIES: [&str; 7] = [
     "luma_base",
@@ -208,10 +211,10 @@ struct Pyramid {
 
 /// A flow field: render-pixel motion per texel of the finest level.
 pub(crate) struct Field {
-    image: GpuImage,
+    pub(crate) image: GpuImage,
     size: [u32; 2],
-    scale: f32,
-    region: IRect,
+    pub(crate) scale: f32,
+    pub(crate) region: IRect,
 }
 
 impl Field {

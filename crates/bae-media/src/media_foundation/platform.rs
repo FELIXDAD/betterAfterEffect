@@ -141,6 +141,45 @@ impl Platform {
         }
     }
 
+    pub fn warm_decoder(&self, subtype: GUID, hardware: bool) -> windows::core::Result<()> {
+        let input = MFT_REGISTER_TYPE_INFO {
+            guidMajorType: MFMediaType_Video,
+            guidSubtype: subtype,
+        };
+        let mut flags =
+            MFT_ENUM_FLAG_SORTANDFILTER | MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_ASYNCMFT;
+        if hardware {
+            flags |= MFT_ENUM_FLAG_HARDWARE;
+        }
+        let mut list = std::ptr::null_mut();
+        let mut count = 0;
+        // SAFETY: MFTEnumEx gives us an array of owned activation objects. The
+        // preferred available decoder is activated on the warm-up MTA thread.
+        unsafe {
+            (self.enumerate)(
+                MFT_CATEGORY_VIDEO_DECODER,
+                flags,
+                &input,
+                std::ptr::null(),
+                &mut list,
+                &mut count,
+            )
+            .ok()?;
+            if !list.is_null() {
+                let items = std::ptr::slice_from_raw_parts_mut(list, count as usize);
+                let result = (&*items).first().and_then(Option::as_ref).map(|decoder| {
+                    let transform: IMFTransform = decoder.ActivateObject()?;
+                    let _ = transform.GetInputAvailableType(0, 0);
+                    decoder.ShutdownObject()
+                });
+                std::ptr::drop_in_place(items);
+                CoTaskMemFree(Some(list.cast()));
+                result.transpose()?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn open_url<T: Interface>(
         &self,
         class: &GUID,
@@ -156,6 +195,15 @@ impl Platform {
 }
 
 pub(super) fn video_device() -> windows::core::Result<ID3D11Device> {
+    static DEVICE: std::sync::Mutex<Option<ID3D11Device>> = std::sync::Mutex::new(None);
+    let mut cached = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(device) = cached.as_ref() {
+        // SAFETY: GetDeviceRemovedReason only queries the current device.
+        let removed = unsafe { device.GetDeviceRemovedReason() };
+        if removed.is_ok() {
+            return Ok(device.clone());
+        }
+    }
     // SAFETY: request the default hardware adapter and protect its immediate
     // context before passing it to Media Foundation's worker threads.
     unsafe {
@@ -175,6 +223,7 @@ pub(super) fn video_device() -> windows::core::Result<ID3D11Device> {
         let _ = device
             .cast::<ID3D11Multithread>()?
             .SetMultithreadProtected(true);
+        *cached = Some(device.clone());
         Ok(device)
     }
 }
