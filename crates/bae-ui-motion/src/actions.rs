@@ -267,6 +267,11 @@ pub mod ids {
     /// Help ▸ Enable Logging (a toggle: debug-level lines in the session log)
     /// and Reveal Logging File.
     pub const ENABLE_LOGGING: &str = "motion.help.enable_logging";
+    /// File ▸ Dependencies ▸ Remove Unused Footage / Consolidate All Footage /
+    /// Reduce Project (the items selected in the Project panel are kept).
+    pub const REMOVE_UNUSED: &str = "motion.file.remove_unused_footage";
+    pub const CONSOLIDATE: &str = "motion.file.consolidate_all_footage";
+    pub const REDUCE_PROJECT: &str = "motion.file.reduce_project";
     pub const REVEAL_LOG: &str = "motion.help.reveal_logging_file";
     /// Layer ▸ Transform ▸ Reset: AE's default transform (anchor point in the
     /// middle of the content, at the comp's center, 100%, no rotation).
@@ -496,6 +501,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LINK_FOCUS_TO_LAYER, "Link Focus Distance to Layer"),
     (ids::SET_FOCUS_TO_LAYER, "Set Focus Distance to Layer"),
     (ids::ENABLE_LOGGING, "Enable Logging"),
+    (ids::REMOVE_UNUSED, "Remove Unused Footage"),
+    (ids::CONSOLIDATE, "Consolidate All Footage"),
+    (ids::REDUCE_PROJECT, "Reduce Project"),
     (ids::REVEAL_LOG, "Reveal Logging File"),
     (ids::CENTER_ANCHOR, "Center Anchor Point in Layer Content"),
     (ids::FLIP_VERTICAL, "Flip Vertical"),
@@ -1205,6 +1213,57 @@ fn transform_edits(
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
+/// File ▸ Dependencies ▸ Remove Unused Footage, Consolidate All Footage and
+/// Reduce Project, then AE's alert with how many items went.
+fn clean_up(cx: &mut PanelContext<'_>, session: &SharedSession, id: &str) {
+    use bae_motion::cleanup;
+    use bae_ui::tr;
+    let stage = cx.stage;
+    let (command, title, n) = match id {
+        ids::REMOVE_UNUSED => (
+            "item.remove_unused",
+            "Remove Unused Footage",
+            cleanup::unused_footage(stage).len(),
+        ),
+        ids::CONSOLIDATE => (
+            "item.consolidate",
+            "Consolidate All Footage",
+            cleanup::duplicate_footage(stage).len(),
+        ),
+        _ => {
+            let keep = session.lock().selected_items.clone();
+            if keep.is_empty() {
+                crate::dialogs::alert(
+                    cx,
+                    tr("Reduce Project"),
+                    tr("Reduce Project removes all items from the project that are not used directly or indirectly by the selected items. Select one or more items before using this command.").to_owned(),
+                );
+                return;
+            }
+            let n = cleanup::unused_by(stage, &keep).len();
+            if n > 0 {
+                cx.invoke_with("item.reduce", json!({ "items": keep }));
+            }
+            let message = match n {
+                0 => tr("All project items are used directly or indirectly by the selected items. No items were removed.").to_owned(),
+                1 => tr("Removed one item not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.").to_owned(),
+                n => tr("Removed {n} items not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.").replace("{n}", &n.to_string()),
+            };
+            crate::dialogs::alert(cx, tr("Reduce Project"), message);
+            return;
+        }
+    };
+    if n > 0 {
+        cx.invoke_with(command, json!({}));
+    }
+    let message = if id == ids::REMOVE_UNUSED {
+        tr("{n} footage or folder items removed.")
+    } else {
+        tr("{n} footage or folder items consolidated.")
+    };
+    crate::dialogs::alert(cx, tr(title), message.replace("{n}", &n.to_string()));
+}
+
 /// File ▸ Add Footage to Comp: the selected Project items (not folders) as
 /// layers of the active comp, the first one on top (AE).
 fn add_footage_to_comp(cx: &mut PanelContext<'_>, session: &SharedSession) {
@@ -1477,6 +1536,10 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if let Some(camera) = camera_settings_target(stage, session) {
                 crate::dialogs::layer_settings(cx, session, &camera);
             }
+            return true;
+        }
+        ids::REMOVE_UNUSED | ids::CONSOLIDATE | ids::REDUCE_PROJECT => {
+            clean_up(cx, session, id);
             return true;
         }
         ids::ENABLE_LOGGING => {
@@ -3147,6 +3210,34 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Link Focus Distance to Layer", "将焦距链接到图层"),
     ("Set Focus Distance to Layer", "将焦距设置为图层"),
     ("Enable Logging", "启用日志记录"),
+    // File ▸ Dependencies (AE 2026 zh_CN: menu items and their alerts).
+    ("Remove Unused Footage", "删除未用过的素材"),
+    ("Consolidate All Footage", "整合所有素材"),
+    ("Reduce Project", "减少项目"),
+    (
+        "{n} footage or folder items removed.",
+        "{n} 个素材或文件夹项目已移除。",
+    ),
+    (
+        "{n} footage or folder items consolidated.",
+        "{n} 个素材或文件夹项目已整合。",
+    ),
+    (
+        "Reduce Project removes all items from the project that are not used directly or indirectly by the selected items. Select one or more items before using this command.",
+        "“减少项目”会从项目中删除所选项没有直接或间接使用的所有项。请在使用此命令之前选择一个或多个项。",
+    ),
+    (
+        "All project items are used directly or indirectly by the selected items. No items were removed.",
+        "所有项目项都由所选项直接或间接使用。没有删除任何项。",
+    ),
+    (
+        "Removed one item not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.",
+        "已删除所选项没有使用的一项。如果您愿意，可以撤消。\n警告: 不保留仅由表达式引用的项。",
+    ),
+    (
+        "Removed {n} items not used by the selection. You can undo this if you like.\nWarning: items referenced only by expressions are not kept.",
+        "已删除所选项没有使用的 {n} 项。如果您愿意，可以撤消。\n警告: 不保留仅由表达式引用的项。",
+    ),
     ("Reveal Logging File", "显示日志记录文件"),
 ];
 
