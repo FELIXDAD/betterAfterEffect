@@ -1170,13 +1170,15 @@ pub(crate) fn encode_shadows(
         let Some((clip, side)) = shadow_projection(lighting, light) else {
             continue;
         };
-        let value = 1.0 - (light.shadow_darkness / 100.0).clamp(0.0, 1.0);
+        let darkness = (light.shadow_darkness / 100.0).clamp(0.0, 1.0);
         for (m, key) in lighting.models.iter().zip(&keys) {
             let mut data: Vec<f32> = Vec::with_capacity(40);
             data.extend(clip.to_cols_array().map(|v| v as f32));
             data.extend(m.matrix.to_cols_array().map(|v| v as f32));
             data.extend(side.map(|v| v as f32));
-            data.extend([value, value, value, 1.0]);
+            // What passes the model: its Shadow Color (black by default).
+            let [r, g, b] = m.shadow_color.map(|c| 1.0 - darkness * (1.0 - c));
+            data.extend([r, g, b, 1.0]);
             let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("bae-render.mesh.shadow"),
                 contents: bytemuck::cast_slice(&data),

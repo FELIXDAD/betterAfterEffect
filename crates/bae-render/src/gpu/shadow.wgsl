@@ -35,7 +35,9 @@ fn caster_keep(c: u32, p: vec3<f32>, to: vec3<f32>, l0: vec4<f32>, l4: vec4<f32>
     if info.w == 0.0 {
         let col = lighting[c + 4u];
         let a = span(u.x, s, rect.x, rect.z) * span(u.y, s, rect.y, rect.w) * col.a * info.x;
-        return 1.0 - l4.x * a * (1.0 - info.y * col.rgb);
+        // What passes: the transmitted colour, else the Shadow Color.
+        let through = info.y * col.rgb + (1.0 - info.y) * lighting[c + 8u].rgb;
+        return 1.0 - l4.x * a * (1.0 - through);
     } else {
         let map = lighting[c + 5u];
         let clip = lighting[c + 6u];
@@ -50,7 +52,8 @@ fn caster_keep(c: u32, p: vec3<f32>, to: vec3<f32>, l0: vec4<f32>, l4: vec4<f32>
                 let uv = clamp(q * map.xy + map.zw, clip.xy, clip.zw);
                 let texel = textureSampleLevel(t_shadow, s_linear, uv, 0.0);
                 let col = texel.rgb / max(texel.a, 1e-6);
-                sum += 1.0 - l4.x * cov * texel.a * info.x * (1.0 - info.y * col);
+                let through = info.y * col + (1.0 - info.y) * lighting[c + 8u].rgb;
+                sum += 1.0 - l4.x * cov * texel.a * info.x * (1.0 - through);
             }
         }
         return sum / f32(n * n);
@@ -70,7 +73,7 @@ fn shadow(o: u32, p: vec3<f32>, u_recv: vec2<f32>, li: u32, l0: vec4<f32>, l1: v
     let count = u32(head.y);
     let block = o + u32(head.z);
     let nl = u32(lighting[o + 3u].w);
-    let stride = 8u + nl;
+    let stride = 9u + nl;
     var to = l0.xyz - p;
     if u32(l0.w) == 1u { to = -l1.xyz * 1e6; }
     let light_dist = max(length(l0.xyz - p), 1e-6);
@@ -80,7 +83,7 @@ fn shadow(o: u32, p: vec3<f32>, u_recv: vec2<f32>, li: u32, l0: vec4<f32>, l1: v
     if grid.z <= 0.0 {
         for (var i = 0u; i < count; i++) {
             let c = block + stride * i;
-            let foot = lighting[c + 8u + li];
+            let foot = lighting[c + 9u + li];
             if any(u_recv < foot.xy) || any(u_recv > foot.zw) { continue; }
             keep *= caster_keep(c, p, to, l0, l4, light_dist, pixel);
             if max(keep.r, max(keep.g, keep.b)) < 1e-3 { break; }
@@ -95,7 +98,7 @@ fn shadow(o: u32, p: vec3<f32>, u_recv: vec2<f32>, li: u32, l0: vec4<f32>, l1: v
             let i = w * 32u + firstTrailingBit(bits);
             bits &= bits - 1u;
             let c = block + stride * i;
-            let foot = lighting[c + 8u + li];
+            let foot = lighting[c + 9u + li];
             if any(u_recv < foot.xy) || any(u_recv > foot.zw) { continue; }
             keep *= caster_keep(c, p, to, l0, l4, light_dist, pixel);
             if max(keep.r, max(keep.g, keep.b)) < 1e-3 { return keep; }

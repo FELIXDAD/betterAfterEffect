@@ -1253,7 +1253,7 @@ impl Builder<'_, '_> {
                 matches!(layer.content, LayerContent::Model(_))
                     && layer.material.casts_shadows != ShadowMode::Off
             })
-            .filter_map(|(_, op)| match op.input {
+            .filter_map(|(index, op)| match op.input {
                 OpInput::Image(id) => match &self.nodes[id.index()].kind {
                     NodeKind::Mesh(m) => {
                         m.models
@@ -1262,6 +1262,7 @@ impl Builder<'_, '_> {
                             .map(|m| ModelCaster {
                                 model: m.model.clone(),
                                 matrix: m.matrix,
+                                shadow_color: comp.layers[*index].material.shadow_color,
                             })
                     }
                     _ => None,
@@ -1504,6 +1505,7 @@ impl Builder<'_, '_> {
                 .hash(&mut h);
             c.opacity.to_bits().hash(&mut h);
             c.transmission.to_bits().hash(&mut h);
+            c.shadow_color.map(f32::to_bits).hash(&mut h);
             match c.pixels {
                 crate::light::CasterPixels::Solid(color) => color.map(f32::to_bits).hash(&mut h),
                 crate::light::CasterPixels::Image(id) => self.nodes[id.index()].key.hash(&mut h),
@@ -1512,6 +1514,7 @@ impl Builder<'_, '_> {
         for m in lighting.models.iter() {
             (Arc::as_ptr(&m.model) as usize).hash(&mut h);
             m.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
+            m.shadow_color.map(f32::to_bits).hash(&mut h);
         }
         let base = h.finish();
         let slot_keys: Vec<u64> = lighting
@@ -3526,6 +3529,7 @@ fn attach_shadows(comp: &RenderComp, planned: &mut [(usize, LayerOp)]) {
                     opacity: op.opacity,
                     transmission: comp.layers[*index].material.light_transmission,
                     pixels,
+                    shadow_color: comp.layers[*index].material.shadow_color,
                     footprints: Arc::new([]),
                 },
             ))

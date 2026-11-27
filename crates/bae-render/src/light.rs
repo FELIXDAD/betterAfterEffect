@@ -166,11 +166,15 @@ pub struct ModelCaster {
     pub model: Arc<crate::model::Model>,
     /// Model space → comp space.
     pub matrix: DMat4,
+    /// Advanced 3D Shadow Color (straight RGB).
+    pub shadow_color: [f32; 3],
 }
 
 impl PartialEq for ModelCaster {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.model, &other.model) && self.matrix == other.matrix
+        Arc::ptr_eq(&self.model, &other.model)
+            && self.matrix == other.matrix
+            && self.shadow_color == other.shadow_color
     }
 }
 
@@ -231,6 +235,9 @@ pub struct ShadowCaster {
     pub transmission: f32,
     /// What blocks the light.
     pub pixels: CasterPixels,
+    /// Advanced 3D Shadow Color (straight RGB; black by default): what the
+    /// shadow turns the light into where the caster blocks it.
+    pub shadow_color: [f32; 3],
     /// Per light of the receiver it is attached to: where its shadow can
     /// fall on the receiver (receiver layer pixels, the softest edge
     /// included; empty: nowhere). Missing: anywhere.
@@ -256,7 +263,7 @@ pub(crate) const HEADER_VEC4S: usize = 7;
 /// Vec4s per light in a lighting record.
 pub(crate) const LIGHT_VEC4S: usize = 5;
 /// Vec4s per shadow caster in a lighting record.
-pub(crate) const CASTER_VEC4S: usize = 8;
+pub(crate) const CASTER_VEC4S: usize = 9;
 
 impl Lighting {
     /// Vec4s of the GPU records (one per motion-blur sample when sampled).
@@ -404,6 +411,8 @@ impl Lighting {
                 px_per_world as f32,
                 kind,
             ]);
+            let [r, g, b] = c.shadow_color;
+            out.push([r, g, b, 0.0]);
             // Per light: the footprint in input texels (the shader skips the
             // caster outside it).
             let mut feet = Vec::with_capacity(self.lights.len());
@@ -639,7 +648,10 @@ fn shadow(point: DVec3, l: &Light, casters: &[ShadowCaster], pixel: f64) -> DVec
             f64::from(color[1]),
             f64::from(color[2]),
         );
-        f *= DVec3::ONE - darkness * a * (DVec3::ONE - tr * col);
+        let [r, g, b] = c.shadow_color.map(f64::from);
+        // What passes: the transmitted colour, else the shadow colour.
+        let pass = tr * col + (1.0 - tr) * DVec3::new(r, g, b);
+        f *= DVec3::ONE - darkness * a * (DVec3::ONE - pass);
     }
     f
 }
@@ -698,6 +710,8 @@ pub struct Material {
     /// Advanced 3D: Transparency Rolloff in percent (default 0): less
     /// transparency where the layer is seen at a glancing angle.
     pub transparency_rolloff: f32,
+    /// Advanced 3D: Shadow Color (straight RGB, default black).
+    pub shadow_color: [f32; 3],
 }
 
 impl Default for Material {
@@ -714,6 +728,7 @@ impl Default for Material {
             metal: 100.0,
             transparency: 0.0,
             transparency_rolloff: 0.0,
+            shadow_color: [0.0; 3],
         }
     }
 }

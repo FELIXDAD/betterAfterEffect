@@ -537,7 +537,7 @@ fn fs_motion(in: VsOut) -> @location(0) vec4<f32> {
     if lit && (d.mode.y & FLAG_LIT_SAMPLES) != 0u {
         let o = d.extra.w;
         let nl = u32(lighting[o + 3u].w);
-        stride = 7u + 5u * nl + (8u + nl) * u32(lighting[o + 6u].y) + 1u + 64u * nl;
+        stride = 7u + 5u * nl + (9u + nl) * u32(lighting[o + 6u].y) + 1u + 64u * nl;
     }
     for (var i = 0u; i < n; i++) {
         let s = samples[d.extra.y + i];
