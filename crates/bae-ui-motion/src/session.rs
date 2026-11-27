@@ -517,6 +517,9 @@ pub struct Session {
     /// stage revision, cached spans.
     pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
+    /// The project revision and selection sizes [`Session::sync`] last
+    /// checked the selections against (each panel syncs every frame).
+    validated: Option<(u64, [usize; 7])>,
     pub(crate) reveal_style_groups: Vec<String>,
     pub scrub: Option<Scrub>,
     /// A keyframe drag in progress (Graph Editor, layer bars): the dragged
@@ -1091,6 +1094,23 @@ impl Session {
         {
             self.text_selection = None;
         }
+        // The checks below only drop entries the project no longer has (or
+        // locked): nothing to redo while neither changed.
+        let fingerprint = |s: &Self| {
+            [
+                s.selected_layers.len(),
+                s.selected_items.len(),
+                s.selected_keys.len(),
+                s.reveal.len(),
+                s.selected_props.len(),
+                s.graph_set.len(),
+                s.selected_effects.len(),
+            ]
+        };
+        if self.pending.is_empty() && self.validated == Some((stage.revision(), fingerprint(self)))
+        {
+            return;
+        }
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));
@@ -1117,6 +1137,7 @@ impl Session {
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
         self.selected_effects.retain(|e| stage.has_prim(e));
+        self.validated = Some((stage.revision(), fingerprint(self)));
     }
 
     /// Keep the meters moving through the last audible scrub sample.

@@ -265,8 +265,13 @@ pub(crate) struct GpuPreview {
     live: crate::live_preview::LivePreview,
     /// The project version live frames render with.
     live_scene: Option<Arc<crate::live_preview::LiveScene>>,
-    /// The key and view of the last live request.
-    live_sent: Option<LiveKey>,
+    /// What the last live request was made from.
+    live_sent: Option<LiveRequest>,
+    /// The viewer is editing (a drag, a nudge, text being typed): frames
+    /// render on the live thread like value drags. `Some(true)`: this frame
+    /// had input, so the edit may have changed. Set before each
+    /// [`Self::frame`].
+    pub live_edit: Option<bool>,
     /// The live target the registry shows.
     live_texture: Option<wgpu::Texture>,
     live_generation: u64,
@@ -279,7 +284,17 @@ pub(crate) struct GpuPreview {
 
 type PixelKey = (u32, u32, u64);
 
-type LiveKey = ((u64, Time, u32), (bae_render::Display, Option<IRect>));
+/// A live frame request; a new one goes when it changes (or on input while
+/// the viewer edits).
+#[derive(PartialEq)]
+struct LiveRequest {
+    revision: u64,
+    time: Time,
+    resolution: u32,
+    camera: Option<bae_render::Camera>,
+    view: (bae_render::Display, Option<IRect>),
+    overrides: Vec<bae_anim::AttrOverride>,
+}
 
 impl GpuPreview {
     /// A preview on the app's GPU context, if the app has one (the headless test
@@ -330,6 +345,7 @@ impl GpuPreview {
             live,
             live_scene: None,
             live_sent: None,
+            live_edit: None,
             live_texture: None,
             live_generation: 0,
             samples,
@@ -435,7 +451,8 @@ impl GpuPreview {
             .get::<crate::session::SharedSession>()
             .map(|s| s.lock().live_overrides(stage))
             .unwrap_or_default();
-        let live = (!overrides.is_empty()).then(|| overrides.clone());
+        let live_edit = self.live_edit.take();
+        let live = (!overrides.is_empty() || live_edit.is_some()).then(|| overrides.clone());
         self.engine.anim.set_nested_switches(
             crate::prefs::current(resources).bool("composition.switches_affect_nested_comps"),
         );
@@ -446,7 +463,31 @@ impl GpuPreview {
         }) {
             self.last = None;
         }
-        let mut rc = match self.engine.anim.convert(stage, comp, 0) {
+        // A value drag or a viewer edit: the newest state renders in the
+        // background (converted there too).
+        if let Some(overrides) = live {
+            let arrived = self.engine.renderer.poll_samples(&self.samples);
+            self.waiting = arrived || self.samples.is_waiting();
+            let request = LiveRequest {
+                revision: stage.revision(),
+                time: comp.time,
+                resolution,
+                camera,
+                view: (self.display, self.roi),
+                overrides: overrides.clone(),
+            };
+            let input = live_edit == Some(true);
+            return self.live_frame(
+                resources,
+                stage,
+                comp,
+                (request, input),
+                resolution,
+                measure_layer_times,
+                overrides,
+            );
+        }
+        let rc = match self.engine.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
                 tracing_warn(&format!("preview: {e}"));
@@ -456,27 +497,19 @@ impl GpuPreview {
         if self.engine.anim.audio_preparation_pending() {
             return self.image();
         }
-        // A 3D view other than Active Camera (the output never changes).
-        if let Some(camera) = camera {
-            rc.camera = Some(camera);
-            if let Some(blur) = &mut rc.motion_blur {
-                let blur = std::sync::Arc::make_mut(blur);
-                blur.cameras.fill(Some(camera));
-            }
-        }
+        let rc = crate::live_preview::with_camera(rc, camera);
         // sampleImage: the layers expressions sampled are drawn and read back
         // without waiting (during a value drag on the live renderer's thread).
         // A frame evaluated before its samples arrived is not shown: the
         // previous image stays up and the viewer evaluates again.
-        if live.is_none()
-            && self.samples.has_requests()
+        if self.samples.has_requests()
             && let Err(e) = self.engine.read_samples(stage, &rc, &self.samples)
         {
             tracing_warn(&format!("preview: sampleImage: {e}"));
         }
         let arrived = self.engine.renderer.poll_samples(&self.samples);
         self.waiting = arrived || self.samples.is_waiting();
-        if self.waiting && live.is_none() && self.rect.is_some() {
+        if self.waiting && self.rect.is_some() {
             return Some(PreviewImage {
                 viewport: self.id,
                 handle: self.registry.display_handle(self.id)?,
@@ -491,18 +524,6 @@ impl GpuPreview {
         }
         let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         let view = (self.display, self.roi);
-        // A value drag: the newest value renders in the background.
-        if let Some(overrides) = live {
-            return self.live_frame(
-                resources,
-                stage,
-                rc,
-                (key, view),
-                resolution,
-                measure_layer_times,
-                overrides,
-            );
-        }
         self.live_sent = None;
         if self.last != Some(key) || self.last_view != Some(view) {
             self.last_view = Some(view);
@@ -725,8 +746,8 @@ impl GpuPreview {
         &mut self,
         resources: &Resources,
         stage: &Stage,
-        rc: bae_render::RenderComp,
-        sent: LiveKey,
+        comp: &EvaluatedComp,
+        (request, input): (LiveRequest, bool),
         resolution: u32,
         measure_layer_times: bool,
         overrides: Vec<bae_anim::AttrOverride>,
@@ -742,7 +763,8 @@ impl GpuPreview {
                 let scene = self.live_scene(resources, stage);
                 self.live.submit(LiveJob {
                     scene,
-                    rc,
+                    comp: Box::new(comp.clone()),
+                    camera: request.camera,
                     overrides,
                     resolution,
                     display: self.display,
@@ -758,11 +780,12 @@ impl GpuPreview {
                 rect: self.rect?,
             });
         }
-        if self.live_sent != Some(sent) {
+        if input || self.live_sent.as_ref() != Some(&request) {
             let scene = self.live_scene(resources, stage);
             self.live.submit(LiveJob {
                 scene,
-                rc,
+                comp: Box::new(comp.clone()),
+                camera: request.camera,
                 overrides,
                 resolution,
                 display: self.display,
@@ -771,7 +794,7 @@ impl GpuPreview {
                 samples: Some(self.samples.clone()),
                 render: true,
             });
-            self.live_sent = Some(sent);
+            self.live_sent = Some(request);
         }
         if let Some(frame) = self.live.take() {
             self.preparing = frame.source.is_none();

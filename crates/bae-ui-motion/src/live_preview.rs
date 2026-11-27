@@ -25,10 +25,13 @@ pub(crate) struct LiveScene {
     pub effects: Option<PreviewEffects>,
 }
 
-/// One frame to render: the comp converted with the dragged value.
+/// One frame to render: the comp evaluated with the dragged value (this
+/// thread converts it for the renderer, so the UI thread never does).
 pub(crate) struct LiveJob {
     pub scene: Arc<LiveScene>,
-    pub rc: RenderComp,
+    pub comp: Box<bae_anim::EvaluatedComp>,
+    /// A 3D view other than Active Camera.
+    pub camera: Option<bae_render::Camera>,
     /// The dragged values (effects reading other frames and motion-blur
     /// samples evaluate them too).
     pub overrides: Vec<bae_anim::AttrOverride>,
@@ -154,11 +157,18 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
         let stage = scene.as_ref().unwrap().1.clone();
         engine.anim.set_overrides(job.overrides);
         bae_render::CompEvaluator::set_image_samples(&mut engine.anim, job.samples.clone());
+        let rc = match engine.anim.convert(&stage, &job.comp, 0) {
+            Ok(rc) => with_camera(rc, job.camera),
+            Err(e) => {
+                tracing::warn!("live preview: {e}");
+                continue;
+            }
+        };
         if let Some(samples) = &job.samples
             && samples.has_requests()
         {
             let read = engine
-                .read_samples(&stage, &job.rc, samples)
+                .read_samples(&stage, &rc, samples)
                 .and_then(|()| engine.renderer.wait_samples(samples));
             if let Err(e) = read {
                 tracing::warn!("live preview: sampleImage: {e}");
@@ -169,9 +179,12 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
             continue;
         }
         engine.renderer.set_layer_times(job.measure);
+        if engine.anim.audio_preparation_pending() {
+            continue;
+        }
         let rendered = engine.render(
             &stage,
-            &job.rc,
+            &rc,
             job.resolution,
             job.display,
             job.roi,
@@ -195,4 +208,17 @@ fn worker(gpu: Arc<GpuContext>, shared: Arc<Shared>) {
         shared.state.lock().unwrap().done = Some(frame);
         bae_gpu::warm_up::request_redraw();
     }
+}
+
+/// `rc` seen through `camera` (a 3D view other than Active Camera; the
+/// output never changes).
+pub(crate) fn with_camera(mut rc: RenderComp, camera: Option<bae_render::Camera>) -> RenderComp {
+    if let Some(camera) = camera {
+        rc.camera = Some(camera);
+        if let Some(blur) = &mut rc.motion_blur {
+            let blur = std::sync::Arc::make_mut(blur);
+            blur.cameras.fill(Some(camera));
+        }
+    }
+    rc
 }

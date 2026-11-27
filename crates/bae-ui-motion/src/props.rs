@@ -811,6 +811,17 @@ pub(crate) fn revealed_mask_attrs(list: &[String]) -> Vec<&'static str> {
 }
 
 pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<Node> {
+    // Groups the timeline opens itself (E, M, MM, F, LL): no layer property.
+    if let Reveal::Attrs(list) = reveal
+        && list.iter().all(|a| {
+            matches!(
+                a.as_str(),
+                "effects" | "masks" | "mask_path" | "mask_feather" | "audio:waveform"
+            )
+        })
+    {
+        return Vec::new();
+    }
     let mut all = Vec::new();
     flatten_props(&layer_tree(stage, layer), &mut all);
     all.into_iter()
@@ -818,10 +829,12 @@ pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<
             let Node::Prop { path, attr, .. } = n else {
                 return false;
             };
-            let spec = query::attr_spec(stage, path, attr);
+            let spec = || query::attr_spec(stage, path, attr);
             match reveal {
-                Reveal::Animated => spec.is_some_and(|s| s.is_animated() || s.expression.is_some()),
-                Reveal::Modified => spec.is_some_and(|s| !s.is_empty()),
+                Reveal::Animated => {
+                    spec().is_some_and(|s| s.is_animated() || s.expression.is_some())
+                }
+                Reveal::Modified => spec().is_some_and(|s| !s.is_empty()),
                 Reveal::Props(list) => list.iter().any(|(p, a)| p == path && a == attr),
                 Reveal::Attrs(list) => {
                     path == layer
