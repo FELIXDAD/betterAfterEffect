@@ -43,6 +43,8 @@ struct Monitor {
     peaks: [AtomicU32; 2],
     // Bit 0 routes L to output 2, bit 1 routes R to output 1. Zero is stereo.
     routing: AtomicU32,
+    /// The last device buffer carried preview samples.
+    audible: AtomicBool,
 }
 
 struct Sink {
@@ -118,6 +120,9 @@ impl Sink {
                 .clock
                 .publish(epoch, nanos, first, self.consumed - first);
         }
+        self.monitor
+            .audible
+            .store(self.consumed != first, Ordering::Relaxed);
     }
 }
 
@@ -352,6 +357,12 @@ impl AudioOutput {
             .peaks
             .each_ref()
             .map(|p| f32::from_bits(p.swap(0, Ordering::Relaxed)))
+    }
+
+    /// The device's last buffer carried preview samples: false from the first
+    /// buffer after [`Self::stop`] (or the end of the range) on.
+    pub fn audible(&self) -> bool {
+        self.monitor.audible.load(Ordering::Relaxed)
     }
 
     /// Silence queued audio while retaining the device and the prepared sources.
