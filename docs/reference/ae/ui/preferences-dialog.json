@@ -1419,11 +1419,16 @@
               }
             },
             {
-              "id": "accessibility_color_contrast",
+              "id": "use_accessible_contrast",
               "type": "checkbox",
               "labelZh": "无障碍色彩对比度",
               "labelEn": "Accessibility Color Contrast",
-              "default": true
+              "default": false,
+              "note": "AE 26 画成开关；默认关闭（Mac 26.2 与 Windows 26 实测）。打开后输入框、下拉框、按钮边框变亮（#303030 → #8d8d8d），文字变亮（#b0 → #eb，#d0 → #ff）",
+              "preferencesKey": {
+                "section": "Main Pref Section v2",
+                "key": "Use Accessible Contrast"
+              }
             }
           ]
         },

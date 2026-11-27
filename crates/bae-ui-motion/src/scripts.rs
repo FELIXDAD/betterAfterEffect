@@ -8,6 +8,7 @@
 //! reads the report `script.run` left in [`ScriptConsole`].
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bae_app::{Owner, Registry};
@@ -98,10 +99,13 @@ fn menu_item(path: &Path, order: i32) -> (String, MenuItemSpec) {
             MenuPos::new(i32::MAX, i32::MAX),
             MenuPos::new(1, 1000 + order),
         ]);
-    let id = title
-        .bytes()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
+    // Use the filename itself whenever it is a valid registry ID. Encoded
+    // names contain no extension separator, so they cannot collide with it.
+    let id = if title.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        title.bytes().map(|b| format!("{b:02x}")).collect()
+    } else {
+        title
+    };
     (format!("motion.file.script.{id}"), spec)
 }
 
@@ -119,8 +123,23 @@ pub fn register_menu(menu: &Registry<MenuItemSpec>, owner: &Owner, dir: &Path) {
 
 #[derive(Default)]
 pub(crate) struct RecentScripts {
-    paths: Vec<PathBuf>,
+    entries: Vec<RecentScript>,
     file: Option<PathBuf>,
+}
+
+#[derive(Clone)]
+struct RecentScript {
+    path: PathBuf,
+    available: Arc<AtomicBool>,
+}
+
+impl RecentScript {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            available: Arc::new(AtomicBool::new(true)),
+        }
+    }
 }
 
 impl RecentScripts {
@@ -130,22 +149,48 @@ impl RecentScripts {
             .and_then(|f| std::fs::read(f).ok())
             .and_then(|data| serde_json::from_slice(&data).ok())
             .unwrap_or_default();
-        paths.retain(|p| p.is_file() && is_script(p));
+        paths.retain(|p| is_script(p));
         paths.truncate(RECENT_LIMIT);
-        Self { paths, file }
+        Self {
+            entries: paths.into_iter().map(RecentScript::new).collect(),
+            file,
+        }
+    }
+
+    pub(crate) fn check_files(&self) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let entries = self.entries.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("bae-recent-scripts".into())
+            .spawn(move || {
+                for entry in entries {
+                    if !entry.path.is_file() {
+                        entry.available.store(false, Ordering::Relaxed);
+                        bae_gpu::warm_up::request_redraw();
+                    }
+                }
+            })
+        {
+            tracing::warn!("checking recent scripts: {error}");
+        }
     }
 
     pub(crate) fn publish(&self, menu: &Registry<MenuItemSpec>, owner: &Owner) {
         menu.batch(|tx| {
             for i in 0..RECENT_LIMIT {
                 let id = format!("motion.file.recent_script.{i}");
-                if let Some(path) = self.paths.get(i) {
+                if let Some(entry) = self.entries.get(i) {
+                    let path = &entry.path;
+                    let available = entry.available.clone();
                     let spec = MenuItemSpec::new(
                         &["File", "Scripts", "Recent Script Files"],
                         path.display().to_string(),
                         RUN_INSTALLED,
                     )
                     .params(json!({"path": path}))
+                    .enabled_when(move |_| available.load(Ordering::Relaxed))
                     .workspace(crate::menus::WORKSPACE)
                     .at(vec![
                         MenuPos::new(i32::MAX, i32::MAX),
@@ -161,13 +206,15 @@ impl RecentScripts {
     }
 
     fn record(&mut self, path: &Path) {
-        self.paths.retain(|p| p != path);
-        self.paths.insert(0, path.to_owned());
-        self.paths.truncate(RECENT_LIMIT);
+        self.entries.retain(|entry| entry.path != path);
+        // A successful open supersedes any pending startup check for this path.
+        self.entries.insert(0, RecentScript::new(path.to_owned()));
+        self.entries.truncate(RECENT_LIMIT);
+        let paths: Vec<_> = self.entries.iter().map(|entry| &entry.path).collect();
         if let Some(file) = &self.file
             && let Err(error) = bae_platform::settings::write_atomic(
                 file,
-                &serde_json::to_vec(&self.paths).expect("script paths"),
+                &serde_json::to_vec(&paths).expect("script paths"),
             )
         {
             tracing::warn!("saving recent scripts: {error}");
@@ -380,7 +427,8 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(found, ["a.js", "b.jsx"]);
-        let (_, spec) = menu_item(&dir.join("a.js"), 0);
+        let (id, spec) = menu_item(&dir.join("a.js"), 0);
+        assert_eq!(id, "motion.file.script.a.js");
         assert_eq!(spec.path, ["File", "Scripts"]);
         assert_eq!(spec.action, RUN_INSTALLED);
         let odd = dir.join("A B.jsx");
@@ -393,7 +441,16 @@ mod tests {
         recent.record(&odd);
         recent.record(&dir.join("a.js"));
         recent.record(&odd);
+        std::fs::remove_file(&odd).unwrap();
         RecentScripts::load(Some(config)).publish(&menu, &Owner::Core);
+        let stage = bae_model::Stage::new();
+        let resources = bae_app::Resources::new();
+        let context = bae_ui::menu::MenuContext::new(&stage, &resources, crate::menus::WORKSPACE);
+        assert!(
+            menu.get("motion.file.recent_script.0")
+                .unwrap()
+                .is_enabled(&context)
+        );
         assert_eq!(
             menu.get("motion.file.recent_script.0").unwrap().params["path"],
             json!(odd)
