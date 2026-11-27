@@ -436,6 +436,7 @@ pub struct RenderQueue {
     /// wait for the next Render, the snapshot does not have their edits).
     batch: Vec<u64>,
     sequence_files_per_folder: Option<usize>,
+    audio_block: Option<[u32; 4]>,
     render_threads: Option<usize>,
     repaint: Option<egui::Context>,
 }
@@ -736,6 +737,10 @@ impl RenderQueue {
             outputs: item.outputs.clone(),
             log: item.log,
             sequence_files_per_folder: self.sequence_files_per_folder,
+            audio_block: self.audio_block.map(|[h, m, s, frames]| {
+                let seconds = f64::from(h) * 3600.0 + f64::from(m) * 60.0 + f64::from(s);
+                Time::from_seconds(seconds) + item.rate.frame_to_time(i64::from(frames))
+            }),
             render_threads: self.render_threads,
             start: item.start,
             end: item.end,
@@ -886,6 +891,7 @@ pub(crate) struct Job {
     outputs: Vec<QueueOutput>,
     log: LogMode,
     sequence_files_per_folder: Option<usize>,
+    audio_block: Option<Time>,
     render_threads: Option<usize>,
     start: i64,
     end: i64,
@@ -905,8 +911,16 @@ fn render_threads(prefs: &bae_prefs::Preferences, cores: usize) -> usize {
 
 /// The export settings of a job's output module; `threads` from Memory &
 /// CPU (multi-frame rendering).
-fn export_settings(job: &QueueOutput, output: PathBuf, threads: Option<usize>) -> ExportSettings {
+fn export_settings(
+    job: &QueueOutput,
+    output: PathBuf,
+    threads: Option<usize>,
+    audio_block: Option<Time>,
+) -> ExportSettings {
     let mut settings = ExportSettings::new(job.format, output);
+    if let Some(duration) = audio_block {
+        settings.audio_block = duration;
+    }
     if let Some(threads) = threads {
         settings.threads = Some(threads);
         settings.frames_in_flight = threads.min(bae_render::export::READBACK_DEPTH);
@@ -1001,7 +1015,7 @@ pub(crate) fn render_job(
         .iter()
         .map(|o| {
             let path = output_path(Path::new(&o.output), o.format, &info.name)?;
-            let settings = export_settings(o, path.clone(), job.render_threads);
+            let settings = export_settings(o, path.clone(), job.render_threads, job.audio_block);
             settings.validate(job.rate, &request)?;
             Ok((path, settings))
         })
@@ -1134,6 +1148,7 @@ pub fn start(
         if !queue.begin() {
             return Ok(());
         }
+        queue.audio_block = bae_prefs::parse_timecode(prefs.str("audio.audio_block_duration"));
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         queue.render_threads = Some(render_threads(&prefs, cores));
         queue.sequence_files_per_folder = prefs
@@ -3137,9 +3152,11 @@ mod tests {
                 },
                 PathBuf::from("/r/x"),
                 Some(1),
+                Some(FrameRate::FPS_30.frame_to_time(12)),
             )
         };
         let png = s(ExportFormat::Png, Channels::RgbAlpha);
+        assert_eq!(png.audio_block, FrameRate::FPS_30.frame_to_time(12));
         assert_eq!((png.threads, png.frames_in_flight), (Some(1), 1));
         assert_eq!((png.alpha, png.bit_rate), (ExportAlpha::Straight, None));
         assert_eq!(
