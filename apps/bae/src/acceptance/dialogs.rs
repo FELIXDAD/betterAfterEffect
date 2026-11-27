@@ -478,18 +478,6 @@ fn precompose_moves_the_selected_layers_in_one_undo_step() {
     assert_eq!(h.state().layers(), layers);
 }
 
-#[derive(Debug)]
-struct DroppedFile(std::path::PathBuf);
-
-impl egui::DroppedFile for DroppedFile {
-    fn path(&self) -> &std::path::Path {
-        &self.0
-    }
-    fn bytes(&self) -> Result<Vec<u8>, String> {
-        std::fs::read(&self.0).map_err(|e| e.to_string())
-    }
-}
-
 /// An open panel that answers once.
 struct PickOnce(std::sync::Mutex<Vec<std::path::PathBuf>>);
 

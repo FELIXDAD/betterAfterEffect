@@ -24,6 +24,34 @@ use vello::{FontEmbolden, Glyph, NormalizedCoord};
 use crate::fonts::FontSystem;
 use crate::layout::{GlyphRun, PositionedGlyph, TextLayout, TextPaint, layout_text};
 
+/// Rasterize a family sample for the Character menu during background warm-up.
+pub fn font_menu_sample(fonts: &mut FontSystem, family: &str, width: u16, height: u16) -> Vec<u8> {
+    let doc = TextDocument::new("Aa", family, 32.0);
+    let layout = layout_text(fonts, &doc);
+    let mut ctx = vello_cpu::RenderContext::new(width, height);
+    if let Some(bounds) = layout.bounds(false) {
+        let w = f64::from(width);
+        let h = f64::from(height);
+        let scale = ((w - 2.0) / bounds.width().max(1.0))
+            .min((h - 2.0) / bounds.height().max(1.0))
+            .min(1.0);
+        let center = bounds.center();
+        let transform = Affine::translate((w * 0.5 - center.x * scale, h * 0.5 - center.y * scale))
+            * Affine::scale(scale);
+        draw_cpu(&mut ctx, &layout, transform);
+    }
+    ctx.flush();
+    let mut pixmap = vello_cpu::Pixmap::new(width, height);
+    ctx.render(&mut pixmap, &mut vello_cpu::Resources::new());
+    pixmap
+        .data_as_u8_slice()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| pixel[3])
+        .collect()
+}
+
 /// Appends `text` to `scene` with `transform` (layer space → target pixels).
 pub fn encode(scene: &mut vello::Scene, text: &TextLayout, transform: Affine) {
     encode_clipped(scene, text, transform, None);
@@ -315,6 +343,34 @@ pub fn draw_cpu(ctx: &mut vello_cpu::RenderContext, text: &TextLayout, transform
     }
 }
 
+/// Rasterizes the editable layer preview with the same outlines and paints as
+/// a render, `scale` pixels per layer pixel (the screen's, so it stays sharp
+/// on Retina and zoomed in), at most 4096 pixels on a side.
+pub fn preview_image(layout: &TextLayout, scale: f64) -> Option<(Rect, vello_cpu::Pixmap)> {
+    let ink = layout.bounds(true)?.inflate(1., 1.).expand();
+    let scale = (4096. / ink.width().max(ink.height())).min(scale.max(0.01));
+    let width = (ink.width() * scale).ceil() as u16;
+    let height = (ink.height() * scale).ceil() as u16;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let mut ctx = vello_cpu::RenderContext::new(width, height);
+    draw_cpu(
+        &mut ctx,
+        layout,
+        Affine::scale(scale) * Affine::translate((-ink.x0, -ink.y0)),
+    );
+    let mut image = vello_cpu::Pixmap::new(width, height);
+    ctx.render(&mut image, &mut vello_cpu::Resources::new());
+    let rect = Rect::new(
+        ink.x0,
+        ink.y0,
+        ink.x0 + f64::from(width) / scale,
+        ink.y0 + f64::from(height) / scale,
+    );
+    Some((rect, image))
+}
+
 /// Layer-space outlines of a run's glyphs (`None` for glyphs without one),
 /// with faux italic shear and faux bold expansion applied.
 fn glyph_outlines(run: &GlyphRun) -> Vec<Option<BezPath>> {
@@ -600,6 +656,7 @@ impl bae_gpu::WarmUp for VerticalGlyphWarmUp {
     fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
         let doc = crate::layout::vertical_warmup_document();
         let layout = self.0.layout(&doc);
+        let _ = preview_image(&layout, 1.);
         if !layout.is_empty() {
             VelloRenderer::shared(gpu)
                 .and_then(|r| r.render_region(gpu, pixel_bounds(&layout), 1., &layout))

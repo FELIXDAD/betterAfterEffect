@@ -366,6 +366,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Animator", "动画制作工具"),
     ("Based On", "依据"),
     ("Amount", "数量"),
+    // The Puppet effect's Mesh 1 group (`props::puppet_mesh`, AE 26's words).
+    ("Mesh", "网格"),
+    ("Deform", "变形"),
+    ("Puppet Pin", "操控点"),
+    ("Starch", "扑粉"),
+    ("In Front", "前面"),
+    ("Extent", "程度"),
     // A Paint effect's strokes (`props::paint_strokes`, AE 26's words).
     ("Brush", "画笔"),
     ("Clone", "仿制"),

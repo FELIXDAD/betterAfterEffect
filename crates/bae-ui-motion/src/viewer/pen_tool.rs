@@ -503,7 +503,7 @@ fn start_vertex(
     let selected = session.lock().selected_layers.clone();
     let target = Target::of(cx.stage, &info.path, &selected, mask);
     let to_comp = shape_tool::target_matrix(info, comp, &target);
-    let color = shape_tool::preview_color(cx.stage, &target);
+    let color = shape_tool::preview_color(cx, &target, info, session.lock().info.color);
     let center_new_anchor = matches!(target, Target::NewLayer)
         && super::prefs::ViewerPrefs::current(cx.resources).center_shape_anchor;
     let mut d = PenPath {
@@ -606,7 +606,8 @@ fn commit(
         Target::Mask(_) => "masks",
         _ => query::CONTENTS,
     };
-    let Some(layer) = shape_tool::run(cx, session, info, &d.target, g, false, options) else {
+    let Some(layer) = shape_tool::run(cx, session, info, &d.target, g, false, options, d.color)
+    else {
         return;
     };
     if let Ok(container) = layer.child(container_name) {

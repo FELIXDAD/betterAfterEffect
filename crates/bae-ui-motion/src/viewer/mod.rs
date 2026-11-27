@@ -43,6 +43,7 @@ mod particle_guides;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+pub(crate) mod puppet_tool;
 mod scene_icons;
 mod select_tool;
 mod shape_tool;
@@ -54,6 +55,7 @@ pub(crate) mod view3d;
 pub(crate) mod view_options;
 
 pub(crate) use overlay::{mask_color, path_shapes};
+pub(crate) use puppet_tool::record_options_ui as puppet_record_options_ui;
 pub(crate) use transform::nudge_layers;
 
 /// The magnification popup (AE 26): `(magnification, label)`.
@@ -305,6 +307,8 @@ pub struct CompositionViewer {
     motion_path: motion_path::MotionPathState,
     /// Point controls of the selected effects.
     effect_points: effect_points::EffectPoints,
+    /// Puppet tools: the pin being dragged.
+    puppet: puppet_tool::PuppetState,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
     /// menu): Esc goes to it instead of switching to the last 3D view.
     esc_taken: bool,
@@ -312,6 +316,8 @@ pub struct CompositionViewer {
     escape: bool,
     /// The current time and since when it has not changed (idle prefetch).
     idle: Option<(PrimPath, Time, u64, std::time::Instant)>,
+    /// Pixel at primary press, before the pointer crosses the drag threshold.
+    mask_start_color: Option<[u8; 4]>,
     /// A camera tool drag.
     camera_drag: Option<camera_tool::CameraDrag>,
 }
@@ -813,6 +819,10 @@ impl Panel for CompositionViewer {
                     None => false,
                 }
             }
+            crate::actions::ids::DELETE if self.puppet.has_selection() => {
+                self.puppet.delete_selected(cx);
+                true
+            }
             crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
                 if let Some(info) = common::active_comp(cx.stage, &session) {
                     self.delete_vertices(cx, &session, &info);
@@ -1039,6 +1049,23 @@ impl Panel for CompositionViewer {
         // Paint.
         let painter = ui.painter_at(area);
         let controls = view_options::shown_controls(&session.lock());
+        // Region of interest for Crop Comp to Region of Interest (AE turns it
+        // off once the comp is cropped to it).
+        {
+            let mut s = session.lock();
+            if std::mem::take(&mut s.roi_cropped) {
+                self.display.roi_on = false;
+                self.display.roi = None;
+            }
+            match self.display.roi() {
+                Some(r) => {
+                    let rect = [r.x0, r.y0, r.x1, r.y1].map(f64::from);
+                    s.roi = Some((info.path.clone(), rect));
+                }
+                None if s.roi.as_ref().is_some_and(|(c, _)| *c == info.path) => s.roi = None,
+                None => {}
+            }
+        }
         let pasteboard = session.lock().panel_background.color();
         painter.rect_filled(area, 0.0, pasteboard);
         let comp_rect = render::comp_rect(&view, info.width, info.height);
@@ -1088,13 +1115,27 @@ impl Panel for CompositionViewer {
         if self.nudge.is_some() && !ui.input(|i| arrows.iter().any(|k| i.key_down(*k))) {
             self.finish_nudge(cx, &session, &info);
         }
-        // Ctrl+T knows a path is selected (Free Transform Points).
-        session.lock().vertex_path = self
-            .select
-            .vertices
-            .prim
-            .clone()
-            .filter(|_| !self.select.vertices.is_empty());
+        // Ctrl+T and Layer ▸ Mask and Shape Path know which vertices are
+        // selected.
+        {
+            let mut s = session.lock();
+            if let Some(indices) = s.vertex_request.take()
+                && self.select.vertices.prim.is_some()
+            {
+                self.select.vertices.indices = indices;
+            }
+            s.vertex_path = self
+                .select
+                .vertices
+                .prim
+                .clone()
+                .filter(|_| !self.select.vertices.is_empty());
+            s.vertex_indices = if s.vertex_path.is_some() {
+                self.select.vertices.indices.clone()
+            } else {
+                Vec::new()
+            };
+        }
         let scrub = session.lock().scrub.clone();
         let editing = scrub.is_some()
             || self.nudge.is_some()
@@ -1409,7 +1450,8 @@ impl Panel for CompositionViewer {
         }
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
-        if let Some(h) = resp.hover_pos() {
+        let tool = tools.lock().current();
+        if let Some(h) = resp.interact_pointer_pos().or(resp.hover_pos()) {
             let p = view.to_comp(h);
             let mut s = session.lock();
             s.info.pos = Some([p.x, p.y]);
@@ -1418,9 +1460,35 @@ impl Panel for CompositionViewer {
                 .cumulative_frame_nr()
                 .saturating_sub(s.info.shown_at)
                 < 3;
-            if shown && let Some(g) = self.gpu.as_mut() {
-                // Outside the rendered frame the comp is transparent (AE: A 0).
-                s.info.color = Some(g.pixel([p.x, p.y]).unwrap_or([0; 4]));
+            let mask = self.prefs.contrasting_masks
+                && (tool.is_shape() || tool == Tool::Pen)
+                && self.shape.is_none()
+                && !self.pen.busy()
+                && !s.selected_layers.is_empty();
+            if shown || mask {
+                let origin = ui.input(|i| i.pointer.press_origin());
+                let pressed = ui.input(|i| i.pointer.primary_pressed());
+                let down = ui.input(|i| i.pointer.primary_down());
+                if pressed {
+                    self.mask_start_color = None;
+                }
+                if mask
+                    && down
+                    && self.mask_start_color.is_none()
+                    && let Some(origin) = origin
+                {
+                    let p = view.to_comp(origin);
+                    self.mask_start_color = self
+                        .gpu
+                        .as_mut()
+                        .and_then(|g| g.pixel([p.x, p.y], ui.ctx()));
+                }
+                if shown || !down || pressed {
+                    s.info.color = self
+                        .gpu
+                        .as_mut()
+                        .and_then(|g| g.pixel([p.x, p.y], ui.ctx()));
+                }
             }
         }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
@@ -1578,7 +1646,6 @@ impl Panel for CompositionViewer {
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
         let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-        let tool = tools.lock().current();
         let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
         if !space {
             self.space_hold = None;
@@ -1661,6 +1728,7 @@ impl Panel for CompositionViewer {
             &comp,
             &view,
             effective,
+            self.mask_start_color,
         );
         if let Some(d) = &self.shape {
             d.paint(&painter, &view);
@@ -1716,6 +1784,21 @@ impl Panel for CompositionViewer {
             &self.prefs,
             time,
         );
+        // Puppet tools: pins added and dragged.
+        let selected_layers = session.lock().selected_layers.clone();
+        let puppet = puppet_tool::frame(
+            &mut self.puppet,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+            effective,
+            &painter,
+            time,
+            &selected_layers,
+        );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         // Motion Sketch: an armed capture owns the next drag.
@@ -1753,7 +1836,9 @@ impl Panel for CompositionViewer {
             &opts,
             effective == Tool::Selection && !path.owns && !points.owns,
         );
-        let select_cursor = if points.owns {
+        let select_cursor = if puppet.owns {
+            puppet.cursor
+        } else if points.owns {
             points.cursor
         } else if path.owns || sketching || guide_busy {
             path.cursor
@@ -1821,6 +1906,7 @@ impl Panel for CompositionViewer {
             &session,
             &comp,
             &view,
+            self.type_tool.editing.is_some(),
         );
 
         // Items dropped from the project panel become layers.

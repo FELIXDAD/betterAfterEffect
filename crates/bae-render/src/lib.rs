@@ -52,12 +52,14 @@ pub mod graph;
 pub mod input;
 pub mod light;
 pub mod mask;
+pub mod model;
 mod module;
 pub mod motion;
 pub mod paint;
 mod parameter_track;
 pub mod png_out;
 pub mod pool;
+pub mod puppet;
 mod renderer;
 pub mod request;
 mod sample;
@@ -83,8 +85,8 @@ pub use gpu::CompositorWarmUp;
 pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{
-    CustomContent, Dependency, FootageRef, FrameBlend, LayerContent, RenderComp, RenderEffect,
-    RenderLayer, RenderMask, TrackMatte,
+    CustomContent, Dependency, FootageRef, FrameBlend, LayerContent, ModelRef, RenderComp,
+    RenderEffect, RenderLayer, RenderMask, TrackMatte,
 };
 pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;
