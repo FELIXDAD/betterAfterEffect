@@ -1,6 +1,41 @@
 use super::*;
 use bae_ui::files::{FilePicker, ImportSelection, OpenRequest, SharedFilePicker};
 
+#[cfg(windows)]
+#[test]
+fn import_dialog_saves_the_hardware_decoding_switch() {
+    use egui_kittest::kittest::Queryable as _;
+
+    let mut h = gui();
+    let id = "import.enable_hardware_accelerated_decoding";
+    assert!(h.state().prefs.current().bool(id));
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page": "import"}),
+    ));
+    settle(&mut h);
+    h.get_by_label("Enable Hardware Accelerated Decoding (Requires Restart)")
+        .click();
+    settle(&mut h);
+    h.get_by_label("OK").click();
+    settle(&mut h);
+    assert!(!h.state().prefs.current().bool(id));
+    if let Some(path) = std::env::var_os("BAE_ACCEPTANCE_MOVIE_HOME") {
+        let root = PathBuf::from(path);
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        let file = root.join("config").join(bae_prefs::FILE_NAME);
+        let store = bae_prefs::PrefsStore::open(file).0;
+        store.set((*h.state().prefs.current()).clone()).unwrap();
+        comp_with(&mut h, &[]);
+        let movie = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/bae-media/tests/fixtures/hevc10-192x128.mp4").canonicalize().unwrap();
+        drop_on_canvas(&mut h, &[movie]);
+        assert_eq!(h.state().layers().len(), 1);
+        eprintln!("ACCEPTANCE_COMP={}",h.state().active_comp().unwrap());
+        h.state_mut().doc.save_as(&root.join("sample.bae")).unwrap();
+    }
+}
+
 struct ImportPicker {
     first: PathBuf,
     alphabetical: bool,

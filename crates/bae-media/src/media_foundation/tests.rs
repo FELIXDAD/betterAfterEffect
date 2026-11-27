@@ -28,6 +28,32 @@ fn hardware() -> bool {
 }
 
 #[test]
+fn software_reader_preserves_colors_when_seeking_h264_and_hevc() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    match Platform::new() {
+        Ok(_) => {}
+        Err(MediaError::Unsupported(_)) => return,
+        Err(e) => panic!("{e}"),
+    }
+    for codec in ["h264", "hevc", "hevc10"] {
+        let path = dir.join(format!("{codec}-192x128.mp4"));
+        let mut source = match Source::open_with_hardware(&path, false) {
+            Err(MediaError::HevcDecoderUnavailable) if codec != "h264" => continue,
+            result => result.unwrap(),
+        };
+        for index in [0, 21, 4] {
+            let frame = source.decode_cpu(&FrameRequest::new(index)).unwrap();
+            assert_picture(&frame, index);
+            let [r, g, b, _] = frame.pixel_f32(110, 60);
+            assert!(
+                r > 0.85 && g < 0.15 && b < 0.15,
+                "{codec} frame {index}: {r} {g} {b}"
+            );
+        }
+    }
+}
+
+#[test]
 fn ntsc_timestamps_round_trip() {
     for n in [0, 1, 2, 17, 30_000, 500_000] {
         assert_eq!(

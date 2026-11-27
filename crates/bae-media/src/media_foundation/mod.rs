@@ -1,5 +1,5 @@
-//! Windows movie I/O through Media Foundation. The Source Reader uses DXVA on
-//! D3D11; the BGRA result takes one upload into the compositor's wgpu device.
+//! Windows movie I/O through Media Foundation. The Source Reader optionally uses DXVA
+//! to decode video on D3D11 and otherwise uses the system's software decoder.
 
 mod color;
 mod encode;
@@ -11,6 +11,8 @@ pub use encode::{MfWriterFormat, encoder_available};
 use platform::{Platform, frame_index, timestamp};
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use windows::Win32::Media::MediaFoundation::*;
 use windows::core::{GUID, Interface};
 
@@ -20,6 +22,35 @@ use crate::{
     MatrixCoefficients, MediaError, MediaFormat, MediaInfo, MediaKind, MediaSource, PixelAspect,
     PixelFormat, SampleType, VideoInfo,
 };
+
+static HARDWARE_DECODE: AtomicBool = AtomicBool::new(true);
+
+/// The import preference takes effect at the next app launch.
+pub fn set_hardware_decoding(enabled: bool) {
+    HARDWARE_DECODE.store(enabled, Ordering::Relaxed);
+}
+
+pub(crate) struct DecoderWarmUp;
+
+impl bae_gpu::WarmUp for DecoderWarmUp {
+    fn name(&self) -> &str {
+        "Windows movie decoders"
+    }
+
+    fn run(&self, _: &std::sync::Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        let platform = Platform::new().map_err(|e| e.to_string())?;
+        let hardware = HARDWARE_DECODE.load(Ordering::Relaxed);
+        if hardware {
+            platform::video_device().map_err(|e| e.to_string())?;
+        }
+        for codec in [MFVideoFormat_H264, MFVideoFormat_HEVC] {
+            platform
+                .warm_decoder(codec, hardware)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
 
 const VIDEO: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 
@@ -77,12 +108,26 @@ fn decode_error(hevc: bool, error: windows::core::Error) -> MediaError {
 
 impl Source {
     fn open(path: &Path) -> Result<Self, MediaError> {
+        Self::open_with_hardware(path, HARDWARE_DECODE.load(Ordering::Relaxed))
+    }
+
+    fn open_with_hardware(path: &Path, hardware: bool) -> Result<Self, MediaError> {
         let platform = Platform::new()?;
         let attrs = platform.attributes()?;
+        tracing::debug!(
+            hardware_decoding = hardware,
+            "opening Media Foundation video reader"
+        );
         // SAFETY: the reader retains its D3D manager and all supplied COM objects.
         unsafe {
-            attrs.SetUnknown(&MF_SOURCE_READER_D3D_MANAGER, &platform.device_manager()?)?;
-            attrs.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)?;
+            if hardware {
+                attrs.SetUnknown(&MF_SOURCE_READER_D3D_MANAGER, &platform.device_manager()?)?;
+            }
+            attrs.SetUINT32(&MF_SOURCE_READER_DISABLE_DXVA, u32::from(!hardware))?;
+            attrs.SetUINT32(
+                &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+                u32::from(hardware),
+            )?;
             attrs.SetUINT32(&MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, 1)?;
             let reader: IMFSourceReader = platform.open_url(&CLSID_MFSourceReader, path, &attrs)?;
             reader.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)?;
@@ -135,6 +180,18 @@ impl Source {
             } else {
                 &MFVideoFormat_ARGB32
             })?;
+            if !hardware && ten_bit {
+                // The software 10-bit RGB converter defaults to sRGB. Preserve the
+                // input transfer, including MF's BT.709 default for untagged YUV.
+                let transfer = native
+                    .GetUINT32(&MF_MT_TRANSFER_FUNCTION)
+                    .unwrap_or(MFVideoTransFunc_709.0 as u32);
+                output.SetUINT32(&MF_MT_TRANSFER_FUNCTION, transfer)?;
+                if let Ok(primaries) = native.GetUINT32(&MF_MT_VIDEO_PRIMARIES) {
+                    output.SetUINT32(&MF_MT_VIDEO_PRIMARIES, primaries)?;
+                }
+                output.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_0_255.0 as u32)?;
+            }
             output.SetUINT64(
                 &MF_MT_FRAME_SIZE,
                 (u64::from(width) << 32) | u64::from(height),
@@ -282,7 +339,7 @@ impl MediaSource for Source {
         } else {
             PixelFormat::Bgra8
         };
-        // SAFETY: the DXGI-backed video processor output is one 2D buffer.
+        // SAFETY: the video processor returns one 2D buffer.
         // ContiguousCopyTo removes row padding and checks the destination length.
         unsafe {
             let buffer: IMF2DBuffer = sample.GetBufferByIndex(0)?.cast()?;
