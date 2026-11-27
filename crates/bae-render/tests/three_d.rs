@@ -620,6 +620,7 @@ fn model_layers_draw_through_the_camera() {
         shadow_darkness: 100.0,
         shadow_diffusion: 0.0,
         scope_below: None,
+        environment: None,
     }];
     let lit = render(&mut r, &comp);
     let luma: Vec<u32> = [(85, 85), (115, 85), (100, 120)]
@@ -630,6 +631,94 @@ fn model_layers_draw_through_the_camera() {
         luma.iter().any(|&l| l != luma[0]),
         "faces shade differently: {luma:?}"
     );
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// An environment light with a picture (AE's Advanced 3D): a hidden 2D
+/// layer, white above the horizon and black below, lights a model from
+/// every direction (its top brighter than its bottom) and, with Background
+/// Visible, shows behind the layers through the camera.
+#[test]
+fn environment_light_pictures_light_models_and_show_behind() {
+    let Some(gpu) = gpu() else { return };
+    let dir = std::env::temp_dir().join(format!("bae-env-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cube.obj");
+    let mut obj = String::new();
+    for z in [-1.0, 1.0] {
+        for y in [-1.0, 1.0] {
+            for x in [-1.0, 1.0] {
+                obj += &format!("v {x} {y} {z}\n");
+            }
+        }
+    }
+    for f in [
+        "1 3 4 2", "5 6 8 7", "1 2 6 5", "3 7 8 4", "1 5 7 3", "2 4 8 6",
+    ] {
+        obj += &format!("f {f}\n");
+    }
+    std::fs::write(&file, obj).unwrap();
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+    let mut model = RenderLayer::new(
+        p("/comps/main/layers/model"),
+        LayerContent::Model(bae_render::ModelRef {
+            asset: p("/assets/cube"),
+            file: Some(file.clone()),
+        }),
+    );
+    // Tipped toward the camera: the top face shows above the front face.
+    model.matrix_3d = Some(
+        DMat4::from_translation(DVec3::new(100.0, 100.0, 0.0))
+            * bae_render::camera::xyz_rotation(DVec3::new(-35.0, 0.0, 0.0)),
+    );
+    // The picture: a 200 × 100 comp, white in its upper half (the sky).
+    let mut sky = RenderComp::new(p("/comps/sky"), 200, 100);
+    let mut white = solid("white", [1.0; 4], [200, 50]);
+    white.path = p("/comps/sky/layers/white");
+    sky.layers = vec![white];
+    let mut source = RenderLayer::new(
+        p("/comps/main/layers/hdri"),
+        LayerContent::Comp(Arc::new(sky)),
+    );
+    source.visible = false;
+    comp.layers = vec![model, source];
+    use bae_render::light::{EnvironmentSource, Falloff, Light, LightKind};
+    let light = |background| Light {
+        kind: LightKind::Environment,
+        world: DMat4::IDENTITY,
+        point_of_interest: DVec3::ZERO,
+        color: [1.0, 1.0, 1.0],
+        intensity: 100.0,
+        cone_angle: 90.0,
+        cone_feather: 50.0,
+        falloff: Falloff::None,
+        radius: 500.0,
+        falloff_distance: 500.0,
+        casts_shadows: false,
+        shadow_darkness: 100.0,
+        shadow_diffusion: 0.0,
+        scope_below: None,
+        environment: Some(EnvironmentSource {
+            layer: 1,
+            background,
+        }),
+    };
+    comp.lights = vec![light(None)];
+    let img = render(&mut r, &comp);
+    let luma =
+        |img: &Image, x, y| -> u32 { img.px(x, y).iter().take(3).map(|&c| u32::from(c)).sum() };
+    // The face toward the sky is brighter than the face toward the ground.
+    let (top, front) = (luma(&img, 100, 72), luma(&img, 100, 118));
+    assert!(top > front + 30, "top {top} vs front {front}");
+    assert_eq!(img.px(2, 2)[3], 0, "no background");
+    // Background Visible: sky above, ground below, the model in front.
+    comp.lights = vec![light(Some([1.0, 0.0]))];
+    let img = render(&mut r, &comp);
+    assert!(luma(&img, 100, 2) > 700, "sky {:?}", img.px(100, 2));
+    assert!(luma(&img, 100, 197) < 30, "ground {:?}", img.px(100, 197));
+    assert_eq!(img.px(2, 197)[3], 255, "opaque background");
+    assert_eq!(luma(&img, 100, 72), top, "the model draws over it");
     std::fs::remove_dir_all(dir).ok();
 }
 

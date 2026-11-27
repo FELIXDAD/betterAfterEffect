@@ -929,6 +929,19 @@ impl TimelinePanel {
                     .id_salt(id.with("val")),
             );
             common::text_path_picker(&mut child, cx, path, id.with("path"));
+        } else if attr == "light:source" {
+            // Environment light Source: a popup of the comp's 2D layers.
+            let vr = Rect::from_min_max(
+                pos2(l + cols.x(Column::Switches), rect.top()),
+                pos2(l + cols.end - 2.0, rect.bottom()),
+            );
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(vr)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .id_salt(id.with("val")),
+            );
+            common::light_source_picker(&mut child, cx, path, id.with("source"));
         } else if let Some(value) = value {
             let vr = Rect::from_min_max(
                 pos2(l + cols.x(Column::Switches), rect.top()),

@@ -363,6 +363,12 @@ const LAYER: &[AttrDef] = &[
     boolean("light:casts_shadows", false).kinds(&["light"]),
     float("light:shadow_darkness", 100.0).kinds(&["light"]),
     float("light:shadow_diffusion", 0.0).kinds(&["light"]),
+    prim_ref("light:source")
+        .kinds(&["light"])
+        .doc("Environment light: the layer whose image (an HDRI, equirectangular) lights the scene."),
+    boolean("light:background_visible", false).kinds(&["light"]),
+    float("light:background_opacity", 100.0).kinds(&["light"]),
+    float("light:background_blur", 0.0).kinds(&["light"]),
     int("material:casts_shadows", 0)
         .kinds(VISUAL)
         .doc("AE's Casts Shadows: 0 Off, 1 On, 2 Only (casts, not drawn)."),
