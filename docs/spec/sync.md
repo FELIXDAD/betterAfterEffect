@@ -60,7 +60,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
    - `Hello`：用对方的版本**替换**（不是合并）`remote`。替换是为了对方丢了数据时（比如 Hub 重启）能重新补发；代价最多是重复发送，CRDT 导入是幂等的。
    - `Updates` / `Snapshot`：`remote[doc]` 并入 `version`；本地已经包含 `version` 就跳过，否则导入。本地没有这个文档时不导入，在 `PumpOutcome::unknown_docs` 里报告（见 2.5）。
    - `SnapshotRequest`：记下来，等本轮收到的数据都导入之后再导出快照发回去（同一个文档一轮只答一次）。这样快照包含请求之前收到的一切：共享目录在交付自己日志里的记录之后才可能请求（启动时、重新交付时），并用这份快照覆盖自己的日志（4.3）。已经取出来的请求总是全部回答：本轮收消息时出错、或者前面某个回答发不出去（比如这个文档的日志写不了），后面的照样回答，最后返回第一个错误。它们已经不在传输层的队列里了，丢掉就再没人回答（`snapshot_requests_taken_before_a_failure_are_answered`、`a_failed_snapshot_answer_does_not_hold_back_other_documents`）。
-3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。被推迟的部分只有之后的 `pump` 才会发出，所以关闭连接前（最后一次 `pump` 之后）要调用 `SyncSession::flush`：不管 `min_send_interval`，立即把对方缺的发出去（不收消息，也不发 `Hello` 和在线状态）。
+3. 对每个本地文档，如果 `remote[doc]` 不包含本地版本，导出 `remote[doc]` 之后的增量发出去，并把本地版本并入 `remote[doc]`。距离上次发送不到 `min_send_interval` 时这一步推迟到之后的 `pump`（共享目录模式用几百毫秒，避免拖动时每秒几十次 SMB 追加；Hub 模式为 0）。被推迟的部分只有之后的 `pump` 才会发出，所以关闭连接前（最后一次 `pump` 之后）要调用 `SyncSession::flush`：不管 `min_send_interval`（也不管下面的 `max_backlog`），立即把对方缺的发出去（不收消息，也不发 `Hello` 和在线状态）。
+4. **流量控制**（`SessionConfig::max_backlog`，默认 16 MiB，和 `HubLimits::max_backlog` 一样）：传输层报告交给它、还没发出去的字节数（`Transport::backlog()`：Hub 连接写缓冲里等对方读的，`ThreadedTransport` 队列里后台线程还没交给内层传输的；默认实现返回 0，`send` 返回前就做完 I/O 的传输不用管）。第 3 步每发一个文档之前看一眼：超过 `max_backlog` 就停下，这一轮不再发任何文档的数据（照常收消息、发 `Hello`、在线状态、回答快照请求），积压降下来之后从停下的那个文档接着发，每个文档都轮得到。因为是发之前检查，积压低于上限时一条消息不管多大都能发出去（新客户端第一次同步一个很大的工程层），所以最多积压 `max_backlog` 加一条消息。没有它的话，对方每个 `Hello`（每 5 秒一次；慢链路上一次大传输比这长）都会让我们把它还没收完的全部再排一份（3.1）。`Hello` 看不出哪些还在路上，所以积压降下来时还在路上的那部分可能再发一次，但每次积压清空最多一次，而不是每个 `Hello` 一次。`SyncStats::held_back` 记暂停的次数；`None` 关闭流量控制。
 
 在收到对方第一个 `Hello` 之前不发任何数据（不知道对方有什么，全量发送太浪费）。
 
@@ -78,7 +79,7 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 
 `SyncSession::pump` 在持有 `Stage` 的线程上调用，不做阻塞 I/O。共享目录、网络的 I/O 由传输层放在后台线程里做，通过队列交给会话：`ThreadedTransport::spawn(内层传输, tick, on_receive)` 把任何会阻塞的传输搬到后台线程，收到消息后调用 `on_receive`（接到"请求重绘 / 尽快 pump"上）。
 
-`ThreadedTransport` 的 `send` 只是放进队列，内层传输发送失败要等之后的 `recv` 才报告。`Transport::close()` 等后台线程把队列里的消息都交给内层传输，再关闭内层传输（调用它的 `close`），然后返回 `recv` 还没报告的第一个错误。关闭前想知道最后几条有没有送到，就调用 `close`。丢弃时同样会等队列交给内层传输，但不关闭内层传输（直接丢弃），也看不到错误。`close` 的默认实现什么都不做，只适合 `send` 返回前就做完 I/O 的传输；`HubTransport` 等对方确认关闭（3.1），`DirTransport` 还有日志落后时报错（4.3）。
+`ThreadedTransport` 的 `send` 只是放进队列，内层传输发送失败要等之后的 `recv` 才报告。它的 `backlog()` 是队列里还没交给内层传输的字节数加上内层传输自己的积压（后台线程每轮更新一次）；排过队的数据（一整轮之后还在队列或内层传输里）全部发出去时，后台线程也调用一次 `on_receive`，让因为积压暂停发送的会话（2.4 第 4 步）接着发。`Transport::close()` 等后台线程把队列里的消息都交给内层传输，再关闭内层传输（调用它的 `close`），然后返回 `recv` 还没报告的第一个错误。关闭前想知道最后几条有没有送到，就调用 `close`。丢弃时同样会等队列交给内层传输，但不关闭内层传输（直接丢弃），也看不到错误。`close` 的默认实现什么都不做，只适合 `send` 返回前就做完 I/O 的传输；`HubTransport` 等对方确认关闭（3.1），`DirTransport` 还有日志落后时报错（4.3）。
 
 同一轮 `pump` 里同一个文档收到的多条数据合并成一批导入（`DocSet::import_batch`），`Stage` 只重建一次镜像、只发一个事件。
 
@@ -89,7 +90,8 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - Hub 用 `MemDocs::load` 恢复持久化的快照，用 `docs().export_snapshot` 保存。Hub 重启丢了数据也没关系：客户端重连后对方 `Hello` 里版本变小，客户端会把缺的重新上传。
 - 传输出错的连接会被断开（`RelayOutcome::disconnected`）。
 - **按连接设置会话**：`Relay::connect` 给每个连接同样的设置（`Relay::peer_config()`：Relay 自己的 `ClientId` 和 `hello_interval`，其他为默认值）。`Relay::connect_with(transport, config)` 给某个连接单独设置，一般从 `peer_config()` 改起。`config.client` 一律换成 Relay 自己的 ID（Relay 对所有连接都是同一个客户端，各会话也靠它认出自己的在线状态）。
-  - Hub（10）用它接工程目录（`DirTransport`）：`min_send_interval` 默认 300 ms（`HubConfig::store_send_interval`）、`hello_interval = None`（4.5 的推荐设置）。客户端照常每次 `pump` 立即收到修改，只是写盘合并了：测试里 100 步的拖动，`hub.log` 从 101 条记录降到 3 条。最后一个客户端断开时 Hub 立即 `Relay::flush()`：没人在编辑，合并没有意义，而没有连接时的轮询间隔（500 ms）比写盘间隔长。
+  - Hub（10）给每个客户端连接的会话设 `max_backlog` = 连接的 `HubLimits::max_backlog`（`HubConfig::limits`，`hub.toml` 的 `[limits]`）。
+  - Hub 用它接工程目录（`DirTransport`）：`min_send_interval` 默认 300 ms（`HubConfig::store_send_interval`）、`hello_interval = None`（4.5 的推荐设置）。客户端照常每次 `pump` 立即收到修改，只是写盘合并了：测试里 100 步的拖动，`hub.log` 从 101 条记录降到 3 条。最后一个客户端断开时 Hub 立即 `Relay::flush()`：没人在编辑，合并没有意义，而没有连接时的轮询间隔（500 ms）比写盘间隔长。
   - 有连接设了 `min_send_interval` 时，丢弃 Relay 之前要先 `pump` 再 `Relay::flush()`（对每个连接调用 `SyncSession::flush`），否则被推迟的最后几次修改永远发不出去。`Relay::close_peer(handle)` 先让这个连接的传输把已经发出的消息交付完（`Transport::close`，见 2.6）并返回出错情况，再断开它。Hub 卸载工程、退出时都这样做：`pump`、`flush`、对工程目录 `close_peer`，最后几次写盘失败会记进日志。
   - 验证：`tests/convergence.rs` 的 `a_peer_with_its_own_session_settings`（单独的发送间隔和 `Hello` 间隔生效、`flush` 立即发出、`ClientId` 用 Relay 的）和 `closing_a_threaded_peer_reports_its_last_writes`（`close` 返回前队列里的消息都已交付；最后一次 `pump` 之后才失败的写由 `close_peer` 报告）；`services/bae-hub/tests/hub.rs` 里把写盘间隔设成 1 分钟，拖动只能靠 `flush` 写出：拖动后立即退出 Hub（客户端还连着）、最后一个客户端断开（工程不卸载）、工程被卸载，三种情况重新加载后每一步都在。
 
@@ -98,13 +100,16 @@ Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state
 - `HubTransport::connect(url, token, timeout)`：`url` 形如 `ws://nas.local:7341/projects/<工程>`，路径和查询参数怎么选工程由 Hub（10）决定；`token` 作为 `Authorization: Bearer <token>` 发送，Hub 拒绝时返回 `SyncError::Hub("... 401 ...")`。暂时只支持 `ws://`（局域网），`wss://` 报错。
 - 一条协议消息就是一个 WebSocket **二进制帧**；文本帧、ping/pong 忽略（pong 自动回复）；解码失败或未知类型的帧跳过；收到 close 帧或连接断开返回 `SyncError::Closed`。
 - 握手后套接字是非阻塞的，`send` 写不完的部分留在缓冲区，在之后的 `recv` 里继续发。`recv` 继续发时写失败（比如对方发完最后一条就断开，我们还在给它发东西，连接被重置），先把已经收到的消息读完，再报告错误：对方认为它们已经送到了。这只是尽力而为：Windows 收到重置时会丢掉还没读的数据，所以客户端结束时要调用 `close`（等对方确认关闭，见下）。应用里套一层 `ThreadedTransport`：`ThreadedTransport::spawn(HubTransport::connect(..)?, Duration::from_millis(2), 请求重绘)`。
-- **上限**（`HubLimits`，两端一致；`connect_with` / `accept_with` / `set_limits` 可改）：
-  - `max_message`：单条协议消息的上限，默认 256 MiB。消息不分片，所以它同时是单帧上限（tungstenite 默认单帧 16 MiB，超过 16 MiB 的工程层快照会被对方拒收、断线、重连后再发同一条，一直卡住）。发送超过上限的消息时 `send` 直接报错，不发出去（会话先把其他文档发完，见 2.4）。
-  - `max_backlog` 和 `stall_timeout`：对方不再读时断开它。积压超过 `max_backlog`（默认 16 MiB）、并且 `stall_timeout`（默认 30 秒）内一个字节都没发出去，`send` / `recv` 报错（"peer is not reading"），`Relay` 随即断开这个连接，内存不会一直涨。不能只看积压了多少：会话把对方缺的一次全发出去（新客户端第一次同步时是整个工程），对方读得再慢，只要还在读就得等它读完；按积压量断开的话，重连后又是同一批，永远同步不完。
+- **上限**（`HubLimits`，每个连接一份；`connect_with` / `accept_with` / `set_limits` 可改）：
+  - `max_message`：本端发送的单条协议消息的上限，默认 256 MiB。消息不分片，所以对方要能收下这么大的一帧（tungstenite 默认单帧 16 MiB，超过 16 MiB 的工程层快照会被对方拒收、断线、重连后再发同一条，一直卡住）。发送超过上限的消息时 `send` 直接报错，不发出去（会话先把其他文档发完，见 2.4）。
+  - `max_incoming`：接受对方的单条消息（也是单帧）的上限，默认也是 256 MiB；对方的 `max_message` 不能比它大。超过时读到帧头就报错、断开连接，不会先把整条收进内存。Hub 对只读连接只收 1 MiB（`HubConfig::read_only_max_incoming`，10）：它们只发 `Hello`、在线状态和快照请求。
+  - `max_backlog`：流量控制。会话在积压超过它时不发文档数据（2.4 第 4 步，Relay 的每个会话都这样），所以读得慢的对方那里最多积压 `max_backlog` 加一条消息，再加上这期间的 `Hello`、在线状态和快照回答（都很小，或者很少）。它同时是"对方不再读"的判断：积压超过 `max_backlog`（默认 16 MiB）、并且 `stall_timeout`（默认 30 秒）内一个字节都没发出去，`send` / `recv` 报错（"peer is not reading"），`Relay` 随即断开这个连接。只要对方还在读，积压多少都不断开（低于下面的硬上限时）：一个大工程层就要积压这么多，按积压量断开的话，重连后又是同一条，永远同步不完。
+  - `max_unsent`：硬上限，默认 528 MiB（两条 256 MiB 的消息加 16 MiB）。哪一次 `send` 会让积压超过它，这次就失败，之后这个连接一直失败（`Relay` 断开它）。积压为 0 时不超过 `max_message` 的消息总能发出去。守流量控制的会话远到不了它；它挡的是不守的发送（反复发快照请求、关掉了流量控制的会话）。
+  - 所以每个连接写缓冲占的内存：正常最多 `max_backlog` 加一条消息（默认最坏 16 + 256 MiB，工程层越小越少），无论如何不超过 `max_unsent`。（系统的套接字缓冲另算，由系统限制。）之前写缓冲没有上限、只在停滞时断开，而读得慢的客户端每 5 秒一个 `Hello` 就让 Relay 把它缺的再排一份：经 VPN 加入一个 200 MB 的工程，NAS 每 5 秒多排约 200 MB，很快内存不够。
 - `close()`：把缓冲区里剩下的消息和 close 帧发完，然后一直读（读到的丢掉），直到对方回应 close：这时对方已经读完我们发的一切，本端也没有没读的数据，关掉套接字不会重置连接（重置可能丢掉对方还没读的数据）。`stall_timeout` 内一个字节都没发出去就放弃，返回错误。丢弃 `HubTransport` 时只做一次不阻塞的关闭，不保证送到。
 - 断线后：重新 `connect`，换掉传输，调用 `SyncSession::reset()`；双方 `Hello` 之后自动补齐（Hub 丢了数据也能补回去）。
 - `HubTransport::accept(tcp_stream, token)` 是服务端一侧，给测试和简单工具用：`tests/hub.rs` 里用 `Relay` + `accept` 写了一个几十行的阻塞式参考 Hub。
-- 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。对方读得慢（每 25 ms 读一条）时，一次发出的 10 条 3 MiB 消息全部送到，积压远超 `max_backlog` 也不断开；完全不读的对方在 `stall_timeout` 后被断开；对方发完最后一条就重置连接时（我们还在给它发 40 MiB），那一条照样读到；`ThreadedTransport(HubTransport)` 的 `close` 返回时，最后一条 20 MiB 的消息已经送到（`tests/hub.rs`）。
+- 验证（`cargo test -p bae-sync --features hub`）：3 个客户端经真实 WebSocket（回环）随机编辑后收敛、在线状态可见；一次修改从一个客户端经 Hub 到另一个客户端的延迟中位数 2.9 ms（最大 5.3 ms）；错误或缺失的 token 被拒（401）；Hub 重启并丢失全部数据后，客户端发现断线、离线继续编辑、重连新 Hub 后收敛，新加入的客户端拿到完整工程。对方读得慢（每 25 ms 读一条）时，一次发出的 10 条 3 MiB 消息全部送到，积压远超 `max_backlog` 也不断开；完全不读的对方在 `stall_timeout` 后被断开；积压超过 `max_unsent` 时连接失败，之后一直失败（`no_more_than_max_unsent_waits`）；读得慢的新客户端（每 100 ms 读一条 2 MiB 的消息，每 50 ms 发一个 `Hello`）经 `Relay` 拿到 20 MiB 的工程：Relay 那边最多积压约 3 MiB、一共发出约 28 MiB 文档数据，关掉流量控制时积压 50–60 MiB、发出五六倍（`a_slow_reader_is_not_flooded_by_its_own_hellos`）；对方发完最后一条就重置连接时（我们还在给它发 40 MiB），那一条照样读到；`ThreadedTransport(HubTransport)` 的 `close` 返回时，最后一条 20 MiB 的消息已经送到（`tests/hub.rs`）。
 
 ## 4. 共享目录模式（PR B）
 
