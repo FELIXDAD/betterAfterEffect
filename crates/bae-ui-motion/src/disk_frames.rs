@@ -29,7 +29,8 @@ const HEADER_LEN: usize = 33;
 #[derive(Clone, PartialEq, Eq)]
 struct Config {
     dir: PathBuf,
-    limit: u64,
+    /// The set Maximum Disk Cache Size, else automatic (a share of the free space).
+    limit: Option<u64>,
     enabled: bool,
     preview: bool,
     compressed: bool,
@@ -39,7 +40,7 @@ impl Config {
     fn new(base: &Path, p: &Preferences) -> Self {
         Self {
             dir: p.preview_cache_dir(base),
-            limit: (p.int("disk.max_disk_cache_size_gb") as u64) << 30,
+            limit: p.explicit_disk_limit_gb().map(|gib| gib << 30),
             enabled: p.bool("disk.enable_disk_cache"),
             preview: p.bool("disk.enable_preview_from_disk_cache"),
             compressed: p.bool("disk.enable_compressed_frames_lossless"),
@@ -75,6 +76,7 @@ struct Entry {
 
 #[derive(Default)]
 struct Index {
+    limit: u64,
     files: HashMap<u64, Entry>,
     order: BTreeSet<(SystemTime, u64)>,
     bytes: u64,
@@ -282,7 +284,7 @@ impl DiskFrames {
     /// Frames are stored and read back (Preview from Disk Cache is on).
     pub(crate) fn enabled(&self) -> bool {
         let state = self.state.lock().unwrap();
-        state.ready && state.cfg.preview && state.cfg.limit > 0 && state.index.is_some()
+        state.ready && state.cfg.preview && state.index.as_ref().is_some_and(|i| i.limit > 0)
     }
     /// Whether `key` is stored and reading it back should beat rendering it.
     pub(crate) fn worth_reading(&self, key: u64) -> bool {
@@ -322,7 +324,7 @@ impl DiskFrames {
         let read = state.speed.estimate(pixel_bytes, state.cfg.compressed);
         if !state.ready
             || !state.cfg.preview
-            || state.cfg.limit == 0
+            || index.limit == 0
             || cost <= frame
             || cost.as_secs_f64() <= SAVE_MARGIN * read
             || index.files.contains_key(&key)
@@ -480,7 +482,15 @@ fn refresh(state: &Mutex<State>) {
             return;
         }
     };
-    index.trim(&cfg.dir, cfg.limit);
+    // The automatic limit counts the space the cache already takes as free.
+    let Some(limit) = cfg.limit.or_else(|| {
+        bae_platform::disk::available_bytes(&cfg.dir)
+            .map(|free| bae_prefs::automatic_disk_limit_gb(free + index.bytes) << 30)
+    }) else {
+        return;
+    };
+    index.limit = limit;
+    index.trim(&cfg.dir, limit);
     let mut s = state.lock().unwrap();
     if s.epoch == epoch {
         s.ready = true;
@@ -499,12 +509,13 @@ fn save_frame(
     rect: IRect,
     cost_us: u32,
 ) {
-    let cfg = {
+    let (cfg, limit) = {
         let s = state.lock().unwrap();
         if s.epoch != epoch {
             return;
         }
-        s.cfg.clone()
+        let Some(index) = &s.index else { return };
+        (s.cfg.clone(), index.limit)
     };
     let Ok(image) = transfer::read_texture(gpu, texture) else {
         return;
@@ -526,7 +537,7 @@ fn save_frame(
         return;
     };
     let bytes = meta.len();
-    if bytes > cfg.limit {
+    if bytes > limit {
         return;
     }
     let path = file_path(&cfg.dir, key);
@@ -558,7 +569,7 @@ fn save_frame(
             cost_us,
         },
     );
-    index.trim(&cfg.dir, cfg.limit);
+    index.trim(&cfg.dir, limit);
     let mut s = state.lock().unwrap();
     if s.epoch == epoch {
         s.index = Some(index);
@@ -690,7 +701,9 @@ mod tests {
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
-        let store = PrefsStore::default();
+        let mut prefs = Preferences::default();
+        prefs.set(bae_prefs::keys::DISK_LIMIT_GB, 1);
+        let store = PrefsStore::new(prefs);
         let setup = || {
             let cache = DiskFrames::new(tmp.path().to_owned(), &store);
             cache.run(&gpu).unwrap();
@@ -752,7 +765,9 @@ mod tests {
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
-        let cache = DiskFrames::new(tmp.path().to_owned(), &PrefsStore::default());
+        let mut prefs = Preferences::default();
+        prefs.set(bae_prefs::keys::DISK_LIMIT_GB, 1);
+        let cache = DiskFrames::new(tmp.path().to_owned(), &PrefsStore::new(prefs));
         cache.run(&gpu).unwrap();
         wait(|| cache.enabled().then_some(()));
         let frame = |size| {
