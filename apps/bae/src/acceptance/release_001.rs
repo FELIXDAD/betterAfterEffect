@@ -288,14 +288,25 @@ fn every_enabled_menu_item_does_something() {
     }
     println!("enabled menu items run: {ran} of {}", items.len());
     // The layer has no effects: the Effect menu greys what needs one (Last
-    // Effect, Remove All). Effect Controls opens the panel and Manage
-    // Effects… its window, enabled in AE as well.
+    // Effect, Remove All). The effects of each category apply to the selected
+    // layer, Effect Controls opens the panel and Manage Effects… its window,
+    // all enabled in AE as well.
     let effect = bae_ui::tr("Effect");
+    assert!(
+        items
+            .iter()
+            .any(|i| i.enabled && i.invocation.id == "motion.effect.apply"),
+        "effects apply to the selected layer"
+    );
     for item in items
         .iter()
         .filter(|i| i.path.first().is_some_and(|p| p == "Effect" || p == effect))
     {
-        let always = ["window.panel", "motion.effect.manage_effects"];
+        let always = [
+            "window.panel",
+            "motion.effect.manage_effects",
+            "motion.effect.apply",
+        ];
         if item.enabled && !always.contains(&item.invocation.id.as_str()) {
             problems.push(format!(
                 "Effect menu item enabled: {} ({})",
