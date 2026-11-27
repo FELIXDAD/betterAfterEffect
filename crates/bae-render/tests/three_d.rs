@@ -967,7 +967,7 @@ fn models_receive_model_shadows() {
         file
     };
     let (cube, slab) = (boxed("cube.obj", 1.0), boxed("slab.obj", 0.05));
-    let mut r = Renderer::new(gpu);
+    let mut r = Renderer::new(gpu.clone());
     use bae_render::light::{Falloff, Light, LightKind, ShadowMode};
     let model = |name: &str, file: &std::path::Path, m: DMat4| {
         let mut l = RenderLayer::new(
@@ -980,7 +980,7 @@ fn models_receive_model_shadows() {
         l.matrix_3d = Some(m);
         l
     };
-    let mut scene = |casts: ShadowMode| {
+    let scene = |casts: ShadowMode| {
         let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
         let mut caster = model(
             "cube",
@@ -1015,10 +1015,10 @@ fn models_receive_model_shadows() {
             scope_below: None,
             environment: None,
         }];
-        render(&mut r, &comp)
+        comp
     };
-    let lit = scene(ShadowMode::Off);
-    let shadowed = scene(ShadowMode::On);
+    let lit = render(&mut r, &scene(ShadowMode::Off));
+    let shadowed = render(&mut r, &scene(ShadowMode::On));
     let luma =
         |img: &Image, x, y| -> i32 { img.px(x, y).iter().take(3).map(|&c| i32::from(c)).sum() };
     assert!(
@@ -1028,5 +1028,29 @@ fn models_receive_model_shadows() {
         lit.px(128, 100)
     );
     assert_eq!(luma(&shadowed, 60, 100), luma(&lit, 60, 100), "lit");
+    // A still scene draws its light maps once (no frame cache here).
+    let mut r = Renderer::with_config(
+        gpu,
+        bae_render::RendererConfig {
+            frame_cache_bytes: 0,
+            ..bae_render::RendererConfig::default()
+        },
+    );
+    // (Moved a little: the maps above are shared by every renderer.)
+    let mut comp = scene(ShadowMode::On);
+    comp.layers[0].matrix_3d = Some(
+        DMat4::from_translation(DVec3::new(101.0, 100.0, 0.0))
+            * DMat4::from_scale(DVec3::splat(0.4)),
+    );
+    let draws: Vec<usize> = (0..3)
+        .map(|_| {
+            r.render_frame(&comp, &RenderRequest::full())
+                .unwrap()
+                .stats
+                .draw_calls
+        })
+        .collect();
+    assert!(draws[1] < draws[0], "light maps reused: {draws:?}");
+    assert_eq!(draws[1], draws[2], "{draws:?}");
     std::fs::remove_dir_all(dir).ok();
 }

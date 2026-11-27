@@ -30,6 +30,18 @@ const MAX_LIGHTS: usize = 8;
 const MAX_SHADOW_LIGHTS: usize = 4;
 const LIGHT_MAP_SIDE: u32 = 2048;
 const LIGHT_MAP: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Sets of light maps kept (several model groups in a frame).
+const MAX_LIGHT_MAP_SETS: usize = 2;
+
+/// The light maps of one set of lights and casting models.
+struct LightMaps {
+    key: u64,
+    layers: u32,
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    /// The frame that last used them.
+    used: u64,
+}
 /// Camera depth of the near plane (pixels).
 const NEAR: f64 = 1.0;
 
@@ -61,8 +73,10 @@ pub(crate) struct MeshPipelines {
     shadow: Option<(wgpu::BindGroupLayout, wgpu::RenderPipeline)>,
     /// Light-view depth of the models casting shadows on models.
     caster: Option<wgpu::RenderPipeline>,
-    /// The light maps (layers) and a view of all of them.
-    light_maps: Option<(u32, wgpu::Texture, wgpu::TextureView)>,
+    /// Light maps kept across frames (redrawn only when their lights or
+    /// casters change).
+    light_maps: Vec<LightMaps>,
+    frame: u64,
     /// Bound when no light's shadows fall on models.
     no_light_map: wgpu::TextureView,
     compare: wgpu::Sampler,
@@ -226,7 +240,8 @@ impl MeshPipelines {
             no_env,
             shadow: None,
             caster: None,
-            light_maps: None,
+            light_maps: Vec::new(),
+            frame: 0,
             no_light_map,
             compare,
         }
@@ -295,12 +310,30 @@ impl MeshPipelines {
         pipeline
     }
 
-    /// The light maps, at least `layers` of them (kept while they suffice).
-    fn light_maps(&mut self, device: &wgpu::Device, layers: u32) -> wgpu::Texture {
-        if let Some((n, texture, _)) = &self.light_maps
-            && *n >= layers
+    /// The light maps of `key` (lights, their projections and the casting
+    /// models), at least `layers` of them, and whether they must be drawn:
+    /// kept across frames, so a still scene draws them once.
+    fn light_maps(
+        &mut self,
+        device: &wgpu::Device,
+        key: u64,
+        layers: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView, bool) {
+        let frame = self.frame;
+        if let Some(m) = self.light_maps.iter_mut().find(|m| m.key == key) {
+            m.used = frame;
+            return (m.texture.clone(), m.view.clone(), false);
+        }
+        // Reuse maps no frame needs any more, else make new ones.
+        if let Some(m) = self
+            .light_maps
+            .iter_mut()
+            .filter(|m| m.used != frame && m.layers >= layers)
+            .min_by_key(|m| m.used)
         {
-            return texture.clone();
+            m.key = key;
+            m.used = frame;
+            return (m.texture.clone(), m.view.clone(), true);
         }
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("bae-render.mesh.light-maps"),
@@ -320,8 +353,25 @@ impl MeshPipelines {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        self.light_maps = Some((layers, texture.clone(), view));
-        texture
+        if self.light_maps.len() >= MAX_LIGHT_MAP_SETS
+            && let Some(oldest) = self
+                .light_maps
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.used != frame)
+                .min_by_key(|(_, m)| m.used)
+                .map(|(i, _)| i)
+        {
+            self.light_maps.remove(oldest);
+        }
+        self.light_maps.push(LightMaps {
+            key,
+            layers,
+            texture: texture.clone(),
+            view: view.clone(),
+            used: frame,
+        });
+        (texture, view, true)
     }
 
     /// The model shadow pipeline (into [`super::shadowmap::FORMAT`] maps).
@@ -854,8 +904,8 @@ pub(crate) fn encode(
     let depth = p.depth(device, size);
     p.pipeline(device, format);
     let shadows = light_shadows(node);
-    let light_maps = if shadows.is_empty() {
-        p.no_light_map.clone()
+    let (light_maps, map_draws) = if shadows.is_empty() {
+        (p.no_light_map.clone(), 0)
     } else {
         draw_light_maps(p, device, queue, encoder, node, &shadows)
     };
@@ -949,7 +999,7 @@ pub(crate) fn encode(
     pass.set_viewport(0.0, 0.0, w.max(1) as f32, h.max(1) as f32, 0.0, 1.0);
     pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
     pass.set_pipeline(&p.pipelines[&format]);
-    let mut count = 0;
+    let mut count = map_draws;
     for (key, frame, env_group) in &draws {
         pass.set_bind_group(0, frame, &[]);
         pass.set_bind_group(2, env_group, &[]);
@@ -993,6 +1043,7 @@ impl MeshPipelines {
     /// Starts a frame for the environment maps.
     pub(crate) fn begin_frame(&mut self) {
         self.env.begin_frame();
+        self.frame += 1;
     }
 
     /// Whether the maps of environment picture node `key` are built.
@@ -1188,8 +1239,10 @@ fn light_shadows(node: &MeshNode) -> Vec<(crate::light::Light, DMat4)> {
     out
 }
 
-/// Draws the depth of the models that cast shadows into one light map per
-/// light of `shadows`; returns a view of all of them.
+/// The depth of the models that cast shadows, one light map per light of
+/// `shadows`: drawn when the lights or the casting models change, else
+/// the maps of an earlier frame. Returns a view of all of them and the
+/// number of draws.
 fn draw_light_maps(
     p: &mut MeshPipelines,
     device: &wgpu::Device,
@@ -1197,8 +1250,26 @@ fn draw_light_maps(
     encoder: &mut wgpu::CommandEncoder,
     node: &MeshNode,
     shadows: &[(crate::light::Light, DMat4)],
-) -> wgpu::TextureView {
-    let texture = p.light_maps(device, shadows.len() as u32);
+) -> (wgpu::TextureView, usize) {
+    use std::hash::{Hash, Hasher};
+    let mut h = rustc_hash::FxHasher::default();
+    for (light, vp) in shadows {
+        crate::input::hash_light(light, &mut h);
+        vp.to_cols_array().map(f64::to_bits).hash(&mut h);
+    }
+    for m in node
+        .models
+        .iter()
+        .filter(|m| m.casts_shadows && m.opacity > 0.0)
+    {
+        (Arc::as_ptr(&m.model) as usize).hash(&mut h);
+        m.matrix.to_cols_array().map(f64::to_bits).hash(&mut h);
+    }
+    let (texture, all, draw) = p.light_maps(device, h.finish(), shadows.len() as u32);
+    if !draw {
+        return (all, 0);
+    }
+    let mut draws = 0;
     let pipeline = p.caster_pipeline(device);
     let layout = p.shadow_pipeline(device).0.clone();
     let casters: Vec<(usize, DMat4)> = node
@@ -1259,11 +1330,9 @@ fn draw_light_maps(
                 pass.set_vertex_buffer(0, vb.slice(..));
                 pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*n, 0, 0..1);
+                draws += 1;
             }
         }
     }
-    p.light_maps
-        .as_ref()
-        .map(|(_, _, view)| view.clone())
-        .unwrap_or_else(|| p.no_light_map.clone())
+    (all, draws)
 }
