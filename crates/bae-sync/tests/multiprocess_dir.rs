@@ -95,7 +95,11 @@ impl Transport for Counted {
 }
 
 /// Mostly drag steps (one value set again and again: a snapshot of them stays
-/// small, so compaction keeps the logs small), some structural edits.
+/// small, so compaction keeps the logs small), some structural edits. No two
+/// processes create the same name: after that, clients with the same versions
+/// can still name the prims differently in the mirror (a known doc model issue,
+/// see docs/workstreams/09-sync.md), and `settle` would wait for a fingerprint
+/// that never comes.
 fn edit(stage: &mut Stage, who: &AuthorId, rng: &mut Rng, tag: &str, n: &mut u32) {
     if rng.chance(70) {
         stage.set_edit_target(&SublayerId::root()).unwrap();
@@ -110,7 +114,7 @@ fn edit(stage: &mut Stage, who: &AuthorId, rng: &mut Rng, tag: &str, n: &mut u32
             })
             .unwrap();
     } else {
-        random_edit(stage, who, rng, tag, n);
+        random_edit_with(stage, who, rng, tag, n, false);
     }
 }
 
@@ -355,10 +359,11 @@ fn settle(clients: &mut [Client]) -> State {
         }
         assert!(
             Instant::now() < deadline,
-            "no convergence within {SETTLE:?}: {:?}",
+            "no convergence within {SETTLE:?} (fingerprint, unsynced, same versions as the \
+             first): {:?}",
             states
                 .iter()
-                .map(|s| (&s.fp, s.unsynced))
+                .map(|s| (&s.fp, s.unsynced, same_versions(&s.vv, &first.vv)))
                 .collect::<Vec<_>>()
         );
         std::thread::sleep(Duration::from_millis(50));
