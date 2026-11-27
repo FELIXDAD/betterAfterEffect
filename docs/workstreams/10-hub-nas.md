@@ -105,6 +105,13 @@
 - **工程目录的清理**：09 的清理（spec 4.7）改为默认关闭，Hub 明确打开，理由见 README"数据目录"。
 - 评审后补了测试：工程目录的 `DirConfig` 打开了清理（`the_project_directory_is_cleaned_up`），客户端会话的 `max_backlog` 来自 `[limits]`（`client_sessions_use_the_configured_backlog`）。以前去掉这两行整个测试集照样通过。
 
+### 2026-11-27（zjzcoder，C 多人协作，#791、#808 评审的跟进）
+
+- **降级后不保存的文档**：Hub 自己在工程目录里的日志是更新的格式版本（新版本的 bae-hub 用过这个数据目录）时，09 的 `DirTransport` 不读、不改、不写这个文档（spec 4.3）。原来只在卸载工程时打一条 error；现在加载工程时打 `WARN`（工程 ID 和文档），`/v1/projects` 的 `not_saved` 也列出它们（`a_newer_format_own_log_is_reported_at_load`）。选择警告而不是拒绝打开：拒绝的话其他文档也都不能同步；这些文档的修改照常在客户端之间转发，客户端各自留着，换回新版本的 Hub 后重连时补写。
+- **`max_backlog_mib = 0` 拒绝启动**，和其他上限一致（原来 PR 说明写的是拒绝，实际接受）；所有"不能是 0"的检查放在"配得上"的检查之前，报的就是"不能是 0"（`zero_limits_are_refused`）。README 和生成的配置文件里写明。
+- **多进程测试**：测试失败时不再留下 `bae-hub` 进程（丢弃子进程时先关它的标准输入，守护 Hub 的子进程来得及先杀 Hub）；杀 Hub 的测试一直编辑到重连之后再叫停；同一端口重启时的端口竞争写在注释里（spec 3.1）。
+- 09 侧：只读令牌连不发 `x-bae-access` 的旧 Hub（0.0.1）时，客户端会再查一次 `/v1/status`（spec 7.5）。
+
 ## 请求（其他工作流在这里留言）
 
 ### 来自 09 collab/sync（2026-11-20）
