@@ -427,6 +427,9 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        actions::ids::CACHE_WHEN_IDLE => spec.checked_when(|cx| {
+            crate::prefs::current(cx.resources).bool(bae_prefs::keys::CACHE_FRAMES_WHEN_IDLE)
+        }),
         crate::effects::LAST_EFFECT => spec.enabled_when(crate::effects::last_effect_enabled),
         crate::effects::REMOVE_ALL => spec.enabled_when(crate::effects::remove_all_enabled),
         actions::ids::LAYER_SWITCH => {
@@ -453,6 +456,11 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 crate::viewer::view_options::background_checked(cx.resources, &key)
             })
         }
+        actions::ids::SEPARATE_DIMENSIONS => spec.checked_when(|cx| {
+            let session = common::session(cx.resources);
+            let layers = session.lock().selected_layers.clone();
+            actions::all_separated(cx.stage, &layers)
+        }),
         crate::viewer::view3d::ids::CREATE_CAMERA => {
             spec.enabled_when(|cx| crate::viewer::view3d::can_create_camera(cx.resources))
         }
@@ -535,6 +543,16 @@ fn panel_label(cx: &MenuContext<'_>, title: &str, panel: &str) -> String {
     let session = common::session(cx.resources);
     let shown = match panel {
         "composition" | "timeline" => common::active_comp(cx.stage, &session).map(|c| c.name),
+        "footage" | "flowchart" => {
+            let s = session.lock();
+            let path = if panel == "footage" {
+                s.footage_view.as_ref()
+            } else {
+                s.flowchart_root.as_ref().or(s.active_comp.as_ref())
+            };
+            path.filter(|p| cx.stage.has_prim(p))
+                .map(|p| bae_motion::query::display_name_of(cx.stage, p))
+        }
         "effect_controls" | "layer" => session
             .lock()
             .selected_layers

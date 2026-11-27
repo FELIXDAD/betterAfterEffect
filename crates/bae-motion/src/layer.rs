@@ -69,6 +69,42 @@ fn default_base_name(kind: LayerKind) -> &'static str {
 
 pub struct CreateLayer;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema)]
+pub struct NewLayerDefaults {
+    /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
+    #[serde(default)]
+    pub start: Option<Time>,
+    /// Label color index (default AE's per kind; the UI passes the
+    /// Preferences > Labels default).
+    #[serde(default)]
+    pub label: Option<i64>,
+    /// Initial duration of synthetic layers in flicks.
+    #[serde(default)]
+    pub duration: Option<Time>,
+    /// Separate the final initial position into its component properties.
+    #[serde(default)]
+    pub separate_position: bool,
+}
+
+impl NewLayerDefaults {
+    pub(crate) fn split_position(
+        self,
+        tx: &mut Transaction<'_>,
+        layer: &PrimPath,
+    ) -> Result<(), CommandError> {
+        if self.separate_position {
+            crate::dimensions::SeparateDimensions.run(
+                tx,
+                crate::dimensions::SeparateDimensionsParams {
+                    layers: vec![layer.clone()],
+                    separated: Some(true),
+                },
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateLayerParams {
     /// The comp to add the layer to.
@@ -111,19 +147,14 @@ pub struct CreateLayerParams {
     /// Position in comp pixels (default the comp center).
     #[serde(default)]
     pub position: Option<[f64; 2]>,
-    /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
-    #[serde(default)]
-    pub start: Option<Time>,
+    #[serde(flatten)]
+    pub defaults: NewLayerDefaults,
     /// Camera layers: Camera Settings (type, zoom, depth of field …).
     #[serde(default)]
     pub camera: Option<crate::camera::CameraSettings>,
     /// Light layers: Light Settings (type, color, intensity …).
     #[serde(default)]
     pub light: Option<crate::camera::LightSettings>,
-    /// Label color index (default AE's per kind; the UI passes the
-    /// Preferences > Labels default).
-    #[serde(default)]
-    pub label: Option<i64>,
     /// Camera and light layers: position in comp space (default `zoom` in
     /// front of `position`, or the light's AE place).
     #[serde(default)]
@@ -152,10 +183,12 @@ impl CreateLayerParams {
             font_size: None,
             shape: None,
             position: None,
-            start: Some(start),
+            defaults: NewLayerDefaults {
+                start: Some(start),
+                ..Default::default()
+            },
             camera: None,
             light: None,
-            label: None,
             position_3d: None,
             point_of_interest: None,
         }
@@ -252,11 +285,12 @@ impl Command for CreateLayer {
         set(tx, &path, "kind", Value::Enum(kind.as_str().to_owned()))?;
         set(tx, &path, "name", Value::String(name.clone()))?;
         let label = p
+            .defaults
             .label
             .filter(|l| (0..=16).contains(l))
             .unwrap_or(default_label(kind));
         set(tx, &path, "label", Value::Int(label))?;
-        let start = p.start.unwrap_or(Time::ZERO);
+        let start = p.defaults.start.unwrap_or(Time::ZERO);
         if start != Time::ZERO {
             set(tx, &path, "start_time", Value::Time(start))?;
             set(tx, &path, "in_point", Value::Time(start))?;
@@ -327,12 +361,33 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::PreComp | LayerKind::Footage | LayerKind::Audio => {
-                let src = p.source.clone().expect("checked above");
+                let src = p.source.as_ref().expect("checked above");
                 let (size, duration) = source_info.expect("checked above");
-                set(tx, &path, "source", Value::PrimRef(src))?;
-                anchor = [size[0] / 2.0, size[1] / 2.0];
+                // A 3D model (AE's model layers): 3D, centred on its origin.
+                let model = matches!(
+                    tx.stage().prim(src).and_then(|v| query::static_value(&v, "kind")),
+                    Some(Value::Enum(k)) if k == "model"
+                );
+                set(tx, &path, "source", Value::PrimRef(src.clone()))?;
+                anchor = if model {
+                    [0.0, 0.0]
+                } else {
+                    [size[0] / 2.0, size[1] / 2.0]
+                };
+                if model {
+                    set(tx, &path, "three_d", Value::Bool(true))?;
+                }
                 if let Some(d) = duration {
-                    set(tx, &path, "out_point", Value::Time(start + d))?;
+                    let (first, end) = if matches!(kind, LayerKind::Footage | LayerKind::Audio) {
+                        query::footage_range(tx.stage(), src, d)
+                    } else {
+                        (Time::ZERO, d)
+                    };
+                    if first != Time::ZERO {
+                        set(tx, &path, "start_time", Value::Time(start - first))?;
+                        set(tx, &path, "in_point", Value::Time(start))?;
+                    }
+                    set(tx, &path, "out_point", Value::Time(start + (end - first)))?;
                 }
             }
             LayerKind::Null => {
@@ -399,6 +454,18 @@ impl Command for CreateLayer {
             )?;
         }
         set(tx, &path, "transform:position", Value::Vec3(position))?;
+        if !needs_source && let Some(duration) = p.defaults.duration {
+            if duration <= Time::ZERO {
+                return Err(fail("duration must be positive"));
+            }
+            set(
+                tx,
+                &path,
+                "out_point",
+                Value::Time(start.saturating_add(duration)),
+            )?;
+        }
+        p.defaults.split_position(tx, &path)?;
         Ok(LayerOutput { path })
     }
 }
@@ -630,6 +697,10 @@ pub struct PasteLayersParams {
     /// Paste directly above this layer of `comp`; default the top of the comp.
     #[serde(default)]
     pub above: Option<PrimPath>,
+    /// Move the pasted layers in time so the earliest in point is here (comp
+    /// flicks; AE: Paste at Current Time, Ctrl+Alt+V).
+    #[serde(default)]
+    pub time: Option<Time>,
 }
 
 impl Command for PasteLayers {
@@ -694,6 +765,30 @@ impl Command for PasteLayers {
             })?;
             set(tx, new_path, "name", Value::String(new_name.clone()))?;
             paths.push(new_path.clone());
+        }
+        if let Some(at) = p.time
+            && let Some(first) = paths
+                .iter()
+                .map(|l| {
+                    let t = query::layer_timing(tx.stage(), l);
+                    t.in_point.min(t.out_point)
+                })
+                .min()
+            && at != first
+        {
+            let delta = at - first;
+            for l in &paths {
+                let t = query::layer_timing(tx.stage(), l);
+                let has_out = tx
+                    .stage()
+                    .prim(l)
+                    .is_some_and(|v| v.value("out_point").is_some());
+                set(tx, l, "start_time", Value::Time(t.start_time + delta))?;
+                set(tx, l, "in_point", Value::Time(t.in_point + delta))?;
+                if has_out {
+                    set(tx, l, "out_point", Value::Time(t.out_point + delta))?;
+                }
+            }
         }
         Ok(LayersOutput { paths })
     }

@@ -23,6 +23,14 @@ const ZH: &[(&str, &str)] = &[
     ("File", "文件"),
     ("Help", "帮助"),
     ("Quit BAE", "退出 BAE"),
+    (
+        "Restart BAE with installed plugins disabled for this session?",
+        "重新启动 BAE，并在本次运行中停用已安装的插件？",
+    ),
+    (
+        "BAE is using software rendering. Check that a hardware GPU driver is available.",
+        "BAE 正在使用软件渲染。请检查显卡驱动是否可用。",
+    ),
     ("Window", "窗口"),
     // Window ▸ Workspace (AE 26: 将“默认”重置为已保存的布局).
     (
@@ -32,6 +40,10 @@ const ZH: &[(&str, &str)] = &[
     ("Workspace", "工作区"),
     ("Minimize", "最小化"),
     ("Settings...", "设置..."),
+    (
+        "The project template could not be opened. A blank project is created instead.",
+        "无法打开项目模板，已改为新建空白项目。",
+    ),
     ("App", "应用"),
     ("Full Screen", "全屏"),
     ("frame {ms} ms", "帧 {ms} 毫秒"),

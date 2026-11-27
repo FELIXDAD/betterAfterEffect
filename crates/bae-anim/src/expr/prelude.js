@@ -709,7 +709,25 @@ var __TRANSFORM = {
   yPosition: "transform:position_y", zPosition: "transform:position_z",
 };
 // The layer's own properties use the empty prim path (the host resolves it).
+var __transformLabels = {
+  "Anchor Point":"anchorPoint", "锚点":"anchorPoint", Position:"position", "位置":"position",
+  "X Position":"xPosition", "X 位置":"xPosition", "Y Position":"yPosition", "Y 位置":"yPosition",
+  "Z Position":"zPosition", "Z 位置":"zPosition", Scale:"scale", "缩放":"scale",
+  Rotation:"rotation", "旋转":"rotation", "X Rotation":"xRotation", "X 轴旋转":"xRotation",
+  "Y Rotation":"yRotation", "Y 轴旋转":"yRotation", "Z Rotation":"zRotation", "Z 轴旋转":"zRotation",
+  Orientation:"orientation", "方向":"orientation", Opacity:"opacity", "不透明度":"opacity",
+  "Point of Interest":"pointOfInterest", "目标点":"pointOfInterest",
+};
 function __Transform(layer) { this.__c = layer.__c; this.__l = layer.__l; this.__path = ""; }
+// Only a display-name lookup needs a callable transform group.
+function __namedTransform(layer) {
+  function group(name) {
+    if (!Object.prototype.hasOwnProperty.call(__transformLabels, name)) throw new Error("Unknown transform property: " + name);
+    return group[__transformLabels[name]];
+  }
+  Object.setPrototypeOf(group, new __Transform(layer));
+  return group;
+}
 Object.keys(__TRANSFORM).forEach(function (k) {
   var attr = __TRANSFORM[k];
   Object.defineProperty(__Transform.prototype, k, {
@@ -718,9 +736,17 @@ Object.keys(__TRANSFORM).forEach(function (k) {
 });
 
 function Layer(c, l) {
-  this.__c = c;
-  this.__l = l;
-  this.__i = null;
+  function layer(name) {
+    if (name === "Transform" || name === "变换") return __namedTransform(layer);
+    if (name === "Time Remap" || name === "时间重映射") return layer.timeRemap;
+    throw new Error("Unknown layer property: " + name);
+  }
+  delete layer.name; // Use the layer name getter on the prototype.
+  Object.setPrototypeOf(layer, Layer.prototype);
+  layer.__c = c;
+  layer.__l = l;
+  layer.__i = null;
+  return layer;
 }
 Layer.prototype = {
   // Layer facts are fetched on first use (most expressions need none).
@@ -815,12 +841,22 @@ Layer.prototype = {
     var p = __h.mask(this.__c, this.__l, nameOrIndex);
     if (p === null) throw new Error("Mask " + JSON.stringify(nameOrIndex) + " does not exist");
     var c = this.__c, l = this.__l;
-    return {
-      get maskPath() { return __prop(c, l, p, "path"); },
-      get maskFeather() { return __prop(c, l, p, "feather"); },
-      get maskOpacity() { return __prop(c, l, p, "opacity"); },
-      get maskExpansion() { return __prop(c, l, p, "expansion"); },
-    };
+    function mask(name) {
+      switch (name) {
+        case "Mask Path": case "蒙版路径": return mask.maskPath;
+        case "Mask Feather": case "蒙版羽化": return mask.maskFeather;
+        case "Mask Opacity": case "蒙版不透明度": return mask.maskOpacity;
+        case "Mask Expansion": case "蒙版扩展": return mask.maskExpansion;
+        default: throw new Error("Unknown mask property: " + name);
+      }
+    }
+    return Object.defineProperties(mask, {
+      name: { value: typeof nameOrIndex === "string" ? nameOrIndex : "", writable: true, configurable: true },
+      maskPath: { get: function () { return __prop(c, l, p, "path"); } },
+      maskFeather: { get: function () { return __prop(c, l, p, "feather"); } },
+      maskOpacity: { get: function () { return __prop(c, l, p, "opacity"); } },
+      maskExpansion: { get: function () { return __prop(c, l, p, "expansion"); } },
+    });
   },
   __xf: function (kind, point, t) {
     return __h.xform(this.__c, this.__l, t === undefined ? __now : __val(t), kind, __val(point));

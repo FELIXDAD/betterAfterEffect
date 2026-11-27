@@ -36,6 +36,9 @@ pub(crate) enum Kind {
     Foam = 15,
     Wave = 16,
     Caustics = 17,
+    // `classic.wgsl` names these two.
+    Classic = 18,
+    ClassicLe = 19,
 }
 
 pub(crate) fn builtin(kind: Kind) -> Builtin {
@@ -164,6 +167,8 @@ impl Effect for Simulation {
 
     fn integrated_parameters(&self) -> &'static [u32] {
         match self.kind {
+            Kind::Classic => &[2, 3],
+            Kind::ClassicLe => &[5, 6],
             Kind::World => &[4, 5],
             Kind::Mercury => &[6, 7],
             Kind::Foam => &[14, 20],
@@ -176,6 +181,7 @@ impl Effect for Simulation {
     fn parameter_ids(&self) -> &'static [u32] {
         match self.kind {
             Kind::World => &[7, 8, 9],
+            Kind::ClassicLe => &[3],
             Kind::Systems => &[4],
             Kind::Mercury => &[3],
             Kind::Playground => &[101],
@@ -188,6 +194,7 @@ impl Effect for Simulation {
         let v = Params::new(&self.def, p);
         let life = match self.kind {
             Kind::World => max_lifetime(v, 5),
+            Kind::ClassicLe => max_lifetime(v, 6),
             Kind::Systems => max_lifetime(v, 2),
             Kind::Mercury => max_lifetime(v, 7),
             // The cannon keeps every particle: the whole emission so far.
@@ -313,7 +320,7 @@ impl Scene<'_> {
                     component(9),
                 ]
             } else if let Some(Value::Vec2(xy)) = value(match kind {
-                Kind::Mercury => 3,
+                Kind::Mercury | Kind::ClassicLe => 3,
                 Kind::Playground => 101,
                 _ => 4,
             }) {
@@ -350,7 +357,12 @@ impl Scene<'_> {
                 * (self.size[1] as f64 / spacing.max(1.)).ceil()
         };
         let n = match k {
-            Kind::World | Kind::Systems | Kind::Drizzle | Kind::Scatter => 0.,
+            Kind::World
+            | Kind::Systems
+            | Kind::Classic
+            | Kind::ClassicLe
+            | Kind::Drizzle
+            | Kind::Scatter => 0.,
 
             Kind::Mercury | Kind::Wave | Kind::Foam | Kind::Caustics => 0.,
             Kind::Ball => tiles(f(6) + 1.),

@@ -1576,6 +1576,27 @@ fn precompose_adjusts_the_duration_to_the_layers() {
 }
 
 #[test]
+fn replace_a_shared_solid_with_one_precomp_preserves_both_layer_instances() {
+    let mut fx = Fx::new();
+    let (a, b) = (fx.comp(), fx.comp());
+    let first = fx.layer(&a, "solid", json!({"name":"Red","size":[40,30]}));
+    let source = bae_motion::solid::layer_solid(&fx.stage, &first).unwrap();
+    let second = fx.layer(&b, "solid", json!({"name":"Credit","source":source}));
+    let out = fx.run("item.replace_with_precomp", json!({"item":source}));
+    let wrapper = p(out["comp"].as_str().unwrap());
+    for l in [&first, &second] {
+        assert_eq!(query::precomp_source(&fx.stage, l).as_ref(), Some(&wrapper));
+    }
+    assert_eq!(query::display_name_of(&fx.stage, &second), "Credit");
+    let inside = query::comp_layers(&fx.stage, &wrapper);
+    assert_eq!(inside.len(), 1);
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &inside[0]),
+        Some(source)
+    );
+}
+
+#[test]
 fn precompose_leaving_the_attributes_on_the_layer() {
     let mut fx = Fx::new();
     let comp = fx.comp();
@@ -2311,4 +2332,29 @@ fn exponential_scale_and_sequence_layers() {
     fx.run("layer.sequence", json!({"layers": [c, a], "overlap": 0}));
     assert_eq!(span(&fx, &a), (7 * SEC, 10 * SEC));
     assert_eq!(fx.keys(&a, opacity), vec![2 * SEC, 3 * SEC]);
+}
+
+#[test]
+fn crop_comp_resizes_and_keeps_the_kept_part_in_place() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let world = fx.world_pos(&comp, &solid);
+    fx.run(
+        "comp.crop",
+        json!({"comp": comp, "rect": [100.4, 50.0, 740.0, 410.2]}),
+    );
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    // Rounded outward: 100..740 × 50..411.
+    assert_eq!((info.width, info.height), (640, 361));
+    let moved = fx.world_pos(&comp, &solid);
+    assert!((moved.x - (world.x - 100.0)).abs() < 1e-6, "{moved:?}");
+    assert!((moved.y - (world.y - 50.0)).abs() < 1e-6, "{moved:?}");
+    assert!(
+        fx.try_run(
+            "comp.crop",
+            json!({"comp": comp, "rect": [10.0, 0.0, 10.0, 10.0]})
+        )
+        .is_err()
+    );
 }

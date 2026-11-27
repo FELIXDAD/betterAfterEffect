@@ -86,6 +86,14 @@ def opts(options):
     return "&[" + ", ".join(out) + "]"
 
 
+# Settings BAE shows but does not do yet: the dialog draws them greyed.
+UNSUPPORTED = {"project.dynamic_link_highest_number", "export.preview_output_during_render_queue"}
+UNSUPPORTED_GROUPS = {"Mercury Transmit"}
+# Labels naming AE's apps, in BAE's words (with their Chinese).
+LABELS = {"RAM Available for [AE/Pr/AME/Au]:": ("RAM Available for BAE:", "BAE 可用的 RAM:")}
+GROUP = None
+
+
 def pref(page, c):
     """Rust expression for a stored control, or None."""
     t = c["type"]
@@ -117,6 +125,8 @@ def pref(page, c):
     elif t in ("dropdown", "radio_group", "theme_picker"):
         if c.get("optionsRef") == "labelPalette17":
             e = f"label({s(key)}, {s(label)}, {int(c.get('default', 0))})"
+        elif key == "audio.audio_default_output":
+            e = f"audio_output({s(key)}, {s(label)}, {s(c['default'])})"
         else:
             options = c.get("options") or [{"value": c.get("default"), "labelEn": "System Default", "labelZh": "系统默认值"}]
             style = {"dropdown": "Style::Dropdown", "radio_group": "Style::Radio", "theme_picker": "Style::Theme"}[t]
@@ -143,6 +153,8 @@ def pref(page, c):
         e += ".indent()"
     if c.get("inlineWith") or t == "radio_group":
         e += ".quiet()"
+    if key in UNSUPPORTED or GROUP in UNSUPPORTED_GROUPS:
+        e += ".unsupported()"
     pk = c.get("preferencesKey")
     if pk:
         e += f".ae({s(pk['section'] + '/' + pk['key'])})"
@@ -177,6 +189,9 @@ def item(page, c):
         return b
     if t == "readonly_text":
         value = str(c.get("default", ""))
+        if label in LABELS:
+            label, cn = LABELS[label]
+            tr(label, cn)
         return f"Item::Info({s(label)}, {s(value)})"
     if t == "table":
         cols = []
@@ -198,6 +213,8 @@ def item(page, c):
 
 
 def group_items(page, g):
+    global GROUP
+    GROUP = g["titleEn"]
     controls = g["controls"]
     rendered = {c["id"]: item(page, c) for c in controls}
     # Inline controls go on the line of the control they follow.
