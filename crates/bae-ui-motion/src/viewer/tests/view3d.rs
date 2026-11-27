@@ -407,3 +407,54 @@ fn unshared_views_keep_their_own_view_options() {
     tool_action(&h, ids::SHARE, json!({}));
     assert!(crate::viewer::view3d::shares_options(&h.resources));
 }
+
+/// View ▸ Split with New Locked Viewer: a new Composition viewer to the right
+/// of the viewer, locked to the active comp. It keeps showing that comp when
+/// another one becomes active; working in it makes its comp active again.
+#[test]
+fn split_with_new_locked_viewer() {
+    use bae_ui::Panel as _;
+    let mut h = H::new();
+    let r = tool_action(&h, crate::tools::ids::SPLIT_LOCKED, json!({}));
+    assert_eq!(r.split.len(), 1, "{:?}", r.split);
+    let (id, beside) = &r.split[0];
+    assert_eq!(id.kind(), "composition");
+    assert_eq!(beside.as_str(), "composition");
+    let comp = h.comp.clone();
+    assert_eq!(h.session().lock().viewer_pins.get(id.as_str()), Some(&comp));
+    // The harness viewer stands in for the new one.
+    let pin = h.session().lock().viewer_pins.remove(id.as_str()).unwrap();
+    h.session()
+        .lock()
+        .viewer_pins
+        .insert("composition".into(), pin);
+    h.viewer = CompositionViewer::new(None);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let other = path(
+        &h.run(
+            "comp.create",
+            json!({"width": 320, "height": 180, "name": "Other"}),
+        )["path"],
+    );
+    h.session().lock().open_comp(&other);
+    let title = {
+        let mut requests = PanelRequests::default();
+        let pid = PanelId::new("composition");
+        let cx = PanelContext::new(
+            &pid,
+            "Composition",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        h.viewer.tab(&cx).title
+    };
+    assert!(!title.contains("Other"), "still its own comp: {title}");
+    // A frame with the viewer focused makes its comp the active one.
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.session().lock().active_comp.as_ref(), Some(&comp));
+    // Saved and restored locked to it.
+    let state = h.viewer.save_state().unwrap();
+    assert_eq!(state["pinned"], json!(comp));
+}

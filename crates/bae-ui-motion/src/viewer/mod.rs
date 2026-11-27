@@ -261,6 +261,8 @@ pub struct CompositionViewer {
     /// The view options of the last frame (saved with the panel).
     saved: guides::ViewOptions,
     locked: bool,
+    /// The comp a locked viewer keeps showing (AE's viewer lock).
+    pinned: Option<PrimPath>,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
     /// View ▸ Zoom to 100 % (/) waits for the frame's area.
@@ -344,8 +346,23 @@ impl CompositionViewer {
             let b = |k: &str| s.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
             v.restore = Some((b("safe"), b("grid")));
             v.checker = s.get("checker").and_then(|v| v.as_bool()).unwrap_or(false);
+            v.pinned = s
+                .get("pinned")
+                .and_then(|p| p.as_str())
+                .and_then(|p| PrimPath::new(p).ok());
+            v.locked = v.pinned.is_some();
         }
         v
+    }
+
+    /// The comp this viewer shows: the one it is locked to, else the active
+    /// comp.
+    fn shown_comp(&self, stage: &bae_model::Stage, session: &SharedSession) -> Option<CompInfo> {
+        self.pinned
+            .as_ref()
+            .filter(|_| self.locked)
+            .and_then(|p| query::comp_info(stage, p))
+            .or_else(|| common::active_comp(stage, session))
     }
 
     fn paint_guides(
@@ -732,7 +749,7 @@ impl Panel for CompositionViewer {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // Read from the session every frame, so New / Open / Close Project
         // update the tab (and its accessible name) at once (issue #215).
-        match common::active_comp(cx.stage, &common::session(cx.resources)) {
+        match self.shown_comp(cx.stage, &common::session(cx.resources)) {
             Some(info) => common::related_tab(cx, "Composition", &info.path, &info.name),
             None => TabInfo::new(tr("Composition")),
         }
@@ -746,7 +763,8 @@ impl Panel for CompositionViewer {
 
     fn save_state(&self) -> Option<serde_json::Value> {
         let (safe, grid) = self.restore.unwrap_or((self.saved.safe, self.saved.grid));
-        Some(json!({"safe": safe, "grid": grid, "checker": self.checker}))
+        let pinned = self.pinned.as_ref().filter(|_| self.locked);
+        Some(json!({"safe": safe, "grid": grid, "checker": self.checker, "pinned": pinned}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -865,7 +883,26 @@ impl Panel for CompositionViewer {
         self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
         crate::import::drop_on_panel(ui, cx);
-        let Some(info) = common::active_comp(cx.stage, &session) else {
+        // A viewer opened locked takes its comp; locking keeps the comp shown.
+        if let Some(p) = session.lock().viewer_pins.remove(cx.panel.as_str()) {
+            self.pinned = Some(p);
+            self.locked = true;
+        }
+        if !self.locked {
+            self.pinned = None;
+        } else if self.pinned.is_none() {
+            self.pinned = session.lock().active_comp.clone();
+        }
+        // Working in a locked viewer makes its comp the active one (the
+        // Timeline and the other panels follow, AE).
+        if let Some(p) = self.pinned.clone().filter(|_| self.locked)
+            && query::comp_info(cx.stage, &p).is_some()
+            && session.lock().active_comp.as_ref() != Some(&p)
+            && (cx.focused || ui.ui_contains_pointer() && ui.input(|i| i.pointer.any_pressed()))
+        {
+            session.lock().open_comp(&p);
+        }
+        let Some(info) = self.shown_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
         };
@@ -2119,6 +2156,7 @@ pub(crate) fn register(app: &mut bae_app::AppBuilder) {
         "composition",
         bae_ui::PanelKind::new("Composition", |spawn| {
             Box::new(CompositionViewer::new(spawn.state))
-        }),
+        })
+        .multi_instance(),
     );
 }

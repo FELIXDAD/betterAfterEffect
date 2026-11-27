@@ -272,7 +272,7 @@ impl Views {
     }
 
     /// Whether the views share their View menu toggles (AE's Share View
-    /// Options; on until turned off, 待核).
+    /// Options; on by default, as in AE 26).
     pub fn shares(&self) -> bool {
         self.own.is_none()
     }

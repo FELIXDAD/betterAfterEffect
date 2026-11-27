@@ -503,7 +503,7 @@
 
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| Split with New Locked Viewer | 589825 | `motion.view.split_with_new_locked_viewer` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | A | ⏸ |
+| Split with New Locked Viewer | 589825 | `motion.view.split_with_new_locked_viewer` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | A | ✅ |
 | Zoom In | 589827 | `viewer.zoom_in` |  | . / Ctrl+Alt+= | . / Cmd+Opt+= | A | ✅ |
 | Zoom Out | 589828 | `viewer.zoom_out` |  | , / Ctrl+Alt+- | , / Cmd+Opt+- | A | ✅ |
 | Resolution ▸ Full | 8650753 | `motion.view.resolution` | `{"factor":1}` | Ctrl+J | Cmd+J | B | ☐ |
