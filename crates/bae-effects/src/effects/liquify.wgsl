@@ -7,7 +7,8 @@ struct Params {
     percent: f32,
     cols: u32,
     rows: u32,
-    pad: vec2u,
+    stride: u32,
+    color_index: u32,
 }
 
 @group(0) @binding(0) var<uniform> u: Params;
@@ -39,6 +40,21 @@ fn offset_at(p: vec2f) -> vec2f {
 fn main(@builtin(global_invocation_id) id: vec3u) {
     if any(id.xy >= vec2u(u.roi.zw - u.roi.xy)) { return; }
     let point = vec2f(u.roi.xy + vec2i(id.xy)) + 0.5;
-    let read_at = point + offset_at(point) * u.percent;
-    textureStore(dst, vec2i(id.xy), fx_bilinear(src, u.input, read_at, false));
+    var read_at = point;
+    if u.percent != 0. {
+        read_at += offset_at(point) * u.percent;
+    }
+    var color = fx_bilinear(src, u.input, read_at, false);
+    if u.stride > 0u {
+        let g = (read_at - u.origin) / u.cell;
+        if all(g >= vec2f(0.)) && all(g <= vec2f(vec2u(u.cols,u.rows) - 1u)) {
+            let lines = fract(g / f32(u.stride) + 0.5);
+            let dist = abs(lines - 0.5) * u.cell * f32(u.stride);
+            let a = 1. - smoothstep(0.3, 1., min(dist.x,dist.y));
+            let palette = array(vec3f(1,0,0), vec3f(1,1,0), vec3f(0,1,0), vec3f(0,1,1),
+                vec3f(0,0,1), vec3f(1,0,1), vec3f(.5));
+            color = mix(color, vec4f(palette[u.color_index],1.),a);
+        }
+    }
+    textureStore(dst, vec2i(id.xy), color);
 }

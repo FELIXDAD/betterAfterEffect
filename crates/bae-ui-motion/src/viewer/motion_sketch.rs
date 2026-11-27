@@ -30,7 +30,7 @@ struct Capture {
 }
 
 /// Indices of the samples kept within `tolerance` pixels (Douglas–Peucker).
-fn thin(samples: &[(Time, DVec2)], tolerance: f64) -> Vec<usize> {
+pub(super) fn thin(samples: &[(Time, DVec2)], tolerance: f64) -> Vec<usize> {
     let n = samples.len();
     if n < 3 {
         return (0..n).collect();

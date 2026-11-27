@@ -81,6 +81,8 @@ pub(super) fn batches(kind: Kind, scene: &Scene<'_>) -> Vec<Batch> {
     let (rate_id, life_id, density) = match kind {
         Kind::World => (4, 5, 1000.),
         Kind::Systems => (1, 2, 1000.),
+        Kind::Classic => (2, 3, 100.),
+        Kind::ClassicLe => (5, 6, 100.),
         Kind::Drizzle => (1, 2, 16.),
         Kind::Mercury => (6, 7, 48.),
         // The cannon keeps every particle (no lifetime). One slot per child of

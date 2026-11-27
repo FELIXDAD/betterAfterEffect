@@ -31,8 +31,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "The composition has no enabled audio layers.",
         "合成中没有开启声音的图层。",
     ),
+    ("Cache Frames When Idle", "空闲时缓存帧"),
     ("Play/Stop (Numpad 0)", "播放/停止（小键盘 0）"),
     ("Set Frame", "设置帧"),
+    ("Solve Camera", "解算摄像机"),
+    ("Track Camera", "跟踪摄像机"),
     ("Track Motion", "跟踪运动"),
     ("Apply Motion Tracker", "应用动态跟踪器"),
     ("Edit Motion Tracker", "编辑动态跟踪器"),
@@ -41,6 +44,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
+    ("Crop Comp", "裁剪合成"),
     ("Delete Keyframes", "删除关键帧"),
     ("Move Keyframes", "移动关键帧"),
     ("Paste Keyframes", "粘贴关键帧"),
@@ -55,6 +59,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Composition viewer: an effect or the text renderer still warming up.
     ("Preparing…", "正在准备…"),
     ("Time Stretch", "时间伸缩"),
+    ("New Item", "新建项"),
     // Panel-scoped zoom shortcuts (timeline: = / -, viewer: . / , / ?)
     ("Zoom In Time", "放大时间"),
     ("Zoom Out Time", "缩小时间"),

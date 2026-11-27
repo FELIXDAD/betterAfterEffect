@@ -291,6 +291,7 @@ mod tests {
         let mut info = sequence_info(
             Path::new("a.mov"),
             &crate::ImageSequence {
+                ordered_paths: Vec::new(),
                 dir: PathBuf::new(),
                 prefix: String::new(),
                 suffix: String::new(),

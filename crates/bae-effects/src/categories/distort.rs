@@ -11,4 +11,6 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.effects.push(effects::compound::displacement());
     registry.effects.push(effects::liquify::liquify());
     registry.prewarm.push(effects::liquify::prewarm);
+    registry.effects.push(effects::puppet::puppet_effect());
+    registry.prewarm.push(effects::puppet::prewarm);
 }

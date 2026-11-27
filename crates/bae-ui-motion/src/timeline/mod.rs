@@ -746,6 +746,12 @@ impl TimelinePanel {
             let lines = ((height / ROW_H).ceil() as usize)
                 .max(hard_lines)
                 .min(MAX_EXPR_LINES);
+            let error_line = stored.is_some_and(|e| {
+                e.enabled
+                    && crate::expr_menu::inline_error(ui, resources, path, attr, source, &e.source)
+                        .is_some()
+            });
+            let lines = lines + usize::from(error_line);
             for line in 0..lines {
                 out.push(Row {
                     kind: RowKind::Expression {
@@ -1108,6 +1114,29 @@ impl TimelinePanel {
             pointer_x,
             shift,
         );
+        // The comp follows a keyframe drag (#593).
+        {
+            let preview = self
+                .key_plan
+                .as_ref()
+                .map(|p| p.preview(stage))
+                .unwrap_or_default();
+            let mut s = session.lock();
+            let mine = |s: &crate::session::Session| {
+                s.key_preview
+                    .as_ref()
+                    .is_some_and(|k| k.owner == "bars" && k.committed.is_none())
+            };
+            if !preview.is_empty() {
+                s.key_preview = Some(crate::session::KeyPreview {
+                    owner: "bars",
+                    specs: preview,
+                    committed: None,
+                });
+            } else if mine(&s) {
+                s.key_preview = None;
+            }
+        }
         // Background of the graph body: marquee selection and deselect (the Graph
         // Editor has its own).
         if !self.graph_mode {
