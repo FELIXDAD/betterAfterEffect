@@ -908,7 +908,10 @@ impl Panel for TimelinePanel {
     fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
         // From the session every frame (issue #215), like the viewer's.
         match common::active_comp(cx.stage, &common::session(cx.resources)) {
-            Some(info) => common::related_tab(cx, "Timeline", &info.path, &info.name),
+            // AE's tab shows only the comp; the name keeps "Timeline".
+            Some(info) => {
+                common::related_tab(cx, "Timeline", &info.path, &info.name).shown_as(&info.name)
+            }
             None => TabInfo::new(tr("Timeline")),
         }
         .close_submenu()
@@ -1037,9 +1040,16 @@ impl TimelinePanel {
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, color::PANEL);
 
-        // Comp tabs.
-        let tabs = Rect::from_min_size(full.min, vec2(full.width(), TABS_H));
-        comp_tabs(ui, tabs, stage, &session);
+        // Comp tabs: only with more than one comp open (AE shows each comp's
+        // Timeline as its own panel tab and has no row of its own).
+        let several = session.lock().open_comps.len() > 1;
+        let tabs = Rect::from_min_size(
+            full.min,
+            vec2(full.width(), if several { TABS_H } else { 0.0 }),
+        );
+        if several {
+            comp_tabs(ui, tabs, stage, &session);
+        }
 
         let Some(info) = common::active_comp(stage, &session) else {
             let rest = Rect::from_min_max(pos2(full.left(), tabs.bottom()), full.max);

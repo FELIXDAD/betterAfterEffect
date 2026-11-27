@@ -39,7 +39,7 @@ fn new_composition_with_cmd_n_opens_it() {
     assert_eq!(h.state().name(&comp), "Comp 1");
     // Timeline and viewer show it.
     assert!(
-        find_text(&h, "Timeline Comp 1").is_some(),
+        h.query_all_by_label("Timeline Comp 1").next().is_some(),
         "{:?}",
         painted_texts(&h)
     );

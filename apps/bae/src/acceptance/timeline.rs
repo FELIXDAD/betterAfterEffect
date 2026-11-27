@@ -815,10 +815,11 @@ fn small_windows_show_and_scroll_the_timeline_rows() {
         let mut h = gui_sized(Gui::new(), size);
         comp_with(&mut h, &["motion.layer.new.null"; 6]);
         settle(&mut h);
-        let tab = find_texts(&h, |t| t.starts_with("Timeline"))
-            .into_iter()
+        let tab = h
+            .query_all_by_label("Timeline Comp 1")
             .next()
-            .expect("timeline tab");
+            .expect("timeline tab")
+            .rect();
         let names = h.state().layer_names();
         let in_timeline = |h: &Ui| {
             names
