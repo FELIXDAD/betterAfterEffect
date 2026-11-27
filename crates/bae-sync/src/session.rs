@@ -536,14 +536,44 @@ impl SyncSession {
     /// the old link: with [`crate::Connection`], which resets the session when
     /// it adopts a new link, ask it only while `Connection::is_online` (the new
     /// remote said hello).
+    ///
+    /// It can stay false for the whole link: [`behind`](Self::behind) lists
+    /// the documents it waits for, and why one may never come (e.g. the
+    /// remote cannot send it in one message). So do not wait for it forever
+    /// (`ConflictConfig::catch_up_timeout`, `ConflictTracker::cancel_offline`).
     pub fn is_caught_up(&self, docs: &dyn DocSet) -> bool {
+        self.confirmed.is_some() && self.behind(docs).is_empty()
+    }
+
+    /// Documents of `docs` the remote showed it has ops of that the local
+    /// version lacks ([`remote_versions`](Self::remote_versions)): what
+    /// [`is_caught_up`](Self::is_caught_up) waits for. Empty before the
+    /// remote said hello. Documents `docs` does not hold are not listed
+    /// ([`PumpOutcome::unknown_docs`]).
+    ///
+    /// Usually they are on their way (a first sync, data the remote's flow
+    /// control holds back) and leave the list within a few pumps. One that
+    /// stays listed is not coming on this link, and only the remote knows
+    /// why: its changes do not fit in one message to us (spec 2.4: a
+    /// sublayer over the hub's message limit, which the hub skips for this
+    /// client and only logs; nothing tells this side), or what it sent did
+    /// not import here ([`PumpOutcome::errors`]), or Loro holds ops back for
+    /// missing dependencies. Meanwhile a `crate::Connection` still shows
+    /// online and nothing unsynced (that is about local edits): show the
+    /// documents that stay listed for a while (say a minute) as not
+    /// received.
+    pub fn behind(&self, docs: &dyn DocSet) -> Vec<DocKey> {
         let Some(remote) = &self.confirmed else {
-            return false;
+            return Vec::new();
         };
-        remote.iter().all(|(key, theirs)| {
-            docs.version(key)
-                .is_none_or(|ours| ours.includes_vv(theirs))
-        })
+        remote
+            .iter()
+            .filter(|(key, theirs)| {
+                docs.version(key)
+                    .is_some_and(|ours| !ours.includes_vv(theirs))
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
     }
 
     /// Snapshot requests of the remote waiting for an answer

@@ -972,6 +972,21 @@ impl Connection {
             .collect()
     }
 
+    /// Documents of `docs` the remote has ops of that we lack, while online
+    /// ([`SyncSession::behind`]); empty otherwise (after a link failure the
+    /// session still answers for the old link). Usually on their way. One
+    /// that stays listed is not coming on this link, e.g. it does not fit in
+    /// one message from the hub to us (only the hub knows, and logs it):
+    /// [`status`](Self::status) still says online, and `unsynced` is only
+    /// about local edits. Show such a document as not received.
+    pub fn behind(&self, docs: &dyn DocSet) -> Vec<DocKey> {
+        if self.is_online() {
+            self.session.behind(docs)
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn status(&self) -> ConnectionStatus {
         let state = match &self.phase {
             Phase::Linked {
@@ -2351,6 +2366,57 @@ mod tests {
             .map(|r| r.as_ref().map_err(ToString::to_string).copied());
         assert_eq!(result, Some(Ok(())));
         assert_eq!(*took.lock().unwrap(), ["a", "a"]);
+    }
+
+    /// A document the remote has more of than we do is listed by `behind`
+    /// while online (not after the link failed). Nothing else shows it: the
+    /// status is online and nothing is unsynced (e.g. a sublayer that does
+    /// not fit in one message from the hub to us, which only the hub knows).
+    #[test]
+    fn documents_the_remote_has_more_of_are_listed_while_online() {
+        let key = |s: &str| DocKey::parse(s).unwrap();
+        let mut docs = MemDocs::new();
+        edit(&mut docs, &key("a"), 1);
+        edit(&mut docs, &key("b"), 1);
+        // The hub has an edit of `a` we lack, and `b` as we have it.
+        let theirs = LoroDoc::new();
+        theirs
+            .import(&docs.export_snapshot(&key("a")).unwrap())
+            .unwrap();
+        theirs.get_map("m").insert("w", 2).unwrap();
+        theirs.commit();
+        let versions = vec![
+            (key("a"), theirs.oplog_vv()),
+            (key("b"), docs.version(&key("b")).unwrap()),
+        ];
+        let link = Limited {
+            hello: Some(Message::hello(ClientId::new("hub").unwrap(), versions)),
+            max: 1 << 20,
+            took: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut c = bare("behind", quiet());
+        assert!(c.behind(&docs).is_empty());
+        linked(
+            &mut c,
+            ThreadedTransport::spawn(link, Duration::from_millis(1), || {}),
+        );
+        wait_for("online", || {
+            c.pump(&mut docs);
+            c.is_online()
+        });
+        assert_eq!(c.behind(&docs), [key("a")]);
+        assert!(!c.session().is_caught_up(&docs));
+        let status = c.status();
+        assert!(
+            matches!(status.state, ConnectionState::Online { .. }) && !status.unsynced,
+            "{status:?}"
+        );
+        // Offline, the session still answers for the old link; the
+        // connection does not.
+        c.lost(SyncError::Hub("gone".into()), Instant::now());
+        assert!(!c.is_online());
+        assert_eq!(c.session().behind(&docs), [key("a")]);
+        assert!(c.behind(&docs).is_empty());
     }
 
     /// A connect attempt that hangs on the NAS (here: it waits for our old

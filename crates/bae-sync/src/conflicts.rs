@@ -113,8 +113,10 @@ pub struct ConflictConfig {
     /// before it completed (the next `connection_lost` restarts the count).
     /// It covers a catch-up that never completes
     /// (`SyncSession::is_caught_up` stays false while a record that failed to
-    /// import, or ops Loro holds pending for missing dependencies, are listed
-    /// by the remote); where nothing of the others arrives at all, call
+    /// import, ops Loro holds pending for missing dependencies, or a document
+    /// the remote cannot send in one message are listed by the remote;
+    /// `SyncSession::behind` lists the documents); where nothing of the
+    /// others arrives at all, call
     /// `cancel_offline` (e.g. once the connection has been online for a while
     /// without catching up). `None` (default): wait for `caught_up` or
     /// `cancel_offline`.
@@ -899,8 +901,10 @@ impl ConflictTracker {
     /// was set are not reported for the remote ops that arrived meanwhile
     /// (they were left to the summary). For a catch-up that never completes:
     /// `SyncSession::is_caught_up` stays false while the remote lists a record
-    /// that failed to import here, or ops Loro holds pending for missing
-    /// dependencies. [`ConflictConfig::catch_up_timeout`] does this on its
+    /// that failed to import here, ops Loro holds pending for missing
+    /// dependencies, or a document it cannot send in one message (a sublayer
+    /// over the hub's message limit; `SyncSession::behind` lists the
+    /// documents). [`ConflictConfig::catch_up_timeout`] does this on its
     /// own. Returns whether a reconnect was pending.
     pub fn cancel_offline(&mut self) -> bool {
         self.offline.take().is_some()

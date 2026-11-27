@@ -234,11 +234,13 @@ fn an_oversized_update_is_not_exported_again_while_the_remote_edits() {
         "the update was exported again"
     );
     // Neither on its way nor known by `b`: unsynced, although `b`'s `Hello`s
-    // acknowledged `a`'s. `b` knows it lacks it.
+    // acknowledged `a`'s. `b` knows it lacks it, and which document.
     assert_eq!(p.sa.unsynced(&p.a), [big()]);
     assert_eq!(p.sa.too_large(&p.a), [big()]);
     assert!(!p.sb.is_caught_up(&p.b));
+    assert_eq!(p.sb.behind(&p.b), [big()]);
     assert!(p.sa.is_caught_up(&p.a));
+    assert!(p.sa.behind(&p.a).is_empty());
 
     // A local edit only makes the update larger: not tried again.
     p.a_edits(&big(), "a");
@@ -272,6 +274,7 @@ fn an_oversized_update_is_not_exported_again_while_the_remote_edits() {
     assert!(p.sa.unsynced(&p.a).is_empty());
     assert!(p.sa.too_large(&p.a).is_empty());
     assert!(p.sb.is_caught_up(&p.b));
+    assert!(p.sb.behind(&p.b).is_empty());
 }
 
 /// A snapshot answer that does not fit: reported once, the link stays, and

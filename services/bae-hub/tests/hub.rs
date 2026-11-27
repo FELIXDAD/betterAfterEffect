@@ -247,7 +247,10 @@ fn a_document_too_large_for_one_client_does_not_drop_its_link() {
     pump_for(&mut clients, Duration::from_millis(100));
     let late = &clients[2];
     assert!(!has_all(&clients[0], late, &root));
+    // Only the hub knows why: the newcomer's session lists the layer as one
+    // the hub has more of (and is never caught up on this link).
     assert!(!late.session.is_caught_up(&late.stage));
+    assert_eq!(late.session.behind(&late.stage), [DocKey::sublayer(&root)]);
     assert!(late.session.stats().bytes_received > 0);
     let list = http_get(addr, "/v1/projects", Some(WRITE));
     let json: serde_json::Value = serde_json::from_str(&list.body).unwrap();
